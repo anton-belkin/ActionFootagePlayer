@@ -1,0 +1,40 @@
+// DJI D-Log M -> Rec.2100 HLG (1000-nit) at HOOK OUTPUT, mpv-standalone only.
+//
+// Why HOOK OUTPUT instead of HOOK MAIN: at MAIN, the shader's HLG-encoded
+// output would still be linearized by mpv as the source's tagged TRC
+// (BT.709 for un-retagged DJI files) and then re-encoded for the target
+// (HLG) -- a double transform that destroys colors. HOOK OUTPUT runs AFTER
+// mpv's color pipeline. We re-sample raw source via BIND MAIN, apply the
+// LUT, and write HLG-encoded values straight to the (HDR-engaged) Metal
+// surface. mpv's color pipeline still runs internally but its output is
+// discarded.
+//
+// HDR engagement is via the [dji_hdr] profile's target-trc=hlg +
+// target-colorspace-hint=yes (mpv standalone only -- IINA's libmpv-OpenGL
+// render context can't engage macOS HDR mode this way).
+//
+// Source files DO NOT need to be retagged.
+//
+// Caveat: any letterbox/pillarbox region is also LUT'd. With autofit=85%
+// in mpv.conf the window matches video aspect, so this isn't visible.
+
+//!TEXTURE HLGLUT
+//!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
+//!FORMAT rgba16
+//!FILTER LINEAR
+//!BORDER CLAMP
+@LUT_DATA@
+
+//!HOOK OUTPUT
+//!BIND HOOKED
+//!BIND MAIN
+//!BIND HLGLUT
+//!DESC DJI D-Log M -> Rec.2100 HLG (LUT at OUTPUT, bypasses mpv color pipeline)
+
+vec4 hook() {
+    vec3 c = MAIN_tex(HOOKED_pos).rgb;
+    c = clamp(c, 0.0, 1.0);
+    const float N = @LUT_SIZE@.0;
+    vec3 lut_coord = c * ((N - 1.0) / N) + (0.5 / N);
+    return vec4(texture(HLGLUT, lut_coord).rgb, 1.0);
+}

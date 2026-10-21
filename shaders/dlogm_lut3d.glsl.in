@@ -1,0 +1,30 @@
+// DJI D-Log M -> Rec.709 conversion as an mpv user shader.
+//
+// The .cube was authored to map gamma-encoded BT.709 values directly to
+// gamma-encoded Rec.709 output (DJI mistags D-Log M as Rec.709, so the
+// LUT operates on the "as-decoded, color-matrix-applied" RGB without any
+// linearization step). Hooking MAIN gets us those values pre-display-CM.
+//
+// The @LUT_SIZE@x@LUT_SIZE@x@LUT_SIZE@ .cube is embedded below as a 3D rgba16 (unorm16) texture;
+// GPU hardware trilinear sampling does the interpolation in one tap.
+
+//!TEXTURE DLOGLUT
+//!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
+//!FORMAT rgba16
+//!FILTER LINEAR
+//!BORDER CLAMP
+@LUT_DATA@
+
+//!HOOK MAIN
+//!BIND HOOKED
+//!BIND DLOGLUT
+//!DESC DJI D-Log M -> Rec.709
+
+vec4 hook() {
+    vec4 color = HOOKED_tex(HOOKED_pos);
+    vec3 c = clamp(color.rgb, 0.0, 1.0);
+    const float N = @LUT_SIZE@.0;
+    vec3 lut_coord = c * ((N - 1.0) / N) + (0.5 / N);
+    color.rgb = texture(DLOGLUT, lut_coord).rgb;
+    return color;
+}
