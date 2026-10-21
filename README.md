@@ -9,14 +9,19 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 
 | Argument | Default | |
 |---|---|---|
-| `project` | — | `.gyroflow` project file |
+| `project` | — | `.gyroflow` project file, or the video itself: the project embedded in it, else its own motion data with Gyroflow's default preset |
+| `preset` | — | `.gyroflow` preset applied on top when the video has no project |
 | `interpolation` | `bicubic` | `bilinear`, `bicubic`, `lanczos` |
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
 | `workers` | 3 | GPU worker threads (each has its own GPU context) |
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
 
-The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), from the
-`gyroflow-core` of the local checkout `../../gyroflow` (branch `fixed-zoom`).
+The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
+`gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow
+master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
+uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
+settings need the PR. A project embedded in the video is read by the plugin itself (`src/embedded.rs`), so stock
+Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow` into the video.
 
 ## How it works
 
@@ -60,12 +65,18 @@ Matches Gyroflow's own render of the project (CLI, same branch): same mean level
 ```bash
 cargo build --release
 install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/gyroflow/
+install -m 755 target/release/gyroflow-probe ~/.config/mpv/gyroflow/
+install -m 755 target/release/gyroflow-embed ~/.config/mpv/gyroflow/
 ```
+
+`gyroflow-probe <video>` tells `gyroflow_auto.lua` what a video without a `.gyroflow` next to it can be
+stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (DJI clip with gyro data and EIS off),
+or nothing, with the reason.
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
-The mpv side is `~/.config/mpv/scripts/gyroflow_auto.lua` and `~/.config/mpv/gyroflow/gyroflow.vpy`
-(see `~/.config/mpv/README.md`).
+The mpv side is `mpv/scripts/gyroflow_auto.lua` and `mpv/gyroflow/gyroflow.vpy` in this repo (see `../README.md`);
+`../install.sh` builds and installs everything.
 
 Log: `~/Library/Logs/vs-gyroflow.log` (`VS_GYROFLOW_LOG=debug` for more).

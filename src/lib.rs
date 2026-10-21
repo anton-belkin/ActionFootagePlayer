@@ -2,8 +2,8 @@
 //
 // Gyroflow stabilization as a VapourSynth filter: `core.gyroflow.Stabilize(clip, project=...)`.
 //
-// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it plays stabilized
-// in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's bit depth, the way
+// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, a project embedded in it,
+// or motion data of its own (with a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's bit depth, the way
 // Gyroflow's exporter does it (src/rendering/mod.rs) - no RGB conversion, so 10-bit D-Log M stays 10-bit.
 
 use std::ffi::{ c_int, c_void, CStr, CString };
@@ -14,6 +14,9 @@ use parking_lot::Mutex;
 use vapoursynth4_sys::*;
 
 use gyroflow_core::{ StabilizationManager, filesystem };
+
+#[allow(dead_code)]
+mod embedded;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma8, Luma16, PixelType, Stabilization };
 
@@ -74,19 +77,56 @@ struct Engine {
 
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
-    fn load(key: String, project: &str, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
+    /// Gyroflow's default preset and then `preset`
+    fn load(key: String, project: &str, preset: Option<&str>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
-        stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
-            .map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        let project_json = if is_project_file(project) {
+            stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
+                .map_err(|e| format!("Can't load {project}: {e:?}"))?;
+            serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
+        } else {
+            let path = std::path::Path::new(project);
+            let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
+            // The camera's file, without the embedded project at its end (see embedded.rs)
+            let mut file = std::fs::File::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
+            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+            let (mut content, size) = embedded::Content::new(&mut file, size);
+            stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+            if let Some(obj) = embedded.as_ref() {
+                let mut is_preset = false;
+                let data = serde_json::to_vec(obj).map_err(|e| e.to_string())?;
+                stab.import_gyroflow_data(&data, true, None, |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
+                    .map_err(|e| format!("Can't load the project embedded in {project}: {e:?}"))?;
+            } else {
+                if !stab.gyro.read().has_motion() {
+                    return Err(format!("{project} has no project and no motion data"));
+                }
+                if let Some(preset) = preset {
+                    stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
+                        .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
+                }
+            }
+            log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
+            embedded
+        };
         // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
         // so apply them before smoothing (same as the frei0r plugin)
         stab.recompute_gyro();
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
-        let render_size = output_override.or_else(|| project_output_size(project));
+        // Without a project there's no output size to keep: render at the size mpv hands over (scaled down from 8K)
+        let render_size = output_override.or_else(|| match project_json.as_ref() {
+            Some(json) => project_output_size(json),
+            None => {
+                let out = stab.params.read().output_size;
+                let scale = (input_size.0 as f64 / out.0.max(1) as f64).min(input_size.1 as f64 / out.1.max(1) as f64).min(1.0);
+                Some((((out.0 as f64 * scale) as usize) & !1, ((out.1 as f64 * scale) as usize) & !1))
+            }
+        });
         if let Some((w, h)) = render_size {
             stab.set_output_size(w, h);
         }
@@ -135,8 +175,11 @@ impl Engine {
     }
 }
 
-fn project_output_size(project: &str) -> Option<(usize, usize)> {
-    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(project).ok()?).ok()?;
+fn is_project_file(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".gyroflow")
+}
+
+fn project_output_size(json: &serde_json::Value) -> Option<(usize, usize)> {
     let output = json.get("output")?;
     let w = output.get("output_width")?.as_u64()? as usize;
     let h = output.get("output_height")?.as_u64()? as usize;
@@ -503,9 +546,12 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
         _ => return fail(node, "width and height go together".into()),
     };
 
-    let mtime = std::fs::metadata(&project).and_then(|m| m.modified()).map(|t| format!("{t:?}")).unwrap_or_default();
+    let preset = unsafe { map_get_str(api, input, c"preset") }.filter(|p| !p.is_empty());
+    // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
+    let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
+    let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
     let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    let engine = match get_engine(&key, || Engine::load(key.clone(), &project, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers)) {
+    let engine = match get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers)) {
         Ok(e) => e,
         Err(e) => return fail(node, e),
     };
@@ -533,7 +579,7 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
     }
 }
