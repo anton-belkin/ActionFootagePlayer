@@ -7,7 +7,9 @@
 
 Fields are named by their path of field numbers (`3.2.18.1`: field 1 of field 18 of field 2 of field 3), since the
 schemas of newer models (Osmo Action 6: dvtm_ac206.proto) aren't public. 32-bit and 64-bit fields are shown as
-floats, varints as integers. `summary` and `timeline` read an .MP4 or an `extract` output.
+floats, varints as integers, short byte strings in hex. Without a schema a packed repeated field is ambiguous: its
+bytes sometimes parse as a message too, so 3.2.15.1 (an aperture, [28, 10] = f/2.8) shows up as 3.2.15.1.4 when it
+is [32, 10]. `summary` and `timeline` read an .MP4 or an `extract` output.
 
 The track is the one the dlogm plugin reads (mpv/scripts/dlogm/dji_color.lua): the first with a `meta` handler.
 """
@@ -220,7 +222,7 @@ def fmt(v):
     if isinstance(v, float):
         return f'{v:.6g}'
     if isinstance(v, bytes):
-        return f'<{len(v)} bytes>'
+        return v.hex() if len(v) <= 6 else f'<{len(v)} bytes>'
     if isinstance(v, str):
         return repr(v if len(v) <= 40 else v[:37] + '...')
     return str(v)
