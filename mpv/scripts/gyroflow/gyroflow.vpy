@@ -1,4 +1,4 @@
-# mpv vf=vapoursynth script, set up by scripts/gyroflow_auto.lua.
+# mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
 # preset, interpolation, workers). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and

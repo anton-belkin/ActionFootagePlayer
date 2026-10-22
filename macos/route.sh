@@ -7,7 +7,7 @@
 #   defaults read @PLAYER_ID@ fallback-mp4
 
 first=$1
-probe="$HOME/.config/mpv/gyroflow/gyroflow-probe"
+probe="$HOME/.config/mpv/scripts/gyroflow/gyroflow-probe"
 
 ours=0
 if [ -f "${first%.*}.gyroflow" ] || [ -f "$first.gyroflow" ]; then

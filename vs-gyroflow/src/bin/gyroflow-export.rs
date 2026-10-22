@@ -4,9 +4,12 @@
 // pass: decode -> Gyroflow (the plugin's own engine, on the GPU) -> LUT -> encode. The source is decoded and
 // encoded once, so there's no intermediate file to lose quality in.
 //
-// It picks the stabilization the same way gyroflow_auto.lua does (a .gyroflow next to the video, a project
+// It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
 // embedded in it, or the clip's own motion data with the default preset) and the LUT from the color profile in
-// the camera's metadata, as dlog_auto.lua does. Clips there's nothing to stabilize with are skipped.
+// the camera's metadata, as the dlogm plugin does. Clips there's nothing to stabilize with are skipped.
+//
+// Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
+// LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/).
 //
 // Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov), 10-bit
 //   D-Log M:        HEVC Main10, Rec.2100 HLG (luts/dlogm_hlg.cube), or Rec.709 with --sdr (DJI's LUT)
@@ -104,12 +107,21 @@ fn file_name(path: &str) -> String {
 
 enum Outcome { Done(PathBuf), Skipped(String) }
 
-// What gyroflow_auto.lua stabilizes the video with
+// What the gyroflow plugin stabilizes the video with
 struct Source { project: String, preset: Option<String>, label: &'static str }
 
 fn mpv_dir() -> PathBuf {
     std::env::var_os("MPV_CONFIG_DIR").map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config/mpv"))
+}
+
+// A file of one of the mpv plugins: in the scripts folder this binary is installed in (~~/scripts/gyroflow/), or
+// in mpv's when it runs from elsewhere (a build)
+fn plugin_file(plugin: &str, name: &str) -> PathBuf {
+    let here = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok())
+        .and_then(|e| Some(e.parent()?.parent()?.to_path_buf()))
+        .filter(|scripts| scripts.join("gyroflow").join("gyroflow-export").is_file());
+    here.unwrap_or_else(|| mpv_dir().join("scripts")).join(plugin).join(name)
 }
 
 fn find_source(path: &Path) -> Result<Source, String> {
@@ -124,7 +136,7 @@ fn find_source(path: &Path) -> Result<Source, String> {
     match info["mode"].as_str() {
         Some("embedded") => Ok(Source { project: s, preset: None, label: "embedded project" }),
         Some("default") => {
-            let preset = mpv_dir().join("gyroflow/default.gyroflow");
+            let preset = plugin_file("gyroflow", "default.gyroflow");
             Ok(Source { project: s, preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset" })
         }
         _ => Err("no project or motion data".into()),
@@ -182,8 +194,8 @@ fn tool(name: &str) -> PathBuf {
 }
 
 fn lut(name: &str) -> Result<PathBuf, String> {
-    let p = mpv_dir().join("luts").join(name);
-    if p.is_file() { Ok(p) } else { Err(format!("{} is missing (run install.sh)", p.display())) }
+    let p = plugin_file("dlogm", &format!("luts/{name}"));
+    if p.is_file() { Ok(p) } else { Err(format!("{} is missing (install the dlogm plugin: install.sh)", p.display())) }
 }
 
 // ffmpeg's filter syntax: quote the path for the option value, then for the filter graph

@@ -50,7 +50,7 @@ Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow`
 
 Realtime (`--vo=null`): 4K60 — 0 dropped frames at start and through seeks; 8K30 — ~8 at start, 0 through
 seeks. In a window with the HDR shader, 8K input left too little headroom (10-50 drops at start), so
-`gyroflow_auto.lua` scales >4K video to 4K on the GPU (`scale_vt`) before VapourSynth; the plugin
+the gyroflow mpv plugin scales >4K video to 4K on the GPU (`scale_vt`) before VapourSynth; the plugin
 stabilizes from the smaller frame (the core scales the source rect): mean abs difference to Gyroflow's
 8K render 0.99/255. With that, both clips play in a window with 0 drops at start and through seeks;
 7-15 when toggling it on mid-playback (mpv rebuilds the filter chain). The processing is the
@@ -64,19 +64,20 @@ Matches Gyroflow's own render of the project (CLI, same branch): same mean level
 
 ```bash
 cargo build --release
-install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/gyroflow/
-install -m 755 target/release/gyroflow-probe ~/.config/mpv/gyroflow/
-install -m 755 target/release/gyroflow-embed ~/.config/mpv/gyroflow/
+install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/gyroflow-probe ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/gyroflow-embed ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
 ```
 
-`gyroflow-probe <video>` tells `gyroflow_auto.lua` what a video without a `.gyroflow` next to it can be
+`gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
 stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (DJI clip with gyro data and EIS off),
 or nothing, with the reason.
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
-The mpv side is `mpv/scripts/gyroflow_auto.lua` and `mpv/gyroflow/gyroflow.vpy` in this repo (see `../README.md`);
+The mpv side is the gyroflow plugin, `mpv/scripts/gyroflow/` in this repo (see `../README.md`);
 `../install.sh` builds and installs everything.
 
 Log: `~/Library/Logs/vs-gyroflow.log` (`VS_GYROFLOW_LOG=debug` for more).
