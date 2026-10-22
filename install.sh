@@ -202,8 +202,12 @@ if [ $apps = 1 ]; then
                 previous=$(defaults read "$PLAYER_ID" "previous-$mov" 2>/dev/null || true)
                 case " $ROUTER_IDS $PLAYER_ID " in *" ${previous:-none} "*) previous= ;; esac
                 previous=${previous:-com.apple.QuickTimePlayerX}
-                python3 -I macos/default-app.py $mov "$previous"
-                echo "   MOV videos open with $previous again" ;;
+                # macOS asks to confirm it; 3: not yet
+                if python3 -I macos/default-app.py $mov "$previous" 2>/dev/null; then
+                    echo "   MOV videos open with $previous again"
+                else
+                    echo "   MOV videos open with $previous again once you confirm it in macOS's dialog"
+                fi ;;
         esac
         for key in fallback fallback-mp4 fallback-mov previous-public.mpeg-4 "previous-$mov"; do
             defaults delete "$PLAYER_ID" "$key" 2>/dev/null || true

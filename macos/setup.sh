@@ -57,8 +57,14 @@ lut() {
 
 default() {
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
-    python3 -I "$res/tools/default-app.py" public.mpeg-4 "$player_id"
-    echo "Steady Player is the default app for MP4 videos"
+    # macOS asks to confirm it in a dialog; default-app.py waits for that, and exits with 3 when it hasn't come
+    rc=0
+    python3 -I "$res/tools/default-app.py" public.mpeg-4 "$player_id" 2>/dev/null || rc=$?
+    case $rc in
+        0) echo "Steady Player is the default app for MP4 videos" ;;
+        3) echo "Steady Player becomes the default app for MP4 videos once you confirm it in macOS's dialog" ;;
+        *) echo "Couldn't make Steady Player the default app for MP4 videos" >&2; return $rc ;;
+    esac
 }
 
 quick_actions() {

@@ -1,6 +1,9 @@
 #!/usr/bin/python3 -I
 # default-app.py <content type> [<bundle id>]: the default app for a content type (e.g. public.mpeg-4), for all
 # roles: prints its bundle id, or makes the app given the default. Steady Player's setup.sh and install.sh use it.
+#
+# macOS (27) asks the user to confirm a new default in a dialog of its own, and only then applies it: this waits
+# for that, and exits with 3 when it hasn't happened yet (the dialog stays up; it applies whenever it's confirmed).
 
 import ctypes, sys, time
 
@@ -34,12 +37,15 @@ def set_default_handler(content_type, bundle_id):
     status = ls.LSSetDefaultRoleHandlerForContentType(cfstr(content_type), ROLES_ALL, cfstr(bundle_id))
     if status != 0:
         sys.exit(f"Couldn't make {bundle_id} the default for {content_type} (error {status})")
-    # LaunchServices applies it asynchronously: wait, so whatever runs next sees it
-    for _ in range(150):
+    # Applied once the user confirms it (and asynchronously): wait, so whatever runs next sees it
+    if (default_handler(content_type) or "").lower() == bundle_id.lower():
+        return
+    for _ in range(300):
+        time.sleep(0.1)
         if (default_handler(content_type) or "").lower() == bundle_id.lower():
             return
-        time.sleep(0.1)
-    print(f"(macOS hasn't confirmed {content_type} -> {bundle_id} yet)", file=sys.stderr)
+    print(f"{content_type} -> {bundle_id} isn't confirmed yet", file=sys.stderr)
+    sys.exit(3)
 
 if len(sys.argv) == 2:
     print(default_handler(sys.argv[1]) or "")

@@ -41,7 +41,8 @@ time macOS won't open it: System Settings → Privacy & Security → Open Anyway
 setup:
 
 - it becomes the default app for MP4 videos (what DJI cameras record): double-clicking one plays it with all
-  of this, and any other video simply plays in mpv;
+  of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
+  it applies once you do;
 - Finder gets the Quick Actions *Play Stabilized* and *Stabilize + LUT* (see Opening files);
 - DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for `Ctrl+s` and Rec.709
   exports. HDR works without it.
