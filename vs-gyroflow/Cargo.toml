@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 # Gyroflow master plus the Static zoom PR (gyroflow/gyroflow#1264), which only adds project settings: the plugin
 # itself uses nothing beyond upstream, and builds against gyroflow/gyroflow master as well.
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon
-gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "57941ac", default-features = false, features = ["bundle-lens-profiles", "cache-gyro-metadata"] }
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "9015d26", default-features = false, features = ["bundle-lens-profiles", "cache-gyro-metadata"] }
 url = "2"
 vapoursynth4-sys = "0.4.1"
 log = "0.4"
