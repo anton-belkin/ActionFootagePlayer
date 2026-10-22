@@ -4,8 +4,9 @@
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
 --   DJI_..._D.MP4 with a project embedded in it (gyroflow-embed)   ->  same
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset:
---       Gyroflow's own default preset, then default.gyroflow in this folder if it exists (install.sh puts the
---       underwater preset there)
+--       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
+--       that ships this plugin read-only, Steady Player, keeps yours), else in this folder (install.sh puts
+--       the underwater preset there)
 --
 -- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip) before
 -- playback starts.
@@ -40,8 +41,11 @@ local DIR = mp.get_script_directory()
 local PLUGIN = utils.join_path(DIR, "libvs_gyroflow.dylib")
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, "gyroflow-probe")
--- Applied on top of Gyroflow's default preset to videos stabilized without a project
-local PRESET = utils.join_path(DIR, "default.gyroflow")
+-- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
+local DATA = os.getenv("GYROFLOW_DATA")
+local PRESETS = {}
+if DATA and DATA ~= "" then table.insert(PRESETS, utils.join_path(DATA, "default.gyroflow")) end
+table.insert(PRESETS, utils.join_path(DIR, "default.gyroflow"))
 -- Containers a project can be embedded in, and that DJI cameras record
 local PROBE_EXTENSIONS = { mp4 = true, mov = true }
 -- bilinear | bicubic | lanczos. Lanczos is sharper but slower: on the M1 Pro a 4K clip plays at ~38 fps of
@@ -94,7 +98,11 @@ local function find_source(path)
         return nil
     end
     local preset = nil
-    if info.mode == "default" and file_exists(PRESET) then preset = PRESET end
+    if info.mode == "default" then
+        for _, p in ipairs(PRESETS) do
+            if not preset and file_exists(p) then preset = p end
+        end
+    end
     return { project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset }
 end
 
