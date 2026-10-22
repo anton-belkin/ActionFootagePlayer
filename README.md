@@ -24,17 +24,33 @@ when there's a project.
 
 ## Install
 
-Needs macOS, [Homebrew](https://brew.sh) mpv (`brew install mpv`, which includes VapourSynth), Homebrew
-ffmpeg for exporting (`brew install ffmpeg`) and Rust ([rustup](https://rustup.rs)) to build the plugin.
+Needs a Mac with Apple Silicon (macOS 11 or later), [Homebrew](https://brew.sh) mpv (`brew install mpv`, which
+includes VapourSynth) and Homebrew ffmpeg for exporting (`brew install ffmpeg`).
+
+**From a release** (prebuilt, no Rust needed):
 
 ```bash
-./install.sh           # into ~/.config/mpv
-./install.sh --apps    # also Steady Player, Steady Router and Finder Quick Actions (see Opening files)
+curl -LO https://github.com/anton-belkin/dlogm-gyroflow-player/releases/latest/download/dlogm-gyroflow-player-0.1.0-macos-arm64.tar.gz
+tar -xzf dlogm-gyroflow-player-0.1.0-macos-arm64.tar.gz
+cd dlogm-gyroflow-player-0.1.0-macos-arm64
+./install.sh --apps
 ```
 
-It downloads DJI's LUT from DJI (it isn't redistributed here) and checks it, bakes the LUTs into shaders,
-builds the plugin and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
-`scripts/`, in `scripts-backup/`, where mpv doesn't load them).
+A tarball downloaded with a browser works too: `install.sh` clears the quarantine flag on the binaries it
+installs. They're signed ad hoc, not by an Apple developer account.
+
+**From source** (needs Rust, [rustup](https://rustup.rs); the first build takes 5-10 minutes):
+
+```bash
+git clone https://github.com/anton-belkin/dlogm-gyroflow-player.git
+cd dlogm-gyroflow-player
+./install.sh --apps
+```
+
+`./install.sh` alone installs just the mpv part into `~/.config/mpv`; `--apps` adds Steady Player, Steady Router
+and the Finder Quick Actions (see Opening files). It downloads DJI's LUT from DJI (it isn't redistributed here)
+and checks it, bakes the LUTs into shaders and installs everything; existing files it replaces are kept as
+`*.bak-<date>` (for `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
 
 ## Using it
 
@@ -177,6 +193,7 @@ vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyrof
 macos/                        Steady Player / Steady Router applets, mpv launcher, gyroflow-router, the Quick
                               Actions' export script
 tools/make_workflow.py        writes the Finder Quick Actions
+tools/make_release.sh         release tarball: the tree plus prebuilt binaries in bin/
 ```
 
 ## License
