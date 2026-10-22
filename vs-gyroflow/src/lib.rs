@@ -16,14 +16,17 @@ use vapoursynth4_sys::*;
 use gyroflow_core::{ StabilizationManager, filesystem };
 
 #[allow(dead_code)]
-mod embedded;
+pub mod embedded;
+pub mod probe;
+pub mod gpu_lut;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
-use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma8, Luma16, PixelType, Stabilization };
+pub use gyroflow_core::stabilization::Interpolation;
+use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
 
 // ---------------------------------------------------------------------------------------------------
 // Logging
 
-fn init_logging() {
+pub fn init_logging() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let level = match std::env::var("VS_GYROFLOW_LOG").unwrap_or_default().as_str() {
@@ -51,12 +54,12 @@ fn init_logging() {
 // everything that would make them render differently.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SampleKind { U8, U16 }
+pub enum SampleKind { U8, U16 }
 
 #[derive(Clone, Copy)]
-struct PlaneJob {
-    src: *const u8, src_stride: usize, src_w: usize, src_h: usize,
-    dst: *mut u8,   dst_stride: usize, dst_w: usize, dst_h: usize,
+pub struct PlaneJob {
+    pub src: *const u8, pub src_stride: usize, pub src_w: usize, pub src_h: usize,
+    pub dst: *mut u8,   pub dst_stride: usize, pub dst_w: usize, pub dst_h: usize,
 }
 
 struct Job {
@@ -68,18 +71,19 @@ struct Job {
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
 unsafe impl Send for Job { }
 
-struct Engine {
+/// Also used by gyroflow-export, so a video renders the same as it plays
+pub struct Engine {
     key: String,
     tx: mpsc::Sender<Job>,
-    render_size: (usize, usize),
-    frame_offset_us: i64,
+    pub render_size: (usize, usize),
+    pub frame_offset_us: i64,
 }
 
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
     /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
     /// Gyroflow's default preset and then `preset`
-    fn load(key: String, project: &str, preset: Option<&str>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    pub fn load(key: String, project: &str, preset: Option<&str>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
@@ -168,7 +172,7 @@ impl Engine {
         Ok(Engine { key, tx, render_size, frame_offset_us })
     }
 
-    fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
+    pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
         self.tx.send(Job { timestamp_us, planes, limited_range, reply }).map_err(|_| "Gyroflow worker is gone".to_string())?;
         result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?

@@ -5,7 +5,8 @@ stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering 
 are never re-encoded.
 
 - **D-Log M → HDR / SDR.** GPU shaders apply DJI's D-Log M LUT (SDR, in IINA) or a D-Log M → Rec.2100 HLG
-  LUT (HDR, in mpv, with macOS's HDR mode). Picked automatically for `*_D.MP4` / `*_D.MOV` files.
+  LUT (HDR, in mpv, with macOS's HDR mode). Picked automatically from the color profile the camera wrote
+  into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
 - **Gyroflow in realtime.** A VapourSynth plugin built on Gyroflow's own core renders the stabilization
   while mpv plays, the way Gyroflow would render it (smoothing, zoom, lens, horizon): 4K60 at ~87 fps of
   capacity on an M1 Pro. It's used when
@@ -13,14 +14,16 @@ are never re-encoded.
   - or the project is stored inside the video (`gyroflow-embed`, below), so there's one file to carry,
   - or the clip has gyro data of its own and was shot without in-camera stabilization (DJI with EIS off,
     FOV Wide): it's stabilized with Gyroflow's default settings, no project needed.
+- **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
+  and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
 
 Made for the DJI Osmo Action 6 on Apple Silicon; the Gyroflow part works with any camera Gyroflow supports
 when there's a project.
 
 ## Install
 
-Needs macOS, [Homebrew](https://brew.sh) mpv (`brew install mpv`, which includes VapourSynth) and Rust
-([rustup](https://rustup.rs)) to build the plugin.
+Needs macOS, [Homebrew](https://brew.sh) mpv (`brew install mpv`, which includes VapourSynth), Homebrew
+ffmpeg for exporting (`brew install ffmpeg`) and Rust ([rustup](https://rustup.rs)) to build the plugin.
 
 ```bash
 ./install.sh           # into ~/.config/mpv
@@ -28,7 +31,8 @@ Needs macOS, [Homebrew](https://brew.sh) mpv (`brew install mpv`, which includes
 ```
 
 It downloads DJI's LUT from DJI (it isn't redistributed here) and checks it, bakes the LUTs into shaders,
-builds the plugin and installs everything; existing files it replaces are kept as `*.bak-<date>`.
+builds the plugin and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
+`scripts/`, in `scripts-backup/`, where mpv doesn't load them).
 
 ## Using it
 
@@ -46,6 +50,7 @@ started from the applet directly, mpv stayed tied to it and macOS throttled it a
 | `Ctrl+g` | Stabilization on/off |
 | `Ctrl+h` / `Ctrl+s` | D-Log M as HDR / SDR (normally picked automatically) |
 | `L` | D-Log M handling off, for `_D` files that aren't D-Log (e.g. HDR photos) |
+| `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part |
 
 ### Stabilization
 
@@ -66,12 +71,40 @@ Clips with gyro data and EIS off play stabilized even without a project, with Gy
 and then `~/.config/mpv/gyroflow/default.gyroflow` if it exists (save one from Gyroflow: Export → Create
 settings preset). Why a clip isn't stabilized is in mpv's log (`--msg-level=gyroflow_auto=v`).
 
+### Exporting
+
+`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, and for
+D-Log M the same LUT. With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile; a
+notification says where the file went. The same from a terminal, for one clip or many:
+
+```bash
+~/.config/mpv/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
+~/.config/mpv/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
+```
+
+The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
+
+- **D-Log M:** HEVC Main10, Rec.2100 HLG, tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes it
+  Rec.709 with DJI's LUT instead.
+- **Other clips:** HEVC Main10 in the colors they were recorded in.
+- `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
+- Audio is copied as it is, and the file keeps the clip's dates. Clips with nothing to stabilize them with are
+  skipped; an existing output is kept unless `--force`.
+
+A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
+playback uses). The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
+stabilizes it on the GPU, the LUT is applied on the GPU too (`vs-gyroflow/src/gpu_lut.rs`, the shader's math),
+and ffmpeg encodes it with VideoToolbox.
+
 ## How it works
 
 ### D-Log M
 
-DJI tags D-Log M files as BT.709 SDR. Two mpv profiles (`mpv/mpv.conf`), applied by
-`mpv/scripts/dlog_auto.lua` on load:
+DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
+DJI's own metadata, though: `ColorMode` in the stream metadata of the `CAM meta` track (19 is D-Log M).
+`gyroflow-probe` reads it for the Osmo Action 6 and Osmo 360, whose layouts are known; other models fall back
+to the file name. Two mpv profiles (`mpv/mpv.conf`), applied by `mpv/scripts/dlog_auto.lua` on load and undone
+when a playlist moves on to a clip that isn't D-Log M:
 
 - `dji_sdr` (IINA): DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
   BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged. IINA's libmpv OpenGL context
@@ -105,7 +138,7 @@ mpv/                          mpv.conf, input.conf, scripts/, gyroflow/gyroflow.
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
 macos/                        DJI Router applet source, mpv.app launcher
 ```
 

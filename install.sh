@@ -59,8 +59,11 @@ put() {
     local src=$1 dst=$2 mode=$3
     mkdir -p "$(dirname "$dst")"
     if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then
-        cp -p "$dst" "$dst.bak-$stamp"
-        echo "   kept the previous $dst as $(basename "$dst").bak-$stamp"
+        # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
+        local bak="$dst.bak-$stamp"
+        case "$dst" in "$MPV_DIR/scripts/"*) mkdir -p "$MPV_DIR/scripts-backup"; bak="$MPV_DIR/scripts-backup/$(basename "$dst").bak-$stamp" ;; esac
+        cp -p "$dst" "$bak"
+        echo "   kept the previous $dst as $bak"
     fi
     install -m "$mode" "$src" "$dst"
 }
@@ -68,10 +71,14 @@ put mpv/mpv.conf                  "$MPV_DIR/mpv.conf" 644
 put mpv/input.conf                "$MPV_DIR/input.conf" 644
 put mpv/scripts/dlog_auto.lua     "$MPV_DIR/scripts/dlog_auto.lua" 644
 put mpv/scripts/gyroflow_auto.lua "$MPV_DIR/scripts/gyroflow_auto.lua" 644
+put mpv/scripts/gyroflow_export.lua "$MPV_DIR/scripts/gyroflow_export.lua" 644
 put mpv/gyroflow/gyroflow.vpy     "$MPV_DIR/gyroflow/gyroflow.vpy" 644
 put "$BUILD/dlogm_lut3d.glsl"     "$MPV_DIR/shaders/dlogm_lut3d.glsl" 644
 put "$BUILD/dlogm_hlg.glsl"       "$MPV_DIR/shaders/dlogm_hlg.glsl" 644
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed; do
+# The LUTs themselves, for gyroflow-export
+put luts/dlogm_hlg.cube           "$MPV_DIR/luts/dlogm_hlg.cube" 644
+put "$lut"                        "$MPV_DIR/luts/dji-dlogm-rec709.cube" 644
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     put "vs-gyroflow/target/release/$f" "$MPV_DIR/gyroflow/$f" 755
 done
 
