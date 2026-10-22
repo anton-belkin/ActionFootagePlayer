@@ -1,12 +1,12 @@
 # DJI D-Log M and Gyroflow stabilization in mpv
 
-Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown as HDR (or SDR), and
+Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown in HDR, and
 underwater clips stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering anything.
 The source files are never re-encoded.
 
-- **Colour recovery for D-Log M in realtime, including HDR.** GPU shaders apply DJI's D-Log M LUT (SDR, in IINA) or a D-Log M → Rec.2100 HLG
-  LUT (HDR, in mpv, with macOS's HDR mode). Picked automatically from the color profile the camera wrote
-  into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
+- **Colour recovery for D-Log M in realtime, including HDR.** A GPU shader turns D-Log M into Rec.2100 HLG
+  and macOS shows it in HDR (on an SDR screen, macOS tone-maps it down). Applied automatically from the color
+  profile the camera wrote into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
 - **Underwater stabilisation in realtime.** DJI's in-camera stabilization (EIS) works well in air but not
   under water (as of today's firmware), so under water you shoot with EIS off, and then the camera records
   gyro data. Those clips play stabilized straight away, with an underwater preset (light refraction 1.33)
@@ -83,7 +83,7 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | Key | |
 |---|---|
 | `Ctrl+g` | Stabilization on/off |
-| `Ctrl+h` / `Ctrl+s` | D-Log M as HDR / SDR (normally picked automatically) |
+| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back |
 | `L` | D-Log M handling off, for `_D` files that aren't D-Log (e.g. HDR photos) |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part |
 
@@ -153,17 +153,16 @@ and ffmpeg encodes it with VideoToolbox.
 DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
 DJI's own metadata, though: `ColorMode` in the stream metadata of the `CAM meta` track (19 is D-Log M).
 `gyroflow-probe` reads it for the Osmo Action 6 and Osmo 360, whose layouts are known; other models fall back
-to the file name. Two mpv profiles (`mpv/mpv.conf`), applied by `mpv/scripts/dlog_auto.lua` on load and undone
-when a playlist moves on to a clip that isn't D-Log M:
+to the file name. There are two mpv profiles (`mpv/mpv.conf`); `mpv/scripts/dlog_auto.lua` applies `dji_hdr` on
+load and undoes it when a playlist moves on to a clip that isn't D-Log M:
 
-- `dji_sdr` (IINA): DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
-  BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged. IINA's libmpv OpenGL context
-  can't switch macOS to HDR, so it stays SDR.
-- `dji_hdr` (mpv): a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
+- `dji_hdr`, the one applied: a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
   Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK OUTPUT`,
   re-sampling the source through `BIND MAIN`. At `HOOK MAIN`, mpv would linearize
   the HLG output as the file's BT.709 and encode it again. `target-trc=hlg` with
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
+- `dji_sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
+  BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in
 `shaders/`), so the GPU does the trilinear interpolation in one tap.
