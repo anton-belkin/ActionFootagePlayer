@@ -144,9 +144,9 @@ decides first whether the video carries a project, or its own gyro data recorded
 stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit; 8K is
 scaled to 4K on the GPU first. Details, measurements and the plugin's options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
 
-The plugin builds on `gyroflow-core` from Gyroflow master plus the Static zoom PR
-([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)), which adds a fixed zoom level.
-Everything else works with stock Gyroflow.
+The plugin builds on `gyroflow-core` from Gyroflow master, which has the Static zoom modes
+([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)) it renders; nothing else is needed
+beyond stock Gyroflow.
 
 ## Layout
 
@@ -172,4 +172,5 @@ DJI's site at install.
 `luts/dlogm_hlg.cube` (D-Log M → Rec.2100 HLG, 1000-nit, no DaVinci DRT) was composed in DaVinci Resolve
 from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide Gamut/Intermediate shaper LUT
 (`DLOGM_DWG_I_SHAPER_ZRG_V1`); the HLG output stage and the bake are this project's. Thanks to Zeb Gardner for
-the underlying transform.
+the underlying transform. His site doesn't state a license for the shaper; it's used here with credit, and
+will be changed if he asks.
