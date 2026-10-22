@@ -2,15 +2,23 @@
 # Installs the pipeline into mpv's config directory. Re-run it after pulling changes.
 #
 #   ./install.sh           shaders (with DJI's LUT, downloaded from DJI), mpv config and scripts, Gyroflow plugin
-#   ./install.sh --apps    also ~/Applications/mpv.app and ~/Applications/DJI Router.app (see README)
+#   ./install.sh --apps    also Steady Player.app and Steady Router.app in ~/Applications, and Finder Quick Actions
+#                          (see README)
 #
 # Files it replaces that differ from the new ones are kept as <file>.bak-<date>.
-# MPV_CONFIG_DIR and APPS_DIR override where it installs (default ~/.config/mpv and ~/Applications).
+# MPV_CONFIG_DIR, APPS_DIR and SERVICES_DIR override where it installs (default ~/.config/mpv, ~/Applications and
+# ~/Library/Services).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 MPV_DIR="${MPV_CONFIG_DIR:-$HOME/.config/mpv}"
 APPS_DIR="${APPS_DIR:-$HOME/Applications}"
+SERVICES_DIR="${SERVICES_DIR:-$HOME/Library/Services}"
+# Working names; the bundle ids are what macOS and the settings go by
+PLAYER_NAME="Steady Player"
+ROUTER_NAME="Steady Router"
+PLAYER_ID="io.github.anton-belkin.steady-player"
+ROUTER_ID="io.github.anton-belkin.steady-router"
 BUILD=build
 
 # DJI publishes it on the Osmo Action 6 downloads page (https://www.dji.com/osmo-action-6/downloads); it isn't
@@ -83,21 +91,46 @@ for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
 done
 
 if [ $apps = 1 ]; then
-    echo "== Apps in $APPS_DIR"
-    mkdir -p "$APPS_DIR"
+    echo "== Apps in $APPS_DIR, Quick Actions in $SERVICES_DIR"
+    mkdir -p "$APPS_DIR" "$SERVICES_DIR"
+    lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
-    # mpv as an app of its own, so the router can start it with `open -na`
-    app="$APPS_DIR/mpv.app"
-    mkdir -p "$app/Contents/MacOS"
-    sed "s|@MPV@|$(command -v mpv)|" macos/mpv-launcher.sh > "$BUILD/mpv-launcher"
-    put "$BUILD/mpv-launcher" "$app/Contents/MacOS/mpv" 755
-    cat > "$app/Contents/Info.plist" <<'PLIST'
+    # Adds "Video file" document types to an app, at a rank: Alternate lists it in Open With without taking
+    # videos over
+    doc_types() {
+        local plist=$1 rank=$2
+        /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
+        /usr/libexec/PlistBuddy \
+            -c "Add :CFBundleDocumentTypes array" \
+            -c "Add :CFBundleDocumentTypes:0 dict" \
+            -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string Video file" \
+            -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer" \
+            -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string $rank" \
+            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" \
+            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.mpeg-4" \
+            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string com.apple.quicktime-movie" \
+            "$plist"
+    }
+    set_id() {
+        /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $2" "$1" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $2" "$1"
+    }
+
+    # The player: an applet that starts mpv through a launcher app of its own (see macos/player.applescript)
+    player="$APPS_DIR/$PLAYER_NAME.app"
+    rm -rf "$player"
+    osacompile -o "$player" macos/player.applescript
+    launcher="$player/Contents/Resources/mpv.app"
+    mkdir -p "$launcher/Contents/MacOS"
+    sed "s|@MPV@|$(command -v mpv)|" macos/mpv-launcher.sh > "$launcher/Contents/MacOS/mpv"
+    chmod 755 "$launcher/Contents/MacOS/mpv"
+    cat > "$launcher/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>mpv</string>
-    <key>CFBundleIdentifier</key><string>io.github.mpv-launcher</string>
+    <key>CFBundleIdentifier</key><string>$PLAYER_ID.mpv</string>
     <key>CFBundleName</key><string>mpv</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -105,30 +138,37 @@ if [ $apps = 1 ]; then
 </dict>
 </plist>
 PLIST
-    codesign --force -s - "$app" >/dev/null 2>&1
+    set_id "$player/Contents/Info.plist" "$PLAYER_ID"
+    doc_types "$player/Contents/Info.plist" Alternate
+    codesign --force -s - "$launcher" >/dev/null 2>&1
+    codesign --force -s - "$player" >/dev/null 2>&1
 
-    # The router: D-Log M clips to mpv, everything else to IINA
-    router="$APPS_DIR/DJI Router.app"
+    # The router: the default player in router mode only (gyroflow-router on)
+    router="$APPS_DIR/$ROUTER_NAME.app"
     rm -rf "$router"
-    osacompile -o "$router" macos/dji-router.applescript
-    plist="$router/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.dji-router" "$plist" 2>/dev/null \
-        || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.dji-router" "$plist"
-    /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
-    /usr/libexec/PlistBuddy \
-        -c "Add :CFBundleDocumentTypes array" \
-        -c "Add :CFBundleDocumentTypes:0 dict" \
-        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string Video file" \
-        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer" \
-        -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" \
-        -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.mpeg-4" \
-        -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string com.apple.quicktime-movie" \
-        "$plist"
+    osacompile -o "$router" macos/router.applescript
+    sed "s|@PLAYER_ID@|$PLAYER_ID|g" macos/route.sh > "$router/Contents/Resources/route.sh"
+    chmod 755 "$router/Contents/Resources/route.sh"
+    set_id "$router/Contents/Info.plist" "$ROUTER_ID"
+    doc_types "$router/Contents/Info.plist" Alternate
     codesign --force -s - "$router" >/dev/null 2>&1
+
+    sed -e "s|@PLAYER_ID@|$PLAYER_ID|g" -e "s|@ROUTER_ID@|$ROUTER_ID|g" macos/gyroflow-router.py > "$BUILD/gyroflow-router"
+    put "$BUILD/gyroflow-router" "$MPV_DIR/gyroflow/gyroflow-router" 755
+    put macos/export-finder.sh "$MPV_DIR/gyroflow/export-finder.sh" 755
+
+    # Finder Quick Actions (right click on videos)
+    python3 -I tools/make_workflow.py "$SERVICES_DIR/Play Stabilized.workflow" "Play Stabilized" NSTouchBarPlayTemplate \
+        "open -b $PLAYER_ID \"\$@\""
+    python3 -I tools/make_workflow.py "$SERVICES_DIR/Stabilize + LUT.workflow" "Stabilize + LUT" NSTouchBarExitFullScreenTemplate \
+        "\"\$HOME/.config/mpv/gyroflow/export-finder.sh\" \"\$@\""
+
     if [ "$APPS_DIR" = "$HOME/Applications" ]; then
-        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$router" "$app"
+        "$lsregister" -f "$player" "$router"
+        /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
     fi
-    echo "   To open MP4/MOV files with it: Finder > Get Info on a clip > Open with: DJI Router > Change All"
+    echo "   $PLAYER_NAME is in Finder's Open With for MP4/MOV; Quick Actions: Play Stabilized, Stabilize + LUT"
+    echo "   Router mode (the default player, sending other videos to your usual one): $MPV_DIR/gyroflow/gyroflow-router on"
 fi
 
 echo "Done."

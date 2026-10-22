@@ -33,8 +33,11 @@ local PROBE = mp.command_native({"expand-path", "~~/gyroflow/gyroflow-probe"})
 local PRESET = mp.command_native({"expand-path", "~~/gyroflow/default.gyroflow"})
 -- Containers a project can be embedded in, and that DJI cameras record
 local PROBE_EXTENSIONS = { mp4 = true, mov = true }
--- bilinear | bicubic | lanczos. Bicubic is the realtime/quality sweet spot on the M1 Pro.
-local INTERPOLATION = "bicubic"
+-- bilinear | bicubic | lanczos. Lanczos is sharper but slower: on the M1 Pro a 4K clip plays at ~38 fps of
+-- capacity with it and ~54 with bicubic, so lanczos up to 30 fps and bicubic above (and when the rate's unknown)
+local INTERPOLATION_SLOW = "lanczos"
+local INTERPOLATION_FAST = "bicubic"
+local SLOW_MAX_FPS = 31
 -- GPU worker threads. 3 on the M1 Pro: 4K60 ~87 fps of capacity
 local WORKERS = 3
 -- Larger video is scaled down to this many pixels (aspect kept) before stabilizing
@@ -62,15 +65,15 @@ local function project_video_size(project)
     f:close()
     local info = json and json.video_info
     if not info or not info.width or not info.height then return nil end
-    return info.width, info.height
+    return info.width, info.height, info.fps
 end
 
 -- What to stabilize the video with: { project = <.gyroflow or the video itself>, kind, width, height, preset }
 local function find_source(path)
     local project = find_project(path)
     if project then
-        local w, h = project_video_size(project)
-        return { project = project, kind = "project", width = w, height = h }
+        local w, h, fps = project_video_size(project)
+        return { project = project, kind = "project", width = w, height = h, fps = fps }
     end
     if not path or path:find("://", 1, true) then return nil end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
@@ -85,7 +88,7 @@ local function find_source(path)
     end
     local preset = nil
     if info.mode == "default" and file_exists(PRESET) then preset = PRESET end
-    return { project = path, kind = info.mode, width = info.width, height = info.height, preset = preset }
+    return { project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset }
 end
 
 local KIND_LABELS = { project = "", embedded = " (embedded project)", default = " (default preset)" }
@@ -101,6 +104,12 @@ local function in_iina()
     return (mp.get_property("options/vo") or ""):find("libmpv", 1, true) ~= nil
 end
 
+local function interpolation(source)
+    local fps = tonumber(source.fps)
+    if fps and fps > 0 and fps <= SLOW_MAX_FPS then return INTERPOLATION_SLOW end
+    return INTERPOLATION_FAST
+end
+
 local function gyroflow_filter(source, enabled)
     return {
         name = "vapoursynth",
@@ -108,7 +117,7 @@ local function gyroflow_filter(source, enabled)
         enabled = enabled,
         params = {
             file = SCRIPT,
-            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = INTERPOLATION, workers = WORKERS }),
+            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = WORKERS }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -149,7 +158,7 @@ mp.add_hook("on_load", 50, function()
     end
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
-    mp.msg.info("gyroflow: stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "")
+    mp.msg.info("gyroflow: stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or ""))
 end)
 

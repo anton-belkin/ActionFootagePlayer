@@ -2,7 +2,7 @@
 //
 // `gyroflow-probe <video>`: what the plugin can stabilize the video with, for gyroflow_auto.lua to decide whether to
 // add the filter, and the color profile the camera recorded it in, for dlog_auto.lua. Prints one JSON line:
-//   {"mode":"embedded","width":3840,"height":2160,...}  a project stored in the video (by gyroflow-embed)
+//   {"mode":"embedded","width":3840,"height":2160,"fps":59.94,...}  a project stored in the video (by gyroflow-embed)
 //   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
 //                                                       in-camera stabilization (DJI with EIS off): stabilize it with
 //                                                       the default preset

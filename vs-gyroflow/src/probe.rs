@@ -16,7 +16,7 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
 
     if let Some(project) = embedded::read(std::path::Path::new(path)).map_err(|e| e.to_string())? {
         let info = &project["video_info"];
-        return Ok(serde_json::json!({ "mode": "embedded", "width": info["width"], "height": info["height"] }));
+        return Ok(serde_json::json!({ "mode": "embedded", "width": info["width"], "height": info["height"], "fps": info["fps"] }));
     }
 
     let (mut file, size) = embedded::Content::new(&mut file, size);
@@ -48,7 +48,7 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
         Some(s) => return Err(format!("in-camera stabilization is on (EIS status {s})")),
         None => return Err("in-camera stabilization state unknown".into()),
     }
-    Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height }))
+    Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
 }
 
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {

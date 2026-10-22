@@ -9,7 +9,8 @@ are never re-encoded.
   into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
 - **Gyroflow in realtime.** A VapourSynth plugin built on Gyroflow's own core renders the stabilization
   while mpv plays, the way Gyroflow would render it (smoothing, zoom, lens, horizon): 4K60 at ~87 fps of
-  capacity on an M1 Pro. It's used when
+  capacity on an M1 Pro. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic (Lanczos holds
+  only ~38 fps at 4K). It's used when
   - a Gyroflow project (`.gyroflow`) sits next to the video,
   - or the project is stored inside the video (`gyroflow-embed`, below), so there's one file to carry,
   - or the clip has gyro data of its own and was shot without in-camera stabilization (DJI with EIS off,
@@ -27,7 +28,7 @@ ffmpeg for exporting (`brew install ffmpeg`) and Rust ([rustup](https://rustup.r
 
 ```bash
 ./install.sh           # into ~/.config/mpv
-./install.sh --apps    # also DJI Router.app and mpv.app in ~/Applications (see Opening files)
+./install.sh --apps    # also Steady Player, Steady Router and Finder Quick Actions (see Opening files)
 ```
 
 It downloads DJI's LUT from DJI (it isn't redistributed here) and checks it, bakes the LUTs into shaders,
@@ -38,10 +39,26 @@ builds the plugin and installs everything; existing files it replaces are kept a
 
 ### Opening files
 
-`DJI Router.app` (`--apps`) routes clips by name: `*_D.MP4` / `*_D.MOV` to mpv (HDR, stabilization),
-everything else to [IINA](https://iina.io). Make it the default for MP4/MOV: Finder → Get Info on a clip →
-Open with → DJI Router → Change All. It starts mpv through `mpv.app`, an app wrapper around Homebrew's mpv:
-started from the applet directly, mpv stayed tied to it and macOS throttled it as a background process.
+`./install.sh --apps` adds two apps to `~/Applications` and two Quick Actions to Finder (right click on videos):
+
+- **Steady Player** plays videos in mpv with all of this. It's listed in Finder's Open With for MP4 and MOV, but
+  doesn't take them over: double-clicking a video still opens your usual player.
+- **Quick Actions:** *Play Stabilized* opens the selected videos in Steady Player; *Stabilize + LUT* exports
+  them (see Exporting) in the background, with a notification as each one is done.
+- **Router mode**, if you want videos to pick their player by themselves: Steady Router becomes the default for
+  MP4 and MOV and decides by the first video it's given. One of ours (D-Log M, or with a Gyroflow project or
+  motion data to stabilize it with) opens in Steady Player, which then plays the rest of the folder; anything
+  else opens in the player that was the default before, or one you choose:
+
+  ```bash
+  ~/.config/mpv/gyroflow/gyroflow-router on                    # the current default becomes the fallback
+  ~/.config/mpv/gyroflow/gyroflow-router on --fallback IINA
+  ~/.config/mpv/gyroflow/gyroflow-router off                   # back to the previous defaults
+  ~/.config/mpv/gyroflow/gyroflow-router status
+  ```
+
+Steady Player starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
+mpv stayed tied to it and macOS throttled it as a background process.
 
 ### Keys
 
@@ -139,7 +156,9 @@ shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
-macos/                        DJI Router applet source, mpv.app launcher
+macos/                        Steady Player / Steady Router applets, mpv launcher, gyroflow-router, the Quick
+                              Actions' export script
+tools/make_workflow.py        writes the Finder Quick Actions
 ```
 
 ## License
