@@ -9,7 +9,9 @@
 // the camera's metadata, as the dlogm plugin does. Clips there's nothing to stabilize with are skipped.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
-// LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/).
+// LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,
+// as for the plugins (Steady Player keeps your preset and DJI's LUT there, its own copy of the plugins being
+// read-only).
 //
 // Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov), 10-bit
 //   D-Log M:        HEVC Main10, Rec.2100 HLG (luts/dlogm_hlg.cube), or Rec.709 with --sdr (DJI's LUT)
@@ -115,9 +117,13 @@ fn mpv_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config/mpv"))
 }
 
-// A file of one of the mpv plugins: in the scripts folder this binary is installed in (~~/scripts/gyroflow/), or
-// in mpv's when it runs from elsewhere (a build)
+// A file of one of the mpv plugins: in $<PLUGIN>_DATA when it's there, else in the scripts folder this binary is
+// installed in (~~/scripts/gyroflow/), or in mpv's when it runs from elsewhere (a build)
 fn plugin_file(plugin: &str, name: &str) -> PathBuf {
+    if let Some(data) = std::env::var_os(format!("{}_DATA", plugin.to_uppercase())).filter(|d| !d.is_empty()) {
+        let p = PathBuf::from(data).join(name);
+        if p.is_file() { return p; }
+    }
     let here = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok())
         .and_then(|e| Some(e.parent()?.parent()?.to_path_buf()))
         .filter(|scripts| scripts.join("gyroflow").join("gyroflow-export").is_file());
