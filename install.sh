@@ -81,6 +81,10 @@ put mpv/scripts/dlog_auto.lua     "$MPV_DIR/scripts/dlog_auto.lua" 644
 put mpv/scripts/gyroflow_auto.lua "$MPV_DIR/scripts/gyroflow_auto.lua" 644
 put mpv/scripts/gyroflow_export.lua "$MPV_DIR/scripts/gyroflow_export.lua" 644
 put mpv/gyroflow/gyroflow.vpy     "$MPV_DIR/gyroflow/gyroflow.vpy" 644
+# The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
+if [ ! -e "$MPV_DIR/gyroflow/default.gyroflow" ]; then
+    install -m 644 mpv/gyroflow/underwater.gyroflow "$MPV_DIR/gyroflow/default.gyroflow"
+fi
 put "$BUILD/dlogm_lut3d.glsl"     "$MPV_DIR/shaders/dlogm_lut3d.glsl" 644
 put "$BUILD/dlogm_hlg.glsl"       "$MPV_DIR/shaders/dlogm_hlg.glsl" 644
 # The LUTs themselves, for gyroflow-export

@@ -14,7 +14,8 @@ are never re-encoded.
   - a Gyroflow project (`.gyroflow`) sits next to the video,
   - or the project is stored inside the video (`gyroflow-embed`, below), so there's one file to carry,
   - or the clip has gyro data of its own and was shot without in-camera stabilization (DJI with EIS off,
-    FOV Wide): it's stabilized with Gyroflow's default settings, no project needed.
+    FOV Wide): it's stabilized with a default preset, no project needed. The default preset is for
+    **underwater** footage (see Stabilization).
 - **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
   and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
 
@@ -86,8 +87,23 @@ date, players and Gyroflow open it as before, and it moves with the file. Apps t
 (trimming, remuxing) drop it.
 
 Clips with gyro data and EIS off play stabilized even without a project, with Gyroflow's default preset
-and then `~/.config/mpv/gyroflow/default.gyroflow` if it exists (save one from Gyroflow: Export → Create
-settings preset). Why a clip isn't stabilized is in mpv's log (`--msg-level=gyroflow_auto=v`).
+and then `~/.config/mpv/gyroflow/default.gyroflow`. Why a clip isn't stabilized is in mpv's log
+(`--msg-level=gyroflow_auto=v`).
+
+**The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
+so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
+bends light and the lens then behaves like a longer one than EIS is tuned for. So under water you shoot with EIS
+off, the camera records gyro data (it only does with EIS off), and those are the clips this stabilizes without
+a project. `install.sh` puts `mpv/gyroflow/underwater.gyroflow` there as `default.gyroflow`, unless you have one
+already:
+
+- **lens underwater:** light refraction 1.33 (Gyroflow: Lens profile → Advanced → "Lens is underwater"). Without
+  it the rotation is corrected by the wrong amount and part of the shake stays: on a test clip, jitter between
+  frames went from 0.16 px to 0.02 px with it.
+- smoothing 0.5, zoom limit 140 %, horizon lock off.
+
+For clips shot with EIS off in air, replace it with a preset without the refraction (save one from Gyroflow:
+Export → Create settings preset), or give those clips a project of their own.
 
 ### Exporting
 
@@ -153,6 +169,7 @@ beyond stock Gyroflow.
 ```
 install.sh                    builds and installs everything
 mpv/                          mpv.conf, input.conf, scripts/, gyroflow/gyroflow.vpy  →  ~/.config/mpv
+mpv/gyroflow/underwater.gyroflow  the default preset for clips without a project
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
