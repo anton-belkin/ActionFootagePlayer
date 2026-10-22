@@ -1,36 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // `gyroflow-probe <video>`: what the plugin can stabilize the video with, for gyroflow_auto.lua to decide whether to
-// add the filter. Prints one JSON line:
-//   {"mode":"embedded","width":3840,"height":2160}  a project stored in the video (by gyroflow-embed)
-//   {"mode":"default","width":3840,"height":2160}   no project, but motion data of its own, recorded without in-camera
-//                                                   stabilization (DJI with EIS off): stabilize it with the default preset
-//   {"mode":null,"reason":"..."}                    nothing to do
+// add the filter, and the color profile the camera recorded it in, for dlog_auto.lua. Prints one JSON line:
+//   {"mode":"embedded","width":3840,"height":2160,...}  a project stored in the video (by gyroflow-embed)
+//   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
+//                                                       in-camera stabilization (DJI with EIS off): stabilize it with
+//                                                       the default preset
+//   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
+// and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
+// DJI file, or a model whose metadata layout isn't known here).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 
-use std::sync::{ Arc, atomic::AtomicBool };
+use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ filesystem, util };
 
 #[path = "../embedded.rs"]
 #[allow(dead_code)]
 mod embedded;
-use gyroflow_core::telemetry_parser::{ Input, tags_impl::* };
+use gyroflow_core::telemetry_parser::{ self, Input, tags_impl::* };
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
         eprintln!("usage: gyroflow-probe <video>");
         std::process::exit(2);
     };
-    let out = match probe(&path) {
+    let path = match std::fs::canonicalize(&path) {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => { println!("{}", serde_json::json!({ "mode": null, "reason": e.to_string(), "color": null })); return; }
+    };
+    let mut out = match probe(&path) {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
     };
+    out["color"] = color_profile(&path).into();
     println!("{out}");
 }
 
 fn probe(path: &str) -> Result<serde_json::Value, String> {
-    let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?.to_string_lossy().to_string();
-    let path = path.as_str();
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
@@ -78,4 +84,76 @@ fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::V
         serde_json::Value::Array(arr) => arr.iter().find_map(|x| find_key(x, key)),
         _ => None
     }
+}
+
+// The color profile DJI recorded the video in: ColorMode (dvtm_library.proto) in the stream metadata of the first
+// sample of the camera's metadata track. DJI tags D-Log M video as BT.709 and the file name doesn't tell D-Log M
+// from Normal, so this is the only reliable way to know. telemetry-parser doesn't decode the field for the Osmo
+// Action 6 (its schema for dvtm_ac206 has no ColorMode), so it's read from the protobuf here.
+fn color_profile(path: &str) -> Option<&'static str> {
+    // Where each model's schema puts ColorMode in StreamMeta. Other models use field 4 for other things (FOVType in
+    // dvtm_wa530), so only the ones checked against their .proto are read
+    const STREAM_COLOR_MODE_FIELD: &[(&str, u64)] = &[
+        ("dvtm_ac206.proto", 4), // Osmo Action 6
+        ("dvtm_oq101.proto", 4), // Osmo 360
+    ];
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let (mut file, size) = embedded::Content::new(&mut file, size);
+    let mut mode = None;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel2 = cancel.clone();
+    let _ = telemetry_parser::util::get_metadata_track_samples(&mut file, size, true, |_info, data: &[u8], _pos, _md| {
+        if cancel2.load(Ordering::Relaxed) { return; }
+        cancel2.store(true, Ordering::Relaxed);
+        // ProductMeta { clip_meta = 1 { clip_meta_header = 1 { proto_file_name = 1 } }, stream_meta = 2 }
+        let Some(header) = pb_bytes(data, 1).and_then(|c| pb_bytes(c, 1)) else { return };
+        let Some(proto) = pb_bytes(header, 1).and_then(|s| std::str::from_utf8(s).ok()) else { return };
+        let Some(&(_, field)) = STREAM_COLOR_MODE_FIELD.iter().find(|(p, _)| *p == proto) else { return };
+        // A ColorMode message without its field is the default (0) in proto3
+        mode = pb_bytes(data, 2).and_then(|s| pb_bytes(s, field)).map(|c| pb_varint(c, 1).unwrap_or(0));
+    }, cancel);
+    Some(match mode? {
+        0 => "normal",
+        1 => "d-cinelike",
+        2 => "dlog",
+        9 => "hlg",
+        19 => "dlogm",
+        22 => "dlog2",
+        _ => "other",
+    })
+}
+
+// Minimal protobuf reading: the first occurrence of a field in a message
+enum PbValue<'a> { Varint(u64), Bytes(&'a [u8]) }
+
+fn pb_field(mut msg: &[u8], wanted: u64) -> Option<PbValue<'_>> {
+    fn varint(buf: &mut &[u8]) -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&b, rest) = buf.split_first()?;
+            *buf = rest;
+            v |= ((b & 0x7f) as u64) << shift;
+            if b & 0x80 == 0 { return Some(v); }
+        }
+        None
+    }
+    while !msg.is_empty() {
+        let key = varint(&mut msg)?;
+        let value = match key & 7 {
+            0 => PbValue::Varint(varint(&mut msg)?),
+            1 => { let (v, rest) = msg.split_at_checked(8)?; msg = rest; PbValue::Bytes(v) }
+            2 => { let len = varint(&mut msg)? as usize; let (v, rest) = msg.split_at_checked(len)?; msg = rest; PbValue::Bytes(v) }
+            5 => { let (v, rest) = msg.split_at_checked(4)?; msg = rest; PbValue::Bytes(v) }
+            _ => return None,
+        };
+        if key >> 3 == wanted { return Some(value); }
+    }
+    None
+}
+fn pb_bytes(msg: &[u8], field: u64) -> Option<&[u8]> {
+    match pb_field(msg, field)? { PbValue::Bytes(b) => Some(b), _ => None }
+}
+fn pb_varint(msg: &[u8], field: u64) -> Option<u64> {
+    match pb_field(msg, field)? { PbValue::Varint(v) => Some(v), _ => None }
 }

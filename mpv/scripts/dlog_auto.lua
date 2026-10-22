@@ -1,8 +1,12 @@
 -- Auto-apply dji_sdr or dji_hdr on file load.
 --
 -- Triggers on DJI D-Log M source detection:
---   filename ends with _D.MP4 / _D.MOV  (DJI Osmo convention)
---   OR container "encoder" / "make" metadata contains "DJI"
+--   the color profile in the camera's own metadata, read by ~~/gyroflow/gyroflow-probe (gyroflow_auto.lua runs it
+--   on load and shares the result; this script runs it itself when gyroflow_auto.lua didn't). DJI tags D-Log M
+--   video as BT.709 and names Normal-color clips *_D.MP4 too, so the metadata is the only reliable sign.
+--   For files the probe can't tell (other DJI models, no probe installed), the old guess:
+--     filename ends with _D.MP4 / _D.MOV  (DJI Osmo convention)
+--     OR container "encoder" / "make" metadata contains "DJI"
 --
 -- Branches by host renderer:
 --   mpv standalone (vo=gpu-next, Vulkan)  ->  dji_hdr
@@ -14,13 +18,32 @@
 --     IINA can't engage macOS HDR mode through its libmpv-OpenGL render
 --     context, so use the HOOK MAIN SDR shader and stay in SDR.
 --
+-- In a playlist, the profile is undone (profile-restore) when the next file isn't D-Log M.
+--
 -- Source files are never modified -- no retag is needed.
 
 local mp = require 'mp'
+local utils = require 'mp.utils'
 
-local function is_dlogm()
-    local path = (mp.get_property("path") or ""):lower()
-    if path:match("_d%.mp4$") or path:match("_d%.mov$") then return true end
+local PROBE = mp.command_native({"expand-path", "~~/gyroflow/gyroflow-probe"})
+local PROBE_EXTENSIONS = { mp4 = true, mov = true }
+
+-- "dlogm", "normal", ... from the camera's metadata, or nil when the probe can't tell
+local function recorded_color(path)
+    local shared = mp.get_property_native("user-data/gyroflow-probe") or {}
+    if shared.path == path then return shared.color ~= "" and shared.color or nil end
+    if path:find("://", 1, true) then return nil end
+    local ext = (path:match("%.([^./]+)$") or ""):lower()
+    local info = utils.file_info(PROBE)
+    if not PROBE_EXTENSIONS[ext] or not info or not info.is_file then return nil end
+    local r = mp.command_native({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = false })
+    local out = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+    return out and out.color or nil
+end
+
+local function guessed_dlogm(path)
+    local lower = path:lower()
+    if lower:match("_d%.mp4$") or lower:match("_d%.mov$") then return true end
     local meta = mp.get_property_native("metadata") or {}
     for k, v in pairs(meta) do
         if type(v) == "string" and v:lower():find("dji", 1, true) then
@@ -33,24 +56,41 @@ local function is_dlogm()
     return false
 end
 
+local function is_dlogm(path)
+    local color = recorded_color(path)
+    if color then
+        mp.msg.verbose("dlog_auto: recorded in " .. color)
+        return color == "dlogm"
+    end
+    return guessed_dlogm(path)
+end
+
 local applied_path = nil
+local active_profile = nil
+
+local function set_profile(name)
+    if active_profile == name then return end
+    if active_profile then mp.commandv("apply-profile", active_profile, "restore") end
+    if name then mp.commandv("apply-profile", name) end
+    active_profile = name
+end
 
 local function apply()
     local path = mp.get_property("path")
     if not path or path == applied_path then return end
-    if not is_dlogm() then
-        applied_path = path
+    applied_path = path
+    if not is_dlogm(path) then
+        set_profile(nil)
         mp.msg.info("dlog_auto: not D-Log M, no profile applied")
         return
     end
-    applied_path = path
     local in_iina = (mp.get_property("current-vo") == "libmpv")
     if in_iina then
-        mp.commandv("apply-profile", "dji_sdr")
+        set_profile("dji_sdr")
         mp.osd_message("D-Log M -> SDR (IINA)", 1.5)
         mp.msg.info("dlog_auto: applied dji_sdr (IINA)")
     else
-        mp.commandv("apply-profile", "dji_hdr")
+        set_profile("dji_hdr")
         mp.osd_message("D-Log M -> HDR (mpv standalone)", 1.5)
         mp.msg.info("dlog_auto: applied dji_hdr (mpv standalone)")
     end

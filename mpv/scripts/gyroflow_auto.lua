@@ -77,6 +77,8 @@ local function find_source(path)
     if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return nil end
     local r = mp.command_native({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = false })
     local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+    -- For dlog_auto.lua, which needs the probe's "color" and would otherwise run it again
+    if info then mp.set_property_native("user-data/gyroflow-probe", { path = path, color = info.color or "" }) end
     if not info or not info.mode then
         mp.msg.verbose("gyroflow: not stabilizing: " .. (info and info.reason or "probe failed"))
         return nil
@@ -118,6 +120,7 @@ local current_source = nil
 
 mp.add_hook("on_load", 50, function()
     current_source = nil
+    mp.set_property_native("user-data/gyroflow-probe", {})
     if in_iina() then
         local project = find_project(mp.get_property("path"))
         if project then mp.msg.info("gyroflow: " .. project .. " found, but IINA can't run VapourSynth; play in mpv to stabilize") end
