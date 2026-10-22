@@ -76,8 +76,9 @@ DJI tags D-Log M files as BT.709 SDR. Two mpv profiles (`mpv/mpv.conf`), applied
 - `dji_sdr` (IINA): DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
   BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged. IINA's libmpv OpenGL context
   can't switch macOS to HDR, so it stays SDR.
-- `dji_hdr` (mpv): a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, made in DaVinci
-  Resolve) at `HOOK OUTPUT`, re-sampling the source through `BIND MAIN`. At `HOOK MAIN`, mpv would linearize
+- `dji_hdr` (mpv): a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
+  Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK OUTPUT`,
+  re-sampling the source through `BIND MAIN`. At `HOOK MAIN`, mpv would linearize
   the HLG output as the file's BT.709 and encode it again. `target-trc=hlg` with
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
 
@@ -112,3 +113,10 @@ macos/                        DJI Router applet source, mpv.app launcher
 
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
+
+## Credits
+
+`luts/dlogm_hlg.cube` (D-Log M → Rec.2100 HLG, 1000-nit, no DaVinci DRT) was composed in DaVinci Resolve
+from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide Gamut/Intermediate shaper LUT
+(`DLOGM_DWG_I_SHAPER_ZRG_V1`); the HLG output stage and the bake are this project's. Thanks to Zeb Gardner for
+the underlying transform.
