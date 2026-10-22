@@ -1,7 +1,8 @@
 #!/usr/bin/python3 -I
-# gyroflow-router on [--fallback <app>] | off | status
+# gyroflow-router on [--fallback <app>] [mp4|mov] | off [mp4|mov] | status
 #
-# Router mode: Steady Router becomes the default app for MP4 and MOV, and opens each video with Steady Player
+# Router mode: Steady Router becomes the default app for MP4 and MOV (or just the type given), and opens each
+# video with Steady Player
 # when it's one of ours (D-Log M, or something to stabilize it with) and with the fallback player otherwise.
 #   on     remembers the current default players, makes Steady Router the default. The fallback is the player that
 #          was the default (for a router of ours, IINA if it's installed, else QuickTime), or --fallback
@@ -50,7 +51,7 @@ def set_default_handler(content_type, bundle_id):
     if status != 0:
         sys.exit(f"Couldn't make {bundle_id} the default for {content_type} (error {status})")
     # LaunchServices applies it asynchronously: wait, so what's printed next is already true
-    for _ in range(50):
+    for _ in range(150):
         if (default_handler(content_type) or "").lower() == bundle_id.lower():
             return
         time.sleep(0.1)
@@ -85,13 +86,22 @@ def name_of(bundle_id):
     r = subprocess.run(["osascript", "-e", f'name of application id "{bundle_id}"'], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else bundle_id
 
+USAGE = "usage: gyroflow-router on [--fallback <app>] [mp4|mov] | off [mp4|mov] | status"
+
+def selected_types(args):
+    """The types named in args (all without any), and the args left"""
+    named = [a for a in args if a.lower() in TYPES]
+    rest = [a for a in args if a.lower() not in TYPES]
+    return { e: t for e, t in TYPES.items() if not named or e in [n.lower() for n in named] }, rest
+
 def on(args):
+    types, args = selected_types(args)
     chosen = None
     if args[:1] == ["--fallback"] and len(args) == 2:
         chosen = bundle_id_of(args[1])
     elif args:
-        sys.exit("usage: gyroflow-router on [--fallback <app>]")
-    for ext, content_type in TYPES.items():
+        sys.exit(USAGE)
+    for ext, content_type in types.items():
         current = default_handler(content_type)
         if current != ROUTER_ID:
             defaults_write(f"previous-{content_type}", current or "")
@@ -102,7 +112,10 @@ def on(args):
         print(f".{ext}: Steady Router; videos that aren't ours open with {name_of(fallback)}")
 
 def off(args):
-    for ext, content_type in TYPES.items():
+    types, args = selected_types(args)
+    if args:
+        sys.exit(USAGE)
+    for ext, content_type in types.items():
         previous = defaults_read(f"previous-{content_type}")
         if default_handler(content_type) != ROUTER_ID:
             print(f".{ext}: Steady Router isn't the default, left as it is")
@@ -121,5 +134,5 @@ def status(args):
 
 commands = { "on": on, "off": off, "status": status }
 if len(sys.argv) < 2 or sys.argv[1] not in commands:
-    sys.exit("usage: gyroflow-router on [--fallback <app>] | off | status")
+    sys.exit(USAGE)
 commands[sys.argv[1]](sys.argv[2:])

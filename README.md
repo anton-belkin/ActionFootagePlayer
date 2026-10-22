@@ -53,6 +53,7 @@ builds the plugin and installs everything; existing files it replaces are kept a
   ```bash
   ~/.config/mpv/gyroflow/gyroflow-router on                    # the current default becomes the fallback
   ~/.config/mpv/gyroflow/gyroflow-router on --fallback IINA
+  ~/.config/mpv/gyroflow/gyroflow-router on mp4               # just one type (DJI cameras record MP4)
   ~/.config/mpv/gyroflow/gyroflow-router off                   # back to the previous defaults
   ~/.config/mpv/gyroflow/gyroflow-router status
   ```
