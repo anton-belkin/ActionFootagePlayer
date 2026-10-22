@@ -1,21 +1,21 @@
 # DJI D-Log M and Gyroflow stabilization in mpv
 
-Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown as HDR (or SDR), and clips
-stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering anything. The source files
-are never re-encoded.
+Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown as HDR (or SDR), and
+underwater clips stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering anything.
+The source files are never re-encoded.
 
 - **D-Log M → HDR / SDR.** GPU shaders apply DJI's D-Log M LUT (SDR, in IINA) or a D-Log M → Rec.2100 HLG
   LUT (HDR, in mpv, with macOS's HDR mode). Picked automatically from the color profile the camera wrote
   into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
-- **Gyroflow in realtime.** A VapourSynth plugin built on Gyroflow's own core renders the stabilization
-  while mpv plays, the way Gyroflow would render it (smoothing, zoom, lens, horizon): 4K60 at ~87 fps of
-  capacity on an M1 Pro. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic (Lanczos holds
-  only ~38 fps at 4K). It's used when
-  - a Gyroflow project (`.gyroflow`) sits next to the video,
-  - or the project is stored inside the video (`gyroflow-embed`, below), so there's one file to carry,
-  - or the clip has gyro data of its own and was shot without in-camera stabilization (DJI with EIS off,
-    FOV Wide): it's stabilized with a default preset, no project needed. The default preset is for
-    **underwater** footage (see Stabilization).
+- **Underwater stabilisation in realtime.** DJI's in-camera stabilization (EIS) works well in air but not
+  under water (as of today's firmware), so under water you shoot with EIS off, and then the camera records
+  gyro data. Those clips play stabilized straight away, with an underwater preset (light refraction 1.33)
+  and no project to make. A VapourSynth plugin built on [Gyroflow](https://gyroflow.xyz)'s own core renders
+  the stabilization while mpv plays, the way Gyroflow would render it (smoothing, zoom, lens, horizon): 4K60
+  at ~87 fps of capacity on an M1 Pro. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic
+  (Lanczos holds only ~38 fps at 4K). Any clip with a Gyroflow project plays stabilized too, its own way:
+  a `.gyroflow` next to the video, or the project stored inside the video (`gyroflow-embed`, below), so
+  there's one file to carry.
 - **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
   and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
 
