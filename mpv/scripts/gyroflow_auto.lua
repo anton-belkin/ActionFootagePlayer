@@ -17,8 +17,6 @@
 -- for VapourSynth: copying, converting and uploading 8K frames left too little headroom in a window
 -- with the HDR shader (dropped frames, a slow start). The window shows less than 4K anyway.
 --
--- mpv standalone only: IINA's libmpv is built without VapourSynth.
---
 -- Ctrl+g toggles the stabilization for the current file.
 
 local mp = require 'mp'
@@ -100,10 +98,6 @@ local function scaled_input_size(w, h)
     return math.floor(w * s / 2) * 2, math.floor(h * s / 2) * 2
 end
 
-local function in_iina()
-    return (mp.get_property("options/vo") or ""):find("libmpv", 1, true) ~= nil
-end
-
 local function interpolation(source)
     local fps = tonumber(source.fps)
     if fps and fps > 0 and fps <= SLOW_MAX_FPS then return INTERPOLATION_SLOW end
@@ -130,11 +124,6 @@ local current_source = nil
 mp.add_hook("on_load", 50, function()
     current_source = nil
     mp.set_property_native("user-data/gyroflow-probe", {})
-    if in_iina() then
-        local project = find_project(mp.get_property("path"))
-        if project then mp.msg.info("gyroflow: " .. project .. " found, but IINA can't run VapourSynth; play in mpv to stabilize") end
-        return
-    end
     if not file_exists(PLUGIN) then
         if find_project(mp.get_property("path")) then mp.msg.warn("gyroflow: plugin missing at " .. PLUGIN) end
         return

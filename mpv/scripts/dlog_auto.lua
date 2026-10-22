@@ -1,4 +1,4 @@
--- Auto-apply dji_sdr or dji_hdr on file load.
+-- Auto-apply dji_hdr (D-Log M -> Rec.2100 HLG, shown in HDR) on file load.
 --
 -- Triggers on DJI D-Log M source detection:
 --   the color profile in the camera's own metadata, read by ~~/gyroflow/gyroflow-probe (gyroflow_auto.lua runs it
@@ -8,15 +8,9 @@
 --     filename ends with _D.MP4 / _D.MOV  (DJI Osmo convention)
 --     OR container "encoder" / "make" metadata contains "DJI"
 --
--- Branches by host renderer:
---   mpv standalone (vo=gpu-next, Vulkan)  ->  dji_hdr
---     HOOK OUTPUT shader bypasses mpv's color pipeline; target-trc=hlg +
---     target-colorspace-hint=yes engages macOS HDR Metal layer.
---     On an SDR display, macOS tone-maps the HLG output down, which looks
---     better than an explicit SDR fallback.
---   IINA (vo=libmpv, OpenGL)              ->  dji_sdr
---     IINA can't engage macOS HDR mode through its libmpv-OpenGL render
---     context, so use the HOOK MAIN SDR shader and stay in SDR.
+-- dji_hdr's HOOK OUTPUT shader bypasses mpv's color pipeline; target-trc=hlg + target-colorspace-hint=yes
+-- engages macOS's HDR Metal layer (vo=gpu-next). On an SDR display, macOS tone-maps the HLG output down, which
+-- looks better than an explicit SDR fallback. dji_sdr (DJI's Rec.709 LUT) is there on Ctrl+s (input.conf).
 --
 -- In a playlist, the profile is undone (profile-restore) when the next file isn't D-Log M.
 --
@@ -84,16 +78,9 @@ local function apply()
         mp.msg.info("dlog_auto: not D-Log M, no profile applied")
         return
     end
-    local in_iina = (mp.get_property("current-vo") == "libmpv")
-    if in_iina then
-        set_profile("dji_sdr")
-        mp.osd_message("D-Log M -> SDR (IINA)", 1.5)
-        mp.msg.info("dlog_auto: applied dji_sdr (IINA)")
-    else
-        set_profile("dji_hdr")
-        mp.osd_message("D-Log M -> HDR (mpv standalone)", 1.5)
-        mp.msg.info("dlog_auto: applied dji_hdr (mpv standalone)")
-    end
+    set_profile("dji_hdr")
+    mp.osd_message("D-Log M -> HDR", 1.5)
+    mp.msg.info("dlog_auto: applied dji_hdr")
 end
 
 mp.register_event("file-loaded", function()
