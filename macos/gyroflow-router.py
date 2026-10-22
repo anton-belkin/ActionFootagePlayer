@@ -11,7 +11,7 @@
 #
 # The settings live in Steady Player's defaults domain (@PLAYER_ID@): fallback-<ext>, previous-<content type>.
 
-import ctypes, subprocess, sys, os
+import ctypes, subprocess, sys, os, time
 
 PLAYER_ID = "@PLAYER_ID@"
 ROUTER_ID = "@ROUTER_ID@"
@@ -49,6 +49,12 @@ def set_default_handler(content_type, bundle_id):
     status = ls.LSSetDefaultRoleHandlerForContentType(cfstr(content_type), ROLES_ALL, cfstr(bundle_id))
     if status != 0:
         sys.exit(f"Couldn't make {bundle_id} the default for {content_type} (error {status})")
+    # LaunchServices applies it asynchronously: wait, so what's printed next is already true
+    for _ in range(50):
+        if (default_handler(content_type) or "").lower() == bundle_id.lower():
+            return
+        time.sleep(0.1)
+    print(f"  (macOS hasn't confirmed {content_type} -> {bundle_id} yet; check with: gyroflow-router status)")
 
 def defaults_read(key):
     r = subprocess.run(["defaults", "read", PLAYER_ID, key], capture_output=True, text=True)
