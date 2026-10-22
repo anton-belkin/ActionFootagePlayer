@@ -1,14 +1,12 @@
--- Shift+E: export the current video the way it plays, stabilized and with the D-Log M LUT, with
--- ~~/gyroflow/gyroflow-export (one pass, into a stabilized/ folder next to the video). With an A-B loop set
--- (the `l` key), only that part. Playback goes on while it runs; the result shows on screen and as a
--- notification.
---
--- mpv standalone only, like the stabilization (gyroflow_auto.lua).
+-- Shift+E: export the current video the way it plays, stabilized and with the D-Log M LUT (the dlogm plugin's),
+-- with gyroflow-export (one pass, into a stabilized/ folder next to the video). With an A-B loop set (the `l`
+-- key), only that part. Playback goes on while it runs; the result shows on screen and as a notification.
+-- Loaded by main.lua.
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
 
-local EXPORT = mp.command_native({"expand-path", "~~/gyroflow/gyroflow-export"})
+local EXPORT = utils.join_path(mp.get_script_directory(), "gyroflow-export")
 
 local running = {}
 
@@ -26,7 +24,7 @@ local function last_line(text)
     return last
 end
 
-mp.add_key_binding("E", "gyroflow-export", function()
+mp.add_key_binding("E", "export", function()
     local path = mp.get_property("path")
     if not path or path:find("://", 1, true) then
         mp.osd_message("Export: not a local file", 2)

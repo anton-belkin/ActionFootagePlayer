@@ -1,0 +1,53 @@
+# The release, built on macOS (Apple Silicon) by tools/make_release.sh. A pushed v* tag publishes it as a GitHub
+# release, with the tag's message as the release notes:
+#
+#   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
+#
+# Pull requests build it as a check; the files are kept as the run's artifact.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vs-gyroflow/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vs-gyroflow/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
+          tools/make_release.sh "$version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS \
+            --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-from-tag

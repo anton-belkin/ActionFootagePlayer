@@ -9,14 +9,14 @@
 // surface. mpv's color pipeline still runs internally but its output is
 // discarded.
 //
-// HDR engagement is via the [dji_hdr] profile's target-trc=hlg +
-// target-colorspace-hint=yes (mpv standalone only -- IINA's libmpv-OpenGL
-// render context can't engage macOS HDR mode this way).
+// HDR engagement is via target-trc=hlg + target-colorspace-hint=yes, which
+// the dlogm plugin sets along with this shader (mpv standalone only --
+// IINA's libmpv-OpenGL render context can't engage macOS HDR mode this way).
 //
 // Source files DO NOT need to be retagged.
 //
-// Caveat: any letterbox/pillarbox region is also LUT'd. With autofit=85%
-// in mpv.conf the window matches video aspect, so this isn't visible.
+// Caveat: any letterbox/pillarbox region is also LUT'd. With autofit-larger
+// (mpv.conf) the window matches video aspect, so this isn't visible.
 
 //!TEXTURE HLGLUT
 //!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@

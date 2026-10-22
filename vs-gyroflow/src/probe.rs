@@ -62,7 +62,8 @@ fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::V
 // The color profile DJI recorded the video in: ColorMode (dvtm_library.proto) in the stream metadata of the first
 // sample of the camera's metadata track. DJI tags D-Log M video as BT.709 and the file name doesn't tell D-Log M
 // from Normal, so this is the only reliable way to know. telemetry-parser doesn't decode the field for the Osmo
-// Action 6 (its schema for dvtm_ac206 has no ColorMode), so it's read from the protobuf here.
+// Action 6 (its schema for dvtm_ac206 has no ColorMode), so it's read from the protobuf here. The dlogm mpv plugin
+// reads it the same way, in Lua (mpv/scripts/dlogm/dji_color.lua): keep the two in step.
 pub fn color_profile(path: &str) -> Option<&'static str> {
     // Where each model's schema puts ColorMode in StreamMeta. Other models use field 4 for other things (FOVType in
     // dvtm_wa530), so only the ones checked against their .proto are read

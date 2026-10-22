@@ -19,8 +19,14 @@ The source files are never re-encoded.
 - **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
   and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
 
-Made for the DJI Osmo Action 6 on Apple Silicon; the Gyroflow part works with any camera Gyroflow supports
-when there's a project.
+It's two mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the other:
+
+- **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
+  Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
+- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS, Apple Silicon).
+
+Neither needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
+Gyroflow part works with any camera Gyroflow supports when there's a project.
 
 ## Install
 
@@ -30,9 +36,9 @@ includes VapourSynth) and Homebrew ffmpeg for exporting (`brew install ffmpeg`).
 **From a release** (prebuilt, no Rust needed):
 
 ```bash
-curl -LO https://github.com/anton-belkin/dlogm-gyroflow-player/releases/latest/download/dlogm-gyroflow-player-0.1.0-macos-arm64.tar.gz
-tar -xzf dlogm-gyroflow-player-0.1.0-macos-arm64.tar.gz
-cd dlogm-gyroflow-player-0.1.0-macos-arm64
+curl -LO https://github.com/anton-belkin/dlogm-gyroflow-player/releases/download/v0.2.0/dlogm-gyroflow-player-0.2.0-macos-arm64.tar.gz
+tar -xzf dlogm-gyroflow-player-0.2.0-macos-arm64.tar.gz
+cd dlogm-gyroflow-player-0.2.0-macos-arm64
 ./install.sh --apps
 ```
 
@@ -47,10 +53,28 @@ cd dlogm-gyroflow-player
 ./install.sh --apps
 ```
 
-`./install.sh` alone installs just the mpv part into `~/.config/mpv`; `--apps` adds Steady Player, Steady Router
-and the Finder Quick Actions (see Opening files). It downloads DJI's LUT from DJI (it isn't redistributed here)
-and checks it, bakes the LUTs into shaders and installs everything; existing files it replaces are kept as
-`*.bak-<date>` (for `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
+`./install.sh` alone installs just the two plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
+recommended settings, when there's none yet); `--apps` adds Steady Player, Steady Router and the Finder Quick
+Actions (see Opening files), and once they're installed, later runs update them too. It downloads DJI's LUT from
+DJI (it isn't redistributed here) and checks it, bakes the LUTs into shaders and installs everything; existing
+files it replaces are kept as `*.bak-<date>` (for `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
+
+**Upgrading from 0.1**, `install.sh` moves the old setup over: the loose scripts go to `scripts-backup/`, the
+D-Log M keys come out of `input.conf` (the rest of it stays), the `mpv.conf` with the D-Log M profiles is replaced
+(kept as a `.bak`), and `~/.config/mpv/gyroflow/` is emptied into the plugin, your `default.gyroflow` included.
+The commands moved with it: `gyroflow-embed`, `gyroflow-export` and `gyroflow-router` are now in
+`~/.config/mpv/scripts/gyroflow/`.
+
+**Just the D-Log M plugin**, on any system: unzip `mpv-dlogm-0.2.0.zip` from the
+[release](https://github.com/anton-belkin/dlogm-gyroflow-player/releases/tag/v0.2.0) into mpv's `scripts/` folder
+(`~/.config/mpv/scripts/`, or `%APPDATA%\mpv\scripts\` on Windows). It has the HDR shader; the Rec.709 one
+(`Ctrl+s`) is made from DJI's LUT, which isn't redistributed: download it from DJI (Osmo Action 6 downloads page)
+and bake it in from a checkout of this repo:
+
+```bash
+python3 tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "DJI OSMO Action 6 D-LogM to Rec.709 LUT-11.17.cube" \
+    ~/.config/mpv/scripts/dlogm/shaders/dlogm_lut3d.glsl
+```
 
 ## Using it
 
@@ -68,11 +92,11 @@ and checks it, bakes the LUTs into shaders and installs everything; existing fil
   else opens in the player that was the default before, or one you choose:
 
   ```bash
-  ~/.config/mpv/gyroflow/gyroflow-router on                    # the current default becomes the fallback
-  ~/.config/mpv/gyroflow/gyroflow-router on --fallback IINA
-  ~/.config/mpv/gyroflow/gyroflow-router on mp4               # just one type (DJI cameras record MP4)
-  ~/.config/mpv/gyroflow/gyroflow-router off                   # back to the previous defaults
-  ~/.config/mpv/gyroflow/gyroflow-router status
+  ~/.config/mpv/scripts/gyroflow/gyroflow-router on                # the current default becomes the fallback
+  ~/.config/mpv/scripts/gyroflow/gyroflow-router on --fallback IINA
+  ~/.config/mpv/scripts/gyroflow/gyroflow-router on mp4           # just one type (DJI cameras record MP4)
+  ~/.config/mpv/scripts/gyroflow/gyroflow-router off               # back to the previous defaults
+  ~/.config/mpv/scripts/gyroflow/gyroflow-router status
   ```
 
 Steady Player starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
@@ -80,12 +104,24 @@ mpv stayed tied to it and macOS throttled it as a background process.
 
 ### Keys
 
-| Key | |
+| Key | | `script-binding` |
+|---|---|---|
+| `Ctrl+g` | Stabilization on/off | `gyroflow/toggle` |
+| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
+| `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
+| `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part | `gyroflow/export` |
+
+To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
+
+### Options
+
+In `~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--script-opts=dlogm-mode=sdr`:
+
+| | |
 |---|---|
-| `Ctrl+g` | Stabilization on/off |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back |
-| `L` | D-Log M handling off, for `_D` files that aren't D-Log (e.g. HDR photos) |
-| `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part |
+| `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
+| `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
+| `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 
 ### Stabilization
 
@@ -93,9 +129,9 @@ Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow)
 file instead of two, move the project into the video:
 
 ```bash
-~/.config/mpv/gyroflow/gyroflow-embed --move DJI_0009_D.MP4            # DJI_0009_D.gyroflow → inside the MP4
-~/.config/mpv/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4         # back out, to open it in Gyroflow
-~/.config/mpv/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --move DJI_0009_D.MP4     # DJI_0009_D.gyroflow → inside the MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # back out, to open it in Gyroflow
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
 ```
 
 The project is appended to the MP4 as a box of its own: the video data isn't touched, the file keeps its
@@ -103,15 +139,15 @@ date, players and Gyroflow open it as before, and it moves with the file. Apps t
 (trimming, remuxing) drop it.
 
 Clips with gyro data and EIS off play stabilized even without a project, with Gyroflow's default preset
-and then `~/.config/mpv/gyroflow/default.gyroflow`. Why a clip isn't stabilized is in mpv's log
-(`--msg-level=gyroflow_auto=v`).
+and then `~/.config/mpv/scripts/gyroflow/default.gyroflow`. Why a clip isn't stabilized is in mpv's log
+(`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
 bends light and the lens then behaves like a longer one than EIS is tuned for. So under water you shoot with EIS
 off, the camera records gyro data (it only does with EIS off), and those are the clips this stabilizes without
-a project. `install.sh` puts `mpv/gyroflow/underwater.gyroflow` there as `default.gyroflow`, unless you have one
-already:
+a project. `install.sh` puts `mpv/scripts/gyroflow/underwater.gyroflow` there as `default.gyroflow`, unless you
+have one already:
 
 - **lens underwater:** light refraction 1.33 (Gyroflow: Lens profile → Advanced → "Lens is underwater"). Without
   it the rotation is corrected by the wrong amount and part of the shake stays: on a test clip, jitter between
@@ -128,8 +164,8 @@ D-Log M the same LUT. With an A-B loop set (`l` twice), only that part. Playback
 notification says where the file went. The same from a terminal, for one clip or many:
 
 ```bash
-~/.config/mpv/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
-~/.config/mpv/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
 The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
@@ -152,16 +188,18 @@ and ffmpeg encodes it with VideoToolbox.
 
 DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
 DJI's own metadata, though: `ColorMode` in the stream metadata of the `CAM meta` track (19 is D-Log M).
-`gyroflow-probe` reads it for the Osmo Action 6 and Osmo 360, whose layouts are known; other models fall back
-to the file name. There are two mpv profiles (`mpv/mpv.conf`); `mpv/scripts/dlog_auto.lua` applies `dji_hdr` on
-load and undoes it when a playlist moves on to a clip that isn't D-Log M:
+The dlogm plugin reads it in Lua (`mpv/scripts/dlogm/dji_color.lua`: the first sample of the metadata track,
+a few protobuf fields), for the Osmo Action 6 and Osmo 360, whose layouts are known; other models fall back
+to the file name. `gyroflow-probe` reads it the same way, for Steady Router and the export. The plugin
+(`mpv/scripts/dlogm/main.lua`) sets the shader and the display options as file-local options, added to any
+shaders of your own, so mpv undoes them when a playlist moves on to a clip that isn't D-Log M:
 
-- `dji_hdr`, the one applied: a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
+- `hdr`, the default: a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
   Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK OUTPUT`,
   re-sampling the source through `BIND MAIN`. At `HOOK MAIN`, mpv would linearize
   the HLG output as the file's BT.709 and encode it again. `target-trc=hlg` with
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
-- `dji_sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
+- `sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
   BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in
@@ -169,7 +207,7 @@ The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl
 
 ### Gyroflow
 
-`mpv/scripts/gyroflow_auto.lua` adds `vf=vapoursynth` with `mpv/gyroflow/gyroflow.vpy`, which runs the
+The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) adds `vf=vapoursynth` with its `gyroflow.vpy`, which runs the
 `gyroflow.Stabilize` plugin from `vs-gyroflow/`. Without a `.gyroflow` next to the video, `gyroflow-probe`
 decides first whether the video carries a project, or its own gyro data recorded with EIS off. Frames are
 stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit; 8K is
@@ -183,8 +221,10 @@ beyond stock Gyroflow.
 
 ```
 install.sh                    builds and installs everything
-mpv/                          mpv.conf, input.conf, scripts/, gyroflow/gyroflow.vpy  →  ~/.config/mpv
-mpv/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/scripts/dlogm/            the D-Log M plugin  →  ~/.config/mpv/scripts/dlogm (+ shaders/, luts/ at install)
+mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries)
+mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
@@ -192,7 +232,8 @@ vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyrof
 macos/                        Steady Player / Steady Router applets, mpv launcher, gyroflow-router, the Quick
                               Actions' export script
 tools/make_workflow.py        writes the Finder Quick Actions
-tools/make_release.sh         release tarball: the tree plus prebuilt binaries in bin/
+tools/make_release.sh         release files: the tree plus prebuilt binaries in bin/, and the dlogm plugin alone
+.github/workflows/release.yml builds the release on macOS and publishes it for a pushed v* tag
 ```
 
 ## License

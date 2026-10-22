@@ -3,7 +3,7 @@
 # background (the Quick Action returns at once), with a notification as each one is done. The log of the last
 # run is ~/Library/Logs/gyroflow-export.log.
 
-export_bin="$HOME/.config/mpv/gyroflow/gyroflow-export"
+export_bin="$HOME/.config/mpv/scripts/gyroflow/gyroflow-export"
 log="$HOME/Library/Logs/gyroflow-export.log"
 
 notify() { osascript -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1; }

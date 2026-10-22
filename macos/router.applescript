@@ -12,5 +12,5 @@ on open theFiles
 end open
 
 on run
-	display dialog "Steady Router opens videos with Steady Player or your usual player. Turn it on or off in Terminal:" & return & return & "~/.config/mpv/gyroflow/gyroflow-router on" & return & "~/.config/mpv/gyroflow/gyroflow-router off" buttons {"OK"} default button 1
+	display dialog "Steady Router opens videos with Steady Player or your usual player. Turn it on or off in Terminal:" & return & return & "~/.config/mpv/scripts/gyroflow/gyroflow-router on" & return & "~/.config/mpv/scripts/gyroflow/gyroflow-router off" buttons {"OK"} default button 1
 end run
