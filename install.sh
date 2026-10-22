@@ -128,7 +128,9 @@ remove_ours "$MPV_DIR/luts" dlogm_hlg.cube dji-dlogm-rec709.cube
 if grep -q 'apply-profile dji_sdr' "$MPV_DIR/input.conf" 2>/dev/null; then
     bak=$(backup_path "$MPV_DIR/input.conf")
     cp -p "$MPV_DIR/input.conf" "$bak"
-    grep -vxF -f <(cat <<'OLD'
+    # Read here, not in a heredoc inside <(...): macOS's bash 3.2 misparses that (the quote in "aren't"), grep
+    # then gets no patterns file, and all of input.conf went
+    IFS= read -r -d '' old_keys <<'OLD' || true
 # Auto-detection (scripts/dlog_auto.lua) handles 99% of cases on file-load.
 # These manual overrides are escape hatches:
 Ctrl+s   apply-profile dji_sdr
@@ -138,7 +140,14 @@ Ctrl+h   apply-profile dji_hdr
 # resets target-* to auto so mpv just plays the file natively.
 L        no-osd set glsl-shaders ""; set image-lut ""; set target-trc auto; set target-prim auto; set target-peak auto; set target-colorspace-hint auto; show-text "D-Log shader OFF — playing file natively" 2000
 OLD
-    ) "$bak" > "$MPV_DIR/input.conf" || true
+    # grep exits 1 when no line is left (input.conf had only these), 2 on an error: then input.conf stays as it was
+    rc=0
+    grep -vxF -f <(printf '%s' "$old_keys") "$bak" > "$MPV_DIR/input.conf" || rc=$?
+    if [ $rc -gt 1 ]; then
+        cp -p "$bak" "$MPV_DIR/input.conf"
+        echo "Couldn't take the D-Log M keys out of $MPV_DIR/input.conf; it's as it was" >&2
+        exit 1
+    fi
     grep -q '[^[:space:]]' "$MPV_DIR/input.conf" || rm "$MPV_DIR/input.conf"
     echo "   took the D-Log M keys out of input.conf (the plugin binds them); the previous one is $bak"
 fi
