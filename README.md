@@ -4,7 +4,7 @@ Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown as
 underwater clips stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering anything.
 The source files are never re-encoded.
 
-- **D-Log M → HDR / SDR.** GPU shaders apply DJI's D-Log M LUT (SDR, in IINA) or a D-Log M → Rec.2100 HLG
+- **Colour recovery for D-Log M in realtime, including HDR.** GPU shaders apply DJI's D-Log M LUT (SDR, in IINA) or a D-Log M → Rec.2100 HLG
   LUT (HDR, in mpv, with macOS's HDR mode). Picked automatically from the color profile the camera wrote
   into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
 - **Underwater stabilisation in realtime.** DJI's in-camera stabilization (EIS) works well in air but not
