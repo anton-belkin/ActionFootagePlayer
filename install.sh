@@ -37,7 +37,16 @@ done
 need() { command -v "$1" >/dev/null || { echo "Missing $1 ($2)" >&2; exit 1; }; }
 need mpv "brew install mpv"
 need python3 "Xcode command line tools"
-need cargo "https://rustup.rs"
+# A release download has the binaries prebuilt in bin/; a git checkout builds them
+if [ -d bin ]; then
+    BIN=bin
+    # Downloaded with a browser, they carry the quarantine flag, and macOS would refuse to run them
+    xattr -dr com.apple.quarantine bin 2>/dev/null || true
+else
+    BIN=vs-gyroflow/target/release
+    need cargo "https://rustup.rs, or download a release, which has the binaries prebuilt"
+fi
+command -v ffmpeg >/dev/null || echo "Warning: no ffmpeg (brew install ffmpeg); exporting needs it" >&2
 if ! grep -q vapoursynth <<< "$(mpv --vf=help 2>/dev/null)"; then
     echo "Warning: this mpv has no VapourSynth filter; videos will play, but not stabilized" >&2
 fi
@@ -56,8 +65,10 @@ echo "== Shaders"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$lut" "$BUILD/dlogm_lut3d.glsl"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$BUILD/dlogm_hlg.glsl"
 
-echo "== Gyroflow plugin"
-(cd vs-gyroflow && cargo build --release)
+if [ "$BIN" != bin ]; then
+    echo "== Gyroflow plugin"
+    (cd vs-gyroflow && cargo build --release)
+fi
 
 echo "== Installing into $MPV_DIR"
 stamp=$(date +%Y%m%d-%H%M%S)
@@ -91,7 +102,7 @@ put "$BUILD/dlogm_hlg.glsl"       "$MPV_DIR/shaders/dlogm_hlg.glsl" 644
 put luts/dlogm_hlg.cube           "$MPV_DIR/luts/dlogm_hlg.cube" 644
 put "$lut"                        "$MPV_DIR/luts/dji-dlogm-rec709.cube" 644
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
-    put "vs-gyroflow/target/release/$f" "$MPV_DIR/gyroflow/$f" 755
+    put "$BIN/$f" "$MPV_DIR/gyroflow/$f" 755
 done
 
 if [ $apps = 1 ]; then
