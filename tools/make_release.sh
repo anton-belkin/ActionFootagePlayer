@@ -5,6 +5,7 @@
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI)
+#   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua)
 #
 # Runs on macOS (Apple Silicon); .github/workflows/release.yml runs it for a pushed v* tag.
 # Built from HEAD's sources (refuses to run with uncommitted changes to them). The binaries are stripped and
@@ -45,6 +46,13 @@ python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 
-(cd dist && shasum -a 256 "$name.tar.gz" "$dlogm.zip" > SHA256SUMS)
-ls -l "dist/$name.tar.gz" "dist/$dlogm.zip"
+telemetry="mpv-dji-telemetry-$version"
+rm -rf "dist/$telemetry" "dist/$telemetry.zip"
+mkdir -p "dist/$telemetry"
+git archive HEAD mpv/scripts/dji-telemetry | tar -x --strip-components 2 -C "dist/$telemetry"
+(cd "dist/$telemetry" && zip -qr "../$telemetry.zip" dji-telemetry)
+rm -rf "dist/$telemetry"
+
+(cd dist && shasum -a 256 "$name.tar.gz" "$dlogm.zip" "$telemetry.zip" > SHA256SUMS)
+ls -l "dist/$name.tar.gz" "dist/$dlogm.zip" "dist/$telemetry.zip"
 cat dist/SHA256SUMS

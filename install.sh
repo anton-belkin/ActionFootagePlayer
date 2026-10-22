@@ -1,9 +1,10 @@
 #!/bin/bash
-# Installs the two mpv plugins into mpv's config directory. Re-run it after pulling changes.
+# Installs the three mpv plugins into mpv's config directory. Re-run it after pulling changes.
 #
 #   ./install.sh           the plugins: scripts/dlogm (D-Log M; its shaders are baked here, with DJI's LUT downloaded
-#                          from DJI) and scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/);
-#                          and mpv.conf when there's none yet
+#                          from DJI), scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/) and
+#                          scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
+#                          none yet
 #   ./install.sh --apps    also Steady Player.app and Steady Router.app in ~/Applications, and Finder Quick Actions
 #                          (see README). Installed once, they're updated by every later run
 #
@@ -78,6 +79,7 @@ fi
 echo "== Installing into $MPV_DIR"
 DLOGM="$MPV_DIR/scripts/dlogm"
 GYROFLOW="$MPV_DIR/scripts/gyroflow"
+TELEMETRY="$MPV_DIR/scripts/dji-telemetry"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
 backup_path() {
@@ -167,6 +169,10 @@ fi
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     put "$BIN/$f" "$GYROFLOW/$f" 755
 done
+
+# The telemetry plugin
+put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644
+put mpv/scripts/dji-telemetry/telemetry.lua "$TELEMETRY/telemetry.lua" 644
 
 if [ $apps = 1 ]; then
     echo "== Apps in $APPS_DIR, Quick Actions in $SERVICES_DIR"
