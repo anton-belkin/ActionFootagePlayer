@@ -24,6 +24,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, or a trail of earlier frames (all blurred)
 --   Shift+E  export   the clip as it plays (export.lua)
+--   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
+--                     saving it in Gyroflow reloads the stabilization here
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox), whatever mpv's hwdec is: software
@@ -49,6 +51,8 @@ local DIR = mp.get_script_directory()
 local PLUGIN = utils.join_path(DIR, "libvs_gyroflow.dylib")
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, "gyroflow-probe")
+local EMBED = utils.join_path(DIR, "gyroflow-embed")
+local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
 local PRESETS = {}
@@ -233,5 +237,110 @@ mp.add_key_binding("Ctrl+g", "toggle", function()
     mp.set_property_native("vf", vf)
     mp.osd_message(enabled and "Gyroflow: on" or "Gyroflow: off", 1.5)
 end)
+
+-- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it
+-- plays with, or for a video without one (an embedded project, or its own motion data with the default preset) the
+-- same written out by gyroflow-embed --extract, so Gyroflow opens it as it plays here. Gyroflow overwrites the
+-- project it opened when it saves (Cmd+S), and the stabilization reloads with it while the video stays where it is.
+local WATCH_INTERVAL = 0.5
+local watch = nil
+
+local function file_version(path)
+    local info = utils.file_info(path)
+    return info and info.is_file and string.format("%s/%d", tostring(info.mtime), info.size) or nil
+end
+
+local function stop_watching()
+    if watch then watch.timer:kill() end
+    watch = nil
+end
+
+local function reload_project(project, version)
+    local w, h, fps = project_video_size(project)
+    if not w then
+        mp.msg.warn("not reloading " .. project .. ": not a Gyroflow project")
+        return
+    end
+    local source = { project = project, kind = "project", width = w, height = h, fps = fps }
+    local vf = mp.get_property_native("vf") or {}
+    for i, f in ipairs(vf) do
+        if f.label == LABEL then
+            local filter = gyroflow_filter(source, f.enabled)
+            -- mpv keeps a filter whose parameters didn't change, and the project's path may not have
+            local data = utils.parse_json(filter.params["user-data"])
+            data.version = version
+            filter.params["user-data"] = utils.format_json(data)
+            vf[i] = filter
+        end
+    end
+    current_source = source
+    mp.set_property_native("vf", vf)
+    mp.msg.info("reloaded " .. project)
+    mp.osd_message("Gyroflow: project reloaded", 3)
+end
+
+-- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval
+local function check_project()
+    local v = file_version(watch.project)
+    if not v or v == watch.version then
+        watch.pending = nil
+    elseif v ~= watch.pending then
+        watch.pending = v
+    else
+        watch.version, watch.pending = v, nil
+        reload_project(watch.project, v)
+    end
+end
+
+local function open_in_gyroflow(project)
+    mp.set_property_bool("pause", true)
+    if not (watch and watch.project == project) then
+        stop_watching()
+        watch = { project = project, version = file_version(project) }
+        watch.timer = mp.add_periodic_timer(WATCH_INTERVAL, check_project)
+    end
+    mp.command_native_async({ name = "subprocess", args = { "/usr/bin/open", "-b", GYROFLOW_APP, project }, playback_only = false, capture_stderr = true }, function(_, r)
+        if r and r.status == 0 then
+            mp.osd_message("Gyroflow: editing " .. project:match("([^/]+)$") .. "\nsave it there to see it here", 4)
+        else
+            mp.msg.warn("open: " .. (r and r.stderr or ""))
+            mp.osd_message("Gyroflow: couldn't open the app (is Gyroflow installed?)", 4)
+        end
+    end)
+end
+
+mp.add_key_binding("Ctrl+e", "edit", function()
+    local path = mp.get_property("path")
+    if not current_source then
+        mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
+        return
+    end
+    -- One saved meanwhile is the user's: open it as it is
+    local project = find_project(path)
+    if project then return open_in_gyroflow(project) end
+    if not file_exists(EMBED) then
+        mp.osd_message("Gyroflow: gyroflow-embed isn't installed", 2)
+        return
+    end
+    project = (path:match("^(.*)%.[^./]+$") or path) .. ".gyroflow"
+    local args = { EMBED, "--extract" }
+    if current_source.preset then
+        table.insert(args, "--preset"); table.insert(args, current_source.preset)
+    end
+    table.insert(args, path); table.insert(args, project)
+    mp.osd_message("Gyroflow: writing the project...", 2)
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        if r and r.status == 0 then
+            mp.msg.info("wrote " .. project)
+            open_in_gyroflow(project)
+        else
+            local err = (r and r.stderr or ""):gsub("%s+$", "")
+            mp.msg.warn("gyroflow-embed: " .. err)
+            mp.osd_message("Gyroflow: couldn't write the project: " .. (err:match("([^\n]+)$") or "failed"), 4)
+        end
+    end)
+end)
+
+mp.register_event("end-file", stop_watching)
 
 require 'export'

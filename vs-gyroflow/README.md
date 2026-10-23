@@ -24,7 +24,9 @@ The project is rendered the way the Gyroflow app renders it (smoothing, zoom, le
 master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
 uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
 settings need the PR. A project embedded in the video is read by the plugin itself (`src/embedded.rs`), so stock
-Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow` into the video.
+Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow` into the video, and
+`gyroflow-embed --extract` writes out the project a clip plays with (the stored one, or the default preset's,
+made by `src/project.rs` with gyroflow-core's own project writer) to open it in Gyroflow.
 
 ## How it works
 
