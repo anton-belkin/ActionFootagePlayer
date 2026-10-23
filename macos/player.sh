@@ -28,9 +28,11 @@ xattr -p com.apple.quarantine "$app" >/dev/null 2>&1 && xattr -dr com.apple.quar
 config=${MPV_HOME:-$HOME/.config/mpv}
 # Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up
 [ $# = 0 ] && set -- --player-operation-mode=pseudo-gui
-for plugin in gyroflow dlogm dji-telemetry; do
+for plugin in gyroflow dlogm dji-telemetry footage-menu; do
     [ -e "$config/scripts/$plugin" ] || set -- "--script=$res/plugins/$plugin" "$@"
 done
+# The menu offers the setup again
+set -- "--script-opts-append=footage_menu-setup=$res/setup.sh" "$@"
 
 # The first time, the setup's offered (from mpv: see setup-offer.lua). After that, DJI's LUT (Ctrl+s, exports
 # with --sdr) is fetched in the background when the setup hasn't got it
