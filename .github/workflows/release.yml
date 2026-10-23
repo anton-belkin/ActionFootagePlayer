@@ -1,9 +1,10 @@
-# The release, built on macOS (Apple Silicon) by tools/make_release.sh. A pushed v* tag publishes it as a GitHub
-# release, with the tag's message as the release notes:
+# The release: built on macOS (Apple Silicon) by tools/make_release.sh, and the gyroflow plugin for Linux and Windows
+# by tools/make_plugin_zip.sh. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
+# release notes:
 #
 #   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
 #
-# Pull requests build it as a check; the files are kept as the run's artifact.
+# Pull requests build it as a check; the files are kept as the runs' artifacts.
 name: Release
 
 on:
@@ -16,7 +17,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  macos:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -40,15 +41,70 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release
+          name: release-macos
           path: dist/
           if-no-files-found: error
 
+  # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-x86_64.zip. Linux on the oldest Ubuntu runner, so the
+  # binaries run with older glibc too
+  plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-22.04
+          - os: windows
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vs-gyroflow/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vs-gyroflow/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
+          bash tools/make_plugin_zip.sh "$version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist/
+          merge-multiple: true
+
       - name: Publish
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # One SHA256SUMS for all of it (the macOS build's has only its own files)
+          (cd dist && sha256sum *.zip *.tar.gz > SHA256SUMS && cat SHA256SUMS)
           # actions/checkout leaves the tag as a lightweight one on the commit, and --notes-from-tag would then take
           # the commit's message: the tag itself, with its message
           git fetch --depth=1 --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"

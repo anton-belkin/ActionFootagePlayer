@@ -64,9 +64,9 @@ fn run(mode: &str, video: &Path, project: &Path, preset: Option<&str>) -> Result
             let data = match embedded::read(video).map_err(|e| format!("{}: {e}", video.display()))? {
                 Some(obj) => serde_json::to_string_pretty(&obj).unwrap(),
                 None => {
-                    let video = std::fs::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
+                    let video = vs_gyroflow::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
                     let project_path = std::path::absolute(project).map_err(|e| format!("{}: {e}", project.display()))?;
-                    let preset = preset.map(|p| std::fs::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
+                    let preset = preset.map(|p| vs_gyroflow::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
                     let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), &project_path.to_string_lossy());
                     // On macOS the core makes the project file, empty, to bookmark the video relative to it
                     if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {

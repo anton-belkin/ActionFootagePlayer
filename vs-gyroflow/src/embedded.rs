@@ -150,7 +150,7 @@ pub fn read(path: &Path) -> Result<Option<serde_json::Value>> {
 }
 
 fn path_to_url(path: &Path) -> Result<String> {
-    let path = std::fs::canonicalize(path)?;
+    let path = crate::canonicalize(path)?;
     url::Url::from_file_path(&path).map(|u| u.to_string()).map_err(|_| Error::new(ErrorKind::InvalidInput, format!("Can't make a URL of {}", path.display())))
 }
 fn file_name(url_or_path: &str) -> &str {

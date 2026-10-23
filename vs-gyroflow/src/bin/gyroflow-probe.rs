@@ -19,7 +19,7 @@ fn main() {
         eprintln!("usage: gyroflow-probe <video>");
         std::process::exit(2);
     };
-    let path = match std::fs::canonicalize(&path) {
+    let path = match vs_gyroflow::canonicalize(&path) {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => { println!("{}", serde_json::json!({ "mode": null, "reason": e.to_string(), "color": null })); return; }
     };

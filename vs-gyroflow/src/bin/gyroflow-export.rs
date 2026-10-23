@@ -19,13 +19,17 @@
 //   --prores:       ProRes 422 HQ instead of HEVC
 // Audio is copied as it is; the file gets the source's dates.
 //
-// Decoding and encoding are ffmpeg (Homebrew's), as child processes with raw frames over pipes; the LUT is ffmpeg's
-// lut3d filter, in RGB, the same place mpv's shader applies it.
+// Decoding and encoding are ffmpeg (Homebrew's on macOS; on Windows and Linux the one next to this binary, else the
+// one in PATH), as child processes with raw frames over pipes; the LUT is ffmpeg's lut3d filter, in RGB, the same
+// place mpv's shader applies it. The encoder is VideoToolbox on macOS; elsewhere the first of NVENC, Quick Sync,
+// AMF (Windows) and VAAPI (Linux) that encodes a test frame, else x265 on the CPU (--encoder picks one).
 //
 // For a player running it (the gyroflow plugin's export.lua): --progress writes the progress to a file twice a
 // second; SIGTERM (or Ctrl+C) stops it, the ffmpegs too, and removes the unfinished file; SIGUSR1 puts it and the
 // ffmpegs at background priority (macOS's lowest, CPU, disk and GPU: playback keeps its frame rate, the export
-// nearly stops) and SIGUSR2 back.
+// nearly stops) and SIGUSR2 back. Without macOS's background priority (Linux, Windows), background is a few frames
+// a second instead. Windows has no such signals: --control <file> takes the same as a word in a file, polled
+// (stop, background, normal).
 
 use std::io::{ Read, Write };
 use std::path::{ Path, PathBuf };
@@ -49,8 +53,12 @@ Renders each video stabilized (and, for D-Log M, color-converted) into a stabili
   --out <folder>   write here instead of <video's folder>/stabilized
   --force          replace an existing output instead of skipping the video
   --interpolation  bilinear | bicubic | lanczos (default lanczos)
+  --encoder <name> ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265
+                   (default: VideoToolbox on macOS, else the first of these that works)
   --progress <file>  write the progress there as JSON, twice a second
-  --background     start at background priority (SIGUSR1 / SIGUSR2 switch it later)";
+  --background     start at background priority (SIGUSR1 / SIGUSR2 switch it later)
+  --control <file> read stop / background / normal from this file while running (for Windows, which has no
+                   SIGUSR1/SIGUSR2)";
 
 struct Options {
     sdr: bool,
@@ -60,14 +68,16 @@ struct Options {
     out: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
+    encoder: Option<String>,
     progress: Progress,
+    control: Option<PathBuf>,
 }
 
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
     let mut opts = Options { sdr: false, prores: false, from: None, to: None, out: None, force: false,
-                             interpolation: Interpolation::Lanczos4, progress: Progress(None) };
+                             interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -85,7 +95,9 @@ fn main() {
                 "lanczos" => Interpolation::Lanczos4,
                 other => fail(&format!("unknown interpolation {other}")),
             },
+            "--encoder" => opts.encoder = Some(value("--encoder")),
             "--progress" => opts.progress = Progress(Some(PathBuf::from(value("--progress")))),
+            "--control" => opts.control = Some(PathBuf::from(value("--control"))),
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
             "-h" | "--help" => { println!("{USAGE}"); return; }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
@@ -123,27 +135,52 @@ static BACKGROUND: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(sig: libc::c_int) {
     match sig {
+        #[cfg(unix)]
         libc::SIGUSR1 => BACKGROUND.store(true, Relaxed),
+        #[cfg(unix)]
         libc::SIGUSR2 => BACKGROUND.store(false, Relaxed),
         _ => STOP.store(sig, Relaxed),
     }
 }
 
 fn catch_signals() {
-    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1, libc::SIGUSR2] {
+    #[cfg(unix)]
+    let signals = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1, libc::SIGUSR2];
+    #[cfg(windows)]
+    let signals = [libc::SIGINT, libc::SIGTERM];
+    for sig in signals {
         unsafe { libc::signal(sig, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t); }
     }
 }
 
 fn stopped() -> bool { STOP.load(Relaxed) != 0 }
 
+// --control: the word in the file, as the signals would set it
+fn read_control(path: &Path) {
+    match std::fs::read_to_string(path).unwrap_or_default().trim() {
+        "stop" => STOP.store(libc::SIGTERM, Relaxed),
+        "background" => BACKGROUND.store(true, Relaxed),
+        "normal" => BACKGROUND.store(false, Relaxed),
+        _ => {}
+    }
+}
+
 // PRIO_DARWIN_BG, for these processes (0: this one). Set on the ffmpegs too: the decoding and encoding compete
 // with the player's as much as the GPU work does
+#[cfg(target_os = "macos")]
 fn set_background(pids: &[u32], on: bool) {
     for &pid in pids {
         unsafe { libc::setpriority(libc::PRIO_DARWIN_PROCESS, pid as libc::id_t, if on { libc::PRIO_DARWIN_BG } else { 0 }); }
     }
 }
+
+// Nothing like it elsewhere: a raised nice value can't be lowered again without privileges on Linux, and the GPU
+// and the video engines have no priority to set. The export loop slows itself down instead (THROTTLE)
+#[cfg(not(target_os = "macos"))]
+fn set_background(_pids: &[u32], _on: bool) {}
+
+// Background without macOS's priority: at most a frame per this long, a few fps that leave the GPU to playback
+const THROTTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 // --progress: the file is replaced whole (written next to it, then renamed), so a reader never sees half of it
 struct Progress(Option<PathBuf>);
@@ -170,9 +207,13 @@ enum Outcome { Done(PathBuf), Skipped(String) }
 // What the gyroflow plugin stabilizes the video with
 struct Source { project: String, preset: Option<String>, label: &'static str }
 
+// mpv's own default: %APPDATA%\mpv on Windows, $XDG_CONFIG_HOME/mpv (~/.config/mpv) elsewhere
 fn mpv_dir() -> PathBuf {
-    std::env::var_os("MPV_CONFIG_DIR").map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config/mpv"))
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if let Some(dir) = env("MPV_CONFIG_DIR") { return dir; }
+    if cfg!(windows) { return env("APPDATA").unwrap_or_default().join("mpv"); }
+    if !cfg!(target_os = "macos") { if let Some(dir) = env("XDG_CONFIG_HOME") { return dir.join("mpv"); } }
+    env("HOME").unwrap_or_default().join(".config/mpv")
 }
 
 // A file of one of the mpv plugins: in $<PLUGIN>_DATA when it's there, else in the scripts folder this binary is
@@ -182,9 +223,9 @@ fn plugin_file(plugin: &str, name: &str) -> PathBuf {
         let p = PathBuf::from(data).join(name);
         if p.is_file() { return p; }
     }
-    let here = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok())
+    let here = std::env::current_exe().ok().and_then(|e| vs_gyroflow::canonicalize(e).ok())
         .and_then(|e| Some(e.parent()?.parent()?.to_path_buf()))
-        .filter(|scripts| scripts.join("gyroflow").join("gyroflow-export").is_file());
+        .filter(|scripts| scripts.join("gyroflow").join(format!("gyroflow-export{}", std::env::consts::EXE_SUFFIX)).is_file());
     here.unwrap_or_else(|| mpv_dir().join("scripts")).join(plugin).join(name)
 }
 
@@ -222,7 +263,7 @@ struct VideoInfo {
 }
 
 fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
-    let out = Command::new(tool("ffprobe")).args(["-v", "error", "-select_streams", "v:0", "-show_entries",
+    let out = ffmpeg_command("ffprobe").args(["-v", "error", "-select_streams", "v:0", "-show_entries",
         "stream=width,height,r_frame_rate,nb_frames,duration,bit_rate,color_range,color_primaries,color_transfer,color_space:format=duration",
         "-of", "json"]).arg(path).output().map_err(|e| format!("ffprobe: {e}"))?;
     if !out.status.success() { return Err(format!("ffprobe: {}", String::from_utf8_lossy(&out.stderr).trim())); }
@@ -248,13 +289,107 @@ fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
     })
 }
 
-// Homebrew's ffmpeg: a Finder Quick Action or mpv doesn't have /opt/homebrew/bin in its PATH
+// Homebrew's ffmpeg: a Finder Quick Action or mpv doesn't have /opt/homebrew/bin in its PATH. On Windows, where
+// ffmpeg is rarely in PATH, one copied next to this binary (the gyroflow plugin's folder) comes first
 fn tool(name: &str) -> PathBuf {
-    for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
-        let p = Path::new(dir).join(name);
-        if p.is_file() { return p; }
+    let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    let here = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join(&name))).filter(|p| p.is_file());
+    if cfg!(windows) || cfg!(target_os = "linux") {
+        if let Some(p) = here { return p; }
+    }
+    if cfg!(target_os = "macos") {
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            let p = Path::new(dir).join(&name);
+            if p.is_file() { return p; }
+        }
     }
     PathBuf::from(name)
+}
+
+// Run without a console window of its own on Windows: mpv runs this one without a console, and each ffmpeg would
+// open one
+fn ffmpeg_command(name: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(tool(name));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+// The HEVC encoder ffmpeg writes the export with: how to set it up, and the pixel format it takes
+struct Encoder {
+    name: String,
+    // Before the inputs (a device to open)
+    global: Vec<String>,
+    // The encoder's own options
+    args: Vec<String>,
+    pix_fmt: &'static str,
+    // After the format filter (uploading to the device)
+    upload: &'static str,
+}
+
+const VAAPI_DEVICE: &str = "/dev/dri/renderD128";
+
+fn encoder(name: &str, prores: bool) -> Encoder {
+    let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let mut e = Encoder { name: name.to_string(), global: vec![], args: vec![], pix_fmt: "p010le", upload: "" };
+    match name {
+        "prores_videotoolbox" => { e.args = v(&["-profile:v", "hq"]); e.pix_fmt = "p210le"; }
+        "prores_ks" => { e.args = v(&["-profile:v", "3", "-vendor", "apl0"]); e.pix_fmt = "yuv422p10le"; }
+        "hevc_videotoolbox" | "hevc_qsv" | "hevc_amf" => e.args = v(&["-profile:v", "main10"]),
+        "hevc_nvenc" => e.args = v(&["-profile:v", "main10", "-preset", "p5"]),
+        "hevc_vaapi" => {
+            e.global = v(&["-vaapi_device", VAAPI_DEVICE]);
+            e.args = v(&["-profile:v", "main10"]);
+            e.upload = ",hwupload";
+        }
+        "libx265" => {
+            e.args = v(&["-profile:v", "main10", "-preset", "fast", "-x265-params", "log-level=error"]);
+            e.pix_fmt = "yuv420p10le";
+        }
+        _ => e.pix_fmt = if prores { "yuv422p10le" } else { "yuv420p10le" },
+    }
+    e
+}
+
+// Whether ffmpeg encodes a 10-bit frame with it: an encoder can be built in without the hardware it needs
+fn encoder_works(e: &Encoder) -> bool {
+    if e.name == "hevc_vaapi" && !Path::new(VAAPI_DEVICE).exists() { return false; }
+    ffmpeg_command("ffmpeg").args(["-nostdin", "-v", "error"]).args(&e.global)
+        .args(["-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-frames:v", "1",
+               "-vf", &format!("format={}{}", e.pix_fmt, e.upload), "-c:v", &e.name]).args(&e.args)
+        .args(["-f", "null", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status().is_ok_and(|s| s.success())
+}
+
+// Whether ffmpeg decodes the video's first frame with -hwaccel auto. It falls back to the CPU when there's no
+// hardware decoder, but stops when one fails to start (a D3D device on Windows, a VAAPI driver)
+fn hwaccel_works(path: &Path) -> bool {
+    ffmpeg_command("ffmpeg").args(["-nostdin", "-v", "error", "-hwaccel", "auto", "-i"]).arg(path)
+        .args(["-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status().is_ok_and(|s| s.success())
+}
+
+fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
+    static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    if let Some(name) = &opts.encoder { return Ok(encoder(name, opts.prores)); }
+    if cfg!(target_os = "macos") {
+        return Ok(encoder(if opts.prores { "prores_videotoolbox" } else { "hevc_videotoolbox" }, opts.prores));
+    }
+    if opts.prores { return Ok(encoder("prores_ks", true)); }
+    let candidates: &[&str] = if cfg!(windows) { &["hevc_nvenc", "hevc_qsv", "hevc_amf", "libx265"] }
+                              else { &["hevc_nvenc", "hevc_vaapi", "hevc_qsv", "libx265"] };
+    let picked = PICKED.get_or_init(|| candidates.iter().find(|&&n| encoder_works(&encoder(n, false))).map(|n| n.to_string()));
+    match picked {
+        Some(name) => Ok(encoder(name, false)),
+        None => Err("ffmpeg has no HEVC encoder that works here (hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265)".into()),
+    }
 }
 
 fn lut(name: &str) -> Result<PathBuf, String> {
@@ -269,7 +404,7 @@ fn filter_path(p: &Path) -> String {
 }
 
 fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
-    let path = std::fs::canonicalize(file).map_err(|e| e.to_string())?;
+    let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let source = match find_source(&path) {
         Ok(s) => s,
         Err(why) => return Ok(Outcome::Skipped(why)),
@@ -353,10 +488,15 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     eprintln!("{}: {color_label} · {} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), source.label, w, h);
 
     if stopped() { return Err("cancelled".into()); }
+    let enc = pick_encoder(opts)?;
+    if !cfg!(target_os = "macos") { eprintln!("  encoder: {}", enc.name); }
 
-    // Decoder: raw 10-bit planar frames on stdout
-    let mut dec_cmd = Command::new(tool("ffmpeg"));
-    dec_cmd.args(["-nostdin", "-v", "error", "-hwaccel", "videotoolbox"]);
+    // Decoder: raw 10-bit planar frames on stdout. Elsewhere than on macOS, whatever hardware decoder ffmpeg finds,
+    // else the CPU
+    let hwaccel = if cfg!(target_os = "macos") { Some("videotoolbox") } else if hwaccel_works(&path) { Some("auto") } else { None };
+    let mut dec_cmd = ffmpeg_command("ffmpeg");
+    dec_cmd.args(["-nostdin", "-v", "error"]);
+    if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
     if opts.from.is_some() { dec_cmd.args(["-ss", &format!("{from:.6}")]); }
     if opts.to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
     dec_cmd.arg("-i").arg(&path)
@@ -366,8 +506,9 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
 
     // Encoder: the stabilized frames, audio and metadata from the source
     let bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (ow * oh) as f64 / (w * h) as f64;
-    let mut enc_cmd = Command::new(tool("ffmpeg"));
-    enc_cmd.args(["-nostdin", "-v", "error", "-y",
+    let mut enc_cmd = ffmpeg_command("ffmpeg");
+    enc_cmd.args(["-nostdin", "-v", "error", "-y"]).args(&enc.global);
+    enc_cmd.args([
                   "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", &format!("{ow}x{oh}"),
                   "-framerate", &format!("{}/{}", info.fps.0, info.fps.1),
                   "-color_range", in_range, "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
@@ -376,16 +517,17 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     if opts.to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
     enc_cmd.arg("-i").arg(&path)
         .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c:a", "copy"]);
-    let pix_fmt = if opts.prores { "p210le" } else { "p010le" };
+    let pix_fmt = enc.pix_fmt;
     // The frames carry the input's BT.709 tags through the filters, and the encoder writes the frames' tags, not
     // the -color_* options, so the target's are set on the frames
     let setparams = format!("setparams=color_primaries={}:color_trc={}:colorspace={}:range={}", tags[0], tags[1], tags[2], tags[3]);
     let graph = if graph.is_empty() { format!("format={pix_fmt},{setparams}") } else { format!("{graph},format={pix_fmt},{setparams}") };
-    enc_cmd.args(["-vf", &graph]);
+    enc_cmd.args(["-vf", &format!("{graph}{}", enc.upload)]);
+    enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
     if opts.prores {
-        enc_cmd.args(["-c:v", "prores_videotoolbox", "-profile:v", "hq", "-tag:v", "apch"]);
+        enc_cmd.args(["-tag:v", "apch"]);
     } else {
-        enc_cmd.args(["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
+        enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
     }
     enc_cmd.args(["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3],
                   "-movflags", "+faststart", "-f", "mov"])
@@ -454,9 +596,14 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (mut reported, mut rate) = (0u64, 0.0);
     let mut background = None;
     let mut error = None;
+    let mut last_control = Instant::now();
     for (n, result) in done_rx {
+        if let Some(control) = &opts.control {
+            if last_control.elapsed().as_millis() >= 250 { read_control(control); last_control = Instant::now(); }
+        }
         if stopped() { error = Some("cancelled".to_string()); break; }
         let want = BACKGROUND.load(Relaxed);
+        if want && !cfg!(target_os = "macos") { std::thread::sleep(THROTTLE); }
         if background != Some(want) {
             set_background(&[0, decoder.id(), encoder.id()], want);
             background = Some(want);

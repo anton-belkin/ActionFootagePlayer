@@ -11,13 +11,15 @@
 -- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip) before
 -- playback starts.
 --
--- The stabilization is the gyroflow VapourSynth plugin (libvs_gyroflow.dylib), so it's the same as rendering the
+-- The stabilization is the gyroflow VapourSynth plugin (libvs_gyroflow.dylib on macOS, libvs_gyroflow.so on Linux,
+-- vs_gyroflow.dll on Windows), so it's the same as rendering the
 -- project in Gyroflow, including the project's smoothing, zoom and output size. It runs before any shaders (the
 -- dlogm plugin's D-Log M ones), at the source bit depth.
 --
 -- Video bigger than 4K (8K) is scaled down to 4K on the GPU (VideoToolbox) before it's copied to memory
 -- for VapourSynth: copying, converting and uploading 8K frames left too little headroom in a window
--- with the HDR shader (dropped frames, a slow start). The window shows less than 4K anyway.
+-- with the HDR shader (dropped frames, a slow start). The window shows less than 4K anyway. On Linux and
+-- Windows it's scaled on the CPU, after the copy.
 --
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
 --   Ctrl+g   toggle   stabilization on/off for the current file
@@ -28,8 +30,9 @@
 --                     saving it in Gyroflow reloads the stabilization here
 --
 -- Options (~~/script-opts/gyroflow.conf):
---   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox), whatever mpv's hwdec is: software
---                decoding doesn't keep up with 4K. no: leave it to mpv's hwdec
+--   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
+--                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
+--                mpv's hwdec
 --   workers=3    GPU worker threads
 --   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30), so the stabilization does
 --                half the work; 0: every frame
@@ -37,21 +40,25 @@
 --                background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
+--   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
+--                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, edges = "trail", edges_blur = 2, edges_zoom = 1.5 }
+local o = { hwdec = true, workers = 3, max_fps = 30, edges = "trail", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
+
+local platform = require 'platform'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
 local DIR = mp.get_script_directory()
-local PLUGIN = utils.join_path(DIR, "libvs_gyroflow.dylib")
+local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
-local PROBE = utils.join_path(DIR, "gyroflow-probe")
-local EMBED = utils.join_path(DIR, "gyroflow-embed")
+local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
+local EMBED = utils.join_path(DIR, platform.exe("gyroflow-embed"))
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -75,7 +82,7 @@ end
 
 local function find_project(path)
     if not path or path:find("://", 1, true) then return nil end
-    local base = path:match("^(.*)%.[^./]+$") or path
+    local base = path:match("^(.*)%.[^./\\]+$") or path
     for _, candidate in ipairs({ base .. ".gyroflow", path .. ".gyroflow" }) do
         if file_exists(candidate) then return candidate end
     end
@@ -101,7 +108,7 @@ local function find_source(path)
         return { project = project, kind = "project", width = w, height = h, fps = fps }
     end
     if not path or path:find("://", 1, true) then return nil end
-    local ext = (path:match("%.([^./]+)$") or ""):lower()
+    local ext = (path:match("%.([^./\\]+)$") or ""):lower()
     if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return nil end
     local r = mp.command_native({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = false })
     local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
@@ -138,7 +145,7 @@ end
 local EDGE_MODES = { "off", "original", "zoom", "trail" }
 local EDGE_LABELS = { off = "background color", original = "original frame, blurred", zoom = "zoomed frame, blurred",
                       trail = "trail of earlier frames, blurred" }
-local EDGE_CONTROL = utils.join_path(os.getenv("TMPDIR") or "/tmp", string.format("mpv-gyroflow-%d.edges", utils.getpid()))
+local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.edges", utils.getpid()))
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "trail"
 
 local function write_edge_mode()
@@ -186,7 +193,15 @@ mp.add_hook("on_load", 50, function()
     local hwdec = o.hwdec and "yes" or mp.get_property("hwdec") or "no"
     local vf = mp.get_property_native("vf") or {}
     local sw, sh = scaled_input_size(source.width, source.height)
-    if sw and hwdec ~= "no" then
+    if not platform.macos then
+        -- Whichever hardware decoder mpv finds (VAAPI, NVDEC, D3D11...), copied back to memory for VapourSynth,
+        -- and >4K scaled down there: there's no one GPU scaler for all of them
+        if hwdec ~= "no" then mp.set_property("file-local-options/hwdec", "auto-copy") end
+        if sw then
+            table.insert(vf, { name = "lavfi", label = SCALE_LABEL, enabled = true,
+                               params = { graph = string.format("scale=w=%d:h=%d:flags=bilinear", sw, sh) } })
+        end
+    elseif sw and hwdec ~= "no" then
         -- Frames stay on the GPU through scale_vt; mpv copies the 4K result to memory for VapourSynth.
         -- Without hardware frames (software decoding) scale_vt fails and mpv drops just that filter
         mp.set_property("file-local-options/hwdec", "videotoolbox")
@@ -292,6 +307,19 @@ local function check_project()
     end
 end
 
+-- The command that opens the project in Gyroflow and returns (status 0) once it's started, without waiting for it
+local function gyroflow_command(project)
+    if platform.macos then return { "/usr/bin/open", "-b", GYROFLOW_APP, project } end
+    if platform.windows then
+        if o.gyroflow_app ~= "" then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, project } end
+        -- The app .gyroflow files are associated with (Gyroflow's installer sets it)
+        return { "cmd", "/d", "/c", "start", "", project }
+    end
+    -- Started in the background, and fails when there's no such program
+    local app = o.gyroflow_app ~= "" and o.gyroflow_app or "gyroflow"
+    return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" "$2" >/dev/null 2>&1 &', "sh", app, project }
+end
+
 local function open_in_gyroflow(project)
     mp.set_property_bool("pause", true)
     if not (watch and watch.project == project) then
@@ -299,9 +327,9 @@ local function open_in_gyroflow(project)
         watch = { project = project, version = file_version(project) }
         watch.timer = mp.add_periodic_timer(WATCH_INTERVAL, check_project)
     end
-    mp.command_native_async({ name = "subprocess", args = { "/usr/bin/open", "-b", GYROFLOW_APP, project }, playback_only = false, capture_stderr = true }, function(_, r)
+    mp.command_native_async({ name = "subprocess", args = gyroflow_command(project), playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
-            mp.osd_message("Gyroflow: editing " .. project:match("([^/]+)$") .. "\nsave it there to see it here", 4)
+            mp.osd_message("Gyroflow: editing " .. platform.file_name(project) .. "\nsave it there to see it here", 4)
         else
             mp.msg.warn("open: " .. (r and r.stderr or ""))
             mp.osd_message("Gyroflow: couldn't open the app (is Gyroflow installed?)", 4)
@@ -322,7 +350,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         mp.osd_message("Gyroflow: gyroflow-embed isn't installed", 2)
         return
     end
-    project = (path:match("^(.*)%.[^./]+$") or path) .. ".gyroflow"
+    project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
     local args = { EMBED, "--extract" }
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)

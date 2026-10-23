@@ -51,7 +51,8 @@ mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 luts/dlogm_hlg.cube "$dlogm/luts/dlogm_hlg.cube"
-install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
+install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
+    mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"

@@ -26,7 +26,8 @@ Player, a Mac app that carries them and opens your MP4s with them:
 
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
   Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
-- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS, Apple Silicon).
+- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
+  Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
 - **`dji-telemetry`**: the camera's telemetry over the video. Plain Lua, any mpv on any system.
 
 None needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
@@ -84,6 +85,37 @@ its setup, and once it's installed, later runs update it too. It downloads DJI's
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
 `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
 
+### Linux and Windows
+
+The gyroflow plugin runs there too, with binaries of its own; dlogm and dji-telemetry are the same zips as on a Mac.
+It needs:
+
+- **mpv built with VapourSynth**: `mpv --vf=help` lists `vapoursynth`. On Windows, the usual builds
+  ([shinchiro's](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) have it. On Linux, it depends on the
+  distribution: Debian's and Ubuntu's mpv doesn't have it, and needs building with `-Dvapoursynth=enabled`.
+- **[VapourSynth](https://github.com/vapoursynth/vapoursynth/releases)** itself, with its Python.
+- **A GPU with Vulkan** (on Windows DirectX 12 or Vulkan), which the stabilization renders on. Without one,
+  Gyroflow's engine falls back to the CPU, far from realtime.
+- **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
+  `gyroflow-export.exe`.
+
+Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip` (releases after 0.3.0)
+into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
+next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all three plugins (with
+DJI's LUT, as on a Mac); `--apps` is macOS's.
+
+What differs from macOS:
+
+- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than 4K is
+  scaled down to 4K on the CPU.
+- `Ctrl+e` starts `gyroflow` from `PATH` on Linux, and on Windows the app `.gyroflow` files open with (Gyroflow's
+  installer sets it). Another one: `gyroflow_app=<path>` in `gyroflow.conf`.
+- Exports are encoded with the first of NVENC, VAAPI (Linux), Quick Sync and AMF (Windows) that works, else x265 on the
+  CPU (much slower); `--prores` is ffmpeg's `prores_ks`. While the video plays, an export runs at a few frames a
+  second rather than at a background priority. Notifications are `notify-send` on Linux; on Windows, mpv's own
+  message.
+- The log is `~/.local/state/vs-gyroflow.log` on Linux and `%LOCALAPPDATA%\vs-gyroflow.log` on Windows.
+
 **Upgrading from 0.2**, `install.sh --apps` removes Steady Router: MP4 goes to Steady Player, MOV back to the
 player it was taking videos from. `gyroflow-router` is gone with it.
 
@@ -133,11 +165,12 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | | |
 |---|---|
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
-| `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
+| `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30), so the stabilization does half the work; `0`: every frame |
 | `gyroflow.conf`: `edges=trail` | what fills the edges the stabilized frame doesn't cover: `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
@@ -337,6 +370,7 @@ mpv/scripts/dlogm/            the D-Log M plugin  →  ~/.config/mpv/scripts/dlo
                               and in Steady Player
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               Steady Player
+mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
@@ -350,7 +384,8 @@ macos/                        Steady Player: the applet, its mpv launcher, setup
 tools/make_app.sh             builds Steady Player.app, with the plugins in it
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: Steady Player, each plugin alone, and the tree plus prebuilt binaries
-.github/workflows/release.yml builds the release on macOS and publishes it for a pushed v* tag
+tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for Linux or Windows
+.github/workflows/release.yml builds the release on macOS, Linux and Windows and publishes it for a pushed v* tag
 ```
 
 ## License

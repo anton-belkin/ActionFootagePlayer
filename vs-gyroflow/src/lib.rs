@@ -36,8 +36,7 @@ pub fn init_logging() {
             "trace" => log::LevelFilter::Trace,
             _ => log::LevelFilter::Info,
         };
-        let path = std::env::var("HOME").map(|h| format!("{h}/Library/Logs/vs-gyroflow.log")).unwrap_or_else(|_| "/tmp/vs-gyroflow.log".into());
-        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(log_path()) {
             let config = simplelog::ConfigBuilder::new()
                 // gyroflow-core is chatty at info level about things that don't matter for playback
                 .add_filter_ignore_str("wgpu")
@@ -46,6 +45,36 @@ pub fn init_logging() {
             let _ = simplelog::WriteLogger::init(level, config, file);
         }
     });
+}
+
+/// macOS: ~/Library/Logs; Windows: %LOCALAPPDATA%; elsewhere $XDG_STATE_HOME (~/.local/state)
+pub fn log_path() -> std::path::PathBuf {
+    use std::path::PathBuf;
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let dir = if cfg!(target_os = "macos") {
+        env("HOME").map(|h| h.join("Library/Logs"))
+    } else if cfg!(windows) {
+        env("LOCALAPPDATA")
+    } else {
+        env("XDG_STATE_HOME").or_else(|| env("HOME").map(|h| h.join(".local/state")))
+    };
+    match dir.filter(|d| std::fs::create_dir_all(d).is_ok()) {
+        Some(d) => d.join("vs-gyroflow.log"),
+        None => std::env::temp_dir().join("vs-gyroflow.log"),
+    }
+}
+
+/// std::fs::canonicalize, without the \\?\ Windows puts in front of a drive path: ffmpeg's messages, Gyroflow's
+/// URLs and the paths printed for the player read better without it, and all of them take the plain path
+pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<std::path::PathBuf> {
+    let p = std::fs::canonicalize(path)?;
+    if cfg!(windows) {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') { return Ok(std::path::PathBuf::from(rest)); }
+        }
+    }
+    Ok(p)
 }
 
 // ---------------------------------------------------------------------------------------------------

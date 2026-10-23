@@ -96,7 +96,16 @@ or nothing, with the reason.
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
+On Linux and Windows it builds the same way (`cargo build --release`), as `libvs_gyroflow.so` and
+`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-embed(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
+on Vulkan (Windows: DirectX 12 or Vulkan). `../tools/make_plugin_zip.sh <version>` makes the plugin's zip of them,
+and cross-compiles with a Rust target, e.g. `x86_64-pc-windows-gnu` on Linux with mingw-w64. A build where
+gyroflow-core's build script can't download the lens profiles (no network) needs
+`resources/camera_presets/profiles.cbor.gz` in its checkout, from
+[gyroflow/lens_profiles](https://github.com/gyroflow/lens_profiles/releases/latest/download/profiles.cbor.gz).
+
 The mpv side is the gyroflow plugin, `mpv/scripts/gyroflow/` in this repo (see `../README.md`);
 `../install.sh` builds and installs everything.
 
-Log: `~/Library/Logs/vs-gyroflow.log` (`VS_GYROFLOW_LOG=debug` for more).
+Log: `~/Library/Logs/vs-gyroflow.log`, on Linux `~/.local/state/vs-gyroflow.log`, on Windows
+`%LOCALAPPDATA%\vs-gyroflow.log` (`VS_GYROFLOW_LOG=debug` for more).
