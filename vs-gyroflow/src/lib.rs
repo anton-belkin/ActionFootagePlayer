@@ -21,6 +21,7 @@ pub mod probe;
 pub mod project;
 pub mod gpu_lut;
 pub mod edges;
+pub mod sphere;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
 use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
@@ -606,7 +607,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
-        return fail(node, format!("unknown edges {edge_mode} (off, original, zoom, trail)"));
+        return fail(node, format!("unknown edges {edge_mode} (off, original, zoom, trail, sphere)"));
     };
     let mut edge_settings = edges::EdgeSettings::default();
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }

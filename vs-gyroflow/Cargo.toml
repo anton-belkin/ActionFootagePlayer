@@ -25,6 +25,8 @@ pollster = "1"
 bytemuck = { version = "1", features = ["derive"] }
 # gyroflow-export: stopping cleanly on SIGTERM, background priority
 libc = "0.2"
+# The trail on a sphere (src/sphere.rs); the same nalgebra as gyroflow-core
+nalgebra = "0.34"
 
 [profile.release]
 debug = 1

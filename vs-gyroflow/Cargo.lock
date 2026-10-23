@@ -3206,6 +3206,7 @@ dependencies = [
  "gyroflow-core",
  "libc",
  "log",
+ "nalgebra 0.34.2",
  "parking_lot",
  "pollster",
  "serde_json",
