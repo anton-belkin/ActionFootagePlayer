@@ -110,6 +110,7 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | Key | | `script-binding` |
 |---|---|---|
 | `Ctrl+g` | Stabilization on/off | `gyroflow/toggle` |
+| `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part | `gyroflow/export` |
@@ -125,6 +126,9 @@ In `~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--scrip
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
+| `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30), so the stabilization does half the work; `0`: every frame |
+| `gyroflow.conf`: `edges=trail` | what fills the edges the stabilized frame doesn't cover: `trail`, `original`, `zoom`, or `off` (the project's background color) |
+| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 
 ### Stabilization
 
@@ -162,6 +166,22 @@ you've changed in `~/.config/mpv/scripts/gyroflow/`):
 For clips shot with EIS off in air, use a preset without the refraction (save one from Gyroflow: Export →
 Create settings preset, as `default.gyroflow` in one of the places above), or give those clips a project of
 their own.
+
+**Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
+leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
+with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
+them while playing:
+
+- **trail**, the default: what was last shown at that spot in earlier frames. The stabilized frame stays put while
+  the camera shakes, so a part it uncovers now was usually in view a moment ago. Where nothing was yet (the first
+  frames, after a seek or a cut), the zoom fill; older trail fades into it too (half-life 3 s).
+- **original**: the unstabilized frame behind.
+- **zoom**: the stabilized frame scaled up 1.5× behind.
+- **off**: the project's background color, as Gyroflow renders it.
+
+With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
+have any. 60 fps clips play at 30 (`max_fps`), every other frame: that leaves room for the fill (4K60 with the
+underwater preset otherwise runs at the limit, ~63 fps of capacity on an M1 Pro).
 
 ### Exporting
 
