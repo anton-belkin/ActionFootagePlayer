@@ -1,9 +1,9 @@
 # ActionCamPlayer
 
-**The open-source desktop player for action-camera footage.** Copy the clips off the card, double-click one,
-and it plays the way it should look: log footage in color and HDR, shaky clips stabilized, the camera's
-telemetry on screen. No import, no project, no rendering, and the original files are never touched. When
-something is worth sharing, one key exports exactly what you see.
+**The open-source desktop player for footage from action cameras and drones.** Copy the clips off the card,
+double-click one, and it plays the way it should look: log footage in color and HDR, shaky clips stabilized,
+the camera's telemetry on screen. No import, no project, no rendering, and the original files are never
+touched. When something is worth sharing, one key exports exactly what you see.
 
 Every camera maker ships its own desktop app for this. ActionCamPlayer is the open alternative: free, one
 player for the cameras you have, no account or cloud, and built on open tools ([mpv](https://mpv.io) for
@@ -23,6 +23,10 @@ on the GPU while it plays:
 
 Nothing to set up and no LUT to hunt for: a log clip and a normal one in the same folder each play right.
 
+Drones from the same makers shoot log too (DJI's Mini 4 Pro, Air 3 and Avata 2 in D-Log M, the larger ones
+in D-Log as well), and they're next: aerial footage is where log flattens the picture most, with sky and
+ground in one frame.
+
 ### 2. Stabilization in realtime, under water too
 
 Clips shot with the camera's stabilization off carry the camera's gyro data. ActionCamPlayer renders the
@@ -35,6 +39,8 @@ without exporting anything first.
 - **Gyroflow, both ways.** A clip with a Gyroflow project plays the way the project says (smoothing, zoom,
   lens, horizon). One key opens the clip in Gyroflow to fine-tune it, and saving there updates playback at
   the same spot. The project can be stored inside the video, so there's one file to carry.
+- **FPV drones.** Drones without a gimbal, like DJI's Avata, record gyro data the same way, and Gyroflow
+  supports them: their clips will play stabilized like the camera's. Drones with a gimbal are steady already.
 - **No black edges.** Where the stabilized frame doesn't cover the window, the gap is filled from earlier
   frames, blurred into the picture.
 
@@ -43,6 +49,9 @@ without exporting anything first.
 Depth under water, whether the camera is in the water, pressure, GPS and speed when the camera has a fix,
 exposure settings: what the camera recorded frame by frame, shown as the clip plays, read from the file
 itself.
+
+For drones that's the flight: height, position and the speed worked out from it, which DJI drones record
+in the file, and in a subtitle file (`.SRT`) next to it when video subtitles are on.
 
 ### 4. Export what you see
 
@@ -74,10 +83,11 @@ them.
 | **Systems** | macOS on Apple Silicon | Linux and Windows |
 | **DJI Osmo Action 6** | log (D-Log M), stabilization, telemetry | |
 | **DJI Osmo 360** | log, stabilization, telemetry, from DJI's published layout; not yet checked on real clips | |
-| **Other DJI** | log recognized by file name | stabilization, telemetry |
+| **Other DJI cameras** | log recognized by file name | stabilization, telemetry |
+| **DJI drones** (Mini 4 Pro, Air 3, Avata 2, ...) | stabilization of clips with a Gyroflow project | log (D-Log M, D-Log), flight telemetry, stabilization of FPV drones from their gyro data |
 | **GoPro, Insta360** | stabilization of clips with a Gyroflow project | stabilization from the camera's own gyro data; GP-Log and I-Log |
 
-New cameras need clips from their owners: a few seconds each, straight from the camera. See
+New cameras and drones need clips from their owners: a few seconds each, straight from the camera. See
 [Other cameras, and how to help](../README.md#other-cameras-and-how-to-help).
 
 ## Open source
