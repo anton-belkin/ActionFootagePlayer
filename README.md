@@ -21,10 +21,15 @@ ready for your phone.
 
 - **Log footage in full color, straight away.** Log (D-Log M on DJI, GP-Log on GoPro, I-Log on Insta360) is the
   camera's mode that records the most, but its clips come out flat and grey and normally need color grading. Here
-  they play in HDR, or with the camera maker's own standard look. The clip says it's log, so there's nothing to set
-  up. Normal clips play as usual.
+  they play in HDR, or with the camera maker's own standard look. The clip says it's log (Osmo Action 6, Osmo 360,
+  recent GoPros), so there's nothing to set up; for other cameras, one key picks the log curve. Normal clips play
+  as usual.
 - **Shaky clips steadied as they play**, from the motion data the camera records when its own stabilization is off,
-  with [Gyroflow](https://gyroflow.xyz)'s engine. Under water too, where the camera's stabilization doesn't hold.
+  with [Gyroflow](https://gyroflow.xyz)'s engine, at the same time as the log conversion.
+- **Steady footage under water. Yes, really.** Every diver knows in-camera stabilization gives up under water. Turn
+  it off, and the clip plays steady here: stabilized from the camera's own motion data, corrected for how water
+  bends light (on a test clip, the jitter between frames went from 0.16 px to 0.02 px).
+  <!-- before/after GIF of an underwater clip here: this is the proof divers need -->
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
 - **One key to share**: mark the moment, press `Shift+E`, and get a stabilized file that an iPhone, a Mac or
   YouTube shows in HDR.
@@ -37,12 +42,18 @@ screen with HDR (MacBook Pro, recent iPhones and flagship phones) a technical co
 every clip, so it's done automatically: log looks good straight away. So you can shoot in the best mode and simply
 watch and share. [Why that works](#why-log-and-why-hdr)
 
-**You already shoot log and grade.** This is the step between the card and your editor: go through a card's worth
-of clips with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT;
-see the gyro stabilization without making a project; open the clip in Gyroflow with one key and see the result back
-in playback when you save; batch-export ProRes 422 HQ from the command line. 10-bit stays 10-bit, the originals are
-never re-encoded, and log is recognized from the camera's metadata, not the file name. Prefer your own mpv? The
-three plugins work on their own, on any system. [How it works](#how-it-works)
+**You dive.** Shoot in D-Log M with EIS off: back on the boat, the clips play steady, in HDR, with the depth in the
+corner, and the turtle is on everyone's phone the same evening. [Back from the dive](#example-back-from-the-dive)
+
+**You already shoot log and grade.** This is the step between the card and your editor. Stabilization and the
+log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass
+(D-Log M so far, see [Known issues](#known-issues)): no project, no render, no separate grading step. In Gyroflow,
+stabilization is a render of its own, and the color comes later in an editor. Go through a card's worth of clips
+with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT; open a clip
+in Gyroflow with one key to fine-tune it and see the result back in playback when you save; batch-export ProRes
+422 HQ from the command line. 10-bit stays 10-bit, the originals are never re-encoded, and log is recognized from
+the camera's metadata, not the file name. Prefer your own mpv? The three plugins work on their own, on any system.
+[How it works](#how-it-works)
 
 ## Quick start (Mac with Apple Silicon, DJI Osmo Action 6)
 
