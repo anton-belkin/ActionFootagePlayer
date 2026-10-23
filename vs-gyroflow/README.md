@@ -17,6 +17,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
+| `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
 | `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
@@ -80,7 +81,14 @@ GPU work itself (`process_pixels`); computing the frame transform is ~0.
 Edge fill, per frame on a GPU worker, with ~20 % of a 4K frame uncovered: mask 2-3 ms, the stabilized frame
 on the grid 4-7 ms (both mostly waiting on the GPU, which the other workers keep busy), fill 1.7 ms, blending
 4 ms; at full 60 fps this cost the underwater 4K60 clip (~63 fps of capacity) a few percent and it dropped
-frames, so the mpv plugin plays clips above 30 fps at half rate: 0 dropped frames after the start.
+frames. The sphere trail adds writing the sphere from a wider view each frame. Whether a clip has edges at all is
+measured when the project loads, with Gyroflow's own numbers: a frame leaves some where the FOV it renders at (the
+zoom's, times the FOV setting) is wider than the widest one it still covers (`minimal_fovs`, what Gyroflow's FOV
+warning compares), for any project and zoom setting. Only in such a clip is the sphere written, every frame, edges
+showing or not, so it has what the camera saw when they do; and `core.gyroflow.LeavesEdges(clip, ...)` (Stabilize's
+arguments, the same loaded project) tells the mpv plugin to play it every other frame above 30 fps. 4K60 in a window
+with the HDR shader on the M1 Pro: no edges, every frame, 0 dropped; edges filled, every other frame, 0 dropped;
+edges filled at full rate, 85 %.
 
 Matches Gyroflow's own render of the project (CLI, same branch): same mean level, mean abs difference
 0.85/255; what differs is the antialiasing of the black border's edge and single pixels of fine detail

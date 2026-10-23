@@ -56,8 +56,8 @@ three plugins work on their own, on any system. [How it works](#how-it-works)
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
 
-`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` switches to the standard look instead of HDR, `Ctrl+g` turns
-the stabilization on and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
+`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` switches to the standard look instead of HDR, `Ctrl+g` goes
+through the stabilization, a wider view of it, and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
 
 ## Example: back from the dive
 
@@ -170,7 +170,7 @@ them with ActionFootagePlayer from Finder's Open With, or right click → Quick 
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on/off | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
@@ -193,7 +193,8 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
-| `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30), so the stabilization does half the work; `0`: every frame |
+| `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
+| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height; `Ctrl+[` and `Ctrl+]` change it while playing), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
@@ -275,8 +276,13 @@ them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
 - **off**: the project's background color, as Gyroflow renders it.
 
 With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
-have any. 60 fps clips play at 30 (`max_fps`), every other frame: that leaves room for the fill (4K60 with the
-underwater preset otherwise runs at the limit, ~63 fps of capacity on an M1 Pro).
+have any. Whether a clip does is Gyroflow's own measurement when it loads, for any project: where the frame it renders
+is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written every frame,
+edges showing or not, so it has what to fill them with when they show, and above `max_fps` it plays every other frame:
+filling them is what doesn't keep up. A clip without any plays every frame, with no sphere to write. The wider view of
+`Ctrl+g` (`wide_fov`) shows more of the picture and has edges throughout. On an M1 Pro, 4K60 in a window with the HDR
+shader: the default preset, every frame, none dropped; the wider view, every other frame, none; the wider view at
+full rate, 85 %.
 
 ### Exporting
 
