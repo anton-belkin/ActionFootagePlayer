@@ -32,7 +32,18 @@
 --   Ctrl+]   blur-more
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
---                     saving it in Gyroflow reloads the stabilization here
+--                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
+--                     is, for Gyroflow to find the motion from the picture (optical flow): once the project is saved
+--                     next to it, it plays stabilized with it
+--
+-- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; mpv/menu.conf):
+--   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
+--   fov <value>             the wider view's FOV, and the wider view on
+--   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
+--   edges <mode>            what fills the edges (the modes of Ctrl+b)
+--   remember                the view, FOV, horizon lock and edges as the defaults, in gyroflow.conf
+-- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, view (normal, wide, off), fov,
+-- horizon_lock (yes, no, project), edges, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -43,7 +54,10 @@
 --                leaves edges anywhere in the clip, as Gyroflow measures it for the project and view (the wider view
 --                does), and they're filled (Ctrl+b not off): the fill is what doesn't keep up. Otherwise every
 --                frame plays. 0: always every frame
+--   view=normal  the view clips start in: normal, or wide (the wider view)
 --   wide_fov=1.4 Gyroflow's FOV (Advanced) for the wider view of Ctrl+g: more of the picture, the edges at times
+--   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
+--                as the project or preset says
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height (Ctrl+[ and Ctrl+] change it while playing)
@@ -55,7 +69,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, wide_fov = 1.4, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 30, view = "normal", wide_fov = 1.4, horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -173,8 +187,15 @@ local function write_edge_control()
 end
 
 -- On, or on with a wider view (Gyroflow's FOV at wide_fov), for the next clips too; off is per clip
-local view = "normal"
-local VIEW_LABELS = { normal = "on", wide = string.format("on, wider view (FOV %g)", o.wide_fov) }
+local view = o.view == "wide" and "wide" or "normal"
+local wide_fov = o.wide_fov
+local function view_label(v)
+    if v == "wide" then return string.format("on, wider view (FOV %g)", wide_fov) end
+    return v == "normal" and "on" or "off"
+end
+-- true or false: locked or not, whatever the project says; nil: the project's
+local HORIZON = { yes = true, no = false }
+local horizon = HORIZON[o.horizon_lock]
 
 -- Faster than max_fps: such a clip plays every other frame if its stabilized frame leaves edges anywhere and they're
 -- filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and view). On an M1 Pro
@@ -193,7 +214,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                fov = view == "wide" and o.wide_fov or nil, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                fov = view == "wide" and wide_fov or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -202,6 +223,19 @@ local function gyroflow_filter(source, enabled)
 end
 
 local current_source = nil
+-- Off for this clip (Ctrl+g)
+local stab_off = false
+-- Ctrl+e on a clip without motion data: the project Gyroflow will save for it is waited for
+local waiting = false
+
+-- For the right-click menu (mpv/menu.conf)
+local function publish()
+    local state = {
+        available = current_source ~= nil, view = stab_off and "off" or view, fov = wide_fov,
+        horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
+    }
+    for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
+end
 
 -- The filter set up again for current_source (another view, or the rate changing with the edge fill); mpv rebuilds
 -- the filter chain, so it costs a few dropped frames
@@ -214,13 +248,19 @@ local function rebuild_filter()
     mp.set_property_native("vf", vf)
 end
 
-mp.add_hook("on_load", 50, function()
-    current_source = nil
+-- A clip played again from where it was (play_again)
+local resume = nil
+
+local function setup()
+    current_source, stab_off = nil, false
+    local path = mp.get_property("path")
+    if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
+    resume = nil
     if not file_exists(PLUGIN) then
-        if find_project(mp.get_property("path")) then mp.msg.warn("plugin missing at " .. PLUGIN) end
+        if find_project(path) then mp.msg.warn("plugin missing at " .. PLUGIN) end
         return
     end
-    local source = find_source(mp.get_property("path"))
+    local source = find_source(path)
     if not source then return end
     current_source = source
     write_edge_control()
@@ -249,25 +289,42 @@ mp.add_hook("on_load", 50, function()
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
-                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
+                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "")
+                .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
+end
+
+mp.add_hook("on_load", 50, function()
+    setup()
+    publish()
 end)
+
+-- The clip loaded again from where it plays: to stabilize it with a project that wasn't there when it loaded
+local function play_again()
+    resume = { path = mp.get_property("path"), pos = mp.get_property_number("time-pos") }
+    mp.commandv("playlist-play-index", "current")
+end
 
 mp.register_event("file-loaded", function()
     if current_source then mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (view == "wide" and ", wider view" or ""), 1.5) end
 end)
 
 -- Sticks for the next clips, like the dlogm plugin's modes
+local function set_edges(mode)
+    local was_off = edge_mode == "off"
+    edge_mode = mode
+    write_edge_control()
+    -- Filling edges or not decides the rate of a fast clip that leaves some (gyroflow.vpy)
+    if current_source and fast(current_source) and (edge_mode == "off") ~= was_off then rebuild_filter() end
+    publish()
+    mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
+end
+
 mp.add_key_binding("Ctrl+b", "edges", function()
     local i = 1
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
     end
-    local was_off = edge_mode == "off"
-    edge_mode = EDGE_MODES[i % #EDGE_MODES + 1]
-    write_edge_control()
-    -- Filling edges or not decides the rate of a fast clip that leaves some (gyroflow.vpy)
-    if current_source and fast(current_source) and (edge_mode == "off") ~= was_off then rebuild_filter() end
-    mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
+    set_edges(EDGE_MODES[i % #EDGE_MODES + 1])
 end)
 
 -- The next step of EDGE_BLURS below (-1) or above (1) the blur; sticks for the next clips too
@@ -287,35 +344,81 @@ mp.add_key_binding("Ctrl+]", "blur-more", step_blur(1))
 
 mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
-mp.add_key_binding("Ctrl+g", "toggle", function()
-    if not current_source then
-        mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
-        return
-    end
+local function no_source()
+    mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
+end
+
+-- The stabilization on (normal), on with the wider view (wide), or off for this clip; normal and wide stick
+local function show(v)
+    if not current_source then return no_source() end
+    local enabled = v ~= "off"
+    if enabled then view = v end
+    stab_off = not enabled
     local vf = mp.get_property_native("vf") or {}
-    local was = nil
-    for _, f in ipairs(vf) do
-        if f.label == LABEL then was = f.enabled end
-    end
-    if was == nil then return end
-    -- on -> wider view -> off -> on
-    local enabled = not was or view == "normal"
-    if was then view = view == "normal" and "wide" or "normal" end
-    if not was then view = "normal" end
     for i, f in ipairs(vf) do
         -- The input scaling goes with it: off shows the video as it is
         if f.label == SCALE_LABEL then f.enabled = enabled end
         if f.label == LABEL then vf[i] = gyroflow_filter(current_source, enabled) end
     end
     mp.set_property_native("vf", vf)
-    mp.msg.info("stabilization " .. (enabled and VIEW_LABELS[view] or "off"))
-    mp.osd_message("Gyroflow: " .. (enabled and VIEW_LABELS[view] or "off"), 1.5)
+    publish()
+    mp.msg.info("stabilization " .. view_label(v))
+    mp.osd_message("Gyroflow: " .. view_label(v), 1.5)
+end
+
+-- on -> wider view -> off -> on
+mp.add_key_binding("Ctrl+g", "toggle", function()
+    if stab_off then show("normal") else show(view == "normal" and "wide" or "off") end
+end)
+
+mp.register_script_message("view", function(v)
+    if v == "normal" or v == "wide" or v == "off" then show(v) end
+end)
+
+mp.register_script_message("fov", function(value)
+    local fov = tonumber(value)
+    if not fov or fov <= 0 then return end
+    wide_fov = fov
+    if current_source then return show("wide") end
+    view = "wide"
+    publish()
+    mp.osd_message("Gyroflow: " .. view_label("wide"), 1.5)
+end)
+
+mp.register_script_message("horizon-lock", function(value)
+    if value == "toggle" then
+        horizon = not horizon
+    elseif value == "project" then
+        horizon = nil
+    elseif HORIZON[value] ~= nil then
+        horizon = HORIZON[value]
+    else
+        return
+    end
+    rebuild_filter()
+    publish()
+    mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the project says" or (horizon and "locked" or "not locked")), 1.5)
+end)
+
+mp.register_script_message("edges", function(mode)
+    if EDGE_LABELS[mode] then set_edges(mode) end
+end)
+
+mp.register_script_message("remember", function()
+    local saved = platform.save_options("gyroflow", {
+        { "view", view }, { "wide_fov", string.format("%g", wide_fov) },
+        { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
+        { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
+    })
+    mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
 -- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it
 -- plays with, or for a video without one (an embedded project, or its own motion data with the default preset) the
 -- same written out by gyroflow-embed --extract, so Gyroflow opens it as it plays here. Gyroflow overwrites the
 -- project it opened when it saves (Cmd+S), and the stabilization reloads with it while the video stays where it is.
+-- A video with no motion data opens as it is: Gyroflow finds the motion from the picture (optical flow), and the
+-- project it saves next to the video is waited for, then the video loads again to play with it.
 local WATCH_INTERVAL = 0.5
 local watch = nil
 
@@ -327,6 +430,10 @@ end
 local function stop_watching()
     if watch then watch.timer:kill() end
     watch = nil
+    if waiting then
+        waiting = false
+        publish()
+    end
 end
 
 local function reload_project(project, version)
@@ -353,58 +460,88 @@ local function reload_project(project, version)
     mp.osd_message("Gyroflow: project reloaded", 3)
 end
 
--- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval
+-- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval. For a video that
+-- had no project, the first one found next to it, once it stays the same
 local function check_project()
-    local v = file_version(watch.project)
+    local project = watch.project or find_project(watch.video)
+    if not project then return end
+    local v = file_version(project)
     if not v or v == watch.version then
         watch.pending = nil
     elseif v ~= watch.pending then
         watch.pending = v
+    elseif not watch.project then
+        mp.msg.info("found " .. project .. ", loading the video again with it")
+        mp.osd_message("Gyroflow: project saved, stabilizing", 3)
+        stop_watching()
+        play_again()
     else
         watch.version, watch.pending = v, nil
         reload_project(watch.project, v)
     end
 end
 
--- The command that opens the project in Gyroflow and returns (status 0) once it's started, without waiting for it
-local function gyroflow_command(project)
-    if platform.macos then return { "/usr/bin/open", "-b", GYROFLOW_APP, project } end
+-- The command that opens the project (or a video) in Gyroflow and returns (status 0) once it's started, without
+-- waiting for it. nil on Windows for a video without gyroflow_app: the app videos open with is the player's
+local function gyroflow_command(file)
+    if platform.macos then return { "/usr/bin/open", "-b", GYROFLOW_APP, file } end
     if platform.windows then
-        if o.gyroflow_app ~= "" then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, project } end
+        if o.gyroflow_app ~= "" then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, file } end
         -- The app .gyroflow files are associated with (Gyroflow's installer sets it)
-        return { "cmd", "/d", "/c", "start", "", project }
+        if not file:lower():match("%.gyroflow$") then return nil end
+        return { "cmd", "/d", "/c", "start", "", file }
     end
     -- Started in the background, and fails when there's no such program
     local app = o.gyroflow_app ~= "" and o.gyroflow_app or "gyroflow"
-    return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" "$2" >/dev/null 2>&1 &', "sh", app, project }
+    return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" "$2" >/dev/null 2>&1 &', "sh", app, file }
 end
 
-local function open_in_gyroflow(project)
+-- `project`: the project to watch for changes; nil for a video without one (`file`, the video itself), to watch
+-- for the project Gyroflow saves next to it
+local function open_in_gyroflow(file, project, opened_message)
+    local args = gyroflow_command(file)
+    if not args then
+        mp.osd_message("Gyroflow: set gyroflow_app in gyroflow.conf to open videos in it", 4)
+        return
+    end
     mp.set_property_bool("pause", true)
-    if not (watch and watch.project == project) then
+    local video = mp.get_property("path")
+    if not (watch and watch.project == project and watch.video == video) then
         stop_watching()
-        watch = { project = project, version = file_version(project) }
+        watch = { project = project, video = video, version = project and file_version(project) or nil }
         watch.timer = mp.add_periodic_timer(WATCH_INTERVAL, check_project)
     end
-    mp.command_native_async({ name = "subprocess", args = gyroflow_command(project), playback_only = false, capture_stderr = true }, function(_, r)
+    waiting = project == nil
+    publish()
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
-            mp.osd_message("Gyroflow: editing " .. platform.file_name(project) .. "\nsave it there to see it here", 4)
+            mp.osd_message(opened_message, 6)
         else
             mp.msg.warn("open: " .. (r and r.stderr or ""))
             mp.osd_message("Gyroflow: couldn't open the app (is Gyroflow installed?)", 4)
+            stop_watching()
         end
     end)
 end
 
+local function edit_project(project)
+    open_in_gyroflow(project, project, "Gyroflow: editing " .. platform.file_name(project) .. "\nsave it there to see it here")
+end
+
 mp.add_key_binding("Ctrl+e", "edit", function()
     local path = mp.get_property("path")
-    if not current_source then
-        mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
+    if not path or path:find("://", 1, true) then
+        mp.osd_message("Gyroflow: not a local file", 1.5)
         return
     end
     -- One saved meanwhile is the user's: open it as it is
     local project = find_project(path)
-    if project then return open_in_gyroflow(project) end
+    if project then return edit_project(project) end
+    if not current_source then
+        return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data:\n"
+            .. "let it find the motion from the picture (optical flow) and save the project next to the video,\n"
+            .. "then it plays here stabilized")
+    end
     if not file_exists(EMBED) then
         mp.osd_message("Gyroflow: gyroflow-embed isn't installed", 2)
         return
@@ -419,7 +556,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             mp.msg.info("wrote " .. project)
-            open_in_gyroflow(project)
+            edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")
             mp.msg.warn("gyroflow-embed: " .. err)
