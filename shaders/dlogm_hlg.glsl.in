@@ -1,22 +1,14 @@
-// DJI D-Log M -> Rec.2100 HLG (1000-nit) at HOOK OUTPUT, mpv-standalone only.
+// DJI D-Log M -> Rec.2100 HLG (1000-nit) at HOOK MAIN, mpv-standalone only.
 //
-// Why HOOK OUTPUT instead of HOOK MAIN: at MAIN, the shader's HLG-encoded
-// output would still be linearized by mpv as the source's tagged TRC
-// (BT.709 for un-retagged DJI files) and then re-encoded for the target
-// (HLG) -- a double transform that destroys colors. HOOK OUTPUT runs AFTER
-// mpv's color pipeline. We re-sample raw source via BIND MAIN, apply the
-// LUT, and write HLG-encoded values straight to the (HDR-engaged) Metal
-// surface. mpv's color pipeline still runs internally but its output is
-// discarded.
+// The LUT's output is HLG-encoded BT.2020. For mpv to pass it through unchanged, the dlogm plugin tags the video
+// as HLG/BT.2020 (vf=format:gamma=hlg:primaries=bt.2020) and sets the same as the target (target-trc=hlg,
+// target-prim=bt.2020, target-peak=1000): mpv's color pipeline then runs an HLG -> HLG identity. Tagged as the
+// file's BT.709, mpv would linearize the HLG output as BT.709 and encode it again, a double transform that
+// destroys colors. target-colorspace-hint=yes switches the display to HDR (vo=gpu-next).
 //
-// HDR engagement is via target-trc=hlg + target-colorspace-hint=yes, which
-// the dlogm plugin sets along with this shader (mpv standalone only --
-// IINA's libmpv-OpenGL render context can't engage macOS HDR mode this way).
-//
-// Source files DO NOT need to be retagged.
-//
-// Caveat: any letterbox/pillarbox region is also LUT'd. With autofit-larger
-// (mpv.conf) the window matches video aspect, so this isn't visible.
+// Not at HOOK OUTPUT, re-sampling the source through BIND MAIN, as it was up to 0.5.0: when mpv redraws a paused
+// frame, libplacebo outputs the frame it cached at MAIN's stage, without MAIN to bind, and skips the shader.
+// The picture went flat grey on pause.
 
 //!TEXTURE HLGLUT
 //!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
@@ -25,16 +17,14 @@
 //!BORDER CLAMP
 @LUT_DATA@
 
-//!HOOK OUTPUT
+//!HOOK MAIN
 //!BIND HOOKED
-//!BIND MAIN
 //!BIND HLGLUT
-//!DESC DJI D-Log M -> Rec.2100 HLG (LUT at OUTPUT, bypasses mpv color pipeline)
+//!DESC DJI D-Log M -> Rec.2100 HLG
 
 vec4 hook() {
-    vec3 c = MAIN_tex(HOOKED_pos).rgb;
-    c = clamp(c, 0.0, 1.0);
+    vec4 c = HOOKED_tex(HOOKED_pos);
     const float N = @LUT_SIZE@.0;
-    vec3 lut_coord = c * ((N - 1.0) / N) + (0.5 / N);
-    return vec4(texture(HLGLUT, lut_coord).rgb, 1.0);
+    vec3 lut_coord = clamp(c.rgb, 0.0, 1.0) * ((N - 1.0) / N) + (0.5 / N);
+    return vec4(texture(HLGLUT, lut_coord).rgb, c.a);
 }

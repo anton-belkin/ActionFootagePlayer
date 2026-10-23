@@ -7,11 +7,12 @@
 -- DJI models, Insta360) play as they are; Ctrl+l picks the curve for one by hand.
 --
 -- Modes, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh):
---   hdr  <curve>_hlg.glsl, a HOOK OUTPUT shader: log -> Rec.2100 HLG 1000-nit. It replaces mpv's final output,
---        so mpv's color pipeline doesn't get a chance to mangle the HLG-encoded result; target-trc=hlg and
---        target-colorspace-hint=yes switch the display to HDR (vo=gpu-next). On an SDR display macOS tone-maps
---        the HLG output down, which looks better than an explicit SDR fallback. D-Log M's LUT is luts/dlogm_hlg.cube;
---        the others are made by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
+--   hdr  <curve>_hlg.glsl, a HOOK MAIN shader: log -> Rec.2100 HLG 1000-nit. The video is tagged as HLG (vf=format,
+--        labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result through as it
+--        is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR display macOS
+--        tone-maps the HLG output down, which looks better than an explicit SDR fallback. D-Log M's LUT is
+--        luts/dlogm_hlg.cube; the others are made by tools/make_hdr_lut.py from their makers' published formulas
+--        (docs/luts.md).
 --   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
 --   off  the file as it is, flat as the camera recorded it
 --
@@ -27,7 +28,7 @@
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
 -- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
 --
--- Everything is set as file-local options, added to the user's own glsl-shaders: mpv restores them when the
+-- Everything is set as file-local options, added to the user's own glsl-shaders and vf: mpv restores them when the
 -- file ends. Source files are never modified.
 
 local mp = require 'mp'
@@ -60,6 +61,10 @@ local GOPRO_CURVES = { GPLOG2 = "gplog2" }
 local PROBED_EXTENSIONS = { mp4 = true, mov = true }
 -- The options this sets, as they are for the file before it does
 local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-colorspace-hint" }
+-- The filter that tags the video as what the hdr shader turns it into, at the end of the chain (after the
+-- stabilization); enabled in hdr mode only
+local TAG_LABEL = "dlogm"
+local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
 
 local mode = o.mode == "sdr" and "sdr" or "hdr"
 -- For the current file: the user's own values of what this changes, its log curve, and the mode it's in (nil:
@@ -108,6 +113,25 @@ local function recorded_curve(path)
     return nil
 end
 
+-- The video tagged as HLG (on) or as the file says (off). The filter stays in the chain once added, disabled when
+-- off. Switching it rebuilds the chain: Gyroflow's filter restarts, as with Ctrl+g
+local function tag_hlg(on)
+    local vf = mp.get_property_native("vf") or {}
+    local tag = nil
+    for _, f in ipairs(vf) do
+        if f.label == TAG_LABEL then tag = f end
+    end
+    if not tag then
+        if not on then return end
+        tag = { name = "format", label = TAG_LABEL, params = HLG_TAGS }
+        table.insert(vf, tag)
+    elseif tag.enabled == on then
+        return
+    end
+    tag.enabled = on
+    mp.set_property_native("file-local-options/vf", vf)
+end
+
 local function apply(m)
     if not base then return false end
     local c = curve or CURVE.dlogm
@@ -133,6 +157,7 @@ local function apply(m)
         target["target-peak"] = "1000"
         target["target-colorspace-hint"] = "yes"
     end
+    tag_hlg(m == "hdr")
     mp.set_property_native("file-local-options/glsl-shaders", shaders)
     for _, opt in ipairs(TARGET_OPTIONS) do
         mp.set_property("file-local-options/" .. opt, target[opt])
