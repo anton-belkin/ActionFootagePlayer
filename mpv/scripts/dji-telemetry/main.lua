@@ -1,16 +1,9 @@
--- dji-telemetry: what a DJI camera recorded alongside the video (depth under water, pressure, GPS, exposure)
--- shown over it as mpv plays. An mpv plugin: this folder goes into ~~/scripts/.
+-- dji-telemetry: what a camera recorded alongside the video (depth under water, pressure, GPS, exposure) shown over
+-- it as mpv plays. An mpv plugin: this folder goes into ~~/scripts/.
 --
--- The values come from the camera's own metadata, read when the file is loaded, two ways:
---   telemetry.lua      plain Lua, so the plugin works in any mpv: the DJI models it knows a layout for, Osmo Action 6
---                      (worked out from its recordings) and Osmo 360 (from its schema). 0.1-0.4 s for a few minutes
---                      of 4K60
---   camera-telemetry   in this folder, when it's installed (built from vs-gyroflow/ with telemetry-parser, the
---                      library Gyroflow reads camera metadata with; macOS on Apple Silicon): GoPro, and the GPS of
---                      other cameras telemetry-parser reads. Run in the background; its values show once it's done
--- A clip telemetry.lua reads stays its own: its layouts are the ones checked on the cameras' recordings, and reading
--- a few GB again at the start would take CPU from the stabilization. camera-telemetry reads the others, and when it
--- isn't installed or fails, they show nothing, as before.
+-- The values come from the camera's own metadata track, read whole when the file is loaded (telemetry.lua, plain
+-- Lua: 0.1-0.4 s for a few minutes of 4K60). Cameras it reads: DJI Osmo Action 6 (worked out from its recordings)
+-- and Osmo 360 (from its schema), and GoPro (GPMF: GPS, speed, exposure). Any other file: nothing happens.
 --
 -- Fields, shown in the order given, each when the clip has it:
 --   depth        under water: the barometer's altitude below the surface. Action 6 records it once it has
@@ -38,14 +31,12 @@
 
 local mp = require 'mp'
 local options = require 'mp.options'
-local utils = require 'mp.utils'
 local telemetry = require 'telemetry'
 
 local o = { fields = "depth,water", units = "metric", position = "bottom-left", font_size = 28, visible = true }
 options.read_options(o, "dji_telemetry")
 
 local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true, lrv = true }
-local READER = utils.join_path(mp.get_script_directory(), "camera-telemetry")
 -- Action 6's underwater confidence goes 0-256; it crosses this a second before the barometer's flag changes
 local UNDERWATER_CONFIDENCE = 128
 local ALIGN = { ["top-left"] = 7, ["top-right"] = 9, ["bottom-left"] = 1, ["bottom-right"] = 3 }
@@ -65,8 +56,8 @@ local function coordinate(deg, pos, neg)
     return string.format("%.5f° %s", math.abs(deg), deg < 0 and neg or pos)
 end
 
--- Position in degrees, when the GPS has a fix: DJI's layout (telemetry.lua), else camera-telemetry's, which has it
--- only with a fix
+-- Position in degrees, when the GPS has a fix: DJI's (latitude, longitude: radians or degrees, with a status), else
+-- GoPro's (latitude_deg, longitude_deg: only with a fix)
 local function position(at)
     local status, lat, lon = at("gps_status"), at("latitude"), at("longitude")
     if status == nil or status == 1 or not lat or not lon or (lat == 0 and lon == 0) then
@@ -107,16 +98,17 @@ local FIELDS = {
         if at("in_water") == 1 or not alt or alt == 0 then return nil end
         return "Altitude", length(alt / 10)
     end },
-    gps = { values = { "gps_status", "gps_unit", "latitude", "longitude" }, line = function(at)
+    gps = { values = { "gps_status", "gps_unit", "latitude", "longitude", "latitude_deg", "longitude_deg" }, line = function(at)
         local lat, lon = position(at)
         if not lat then return nil end
         return "GPS", coordinate(lat, "N", "S") .. "  " .. coordinate(lon, "E", "W")
     end },
-    speed = { values = { "ebike_speed_kmh", "gps_status", "gps_unit", "latitude", "longitude", "velocity_x", "velocity_y" }, line = function(at)
+    speed = { values = { "ebike_speed_kmh", "gps_status", "gps_unit", "latitude", "longitude", "latitude_deg", "longitude_deg",
+                         "velocity_x", "velocity_y", "speed_ms" }, line = function(at)
         local bike = at("ebike_speed_kmh")
         if bike and bike > 0 then return "Speed", speed(bike / 3.6) end
-        local vx, vy = at("velocity_x"), at("velocity_y")
         if not position(at) then return nil end
+        local vx, vy = at("velocity_x"), at("velocity_y")
         if vx and vy then return "Speed", speed(math.sqrt(vx * vx + vy * vy)) end
         local ms = at("speed_ms")
         if not ms then return nil end
@@ -166,8 +158,6 @@ end
 
 local visible = o.visible
 local track = nil
--- camera-telemetry running for the current file
-local reading = nil
 local overlay = mp.create_osd_overlay("ass-events")
 local shown = nil
 
@@ -208,36 +198,8 @@ local function update()
     overlay:update()
 end
 
-local function stop_reading()
-    if reading then mp.abort_async_command(reading) end
-    reading = nil
-end
-
-local function file_exists(path)
-    local info = utils.file_info(path)
-    return info ~= nil and info.is_file
-end
-
--- camera-telemetry's values, for a clip telemetry.lua didn't read
-local function use_values(result)
-    local values, names = {}, {}
-    for name, series in pairs(result.values or {}) do
-        if type(series.t) == "table" and type(series.v) == "table" and #series.t == #series.v then
-            values[name] = series
-            names[#names + 1] = name
-        end
-    end
-    if #names == 0 then return end
-    table.sort(names)
-    track = { model = result.model or result.camera, values = values }
-    mp.msg.verbose("telemetry from camera-telemetry (" .. tostring(result.camera) .. "): " .. table.concat(names, ", "))
-    shown = nil
-    update()
-end
-
 mp.register_event("file-loaded", function()
     track, shown = nil, nil
-    stop_reading()
     overlay:remove()
     local path = mp.get_property("path")
     if not path or path:find("://", 1, true) or #wanted == 0 then return end
@@ -246,31 +208,16 @@ mp.register_event("file-loaded", function()
     local err
     track, err = telemetry.read(path, wanted)
     if err then mp.msg.warn("couldn't read the telemetry: " .. tostring(err)) end
-    if track then
-        mp.msg.verbose("telemetry: " .. track.model)
-        update()
-    else
-        mp.msg.verbose("no telemetry with a layout telemetry.lua knows")
+    if not track then
+        mp.msg.verbose("no telemetry with a known layout")
+        return
     end
-
-    if track or not file_exists(READER) then return end
-    local id
-    id = mp.command_native_async({ name = "subprocess", args = { READER, path }, capture_stdout = true, capture_stderr = true, playback_only = false }, function(ok, r)
-        if reading ~= id then return end
-        reading = nil
-        local result = ok and r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
-        if not result then
-            mp.msg.verbose("camera-telemetry: " .. ((r and r.stderr or ""):gsub("%s+$", "")))
-            return
-        end
-        use_values(result)
-    end)
-    reading = id
+    mp.msg.verbose("telemetry: " .. track.model)
+    update()
 end)
 
 mp.register_event("end-file", function()
     track, shown = nil, nil
-    stop_reading()
     overlay:remove()
 end)
 

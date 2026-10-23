@@ -3,8 +3,7 @@
 #
 #   ./install.sh           the plugins: scripts/dlogm (D-Log M; its shaders are baked here, with DJI's LUT downloaded
 #                          from DJI), scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/) and
-#                          scripts/dji-telemetry (the camera's telemetry over the video, with camera-telemetry, built
-#                          from vs-gyroflow/ too, for the cameras its Lua doesn't read); and mpv.conf when there's
+#                          scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
 #                          none yet
 #   ./install.sh --apps    also Steady Player.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
@@ -177,7 +176,6 @@ done
 # The telemetry plugin
 put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644
 put mpv/scripts/dji-telemetry/telemetry.lua "$TELEMETRY/telemetry.lua" 644
-put "$BIN/camera-telemetry"                  "$TELEMETRY/camera-telemetry" 755
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; Steady Player carries them now
 for f in gyroflow-router export-finder.sh; do
