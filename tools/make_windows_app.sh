@@ -33,6 +33,13 @@ VAPOURSYNTH_SHA256="8de011b9d372ca1593ccbe6ea164c5d093ef44905a69597fa3d8099d38ce
 # nothing for the system to install
 MSVC_RUNTIME_URL="https://files.pythonhosted.org/packages/c2/6e/7ba5696e9d8c1bcb01352f06e441497c308e84f75aba598400646ab31ca7/msvc_runtime-14.51.36231-cp313-cp313-win_amd64.whl"
 MSVC_RUNTIME_SHA256="f3c3ac4f733a774f6ae209567e533bfde6f72dc1c10977733bfe09ce01e5b624"
+# The Vulkan loader (Khronos's, as Silk.NET builds it), which mpv.exe needs to start at all: the GPU's driver installs
+# one, and the system's comes first (the launcher puts this one last in PATH); without one Windows refuses to start
+# mpv, with a dialog. And its license, from Khronos at the same version
+VULKAN_LOADER_URL="https://api.nuget.org/v3-flatcontainer/silk.net.vulkan.loader.native/2025.9.12/silk.net.vulkan.loader.native.2025.9.12.nupkg"
+VULKAN_LOADER_SHA256="33811c05ab0bcba632ad38abba459b0d72d6e58859342e0782d011863dde07d1"
+VULKAN_LICENSE_URL="https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.3.283/LICENSE.txt"
+VULKAN_LICENSE_SHA256="43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
 # ffmpeg for gyroflow-export: Gyan's essentials build (x265, NVENC, Quick Sync, AMF)
 FFMPEG_URL="https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.7z"
 FFMPEG_SHA256="4705843ccaaf54257c16ad90f3e952ece33c17df964ecf7bfdbb0f49c7171077"
@@ -91,6 +98,13 @@ echo "== The VC++ runtime"
 archive=$(fetch "$MSVC_RUNTIME_URL" "$MSVC_RUNTIME_SHA256")
 unzip_to "$archive" "$tmp/msvc"
 cp "$tmp"/msvc/msvc_runtime-*.data/data/Scripts/*.dll "$app/mpv/"
+
+echo "== The Vulkan loader"
+archive=$(fetch "$VULKAN_LOADER_URL" "$VULKAN_LOADER_SHA256")
+unzip_to "$archive" "$tmp/vulkan"
+mkdir -p "$app/vulkan"
+cp "$tmp/vulkan/runtimes/win-x64/native/vulkan-1.dll" "$app/vulkan/"
+vulkan_license=$(fetch "$VULKAN_LICENSE_URL" "$VULKAN_LICENSE_SHA256")
 
 echo "== Python and VapourSynth"
 archive=$(fetch "$PYTHON_URL" "$PYTHON_SHA256")
@@ -162,6 +176,7 @@ cp windows/THIRD-PARTY.txt "$licenses/"
 cp "$python/LICENSE.txt" "$licenses/Python.txt"
 cp "$site"/vapoursynth-*.dist-info/licenses/COPYING.LESSER "$licenses/VapourSynth.txt"
 cp "$tmp"/msvc/msvc_runtime-*.dist-info/licenses/LICENSE "$licenses/VC++ runtime.txt"
+cp "$vulkan_license" "$licenses/Vulkan loader.txt"
 find "$tmp/ffmpeg" -maxdepth 2 -name LICENSE -exec cp {} "$licenses/ffmpeg.txt" \;
 echo "$version" > "$app/VERSION"
 rm -rf "$tmp"

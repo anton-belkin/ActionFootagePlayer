@@ -128,7 +128,7 @@ jobs:
           $code = Run $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=', "/LOG=$PWD\install.log") "$PWD\install.log"
           if ($code -ne 0) { throw "the installer failed: $code" }
           $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
-          foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'python\python.exe', 'plugins\gyroflow\vs_gyroflow.dll', 'plugins\gyroflow\ffmpeg.exe') {
+          foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'vulkan\vulkan-1.dll', 'python\python.exe', 'plugins\gyroflow\vs_gyroflow.dll', 'plugins\gyroflow\ffmpeg.exe') {
               if (-not (Test-Path "$app\$f")) { throw "not installed: $f" }
           }
           $plugin = "$app\plugins\gyroflow\vs_gyroflow.dll"
@@ -139,7 +139,9 @@ jobs:
               'assert hasattr(core, "gyroflow")',
               'video_in.std.Invert().set_output()')
           $env:VSSCRIPT_PATH = "$app\python\Lib\site-packages\vapoursynth\vsscript.dll"
-          $env:PATH = "$app\python;$env:PATH"
+          # As ActionFootagePlayer.exe sets it: the runner has no GPU driver, so no Vulkan loader but the app's
+          Write-Host "System Vulkan loader: $(Test-Path "$env:SystemRoot\System32\vulkan-1.dll")"
+          $env:PATH = "$app\python;$env:PATH;$app\vulkan"
           # Started without a console, mpv would be the pseudo-GUI, which waits idle after a file that failed
           $code = Run "$app\mpv\mpv.exe" @('--no-config', '--player-operation-mode=cplayer', '--idle=no', '--force-window=no',
               '--vo=null', '--ao=null', '--frames=10', '--msg-level=all=v', "--log-file=$PWD\mpv-vs.log",

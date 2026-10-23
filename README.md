@@ -451,7 +451,8 @@ What differs from macOS:
 
 The installer (`tools/make_windows_app.sh`, `windows/`) puts everything in the app's folder, so nothing else needs
 installing: mpv ([shinchiro's build](https://github.com/shinchiro/mpv-winbuild-cmake), with VapourSynth support,
-and with the app's icon), Python with VapourSynth, the VC++ runtime VapourSynth needs, ffmpeg and ffprobe for exports
+and with the app's icon), Python with VapourSynth, the VC++ runtime VapourSynth needs, a Vulkan loader for a PC whose graphics driver hasn't
+installed one (mpv can't start without), ffmpeg and ffprobe for exports
 ([Gyan's build](https://www.gyan.dev/ffmpeg/builds/)), and the plugins. `ActionFootagePlayer.exe`
 (`windows/launcher/`) starts that mpv with the plugins and tells it where VapourSynth is. Like the Mac app, it reads
 your `%APPDATA%\mpv` (`mpv.conf`, `input.conf`, `script-opts\`), uses a copy of a plugin there instead of its own,

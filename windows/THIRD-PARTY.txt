@@ -16,6 +16,10 @@ Python (python\)
 VapourSynth (python\Lib\site-packages\vapoursynth\)
     LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth
 
+Vulkan loader (vulkan\vulkan-1.dll, used only when the system has none)
+    Apache 2.0 (licenses\Vulkan loader.txt). Source: https://github.com/KhronosGroup/Vulkan-Loader; the build:
+    https://www.nuget.org/packages/Silk.NET.Vulkan.Loader.Native
+
 Microsoft Visual C++ runtime (mpv\msvcp140*.dll, vcruntime140*.dll, concrt140.dll, ...)
     Redistributable under the Visual Studio license (licenses\VC++ runtime.txt), from https://pypi.org/project/msvc-runtime/
 

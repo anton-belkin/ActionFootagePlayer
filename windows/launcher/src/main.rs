@@ -11,6 +11,8 @@
 //                             where its vsscript.dll is; it finds this Python from there)
 //   plugins\                  the plugins: dlogm, gyroflow (with ffmpeg.exe and ffprobe.exe for its exports) and
 //                             dji-telemetry
+//   vulkan\vulkan-1.dll       the Vulkan loader, which mpv.exe can't start without, for a PC whose GPU driver hasn't
+//                             installed one (last in mpv's PATH: the system's comes first)
 //   tools\setup.py            what fetches DJI's LUT
 //
 // mpv reads the config in %APPDATA%\mpv (MPV_HOME) like any mpv, and gets the app's plugins except one the config has
@@ -73,12 +75,14 @@ fn config_has(plugin: &str) -> bool {
 }
 
 // What the plugins and their binaries find their things by. Python's folder in PATH too: vsscript.dll loads its
-// python3.dll, whose functions are python313.dll's, which Windows then has to find
+// python3.dll, whose functions are python313.dll's, which Windows then has to find. And the app's Vulkan loader, last:
+// Windows looks in System32 before PATH, so the system's is used when there is one
 fn environment(cmd: &mut Command, app: &Path) {
     let data = data_dir();
     let python = app.join("python");
     let mut path = vec![python.clone()];
     path.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+    path.push(app.join("vulkan"));
     if let Ok(path) = std::env::join_paths(path) {
         cmd.env("PATH", path);
     }

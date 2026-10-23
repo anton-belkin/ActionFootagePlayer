@@ -48,6 +48,7 @@ Name: default; Description: "Make it the default app for MP4 videos (Windows ask
 ; What an earlier version put there that this one may not have
 Type: filesandordirs; Name: "{app}\mpv"
 Type: filesandordirs; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\vulkan"
 Type: filesandordirs; Name: "{app}\plugins"
 Type: filesandordirs; Name: "{app}\tools"
 Type: filesandordirs; Name: "{app}\licenses"
