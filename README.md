@@ -111,7 +111,7 @@ this reads):
 
 | | Log in color: HDR, Rec.709 LUT ¹ | Stabilized from the camera's gyro, no project ² | Stabilized with a Gyroflow project ² | Telemetry ³ | Export what you see ² |
 |---|---|---|---|---|---|
-| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 |
+| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 (`Ctrl+s`) |
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | should work, with a project |
@@ -755,8 +755,6 @@ same in every LUT it writes):
 
 Each goes from here once it's fixed.
 
-- **`Shift+E` exports D-Log M in HDR even after `Ctrl+s`.** Rec.709 is `gyroflow-export --sdr` in a terminal for
-  now. [#21](https://github.com/anton-belkin/ActionFootagePlayer/issues/21)
 - **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
   the default is depth and in-water, which GoPro doesn't record.
   [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)
