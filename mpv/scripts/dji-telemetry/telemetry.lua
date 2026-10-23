@@ -1,16 +1,17 @@
--- The telemetry a DJI camera recorded, over time: every sample of the file's metadata track (one protobuf
--- message per frame, ProductMeta in DJI's dvtm_*.proto), and from each the values the plugin shows.
+-- The telemetry a camera recorded, over time: every sample of the file's metadata track, and from each the values
+-- the plugin shows. Two formats:
+--   DJI    one protobuf message per frame, ProductMeta in DJI's dvtm_*.proto, read along a layout per model
+--   GoPro  GPMF (github.com/gopro/gpmf-parser): about a second of KLV per sample, GPS, shutter, ISO, white balance
 --
--- The track is the one dji_color.lua in the dlogm plugin reads (the first with a `meta` handler); here all its
--- samples are read, through the whole sample table (stts, stsc, stsz, stco/co64). Plain Lua (5.1/LuaJIT: no
--- string.unpack, no bit operations), so the plugin needs no binaries.
+-- The track is the first with a `meta` handler, as dji_color.lua in the dlogm plugin reads it (GoPro's: the one
+-- whose samples are `gpmd`); here all its samples are read, through the whole sample table (stts, stsc, stsz,
+-- stco/co64). Plain Lua (5.1/LuaJIT: no string.unpack, no bit operations), so the plugin needs no binaries.
 --
 --   local t = require('telemetry').read(path, { "altitude_dm", "in_water" })
---   t.model                           "dvtm_ac206.proto"
+--   t.model                           "dvtm_ac206.proto", or "GoPro HERO6 Black"
 --   telemetry.at(t.values.altitude_dm, time)   the value at that time (seconds), or nil
 --
--- read() returns nil for files that aren't from a DJI camera with a known layout, or that have none of the
--- values asked for.
+-- read() returns nil for files that aren't from a camera it reads, or that have none of the values asked for.
 
 local M = {}
 
@@ -191,24 +192,32 @@ local function sample_table(s, sa, sb, timescale)
     return chunks, times, sizes
 end
 
--- The first track with a `meta` handler: its timescale and stbl
+-- The metadata track: the first with a `meta` handler whose samples are GoPro's `gpmd`, else the first with a `meta`
+-- handler. Its timescale and stbl
 local function metadata_track(moov, first)
+    local found = nil
     for typ, ta, tb in boxes(moov, first, #moov) do
         if typ == "trak" then
             local ma, mb = child(moov, ta, tb, "mdia")
             local ha = ma and child(moov, ma, mb, "hdlr")
             if ha and moov:sub(ha + 8, ha + 11) == "meta" then
                 local da = child(moov, ma, mb, "mdhd")
-                if not da then return nil end
-                local timescale = u32(moov, da + (moov:byte(da) == 1 and 20 or 12))
+                local timescale = da and u32(moov, da + (moov:byte(da) == 1 and 20 or 12))
                 local ia, ib = child(moov, ma, mb, "minf")
                 local sa, sb
                 if ia then sa, sb = child(moov, ia, ib, "stbl") end
-                if not sa or not timescale or timescale == 0 then return nil end
-                return timescale, sa, sb
+                if sa and timescale and timescale > 0 then
+                    -- stsd: version and flags, entry count, then the first entry's size and format
+                    local dd = child(moov, sa, sb, "stsd")
+                    if dd and moov:sub(dd + 12, dd + 15) == "gpmd" then return timescale, sa, sb end
+                    found = found or { timescale, sa, sb }
+                elseif not found then
+                    return nil
+                end
             end
         end
     end
+    if found then return found[1], found[2], found[3] end
     return nil
 end
 
@@ -341,6 +350,140 @@ local function extract(sample, path, kind, cache)
     return DECODE[kind](v, wire, low)
 end
 
+-- GPMF: KLV items, each a four-character key, a type, the size of one sample and how many there are, the data
+-- padded to 4 bytes. Big-endian. Type 0 nests more items; `?` is a struct whose types a TYPE item before it lists
+local GPMF_SIZES = { b = 1, B = 1, c = 1, d = 8, f = 4, F = 4, j = 8, J = 8, l = 4, L = 4, q = 4, Q = 8, s = 2, S = 2 }
+
+local function gpmf_items(s, first, last)
+    local i = first
+    return function()
+        if i + 7 > last then return nil end
+        local key, typ, size = s:sub(i, i + 3), s:sub(i + 4, i + 4), s:byte(i + 5)
+        local count = s:byte(i + 6) * 256 + s:byte(i + 7)
+        local a = i + 8
+        local b = a + size * count - 1
+        if b > last then return nil end
+        i = a + math.ceil(size * count / 4) * 4
+        return key, typ, size, count, a, b
+    end
+end
+
+local function be_uint(s, i, n)
+    local v = 0
+    for k = i, i + n - 1 do v = v * 256 + s:byte(k) end
+    return v
+end
+
+local function be_float32(s, i)
+    local b1, b2, b3, b4 = s:byte(i, i + 3)
+    local sign = b1 >= 128 and -1 or 1
+    local exp = (b1 % 128) * 2 + math.floor(b2 / 128)
+    local mant = (b2 % 128) * 65536 + b3 * 256 + b4
+    if exp == 255 then return nil end
+    if exp == 0 then return sign * mant * 2 ^ -149 end
+    return sign * (1 + mant / 8388608) * 2 ^ (exp - 127)
+end
+
+local function be_float64(s, i)
+    return float64(s:sub(i, i + 7):reverse())
+end
+
+-- One number of GPMF type t at s[i]
+local function gpmf_number(s, i, t)
+    local n = GPMF_SIZES[t]
+    if t == "f" then return be_float32(s, i) end
+    if t == "d" then return be_float64(s, i) end
+    if t == "Q" then return be_uint(s, i, 4) - (s:byte(i) >= 128 and 4294967296 or 0) + be_uint(s, i + 4, 4) / 4294967296 end
+    local v = be_uint(s, i, n)
+    if (t == "b" or t == "s" or t == "l" or t == "q" or t == "j") and s:byte(i) >= 128 then v = v - 256 ^ n end
+    if t == "q" then v = v / 65536 end
+    return v
+end
+
+-- An item's samples as rows of numbers, each divided by its SCAL (one per column, or one for all). types: the
+-- struct's types, for `?`
+local function gpmf_rows(s, typ, size, count, a, scale, types)
+    local columns = {}
+    if typ == "?" then
+        for c in (types or ""):gmatch(".") do columns[#columns + 1] = c end
+    elseif GPMF_SIZES[typ] then
+        for _ = 1, size / GPMF_SIZES[typ] do columns[#columns + 1] = typ end
+    end
+    local width = 0
+    for _, c in ipairs(columns) do
+        if not GPMF_SIZES[c] then return {} end
+        width = width + GPMF_SIZES[c]
+    end
+    if width ~= size or width == 0 then return {} end
+    local rows = {}
+    for r = 0, count - 1 do
+        local row, i = {}, a + r * size
+        for k, c in ipairs(columns) do
+            local v = gpmf_number(s, i, c)
+            local sc = scale and (scale[k] or (#scale == 1 and scale[1])) or nil
+            row[k] = (v and sc and sc ~= 0) and v / sc or v
+            i = i + GPMF_SIZES[c]
+        end
+        rows[#rows + 1] = row
+    end
+    return rows
+end
+
+-- The values of one GPMF sample, recorded from t over dur seconds: push(name, time, value) for each, the samples of
+-- an item spread evenly over the time. Returns the device's name (DVNM), when it has one
+local function gpmf_sample(sample, t, dur, push)
+    local model = nil
+    local function spread(rows, f)
+        for k, row in ipairs(rows) do f(t + dur * (k - 1) / #rows, row) end
+    end
+    local function position(time, fix, lat, lon, ms)
+        push("latitude_deg", time, fix and lat or false)
+        push("longitude_deg", time, fix and lon or false)
+        push("speed_ms", time, fix and ms and math.floor(ms * 100 + 0.5) / 100 or false)
+    end
+    for key, typ, _, _, a, b in gpmf_items(sample, 1, #sample) do
+        if key == "DEVC" and typ == "\0" then
+            for k2, t2, sz2, n2, a2, b2 in gpmf_items(sample, a, b) do
+                if k2 == "DVNM" and t2 == "c" then
+                    model = model or sample:sub(a2, b2):gsub("%z+$", "")
+                elseif k2 == "STRM" and t2 == "\0" then
+                    local scale, types, fix = nil, nil, nil
+                    for k3, t3, sz3, n3, a3 in gpmf_items(sample, a2, b2) do
+                        if k3 == "SCAL" then
+                            scale = {}
+                            for _, row in ipairs(gpmf_rows(sample, t3, sz3, n3, a3)) do scale[#scale + 1] = row[1] end
+                        elseif k3 == "TYPE" then
+                            types = sample:sub(a3, a3 + sz3 * n3 - 1):gsub("%z+$", "")
+                        elseif k3 == "GPSF" then
+                            fix = (gpmf_rows(sample, t3, sz3, n3, a3)[1] or {})[1]
+                        elseif k3 == "GPS5" then
+                            -- latitude, longitude, altitude, 2D speed, 3D speed; the fix (0 none, 2 2D, 3 3D) before it
+                            spread(gpmf_rows(sample, t3, sz3, n3, a3, scale), function(time, r)
+                                position(time, (fix or 0) >= 2, r[1], r[2], r[4])
+                            end)
+                        elseif k3 == "GPS9" then
+                            -- HERO11 and later: the same, then days, seconds, DOP and the fix, per row
+                            spread(gpmf_rows(sample, t3, sz3, n3, a3, scale, types), function(time, r)
+                                position(time, (r[9] or 0) >= 2, r[1], r[2], r[4])
+                            end)
+                        elseif k3 == "SHUT" then
+                            spread(gpmf_rows(sample, t3, sz3, n3, a3, scale), function(time, r)
+                                push("exposure_time", time, r[1] and r[1] > 0 and { 1, math.floor(1 / r[1] + 0.5) } or false)
+                            end)
+                        elseif k3 == "ISOE" or k3 == "WBAL" then
+                            local name = k3 == "ISOE" and "iso" or "white_balance_k"
+                            spread(gpmf_rows(sample, t3, sz3, n3, a3, scale), function(time, r)
+                                push(name, time, r[1] and math.floor(r[1] + 0.5) or false)
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return model
+end
+
 local function same(a, b)
     if type(a) == "table" and type(b) == "table" then return a[1] == b[1] and a[2] == b[2] end
     return a == b
@@ -388,6 +531,8 @@ function M.read(path, names)
         moov = nil
 
         local out, wanted, model = nil, nil, nil
+        -- GoPro: the names asked for, and what pushes a value of one
+        local gpmf, push = nil, nil
         for _, chunk in ipairs(chunks) do
             local total = 0
             for k = chunk.first, chunk.first + chunk.count - 1 do total = total + sizes[k] end
@@ -401,7 +546,27 @@ function M.read(path, names)
                 local t = times[k]
                 if size <= MAX_SAMPLE and size > 4 and t then
                     local sample = data:sub(pos, pos + size - 1)
-                    if not model then
+                    if not model and not gpmf and sample:sub(1, 4) == "DEVC" then
+                        gpmf, out = {}, { model = "GoPro", values = {} }
+                        for _, name in ipairs(names) do gpmf[name] = true end
+                        push = function(name, time, v)
+                            if not gpmf[name] then return end
+                            local series = out.values[name]
+                            if not series then
+                                series = { t = {}, v = {} }
+                                out.values[name] = series
+                            end
+                            local n = #series.t
+                            if n == 0 or not same(series.v[n], v) then
+                                series.t[n + 1], series.v[n + 1] = time, v
+                            end
+                        end
+                    end
+                    if gpmf then
+                        local dur = (times[k + 1] or t + 1) - t
+                        local device = gpmf_sample(sample, t, dur, push)
+                        if device and out.model == "GoPro" then out.model = device:find("^GoPro") and device or "GoPro " .. device end
+                    elseif not model then
                         model = model_of(sample)
                         if model then
                             local layout = LAYOUTS[model]
@@ -416,7 +581,7 @@ function M.read(path, names)
                             if #wanted == 0 then return nil end
                         end
                     end
-                    if wanted then
+                    if wanted and not gpmf then
                         local cache = {}
                         for _, w in ipairs(wanted) do
                             local v = extract(sample, w.path, w.kind, cache)
@@ -431,6 +596,16 @@ function M.read(path, names)
                 end
                 pos = pos + size
             end
+        end
+        if gpmf then
+            -- A series that never had a value says nothing
+            local any = false
+            for name, series in pairs(out.values) do
+                local has = false
+                for _, v in ipairs(series.v) do has = has or v ~= false end
+                if has then any = true else out.values[name] = nil end
+            end
+            if not any then return nil end
         end
         return out
     end)

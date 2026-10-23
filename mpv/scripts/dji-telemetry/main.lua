@@ -1,9 +1,9 @@
--- dji-telemetry: what a DJI camera recorded alongside the video (depth under water, pressure, GPS, exposure)
--- shown over it as mpv plays. An mpv plugin: this folder goes into ~~/scripts/.
+-- dji-telemetry: what a camera recorded alongside the video (depth under water, pressure, GPS, exposure) shown over
+-- it as mpv plays. An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- The values come from the camera's own metadata track, read whole when the file is loaded (telemetry.lua, plain
--- Lua: 0.1-0.4 s for a few minutes of 4K60). Known layouts: Osmo Action 6 (worked out from its recordings) and
--- Osmo 360 (from its schema). Any other file: nothing happens.
+-- Lua: 0.1-0.4 s for a few minutes of 4K60). Cameras it reads: DJI Osmo Action 6 (worked out from its recordings)
+-- and Osmo 360 (from its schema), and GoPro (GPMF: GPS, speed, exposure). Any other file: nothing happens.
 --
 -- Fields, shown in the order given, each when the clip has it:
 --   depth        under water: the barometer's altitude below the surface. Action 6 records it once it has
@@ -12,8 +12,8 @@
 --                comes from the picture, so it also works in a dive housing, where the barometer can't tell)
 --   pressure     hPa. In a dive housing it's the air in the housing, not the depth
 --   altitude     the barometer's altitude out of water: relative, and it drifts by meters
---   gps          position, when there's a fix (a remote or Mimo connected to the camera)
---   speed        ground speed, from the GPS velocity (Osmo 360 on an e-bike: the bike's)
+--   gps          position, when there's a fix (DJI: a remote or Mimo connected to the camera)
+--   speed        ground speed, from the GPS (Osmo 360 on an e-bike: the bike's)
 --   temperature  the image sensor's (Osmo 360), not the water's
 --   heartrate    from a paired device (Osmo 360)
 --   exposure     ISO, shutter, aperture, white balance
@@ -36,7 +36,7 @@ local telemetry = require 'telemetry'
 local o = { fields = "depth,water", units = "metric", position = "bottom-left", font_size = 28, visible = true }
 options.read_options(o, "dji_telemetry")
 
-local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true }
+local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true, lrv = true }
 -- Action 6's underwater confidence goes 0-256; it crosses this a second before the barometer's flag changes
 local UNDERWATER_CONFIDENCE = 128
 local ALIGN = { ["top-left"] = 7, ["top-right"] = 9, ["bottom-left"] = 1, ["bottom-right"] = 3 }
@@ -56,10 +56,15 @@ local function coordinate(deg, pos, neg)
     return string.format("%.5f° %s", math.abs(deg), deg < 0 and neg or pos)
 end
 
--- Position in degrees, when the GPS has a fix
+-- Position in degrees, when the GPS has a fix: DJI's (latitude, longitude: radians or degrees, with a status), else
+-- GoPro's (latitude_deg, longitude_deg: only with a fix)
 local function position(at)
     local status, lat, lon = at("gps_status"), at("latitude"), at("longitude")
-    if status == nil or status == 1 or not lat or not lon or (lat == 0 and lon == 0) then return nil end
+    if status == nil or status == 1 or not lat or not lon or (lat == 0 and lon == 0) then
+        lat, lon = at("latitude_deg"), at("longitude_deg")
+        if not lat or not lon then return nil end
+        return lat, lon
+    end
     if at("gps_unit") == 0 then lat, lon = math.deg(lat), math.deg(lon) end
     return lat, lon
 end
@@ -93,17 +98,21 @@ local FIELDS = {
         if at("in_water") == 1 or not alt or alt == 0 then return nil end
         return "Altitude", length(alt / 10)
     end },
-    gps = { values = { "gps_status", "gps_unit", "latitude", "longitude" }, line = function(at)
+    gps = { values = { "gps_status", "gps_unit", "latitude", "longitude", "latitude_deg", "longitude_deg" }, line = function(at)
         local lat, lon = position(at)
         if not lat then return nil end
         return "GPS", coordinate(lat, "N", "S") .. "  " .. coordinate(lon, "E", "W")
     end },
-    speed = { values = { "ebike_speed_kmh", "gps_status", "gps_unit", "latitude", "longitude", "velocity_x", "velocity_y" }, line = function(at)
+    speed = { values = { "ebike_speed_kmh", "gps_status", "gps_unit", "latitude", "longitude", "latitude_deg", "longitude_deg",
+                         "velocity_x", "velocity_y", "speed_ms" }, line = function(at)
         local bike = at("ebike_speed_kmh")
         if bike and bike > 0 then return "Speed", speed(bike / 3.6) end
+        if not position(at) then return nil end
         local vx, vy = at("velocity_x"), at("velocity_y")
-        if not position(at) or not vx or not vy then return nil end
-        return "Speed", speed(math.sqrt(vx * vx + vy * vy))
+        if vx and vy then return "Speed", speed(math.sqrt(vx * vx + vy * vy)) end
+        local ms = at("speed_ms")
+        if not ms then return nil end
+        return "Speed", speed(ms)
     end },
     temperature = { values = { "sensor_temperature_c" }, line = function(at)
         local c = at("sensor_temperature_c")
@@ -217,10 +226,10 @@ mp.observe_property("osd-dimensions", "native", update)
 
 mp.add_key_binding("Ctrl+t", "toggle", function()
     if not track then
-        mp.osd_message("DJI telemetry: none in this file", 1.5)
+        mp.osd_message("Telemetry: none in this file", 1.5)
         return
     end
     visible = not visible
     update()
-    mp.osd_message(visible and "DJI telemetry: on" or "DJI telemetry: off", 1.5)
+    mp.osd_message(visible and "Telemetry: on" or "Telemetry: off", 1.5)
 end)
