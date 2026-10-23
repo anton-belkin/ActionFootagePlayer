@@ -21,10 +21,15 @@ ready for your phone.
 
 - **Log footage in full color, straight away.** Log (D-Log M on DJI, GP-Log on GoPro, I-Log on Insta360) is the
   camera's mode that records the most, but its clips come out flat and grey and normally need color grading. Here
-  they play in HDR, or with the camera maker's own standard look. The clip says it's log, so there's nothing to set
-  up. Normal clips play as usual.
+  they play in HDR, or with the camera maker's own standard look. The clip says it's log (Osmo Action 6, Osmo 360,
+  recent GoPros), so there's nothing to set up; for other cameras, one key picks the log curve. Normal clips play
+  as usual.
 - **Shaky clips steadied as they play**, from the motion data the camera records when its own stabilization is off,
-  with [Gyroflow](https://gyroflow.xyz)'s engine. Under water too, where the camera's stabilization doesn't hold.
+  with [Gyroflow](https://gyroflow.xyz)'s engine, at the same time as the log conversion.
+- **Steady footage under water. Yes, really.** Every diver knows in-camera stabilization gives up under water. Turn
+  it off, and the clip plays steady here: stabilized from the camera's own motion data, corrected for how water
+  bends light (on a test clip, the jitter between frames went from 0.16 px to 0.02 px).
+  <!-- before/after GIF of an underwater clip here: this is the proof divers need -->
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
 - **One key to share**: mark the moment, press `Shift+E`, and get a stabilized file that an iPhone, a Mac or
   YouTube shows in HDR.
@@ -37,21 +42,26 @@ screen with HDR (MacBook Pro, recent iPhones and flagship phones) a technical co
 every clip, so it's done automatically: log looks good straight away. So you can shoot in the best mode and simply
 watch and share. [Why that works](#why-log-and-why-hdr)
 
-**You already shoot log and grade.** This is the step between the card and your editor: go through a card's worth
-of clips with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT;
-see the gyro stabilization without making a project; open the clip in Gyroflow with one key and see the result back
-in playback when you save; batch-export ProRes 422 HQ from the command line. 10-bit stays 10-bit, the originals are
-never re-encoded, and log is recognized from the camera's metadata, not the file name. Prefer your own mpv? The
-three plugins work on their own, on any system. [How it works](#how-it-works)
+**You dive.** Shoot in D-Log M with EIS off: back on the boat, the clips play steady, in HDR, with the depth in the
+corner, and the turtle is on everyone's phone the same evening. [Back from the dive](#example-back-from-the-dive)
+
+**You already shoot log and grade.** This is the step between the card and your editor. Stabilization and the
+log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass
+(D-Log M so far, see [Known issues](#known-issues)): no project, no render, no separate grading step. In Gyroflow,
+stabilization is a render of its own, and the color comes later in an editor. Go through a card's worth of clips
+with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT; open a clip
+in Gyroflow with one key to fine-tune it and see the result back in playback when you save; batch-export ProRes
+422 HQ from the command line. 10-bit stays 10-bit, the originals are never re-encoded, and log is recognized from
+the camera's metadata, not the file name. Prefer your own mpv? The three plugins work on their own, on any system.
+[How it works](#how-it-works)
 
 ## Quick start (Mac with Apple Silicon, DJI Osmo Action 6)
 
 1. **On the camera:** set the color mode to **D-Log M**. Under water, turn **EIS off**: the camera then records the
    motion data the stabilization uses.
-2. **Install:** with [Homebrew](https://brew.sh), run `brew install mpv ffmpeg` in Terminal. Then download
-   `ActionFootagePlayer-<version>-macos-arm64.zip` from the
+2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.zip` from the
    [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move it to
-   Applications.
+   Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
@@ -111,7 +121,7 @@ this reads):
 
 **verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
 published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
-Export renders what plays, so it covers the clips that play stabilized. Details, and how clips from your camera
+Export covers the clips that play stabilized, and not all of what plays yet: see [Known issues](#known-issues). Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet, where there's no app,
@@ -132,15 +142,13 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 11 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins and their menu in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins and their menu, mpv and ffmpeg in it |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
 
-**The app** needs [Homebrew](https://brew.sh)'s mpv (it includes VapourSynth), and its ffmpeg for exporting:
-
-```bash
-brew install mpv ffmpeg
-```
+**The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
+exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
+oldest macOS those builds are made for.
 
 Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
@@ -480,8 +488,8 @@ your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. Th
 what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
 your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
 
-ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts Homebrew's
-mpv with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
+ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts the mpv it
+carries (`Contents/Helpers/`, or Homebrew's in an app built without it) with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
 its icon, and gets the videos Finder opens with it. A video opened while one plays takes its place. mpv's own menu
 items still say mpv (About mpv, Quit mpv). The setup is offered from inside mpv (`macos/setup-offer.lua`), once
 it runs.
@@ -696,6 +704,12 @@ tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for L
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
 
+ActionFootagePlayer.app also carries mpv, ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as
+Homebrew builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
+`Contents/Resources/ThirdParty/` has each one's license files and the Homebrew formula it was built by, and
+`SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them
+at build). The sources are also available from this project on request.
+
 ## Credits
 
 Camera metadata (motion data, lens, in-camera stabilization) is read by Adrian Eddy's
@@ -725,3 +739,19 @@ same in every LUT it writes):
 - Insta360 10-bit I-Log: Insta360's "10-bit I-Log White Paper" (v1.0, June 2026).
 - DaVinci Wide Gamut and DaVinci Intermediate (for `--from-dwgi`): as Blackmagic Design publishes them.
 
+## Known issues
+
+Each goes from here once it's fixed.
+
+- **`Shift+E` exports D-Log M in HDR even after `Ctrl+s`.** Rec.709 is `gyroflow-export --sdr` in a terminal for
+  now. [#21](https://github.com/anton-belkin/ActionFootagePlayer/issues/21)
+- **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
+  preset as Gyroflow would, edges in the project's background color.
+  [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
+- **Only D-Log M is exported in HDR.** D-Log, GP-Log, GP-Log2 and 10-bit I-Log play in HDR but export flat, as
+  recorded, and so does a curve picked with `Ctrl+l`. [#23](https://github.com/anton-belkin/ActionFootagePlayer/issues/23)
+- **A clip that plays without stabilization isn't exported**, e.g. D-Log M shot with EIS on; and after `Ctrl+g`
+  turns it off, the export is stabilized all the same. [#24](https://github.com/anton-belkin/ActionFootagePlayer/issues/24)
+- **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
+  the default is depth and in-water, which GoPro doesn't record.
+  [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)

@@ -12,6 +12,8 @@ data="$HOME/Library/Application Support/ActionFootagePlayer"
 old="$HOME/Library/Application Support/Steady Player"
 [ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
 export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
+# The app's own ffmpeg, when it has one (tools/bundle_runtime.py)
+[ -x "$res/../Helpers/ffmpeg" ] && export GYROFLOW_TOOLS="${res:h}/Helpers"
 export_bin="$res/plugins/gyroflow/gyroflow-export"
 config=${MPV_HOME:-$HOME/.config/mpv}
 [ -e "$config/scripts/gyroflow" ] && export_bin="$config/scripts/gyroflow/gyroflow-export"

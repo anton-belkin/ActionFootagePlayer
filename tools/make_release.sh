@@ -1,7 +1,8 @@
 #!/bin/bash
 # tools/make_release.sh <version>: into dist/
 #   ActionFootagePlayer-<version>-macos-arm64.zip             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh):
-#                                                       unzipped into Applications, its setup downloads DJI's LUT
+#                                                       unzipped into Applications, its setup downloads DJI's LUT.
+#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
