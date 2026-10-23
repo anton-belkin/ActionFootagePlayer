@@ -70,6 +70,16 @@ mkdir -p "dist/$dlogm/dlogm/shaders" "dist/$dlogm/dlogm/luts"
 git archive HEAD mpv/scripts/dlogm | tar -x --strip-components 2 -C "dist/$dlogm"
 cp dist/dlogm_hlg.glsl "dist/$dlogm/dlogm/shaders/dlogm_hlg.glsl"
 git show HEAD:luts/dlogm_hlg.cube > "dist/$dlogm/dlogm/luts/dlogm_hlg.cube"
+# The other log curves' HDR shaders, from their makers' published formulas (the app's are made by make_app.sh)
+for curve in dlog gplog2 ilog; do
+    python3 -I tools/make_hdr_lut.py "$curve" "dist/${curve}_hlg.cube" >/dev/null
+    python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "dist/${curve}_hlg.cube" \
+        "dist/$dlogm/dlogm/shaders/${curve}_hlg.glsl" >/dev/null
+    rm "dist/${curve}_hlg.cube"
+done
+git show HEAD:luts/gplog_hlg.cube > dist/gplog_hlg.cube
+python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in dist/gplog_hlg.cube "dist/$dlogm/dlogm/shaders/gplog_hlg.glsl" >/dev/null
+rm dist/gplog_hlg.cube
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 

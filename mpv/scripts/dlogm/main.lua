@@ -1,24 +1,30 @@
--- dlogm: DJI D-Log M video shown in HDR, as mpv plays it. An mpv plugin: this folder goes into ~~/scripts/.
+-- dlogm: log video (DJI D-Log M, and D-Log, GoPro GP-Log and GP-Log2, Insta360 10-bit I-Log) shown in HDR, as mpv
+-- plays it. An mpv plugin: this folder goes into ~~/scripts/.
 --
--- D-Log M is recognized by the color profile the camera wrote into the file (dji_color.lua: Osmo Action 6,
--- Osmo 360). DJI tags D-Log M video as BT.709 and names Normal-color clips *_D.MP4 too, so the metadata is the only
--- reliable sign. Files it can't tell (other DJI models) play as they are.
+-- The log curve is recognized by what the camera wrote into the file: DJI's color profile (dji_color.lua: Osmo
+-- Action 6, Osmo 360) and GoPro's Protune color (gopro_color.lua: PTCL GPLOG2, or LOG from a HERO12 Black on
+-- firmware 1.20 or later or a HERO13 Black, where GP-Log is what its LUT is for). DJI tags D-Log M video as BT.709
+-- and names Normal-color clips *_D.MP4 too, so the metadata is the only reliable sign. Files it can't tell (other
+-- DJI models, Insta360) play as they are; Ctrl+l picks the curve for one by hand.
 --
 -- Modes, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh):
---   hdr  dlogm_hlg.glsl, a HOOK MAIN shader: D-Log M -> Rec.2100 HLG 1000-nit. The video is tagged as HLG
---        (vf=format, labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result
---        through as it is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR
---        display macOS tone-maps the HLG output down, which looks better than an explicit SDR fallback.
---   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR.
+--   hdr  <curve>_hlg.glsl, a HOOK MAIN shader: log -> Rec.2100 HLG 1000-nit. The video is tagged as HLG (vf=format,
+--        labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result through as it
+--        is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR display macOS
+--        tone-maps the HLG output down, which looks better than an explicit SDR fallback. D-Log M's LUT is
+--        luts/dlogm_hlg.cube and GP-Log's luts/gplog_hlg.cube, both from Zeb Gardner's LUTs; the others are made
+--        by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
+--   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
 --   off  the file as it is, flat as the camera recorded it
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
---   Ctrl+h  hdr  this file, and D-Log M files after it
---   Ctrl+s  sdr  this file, and D-Log M files after it
---   L       off  this file
+--   Ctrl+h  hdr    this file, and log files after it
+--   Ctrl+s  sdr    this file, and log files after it
+--   L       off    this file
+--   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
 --
 -- Options (~~/script-opts/dlogm.conf):
---   mode=hdr     what D-Log M files start in: hdr or sdr
+--   mode=hdr     what log files start in: hdr or sdr
 --
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
 -- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
@@ -30,6 +36,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 local dji_color = require 'dji_color'
+local gopro_color = require 'gopro_color'
 
 local o = { mode = "hdr" }
 options.read_options(o, "dlogm")
@@ -40,11 +47,22 @@ local DATA = os.getenv("DLOGM_DATA")
 local DIRS = {}
 if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
 table.insert(DIRS, DIR)
-local SHADERS = {
-    hdr = "shaders/dlogm_hlg.glsl",
-    sdr = "shaders/dlogm_lut3d.glsl",
+-- The log curves, in Ctrl+l's order, with their shaders by mode
+local CURVES = {
+    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl" },
+    { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
+    { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
+    { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
+    { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
 }
-local LABELS = { hdr = "D-Log M -> HDR", sdr = "D-Log M -> Rec.709", off = "D-Log M handling off: the file as it is" }
+local CURVE = {}
+for _, c in ipairs(CURVES) do CURVE[c.id] = c end
+-- What the cameras' metadata says, as a curve
+local DJI_CURVES = { dlogm = "dlogm", dlog = "dlog" }
+local GOPRO_CURVES = { GPLOG2 = "gplog2", LOG = "gplog" }
+-- GP-Log as gplog_hlg.cube is made for: by the firmware where GoPro's own LUTs put 18 % grey where it does. Earlier
+-- HERO12 firmware recorded 2 stops darker, MAX2 2 stops brighter: their clips play as they are (Ctrl+l still works)
+local GPLOG_FIRMWARE = { ["HERO12 Black"] = 1.20, ["HERO13 Black"] = 0 }
 local PROBED_EXTENSIONS = { mp4 = true, mov = true }
 -- The options this sets, as they are for the file before it does
 local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-colorspace-hint" }
@@ -54,10 +72,19 @@ local TAG_LABEL = "dlogm"
 local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
 
 local mode = o.mode == "sdr" and "sdr" or "hdr"
--- For the current file: the user's own values of what this changes, and the mode it's in (nil: untouched)
+-- For the current file: the user's own values of what this changes, its log curve, and the mode it's in (nil:
+-- untouched)
 local base = nil
+local curve = nil
 local current = nil
 local announce = false
+
+local function label(m)
+    local name = (curve or CURVE.dlogm).name
+    if m == "hdr" then return name .. " -> HDR" end
+    if m == "sdr" then return name .. " -> Rec.709" end
+    return name .. " handling off: the file as it is"
+end
 
 local function file_exists(path)
     local info = utils.file_info(path)
@@ -73,13 +100,28 @@ local function plugin_file(name)
     return nil
 end
 
-local function is_dlogm(path)
-    if path:find("://", 1, true) then return false end
+-- The file's log curve from the camera's metadata, nil when it isn't one (or can't be told)
+local function recorded_curve(path)
+    if path:find("://", 1, true) then return nil end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
-    local color = PROBED_EXTENSIONS[ext] and dji_color.read(path) or nil
-    if not color then return false end
-    mp.msg.verbose("recorded in " .. color)
-    return color == "dlogm"
+    if not PROBED_EXTENSIONS[ext] then return nil end
+    local color = dji_color.read(path)
+    if color then
+        mp.msg.verbose("recorded in " .. color)
+        return CURVE[DJI_CURVES[color]]
+    end
+    local camera, firmware
+    color, camera, firmware = gopro_color.read(path)
+    if color then
+        mp.msg.verbose("Protune color " .. color .. " on " .. (camera or "a GoPro") .. ", firmware " .. (firmware or "?"))
+        local id = GOPRO_CURVES[color]
+        if id == "gplog" and not (GPLOG_FIRMWARE[camera] and firmware and firmware >= GPLOG_FIRMWARE[camera]) then
+            mp.msg.info("GP-Log from " .. (camera or "this GoPro") .. ": not what the GP-Log LUT is made for (Ctrl+l)")
+            return nil
+        end
+        return CURVE[id]
+    end
+    return nil
 end
 
 -- The video tagged as HLG (on) or as the file says (off). The filter stays in the chain once added, disabled when
@@ -103,10 +145,16 @@ end
 
 local function apply(m)
     if not base then return false end
-    local shader = SHADERS[m] and plugin_file(SHADERS[m])
-    if SHADERS[m] and not shader then
-        mp.msg.warn("missing " .. SHADERS[m] .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
-        mp.osd_message(LABELS[m] .. ": its shader isn't installed", 3)
+    local c = curve or CURVE.dlogm
+    if m == "sdr" and not c.sdr then
+        mp.osd_message(c.name .. ": no Rec.709 LUT for it yet", 3)
+        return false
+    end
+    local name = c[m]
+    local shader = name and plugin_file(name)
+    if name and not shader then
+        mp.msg.warn("missing " .. name .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
+        mp.osd_message(label(m) .. ": its shader isn't installed", 3)
         return false
     end
     local shaders = {}
@@ -122,8 +170,8 @@ local function apply(m)
     end
     tag_hlg(m == "hdr")
     mp.set_property_native("file-local-options/glsl-shaders", shaders)
-    for _, name in ipairs(TARGET_OPTIONS) do
-        mp.set_property("file-local-options/" .. name, target[name])
+    for _, opt in ipairs(TARGET_OPTIONS) do
+        mp.set_property("file-local-options/" .. opt, target[opt])
     end
     current = m
     return true
@@ -131,40 +179,55 @@ end
 
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function()
-    base, current, announce = nil, nil, false
+    base, curve, current, announce = nil, nil, nil, false
     local path = mp.get_property("path")
     if not path then return end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
-    for _, name in ipairs(TARGET_OPTIONS) do base.target[name] = mp.get_property(name) end
-    if not is_dlogm(path) then
-        mp.msg.verbose("not D-Log M")
+    for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end
+    curve = recorded_curve(path)
+    if not curve then
+        mp.msg.verbose("not log footage it knows")
         return
     end
-    announce = apply(mode)
-    if announce then mp.msg.info(LABELS[mode]) end
+    -- A curve without a Rec.709 LUT starts in HDR whatever the mode
+    announce = apply(curve.sdr and mode or "hdr")
+    if announce then mp.msg.info(label(current)) end
 end)
 
 mp.register_event("file-loaded", function()
-    if announce then mp.osd_message(LABELS[current], 1.5) end
+    if announce then mp.osd_message(label(current), 1.5) end
     announce = false
 end)
 
-mp.register_event("end-file", function() base, current = nil, nil end)
+mp.register_event("end-file", function() base, curve, current = nil, nil, nil end)
 
 local function choose(m, sticky)
     return function()
         if not base then return end
         if current == m then
-            mp.osd_message(LABELS[m], 1.5)
+            mp.osd_message(label(m), 1.5)
             return
         end
         if apply(m) then
             if sticky then mode = m end
-            mp.osd_message(LABELS[m], 2)
+            mp.osd_message(label(m), 2)
         end
     end
+end
+
+-- The next curve for this file, shown the way the file is shown now (HDR when it was off or untouched)
+local function next_curve()
+    if not base then return end
+    local i = 0
+    for k, c in ipairs(CURVES) do
+        if c == curve then i = k end
+    end
+    curve = CURVES[i % #CURVES + 1]
+    local m = current == "sdr" and curve.sdr and "sdr" or "hdr"
+    if apply(m) then mp.osd_message(label(m), 2) end
 end
 
 mp.add_key_binding("Ctrl+h", "hdr", choose("hdr", true))
 mp.add_key_binding("Ctrl+s", "sdr", choose("sdr", true))
 mp.add_key_binding("L", "off", choose("off", false))
+mp.add_key_binding("Ctrl+l", "curve", next_curve)

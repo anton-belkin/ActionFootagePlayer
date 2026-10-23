@@ -1,0 +1,22 @@
+// A log curve -> Rec.2100 HLG (1000-nit) at HOOK MAIN, mpv-standalone only: dlog_hlg.glsl, gplog_hlg.glsl,
+// gplog2_hlg.glsl and ilog_hlg.glsl, baked from their LUTs. The same as dlogm_hlg.glsl.in, which says why: the dlogm
+// plugin tags the video and the target as HLG/BT.2020, so mpv passes the LUT's HLG output through unchanged.
+
+//!TEXTURE HLGLUT
+//!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
+//!FORMAT rgba16
+//!FILTER LINEAR
+//!BORDER CLAMP
+@LUT_DATA@
+
+//!HOOK MAIN
+//!BIND HOOKED
+//!BIND HLGLUT
+//!DESC Log -> Rec.2100 HLG
+
+vec4 hook() {
+    vec4 c = HOOKED_tex(HOOKED_pos);
+    const float N = @LUT_SIZE@.0;
+    vec3 lut_coord = clamp(c.rgb, 0.0, 1.0) * ((N - 1.0) / N) + (0.5 / N);
+    return vec4(texture(HLGLUT, lut_coord).rgb, c.a);
+}

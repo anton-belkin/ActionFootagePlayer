@@ -1,9 +1,9 @@
 #!/bin/bash
 # Installs the three mpv plugins into mpv's config directory. Re-run it after pulling changes.
 #
-#   ./install.sh           the plugins: scripts/dlogm (D-Log M; its shaders are baked here, with DJI's LUT downloaded
-#                          from DJI), scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/) and
-#                          scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
+#   ./install.sh           the plugins: scripts/dlogm (D-Log M and other log curves; its shaders are baked here, with
+#                          DJI's LUT downloaded from DJI), scripts/gyroflow (stabilization, with the binaries built
+#                          from vs-gyroflow/) and scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
 #                          none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
@@ -32,6 +32,8 @@ OLD_PLAYER_ID="io.github.anton-belkin.steady-player"
 ROUTER_NAME="Steady Router"
 ROUTER_IDS="io.github.anton-belkin.steady-router com.antonbelkin.dji-router io.github.dji-router"
 BUILD=build
+# The log curves besides D-Log M with an HDR shader, from tools/make_hdr_lut.py (the dlogm plugin's CURVES)
+HDR_CURVES="dlog gplog2 ilog"
 
 macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
@@ -85,6 +87,13 @@ sh macos/setup.sh fetch-lut "$lut"
 echo "== Shaders"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$lut" "$BUILD/dlogm_lut3d.glsl"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$BUILD/dlogm_hlg.glsl"
+# The other log curves' HDR LUTs, made from their makers' published formulas
+for curve in $HDR_CURVES; do
+    python3 -I tools/make_hdr_lut.py "$curve" "$BUILD/${curve}_hlg.cube"
+    python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$BUILD/${curve}_hlg.cube" "$BUILD/${curve}_hlg.glsl"
+done
+# GP-Log's, from Zeb Gardner's LUT (luts/gplog_hlg.cube)
+python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$BUILD/gplog_hlg.glsl"
 
 if [ "$BIN" != bin ]; then
     echo "== Gyroflow plugin"
@@ -176,7 +185,11 @@ fi
 # The dlogm plugin
 put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
+put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
+for curve in $HDR_CURVES gplog; do
+    put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
+done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
