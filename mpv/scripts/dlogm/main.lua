@@ -1,8 +1,9 @@
--- dlogm: log video (DJI D-Log M, and D-Log, GoPro GP-Log2, Insta360 10-bit I-Log) shown in HDR, as mpv plays it. An
--- mpv plugin: this folder goes into ~~/scripts/.
+-- dlogm: log video (DJI D-Log M, and D-Log, GoPro GP-Log and GP-Log2, Insta360 10-bit I-Log) shown in HDR, as mpv
+-- plays it. An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- The log curve is recognized by what the camera wrote into the file: DJI's color profile (dji_color.lua: Osmo
--- Action 6, Osmo 360) and GoPro's Protune color (gopro_color.lua: PTCL GPLOG2). DJI tags D-Log M video as BT.709
+-- Action 6, Osmo 360) and GoPro's Protune color (gopro_color.lua: PTCL GPLOG2, or LOG from a HERO12 Black on
+-- firmware 1.20 or later or a HERO13 Black, where GP-Log is what its LUT is for). DJI tags D-Log M video as BT.709
 -- and names Normal-color clips *_D.MP4 too, so the metadata is the only reliable sign. Files it can't tell (other
 -- DJI models, Insta360) play as they are; Ctrl+l picks the curve for one by hand.
 --
@@ -11,8 +12,8 @@
 --        labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result through as it
 --        is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR display macOS
 --        tone-maps the HLG output down, which looks better than an explicit SDR fallback. D-Log M's LUT is
---        luts/dlogm_hlg.cube; the others are made by tools/make_hdr_lut.py from their makers' published formulas
---        (docs/luts.md).
+--        luts/dlogm_hlg.cube and GP-Log's luts/gplog_hlg.cube, both from Zeb Gardner's LUTs; the others are made
+--        by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
 --   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
 --   off  the file as it is, flat as the camera recorded it
 --
@@ -20,7 +21,7 @@
 --   Ctrl+h  hdr    this file, and log files after it
 --   Ctrl+s  sdr    this file, and log files after it
 --   L       off    this file
---   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log2, I-Log (10-bit) in turn
+--   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   mode=hdr     what log files start in: hdr or sdr
@@ -50,6 +51,7 @@ table.insert(DIRS, DIR)
 local CURVES = {
     { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl" },
     { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
+    { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
     { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
     { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
 }
@@ -57,7 +59,10 @@ local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- What the cameras' metadata says, as a curve
 local DJI_CURVES = { dlogm = "dlogm", dlog = "dlog" }
-local GOPRO_CURVES = { GPLOG2 = "gplog2" }
+local GOPRO_CURVES = { GPLOG2 = "gplog2", LOG = "gplog" }
+-- GP-Log as gplog_hlg.cube is made for: by the firmware where GoPro's own LUTs put 18 % grey where it does. Earlier
+-- HERO12 firmware recorded 2 stops darker, MAX2 2 stops brighter: their clips play as they are (Ctrl+l still works)
+local GPLOG_FIRMWARE = { ["HERO12 Black"] = 1.20, ["HERO13 Black"] = 0 }
 local PROBED_EXTENSIONS = { mp4 = true, mov = true }
 -- The options this sets, as they are for the file before it does
 local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-colorspace-hint" }
@@ -105,10 +110,16 @@ local function recorded_curve(path)
         mp.msg.verbose("recorded in " .. color)
         return CURVE[DJI_CURVES[color]]
     end
-    color = gopro_color.read(path)
+    local camera, firmware
+    color, camera, firmware = gopro_color.read(path)
     if color then
-        mp.msg.verbose("Protune color " .. color)
-        return CURVE[GOPRO_CURVES[color]]
+        mp.msg.verbose("Protune color " .. color .. " on " .. (camera or "a GoPro") .. ", firmware " .. (firmware or "?"))
+        local id = GOPRO_CURVES[color]
+        if id == "gplog" and not (GPLOG_FIRMWARE[camera] and firmware and firmware >= GPLOG_FIRMWARE[camera]) then
+            mp.msg.info("GP-Log from " .. (camera or "this GoPro") .. ": not what the GP-Log LUT is made for (Ctrl+l)")
+            return nil
+        end
+        return CURVE[id]
     end
     return nil
 end

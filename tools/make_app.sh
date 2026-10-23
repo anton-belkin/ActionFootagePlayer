@@ -71,6 +71,7 @@ for curve in dlog gplog2 ilog; do
     python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$cubes/$curve.cube" "$dlogm/shaders/${curve}_hlg.glsl" >/dev/null
 done
 rm -rf "$cubes"
+python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$dlogm/shaders/gplog_hlg.glsl" >/dev/null
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"

@@ -88,8 +88,8 @@ useful right now:
   [What to shoot and how to share it](#other-cameras-and-how-to-help); if you can't share the video, its metadata
   alone helps.
 - **Trying it on Linux or Windows**, and telling how it went.
-- **Knowing GP-Log (HERO12/13, MAX2) or Insta360's 8-bit I-Log well**: their gamut and curve aren't published,
-  and they're the missing piece for those cameras (GP-Log2 and 10-bit I-Log are done from their makers' formulas).
+- **Knowing Insta360's 8-bit I-Log well**, or GP-Log on a MAX2: their transforms are the missing piece for those
+  cameras (D-Log, GP-Log2 and 10-bit I-Log are done from their makers' formulas, GP-Log from Zeb Gardner's LUT).
 - **Code**: Lua (the plugins), Rust (`vs-gyroflow/`), GLSL shaders. Issues and pull requests welcome.
 
 ---
@@ -105,7 +105,7 @@ this reads):
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | should work, with a project |
-| GoPro | should work: HDR from GP-Log2 (MISSION 1) ⁴. Not yet: GP-Log | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
+| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | should work, with a project |
 
@@ -122,8 +122,8 @@ only the plugins in an mpv you start yourself:
 2. The stabilization and the export need an mpv built with VapourSynth, and binaries for macOS on Apple Silicon,
    Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
-4. From the makers' published formulas ([Other log curves](#other-log-curves)), checked against the makers' own
-   LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), and not in exports yet. `Ctrl+l`
+4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
+   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), and not in exports yet. `Ctrl+l`
    picks the curve for a clip whose metadata doesn't say it.
 
 ## Install
@@ -179,7 +179,7 @@ them with ActionFootagePlayer from Finder's Open With, or right click → Quick 
 | `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
-| `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
+| `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -473,7 +473,7 @@ camera's metadata is read from (what has been tried: [What works, camera by came
 | DJI Osmo Action 6 | yes | D-Log M | yes |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
 | Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log (`LOG`): no transform yet, its gamut isn't published | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
@@ -512,7 +512,7 @@ It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works wit
 ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT; D-Log,
-  GoPro's GP-Log2 and Insta360's 10-bit I-Log in HDR. Plain Lua and GPU shaders, so it runs in any mpv on any
+  GoPro's GP-Log and GP-Log2, and Insta360's 10-bit I-Log in HDR. Plain Lua and GPU shaders, so it runs in any mpv on any
   system (`vo=gpu-next`).
 - **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
   Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
@@ -546,9 +546,10 @@ The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl
 
 ### Other log curves
 
-D-Log, GP-Log2 and 10-bit I-Log get the same `hdr` mode, a 65³ LUT to Rec.2100 HLG at `HOOK OUTPUT`
-(`shaders/log_hlg.glsl.in`). Their LUTs aren't in the repo: `tools/make_hdr_lut.py` makes them at install from
-each maker's own publication, which [docs/luts.md](docs/luts.md) lists with the rest of what the makers publish:
+D-Log, GP-Log, GP-Log2 and 10-bit I-Log get the same `hdr` mode as D-Log M, a 65³ LUT to Rec.2100 HLG at
+`HOOK MAIN` (`shaders/log_hlg.glsl.in`). D-Log's, GP-Log2's and I-Log's aren't in the repo: `tools/make_hdr_lut.py`
+makes them at install from each maker's own publication, which [docs/luts.md](docs/luts.md) lists with the rest of
+what the makers publish:
 
 | Curve | Decoding, and the gamut | From |
 |---|---|---|
@@ -563,15 +564,22 @@ gives GoPro's Rec.709 LUT to within 0.001 in the mid-tones; 18 % grey lands wher
 DJI's (Zenmuse X9) D-Log → HLG LUTs put it, theirs with a contrast curve on top; and rebuilt this way from Zeb
 Gardner's D-Log M → DWG/I, D-Log M comes within about 0.025 of `dlogm_hlg.cube` on natural colors.
 
-The tool takes any LUT that ends in DaVinci Wide Gamut/Intermediate too (`--from-dwgi`), such as Zeb Gardner's
-GP-Log → DWG/I, which isn't redistributed here:
+GoPro publishes no gamut for GP-Log, so its LUT, `luts/gplog_hlg.cube`, is made from
+[Zeb Gardner](https://www.zebgardner.com/photo-and-video-editing/gopro-log-color-management-accuracy-testing)'s
+GP-Log → DaVinci Wide Gamut/Intermediate shaper LUT, fitted from test charts, with the same rendering. The tool
+takes any LUT that ends in DWG/I (`--from-dwgi`), and keeps its comments and `--note`s as credits:
 
 ```bash
-python3 tools/make_hdr_lut.py --from-dwgi GP_LOG-to-DWG_I-ZRG-V1-j3dz.cube gplog_hlg.cube
+python3 tools/make_hdr_lut.py --from-dwgi GP_LOG-to-DWG_I-ZRG-V1-j3dz.cube luts/gplog_hlg.cube --note "..."
 ```
 
+GoPro moved GP-Log's exposure with firmware: its own LUTs put 18 % grey at GP-Log 0.33 for HERO12 Black firmware
+1.10/1.12, 0.53 for 1.20 and later and for HERO13 Black, 0.72 for MAX2. Zeb Gardner's puts it at 0.50, so only
+the middle ones are recognized as GP-Log; the others would play two stops off, and `Ctrl+l` picks it for them by
+hand.
+
 Which curve a clip is in: DJI's `ColorMode` (2 is D-Log, from the same metadata as D-Log M), GoPro's `PTCL`
-(`mpv/scripts/dlogm/gopro_color.lua`), or `Ctrl+l`.
+with the camera and firmware (`mpv/scripts/dlogm/gopro_color.lua`), or `Ctrl+l`.
 
 ### Gyroflow
 
@@ -620,6 +628,7 @@ mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/d
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
+luts/gplog_hlg.cube           GoPro GP-Log → Rec.2100 HLG LUT
 tools/cube_to_glsl.py         .cube → mpv shader
 tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) → Rec.2100 HLG LUT, from the makers'
                               formulas
@@ -651,9 +660,14 @@ Camera metadata (motion data, lens, in-camera stabilization) is read by Adrian E
 `luts/dlogm_hlg.cube` (D-Log M → Rec.2100 HLG, 1000-nit, no DaVinci DRT) was composed in DaVinci Resolve
 from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide Gamut/Intermediate shaper LUT
 (`DLOGM_DWG_I_SHAPER_ZRG_V1`); the HLG output stage and the bake are this project's. Thanks to Zeb Gardner for
-the underlying transform. His site doesn't state a license for the shaper; it's used here with credit, and
-will be changed if he asks. The HDR rendering of the other log curves is fitted to that LUT, so it builds on his
-transform too.
+the underlying transform.
+
+`luts/gplog_hlg.cube` (GoPro GP-Log → Rec.2100 HLG) is made by `tools/make_hdr_lut.py` from Zeb Gardner's GP-Log →
+DaVinci Wide Gamut/Intermediate shaper LUT (`GP_LOG to DWG_I ZRG V1`, from his
+[GoPro Log accuracy testing](https://www.zebgardner.com/photo-and-video-editing/gopro-log-color-management-accuracy-testing)).
+
+His site states no license for his LUTs; Zeb Gardner has agreed to their use here, with this credit. The HDR
+rendering of the other log curves is fitted to `dlogm_hlg.cube`, so it builds on his work too.
 
 The other log curves are decoded from their makers' own publications (`tools/make_hdr_lut.py`, which says the
 same in every LUT it writes):

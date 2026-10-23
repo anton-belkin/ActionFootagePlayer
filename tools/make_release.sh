@@ -77,6 +77,9 @@ for curve in dlog gplog2 ilog; do
         "dist/$dlogm/dlogm/shaders/${curve}_hlg.glsl" >/dev/null
     rm "dist/${curve}_hlg.cube"
 done
+git show HEAD:luts/gplog_hlg.cube > dist/gplog_hlg.cube
+python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in dist/gplog_hlg.cube "dist/$dlogm/dlogm/shaders/gplog_hlg.glsl" >/dev/null
+rm dist/gplog_hlg.cube
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 

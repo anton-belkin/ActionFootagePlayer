@@ -44,10 +44,10 @@ conversion (as `luts/dlogm_hlg.cube`), or a published curve and gamut to build o
 | | Mavic 4 Pro; Osmo Pocket 4, 4P | DJI's V1, one file for all three; Pocket 4 and 4P each have their own V2 (2026) and vivid | as above, if it's the same D-Log | as above |
 | | Zenmuse X9 (Inspire 3, Ronin 4D) | DJI's | **DJI's LUT to Rec.2020 HLG** | — (not a camera this player targets) |
 | DJI D-Log2 | Osmo Pocket 4P | DJI's, 33 and 65, plain and vivid | no LUT; a D-Log2/D-Gamut2 ACES transform said to be DJI's (copies only, below), an MIT one (AJ3DVFX), Gamut's BaseLUTs to DWG ($35) | DJI's own publication; metadata |
-| GoPro GP-Log | HERO12 Black, firmware 1.10/1.12 | GoPro's, 16³, one per white balance | no GoPro LUT. **GP-Tune LUT Pack ($19): LUTs to PQ and HLG** (HERO9–12, +2/+3 EV); free to DWG/I: Zeb Gardner's, which `tools/make_hdr_lut.py --from-dwgi` turns into an HLG LUT (not shipped: no license); curve known (Protune log, base 400), gamut only fitted | the gamut from GoPro; firmware version from the file |
-| | HERO12 Black, firmware 1.20 | GoPro's | as above | as above |
-| | HERO12 Black firmware 2.00+, HERO13 Black | GoPro's, one file | as above (GP-Tune lists models up to HERO12) | as above |
-| | MAX2 | GoPro's, technical and creative | as above, none MAX2-specific | as above |
+| GoPro GP-Log | HERO12 Black, firmware 1.10/1.12 | GoPro's, 16³, one per white balance | no GoPro LUT. Ours, `luts/gplog_hlg.cube`, from Zeb Gardner's GP-Log → DWG/I (with his permission), but these record 18 % grey at 0.33, not its 0.50: by hand only. **GP-Tune LUT Pack ($19): LUTs to PQ and HLG** (HERO9–12, +2/+3 EV); curve known (Protune log, base 400), gamut only fitted | the gamut from GoPro |
+| | HERO12 Black, firmware 1.20 | GoPro's | **ours, `luts/gplog_hlg.cube`** (grey at 0.54 in GoPro's LUT, 0.50 in Zeb Gardner's), recognized from `PTCL`, `MINF`, `FIRM` | footage to check it on |
+| | HERO12 Black firmware 2.00+, HERO13 Black | GoPro's, one file | as above (grey at 0.53 in GoPro's LUT) | as above |
+| | MAX2 | GoPro's, technical and creative | ours by hand only: GoPro's MAX2 LUT puts grey at 0.72, two stops from Zeb Gardner's | a MAX2 transform |
 | | HERO11 Black (Labs firmware, `WIDE=1`, log base 400) | only the Labs maintainer's, unofficial | as above (GP-Tune has Labs WIDE) | an official LUT |
 | GoPro GP-Log2 | MISSION 1, MISSION 1 PRO | GoPro's, five (technical, creative, 33 and 65) | **ours, `tools/make_hdr_lut.py gplog2`**, from GoPro Labs' own LUT generator (log base 600, Rec.2020, Apache-2.0), matching GoPro's Rec.709 LUT in the mid-tones; detected by `PTCL` | footage to check it on |
 | Insta360 10-bit I-Log | X6; Luna Ultra, Luna Pro | Insta360's, one set for all | **ours, `tools/make_hdr_lut.py ilog`**, from the white paper's curve and BT.2020 gamut; Insta360's own LUTs to HLG and PQ too (a contrast curve on top), not shipped | metadata (`Ctrl+l` meanwhile); footage to check it on |
@@ -91,7 +91,8 @@ Third-party, free:
   `d4a392c59efcca0b394d41e72dc7e0c8b05489218110680ec012d849ddada34a`) and GP-Log → DWG/I
   (`GP_LOG-to-DWG_I-ZRG-V1-j3dz.cube`, `aff985958704a8c03e5684ae6a165f354b8a3ec083a7bfefe1293a5848225b4a`), 1D
   shaper + 65³, fitted from test charts; also a D-Log2 → Rec.709 LUT (`/s/D_log2-to-Rec709.cube`). No license
-  stated: download at install, or ask him.
+  stated, but he has agreed to this project's use of them: `luts/dlogm_hlg.cube` and `luts/gplog_hlg.cube` are
+  made from them, with credit.
 - **Thatcher Freeman**, [thatcherfreeman/dwg-transforms](https://github.com/thatcherfreeman/dwg-transforms):
   DCTLs to DWG with a fitted curve and estimated primaries **per camera**: D-Log M for Action 5, Air 2S,
   Mavic 2 Pro, Mavic 3 Pro, Mini 4 Pro, Mini 5 Pro, Pocket 3; D-Log for Mavic 3 Pro Cine and Phantom 4; D-Log2;

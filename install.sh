@@ -92,6 +92,8 @@ for curve in $HDR_CURVES; do
     python3 -I tools/make_hdr_lut.py "$curve" "$BUILD/${curve}_hlg.cube"
     python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$BUILD/${curve}_hlg.cube" "$BUILD/${curve}_hlg.glsl"
 done
+# GP-Log's, from Zeb Gardner's LUT (luts/gplog_hlg.cube)
+python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$BUILD/gplog_hlg.glsl"
 
 if [ "$BIN" != bin ]; then
     echo "== Gyroflow plugin"
@@ -185,7 +187,7 @@ put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
 put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
-for curve in $HDR_CURVES; do
+for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
 done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644

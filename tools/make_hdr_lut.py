@@ -2,7 +2,7 @@
 """Make a log -> Rec.2100 HLG .cube LUT from a log curve's published formulas, like luts/dlogm_hlg.cube is for D-Log M.
 
     make_hdr_lut.py <curve> <out.cube> [--size N]
-    make_hdr_lut.py --from-dwgi <in.cube> <out.cube> [--size N]
+    make_hdr_lut.py --from-dwgi <in.cube> <out.cube> [--size N] [--note <line>]...
 
 Curves, each from its maker's own publication (docs/luts.md has the sources):
   dlog    DJI D-Log / D-Gamut: DJI's ACES input transform, Dlog_DGamut_to_ACES_AP0_cat02_v1, in DJI's "ACES Workflow
@@ -13,7 +13,8 @@ Curves, each from its maker's own publication (docs/luts.md has the sources):
   ilog    Insta360 10-bit I-Log, BT.2020 primaries: the Insta360 10-bit I-Log White Paper (v1.0, June 2026). X6, Luna
           Ultra, Luna Pro; not the 8-bit I-Log of older models.
 --from-dwgi takes a LUT whose output is DaVinci Wide Gamut / DaVinci Intermediate (Blackmagic Design's published
-spaces), such as Zeb Gardner's GP-Log -> DWG/I, and its comment lines (its author) go into the output's header.
+spaces), such as Zeb Gardner's GP-Log -> DWG/I, and its comment lines (its author) go into the output's header, with
+each --note (where it comes from, its terms) after them.
 
 All of them render the same way: scene light, with 18 % grey at 0.18, is scaled by 0.254 and rolled off by
 x / (1 + (x/0.69)^1.5)^(1/1.5) per channel, then HLG-encoded (ITU-R BT.2100) in Rec.2020. Those numbers are fitted
@@ -216,16 +217,20 @@ def write_cube(path, size, header, transform):
 
 def main():
     args = sys.argv[1:]
-    size = 65
+    size, notes = 65, []
     if '--size' in args:
         k = args.index('--size')
         size = int(args[k + 1])
+        del args[k:k + 2]
+    while '--note' in args:
+        k = args.index('--note')
+        notes.append(args[k + 1])
         del args[k:k + 2]
     if len(args) == 3 and args[0] == '--from-dwgi':
         cube = read_cube(args[1])
         m = to_rec2020(DWG)
         header = ['Rec.2100 HLG (Rec.2020, 1000-nit reference), from a LUT to DaVinci Wide Gamut/Intermediate,',
-                  f'{os.path.basename(args[1])}, which says:', *cube[2], '']
+                  f'{os.path.basename(args[1])}, which says:', *cube[2], *notes, '']
 
         def transform(rgb):
             return render(mul(m, [davinci_intermediate(v) for v in apply_cube(cube, rgb)]))
