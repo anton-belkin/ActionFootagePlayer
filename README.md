@@ -13,8 +13,8 @@ ready for your phone.
      2. a 5-second GIF: an underwater clip, shaky | stabilized, with the depth in the corner -->
 
 > **Status: early (alpha).** In daily use with the **DJI Osmo Action 6** on **Macs with Apple Silicon**. Other DJI
-> cameras, GoPro and Insta360 are built for but not yet tried on real footage; Linux and Windows have the plugins
-> only, not yet tried. [What works with your camera](#what-works-camera-by-camera) ·
+> cameras, GoPro and Insta360 are built for but not yet tried on real footage. Windows has an app of its own and Linux
+> the plugins, neither tried yet. [What works with your camera](#what-works-camera-by-camera) ·
 > [Help it work with yours](#help-it-work-with-your-camera)
 
 ## What you get
@@ -114,8 +114,8 @@ published metadata layout or sample clips, but not tried on real footage yet. **
 Export renders what plays, so it covers the clips that play stabilized. Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
-The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet, where there's no app,
-only the plugins in an mpv you start yourself:
+The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet: the Windows app
+carries the same plugins, and on Linux they're in an mpv of your own:
 
 1. D-Log M is plain Lua and GPU shaders, for any mpv on any system. Whether HDR reaches the screen there depends on
    mpv and the system. The Rec.709 LUT is baked in from a checkout of this repo (`install.sh` does it on Linux).
@@ -133,6 +133,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | For | File |
 |---|---|
 | a Mac with Apple Silicon (macOS 11 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins in it |
+| a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with mpv, VapourSynth and ffmpeg in it |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
 
@@ -155,6 +156,13 @@ it opens, it offers its setup:
 
 Coming from Steady Player, as the app was called up to 0.3.0: see [Upgrading](#upgrading).
 
+**On Windows**, run the installer: it needs nothing else installed and no admin rights (it installs for you alone,
+in `%LOCALAPPDATA%\Programs\ActionFootagePlayer`). It isn't signed, so Windows SmartScreen warns about it the first
+time: More info → Run anyway. It puts ActionFootagePlayer in Open With for MP4 and MOV videos, and Explorer's menu
+for them gets *Play in ActionFootagePlayer* and *Stabilize + LUT* (on Windows 11 under Show more options). It
+downloads DJI's Rec.709 LUT, and, if you leave that ticked, opens Settings to make it the default app for MP4
+videos: Windows doesn't let an app do that itself. See [The Windows app](#the-windows-app).
+
 **The plugins**: unzip them into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\` on
 Windows); nothing goes in `mpv.conf` or `input.conf`. DJI's Rec.709 LUT and the stabilization take a step more:
 see [Plugins in your own mpv](#plugins-in-your-own-mpv) and [Linux and Windows](#linux-and-windows).
@@ -169,6 +177,10 @@ them with ActionFootagePlayer from Finder's Open With, or right click → Quick 
 - **Play Stabilized** opens the selected videos in ActionFootagePlayer.
 - **Stabilize + LUT** exports them (see [Exporting](#exporting)) in the background, with a notification as each
   one is done.
+
+On Windows, the same two are in Explorer's menu for MP4 and MOV videos: *Play in ActionFootagePlayer*, and
+*Stabilize + LUT*, which exports in a window of its own that shows how it goes (videos sent while it runs are
+exported after the others, in the same window).
 
 ### Keys
 
@@ -422,7 +434,9 @@ None of it has been tried there by hand yet (the release builds it on Linux and 
 Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip`
 into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
 next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all three plugins (with
-DJI's LUT, as on a Mac); `--apps` is macOS's.
+DJI's LUT, as on a Mac). With `--apps` it also puts ActionFootagePlayer in the applications menu: the same mpv, by
+its own name and icon (`~/.local/share/applications/`), made the default app for MP4 videos. On Windows, the app
+has all of it: [The Windows app](#the-windows-app).
 
 What differs from macOS:
 
@@ -435,6 +449,19 @@ What differs from macOS:
   second rather than at a background priority. Notifications are `notify-send` on Linux; on Windows, mpv's own
   message.
 - The log is `~/.local/state/vs-gyroflow.log` on Linux and `%LOCALAPPDATA%\vs-gyroflow.log` on Windows.
+
+### The Windows app
+
+The installer (`tools/make_windows_app.sh`, `windows/`) puts everything in the app's folder, so nothing else needs
+installing: mpv ([shinchiro's build](https://github.com/shinchiro/mpv-winbuild-cmake), with VapourSynth support,
+and with the app's icon), Python with VapourSynth, the VC++ runtime VapourSynth needs, ffmpeg and ffprobe for exports
+([Gyan's build](https://www.gyan.dev/ffmpeg/builds/)), and the plugins. `ActionFootagePlayer.exe`
+(`windows/launcher/`) starts that mpv with the plugins and tells it where VapourSynth is. Like the Mac app, it reads
+your `%APPDATA%\mpv` (`mpv.conf`, `input.conf`, `script-opts\`), uses a copy of a plugin there instead of its own,
+and plays a video opened while one plays in its place. What's yours is in `%LOCALAPPDATA%\ActionFootagePlayer\`:
+DJI's LUT and its shader (`dlogm\`, fetched in the background if the installer couldn't), and your own default
+preset if you make one (`gyroflow\default.gyroflow`); uninstalling leaves it. The stabilization renders on DirectX 12
+or Vulkan.
 
 ### What the app keeps where
 
@@ -646,11 +673,17 @@ macos/                        ActionFootagePlayer: player.sh (the app's executab
                               the Quick Actions' export script
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
-tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns (renders with Google Chrome)
+windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
+                              gives mpv.exe the app's icon (Rust, no dependencies)
+windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
+windows/AppIcon.ico           the Windows app's icon (tools/make_icon.sh, tools/png_to_ico.py)
+tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python, VapourSynth and ffmpeg pinned
+tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
 tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for Linux or Windows
-.github/workflows/release.yml builds the release on macOS, Linux and Windows and publishes it for a pushed v* tag
+.github/workflows/release.yml builds the release on macOS, Linux and Windows (with the Windows app) and publishes it
+                              for a pushed v* tag
 ```
 
 ## License

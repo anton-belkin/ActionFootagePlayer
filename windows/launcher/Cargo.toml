@@ -1,0 +1,21 @@
+[package]
+name = "action-footage-player"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "ActionFootagePlayer for Windows: starts the mpv it carries with the plugins, VapourSynth and its Python"
+
+# Nothing but the standard library and a few Win32 calls
+[dependencies]
+
+[[bin]]
+name = "ActionFootagePlayer"
+path = "src/main.rs"
+
+[[bin]]
+name = "set-icon"
+path = "src/set_icon.rs"
+
+[profile.release]
+opt-level = "s"
+strip = true

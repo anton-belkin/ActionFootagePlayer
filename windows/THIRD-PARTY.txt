@@ -1,0 +1,23 @@
+ActionFootagePlayer for Windows carries these, unchanged except for mpv's icon (tools/make_windows_app.sh in
+https://github.com/anton-belkin/ActionFootagePlayer has the exact versions and where each was downloaded from):
+
+mpv (mpv\mpv.exe)
+    GPL 2 or later (this build includes GPL parts). Source: https://github.com/mpv-player/mpv
+    The Windows build: https://github.com/shinchiro/mpv-winbuild-cmake (its libraries and their sources are listed
+    there), downloaded from https://sourceforge.net/projects/mpv-player-windows/
+
+ffmpeg (plugins\gyroflow\ffmpeg.exe, ffprobe.exe)
+    GPL 3 (licenses\ffmpeg.txt). Source: https://ffmpeg.org. The build: https://www.gyan.dev/ffmpeg/builds/
+    (https://github.com/GyanD/codexffmpeg), which lists its libraries and their sources
+
+Python (python\)
+    PSF License (licenses\Python.txt). https://www.python.org
+
+VapourSynth (python\Lib\site-packages\vapoursynth\)
+    LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth
+
+Microsoft Visual C++ runtime (mpv\msvcp140*.dll, vcruntime140*.dll, concrt140.dll, ...)
+    Redistributable under the Visual Studio license (licenses\VC++ runtime.txt), from https://pypi.org/project/msvc-runtime/
+
+The gyroflow plugin (plugins\gyroflow\vs_gyroflow.dll, gyroflow-*.exe) is built from this project's vs-gyroflow/,
+with Gyroflow's engine (https://github.com/gyroflow/gyroflow, GPL 3).

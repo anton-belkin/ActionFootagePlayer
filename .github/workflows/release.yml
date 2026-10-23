@@ -1,5 +1,5 @@
-# The release: built on macOS (Apple Silicon) by tools/make_release.sh, and the gyroflow plugin for Linux and Windows
-# by tools/make_plugin_zip.sh. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
+# The release: built on macOS (Apple Silicon) by tools/make_release.sh, the gyroflow plugin for Linux and Windows
+# by tools/make_plugin_zip.sh, and the Windows app's installer by tools/make_windows_app.sh. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
 # release notes:
 #
 #   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
@@ -45,8 +45,9 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-x86_64.zip. Linux on the oldest Ubuntu runner, so the
-  # binaries run with older glibc too
+  # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-x86_64.zip, and on Windows the app with its installer,
+  # ActionFootagePlayer-<version>-windows-x86_64-setup.exe. Linux on the oldest Ubuntu runner, so the binaries run
+  # with older glibc too
   plugin:
     strategy:
       fail-fast: false
@@ -78,7 +79,53 @@ jobs:
       - name: Build
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           bash tools/make_plugin_zip.sh "$version"
+
+      # What the Windows app carries from elsewhere (mpv, Python, VapourSynth, ffmpeg), pinned in the script
+      - uses: actions/cache@v4
+        if: matrix.os == 'windows'
+        with:
+          path: build/windows-deps
+          key: windows-deps-${{ hashFiles('tools/make_windows_app.sh') }}
+
+      - name: Windows app
+        if: matrix.os == 'windows'
+        run: |
+          if ! command -v ISCC >/dev/null && ! ls "/c/Program Files (x86)/Inno Setup "*/ISCC.exe >/dev/null 2>&1; then
+              choco install innosetup -y --no-progress
+          fi
+          bash tools/make_windows_app.sh "$VERSION"
+          test -f "dist/ActionFootagePlayer-$VERSION-windows-x86_64-setup.exe"
+
+      # The installer installs, and the mpv in it plays through VapourSynth, with the Python in it and the gyroflow
+      # plugin loaded, the way ActionFootagePlayer.exe starts it (no GPU here: the stabilization itself isn't run)
+      - name: Windows app smoke test
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $setup = "dist\ActionFootagePlayer-$env:VERSION-windows-x86_64-setup.exe"
+          $p = Start-Process -Wait -PassThru -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/TASKS=', '/LOG=install.log'
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 30; throw "the installer failed: $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
+          foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'python\python.exe', 'plugins\gyroflow\vs_gyroflow.dll', 'plugins\gyroflow\ffmpeg.exe') {
+              if (-not (Test-Path "$app\$f")) { throw "not installed: $f" }
+          }
+          $plugin = "$app\plugins\gyroflow\vs_gyroflow.dll"
+          Set-Content -Path vs-test.vpy -Value @(
+              'import vapoursynth as vs',
+              'core = vs.core',
+              "core.std.LoadPlugin(r'$plugin')",
+              'assert hasattr(core, "gyroflow")',
+              'video_in.std.Invert().set_output()')
+          $env:VSSCRIPT_PATH = "$app\python\Lib\site-packages\vapoursynth\vsscript.dll"
+          $env:PATH = "$app\python;$env:PATH"
+          $mpv = Start-Process -Wait -PassThru -FilePath "$app\mpv\mpv.exe" -ArgumentList '--no-config', '--vo=null', '--ao=null', '--frames=10', 'av://lavfi:testsrc=duration=2:size=320x240:rate=10', "--vf=vapoursynth=file=[$PWD\vs-test.vpy]", '--log-file=mpv-vs.log'
+          Select-String -Path mpv-vs.log -Pattern 'vapoursynth|error|fatal' | Select-Object -First 20
+          if ($mpv.ExitCode -ne 0) { throw "mpv didn't play through VapourSynth: $($mpv.ExitCode)" }
+          # The setup, with the app's Python: DJI's LUT (DJI's server, so a warning only)
+          & "$app\python\python.exe" -I "$app\tools\setup.py" lut
+          if ($LASTEXITCODE -ne 0) { Write-Output "::warning::setup.py couldn't fetch DJI's LUT" }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -104,10 +151,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # One SHA256SUMS for all of it (the macOS build's has only its own files)
-          (cd dist && sha256sum *.zip *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+          (cd dist && sha256sum *.zip *.tar.gz *.exe > SHA256SUMS && cat SHA256SUMS)
           # actions/checkout leaves the tag as a lightweight one on the commit, and --notes-from-tag would then take
           # the commit's message: the tag itself, with its message
           git fetch --depth=1 --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag ] || { echo "$GITHUB_REF_NAME isn't an annotated tag" >&2; exit 1; }
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/*.exe dist/SHA256SUMS \
             --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-from-tag
