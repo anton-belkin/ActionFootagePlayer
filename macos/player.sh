@@ -4,11 +4,14 @@
 # its icon (mpv on its own would put up its own), taking the videos Finder opens with it (Apple Events, which reach
 # mpv once it's running: this script execs it). A video opened while one plays takes its place.
 #
-# mpv gets the plugins in ActionFootagePlayer.app (Contents/Resources/plugins/), except one that mpv's config has a copy
-# of (install.sh puts them there for mpv in a terminal): mpv would load both. What the plugins can't keep in the
-# app, DJI's LUT and your default preset, is in ~/Library/Application Support/ActionFootagePlayer/ (DLOGM_DATA,
-# GYROFLOW_DATA). mpv is the app's own when it has one (tools/bundle_runtime.py: in Contents/Helpers/, with Python,
-# VapourSynth and MoltenVK beside it), else Homebrew's.
+# The app is whole by itself: mpv gets the plugins in ActionFootagePlayer.app (Contents/Resources/plugins/) and no
+# others, and its settings (Contents/Resources/app.conf), with a config folder of its own,
+# ~/Library/Application Support/ActionFootagePlayer/mpv/, where the plugins keep what you set (script-opts/). An mpv
+# you may also have, its ~/.config/mpv and the plugins install.sh puts there, isn't read: the first time, only the
+# four plugins' settings are copied over from it. What the plugins can't keep in the app, DJI's LUT and your default
+# preset, is in ~/Library/Application Support/ActionFootagePlayer/ too (DLOGM_DATA, GYROFLOW_DATA). mpv is the app's
+# own when it has one (tools/bundle_runtime.py: in Contents/Helpers/, with Python, VapourSynth and MoltenVK beside
+# it), else Homebrew's.
 #
 # The first time it starts, it offers the setup (Contents/Resources/setup.sh, through setup-offer.lua): the default
 # app for MP4 videos, the Finder Quick Actions and DJI's LUT. Once asked, or once set up (setup.sh, install.sh
@@ -25,12 +28,22 @@ export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
 # Downloaded, the whole app carries the quarantine flag, and macOS would refuse the plugin's binaries
 xattr -p com.apple.quarantine "$app" >/dev/null 2>&1 && xattr -dr com.apple.quarantine "$app" 2>/dev/null
 
-config=${MPV_HOME:-$HOME/.config/mpv}
+# mpv's config folder, the app's own. The first time, the plugins' settings come over from mpv's (up to 0.6.0 the app
+# read that one)
+config="$data/mpv"
+if [ ! -d "$config" ]; then
+    mkdir -p "$config/script-opts"
+    for opts in dlogm gyroflow dji_telemetry footage_menu; do
+        from="${MPV_HOME:-$HOME/.config/mpv}/script-opts/$opts.conf"
+        [ -f "$from" ] && cp "$from" "$config/script-opts/"
+    done
+fi
 # Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up
 [ $# = 0 ] && set -- --player-operation-mode=pseudo-gui
 for plugin in gyroflow dlogm dji-telemetry footage-menu; do
-    [ -e "$config/scripts/$plugin" ] || set -- "--script=$res/plugins/$plugin" "$@"
+    set -- "--script=$res/plugins/$plugin" "$@"
 done
+set -- "--config-dir=$config" --load-scripts=no "--include=$res/app.conf" "$@"
 # The menu offers the setup again
 set -- "--script-opts-append=footage_menu-setup=$res/setup.sh" "$@"
 

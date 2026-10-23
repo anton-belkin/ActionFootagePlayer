@@ -10,7 +10,8 @@
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
 #                                        dji-telemetry, and footage-menu (the right-click menu)
-#   Contents/Resources/setup.sh          the setup (offered at first launch by setup-offer.lua), and the export script
+#   Contents/Resources/app.conf          the app's mpv settings (mpv/app.conf)
+#   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
 #   Contents/Helpers/, Frameworks/,      with BUNDLE_RUNTIME: mpv, ffmpeg and what they load, and their licenses and
@@ -88,6 +89,7 @@ install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/tele
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
+install -m 644 mpv/app.conf "$res/"
 install -m 644 macos/setup-offer.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"
