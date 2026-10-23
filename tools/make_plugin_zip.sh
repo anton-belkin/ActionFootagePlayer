@@ -39,16 +39,17 @@ rm -rf "dist/$name" "dist/$name.zip"
 mkdir -p "dist/$name"
 git archive HEAD mpv/scripts/gyroflow | tar -x --strip-components 2 -C "dist/$name"
 mv "dist/$name/gyroflow/underwater.gyroflow" "dist/$name/gyroflow/default.gyroflow"
-# Without the debug info the release profile keeps (the MSVC build has it in .pdb files, which aren't copied)
+# Without the debug info and symbols the release profile keeps (the MSVC build has them in .pdb files, which
+# aren't copied)
 case "$os-$target" in
-    linux-*) strip=strip ;;
-    windows-*-gnu) strip=x86_64-w64-mingw32-strip ;;
+    linux-*) strip="strip --strip-unneeded" ;;
+    windows-*-gnu) strip="x86_64-w64-mingw32-strip --strip-all" ;;
     *) strip= ;;
 esac
 for f in $files; do
     cp "$bin/$f" "dist/$name/gyroflow/$f"
     chmod 755 "dist/$name/gyroflow/$f"
-    [ -z "$strip" ] || "$strip" --strip-debug "dist/$name/gyroflow/$f"
+    [ -z "$strip" ] || $strip "dist/$name/gyroflow/$f"
 done
 
 # zip isn't in Git Bash; Python's keeps the executable bits too
