@@ -71,8 +71,8 @@ brew install mpv ffmpeg
 ```
 
 Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
-account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. Opened on its
-own, it offers its setup:
+account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
+it opens, it offers its setup:
 
 - it becomes the default app for MP4 videos (what DJI cameras record): double-clicking one plays it with all
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
@@ -365,8 +365,11 @@ your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. Th
 what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
 your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
 
-ActionFootagePlayer starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
-mpv stayed tied to it and macOS throttled it as a background process.
+ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts Homebrew's
+mpv with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
+its icon, and gets the videos Finder opens with it. A video opened while one plays takes its place. mpv's own menu
+items still say mpv (About mpv, Quit mpv). The setup is offered from inside mpv (`macos/setup-offer.lua`), once
+it runs.
 
 ### Upgrading
 
@@ -514,8 +517,9 @@ luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is
 tools/cube_to_glsl.py         .cube → mpv shader
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
-macos/                        ActionFootagePlayer: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
-                              DJI's LUT), default-app.py, the Quick Actions' export script
+macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
+                              Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
+                              the Quick Actions' export script
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
 tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns (renders with Google Chrome)
