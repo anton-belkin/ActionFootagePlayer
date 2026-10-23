@@ -110,7 +110,7 @@ this reads):
 
 **verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
 published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
-Export renders what plays, so it covers the clips that play stabilized. Details, and how clips from your camera
+Export covers the clips that play stabilized, and not all of what plays yet: see [Known issues](#known-issues). Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet, where there's no app,
@@ -690,3 +690,19 @@ same in every LUT it writes):
 - Insta360 10-bit I-Log: Insta360's "10-bit I-Log White Paper" (v1.0, June 2026).
 - DaVinci Wide Gamut and DaVinci Intermediate (for `--from-dwgi`): as Blackmagic Design publishes them.
 
+## Known issues
+
+Each goes from here once it's fixed.
+
+- **`Shift+E` exports D-Log M in HDR even after `Ctrl+s`.** Rec.709 is `gyroflow-export --sdr` in a terminal for
+  now. [#21](https://github.com/anton-belkin/ActionFootagePlayer/issues/21)
+- **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
+  preset as Gyroflow would, edges in the project's background color.
+  [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
+- **Only D-Log M is exported in HDR.** D-Log, GP-Log, GP-Log2 and 10-bit I-Log play in HDR but export flat, as
+  recorded, and so does a curve picked with `Ctrl+l`. [#23](https://github.com/anton-belkin/ActionFootagePlayer/issues/23)
+- **A clip that plays without stabilization isn't exported**, e.g. D-Log M shot with EIS on; and after `Ctrl+g`
+  turns it off, the export is stabilized all the same. [#24](https://github.com/anton-belkin/ActionFootagePlayer/issues/24)
+- **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
+  the default is depth and in-water, which GoPro doesn't record.
+  [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)
