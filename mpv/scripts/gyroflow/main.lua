@@ -42,7 +42,8 @@
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   remember                the view, FOV, horizon lock and edges as the defaults, in gyroflow.conf
--- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, view (normal, wide, off), fov,
+-- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
+-- the preset), view (normal, wide, off), fov,
 -- horizon_lock (yes, no, project), edges, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
@@ -231,7 +232,8 @@ local waiting = false
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local state = {
-        available = current_source ~= nil, view = stab_off and "off" or view, fov = wide_fov,
+        available = current_source ~= nil, kind = current_source and current_source.kind or "",
+        view = stab_off and "off" or view, fov = wide_fov,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end

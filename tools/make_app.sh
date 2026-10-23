@@ -9,7 +9,7 @@
 #   Contents/Resources/AppIcon.icns      the icon (macos/icon/, made by tools/make_icon.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
-#                                        and dji-telemetry
+#                                        dji-telemetry, and footage-menu (the right-click menu)
 #   Contents/Resources/setup.sh          the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
@@ -60,7 +60,8 @@ PLIST
 dlogm="$res/plugins/dlogm"
 gyroflow="$res/plugins/gyroflow"
 telemetry="$res/plugins/dji-telemetry"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry"
+menu="$res/plugins/footage-menu"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$menu"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 luts/dlogm_hlg.cube "$dlogm/luts/dlogm_hlg.cube"
@@ -79,6 +80,7 @@ for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
+install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 macos/setup-offer.lua "$res/"

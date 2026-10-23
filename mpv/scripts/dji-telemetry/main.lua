@@ -27,7 +27,8 @@
 --   field <name> [yes|no]      show a field or not (without yes or no: the other way round); a field shown anew
 --                              goes after the others
 --   remember                   these, and whether it shows, as the defaults in dji_telemetry.conf
--- The state is in user-data/dji_telemetry/ for the menu: available (the file has telemetry it reads), visible,
+-- The state is in user-data/dji_telemetry/ for the menu: available (the file has telemetry it reads), model (the
+-- camera's, as its telemetry says), visible,
 -- position, units, and shown/<field> for each field.
 --
 -- Options (~~/script-opts/dji_telemetry.conf):
@@ -181,7 +182,8 @@ local shown = nil
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
-    local state = { available = track ~= nil, visible = visible, position = corner, units = imperial and "imperial" or "metric" }
+    local state = { available = track ~= nil, model = track and track.model or "", visible = visible, position = corner,
+                    units = imperial and "imperial" or "metric" }
     for k, v in pairs(state) do mp.set_property_native("user-data/dji_telemetry/" .. k, v) end
     local on = {}
     for _, name in ipairs(fields) do on[name] = true end
