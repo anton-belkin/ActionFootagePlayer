@@ -5,6 +5,7 @@
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS, Resources/Scripts   the applet (macos/player.applescript)
+#   Contents/Resources/AppIcon.icns      the icon (macos/icon/, made by tools/make_icon.sh), in place of the applet's
 #   Contents/Resources/mpv.app           the launcher that starts mpv as an app of its own (macos/mpv-launcher.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
@@ -68,6 +69,12 @@ plist="$app/Contents/Info.plist"
     || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $PLAYER_ID" "$plist"
 /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $version" "$plist"
+# The icon: osacompile's is in Assets.car (by CFBundleIconName) and droplet.icns; ours is an .icns alone
+rm -f "$res/Assets.car" "$res"/droplet.icns "$res"/applet.icns
+install -m 644 macos/icon/AppIcon.icns "$res/AppIcon.icns"
+/usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$plist"
 # Video files, at rank Alternate: listed in Open With, the default only when made so (setup.sh default)
 /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy \
