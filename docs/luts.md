@@ -37,21 +37,21 @@ conversion (as `luts/dlogm_hlg.cube`), or a published curve and gamut to build o
 | Curve | Cameras | SDR (Rec.709) | HDR | Missing |
 |---|---|---|---|---|
 | DJI D-Log M | Osmo Action 6 | DJI's 11.17 (file C) | ours, `dlogm_hlg.cube`, verified on real clips | — |
-| | Mavic 3, 3 Classic, 3 Pro; Air 3, Air 3S; Mini 4 Pro; Avata 2; Flip; O4 Air Unit; Osmo Action 4, Action 5 Pro; Pocket 3; Osmo 360, 360 II; Osmo Nano | DJI's, one file for all (file A, 2023) | no DJI LUT; ours, if their D-Log M is the Action 6's curve | whether the curve is the same; clips |
-| | Mavic 4 Pro, Mini 5 Pro, Avata 360, Lito X1 | DJI's, one file (file B, 2025) | as above | as above |
-| | Mavic 2, Air 2S | DJI's (file D, 2018) | as above | as above |
-| DJI D-Log | Mavic 3 family | DJI's, plain and vivid (2021, 2022) | no LUT; D-Log/D-Gamut white paper | an HLG conversion of ours; metadata telling D-Log from D-Log M |
-| | Mavic 4 Pro; Osmo Pocket 4, 4P | DJI's V1, one file for all three; Pocket 4 and 4P each have their own V2 (2026) and vivid | no LUT; the white paper, if it's the same D-Log | as above |
+| | Mavic 3, 3 Classic, 3 Pro; Air 3, Air 3S; Mini 4 Pro; Avata 2; Flip; O4 Air Unit; Osmo Action 4, Action 5 Pro; Pocket 3; Osmo 360, 360 II; Osmo Nano | DJI's, one file for all (file A, 2023) | no DJI LUT. Ours, if their D-Log M is the Action 6's curve; third-party fits to scene-linear/DWG: Zeb Gardner's (free, from a Mini 4 Pro), Thatcher Freeman's per model (Mini 4 Pro, Action 5, Pocket 3, Mavic 3 Pro, Air 2S, Mavic 2 Pro; no license), Gamut's BaseLUTs to DWG ($35 per camera) | whether the curve is the same; clips |
+| | Mavic 4 Pro, Mini 5 Pro, Avata 360, Lito X1 | DJI's, one file (file B, 2025) | as above (Thatcher Freeman: Mini 5 Pro; Gamut: Mini 5 Pro, Mavic 4 Pro) | as above |
+| | Mavic 2, Air 2S | DJI's (file D, 2018) | as above (Thatcher Freeman: both) | as above |
+| DJI D-Log | Mavic 3 family | DJI's, plain and vivid (2021, 2022) | no LUT; **DJI's own ACES input transform** (curve and D-Gamut primaries, 2023), so an HLG conversion of ours | the conversion; metadata telling D-Log from D-Log M |
+| | Mavic 4 Pro; Osmo Pocket 4, 4P | DJI's V1, one file for all three; Pocket 4 and 4P each have their own V2 (2026) and vivid | as above, if it's the same D-Log | as above |
 | | Zenmuse X9 (Inspire 3, Ronin 4D) | DJI's | **DJI's LUT to Rec.2020 HLG** | — (not a camera this player targets) |
-| DJI D-Log2 | Osmo Pocket 4P | DJI's, 33 and 65, plain and vivid | none: no LUT, curve not published | everything for HDR; metadata |
-| GoPro GP-Log | HERO12 Black, firmware 1.10/1.12 | GoPro's, 16³, one per white balance | no LUT; curve known (Protune log, base 400, community), gamut not | gamut; firmware version from the file |
+| DJI D-Log2 | Osmo Pocket 4P | DJI's, 33 and 65, plain and vivid | no LUT; a D-Log2/D-Gamut2 ACES transform said to be DJI's (copies only, below), an MIT one (AJ3DVFX), Gamut's BaseLUTs to DWG ($35) | DJI's own publication; metadata |
+| GoPro GP-Log | HERO12 Black, firmware 1.10/1.12 | GoPro's, 16³, one per white balance | no GoPro LUT. **GP-Tune LUT Pack ($19): LUTs to PQ and HLG** (HERO9–12, +2/+3 EV); free to DWG/I: Zeb Gardner's; curve known (Protune log, base 400), gamut only fitted | the gamut from GoPro; firmware version from the file |
 | | HERO12 Black, firmware 1.20 | GoPro's | as above | as above |
-| | HERO12 Black firmware 2.00+, HERO13 Black | GoPro's, one file | as above | gamut |
-| | MAX2 | GoPro's, technical and creative | as above | gamut |
-| | HERO11 Black (Labs firmware, `WIDE=1`, log base 400) | only the Labs maintainer's, unofficial | as above | an official LUT |
-| GoPro GP-Log2 | MISSION 1, MISSION 1 PRO | GoPro's, five (technical, creative, 33 and 65) | no LUT; curve (base 600) and Rec.2020 from community transforms (MIT), not from GoPro | GoPro's own spec |
-| Insta360 10-bit I-Log | X6; Luna Ultra, Luna Pro | Insta360's, one set for all | **Insta360's LUTs to HLG and PQ**, and the curve and BT.2020 gamut in a white paper | metadata |
-| Insta360 8-bit I-Log | Ace Pro 2, GO Ultra | Insta360's, one file | none: no LUT, curve not published | everything for HDR; metadata |
+| | HERO12 Black firmware 2.00+, HERO13 Black | GoPro's, one file | as above (GP-Tune lists models up to HERO12) | as above |
+| | MAX2 | GoPro's, technical and creative | as above, none MAX2-specific | as above |
+| | HERO11 Black (Labs firmware, `WIDE=1`, log base 400) | only the Labs maintainer's, unofficial | as above (GP-Tune has Labs WIDE) | an official LUT |
+| GoPro GP-Log2 | MISSION 1, MISSION 1 PRO | GoPro's, five (technical, creative, 33 and 65) | no LUT; **curve (log base 600) and Rec.2020 primaries from GoPro Labs' own LUT generator, Apache-2.0**, so an HLG conversion of ours; Gamut's BaseLUTs to DWG ($35) | the conversion |
+| Insta360 10-bit I-Log | X6; Luna Ultra, Luna Pro | Insta360's, one set for all | **Insta360's LUTs to HLG and PQ**, and the curve and BT.2020 gamut in a white paper; an ACES package | metadata |
+| Insta360 8-bit I-Log | Ace Pro 2, GO Ultra | Insta360's, one file | none found, free or paid | everything for HDR; metadata |
 | | X5 | Insta360's | as above | as above |
 | | X3, ONE X2 | Insta360's, one file | as above | as above |
 | | ONE X | Insta360's (64³) | as above | as above |
@@ -61,6 +61,70 @@ conversion (as `luts/dlogm_hlg.cube`), or a published curve and gamut to build o
 Of all of these, only the Action 6 has been tried in the player; everything else is from the makers' files and
 pages. How the camera marks its log profile in the file is known for DJI's Action 6 (and guessed from the `_D`
 file name for other DJI cameras) and for GoPro (`PTCL`, not yet seen on a GP-Log clip); for Insta360 it isn't.
+
+## HDR beyond the makers' LUTs
+
+An HDR path doesn't need a LUT that ends in HLG. It needs the log footage turned into scene light in a known
+gamut: then the HLG (or PQ) step, and the gamut matrix to Rec.2020, are standard math the plugin can do
+itself, as it does for D-Log M. So anything that ends in scene-linear, ACES AP0 or DaVinci Wide
+Gamut/Intermediate (Blackmagic publishes DWG/I) will do, and that's what most of the following are. Ready
+HLG/PQ LUTs are rare: besides Insta360's 10-bit and DJI's X9, only the GP-Tune pack has them.
+
+Official, and usable as published formulas:
+
+- **DJI D-Log / D-Gamut**: DJI's "ACES Workflow Guide" (2023-12, linked from the Mavic 3 and Mavic 4 Pro
+  download pages), `https://terra-1-g.djicdn.com/851d20f7b9f64838a34cd02351370894/ACES/ACES%20Workflow%20Guide%20.zip`
+  (`76473cdcd09c61f1f16ca99216a97b9dc7a60765b66c5a239906869978f60fb8`): an ACES input transform as CTL, CLF and
+  DCTL. D-Log to linear: `(x - 0.0929) / 6.025` for `x ≤ 0.14`, else `(10^(3.89616·x - 2.27752) - 0.0108) / 0.9892`;
+  D-Gamut primaries R (0.71, 0.31), G (0.21, 0.88), B (0.09, −0.08), white D65. Nothing for D-Log M in it.
+- **GoPro GP-Log2**: GoPro Labs' [GP-Log2 LUT Generator](https://gopro.github.io/labs/gplog2/) (in
+  [gopro/labs](https://github.com/gopro/labs), Apache-2.0, updated 2026-09-22): `log(L·599 + 1) / log(600)`,
+  Rec.2020 primaries, with GoPro's EV offset (+1.8 by default) and highlight roll-off. Its outputs are SDR
+  (Rec.709 or Rec.2020 with the BT.709 curve), but the code can be reused, license and all.
+- **Insta360 10-bit I-Log**: the white paper (above), and an ACES package, "Insta360 I-Log & ACES Workflow"
+  (v1.0, 2026-06-09), `https://wassets.insta360.com/common/bc6e6ba50b8b4980b2f8ff480ad5714c/Insta360_I-Log&ACES_Workflow.zip`
+  on `https://www.insta360.com/download/aces` (not fetched).
+
+Third-party, free:
+
+- **Zeb Gardner**: D-Log M → DWG/I (`DLOGM_DWG_I_SHAPER_ZRG_V1.zip`,
+  `d4a392c59efcca0b394d41e72dc7e0c8b05489218110680ec012d849ddada34a`) and GP-Log → DWG/I
+  (`GP_LOG-to-DWG_I-ZRG-V1-j3dz.cube`, `aff985958704a8c03e5684ae6a165f354b8a3ec083a7bfefe1293a5848225b4a`), 1D
+  shaper + 65³, fitted from test charts; also a D-Log2 → Rec.709 LUT (`/s/D_log2-to-Rec709.cube`). No license
+  stated: download at install, or ask him.
+- **Thatcher Freeman**, [thatcherfreeman/dwg-transforms](https://github.com/thatcherfreeman/dwg-transforms):
+  DCTLs to DWG with a fitted curve and estimated primaries **per camera**: D-Log M for Action 5, Air 2S,
+  Mavic 2 Pro, Mavic 3 Pro, Mini 4 Pro, Mini 5 Pro, Pocket 3; D-Log for Mavic 3 Pro Cine and Phantom 4; D-Log2;
+  GP-Log, GP-Log2, Protune; an Insta360 X4 Flat work in progress. Its `specs/` has a
+  `DLog2_DGamut2_to_ACES_AP0_cat02.dctl` (D-Gamut2 to XYZ matrix and the curve), which Gamut says is the DCTL
+  DJI made public for D-Log2. **No license**, so as reference only, or with the author's permission. The D-Log M
+  fits differ by model, which says the "one LUT for 15 products" isn't the whole story either.
+- **AJ3DVFX/dji-dlog2-to-aces-idt** ([GitHub](https://github.com/AJ3DVFX/dji-dlog2-to-aces-idt), MIT,
+  2026-08): D-Log2/D-Gamut2 → ACES AP0 DCTL.
+- **xtremestuff/protune-transforms** (MIT; above): GP-Log and GP-Log2 to ACES/DWG/Rec.2020, with a HERO5-era
+  matrix.
+
+Paid (none may be redistributed; a user who buys one would put the file where the player can read it):
+
+- **GP-Tune LUT Pack**, xtremestuff, $19, <https://xtremestuff.net/store/gp-tune-lut-pack/>: 110+ 33³ `.cube`
+  LUTs for Protune Flat, Natural and GP-Log (Native, Rec.709 and Labs WIDE gamuts; HERO9–HERO12 by model, older
+  ones generic), including **HDR LUTs to 1000-nit PQ and to HLG, at +2 and +3 EV**. Knows GP-Log before and
+  after HERO12 firmware 1.20 (mid-grey 49 % vs 76 % IRE). No GP-Log2, MAX2 or HERO13 named. The license isn't on
+  the page. Its siblings GP-Tune Transform ($24, Resolve DCTL/ACES) and GP-Tune Plugin ($29) are Resolve-only.
+- **Gamut BaseLUTs**, gamut.io, $35 per camera (or a $129/year membership), e.g.
+  <https://gamut.io/product/baseluts-for-dji-osmo-action-6/>: per-camera LUTs to Rec.709, to **DWG**
+  (scene-referred) and to an ARRI 709 look, made from charts. Cameras: DJI Osmo Action 5 Pro, Action 6, Pocket 3,
+  Pocket 4/4P (D-Log and D-Log2), Mini 3 Pro, Mini 4 Pro, Mini 5 Pro, Avata 2, Mavic 3 Classic, Mavic 3 Pro,
+  Mavic 4 Pro, Ronin 4D; GoPro MISSION 1; Insta360 Luna Ultra. License (gamut.io/license): one buyer, up to two
+  computers, no redistribution.
+- **"D-Log M ACES IDT & DCTL"**, a Patreon post (`https://www.patreon.com/posts/d-log-m-aces-idt-122210348`):
+  not checked (Patreon wasn't reachable from here).
+- Not useful here: Leeming LUT Pro (Rec.709 only, personal license for 3 devices), FilmConvert and Dehancer
+  (plugins, HDR left to the host app), the many look packs.
+
+Nothing, free or paid, turned up for Insta360's 8-bit I-Log (Ace Pro 2, GO Ultra, X5 and older) beyond its
+Rec.709 LUTs. Fitting it ourselves from test clips is the remaining route (Zeb Gardner published his Python
+tool for that).
 
 ## DJI
 
@@ -143,7 +207,8 @@ LUTs are behind `https://mydjiflight.dji.com/file/links/DJI_ZENMUSE_X9_DLOG_TO_R
 DJI publishes no curve or gamut for D-Log M (Zeb Gardner, below, worked it out from test charts). D-Log and
 D-Gamut have a white paper, `https://dl.djicdn.com/downloads/zenmuse+x7/20171010/D-Log_D-Gamut_Whitepaper.pdf`,
 and the Mavic 3 and Mavic 4 Pro pages have an ACES workflow guide
-(`.../ACES/ACES%20Workflow%20Guide%20.zip`). D-Log2 has nothing published that turned up.
+(`.../ACES/ACES%20Workflow%20Guide%20.zip`, D-Log only; see HDR beyond the makers' LUTs). For D-Log2, DJI is
+said to have made a DCTL public, but not on its download pages; copies are on GitHub.
 
 ### Metadata
 
