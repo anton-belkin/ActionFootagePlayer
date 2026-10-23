@@ -1,29 +1,97 @@
-# ActionFootagePlayer
+# Action Footage Player
 
-Still alpha: in daily use on Osmo Action 6 footage on a Mac; other cameras and systems are built for but mostly
-not tried yet.
+**Your action camera's best footage, the way it should look. Just double-click the clip.**
 
-A desktop player for footage from action cameras and drones. Copy the clips off the card, double-click one, and
-it plays the way it should look, with nothing to process first:
+A free, open-source video player for footage from action cameras (drones are next). Clips shot in the camera's
+log color mode play in full color and HDR, shaky clips are steadied as they play (under water too), and what the
+camera measured, like depth or speed, shows on screen. No import, no editing, nothing to render first, no account
+or cloud; your original files are never changed. When a moment is worth sharing, one key saves exactly that part,
+ready for your phone.
 
-- **Log footage in color**, in HDR or through the maker's Rec.709 LUT, from the color profile the camera wrote
-  into the file.
-- **Stabilized while it plays**, from the gyro data the camera recorded, with [Gyroflow](https://gyroflow.xyz)'s
-  engine: under water too, where the camera's own stabilization doesn't hold. A clip with a Gyroflow project
-  plays the way the project says.
-- **The camera's telemetry over the video**: depth under water, pressure, GPS and speed, exposure.
+<!-- HERO, the most important thing on this page:
+     1. one frame side by side: as the camera recorded it (flat, grey) | as it plays here
+     2. a 5-second GIF: an underwater clip, shaky | stabilized, with the depth in the corner -->
 
-The original files are never re-encoded or changed. When something is worth sharing, `Shift+E` exports what you
-see, stabilized and in HDR, in one pass.
+> **Status: early (alpha).** In daily use with the **DJI Osmo Action 6** on **Macs with Apple Silicon**. Other DJI
+> cameras, GoPro and Insta360 are built for but not yet tried on real footage; Linux and Windows have the plugins
+> only, not yet tried. [What works with your camera](#what-works-camera-by-camera) ·
+> [Help it work with yours](#help-it-work-with-your-camera)
 
-Back from a dive shot in D-Log M with the camera's stabilization off, say: copy the card to the laptop and
-double-click the first clip. It plays stabilized, in HDR, with the depth in the corner. Skip through the hour to
-the 15 seconds with the turtle, `l` at the start, `l` at the end, `Shift+E`, and the fragment is in a
-`stabilized/` folder next to the clip, ready to AirDrop or post the same evening (iPhone, Mac and YouTube show it
-as HDR).
+## What you get
 
-It's [mpv](https://mpv.io) with three plugins (D-Log M, stabilization, telemetry) and a Mac app that carries
-them. The plugins work on their own too, in an mpv you start yourself.
+- **Log footage in full color, straight away.** Log (D-Log M on DJI, GP-Log on GoPro, I-Log on Insta360) is the
+  camera's mode that records the most, but its clips come out flat and grey and normally need color grading. Here
+  they play in HDR, or with the camera maker's own standard look. The clip says it's log, so there's nothing to set
+  up. Normal clips play as usual.
+- **Shaky clips steadied as they play**, from the motion data the camera records when its own stabilization is off,
+  with [Gyroflow](https://gyroflow.xyz)'s engine. Under water too, where the camera's stabilization doesn't hold.
+- **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
+- **One key to share**: mark the moment, press `Shift+E`, and get a stabilized file that an iPhone, a Mac or
+  YouTube shows in HDR.
+
+## Who it's for
+
+**You just want your footage to look its best**, without learning to grade. An action camera's best picture is
+usually hidden behind a "pro" mode, because on an ordinary screen it needs creative grading to look good. On a
+screen with HDR (MacBook Pro, recent iPhones and flagship phones) a technical conversion is enough, the same for
+every clip, so it's done automatically: log looks good straight away. So you can shoot in the best mode and simply
+watch and share. [Why that works](#why-log-and-why-hdr)
+
+**You already shoot log and grade.** This is the step between the card and your editor: go through a card's worth
+of clips with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT;
+see the gyro stabilization without making a project; open the clip in Gyroflow with one key and see the result back
+in playback when you save; batch-export ProRes 422 HQ from the command line. 10-bit stays 10-bit, the originals are
+never re-encoded, and log is recognized from the camera's metadata, not the file name. Prefer your own mpv? The
+three plugins work on their own, on any system. [How it works](#how-it-works)
+
+## Quick start (Mac with Apple Silicon, DJI Osmo Action 6)
+
+1. **On the camera:** set the color mode to **D-Log M**. Under water, turn **EIS off**: the camera then records the
+   motion data the stabilization uses.
+2. **Install:** with [Homebrew](https://brew.sh), run `brew install mpv ffmpeg` in Terminal. Then download
+   `ActionFootagePlayer-<version>-macos-arm64.zip` from the
+   [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move it to
+   Applications.
+3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
+   System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
+4. **Copy the clips off the card and double-click one.**
+
+`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` switches to the standard look instead of HDR, `Ctrl+g` turns
+the stabilization on and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
+
+## Example: back from the dive
+
+You shot the dive in D-Log M, with EIS off because under water it doesn't hold. In the hotel, you copy the card to
+the laptop and double-click the first clip: it plays stabilized, in HDR, with the depth in the corner. You skip
+through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, and pause for
+half a minute. The fragment is in a `stabilized/` folder next to the clip, ready to AirDrop to the group the same
+evening, in HDR. The originals are untouched for proper editing later.
+
+## Why log, and why HDR
+
+The log mode records the most the camera can: often more than its own HDR mode (GoPro's HERO12 makes HDR by merging
+two exposures, while its log is a single one, which holds up better with motion and in low light), and on some
+cameras, the Osmo Action 6 among them, log is the only way to HDR at all. On an ordinary (SDR) screen, log needs a
+colorist to decide what to keep and what to leave out of SDR's narrow range: a creative job. An HDR screen has room
+for all of it, so the conversion becomes a technical one, the same for every clip, and can be automatic. That turns
+the "pro" mode into the one to use for everyday footage.
+
+On a Mac without an HDR screen (MacBook Air, most external monitors), macOS tones the picture down, or `Ctrl+s`
+shows DJI's standard Rec.709 look. Exports still play in HDR on an iPhone.
+
+## Help it work with your camera
+
+Everything was worked out on one camera, and each maker, often each model, records its metadata differently. Most
+useful right now:
+
+- **A few seconds of footage** from a GoPro, an Insta360, another DJI camera or a DJI drone, straight from the card.
+  [What to shoot and how to share it](#other-cameras-and-how-to-help); if you can't share the video, its metadata
+  alone helps.
+- **Trying it on Linux or Windows**, and telling how it went.
+- **Knowing GP-Log or I-Log well**: their color transforms are the missing piece for GoPro and Insta360.
+- **Code**: Lua (the plugins), Rust (`vs-gyroflow/`), GLSL shaders. Issues and pull requests welcome.
+
+---
 
 ## What works, camera by camera
 
