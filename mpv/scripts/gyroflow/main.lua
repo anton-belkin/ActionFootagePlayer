@@ -6,7 +6,7 @@
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
 --       with HyperSmooth off and Insta360 ones with FlowState off in the camera, when Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
---       that ships this plugin read-only, Steady Player, keeps yours), else in this folder (install.sh puts
+--       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
 --
 -- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip; ~0.5 s more

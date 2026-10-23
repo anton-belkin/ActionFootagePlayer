@@ -1,11 +1,11 @@
-# ActionCamPlayer
+# ActionFootagePlayer
 
 **The open-source desktop player for footage from action cameras and drones.** Copy the clips off the card,
 double-click one, and it plays the way it should look: log footage in color and HDR, shaky clips stabilized,
 the camera's telemetry on screen. No import, no project, no rendering, and the original files are never
 touched. When something is worth sharing, one key exports exactly what you see.
 
-Every camera maker ships its own desktop app for this. ActionCamPlayer is the open alternative: free, one
+Every camera maker ships its own desktop app for this. ActionFootagePlayer is the open alternative: free, one
 player for the cameras you have, no account or cloud, and built on open tools ([mpv](https://mpv.io) for
 playback, [Gyroflow](https://gyroflow.xyz) for stabilization), so it keeps working with your own setup
 instead of replacing it.
@@ -15,7 +15,7 @@ instead of replacing it.
 ### 1. Log footage that looks right straight away
 
 Shooting in a log profile keeps more of the scene, but the clips come out flat and grey, and most players
-show them that way. ActionCamPlayer reads the color profile the camera wrote into the file and converts it
+show them that way. ActionFootagePlayer reads the color profile the camera wrote into the file and converts it
 on the GPU while it plays:
 
 - **in HDR**, on screens that have it (on an SDR screen, the system tones it down), or
@@ -29,7 +29,7 @@ ground in one frame.
 
 ### 2. Stabilization in realtime, under water too
 
-Clips shot with the camera's stabilization off carry the camera's gyro data. ActionCamPlayer renders the
+Clips shot with the camera's stabilization off carry the camera's gyro data. ActionFootagePlayer renders the
 stabilization from it while the clip plays, with Gyroflow's own engine, so a 4K60 clip plays stabilized
 without exporting anything first.
 

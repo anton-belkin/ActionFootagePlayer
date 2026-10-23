@@ -3,11 +3,14 @@
 # background (the Quick Action returns at once), with a notification as each one is done. The log of the last
 # run is ~/Library/Logs/gyroflow-export.log.
 #
-# In Steady Player.app (Contents/Resources/), with the same plugins and data as the player (mpv-launcher.sh): the
+# In ActionFootagePlayer.app (Contents/Resources/), with the same plugins and data as the player (mpv-launcher.sh): the
 # app's gyroflow-export, or the one in mpv's config when it has the plugin.
 
 res=${0:A:h}
-data="$HOME/Library/Application Support/Steady Player"
+data="$HOME/Library/Application Support/ActionFootagePlayer"
+# Steady Player's, as the app was called up to 0.3
+old="$HOME/Library/Application Support/Steady Player"
+[ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
 export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
 export_bin="$res/plugins/gyroflow/gyroflow-export"
 config=${MPV_HOME:-$HOME/.config/mpv}

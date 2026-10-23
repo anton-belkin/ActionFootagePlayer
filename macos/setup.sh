@@ -1,12 +1,12 @@
 #!/bin/sh
-# Steady Player's setup, in Contents/Resources/ of the app. Opening the app on its own offers `setup.sh all`;
+# ActionFootagePlayer's setup, in Contents/Resources/ of the app. Opening the app on its own offers `setup.sh all`;
 # install.sh --apps runs the parts.
 #
 #   setup.sh all [<cube>]       the three below
 #   setup.sh lut [<cube>]       DJI's D-Log M -> Rec.709 LUT, and the sdr shader made from it, into
-#                               ~/Library/Application Support/Steady Player/dlogm/ (the dlogm plugin's DLOGM_DATA).
+#                               ~/Library/Application Support/ActionFootagePlayer/dlogm/ (the dlogm plugin's DLOGM_DATA).
 #                               DJI's LUT isn't redistributed: it's downloaded from DJI and checked, or <cube> is used
-#   setup.sh default            Steady Player becomes the default app for MP4 videos
+#   setup.sh default            ActionFootagePlayer becomes the default app for MP4 videos
 #   setup.sh quick-actions      the Finder Quick Actions Play Stabilized and Stabilize + LUT, in ~/Library/Services
 #                               (SERVICES_DIR overrides it)
 #   setup.sh fetch-lut <out>    just the download, checked
@@ -16,7 +16,10 @@ set -eu
 
 res=$(cd "$(dirname "$0")" && pwd)
 app=${res%/Contents/Resources}
-data="$HOME/Library/Application Support/Steady Player"
+data="$HOME/Library/Application Support/ActionFootagePlayer"
+# Steady Player's, as the app was called up to 0.3
+old="$HOME/Library/Application Support/Steady Player"
+[ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
 services=${SERVICES_DIR:-$HOME/Library/Services}
 
 # DJI publishes it on the Osmo Action 6 downloads page (https://www.dji.com/osmo-action-6/downloads). The checksum
@@ -61,9 +64,9 @@ default() {
     rc=0
     python3 -I "$res/tools/default-app.py" public.mpeg-4 "$player_id" 2>/dev/null || rc=$?
     case $rc in
-        0) echo "Steady Player is the default app for MP4 videos" ;;
-        3) echo "Steady Player becomes the default app for MP4 videos once you confirm it in macOS's dialog" ;;
-        *) echo "Couldn't make Steady Player the default app for MP4 videos" >&2; return $rc ;;
+        0) echo "ActionFootagePlayer is the default app for MP4 videos" ;;
+        3) echo "ActionFootagePlayer becomes the default app for MP4 videos once you confirm it in macOS's dialog" ;;
+        *) echo "Couldn't make ActionFootagePlayer the default app for MP4 videos" >&2; return $rc ;;
     esac
 }
 
@@ -86,7 +89,7 @@ fi
 # The rest is the app's
 case "$app" in
     */AppTranslocation/*)
-        echo "Move Steady Player to Applications first (macOS runs it from a read-only copy where it is now)" >&2
+        echo "Move ActionFootagePlayer to Applications first (macOS runs it from a read-only copy where it is now)" >&2
         exit 1 ;;
 esac
 player_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Contents/Info.plist")

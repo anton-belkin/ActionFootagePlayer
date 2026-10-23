@@ -1,16 +1,19 @@
 #!/bin/sh
-# Starts mpv as an app of its own, for Steady Player.app (`open -na .../Contents/Resources/mpv.app --args <file>...`).
+# Starts mpv as an app of its own, for ActionFootagePlayer.app (`open -na .../Contents/Resources/mpv.app --args <file>...`).
 # mpv started from the applet's `do shell script ... &` stayed attached to the applet, which quits right
 # away, and macOS ran it as a background process: hardware decoding and the GPU throttled, a 4-5 s
 # stall at start and stabilized playback at a fraction of realtime.
 #
-# mpv gets the plugins in Steady Player.app (Contents/Resources/plugins/), except one that mpv's config has a copy
+# mpv gets the plugins in ActionFootagePlayer.app (Contents/Resources/plugins/), except one that mpv's config has a copy
 # of (install.sh puts them there for mpv in a terminal): mpv would load both. What the plugins can't keep in the
-# app, DJI's LUT and your default preset, is in ~/Library/Application Support/Steady Player/ (DLOGM_DATA,
+# app, DJI's LUT and your default preset, is in ~/Library/Application Support/ActionFootagePlayer/ (DLOGM_DATA,
 # GYROFLOW_DATA). mpv is Homebrew's.
 
 res=$(cd "$(dirname "$0")/../../.." && pwd)
-data="$HOME/Library/Application Support/Steady Player"
+data="$HOME/Library/Application Support/ActionFootagePlayer"
+# Steady Player's, as the app was called up to 0.3
+old="$HOME/Library/Application Support/Steady Player"
+[ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
 export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
 config=${MPV_HOME:-$HOME/.config/mpv}
 for plugin in gyroflow dlogm dji-telemetry; do
@@ -23,5 +26,5 @@ done
 for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
     [ -x "$mpv" ] && exec "$mpv" "$@"
 done
-osascript -e 'display alert "Steady Player needs mpv" message "Install it with Homebrew: brew install mpv"' >/dev/null
+osascript -e 'display alert "ActionFootagePlayer needs mpv" message "Install it with Homebrew: brew install mpv"' >/dev/null
 exit 1

@@ -1,5 +1,5 @@
 #!/bin/bash
-# tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds Steady Player.app, with the three mpv
+# tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the three mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
 #   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
@@ -12,7 +12,7 @@
 #   Contents/Resources/setup.sh          the setup, and the export script of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
 #
-# Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/Steady Player).
+# Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/ActionFootagePlayer).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,7 +20,7 @@ app=${1:?usage: tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<versio
 bin=${2:?}
 hlg=${3:?}
 version=${4:-dev}
-PLAYER_ID="io.github.anton-belkin.steady-player"
+PLAYER_ID="io.github.anton-belkin.action-footage-player"
 
 rm -rf "$app"
 osacompile -o "$app" macos/player.applescript

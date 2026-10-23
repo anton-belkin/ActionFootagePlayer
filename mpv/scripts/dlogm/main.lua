@@ -23,7 +23,7 @@
 --   mode=hdr     what D-Log M files start in: hdr or sdr
 --
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
--- (Steady Player) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
+-- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
 --
 -- Everything is set as file-local options, added to the user's own glsl-shaders: mpv restores them when the
 -- file ends. Source files are never modified.

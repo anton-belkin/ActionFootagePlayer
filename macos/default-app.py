@@ -1,6 +1,6 @@
 #!/usr/bin/python3 -I
 # default-app.py <content type> [<bundle id>]: the default app for a content type (e.g. public.mpeg-4), for all
-# roles: prints its bundle id, or makes the app given the default. Steady Player's setup.sh and install.sh use it.
+# roles: prints its bundle id, or makes the app given the default. ActionFootagePlayer's setup.sh and install.sh use it.
 #
 # macOS (27) asks the user to confirm a new default in a dialog of its own, and only then applies it: this waits
 # for that, and exits with 3 when it hasn't happened yet (the dialog stays up; it applies whenever it's confirmed).

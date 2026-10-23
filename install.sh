@@ -5,15 +5,15 @@
 #                          from DJI), scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/) and
 #                          scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
 #                          none yet
-#   ./install.sh --apps    also Steady Player.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
+#   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
 #                          it's updated by every later run. macOS only
 #
-# On Linux it installs the same plugins (the binaries built for Linux); Steady Player is macOS's.
+# On Linux it installs the same plugins (the binaries built for Linux); ActionFootagePlayer is macOS's.
 #
 # Files it replaces that differ from the new ones are kept as <file>.bak-<date> (for scripts/, in scripts-backup/).
 # The layout of earlier versions (loose scripts, profiles in mpv.conf, keys in input.conf, ~~/gyroflow) is moved
-# over to the plugins, and Steady Router (0.2 and earlier) is removed: Steady Player is the default player itself.
+# over to the plugins, and Steady Router (0.2 and earlier) is removed: ActionFootagePlayer is the default player itself.
 # MPV_CONFIG_DIR, APPS_DIR and SERVICES_DIR override where it installs (default ~/.config/mpv, ~/Applications and
 # ~/Library/Services).
 set -euo pipefail
@@ -23,8 +23,11 @@ MPV_DIR="${MPV_CONFIG_DIR:-$HOME/.config/mpv}"
 APPS_DIR="${APPS_DIR:-$HOME/Applications}"
 SERVICES_DIR="${SERVICES_DIR:-$HOME/Library/Services}"
 # The working name; the bundle id is what macOS and the settings go by (tools/make_app.sh sets it)
-PLAYER_NAME="Steady Player"
-PLAYER_ID="io.github.anton-belkin.steady-player"
+PLAYER_NAME="ActionFootagePlayer"
+PLAYER_ID="io.github.anton-belkin.action-footage-player"
+# The app's name up to 0.3: it's replaced (what's yours moves over in setup.sh)
+OLD_PLAYER_NAME="Steady Player"
+OLD_PLAYER_ID="io.github.anton-belkin.steady-player"
 # Steady Router, of 0.2 and earlier, and the ids it had before
 ROUTER_NAME="Steady Router"
 ROUTER_IDS="io.github.anton-belkin.steady-router com.antonbelkin.dji-router io.github.dji-router"
@@ -44,10 +47,10 @@ for arg in "$@"; do
     esac
 done
 if [ $macos = 0 ] && [ $apps = 1 ]; then
-    echo "--apps is for macOS: Steady Player is a Mac app" >&2
+    echo "--apps is for macOS: ActionFootagePlayer is a Mac app" >&2
     exit 2
 fi
-[ -d "$APPS_DIR/$PLAYER_NAME.app" ] && apps=1
+[ -d "$APPS_DIR/$PLAYER_NAME.app" ] || [ -d "$APPS_DIR/$OLD_PLAYER_NAME.app" ] && apps=1
 
 need() { command -v "$1" >/dev/null || { echo "Missing $1 ($2)" >&2; exit 1; }; }
 if [ $macos = 1 ]; then
@@ -197,7 +200,7 @@ done
 put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644
 put mpv/scripts/dji-telemetry/telemetry.lua "$TELEMETRY/telemetry.lua" 644
 
-# 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; Steady Player carries them now
+# 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do
     rm -f "$GYROFLOW/$f"
 done
@@ -209,24 +212,30 @@ if [ $apps = 1 ]; then
     # A release has its version in VERSION
     version=$(cat VERSION 2>/dev/null || git describe --tags --always 2>/dev/null || echo local)
     tools/make_app.sh "$player" "$BIN" "$BUILD/dlogm_hlg.glsl" "$version"
+    old_player="$APPS_DIR/$OLD_PLAYER_NAME.app"
+    if [ -d "$old_player" ]; then
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old_player" 2>/dev/null || true
+        rm -rf "$old_player"
+        echo "   removed $OLD_PLAYER_NAME (it's $PLAYER_NAME now)"
+    fi
     setup="$player/Contents/Resources/setup.sh"
     "$setup" lut "$lut" | sed 's/^/   /'
     SERVICES_DIR="$SERVICES_DIR" "$setup" quick-actions | sed 's/^/   /'
     # Only for the real Applications folder: an install elsewhere (a test) leaves the system's defaults alone
     if [ "$APPS_DIR" = "$HOME/Applications" ] || [ "$APPS_DIR" = /Applications ]; then
         "$setup" default | sed 's/^/   /'
-        # Steady Router: gone, and MOV back to the player it was taking videos from (MP4 is Steady Player's now)
+        # Steady Router: gone, and MOV back to the player it was taking videos from (MP4 is ActionFootagePlayer's now)
         router="$APPS_DIR/$ROUTER_NAME.app"
         if [ -d "$router" ]; then
             /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$router" 2>/dev/null || true
             rm -rf "$router"
-            echo "   removed $ROUTER_NAME (Steady Player is the default player itself now)"
+            echo "   removed $ROUTER_NAME (ActionFootagePlayer is the default player itself now)"
         fi
         mov=com.apple.quicktime-movie
         case " $ROUTER_IDS " in
             *" $(python3 -I macos/default-app.py $mov) "*)
-                previous=$(defaults read "$PLAYER_ID" "previous-$mov" 2>/dev/null || true)
-                case " $ROUTER_IDS $PLAYER_ID " in *" ${previous:-none} "*) previous= ;; esac
+                previous=$(defaults read "$PLAYER_ID" "previous-$mov" 2>/dev/null || defaults read "$OLD_PLAYER_ID" "previous-$mov" 2>/dev/null || true)
+                case " $ROUTER_IDS $PLAYER_ID $OLD_PLAYER_ID " in *" ${previous:-none} "*) previous= ;; esac
                 previous=${previous:-com.apple.QuickTimePlayerX}
                 # macOS asks to confirm it; 3: not yet
                 if python3 -I macos/default-app.py $mov "$previous" 2>/dev/null; then
@@ -238,6 +247,7 @@ if [ $apps = 1 ]; then
         for key in fallback fallback-mp4 fallback-mov previous-public.mpeg-4 "previous-$mov"; do
             defaults delete "$PLAYER_ID" "$key" 2>/dev/null || true
         done
+        defaults delete "$OLD_PLAYER_ID" 2>/dev/null || true
     fi
     echo "   Opening $PLAYER_NAME on its own offers the same setup (it's what a downloaded copy does)"
 fi

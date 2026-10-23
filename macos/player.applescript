@@ -1,4 +1,4 @@
--- Steady Player: plays videos in mpv with this project's plugins, which it carries (Contents/Resources/plugins/):
+-- ActionFootagePlayer: plays videos in mpv with this project's plugins, which it carries (Contents/Resources/plugins/):
 -- D-Log M as HDR, Gyroflow stabilization. Opened on its own, it offers its setup (Contents/Resources/setup.sh):
 -- the default app for MP4 videos, the Finder Quick Actions and DJI's LUT.
 --
@@ -32,17 +32,17 @@ on open theFiles
 end open
 
 on run
-	set question to "Steady Player plays videos in mpv: D-Log M in HDR, clips with gyro data stabilized." & return & return & ¬
+	set question to "ActionFootagePlayer plays videos in mpv: D-Log M in HDR, clips with gyro data stabilized." & return & return & ¬
 		"Set it up? It becomes the default app for MP4 videos, Finder gets the Quick Actions Play Stabilized and " & ¬
 		"Stabilize + LUT, and DJI's Rec.709 LUT is downloaded from DJI."
 	set choice to button returned of (display dialog question buttons {"Cancel", "Open mpv", "Set Up"} ¬
-		default button "Set Up" cancel button "Cancel" with title "Steady Player")
+		default button "Set Up" cancel button "Cancel" with title "ActionFootagePlayer")
 	if choice is "Set Up" then
 		try
 			set report to do shell script quoted form of (resourcesPath() & "setup.sh") & " all 2>&1"
-			display dialog report buttons {"OK"} default button 1 with title "Steady Player"
+			display dialog report buttons {"OK"} default button 1 with title "ActionFootagePlayer"
 		on error errText
-			display alert "Steady Player's setup didn't finish" message errText as critical
+			display alert "ActionFootagePlayer's setup didn't finish" message errText as critical
 		end try
 	else
 		startMpv(" --player-operation-mode=pseudo-gui")

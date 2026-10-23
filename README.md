@@ -21,8 +21,8 @@ The source files are never re-encoded.
 - **Depth and the rest of the camera's telemetry over the video.** What the camera recorded frame by frame
   (depth under water, pressure, GPS with a remote connected, exposure) shown as mpv plays, from the file itself.
 
-It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and Steady
-Player, a Mac app that carries them and opens your MP4s with them:
+It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
+ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
   Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
@@ -39,10 +39,11 @@ are on the way, and need clips from their owners: see [Other cameras, and how to
 Needs a Mac with Apple Silicon (macOS 11 or later), [Homebrew](https://brew.sh) mpv (`brew install mpv`, which
 includes VapourSynth) and Homebrew ffmpeg for exporting (`brew install ffmpeg`).
 
-**Steady Player**, the app (it carries the plugins; dji-telemetry from the release after 0.3.0): download
-`Steady-Player-0.3.0-macos-arm64.zip` from the
-[release](https://github.com/anton-belkin/dlogm-gyroflow-player/releases/tag/v0.3.0), unzip it and move
-Steady Player to Applications, then open it. It's signed ad hoc, not by an Apple developer account, so the first
+**ActionFootagePlayer**, the app (it carries the plugins; dji-telemetry from the release after 0.3.0): download
+`ActionFootagePlayer-<version>-macos-arm64.zip` from the
+[latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move
+ActionFootagePlayer to Applications, then open it. (Up to 0.3.0 it was called Steady Player, and the files
+`Steady-Player-<version>-macos-arm64.zip` and `dlogm-gyroflow-player-<version>-macos-arm64.tar.gz`.) It's signed ad hoc, not by an Apple developer account, so the first
 time macOS won't open it: System Settings → Privacy & Security → Open Anyway. Opened on its own, it offers its
 setup:
 
@@ -74,14 +75,14 @@ setup:
 [rustup](https://rustup.rs); the first build takes 5-10 minutes):
 
 ```bash
-curl -LO https://github.com/anton-belkin/dlogm-gyroflow-player/releases/download/v0.3.0/dlogm-gyroflow-player-0.3.0-macos-arm64.tar.gz
-tar -xzf dlogm-gyroflow-player-0.3.0-macos-arm64.tar.gz
-cd dlogm-gyroflow-player-0.3.0-macos-arm64     # or: git clone https://github.com/anton-belkin/dlogm-gyroflow-player.git
+# ActionFootagePlayer-<version>-macos-arm64.tar.gz from the latest release, then:
+tar -xzf ActionFootagePlayer-*-macos-arm64.tar.gz
+cd ActionFootagePlayer-*-macos-arm64     # or: git clone https://github.com/anton-belkin/ActionFootagePlayer.git
 ./install.sh --apps
 ```
 
 `./install.sh` alone installs the three plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
-recommended settings, when there's none yet); `--apps` also builds Steady Player into `~/Applications` and runs
+recommended settings, when there's none yet); `--apps` also builds ActionFootagePlayer into `~/Applications` and runs
 its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
 `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
@@ -117,7 +118,13 @@ What differs from macOS:
   message.
 - The log is `~/.local/state/vs-gyroflow.log` on Linux and `%LOCALAPPDATA%\vs-gyroflow.log` on Windows.
 
-**Upgrading from 0.2**, `install.sh --apps` removes Steady Router: MP4 goes to Steady Player, MOV back to the
+**Upgrading from 0.3**, `install.sh --apps` replaces Steady Player, as the app was called, with ActionFootagePlayer:
+the old app goes, the new one becomes the default for MP4 videos, and what was yours in
+`~/Library/Application Support/Steady Player/` (DJI's LUT, your `default.gyroflow`) moves to
+`~/Library/Application Support/ActionFootagePlayer/`. With the app alone, the new one moves it the first time it
+plays or sets up; delete Steady Player from Applications yourself.
+
+**Upgrading from 0.2**, `install.sh --apps` removes Steady Router: MP4 goes to ActionFootagePlayer, MOV back to the
 player it was taking videos from. `gyroflow-router` is gone with it.
 
 **Upgrading from 0.1**, `install.sh` moves the old setup over: the loose scripts go to `scripts-backup/`, the
@@ -129,19 +136,19 @@ The commands moved with it: `gyroflow-embed` and `gyroflow-export` are now in `~
 
 ### Opening files
 
-Once Steady Player is set up, double-clicking an MP4 plays it in mpv with the plugins; for other videos, open
-them with Steady Player from Finder's Open With, or right click → Quick Actions:
+Once ActionFootagePlayer is set up, double-clicking an MP4 plays it in mpv with the plugins; for other videos, open
+them with ActionFootagePlayer from Finder's Open With, or right click → Quick Actions:
 
-- **Play Stabilized** opens the selected videos in Steady Player.
+- **Play Stabilized** opens the selected videos in ActionFootagePlayer.
 - **Stabilize + LUT** exports them (see Exporting) in the background, with a notification as each one is done.
 
-Steady Player uses the plugins it carries (`Contents/Resources/plugins/`), or the copy in `~/.config/mpv/scripts/`
+ActionFootagePlayer uses the plugins it carries (`Contents/Resources/plugins/`), or the copy in `~/.config/mpv/scripts/`
 when there is one (`install.sh` puts them there for mpv in a terminal), so they're never loaded twice. It reads
 your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. The app is read-only once signed;
-what's yours is in `~/Library/Application Support/Steady Player/`: DJI's LUT and its shader (`dlogm/`), and
+what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
 your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
 
-Steady Player starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
+ActionFootagePlayer starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
 mpv stayed tied to it and macOS throttled it as a background process.
 
 ### Keys
@@ -192,8 +199,8 @@ Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilizati
 in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
 
 To carry one file instead of two, move the project into the video (the commands here are in
-`~/.config/mpv/scripts/gyroflow/`; with just Steady Player, in
-`/Applications/Steady Player.app/Contents/Resources/plugins/gyroflow/`):
+`~/.config/mpv/scripts/gyroflow/`; with just ActionFootagePlayer, in
+`/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/`):
 
 ```bash
 ~/.config/mpv/scripts/gyroflow/gyroflow-embed --move DJI_0009_D.MP4     # DJI_0009_D.gyroflow → inside the MP4
@@ -210,8 +217,8 @@ project: DJI with EIS off, and (not yet tried on a real clip, see Other cameras)
 Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
 that it was off: footage the camera stabilized already gets worse stabilized again, so a clip that doesn't say
 plays as it is. These clips get Gyroflow's default preset
-and then `default.gyroflow`: yours in `~/Library/Application Support/Steady Player/gyroflow/` if you put one
-there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in Steady Player). Why a clip isn't stabilized is in mpv's log
+and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFootagePlayer/gyroflow/` if you put one
+there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
@@ -357,7 +364,7 @@ off, so a wrong guess about a camera means its clips play as they are, not worse
 - the model, firmware and settings (lens/FOV, frame rate) in a word.
 
 Share them through a link (Google Drive, Dropbox, WeTransfer, ...) in a
-[new issue](https://github.com/anton-belkin/dlogm-gyroflow-player/issues/new). The clips are used only to work out
+[new issue](https://github.com/anton-belkin/ActionFootagePlayer/issues/new). The clips are used only to work out
 the camera's metadata; if anything from them goes into the repo, it's the metadata alone as test data (a few kB,
 no picture), and only if you're fine with that. The files carry the camera's serial number, and the place they
 were shot if the camera had GPS, so shoot somewhere you don't mind showing.
@@ -433,9 +440,9 @@ evenly over it. GPS5 (HERO5-10) has the fix for the whole sample in `GPSF`, GPS9
 ```
 install.sh                    builds and installs everything
 mpv/scripts/dlogm/            the D-Log M plugin  →  ~/.config/mpv/scripts/dlogm (+ shaders/, luts/ at install),
-                              and in Steady Player
+                              and in ActionFootagePlayer
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
-                              Steady Player
+                              ActionFootagePlayer
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
@@ -445,11 +452,11 @@ luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is
 tools/cube_to_glsl.py         .cube → mpv shader
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
-macos/                        Steady Player: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
+macos/                        ActionFootagePlayer: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
                               DJI's LUT), default-app.py, the Quick Actions' export script
-tools/make_app.sh             builds Steady Player.app, with the plugins in it
+tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
 tools/make_workflow.py        writes the Finder Quick Actions
-tools/make_release.sh         release files: Steady Player, each plugin alone, and the tree plus prebuilt binaries
+tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
 tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for Linux or Windows
 .github/workflows/release.yml builds the release on macOS, Linux and Windows and publishes it for a pushed v* tag
 ```

@@ -1,6 +1,6 @@
 #!/bin/bash
 # tools/make_release.sh <version>: into dist/
-#   Steady-Player-<version>-macos-arm64.zip             Steady Player.app with the plugins in it (tools/make_app.sh):
+#   ActionFootagePlayer-<version>-macos-arm64.zip             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh):
 #                                                       unzipped into Applications, its setup downloads DJI's LUT
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
@@ -10,7 +10,7 @@
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
 #                                                       tools/make_plugin_zip.sh's)
-#   dlogm-gyroflow-player-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
+#   ActionFootagePlayer-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
 #                                                       install.sh needs no Rust (it uses bin/ when it's there)
 #
 # Runs on macOS (Apple Silicon); .github/workflows/release.yml runs it for a pushed v* tag.
@@ -20,7 +20,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version=${1:?usage: tools/make_release.sh <version>}
-name="dlogm-gyroflow-player-$version-macos-arm64"
+name="ActionFootagePlayer-$version-macos-arm64"
 if ! git diff --quiet HEAD -- vs-gyroflow; then
     echo "vs-gyroflow has uncommitted changes; the binaries would not match the tree" >&2
     exit 1
@@ -46,11 +46,11 @@ tar -C dist -czf "dist/$name.tar.gz" "$name"
 
 # Built from the tarball's tree, which is HEAD's
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "dist/dlogm_hlg.glsl"
-app="Steady-Player-$version-macos-arm64"
+app="ActionFootagePlayer-$version-macos-arm64"
 rm -rf "dist/$app" "dist/$app.zip"
 mkdir -p "dist/$app"
-tools/make_app.sh "dist/$app/Steady Player.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
-ditto -c -k --keepParent "dist/$app/Steady Player.app" "dist/$app.zip"
+tools/make_app.sh "dist/$app/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
+ditto -c -k --keepParent "dist/$app/ActionFootagePlayer.app" "dist/$app.zip"
 rm -rf "dist/$app"
 
 gyroflow="mpv-gyroflow-$version-macos-arm64"
