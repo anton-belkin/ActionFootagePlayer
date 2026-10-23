@@ -188,6 +188,7 @@ fi
 put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
 put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
+put mpv/scripts/dlogm/video_color.lua "$DLOGM/video_color.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
 for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644

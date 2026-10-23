@@ -113,6 +113,8 @@ local function passport(d, g, t)
     if d then
         if d.log then
             table.insert(parts, (CURVE_NAMES[d.curve] or d.curve) .. (d.curve ~= d.recorded and " (by hand)" or ""))
+        elseif d.hdr and d.hdr ~= "" then
+            table.insert(parts, "HDR (" .. d.hdr:upper() .. ")")
         else
             table.insert(parts, "not log")
         end
@@ -124,7 +126,11 @@ end
 
 local function look_menu(d, key)
     local items = {}
-    if not d.log then
+    if not d.log and d.hdr and d.hdr ~= "" then
+        -- A file tagged HDR: as it is, or tone-mapped to SDR as without the plugin
+        table.insert(items, item("HDR (" .. d.hdr:upper() .. "), as it is", "script-binding dlogm/hdr", { checked = d.look == "hdr", shortcut = key["script-binding dlogm/hdr"] }))
+        table.insert(items, item("Tone-mapped to SDR", "script-binding dlogm/sdr", { checked = d.look == "sdr", shortcut = key["script-binding dlogm/sdr"] }))
+    elseif not d.log then
         table.insert(items, info("Not log, as the camera says"))
     else
         local name = CURVE_NAMES[d.curve] or d.curve

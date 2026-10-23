@@ -7,6 +7,12 @@
 -- and names Normal-color clips *_D.MP4 too, so the metadata is the only reliable sign. Files it can't tell (other
 -- DJI models, Insta360) play as they are; Ctrl+l picks the curve for one by hand.
 --
+-- A file tagged HDR (transfer HLG or PQ: the player's own exports, phones, GoPro's and DJI's HDR modes) plays in
+-- HDR as it is, with no LUT: the target is set to match it and the display switched to HDR, as in the hdr mode. It
+-- is never taken for log, whatever camera metadata or *_D name an export carries over: log is recorded tagged as
+-- SDR. The tag is read from the MP4/MOV before the file plays (video_color.lua); in other containers from the
+-- decoder once it starts, so there the first frames are in SDR.
+--
 -- Modes, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh):
 --   hdr  <curve>_hlg.glsl, a HOOK MAIN shader: log -> Rec.2100 HLG 1000-nit. The video is tagged as HLG (vf=format,
 --        labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result through as it
@@ -16,6 +22,9 @@
 --        by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
 --   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
 --   off  the file as it is, flat as the camera recorded it
+-- An HDR file has two of its own, for that file only (the mode log files start in stays as it was): as it is, in
+-- HDR (Ctrl+h, and L: the file as it is), or tone-mapped to SDR by mpv, as without the plugin (Ctrl+s). Ctrl+l still
+-- grades one with a log curve by hand.
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
 --   Ctrl+h  hdr    this file, and log files after it
@@ -28,7 +37,7 @@
 --   remember          the mode (hdr or sdr) as the default, in dlogm.conf
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
 -- ""), curve (the one applied, or ""), look (hdr, sdr, off, or "" when untouched), mode, sdr (DJI's LUT is there for
--- the curve).
+-- the curve), hdr (the file is tagged HDR: hlg or pq, or "").
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   mode=hdr     what log files start in: hdr or sdr
@@ -44,6 +53,7 @@ local options = require 'mp.options'
 local utils = require 'mp.utils'
 local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
+local video_color = require 'video_color'
 
 local o = { mode = "hdr" }
 options.read_options(o, "dlogm")
@@ -77,6 +87,8 @@ local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-col
 -- stabilization); enabled in hdr mode only
 local TAG_LABEL = "dlogm"
 local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
+-- The HDR transfers, by mpv's names for them (target-trc, video-dec-params/gamma)
+local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 
 local mode = o.mode == "sdr" and "sdr" or "hdr"
 -- For the current file: the user's own values of what this changes, its log curve, and the mode it's in (nil:
@@ -87,8 +99,17 @@ local current = nil
 local announce = false
 -- What the file's metadata says
 local recorded = nil
+-- The file's HDR tag, { trc = "hlg" or "pq", prim = "bt.2020", ... } (nil: SDR), and whether the user has changed
+-- how the file shows
+local hdr = nil
+local touched = false
 
 local function label(m)
+    if hdr and not curve then
+        local name = "HDR video (" .. HDR_NAMES[hdr.trc] .. ")"
+        if m == "sdr" then return name .. " tone-mapped to SDR" end
+        return name .. ", as it is"
+    end
     local name = (curve or CURVE.dlogm).name
     if m == "hdr" then return name .. " -> HDR" end
     if m == "sdr" then return name .. " -> Rec.709" end
@@ -114,7 +135,7 @@ local function publish()
     local c = curve or CURVE.dlogm
     local state = {
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
-        look = current or "", mode = mode, sdr = c.sdr ~= nil and plugin_file(c.sdr) ~= nil,
+        look = current or "", mode = mode, sdr = c.sdr ~= nil and plugin_file(c.sdr) ~= nil, hdr = hdr and hdr.trc or "",
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -162,8 +183,37 @@ local function tag_hlg(on)
     mp.set_property_native("file-local-options/vf", vf)
 end
 
+-- The target for HDR: the display switched to HDR (vo=gpu-next) and the signal sent to it encoded as `trc`, so mpv
+-- passes HDR video in it through as it is. 1000 nits, as the hdr shader's HLG is graded for
+local function hdr_target(target, trc, prim)
+    target["target-trc"] = trc
+    target["target-prim"] = prim
+    target["target-peak"] = "1000"
+    target["target-colorspace-hint"] = "yes"
+end
+
+local function set_target(target)
+    for _, opt in ipairs(TARGET_OPTIONS) do
+        mp.set_property("file-local-options/" .. opt, target[opt])
+    end
+end
+
+-- An HDR file, without a log curve: as it is, in HDR (hdr, off), or tone-mapped to SDR by mpv (sdr)
+local function apply_hdr_file(m)
+    local target = {}
+    for k, v in pairs(base.target) do target[k] = v end
+    if m ~= "sdr" then hdr_target(target, hdr.trc, hdr.prim) end
+    tag_hlg(false)
+    mp.set_property_native("file-local-options/glsl-shaders", base.shaders)
+    set_target(target)
+    current = m == "sdr" and "sdr" or "hdr"
+    publish()
+    return true
+end
+
 local function apply(m)
     if not base then return false end
+    if hdr and not curve then return apply_hdr_file(m) end
     local c = curve or CURVE.dlogm
     if m == "sdr" and not c.sdr then
         mp.osd_message(c.name .. ": no Rec.709 LUT for it yet", 3)
@@ -182,16 +232,14 @@ local function apply(m)
     for k, v in pairs(base.target) do target[k] = v end
     if shader then table.insert(shaders, shader) end
     if m == "hdr" then
-        target["target-trc"] = "hlg"
-        target["target-prim"] = "bt.2020"
-        target["target-peak"] = "1000"
-        target["target-colorspace-hint"] = "yes"
+        hdr_target(target, "hlg", "bt.2020")
+    elseif m == "off" and hdr then
+        -- off on an HDR file graded by hand: as it is, in HDR
+        hdr_target(target, hdr.trc, hdr.prim)
     end
     tag_hlg(m == "hdr")
     mp.set_property_native("file-local-options/glsl-shaders", shaders)
-    for _, opt in ipairs(TARGET_OPTIONS) do
-        mp.set_property("file-local-options/" .. opt, target[opt])
-    end
+    set_target(target)
     current = m
     publish()
     return true
@@ -199,11 +247,20 @@ end
 
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function()
-    base, curve, current, announce, recorded = nil, nil, nil, false, nil
+    base, curve, current, announce, recorded, hdr, touched = nil, nil, nil, false, nil, nil, false
     local path = mp.get_property("path")
     if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
     for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end
+    local trc, prim
+    if not path:find("://", 1, true) then trc, prim = video_color.read(path) end
+    if trc then
+        -- Log is recorded tagged as SDR: what an HDR file's camera metadata says (an export's) isn't read
+        hdr = { trc = trc, prim = prim or "bt.2020" }
+        announce = apply("hdr")
+        mp.msg.info(label(current))
+        return
+    end
     recorded = recorded_curve(path)
     curve = recorded
     if not curve then
@@ -215,25 +272,44 @@ mp.add_hook("on_preloaded", 50, function()
     if announce then mp.msg.info(label(current)) end
 end)
 
+-- An HDR file whose container didn't say (not MP4/MOV, or no colr box), from the decoder once it starts: in HDR as
+-- it is from then on, unless the user has chosen otherwise. The decoder's, not video-params: the hdr mode's filter
+-- tags the video as HLG after it
+mp.observe_property("video-dec-params", "native", function(_, p)
+    if not base or hdr or touched or not p or not HDR_NAMES[p.gamma] then return end
+    hdr = { trc = p.gamma, prim = p.primaries or "bt.2020" }
+    if curve then mp.msg.info(curve.name .. " in the metadata, but the video is tagged " .. HDR_NAMES[hdr.trc] .. ": not log") end
+    recorded, curve = nil, nil
+    if apply("hdr") then
+        mp.msg.info(label(current))
+        mp.osd_message(label(current), 1.5)
+    end
+end)
+
 mp.register_event("file-loaded", function()
     if announce then mp.osd_message(label(current), 1.5) end
     announce = false
 end)
 
 mp.register_event("end-file", function()
-    base, curve, current, recorded = nil, nil, nil, nil
+    base, curve, current, recorded, hdr = nil, nil, nil, nil, nil
     publish()
 end)
 
-local function choose(m, sticky)
+local function choose(wanted, sticky)
     return function()
         if not base then return end
+        touched = true
+        local hdr_file = hdr and not curve
+        -- An HDR file as it is is in HDR
+        local m = hdr_file and wanted == "off" and "hdr" or wanted
         if current == m then
             mp.osd_message(label(m), 1.5)
             return
         end
         if apply(m) then
-            if sticky then mode = m end
+            -- An HDR file's look is its own: log files start as they did
+            if sticky and not hdr_file then mode = m end
             publish()
             mp.osd_message(label(m), 2)
         end
@@ -243,6 +319,7 @@ end
 -- The next curve for this file, shown the way the file is shown now (HDR when it was off or untouched)
 local function next_curve()
     if not base then return end
+    touched = true
     local i = 0
     for k, c in ipairs(CURVES) do
         if c == curve then i = k end
@@ -257,10 +334,17 @@ mp.add_key_binding("Ctrl+s", "sdr", choose("sdr", true))
 mp.add_key_binding("L", "off", choose("off", false))
 mp.add_key_binding("Ctrl+l", "curve", next_curve)
 
--- This file's curve by name, or the one its metadata says (auto: for a file it says isn't log, as it is again)
+-- This file's curve by name, or the one its metadata says (auto: for a file it says isn't log, as it is again; an
+-- HDR file in HDR)
 mp.register_script_message("curve", function(id)
     if not base then return end
+    touched = true
     if id == "auto" and not recorded then
+        if hdr then
+            curve = nil
+            if apply("hdr") then mp.osd_message(label(current), 2) end
+            return
+        end
         if current then apply("off") end
         curve, current = nil, nil
         publish()

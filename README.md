@@ -115,7 +115,7 @@ this reads):
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | should work, with a project |
-| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
+| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS and speed; exposure on one without GPS | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | should work, with a project |
 
@@ -202,8 +202,8 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
-| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
+| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
+| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
@@ -233,7 +233,7 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
-| `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
+| `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
@@ -375,6 +375,11 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
 
+Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
+an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
+for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it tone-mapped
+to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
+
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses), without edges to fill. Filling them costs more: the export fills every frame, where playback above
 `max_fps` plays every other one. The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
@@ -385,8 +390,7 @@ and ffmpeg encodes it with VideoToolbox.
 
 DJI cameras record, next to the video, a message per frame with what the camera knew at that moment, and GoPro
 cameras about a second of it at a time (GPMF). The dji-telemetry plugin reads all of it when a clip opens and
-shows, by default, the depth and whether the camera is in the water, bottom left. Each field shows when the clip
-has it:
+shows it bottom left. Each field shows when the clip has it:
 
 | `fields=` | |
 |---|---|
@@ -400,7 +404,12 @@ has it:
 | `heartrate` | from a device paired with an Osmo 360 |
 | `exposure` | ISO, shutter, aperture, white balance |
 
-GoPro records GPS, shutter, ISO and white balance, and no barometer: for its clips set `fields=gps,speed,exposure`.
+Without `fields=`, each clip shows what it has of `depth`, `water`, `gps` and `speed`, and `exposure` only when it
+has none of them: a DJI clip shows the depth and whether the camera is in the water, a GoPro one the position and
+speed once the GPS has a fix (GoPro has no barometer), and a GoPro without GPS (HERO12 Black), or with it off, the
+exposure. Exposure isn't shown next to the others by default: it's a long line that changes all the time, so it's
+there for the asking (`fields=`, or the right-click menu). A `fields=` you set is shown as it is, in every clip, and
+so are fields picked in the menu, from then on (Remember as default keeps them).
 
 **In a dive housing the depth isn't recorded.** The barometer then measures the air in the housing (1050-1100 hPa
 whatever the depth), and the camera doesn't set its in-water flag; `water` still shows *In water*, from the picture.
@@ -664,7 +673,7 @@ beyond stock Gyroflow.
 The metadata track (the first with a `meta` handler, as for D-Log M) holds one protobuf message per frame,
 `ProductMeta` in DJI's `dvtm_*.proto`: the clip's and the stream's metadata in the first, then `FrameMeta` in each.
 `mpv/scripts/dji-telemetry/telemetry.lua` finds every sample through the track's sample table (`stts`, `stsc`,
-`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the fields the chosen `fields=` need,
+`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the values the fields shown need,
 along paths of field numbers per model (`LAYOUTS`, by `proto_file_name`). Each value is kept only where it changes;
 `main.lua` looks it up by `time-pos` and redraws the OSD overlay (ASS) when the text changes. A 3.7-minute 4K60 clip
 (2.5 GB) is read in 0.4 s.
@@ -755,6 +764,6 @@ same in every LUT it writes):
 
 Each goes from here once it's fixed.
 
-- **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
-  the default is depth and in-water, which GoPro doesn't record.
-  [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)
+- **The wider view's FOV is a fixed number** (`wide_fov`, `Ctrl+[` / `Ctrl+]`), which suits some clips and lenses
+  and not others. It should be picked by itself, so the stabilized picture covers about the frame's area.
+  [#32](https://github.com/anton-belkin/ActionFootagePlayer/issues/32)
