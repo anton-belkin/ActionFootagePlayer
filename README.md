@@ -525,10 +525,13 @@ they are. `gyroflow-probe` reads it the same way, for the export. The plugin
 shaders of your own, so mpv undoes them when a playlist moves on to a clip that isn't D-Log M:
 
 - `hdr`, the default: a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
-  Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK OUTPUT`,
-  re-sampling the source through `BIND MAIN`. At `HOOK MAIN`, mpv would linearize
-  the HLG output as the file's BT.709 and encode it again. `target-trc=hlg` with
+  Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK MAIN`.
+  A `format` filter at the end of the chain tags the video as HLG/BT.2020, the target is the same
+  (`target-trc=hlg`, `target-prim=bt.2020`, `target-peak=1000`), so mpv's color pipeline runs an HLG → HLG
+  identity; tagged as the file's BT.709, mpv would linearize the HLG output as BT.709 and encode it again.
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
+  (Up to 0.5.0 the LUT was at `HOOK OUTPUT`, re-sampling the source through `BIND MAIN`: libplacebo redraws a
+  paused frame from its cache, where `MAIN` can't be bound, and skipped it, so paused video went grey.)
 - `sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
   BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged.
 
