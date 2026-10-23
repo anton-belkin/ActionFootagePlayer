@@ -3,6 +3,12 @@
 -- key), only that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
 -- as a notification. Shift+E again on a video being exported, twice, cancels it.
 --
+-- As it plays: in the dlogm plugin's standard look (Ctrl+s) with DJI's LUT (--sdr), and with the horizon locked or
+-- not when the gyroflow plugin's menu says so (--horizon-lock). Script messages, for the right-click menu:
+--   export [sdr]         the same as Shift+E, or in the standard look whatever plays
+--   cancel-export        cancel this clip's export, without asking
+--   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
+--
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
 -- keeps its frame rate, the export nearly stops; on Linux and Windows a few frames a second), and at full speed
@@ -30,6 +36,14 @@ local overlay = mp.create_osd_overlay("ass-events")
 local confirm = nil
 local playing = false
 local timer
+local last_export = nil
+
+-- For the right-click menu: whether the clip playing is being exported, and the last file exported
+local function publish()
+    mp.set_property_native("user-data/gyroflow/exporting", running[mp.get_property("path") or ""] ~= nil)
+    mp.set_property_native("user-data/gyroflow/last_export", last_export or "")
+end
+mp.observe_property("path", "string", publish)
 
 -- On Windows, the OSD message is all
 local function notify(title, text)
@@ -127,6 +141,7 @@ local function finish(path)
     if job.control then os.remove(job.control) end
     if #order == 0 and timer then timer:kill(); timer = nil end
     redraw()
+    publish()
     return job
 end
 
@@ -171,24 +186,18 @@ mp.register_event("shutdown", function()
     end
 end)
 
-mp.add_key_binding("E", "export", function()
+-- The clip playing, or nil (and why on screen)
+local function local_path()
     local path = mp.get_property("path")
     if not path or path:find("://", 1, true) then
         mp.osd_message("Export: not a local file", 2)
-        return
+        return nil
     end
-    local job = running[path]
-    if job then
-        if job.cancelling then return end
-        if confirm and confirm.path == path and mp.get_time() < confirm.time + CONFIRM_SECONDS then
-            confirm = nil
-            cancel(path)
-        else
-            confirm = { path = path, time = mp.get_time() }
-            mp.osd_message("Exporting " .. job.name .. job.range .. ": Shift+E again to cancel", CONFIRM_SECONDS)
-        end
-        return
-    end
+    return path
+end
+
+-- `sdr`: in the standard look whatever plays
+local function start(path, sdr)
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then
         mp.osd_message("Export: gyroflow-export isn't installed", 2)
@@ -200,6 +209,11 @@ mp.add_key_binding("E", "export", function()
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
+    if sdr or mp.get_property_native("user-data/dlogm/look") == "sdr" then table.insert(args, "--sdr") end
+    local horizon = mp.get_property_native("user-data/gyroflow/horizon_lock")
+    if horizon == "yes" or horizon == "no" then
+        table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")
+    end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local range = ""
     if a and b and b > a then
@@ -210,7 +224,7 @@ mp.add_key_binding("E", "export", function()
     table.insert(args, path)
 
     local name = platform.file_name(path)
-    job = { name = name, range = range, progress = progress, control = control }
+    local job = { name = name, range = range, progress = progress, control = control }
     running[path] = job
     table.insert(order, path)
     mp.osd_message("Exporting " .. name .. range .. (playing and " (slowly while the video plays)" or ""), 3)
@@ -224,6 +238,8 @@ mp.add_key_binding("E", "export", function()
             mp.osd_message("Export cancelled: " .. name .. range, 4)
             notify("Export cancelled", name .. range)
         elseif r and r.status == 0 and out then
+            last_export = out
+            publish()
             mp.osd_message("Exported " .. name .. range .. "\n" .. out, 5)
             notify("Exported " .. name, out)
         else
@@ -235,4 +251,49 @@ mp.add_key_binding("E", "export", function()
     end)
     if not timer then timer = mp.add_periodic_timer(1, poll) end
     redraw()
+    publish()
+end
+
+mp.add_key_binding("E", "export", function()
+    local path = local_path()
+    if not path then return end
+    local job = running[path]
+    if not job then return start(path, false) end
+    if job.cancelling then return end
+    if confirm and confirm.path == path and mp.get_time() < confirm.time + CONFIRM_SECONDS then
+        confirm = nil
+        cancel(path)
+    else
+        confirm = { path = path, time = mp.get_time() }
+        mp.osd_message("Exporting " .. job.name .. job.range .. ": Shift+E again to cancel", CONFIRM_SECONDS)
+    end
+end)
+
+mp.register_script_message("export", function(how)
+    local path = local_path()
+    if not path then return end
+    if running[path] then
+        mp.osd_message("Exporting " .. running[path].name .. running[path].range .. " already", 2)
+        return
+    end
+    start(path, how == "sdr")
+end)
+
+mp.register_script_message("cancel-export", function()
+    local path = mp.get_property("path")
+    local job = path and running[path]
+    if job and not job.cancelling then cancel(path) end
+end)
+
+mp.register_script_message("reveal-last-export", function()
+    if not last_export then return end
+    local args
+    if platform.macos then
+        args = { "open", "-R", last_export }
+    elseif platform.windows then
+        args = { "explorer", "/select," .. last_export }
+    else
+        args = { "xdg-open", last_export:match("^(.*)/") or "." }
+    end
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end)
 end)

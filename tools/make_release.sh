@@ -8,6 +8,8 @@
 #                                                       redistributed (install.sh downloads it from DJI). With the
 #                                                       HLG LUT itself, for the gyroflow plugin's exports
 #   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua)
+#   mpv-footage-menu-<version>.zip                      the right-click menu for the plugins, the same way (plain
+#                                                       Lua, mpv 0.41 and later)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
 #                                                       tools/make_plugin_zip.sh's)
@@ -93,6 +95,13 @@ git archive HEAD mpv/scripts/dji-telemetry | tar -x --strip-components 2 -C "dis
 (cd "dist/$telemetry" && zip -qr "../$telemetry.zip" dji-telemetry)
 rm -rf "dist/$telemetry"
 
-(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+menu="mpv-footage-menu-$version"
+rm -rf "dist/$menu" "dist/$menu.zip"
+mkdir -p "dist/$menu"
+git archive HEAD mpv/scripts/footage-menu | tar -x --strip-components 2 -C "dist/$menu"
+(cd "dist/$menu" && zip -qr "../$menu.zip" footage-menu)
+rm -rf "dist/$menu"
+
+(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$menu.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$menu.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS

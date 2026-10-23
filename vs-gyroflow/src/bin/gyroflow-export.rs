@@ -47,6 +47,7 @@ const USAGE: &str = "usage: gyroflow-export [options] <video>...
 Renders each video stabilized (and, for D-Log M, color-converted) into a stabilized/ folder next to it.
 
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
+  --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
@@ -62,6 +63,7 @@ Renders each video stabilized (and, for D-Log M, color-converted) into a stabili
 
 struct Options {
     sdr: bool,
+    horizon_lock: Option<f64>,
     prores: bool,
     from: Option<f64>,
     to: Option<f64>,
@@ -76,7 +78,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { sdr: false, prores: false, from: None, to: None, out: None, force: false,
+    let mut opts = Options { sdr: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -84,6 +86,8 @@ fn main() {
         let mut value = |name: &str| args.next().unwrap_or_else(|| fail(&format!("{name} needs a value")));
         match a.as_str() {
             "--sdr" => opts.sdr = true,
+            "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
+                .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
             "--prores" => opts.prores = true,
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
@@ -468,7 +472,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (w, h) = (info.width & !1, info.height & !1);
     let workers = 3;
     let key = format!("export|{}", path.display());
-    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, (w, h), 3, (1, 1), None,
+    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, opts.horizon_lock, (w, h), 3, (1, 1), None,
                                        SampleKind::U16, 1023.0, true, opts.interpolation, workers)?);
     let (ow, oh) = (engine.render_size.0 & !1, engine.render_size.1 & !1);
 

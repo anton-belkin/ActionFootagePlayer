@@ -23,6 +23,13 @@
 --   L       off    this file
 --   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
 --
+-- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
+--   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
+--   remember          the mode (hdr or sdr) as the default, in dlogm.conf
+-- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
+-- ""), curve (the one applied, or ""), look (hdr, sdr, off, or "" when untouched), mode, sdr (DJI's LUT is there for
+-- the curve).
+--
 -- Options (~~/script-opts/dlogm.conf):
 --   mode=hdr     what log files start in: hdr or sdr
 --
@@ -78,6 +85,8 @@ local base = nil
 local curve = nil
 local current = nil
 local announce = false
+-- What the file's metadata says
+local recorded = nil
 
 local function label(m)
     local name = (curve or CURVE.dlogm).name
@@ -98,6 +107,16 @@ local function plugin_file(name)
         if file_exists(utils.join_path(dir, name)) then return utils.join_path(dir, name) end
     end
     return nil
+end
+
+-- For the right-click menu (mpv/menu.conf)
+local function publish()
+    local c = curve or CURVE.dlogm
+    local state = {
+        log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
+        look = current or "", mode = mode, sdr = c.sdr ~= nil and plugin_file(c.sdr) ~= nil,
+    }
+    for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
 
 -- The file's log curve from the camera's metadata, nil when it isn't one (or can't be told)
@@ -174,20 +193,22 @@ local function apply(m)
         mp.set_property("file-local-options/" .. opt, target[opt])
     end
     current = m
+    publish()
     return true
 end
 
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function()
-    base, curve, current, announce = nil, nil, nil, false
+    base, curve, current, announce, recorded = nil, nil, nil, false, nil
     local path = mp.get_property("path")
-    if not path then return end
+    if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
     for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end
-    curve = recorded_curve(path)
+    recorded = recorded_curve(path)
+    curve = recorded
     if not curve then
         mp.msg.verbose("not log footage it knows")
-        return
+        return publish()
     end
     -- A curve without a Rec.709 LUT starts in HDR whatever the mode
     announce = apply(curve.sdr and mode or "hdr")
@@ -199,7 +220,10 @@ mp.register_event("file-loaded", function()
     announce = false
 end)
 
-mp.register_event("end-file", function() base, curve, current = nil, nil, nil end)
+mp.register_event("end-file", function()
+    base, curve, current, recorded = nil, nil, nil, nil
+    publish()
+end)
 
 local function choose(m, sticky)
     return function()
@@ -210,6 +234,7 @@ local function choose(m, sticky)
         end
         if apply(m) then
             if sticky then mode = m end
+            publish()
             mp.osd_message(label(m), 2)
         end
     end
@@ -231,3 +256,60 @@ mp.add_key_binding("Ctrl+h", "hdr", choose("hdr", true))
 mp.add_key_binding("Ctrl+s", "sdr", choose("sdr", true))
 mp.add_key_binding("L", "off", choose("off", false))
 mp.add_key_binding("Ctrl+l", "curve", next_curve)
+
+-- This file's curve by name, or the one its metadata says (auto: for a file it says isn't log, as it is again)
+mp.register_script_message("curve", function(id)
+    if not base then return end
+    if id == "auto" and not recorded then
+        if current then apply("off") end
+        curve, current = nil, nil
+        publish()
+        mp.osd_message("Not log, as the camera says: the file as it is", 2)
+        return
+    end
+    local c = id == "auto" and recorded or CURVE[id]
+    if not c then return end
+    local before = curve
+    curve = c
+    local m = current == "sdr" and curve.sdr and "sdr" or "hdr"
+    if apply(m) then mp.osd_message(label(m), 2) else curve = before end
+end)
+
+-- Sets options in ~~/script-opts/dlogm.conf, the rest of the file as it was; false when it can't be written
+local function save_options(values)
+    local path = mp.command_native({ "expand-path", "~~/script-opts/dlogm.conf" })
+    local lines, done = {}, {}
+    local f = io.open(path, "r")
+    if f then
+        for line in f:lines() do
+            local key = line:match("^%s*([%w_%-]+)%s*=")
+            if not (key and values[key]) then
+                table.insert(lines, line)
+            elseif not done[key] then
+                table.insert(lines, key .. "=" .. values[key])
+                done[key] = true
+            end
+        end
+        f:close()
+    end
+    for key, value in pairs(values) do
+        if not done[key] then table.insert(lines, key .. "=" .. value) end
+    end
+    local dir = path:match("^(.*)[/\\]")
+    if dir and not utils.file_info(dir) then
+        local windows = package.config:sub(1, 1) == "\\"
+        mp.command_native({ name = "subprocess", playback_only = false,
+                            args = windows and { "cmd", "/d", "/c", "mkdir", dir } or { "mkdir", "-p", dir } })
+    end
+    f = io.open(path, "w")
+    if not f then return false end
+    f:write(table.concat(lines, "\n") .. "\n")
+    f:close()
+    return true
+end
+
+mp.register_script_message("remember", function()
+    local saved = save_options({ mode = mode })
+    mp.osd_message(saved and ("Log clips start in " .. (mode == "sdr" and "the standard look" or "HDR") .. " (dlogm.conf)")
+                         or "Couldn't write dlogm.conf", 2)
+end)

@@ -142,7 +142,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins, mpv and ffmpeg in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins and their menu, mpv and ffmpeg in it |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
 
@@ -178,21 +178,41 @@ them with ActionFootagePlayer from Finder's Open With, or right click → Quick 
 - **Stabilize + LUT** exports them (see [Exporting](#exporting)) in the background, with a notification as each
   one is done.
 
+### The menu
+
+Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
+top, what the clip is (the camera, its log curve, whether it has motion data and telemetry); then playing, marking a
+part and exporting it; **Look** (HDR, the standard look, as recorded, the log curve by hand); **Stabilization** (on,
+the wider view and its FOV, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
+previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
+Report this camera…, which opens an issue on GitHub with what the plugins found in the clip.
+
+Look, Stabilization and Telemetry each have **Remember as default**: the settings as they are become the plugin's
+options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
+flow)…** instead: see Stabilization.
+
+The menu is mpv's own, so it needs mpv 0.41 or later (Homebrew's is); with an older mpv, right click pauses as it
+always did. It's the footage-menu plugin, which shows only the plugins that are there.
+
 ### Keys
 
 | Key | | `script-binding` |
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
+| `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
-| `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here | `gyroflow/edit` |
+| `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
+| right click | The menu | `footage_menu/menu` |
 
-To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
+To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
+without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
+e.g. `Ctrl+k script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-message-to gyroflow fov 2`.
 
 ## In detail
 
@@ -207,18 +227,22 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
-| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` |
+| `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
+| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` (`Ctrl+[` and `Ctrl+]` change it while playing) |
+| `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
-| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height; `Ctrl+[` and `Ctrl+]` change it while playing), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
 | `dji_telemetry.conf`: `visible=yes` | `no`: shown only after `Ctrl+t` |
+| `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
 
 The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with
-anything but letters and digits made `_`.
+anything but letters and digits made `_` (the menu's: `footage_menu.conf`). The menu's Remember as default writes
+these files, keeping whatever else is in them.
 
 ### Stabilization
 
@@ -229,6 +253,14 @@ plugin from what it renders: the same lens profile, smoothing, zoom and refracti
 what you saw. A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
 Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilization with it, at the same spot
 in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
+
+A clip without motion data (shot with the camera's stabilization on, or by a camera that records none) can be
+stabilized from the picture: `Ctrl+e` (or the menu's Stabilize in Gyroflow) opens the video itself in Gyroflow,
+where its motion is found by optical flow. Save the project next to the clip there, and the clip loads again where
+it was, stabilized with it. On Linux and Windows this needs `gyroflow_app` (Options).
+
+The menu's Lock horizon keeps the horizon level, whatever the project says (Gyroflow's horizon lock at 100 %, its
+roll and pitch as the project has them); unticked, it isn't locked. It needs more zoom, so the edges show more.
 
 To carry one file instead of two, move the project into the video (the commands here are in
 `~/.config/mpv/scripts/gyroflow/`; with just ActionFootagePlayer, in
@@ -272,7 +304,7 @@ their own.
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
 with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
-them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
+them while playing, and `edges_blur` (Options) sets how blurred:
 
 - **sphere**, the default: what was last seen in that direction, by the gyro. It's taken from the
   whole source frame, not just what the output shows, so it also has what the zoom crops away and what the camera
@@ -299,8 +331,9 @@ full rate, 85 %.
 
 ### Exporting
 
-`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, and for
-D-Log M the same LUT. With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, the horizon
+locked or not as the menu has it, and for D-Log M the same LUT: HDR, or DJI's Rec.709 one in the standard look
+(`Ctrl+s`; the menu's Export in standard look does that whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -391,6 +424,9 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 
 - `mpv-dji-telemetry-<version>.zip`, on any system: plain Lua.
 
+- `mpv-footage-menu-<version>.zip`, on any system with mpv 0.41 or later: the right-click menu (plain Lua). It
+  shows the plugins that are there.
+
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
@@ -407,7 +443,7 @@ cd ActionFootagePlayer-*-macos-arm64     # or: git clone https://github.com/anto
 ./install.sh --apps
 ```
 
-`./install.sh` alone installs the three plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
+`./install.sh` alone installs the three plugins and their menu into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
 recommended settings, when there's none yet); `--apps` also builds ActionFootagePlayer into `~/Applications` and runs
 its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
@@ -639,6 +675,8 @@ mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scrip
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
+mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
+                              ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)

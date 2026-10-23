@@ -18,6 +18,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
 | `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
+| `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
 | `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with

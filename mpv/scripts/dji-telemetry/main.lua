@@ -21,6 +21,16 @@
 -- Keys (rebind with `<key> script-binding dji_telemetry/<name>` in input.conf):
 --   Ctrl+t  toggle  the overlay off/on, for this file and the next
 --
+-- Script messages (`script-message-to dji_telemetry <message>`, what the right-click menu runs; mpv/menu.conf):
+--   position <corner>          where it shows: top-left, top-right, bottom-left, bottom-right
+--   units metric|imperial
+--   field <name> [yes|no]      show a field or not (without yes or no: the other way round); a field shown anew
+--                              goes after the others
+--   remember                   these, and whether it shows, as the defaults in dji_telemetry.conf
+-- The state is in user-data/dji_telemetry/ for the menu: available (the file has telemetry it reads), model (the
+-- camera's, as its telemetry says), visible,
+-- position, units, and shown/<field> for each field.
+--
 -- Options (~~/script-opts/dji_telemetry.conf):
 --   fields=depth,water   which, from the list above
 --   units=metric         or imperial: feet, mph, °F
@@ -31,6 +41,7 @@
 
 local mp = require 'mp'
 local options = require 'mp.options'
+local utils = require 'mp.utils'
 local telemetry = require 'telemetry'
 
 local o = { fields = "depth,water", units = "metric", position = "bottom-left", font_size = 28, visible = true }
@@ -41,6 +52,7 @@ local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true, lrv = true }
 local UNDERWATER_CONFIDENCE = 128
 local ALIGN = { ["top-left"] = 7, ["top-right"] = 9, ["bottom-left"] = 1, ["bottom-right"] = 3 }
 local imperial = o.units == "imperial"
+local corner = ALIGN[o.position] and o.position or "bottom-left"
 
 local function length(m)
     if imperial then return string.format("%.0f ft", m * 3.28084) end
@@ -141,10 +153,12 @@ local FIELDS = {
     end },
 }
 
+-- The fields shown, in order, and the telemetry values they read
 local fields, wanted = {}, {}
-do
+local function set_fields(names)
     local seen = {}
-    for name in o.fields:gmatch("[^,%s]+") do
+    fields, wanted = {}, {}
+    for _, name in ipairs(names) do
         if FIELDS[name] then
             fields[#fields + 1] = name
             for _, v in ipairs(FIELDS[name].values) do
@@ -155,11 +169,26 @@ do
         end
     end
 end
+do
+    local names = {}
+    for name in o.fields:gmatch("[^,%s]+") do names[#names + 1] = name end
+    set_fields(names)
+end
 
 local visible = o.visible
 local track = nil
 local overlay = mp.create_osd_overlay("ass-events")
 local shown = nil
+
+-- For the right-click menu (mpv/menu.conf)
+local function publish()
+    local state = { available = track ~= nil, model = track and track.model or "", visible = visible, position = corner,
+                    units = imperial and "imperial" or "metric" }
+    for k, v in pairs(state) do mp.set_property_native("user-data/dji_telemetry/" .. k, v) end
+    local on = {}
+    for _, name in ipairs(fields) do on[name] = true end
+    for name in pairs(FIELDS) do mp.set_property_native("user-data/dji_telemetry/shown/" .. name, on[name] == true) end
+end
 
 local function text_at(t)
     local function at(name) return telemetry.at(track.values[name], t) end
@@ -189,7 +218,7 @@ local function update()
 
     local scale = h / 720
     local margin = math.floor(24 * scale)
-    local an = ALIGN[o.position] or ALIGN["bottom-left"]
+    local an = ALIGN[corner]
     local x = (an == 7 or an == 1) and margin or w - margin
     local y = (an == 7 or an == 9) and margin or h - margin
     overlay.res_x, overlay.res_y = w, h
@@ -198,13 +227,18 @@ local function update()
     overlay:update()
 end
 
-mp.register_event("file-loaded", function()
-    track, shown = nil, nil
+-- The values the file was read for
+local read_for = {}
+
+-- The file's telemetry, the values the fields read
+local function load()
+    track, shown, read_for = nil, nil, {}
     overlay:remove()
     local path = mp.get_property("path")
     if not path or path:find("://", 1, true) or #wanted == 0 then return end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     if not PROBED_EXTENSIONS[ext] then return end
+    for _, v in ipairs(wanted) do read_for[v] = true end
     local err
     track, err = telemetry.read(path, wanted)
     if err then mp.msg.warn("couldn't read the telemetry: " .. tostring(err)) end
@@ -214,11 +248,17 @@ mp.register_event("file-loaded", function()
     end
     mp.msg.verbose("telemetry: " .. track.model)
     update()
+end
+
+mp.register_event("file-loaded", function()
+    load()
+    publish()
 end)
 
 mp.register_event("end-file", function()
     track, shown = nil, nil
     overlay:remove()
+    publish()
 end)
 
 mp.observe_property("time-pos", "number", update)
@@ -231,5 +271,86 @@ mp.add_key_binding("Ctrl+t", "toggle", function()
     end
     visible = not visible
     update()
+    publish()
     mp.osd_message(visible and "Telemetry: on" or "Telemetry: off", 1.5)
+end)
+
+local CORNER_LABELS = { ["top-left"] = "top left", ["top-right"] = "top right", ["bottom-left"] = "bottom left", ["bottom-right"] = "bottom right" }
+
+mp.register_script_message("position", function(where)
+    if not ALIGN[where] then return end
+    corner, shown, visible = where, nil, true
+    update()
+    publish()
+    mp.osd_message("Telemetry: " .. CORNER_LABELS[where], 1.5)
+end)
+
+mp.register_script_message("units", function(units)
+    if units ~= "metric" and units ~= "imperial" then return end
+    imperial, shown = units == "imperial", nil
+    update()
+    publish()
+    mp.osd_message("Telemetry: " .. units, 1.5)
+end)
+
+mp.register_script_message("field", function(name, on)
+    if not FIELDS[name] then return end
+    local names, has = {}, false
+    for _, f in ipairs(fields) do
+        if f == name then has = true else names[#names + 1] = f end
+    end
+    if on == "yes" or (on ~= "no" and not has) then
+        if has then return end
+        names[#names + 1] = name
+    elseif not has then
+        return
+    end
+    set_fields(names)
+    visible = true
+    -- Values it didn't read are read now: the file is read again
+    local reread = false
+    for _, v in ipairs(wanted) do
+        if not read_for[v] then reread = true end
+    end
+    if reread then load() else shown = nil; update() end
+    publish()
+end)
+
+-- Sets options in ~~/script-opts/dji_telemetry.conf, the rest of the file as it was; false when it can't be written
+local function save_options(values)
+    local path = mp.command_native({ "expand-path", "~~/script-opts/dji_telemetry.conf" })
+    local lines, done = {}, {}
+    local f = io.open(path, "r")
+    if f then
+        for line in f:lines() do
+            local key = line:match("^%s*([%w_%-]+)%s*=")
+            if not (key and values[key]) then
+                table.insert(lines, line)
+            elseif not done[key] then
+                table.insert(lines, key .. "=" .. values[key])
+                done[key] = true
+            end
+        end
+        f:close()
+    end
+    for key, value in pairs(values) do
+        if not done[key] then table.insert(lines, key .. "=" .. value) end
+    end
+    local dir = path:match("^(.*)[/\\]")
+    if dir and not utils.file_info(dir) then
+        local windows = package.config:sub(1, 1) == "\\"
+        mp.command_native({ name = "subprocess", playback_only = false,
+                            args = windows and { "cmd", "/d", "/c", "mkdir", dir } or { "mkdir", "-p", dir } })
+    end
+    f = io.open(path, "w")
+    if not f then return false end
+    f:write(table.concat(lines, "\n") .. "\n")
+    f:close()
+    return true
+end
+
+mp.register_script_message("remember", function()
+    local saved = save_options({ fields = table.concat(fields, ","), units = imperial and "imperial" or "metric",
+                                 position = corner, visible = visible and "yes" or "no" })
+    mp.osd_message(saved and "Telemetry: saved as the defaults (dji_telemetry.conf)" or "Telemetry: couldn't write dji_telemetry.conf", 2)
 end)
