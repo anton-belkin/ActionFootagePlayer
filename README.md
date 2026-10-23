@@ -135,7 +135,7 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
-| `dji_telemetry.conf`: `position=top-right` | `top-left`, `bottom-left`, `bottom-right` |
+| `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
 | `dji_telemetry.conf`: `visible=yes` | `no`: shown only after `Ctrl+t` |
 
@@ -208,7 +208,7 @@ and ffmpeg encodes it with VideoToolbox.
 
 DJI cameras record, next to the video, a message per frame with what the camera knew at that moment. The
 dji-telemetry plugin reads all of it when a clip opens and shows, by default, the depth and whether the camera is
-in the water, top right. Each field shows when the clip has it:
+in the water, bottom left. Each field shows when the clip has it:
 
 | `fields=` | |
 |---|---|

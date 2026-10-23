@@ -24,7 +24,8 @@
 -- Options (~~/script-opts/dji_telemetry.conf):
 --   fields=depth,water   which, from the list above
 --   units=metric         or imperial: feet, mph, °F
---   position=top-right   top-left, bottom-left, bottom-right
+--   position=bottom-left top-left, top-right, bottom-right (top left has mpv's messages, top right the exports'
+--                        progress)
 --   font_size=28         at a 720-pixel-high window; it scales with the window
 --   visible=yes          shown when a file starts; no: only after Ctrl+t
 
@@ -32,7 +33,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local telemetry = require 'telemetry'
 
-local o = { fields = "depth,water", units = "metric", position = "top-right", font_size = 28, visible = true }
+local o = { fields = "depth,water", units = "metric", position = "bottom-left", font_size = 28, visible = true }
 options.read_options(o, "dji_telemetry")
 
 local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true }
@@ -179,7 +180,7 @@ local function update()
 
     local scale = h / 720
     local margin = math.floor(24 * scale)
-    local an = ALIGN[o.position] or ALIGN["top-right"]
+    local an = ALIGN[o.position] or ALIGN["bottom-left"]
     local x = (an == 7 or an == 1) and margin or w - margin
     local y = (an == 7 or an == 9) and margin or h - margin
     overlay.res_x, overlay.res_y = w, h
