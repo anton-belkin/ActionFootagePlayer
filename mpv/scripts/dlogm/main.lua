@@ -22,6 +22,9 @@
 -- Options (~~/script-opts/dlogm.conf):
 --   mode=hdr     what D-Log M files start in: hdr or sdr
 --
+-- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
+-- (Steady Player) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
+--
 -- Everything is set as file-local options, added to the user's own glsl-shaders: mpv restores them when the
 -- file ends. Source files are never modified.
 
@@ -34,9 +37,10 @@ local o = { mode = "hdr" }
 options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
+local DATA = os.getenv("DLOGM_DATA")
 local SHADERS = {
-    hdr = utils.join_path(DIR, "shaders/dlogm_hlg.glsl"),
-    sdr = utils.join_path(DIR, "shaders/dlogm_lut3d.glsl"),
+    hdr = "shaders/dlogm_hlg.glsl",
+    sdr = "shaders/dlogm_lut3d.glsl",
 }
 local LABELS = { hdr = "D-Log M -> HDR", sdr = "D-Log M -> Rec.709", off = "D-Log M handling off: the file as it is" }
 local PROBED_EXTENSIONS = { mp4 = true, mov = true }
@@ -52,6 +56,15 @@ local announce = false
 local function file_exists(path)
     local info = utils.file_info(path)
     return info ~= nil and info.is_file
+end
+
+-- A file of the plugin's, from $DLOGM_DATA or this folder; nil when it's in neither. Looked up each time: the app
+-- may fetch DJI's LUT while a file plays
+local function plugin_file(name)
+    for _, dir in ipairs({ DATA, DIR }) do
+        if dir and dir ~= "" and file_exists(utils.join_path(dir, name)) then return utils.join_path(dir, name) end
+    end
+    return nil
 end
 
 local function guessed_dlogm(path)
@@ -82,8 +95,9 @@ end
 
 local function apply(m)
     if not base then return false end
-    if SHADERS[m] and not file_exists(SHADERS[m]) then
-        mp.msg.warn("missing " .. SHADERS[m] .. " (run install.sh)")
+    local shader = SHADERS[m] and plugin_file(SHADERS[m])
+    if SHADERS[m] and not shader then
+        mp.msg.warn("missing " .. SHADERS[m] .. " in " .. DIR .. (DATA and (" and " .. DATA) or "") .. " (run install.sh)")
         mp.osd_message(LABELS[m] .. ": its shader isn't installed", 3)
         return false
     end
@@ -91,7 +105,7 @@ local function apply(m)
     for _, s in ipairs(base.shaders) do table.insert(shaders, s) end
     local target = {}
     for k, v in pairs(base.target) do target[k] = v end
-    if SHADERS[m] then table.insert(shaders, SHADERS[m]) end
+    if shader then table.insert(shaders, shader) end
     if m == "hdr" then
         target["target-trc"] = "hlg"
         target["target-prim"] = "bt.2020"

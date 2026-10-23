@@ -5,12 +5,13 @@
 #                          from DJI), scripts/gyroflow (stabilization, with the binaries built from vs-gyroflow/) and
 #                          scripts/dji-telemetry (the camera's telemetry over the video); and mpv.conf when there's
 #                          none yet
-#   ./install.sh --apps    also Steady Player.app and Steady Router.app in ~/Applications, and Finder Quick Actions
-#                          (see README). Installed once, they're updated by every later run
+#   ./install.sh --apps    also Steady Player.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
+#                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
+#                          it's updated by every later run
 #
 # Files it replaces that differ from the new ones are kept as <file>.bak-<date> (for scripts/, in scripts-backup/).
 # The layout of earlier versions (loose scripts, profiles in mpv.conf, keys in input.conf, ~~/gyroflow) is moved
-# over to the plugins.
+# over to the plugins, and Steady Router (0.2 and earlier) is removed: Steady Player is the default player itself.
 # MPV_CONFIG_DIR, APPS_DIR and SERVICES_DIR override where it installs (default ~/.config/mpv, ~/Applications and
 # ~/Library/Services).
 set -euo pipefail
@@ -19,17 +20,13 @@ cd "$(dirname "$0")"
 MPV_DIR="${MPV_CONFIG_DIR:-$HOME/.config/mpv}"
 APPS_DIR="${APPS_DIR:-$HOME/Applications}"
 SERVICES_DIR="${SERVICES_DIR:-$HOME/Library/Services}"
-# Working names; the bundle ids are what macOS and the settings go by
+# The working name; the bundle id is what macOS and the settings go by (tools/make_app.sh sets it)
 PLAYER_NAME="Steady Player"
-ROUTER_NAME="Steady Router"
 PLAYER_ID="io.github.anton-belkin.steady-player"
-ROUTER_ID="io.github.anton-belkin.steady-router"
+# Steady Router, of 0.2 and earlier, and the ids it had before
+ROUTER_NAME="Steady Router"
+ROUTER_IDS="io.github.anton-belkin.steady-router com.antonbelkin.dji-router io.github.dji-router"
 BUILD=build
-
-# DJI publishes it on the Osmo Action 6 downloads page (https://www.dji.com/osmo-action-6/downloads); it isn't
-# redistributed here. The checksum is of version 11.17: if DJI updates the file, check it and update both.
-DJI_LUT_URL="https://terra-1-g.djicdn.com/851d20f7b9f64838a34cd02351370894/AC206%20LUT/DJI%20OSMO%20Action%206%20D-LogM%20to%20Rec.709%20LUT-11.17.cube"
-DJI_LUT_SHA256="1972eb9b05699ba19d4aaa67aaa5fb00b46935c60ba9219183289f79e044cbb2"
 
 apps=0
 for arg in "$@"; do
@@ -60,12 +57,9 @@ fi
 mkdir -p "$BUILD"
 
 echo "== DJI D-Log M LUT"
+# Downloaded from DJI and checked (the URL and checksum are in setup.sh, which the app uses for the same)
 lut="$BUILD/dji-dlogm-rec709.cube"
-lut_ok() { echo "$DJI_LUT_SHA256  $lut" | shasum -a 256 -c --status 2>/dev/null; }
-if ! lut_ok; then
-    curl -fsSL -o "$lut" "$DJI_LUT_URL"
-    lut_ok || { echo "The LUT DJI serves isn't the one this was made for (checksum differs)" >&2; exit 1; }
-fi
+sh macos/setup.sh fetch-lut "$lut"
 
 echo "== Shaders"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$lut" "$BUILD/dlogm_lut3d.glsl"
@@ -130,7 +124,9 @@ remove_ours "$MPV_DIR/luts" dlogm_hlg.cube dji-dlogm-rec709.cube
 if grep -q 'apply-profile dji_sdr' "$MPV_DIR/input.conf" 2>/dev/null; then
     bak=$(backup_path "$MPV_DIR/input.conf")
     cp -p "$MPV_DIR/input.conf" "$bak"
-    grep -vxF -f <(cat <<'OLD'
+    # Read here, not in a heredoc inside <(...): macOS's bash 3.2 misparses that (the quote in "aren't"), grep
+    # then gets no patterns file, and all of input.conf went
+    IFS= read -r -d '' old_keys <<'OLD' || true
 # Auto-detection (scripts/dlog_auto.lua) handles 99% of cases on file-load.
 # These manual overrides are escape hatches:
 Ctrl+s   apply-profile dji_sdr
@@ -140,7 +136,14 @@ Ctrl+h   apply-profile dji_hdr
 # resets target-* to auto so mpv just plays the file natively.
 L        no-osd set glsl-shaders ""; set image-lut ""; set target-trc auto; set target-prim auto; set target-peak auto; set target-colorspace-hint auto; show-text "D-Log shader OFF — playing file natively" 2000
 OLD
-    ) "$bak" > "$MPV_DIR/input.conf" || true
+    # grep exits 1 when no line is left (input.conf had only these), 2 on an error: then input.conf stays as it was
+    rc=0
+    grep -vxF -f <(printf '%s' "$old_keys") "$bak" > "$MPV_DIR/input.conf" || rc=$?
+    if [ $rc -gt 1 ]; then
+        cp -p "$bak" "$MPV_DIR/input.conf"
+        echo "Couldn't take the D-Log M keys out of $MPV_DIR/input.conf; it's as it was" >&2
+        exit 1
+    fi
     grep -q '[^[:space:]]' "$MPV_DIR/input.conf" || rm "$MPV_DIR/input.conf"
     echo "   took the D-Log M keys out of input.conf (the plugin binds them); the previous one is $bak"
 fi
@@ -174,85 +177,49 @@ done
 put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644
 put mpv/scripts/dji-telemetry/telemetry.lua "$TELEMETRY/telemetry.lua" 644
 
+# 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; Steady Player carries them now
+for f in gyroflow-router export-finder.sh; do
+    rm -f "$GYROFLOW/$f"
+done
+
 if [ $apps = 1 ]; then
-    echo "== Apps in $APPS_DIR, Quick Actions in $SERVICES_DIR"
-    mkdir -p "$APPS_DIR" "$SERVICES_DIR"
-    lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-
-    # Adds "Video file" document types to an app, at a rank: Alternate lists it in Open With without taking
-    # videos over
-    doc_types() {
-        local plist=$1 rank=$2
-        /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
-        /usr/libexec/PlistBuddy \
-            -c "Add :CFBundleDocumentTypes array" \
-            -c "Add :CFBundleDocumentTypes:0 dict" \
-            -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string Video file" \
-            -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer" \
-            -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string $rank" \
-            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" \
-            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.mpeg-4" \
-            -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string com.apple.quicktime-movie" \
-            "$plist"
-    }
-    set_id() {
-        /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $2" "$1" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $2" "$1"
-    }
-
-    # The player: an applet that starts mpv through a launcher app of its own (see macos/player.applescript)
+    echo "== $PLAYER_NAME in $APPS_DIR"
+    mkdir -p "$APPS_DIR"
     player="$APPS_DIR/$PLAYER_NAME.app"
-    rm -rf "$player"
-    osacompile -o "$player" macos/player.applescript
-    launcher="$player/Contents/Resources/mpv.app"
-    mkdir -p "$launcher/Contents/MacOS"
-    sed "s|@MPV@|$(command -v mpv)|" macos/mpv-launcher.sh > "$launcher/Contents/MacOS/mpv"
-    chmod 755 "$launcher/Contents/MacOS/mpv"
-    cat > "$launcher/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key><string>mpv</string>
-    <key>CFBundleIdentifier</key><string>$PLAYER_ID.mpv</string>
-    <key>CFBundleName</key><string>mpv</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>NSHighResolutionCapable</key><true/>
-</dict>
-</plist>
-PLIST
-    set_id "$player/Contents/Info.plist" "$PLAYER_ID"
-    doc_types "$player/Contents/Info.plist" Alternate
-    codesign --force -s - "$launcher" >/dev/null 2>&1
-    codesign --force -s - "$player" >/dev/null 2>&1
-
-    # The router: the default player in router mode only (gyroflow-router on)
-    router="$APPS_DIR/$ROUTER_NAME.app"
-    rm -rf "$router"
-    osacompile -o "$router" macos/router.applescript
-    sed "s|@PLAYER_ID@|$PLAYER_ID|g" macos/route.sh > "$router/Contents/Resources/route.sh"
-    chmod 755 "$router/Contents/Resources/route.sh"
-    set_id "$router/Contents/Info.plist" "$ROUTER_ID"
-    doc_types "$router/Contents/Info.plist" Alternate
-    codesign --force -s - "$router" >/dev/null 2>&1
-
-    sed -e "s|@PLAYER_ID@|$PLAYER_ID|g" -e "s|@ROUTER_ID@|$ROUTER_ID|g" macos/gyroflow-router.py > "$BUILD/gyroflow-router"
-    put "$BUILD/gyroflow-router" "$GYROFLOW/gyroflow-router" 755
-    put macos/export-finder.sh "$GYROFLOW/export-finder.sh" 755
-
-    # Finder Quick Actions (right click on videos)
-    python3 -I tools/make_workflow.py "$SERVICES_DIR/Play Stabilized.workflow" "Play Stabilized" NSTouchBarPlayTemplate \
-        "open -b $PLAYER_ID \"\$@\""
-    python3 -I tools/make_workflow.py "$SERVICES_DIR/Stabilize + LUT.workflow" "Stabilize + LUT" NSTouchBarExitFullScreenTemplate \
-        "\"\$HOME/.config/mpv/scripts/gyroflow/export-finder.sh\" \"\$@\""
-
-    if [ "$APPS_DIR" = "$HOME/Applications" ]; then
-        "$lsregister" -f "$player" "$router"
-        /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
+    # A release has its version in VERSION
+    version=$(cat VERSION 2>/dev/null || git describe --tags --always 2>/dev/null || echo local)
+    tools/make_app.sh "$player" "$BIN" "$BUILD/dlogm_hlg.glsl" "$version"
+    setup="$player/Contents/Resources/setup.sh"
+    "$setup" lut "$lut" | sed 's/^/   /'
+    SERVICES_DIR="$SERVICES_DIR" "$setup" quick-actions | sed 's/^/   /'
+    # Only for the real Applications folder: an install elsewhere (a test) leaves the system's defaults alone
+    if [ "$APPS_DIR" = "$HOME/Applications" ] || [ "$APPS_DIR" = /Applications ]; then
+        "$setup" default | sed 's/^/   /'
+        # Steady Router: gone, and MOV back to the player it was taking videos from (MP4 is Steady Player's now)
+        router="$APPS_DIR/$ROUTER_NAME.app"
+        if [ -d "$router" ]; then
+            /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$router" 2>/dev/null || true
+            rm -rf "$router"
+            echo "   removed $ROUTER_NAME (Steady Player is the default player itself now)"
+        fi
+        mov=com.apple.quicktime-movie
+        case " $ROUTER_IDS " in
+            *" $(python3 -I macos/default-app.py $mov) "*)
+                previous=$(defaults read "$PLAYER_ID" "previous-$mov" 2>/dev/null || true)
+                case " $ROUTER_IDS $PLAYER_ID " in *" ${previous:-none} "*) previous= ;; esac
+                previous=${previous:-com.apple.QuickTimePlayerX}
+                # macOS asks to confirm it; 3: not yet
+                if python3 -I macos/default-app.py $mov "$previous" 2>/dev/null; then
+                    echo "   MOV videos open with $previous again"
+                else
+                    echo "   MOV videos open with $previous again once you confirm it in macOS's dialog"
+                fi ;;
+        esac
+        for key in fallback fallback-mp4 fallback-mov previous-public.mpeg-4 "previous-$mov"; do
+            defaults delete "$PLAYER_ID" "$key" 2>/dev/null || true
+        done
     fi
-    echo "   $PLAYER_NAME is in Finder's Open With for MP4/MOV; Quick Actions: Play Stabilized, Stabilize + LUT"
-    echo "   Router mode (the default player, sending other videos to your usual one): $GYROFLOW/gyroflow-router on"
+    echo "   Opening $PLAYER_NAME on its own offers the same setup (it's what a downloaded copy does)"
 fi
 
 echo "Done."
