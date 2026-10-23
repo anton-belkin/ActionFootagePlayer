@@ -7,7 +7,8 @@
 # mpv gets the plugins in ActionFootagePlayer.app (Contents/Resources/plugins/), except one that mpv's config has a copy
 # of (install.sh puts them there for mpv in a terminal): mpv would load both. What the plugins can't keep in the
 # app, DJI's LUT and your default preset, is in ~/Library/Application Support/ActionFootagePlayer/ (DLOGM_DATA,
-# GYROFLOW_DATA). mpv is Homebrew's.
+# GYROFLOW_DATA). mpv is the app's own when it has one (tools/bundle_runtime.py: in Contents/Helpers/, with Python,
+# VapourSynth and MoltenVK beside it), else Homebrew's.
 #
 # The first time it starts, it offers the setup (Contents/Resources/setup.sh, through setup-offer.lua): the default
 # app for MP4 videos, the Finder Quick Actions and DJI's LUT. Once asked, or once set up (setup.sh, install.sh
@@ -41,6 +42,20 @@ elif [ ! -f "$DLOGM_DATA/shaders/dlogm_lut3d.glsl" ]; then
 fi
 
 export MPVBUNDLE=true
+contents="$app/Contents"
+if [ -x "$contents/Helpers/mpv" ]; then
+    # VapourSynth's Python (and the `vapoursynth` command that tells VSScript where it is), the Vulkan driver
+    # (mpv's HDR output), and the ffmpeg gyroflow-export runs
+    export PATH="$res/bin:$contents/Helpers:$PATH"
+    for home in "$contents"/Frameworks/Python.framework/Versions/[0-9]*; do export PYTHONHOME="$home"; done
+    # VapourSynth 74 and later: VSScript is in the vapoursynth package, where mpv doesn't look for it
+    for vs in "$PYTHONHOME"/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
+        [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
+    done
+    export VK_DRIVER_FILES="$res/vulkan/icd.d/MoltenVK_icd.json"
+    export VK_ICD_FILENAMES="$VK_DRIVER_FILES" GYROFLOW_TOOLS="$contents/Helpers"
+    exec "$contents/Helpers/mpv" "$@"
+fi
 for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
     [ -x "$mpv" ] && exec "$mpv" "$@"
 done

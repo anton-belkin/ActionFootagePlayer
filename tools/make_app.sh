@@ -13,6 +13,12 @@
 #   Contents/Resources/setup.sh          the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
+#   Contents/Helpers/, Frameworks/,      with BUNDLE_RUNTIME: mpv, ffmpeg and what they load, and their licenses and
+#     Resources/ThirdParty/              sources (tools/bundle_runtime.py)
+#
+# With BUNDLE_RUNTIME set to Homebrew's prefix (`brew --prefix`), the app also gets Homebrew's mpv and ffmpeg and
+# what they load, Python and VapourSynth among it, with their licenses (tools/bundle_runtime.py): it then needs no
+# Homebrew, and the macOS the bottles were built for. Without it, the app runs Homebrew's mpv.
 #
 # Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/ActionFootagePlayer).
 set -euo pipefail
@@ -85,8 +91,15 @@ install -m 644 macos/setup-offer.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"
 
-# Inside out: the binaries, then the app, which seals the rest
+if [ -n "${BUNDLE_RUNTIME:-}" ]; then
+    minos=$(python3 -I tools/bundle_runtime.py "$app" "$BUNDLE_RUNTIME")
+    /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string $minos" "$app/Contents/Info.plist"
+fi
+
+# Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
+# existing signature"
+sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-embed" "$gyroflow/gyroflow-export"; do
-    codesign --force -s - "$f" 2>/dev/null
+    sign "$f"
 done
-codesign --force -s - "$app" 2>/dev/null
+sign "$app"

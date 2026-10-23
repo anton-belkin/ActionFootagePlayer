@@ -21,6 +21,10 @@ data="$HOME/Library/Application Support/ActionFootagePlayer"
 old="$HOME/Library/Application Support/Steady Player"
 [ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
 services=${SERVICES_DIR:-$HOME/Library/Services}
+# The app's own Python when it has one (tools/bundle_runtime.py): macOS's python3 is a stub that asks to install
+# the Command Line Tools first
+py=python3
+for p in "$app"/Contents/Frameworks/Python.framework/Versions/[0-9]*/bin/python3; do [ -x "$p" ] && py=$p; done
 
 # DJI publishes it on the Osmo Action 6 downloads page (https://www.dji.com/osmo-action-6/downloads). The checksum
 # is of version 11.17: if DJI updates the file, check it and update both.
@@ -52,7 +56,7 @@ lut() {
     fi
     fetch_lut "$cube" || return 1
     if [ ! -f "$shader" ] || [ "$cube" -nt "$shader" ]; then
-        python3 -I "$res/tools/cube_to_glsl.py" "$res/tools/dlogm_lut3d.glsl.in" "$cube" "$shader.part" >/dev/null \
+        "$py" -I "$res/tools/cube_to_glsl.py" "$res/tools/dlogm_lut3d.glsl.in" "$cube" "$shader.part" >/dev/null \
             && mv "$shader.part" "$shader" || { rm -f "$shader.part"; return 1; }
     fi
     echo "DJI's Rec.709 LUT: $dlogm"
@@ -62,7 +66,7 @@ default() {
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
     # macOS asks to confirm it in a dialog; default-app.py waits for that, and exits with 3 when it hasn't come
     rc=0
-    python3 -I "$res/tools/default-app.py" public.mpeg-4 "$player_id" 2>/dev/null || rc=$?
+    "$py" -I "$res/tools/default-app.py" public.mpeg-4 "$player_id" 2>/dev/null || rc=$?
     case $rc in
         0) echo "ActionFootagePlayer is the default app for MP4 videos" ;;
         3) echo "ActionFootagePlayer becomes the default app for MP4 videos once you confirm it in macOS's dialog" ;;
@@ -72,9 +76,9 @@ default() {
 
 quick_actions() {
     mkdir -p "$services"
-    python3 -I "$res/tools/make_workflow.py" "$services/Play Stabilized.workflow" "Play Stabilized" \
+    "$py" -I "$res/tools/make_workflow.py" "$services/Play Stabilized.workflow" "Play Stabilized" \
         NSTouchBarPlayTemplate "open -b $player_id \"\$@\""
-    python3 -I "$res/tools/make_workflow.py" "$services/Stabilize + LUT.workflow" "Stabilize + LUT" \
+    "$py" -I "$res/tools/make_workflow.py" "$services/Stabilize + LUT.workflow" "Stabilize + LUT" \
         NSTouchBarExitFullScreenTemplate "\"$res/export-finder.sh\" \"\$@\""
     /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
     echo "Finder Quick Actions: Play Stabilized, Stabilize + LUT"

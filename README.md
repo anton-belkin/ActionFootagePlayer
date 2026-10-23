@@ -48,10 +48,9 @@ three plugins work on their own, on any system. [How it works](#how-it-works)
 
 1. **On the camera:** set the color mode to **D-Log M**. Under water, turn **EIS off**: the camera then records the
    motion data the stabilization uses.
-2. **Install:** with [Homebrew](https://brew.sh), run `brew install mpv ffmpeg` in Terminal. Then download
-   `ActionFootagePlayer-<version>-macos-arm64.zip` from the
+2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.zip` from the
    [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move it to
-   Applications.
+   Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
@@ -132,15 +131,13 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 11 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins, mpv and ffmpeg in it |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
 
-**The app** needs [Homebrew](https://brew.sh)'s mpv (it includes VapourSynth), and its ffmpeg for exporting:
-
-```bash
-brew install mpv ffmpeg
-```
+**The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
+exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
+oldest macOS those builds are made for.
 
 Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
@@ -444,8 +441,8 @@ your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. Th
 what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
 your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
 
-ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts Homebrew's
-mpv with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
+ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts the mpv it
+carries (`Contents/Helpers/`, or Homebrew's in an app built without it) with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
 its icon, and gets the videos Finder opens with it. A video opened while one plays takes its place. mpv's own menu
 items still say mpv (About mpv, Quit mpv). The setup is offered from inside mpv (`macos/setup-offer.lua`), once
 it runs.
@@ -657,6 +654,12 @@ tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for L
 
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
+
+ActionFootagePlayer.app also carries mpv, ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as
+Homebrew builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
+`Contents/Resources/ThirdParty/` has each one's license files and the Homebrew formula it was built by, and
+`SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them
+at build). The sources are also available from this project on request.
 
 ## Credits
 
