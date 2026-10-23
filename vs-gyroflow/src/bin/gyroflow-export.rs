@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// `gyroflow-export <video>...`: renders videos the way mpv plays them, stabilized and with the D-Log M LUT, in one
+// `gyroflow-export <video>...`: renders videos the way mpv plays them, stabilized and with the log curve's LUT, in one
 // pass: decode -> Gyroflow (the plugin's own engine, on the GPU) -> LUT -> encode. The source is decoded and
 // encoded once, so there's no intermediate file to lose quality in.
 //
 // It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
-// embedded in it, or the clip's own motion data with the default preset) and the LUT from the color profile in
-// the camera's metadata, as the dlogm plugin does. Clips there's nothing to stabilize with are skipped.
+// embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
+// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). Clips there's
+// nothing to stabilize with are skipped.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
 // LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,
@@ -14,7 +15,7 @@
 // read-only).
 //
 // Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov), 10-bit
-//   D-Log M:        HEVC Main10, Rec.2100 HLG (luts/dlogm_hlg.cube), or Rec.709 with --sdr (DJI's LUT)
+//   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
 // Audio is copied as it is; the file gets the source's dates.
@@ -44,8 +45,10 @@ use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for D-Log M, color-converted) into a stabilized/ folder next to it.
+Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it.
 
+  --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
+                   one the camera's metadata says
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
   --prores         ProRes 422 HQ instead of HEVC 10-bit
@@ -61,7 +64,12 @@ Renders each video stabilized (and, for D-Log M, color-converted) into a stabili
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
                    SIGUSR1/SIGUSR2)";
 
+// The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
+const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
+
 struct Options {
+    // None: from the metadata; Some(None): none
+    curve: Option<Option<&'static str>>,
     sdr: bool,
     horizon_lock: Option<f64>,
     prores: bool,
@@ -78,13 +86,18 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { sdr: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
+    let mut opts = Options { curve: None, sdr: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().unwrap_or_else(|| fail(&format!("{name} needs a value")));
         match a.as_str() {
+            "--curve" => opts.curve = Some(match value("--curve").as_str() {
+                "none" => None,
+                c => Some(CURVES.iter().find(|(id, _)| *id == c).map(|(id, _)| *id)
+                    .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, none)")))),
+            }),
             "--sdr" => opts.sdr = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
@@ -405,6 +418,16 @@ fn lut(name: &str) -> Result<PathBuf, String> {
     if p.is_file() { Ok(p) } else { Err(format!("{} is missing (install the dlogm plugin: install.sh)", p.display())) }
 }
 
+// The YUV matrix the video is decoded with, as mpv does: the one it's tagged with, else BT.709 (DJI tags D-Log M
+// BT.709; a GoPro's or Insta360's 10-bit may be tagged BT.2020). By the names of ffmpeg's scale and gpu_lut
+fn yuv_matrix(tag: Option<&str>) -> &'static str {
+    match tag {
+        Some("bt2020nc" | "bt2020c") => "bt2020",
+        Some("smpte170m" | "bt470bg") => "bt601",
+        _ => "bt709",
+    }
+}
+
 // ffmpeg's filter syntax: quote the path for the option value, then for the filter graph
 fn filter_path(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "\\\\").replace('\'', "\\'").replace(':', "\\:");
@@ -417,7 +440,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         Ok(s) => s,
         Err(why) => return Ok(Outcome::Skipped(why)),
     };
-    let color = probe::color_profile(&path.to_string_lossy());
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
     let info = ffprobe(&path)?;
 
     let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
@@ -435,18 +458,22 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let tmp_path = out_dir.join(format!(".{stem}.partial.mov"));
 
-    // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's BT.709
-    // matrix and range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs)
-    // when the output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed
+    // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
+    // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
+    // output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed. Only D-Log M has a Rec.709 LUT:
+    // the others are HLG whatever --sdr says, as they play
     let in_range = if info.full_range { "pc" } else { "tv" };
+    let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
-    let (graph, tags, color_label) = if color == Some("dlogm") {
-        let (cube, matrix, primaries, transfer, label) = if opts.sdr {
-            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", "D-Log M -> Rec.709")
+    let (graph, tags, color_label) = if let Some(curve) = curve {
+        let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
+        let (cube, matrix, primaries, transfer, label) = if opts.sdr && curve == "dlogm" {
+            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709"))
         } else {
-            (lut("dlogm_hlg.cube")?, "bt2020", "bt2020", "arib-std-b67", "D-Log M -> HLG")
+            let no_sdr = if opts.sdr { " (no Rec.709 LUT for it)" } else { "" };
+            (lut(&format!("{curve}_hlg.cube"))?, "bt2020", "bt2020", "arib-std-b67", format!("{name} -> HLG{no_sdr}"))
         };
-        let graph = format!("scale=in_color_matrix=bt709:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
+        let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
                              scale=out_color_matrix={matrix}:out_range=tv", filter_path(&cube));
         lut_job = Some((cube, matrix, graph));
         let space = if matrix == "bt2020" { "bt2020nc" } else { "bt709" };
@@ -458,7 +485,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
             info.matrix.clone().unwrap_or_else(|| "bt709".into()),
             in_range.to_string(),
         ];
-        (String::new(), tags, "colors as recorded")
+        (String::new(), tags, "colors as recorded".to_string())
     };
 
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
@@ -481,7 +508,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         None => None,
         Some((cube, matrix, cpu_graph)) => {
             let out_matrix = gpu_lut::matrix_coefficients(matrix).unwrap();
-            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients("bt709").unwrap(), info.full_range, out_matrix) {
+            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix) {
                 Ok(l) => Some(l),
                 Err(e) => {
                     eprintln!("  LUT on the CPU (slower): {e}");

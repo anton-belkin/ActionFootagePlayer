@@ -1,10 +1,12 @@
--- Shift+E: export the current video the way it plays, stabilized and with the D-Log M LUT (the dlogm plugin's),
+-- Shift+E: export the current video the way it plays, stabilized and with the log curve's LUT (the dlogm plugin's),
 -- with gyroflow-export (one pass, into a stabilized/ folder next to the video). With an A-B loop set (the `l`
 -- key), only that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
 -- as a notification. Shift+E again on a video being exported, twice, cancels it.
 --
--- As it plays: in the dlogm plugin's standard look (Ctrl+s) with DJI's LUT (--sdr), and with the horizon locked or
--- not when the gyroflow plugin's menu says so (--horizon-lock). Script messages, for the right-click menu:
+-- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
+-- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
+-- standard look (Ctrl+s) with DJI's LUT (--sdr), and with the horizon locked or not when the gyroflow plugin's menu
+-- says so (--horizon-lock). Script messages, for the right-click menu:
 --   export [sdr]         the same as Shift+E, or in the standard look whatever plays
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
@@ -209,7 +211,13 @@ local function start(path, sdr)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    if sdr or mp.get_property_native("user-data/dlogm/look") == "sdr" then table.insert(args, "--sdr") end
+    local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
+    if look == "off" or curve == "" then
+        table.insert(args, "--curve"); table.insert(args, "none")
+    elseif curve then
+        table.insert(args, "--curve"); table.insert(args, curve)
+    end
+    if sdr or look == "sdr" then table.insert(args, "--sdr") end
     local horizon = mp.get_property_native("user-data/gyroflow/horizon_lock")
     if horizon == "yes" or horizon == "no" then
         table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")

@@ -46,8 +46,8 @@ watch and share. [Why that works](#why-log-and-why-hdr)
 corner, and the turtle is on everyone's phone the same evening. [Back from the dive](#example-back-from-the-dive)
 
 **You already shoot log and grade.** This is the step between the card and your editor. Stabilization and the
-log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass
-(D-Log M so far, see [Known issues](#known-issues)): no project, no render, no separate grading step. In Gyroflow,
+log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass:
+no project, no render, no separate grading step. In Gyroflow,
 stabilization is a render of its own, and the color comes later in an editor. Go through a card's worth of clips
 with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT; open a clip
 in Gyroflow with one key to fine-tune it and see the result back in playback when you save; batch-export ProRes
@@ -133,7 +133,7 @@ only the plugins in an mpv you start yourself:
    Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
 4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
-   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), and not in exports yet. `Ctrl+l`
+   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
    picks the curve for a clip whose metadata doesn't say it.
 
 ## Install
@@ -332,8 +332,9 @@ full rate, 85 %.
 ### Exporting
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, the horizon
-locked or not as the menu has it, and for D-Log M the same LUT: HDR, or DJI's Rec.709 one in the standard look
-(`Ctrl+s`; the menu's Export in standard look does that whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+locked or not as the menu has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
+or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
+whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -354,9 +355,11 @@ The same from a terminal, for one clip or many:
 
 The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
 
-- **D-Log M:** HEVC Main10, Rec.2100 HLG, tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes it
-  Rec.709 with DJI's LUT instead.
-- **Other clips:** HEVC Main10 in the colors they were recorded in.
+- **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
+  reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,
+  `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
+  DJI's LUT instead.
+- **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - Audio is copied as it is, and the file keeps the clip's dates. Clips with nothing to stabilize them with are
   skipped; an existing output is kept unless `--force`.
@@ -748,8 +751,6 @@ Each goes from here once it's fixed.
 - **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
   preset as Gyroflow would, edges in the project's background color.
   [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
-- **Only D-Log M is exported in HDR.** D-Log, GP-Log, GP-Log2 and 10-bit I-Log play in HDR but export flat, as
-  recorded, and so does a curve picked with `Ctrl+l`. [#23](https://github.com/anton-belkin/ActionFootagePlayer/issues/23)
 - **A clip that plays without stabilization isn't exported**, e.g. D-Log M shot with EIS on; and after `Ctrl+g`
   turns it off, the export is stabilized all the same. [#24](https://github.com/anton-belkin/ActionFootagePlayer/issues/24)
 - **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
