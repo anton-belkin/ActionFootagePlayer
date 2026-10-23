@@ -1,136 +1,91 @@
-# DJI D-Log M and Gyroflow stabilization in mpv
+# ActionFootagePlayer
 
-Watch DJI Osmo Action footage straight off the camera on a Mac: D-Log M shown in HDR, and
-underwater clips stabilized in realtime with [Gyroflow](https://gyroflow.xyz), without rendering anything.
-The source files are never re-encoded.
+Still alpha: in daily use on Osmo Action 6 footage on a Mac; other cameras and systems are built for but mostly
+not tried yet.
 
-- **Colour recovery for D-Log M in realtime, including HDR.** A GPU shader turns D-Log M into Rec.2100 HLG
-  and macOS shows it in HDR (on an SDR screen, macOS tone-maps it down). Applied automatically from the color
-  profile the camera wrote into the file (Osmo Action 6, Osmo 360; other DJI models by the `_D` file name).
-- **Underwater stabilisation in realtime.** DJI's in-camera stabilization (EIS) works well in air but not
-  under water (as of today's firmware), so under water you shoot with EIS off, and then the camera records
-  gyro data. Those clips play stabilized straight away, with an underwater preset (light refraction 1.33)
-  and no project to make. A VapourSynth plugin built on [Gyroflow](https://gyroflow.xyz)'s own core renders
-  the stabilization while mpv plays, the way Gyroflow would render it (smoothing, zoom, lens, horizon): 4K60
-  at ~87 fps of capacity on an M1 Pro. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic
-  (Lanczos holds only ~38 fps at 4K). Any clip with a Gyroflow project plays stabilized too, its own way:
-  a `.gyroflow` next to the video, or the project stored inside the video (`gyroflow-embed`, below), so
-  there's one file to carry.
-- **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
-  and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
-- **Depth and the rest of the camera's telemetry over the video.** What the camera recorded frame by frame
-  (depth under water, pressure, GPS with a remote connected, exposure) shown as mpv plays, from the file itself.
+A desktop player for footage from action cameras and drones. Copy the clips off the card, double-click one, and
+it plays the way it should look, with nothing to process first:
 
-It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
-ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
+- **Log footage in color**, in HDR or through the maker's Rec.709 LUT, from the color profile the camera wrote
+  into the file.
+- **Stabilized while it plays**, from the gyro data the camera recorded, with [Gyroflow](https://gyroflow.xyz)'s
+  engine: under water too, where the camera's own stabilization doesn't hold. A clip with a Gyroflow project
+  plays the way the project says.
+- **The camera's telemetry over the video**: depth under water, pressure, GPS and speed, exposure.
 
-- **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
-  Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
-- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
-  Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
-- **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
+The original files are never re-encoded or changed. When something is worth sharing, `Shift+E` exports what you
+see, stabilized and in HDR, in one pass.
 
-None needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
-Gyroflow part works with any camera Gyroflow supports when there's a project. Other DJI models, GoPro and Insta360
-are on the way, and need clips from their owners: see [Other cameras, and how to help](#other-cameras-and-how-to-help).
+Back from a dive shot in D-Log M with the camera's stabilization off, say: copy the card to the laptop and
+double-click the first clip. It plays stabilized, in HDR, with the depth in the corner. Skip through the hour to
+the 15 seconds with the turtle, `l` at the start, `l` at the end, `Shift+E`, and the fragment is in a
+`stabilized/` folder next to the clip, ready to AirDrop or post the same evening (iPhone, Mac and YouTube show it
+as HDR).
+
+It's [mpv](https://mpv.io) with three plugins (D-Log M, stabilization, telemetry) and a Mac app that carries
+them. The plugins work on their own too, in an mpv you start yourself.
+
+## What works, camera by camera
+
+In the Mac app, with clips straight from the camera (an app that exports or trims them drops the metadata
+this reads):
+
+| | Log in color: HDR, Rec.709 LUT ¹ | Stabilized from the camera's gyro, no project ² | Stabilized with a Gyroflow project ² | Telemetry ³ | Export what you see ² |
+|---|---|---|---|---|---|
+| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 |
+| DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
+| Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | a guess, by the `_D` file name | should work (EIS off) | should work | not yet | should work |
+| DJI drones | not yet | not yet | should work | not yet | should work, with a project |
+| GoPro | not yet (GP-Log) | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
+| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | not yet (I-Log) | should work (FlowState off) | should work | not yet | should work |
+| Other cameras Gyroflow supports | | not yet | should work | not yet | should work, with a project |
+
+**verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
+published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
+Export renders what plays, so it covers the clips that play stabilized. Details, and how clips from your camera
+would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
+The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet, where there's no app,
+only the plugins in an mpv you start yourself:
+
+1. D-Log M is plain Lua and GPU shaders, for any mpv on any system. Whether HDR reaches the screen there depends on
+   mpv and the system. The Rec.709 LUT is baked in from a checkout of this repo (`install.sh` does it on Linux).
+2. The stabilization and the export need an mpv built with VapourSynth, and binaries for macOS on Apple Silicon,
+   Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
+3. Plain Lua, any mpv on any system.
 
 ## Install
 
-Needs a Mac with Apple Silicon (macOS 11 or later), [Homebrew](https://brew.sh) mpv (`brew install mpv`, which
-includes VapourSynth) and Homebrew ffmpeg for exporting (`brew install ffmpeg`).
+From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), take:
 
-**ActionFootagePlayer**, the app (it carries the plugins; dji-telemetry from the release after 0.3.0): download
-`ActionFootagePlayer-<version>-macos-arm64.zip` from the
-[latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move
-ActionFootagePlayer to Applications, then open it. (Up to 0.3.0 it was called Steady Player, and the files
-`Steady-Player-<version>-macos-arm64.zip` and `dlogm-gyroflow-player-<version>-macos-arm64.tar.gz`.) It's signed ad hoc, not by an Apple developer account, so the first
-time macOS won't open it: System Settings → Privacy & Security → Open Anyway. Opened on its own, it offers its
-setup:
+| For | File |
+|---|---|
+| a Mac with Apple Silicon (macOS 11 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins in it |
+| D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
+| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
+
+**The app** needs [Homebrew](https://brew.sh)'s mpv (it includes VapourSynth), and its ffmpeg for exporting:
+
+```bash
+brew install mpv ffmpeg
+```
+
+Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
+account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. Opened on its
+own, it offers its setup:
 
 - it becomes the default app for MP4 videos (what DJI cameras record): double-clicking one plays it with all
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
   it applies once you do;
-- Finder gets the Quick Actions *Play Stabilized* and *Stabilize + LUT* (see Opening files);
+- Finder gets the Quick Actions *Play Stabilized* and *Stabilize + LUT* (see [Opening files](#opening-files));
 - DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for `Ctrl+s` and Rec.709
   exports. HDR works without it.
 
-**Just the plugins**, for mpv you start yourself: unzip them into mpv's `scripts/` folder (`~/.config/mpv/scripts/`).
+Coming from Steady Player, as the app was called up to 0.3.0: see [Upgrading](#upgrading).
 
-- `mpv-dlogm-0.3.0.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shader; the Rec.709
-  one (`Ctrl+s`) is made from DJI's LUT: download it from DJI (Osmo Action 6 downloads page) and bake it in from a
-  checkout of this repo:
-
-  ```bash
-  python3 tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "DJI OSMO Action 6 D-LogM to Rec.709 LUT-11.17.cube" \
-      ~/.config/mpv/scripts/dlogm/shaders/dlogm_lut3d.glsl
-  ```
-
-- `mpv-dji-telemetry-<version>.zip` (releases after 0.3.0), on any system: plain Lua.
-
-- `mpv-gyroflow-0.3.0-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon, with its binaries. Downloaded with
-  a browser, they carry the quarantine flag, and macOS would refuse them:
-  `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`.
-
-**With install.sh**, from the release's tarball (prebuilt, no Rust needed) or from source (needs Rust,
-[rustup](https://rustup.rs); the first build takes 5-10 minutes):
-
-```bash
-# ActionFootagePlayer-<version>-macos-arm64.tar.gz from the latest release, then:
-tar -xzf ActionFootagePlayer-*-macos-arm64.tar.gz
-cd ActionFootagePlayer-*-macos-arm64     # or: git clone https://github.com/anton-belkin/ActionFootagePlayer.git
-./install.sh --apps
-```
-
-`./install.sh` alone installs the three plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
-recommended settings, when there's none yet); `--apps` also builds ActionFootagePlayer into `~/Applications` and runs
-its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
-LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
-`scripts/`, in `scripts-backup/`, where mpv doesn't load them).
-
-### Linux and Windows
-
-The gyroflow plugin runs there too, with binaries of its own; dlogm and dji-telemetry are the same zips as on a Mac.
-It needs:
-
-- **mpv built with VapourSynth**: `mpv --vf=help` lists `vapoursynth`. On Windows, the usual builds
-  ([shinchiro's](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) have it. On Linux, it depends on the
-  distribution: Debian's and Ubuntu's mpv doesn't have it, and needs building with `-Dvapoursynth=enabled`.
-- **[VapourSynth](https://github.com/vapoursynth/vapoursynth/releases)** itself, with its Python.
-- **A GPU with Vulkan** (on Windows DirectX 12 or Vulkan), which the stabilization renders on. Without one,
-  Gyroflow's engine falls back to the CPU, far from realtime.
-- **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
-  `gyroflow-export.exe`.
-
-Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip` (releases after 0.3.0)
-into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
-next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all three plugins (with
-DJI's LUT, as on a Mac); `--apps` is macOS's.
-
-What differs from macOS:
-
-- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than 4K is
-  scaled down to 4K on the CPU.
-- `Ctrl+e` starts `gyroflow` from `PATH` on Linux, and on Windows the app `.gyroflow` files open with (Gyroflow's
-  installer sets it). Another one: `gyroflow_app=<path>` in `gyroflow.conf`.
-- Exports are encoded with the first of NVENC, VAAPI (Linux), Quick Sync and AMF (Windows) that works, else x265 on the
-  CPU (much slower); `--prores` is ffmpeg's `prores_ks`. While the video plays, an export runs at a few frames a
-  second rather than at a background priority. Notifications are `notify-send` on Linux; on Windows, mpv's own
-  message.
-- The log is `~/.local/state/vs-gyroflow.log` on Linux and `%LOCALAPPDATA%\vs-gyroflow.log` on Windows.
-
-**Upgrading from 0.3**, `install.sh --apps` replaces Steady Player, as the app was called, with ActionFootagePlayer:
-the old app goes, the new one becomes the default for MP4 videos, and what was yours in
-`~/Library/Application Support/Steady Player/` (DJI's LUT, your `default.gyroflow`) moves to
-`~/Library/Application Support/ActionFootagePlayer/`. With the app alone, the new one moves it the first time it
-plays or sets up; delete Steady Player from Applications yourself.
-
-**Upgrading from 0.2**, `install.sh --apps` removes Steady Router: MP4 goes to ActionFootagePlayer, MOV back to the
-player it was taking videos from. `gyroflow-router` is gone with it.
-
-**Upgrading from 0.1**, `install.sh` moves the old setup over: the loose scripts go to `scripts-backup/`, the
-D-Log M keys come out of `input.conf` (the rest of it stays), the `mpv.conf` with the D-Log M profiles is replaced
-(kept as a `.bak`), and `~/.config/mpv/gyroflow/` is emptied into the plugin, your `default.gyroflow` included.
-The commands moved with it: `gyroflow-embed` and `gyroflow-export` are now in `~/.config/mpv/scripts/gyroflow/`.
+**The plugins**: unzip them into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\` on
+Windows); nothing goes in `mpv.conf` or `input.conf`. DJI's Rec.709 LUT and the stabilization take a step more:
+see [Plugins in your own mpv](#plugins-in-your-own-mpv) and [Linux and Windows](#linux-and-windows).
 
 ## Using it
 
@@ -140,16 +95,8 @@ Once ActionFootagePlayer is set up, double-clicking an MP4 plays it in mpv with 
 them with ActionFootagePlayer from Finder's Open With, or right click → Quick Actions:
 
 - **Play Stabilized** opens the selected videos in ActionFootagePlayer.
-- **Stabilize + LUT** exports them (see Exporting) in the background, with a notification as each one is done.
-
-ActionFootagePlayer uses the plugins it carries (`Contents/Resources/plugins/`), or the copy in `~/.config/mpv/scripts/`
-when there is one (`install.sh` puts them there for mpv in a terminal), so they're never loaded twice. It reads
-your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. The app is read-only once signed;
-what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
-your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
-
-ActionFootagePlayer starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
-mpv stayed tied to it and macOS throttled it as a background process.
+- **Stabilize + LUT** exports them (see [Exporting](#exporting)) in the background, with a notification as each
+  one is done.
 
 ### Keys
 
@@ -165,6 +112,8 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
+
+## In detail
 
 ### Options
 
@@ -338,19 +287,117 @@ python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # ev
 python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
 ```
 
+## Installing, in detail
+
+### Plugins in your own mpv
+
+Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) and works without the others:
+
+- `mpv-dlogm-<version>.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shader; the
+  Rec.709 one (`Ctrl+s`) is made from DJI's LUT: download it from DJI (Osmo Action 6 downloads page) and bake it in
+  from a checkout of this repo:
+
+  ```bash
+  python3 tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "DJI OSMO Action 6 D-LogM to Rec.709 LUT-11.17.cube" \
+      ~/.config/mpv/scripts/dlogm/shaders/dlogm_lut3d.glsl
+  ```
+
+- `mpv-dji-telemetry-<version>.zip`, on any system: plain Lua.
+
+- `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
+  its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
+  `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
+
+### With install.sh
+
+From the release's tarball (prebuilt, no Rust needed) or from source (needs Rust, [rustup](https://rustup.rs);
+the first build takes 5-10 minutes):
+
+```bash
+# ActionFootagePlayer-<version>-macos-arm64.tar.gz from the latest release, then:
+tar -xzf ActionFootagePlayer-*-macos-arm64.tar.gz
+cd ActionFootagePlayer-*-macos-arm64     # or: git clone https://github.com/anton-belkin/ActionFootagePlayer.git
+./install.sh --apps
+```
+
+`./install.sh` alone installs the three plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
+recommended settings, when there's none yet); `--apps` also builds ActionFootagePlayer into `~/Applications` and runs
+its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
+LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
+`scripts/`, in `scripts-backup/`, where mpv doesn't load them).
+
+### Linux and Windows
+
+The gyroflow plugin runs there too, with binaries of its own; dlogm and dji-telemetry are the same zips as on a Mac.
+None of it has been tried there by hand yet (the release builds it on Linux and Windows). It needs:
+
+- **mpv built with VapourSynth**: `mpv --vf=help` lists `vapoursynth`. On Windows, the usual builds
+  ([shinchiro's](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) have it. On Linux, it depends on the
+  distribution: Debian's and Ubuntu's mpv doesn't have it, and needs building with `-Dvapoursynth=enabled`.
+- **[VapourSynth](https://github.com/vapoursynth/vapoursynth/releases)** itself, with its Python.
+- **A GPU with Vulkan** (on Windows DirectX 12 or Vulkan), which the stabilization renders on. Without one,
+  Gyroflow's engine falls back to the CPU, far from realtime.
+- **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
+  `gyroflow-export.exe`.
+
+Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip`
+into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
+next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all three plugins (with
+DJI's LUT, as on a Mac); `--apps` is macOS's.
+
+What differs from macOS:
+
+- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than 4K is
+  scaled down to 4K on the CPU.
+- `Ctrl+e` starts `gyroflow` from `PATH` on Linux, and on Windows the app `.gyroflow` files open with (Gyroflow's
+  installer sets it). Another one: `gyroflow_app=<path>` in `gyroflow.conf`.
+- Exports are encoded with the first of NVENC, VAAPI (Linux), Quick Sync and AMF (Windows) that works, else x265 on the
+  CPU (much slower); `--prores` is ffmpeg's `prores_ks`. While the video plays, an export runs at a few frames a
+  second rather than at a background priority. Notifications are `notify-send` on Linux; on Windows, mpv's own
+  message.
+- The log is `~/.local/state/vs-gyroflow.log` on Linux and `%LOCALAPPDATA%\vs-gyroflow.log` on Windows.
+
+### What the app keeps where
+
+ActionFootagePlayer uses the plugins it carries (`Contents/Resources/plugins/`), or the copy in `~/.config/mpv/scripts/`
+when there is one (`install.sh` puts them there for mpv in a terminal), so they're never loaded twice. It reads
+your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. The app is read-only once signed;
+what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
+your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
+
+ActionFootagePlayer starts mpv through a small launcher app inside it (`open -na`): started from the applet directly,
+mpv stayed tied to it and macOS throttled it as a background process.
+
+### Upgrading
+
+**From 0.3**, when the app was called Steady Player (its files were `Steady-Player-<version>-macos-arm64.zip` and
+`dlogm-gyroflow-player-<version>-macos-arm64.tar.gz`), `install.sh --apps` replaces it with ActionFootagePlayer:
+the old app goes, the new one becomes the default for MP4 videos, and what was yours in
+`~/Library/Application Support/Steady Player/` (DJI's LUT, your `default.gyroflow`) moves to
+`~/Library/Application Support/ActionFootagePlayer/`. With the app alone, the new one moves it the first time it
+plays or sets up; delete Steady Player from Applications yourself.
+
+**From 0.2**, `install.sh --apps` removes Steady Router: MP4 goes to ActionFootagePlayer, MOV back to the
+player it was taking videos from. `gyroflow-router` is gone with it.
+
+**From 0.1**, `install.sh` moves the old setup over: the loose scripts go to `scripts-backup/`, the
+D-Log M keys come out of `input.conf` (the rest of it stays), the `mpv.conf` with the D-Log M profiles is replaced
+(kept as a `.bak`), and `~/.config/mpv/gyroflow/` is emptied into the plugin, your `default.gyroflow` included.
+The commands moved with it: `gyroflow-embed` and `gyroflow-export` are now in `~/.config/mpv/scripts/gyroflow/`.
+
 ## Other cameras, and how to help
 
 Everything here was worked out on clips from an Osmo Action 6. The camera's metadata says what the plugins
 need (whether the camera stabilized the picture itself, the color profile, the telemetry), but each maker, and
-often each model, writes it differently, and without clips there's nothing to check a guess against. Where
-things stand:
+often each model, writes it differently, and without clips there's nothing to check a guess against. What each
+camera's metadata is read from (what has been tried: [What works, camera by camera](#what-works-camera-by-camera)):
 
 | | Stabilization without a project | Log footage (HDR, Rec.709 LUT) | Telemetry |
 |---|---|---|---|
 | DJI Osmo Action 6 | yes | D-Log M | yes |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
 | Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | `_D` file name only, a guess | no |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips | no (GP-Log: the Protune color is in `PTCL`, `FLAT` on a HERO6; what GP-Log writes there isn't known) | GPS, speed, exposure; checked on GoPro's sample clips |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | no (GP-Log: the Protune color is in `PTCL`, `FLAT` on a HERO6; what GP-Log writes there isn't known) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | no (I-Log) | no |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
@@ -385,6 +432,17 @@ Gyroflow, so they work in any mpv on any system.
 
 ## How it works
 
+It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
+ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
+
+- **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
+  Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
+- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
+  Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
+- **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
+
+None needs anything in `mpv.conf` or `input.conf`.
+
 ### D-Log M
 
 DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
@@ -413,7 +471,10 @@ The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) adds `vf=vapoursynth` with
 decides first whether the video carries a project, or its own gyro data recorded with the camera's stabilization
 off (where each camera records that: `vs-gyroflow/src/probe.rs`). Frames are
 stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit; 8K is
-scaled to 4K on the GPU first. Details, measurements and the plugin's options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
+scaled to 4K on the GPU first. It renders the stabilization while mpv plays, the way Gyroflow would render it
+(smoothing, zoom, lens, horizon): 4K60 at ~87 fps of capacity on an M1 Pro. Clips up to 30 fps get Lanczos
+interpolation, faster ones bicubic (Lanczos holds only ~38 fps at 4K). Details, measurements and the plugin's
+options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
 
 The plugin builds on `gyroflow-core` from Gyroflow master, which has the Static zoom modes
 ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)) it renders; nothing else is needed
@@ -479,3 +540,4 @@ from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide 
 (`DLOGM_DWG_I_SHAPER_ZRG_V1`); the HLG output stage and the bake are this project's. Thanks to Zeb Gardner for
 the underlying transform. His site doesn't state a license for the shaper; it's used here with credit, and
 will be changed if he asks.
+
