@@ -46,12 +46,14 @@ tar -C dist -czf "dist/$name.tar.gz" "$name"
 
 # Built from the tarball's tree, which is HEAD's
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "dist/dlogm_hlg.glsl"
+# The zip has the tarball's name: the app is built in a folder of its own, not in dist/$name
 app="ActionFootagePlayer-$version-macos-arm64"
-rm -rf "dist/$app" "dist/$app.zip"
-mkdir -p "dist/$app"
-tools/make_app.sh "dist/$app/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
-ditto -c -k --keepParent "dist/$app/ActionFootagePlayer.app" "dist/$app.zip"
-rm -rf "dist/$app"
+stage="dist/app-$version"
+rm -rf "$stage" "dist/$app.zip"
+mkdir -p "$stage"
+tools/make_app.sh "$stage/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
+ditto -c -k --keepParent "$stage/ActionFootagePlayer.app" "dist/$app.zip"
+rm -rf "$stage"
 
 gyroflow="mpv-gyroflow-$version-macos-arm64"
 rm -rf "dist/$gyroflow" "dist/$gyroflow.zip"
