@@ -1,5 +1,5 @@
 #!/bin/bash
-# tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds Steady Player.app, with the two mpv
+# tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds Steady Player.app, with the three mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
 #   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
@@ -7,7 +7,8 @@
 #   Contents/MacOS, Resources/Scripts   the applet (macos/player.applescript)
 #   Contents/Resources/mpv.app           the launcher that starts mpv as an app of its own (macos/mpv-launcher.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
-#                                        downloads it) and gyroflow, with the underwater preset as default.gyroflow
+#                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
+#                                        and dji-telemetry
 #   Contents/Resources/setup.sh          the setup, and the export script of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
 #
@@ -45,7 +46,8 @@ PLIST
 
 dlogm="$res/plugins/dlogm"
 gyroflow="$res/plugins/gyroflow"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow"
+telemetry="$res/plugins/dji-telemetry"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 luts/dlogm_hlg.cube "$dlogm/luts/dlogm_hlg.cube"
@@ -54,6 +56,7 @@ install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyrof
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
+install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 mkdir -p "$res/tools"

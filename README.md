@@ -18,15 +18,18 @@ The source files are never re-encoded.
   there's one file to carry.
 - **Export what you see.** `Shift+E` in mpv (or `gyroflow-export` in a terminal) renders the clip stabilized
   and color-converted in one pass, 10-bit HEVC HLG, so there's no intermediate file to lose quality in.
+- **Depth and the rest of the camera's telemetry over the video.** What the camera recorded frame by frame
+  (depth under water, pressure, GPS with a remote connected, exposure) shown as mpv plays, from the file itself.
 
-It's two mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the other, and Steady
-Player, a Mac app that carries both and opens your MP4s with them:
+It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and Steady
+Player, a Mac app that carries them and opens your MP4s with them:
 
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
   Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
 - **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS, Apple Silicon).
+- **`dji-telemetry`**: the camera's telemetry over the video. Plain Lua, any mpv on any system.
 
-Neither needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
+None needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
 Gyroflow part works with any camera Gyroflow supports when there's a project.
 
 ## Install
@@ -34,7 +37,8 @@ Gyroflow part works with any camera Gyroflow supports when there's a project.
 Needs a Mac with Apple Silicon (macOS 11 or later), [Homebrew](https://brew.sh) mpv (`brew install mpv`, which
 includes VapourSynth) and Homebrew ffmpeg for exporting (`brew install ffmpeg`).
 
-**Steady Player**, the app (it carries both plugins): download `Steady-Player-0.3.0-macos-arm64.zip` from the
+**Steady Player**, the app (it carries the plugins; dji-telemetry from the release after 0.3.0): download
+`Steady-Player-0.3.0-macos-arm64.zip` from the
 [release](https://github.com/anton-belkin/dlogm-gyroflow-player/releases/tag/v0.3.0), unzip it and move
 Steady Player to Applications, then open it. It's signed ad hoc, not by an Apple developer account, so the first
 time macOS won't open it: System Settings → Privacy & Security → Open Anyway. Opened on its own, it offers its
@@ -58,6 +62,8 @@ setup:
       ~/.config/mpv/scripts/dlogm/shaders/dlogm_lut3d.glsl
   ```
 
+- `mpv-dji-telemetry-<version>.zip` (releases after 0.3.0), on any system: plain Lua.
+
 - `mpv-gyroflow-0.3.0-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon, with its binaries. Downloaded with
   a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`.
@@ -72,7 +78,7 @@ cd dlogm-gyroflow-player-0.3.0-macos-arm64     # or: git clone https://github.co
 ./install.sh --apps
 ```
 
-`./install.sh` alone installs the two plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
+`./install.sh` alone installs the three plugins into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
 recommended settings, when there's none yet); `--apps` also builds Steady Player into `~/Applications` and runs
 its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
@@ -90,7 +96,7 @@ The commands moved with it: `gyroflow-embed` and `gyroflow-export` are now in `~
 
 ### Opening files
 
-Once Steady Player is set up, double-clicking an MP4 plays it in mpv with both plugins; for other videos, open
+Once Steady Player is set up, double-clicking an MP4 plays it in mpv with the plugins; for other videos, open
 them with Steady Player from Finder's Open With, or right click → Quick Actions:
 
 - **Play Stabilized** opens the selected videos in Steady Player.
@@ -114,18 +120,28 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here | `gyroflow/edit` |
+| `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
 
 ### Options
 
-In `~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--script-opts=dlogm-mode=sdr`:
+In `~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--script-opts=dlogm-mode=sdr` (a value
+with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 
 | | |
 |---|---|
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
+| `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
+| `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
+| `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
+| `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
+| `dji_telemetry.conf`: `visible=yes` | `no`: shown only after `Ctrl+t` |
+
+The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with
+anything but letters and digits made `_`.
 
 ### Stabilization
 
@@ -197,6 +213,40 @@ playback uses). The video is decoded once and encoded once: ffmpeg decodes it, t
 stabilizes it on the GPU, the LUT is applied on the GPU too (`vs-gyroflow/src/gpu_lut.rs`, the shader's math),
 and ffmpeg encodes it with VideoToolbox.
 
+### Telemetry
+
+DJI cameras record, next to the video, a message per frame with what the camera knew at that moment. The
+dji-telemetry plugin reads all of it when a clip opens and shows, by default, the depth and whether the camera is
+in the water, bottom left. Each field shows when the clip has it:
+
+| `fields=` | |
+|---|---|
+| `depth` | under water: the barometer's altitude below the surface, in 0.1 m steps, about once a second. The camera starts recording it a second or two after it goes in |
+| `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing |
+| `pressure` | hPa, ~100 more per meter of water |
+| `altitude` | the barometer's altitude out of water. It's relative and drifts by meters, so it's a rough guide |
+| `gps` | position, when the camera has a fix (a remote or Mimo connected) |
+| `speed` | ground speed from the GPS (Osmo 360 on an e-bike: the bike's) |
+| `temperature` | Osmo 360's image sensor, not the water |
+| `heartrate` | from a device paired with an Osmo 360 |
+| `exposure` | ISO, shutter, aperture, white balance |
+
+**In a dive housing the depth isn't recorded.** The barometer then measures the air in the housing (1050-1100 hPa
+whatever the depth), and the camera doesn't set its in-water flag; `water` still shows *In water*, from the picture.
+The Osmo Action 6 records no temperature at all: no clip had any.
+
+Models: the Osmo Action 6 (its schema isn't published; the layout was worked out from its recordings with
+`tools/dji_meta_dump.py`, below) and the Osmo 360 (from its schema). No Action 6 clip here had a GPS fix, so its
+`gps` and `speed` follow the Osmo 360's layout and haven't been seen working yet. Clips from other cameras, and
+files that aren't from a camera at all (exports included), show nothing.
+
+To look at what a clip recorded, or to work out another model's layout:
+
+```bash
+python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # every field: min, max, how often
+python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
+```
+
 ## How it works
 
 ### D-Log M
@@ -232,6 +282,19 @@ The plugin builds on `gyroflow-core` from Gyroflow master, which has the Static 
 ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)) it renders; nothing else is needed
 beyond stock Gyroflow.
 
+### Telemetry
+
+The metadata track (the first with a `meta` handler, as for D-Log M) holds one protobuf message per frame,
+`ProductMeta` in DJI's `dvtm_*.proto`: the clip's and the stream's metadata in the first, then `FrameMeta` in each.
+`mpv/scripts/dji-telemetry/telemetry.lua` finds every sample through the track's sample table (`stts`, `stsc`,
+`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the fields the chosen `fields=` need,
+along paths of field numbers per model (`LAYOUTS`, by `proto_file_name`). Each value is kept only where it changes;
+`main.lua` looks it up by `time-pos` and redraws the OSD overlay (ASS) when the text changes. A 3.7-minute 4K60 clip
+(2.5 GB) is read in 0.4 s.
+
+On the Action 6 the barometer is `Barometer { is_in_water = 1; altitude_dm = 2; atmospheric_hpa = 3; }` at
+field 13 of the frame's camera part (`3.2.13`); the other camera fields are numbered as on the Osmo 360.
+
 ## Layout
 
 ```
@@ -241,10 +304,12 @@ mpv/scripts/dlogm/            the D-Log M plugin  →  ~/.config/mpv/scripts/dlo
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               Steady Player
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
+tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
 macos/                        Steady Player: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
                               DJI's LUT), default-app.py, the Quick Actions' export script
