@@ -78,14 +78,18 @@ them.
 
 ## Cameras and systems
 
-| | Today | On the way |
-|---|---|---|
-| **Systems** | macOS on Apple Silicon | Linux and Windows |
-| **DJI Osmo Action 6** | log (D-Log M), stabilization, telemetry | |
-| **DJI Osmo 360** | log, stabilization, telemetry, from DJI's published layout; not yet checked on real clips | |
-| **Other DJI cameras** | log recognized by file name | stabilization, telemetry |
-| **DJI drones** (Mini 4 Pro, Air 3, Avata 2, ...) | stabilization of clips with a Gyroflow project | log (D-Log M, D-Log), flight telemetry, stabilization of FPV drones from their gyro data |
-| **GoPro, Insta360** | stabilization of clips with a Gyroflow project | stabilization from the camera's own gyro data; GP-Log and I-Log |
+What works with which camera today, and what has been tried on real footage: the README's
+[What works, camera by camera](../README.md#what-works-camera-by-camera). In short, everything is in daily use on
+the DJI Osmo Action 6 in the Mac app; the Osmo 360, other DJI cameras, GoPro and Insta360 are built for (from the
+makers' metadata, and GoPro's sample clips) but not yet tried on real footage; the plugins for Linux and Windows
+are released but not yet tried there.
+
+On the way:
+
+- **DJI drones** (Mini 4 Pro, Air 3, Avata 2, ...): log (D-Log M, D-Log), flight telemetry, and stabilization of FPV
+  drones from their gyro data. Today, clips with a Gyroflow project play stabilized.
+- **Other DJI cameras**: telemetry, and log recognized from the metadata rather than the file name.
+- **GoPro, Insta360**: GP-Log and I-Log.
 
 New cameras and drones need clips from their owners: a few seconds each, straight from the camera. See
 [Other cameras, and how to help](../README.md#other-cameras-and-how-to-help).
