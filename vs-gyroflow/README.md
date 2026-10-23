@@ -90,7 +90,7 @@ install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
-stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (DJI clip with gyro data and EIS off),
+stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
 or nothing, with the reason.
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then

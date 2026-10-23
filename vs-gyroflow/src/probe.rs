@@ -4,8 +4,8 @@
 // the mpv scripts) and gyroflow-export, so both decide the same way.
 
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
-use gyroflow_core::{ filesystem, util };
-use gyroflow_core::telemetry_parser::{ self, Input, tags_impl::* };
+use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
+use gyroflow_core::telemetry_parser::{ self, Input, util::SampleInfo, tags_impl::* };
 
 use crate::embedded;
 
@@ -23,32 +23,88 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     let video = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     let input = Input::from_stream(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false))).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
-    if camera != "DJI" {
-        return Err(format!("{camera}: only DJI files are stabilized without a project"));
-    }
+    let samples = input.samples.as_deref().unwrap_or_default();
 
     let mut motion_samples = 0;
-    let mut eis_status = None;
-    for s in input.samples.as_ref().into_iter().flatten() {
+    for s in samples {
         let Some(m) = s.tag_map.as_ref() else { continue };
         if let Some(TagValue::Vec_TimeQuaternion_f64(v)) = m.get(&GroupId::Quaternion).and_then(|g| g.get(&TagId::Data)).map(|t| &t.value) { motion_samples += v.get().len(); }
         if let Some(TagValue::Vec_TimeVector3_f64(v)) = m.get(&GroupId::Gyroscope).and_then(|g| g.get(&TagId::Data)).map(|t| &t.value) { motion_samples += v.get().len(); }
-        if eis_status.is_none() {
-            if let Some(TagValue::Json(v)) = m.get(&GroupId::Default).and_then(|g| g.get(&TagId::Metadata)).map(|t| &t.value) {
-                eis_status = find_key(v.get(), "eis_status").and_then(|x| x["status"].as_i64());
-            }
-        }
+    }
+    // Other cameras' gyro comes raw (GoPro: int16 with a scale), read the way Gyroflow reads it
+    if motion_samples == 0 && telemetry_parser::util::normalized_imu(&input, None).is_ok_and(|v| v.iter().any(|x| x.gyro.is_some())) {
+        motion_samples = 1;
     }
     if motion_samples == 0 {
-        return Err("no motion data (DJI records it only with EIS off and the Wide FOV)".into());
+        return Err(match camera.as_str() {
+            "DJI" => "no motion data (DJI records it only with EIS off and the Wide FOV)".into(),
+            _ => format!("{camera}: no motion data"),
+        });
     }
-    // EIS_OFF. Unknown (other models) counts as on: stabilizing footage the camera already stabilized makes it worse
-    match eis_status {
-        Some(0) => { },
-        Some(s) => return Err(format!("in-camera stabilization is on (EIS status {s})")),
-        None => return Err("in-camera stabilization state unknown".into()),
+    in_camera_stabilization_off(&camera, samples)?;
+    // DJI clips are left as they were before this check (the Osmo Action 6 plays well; no clip at hand to check that
+    // its lens comes through here)
+    if camera != "DJI" && !has_lens_profile(&input, samples, video.width, video.height, video.fps) {
+        return Err(format!("{camera}: no lens profile for this camera and mode in Gyroflow's database"));
     }
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
+}
+
+// Ok when the camera recorded that it didn't stabilize the picture itself (EIS). Footage the camera already
+// stabilized gets worse stabilized again, so on, or not said, is an Err with the reason: such clips play as they are.
+// The signs are the ones Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
+fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(), String> {
+    let default_tags = || samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Default));
+    let metadata = || default_tags().filter_map(|m| match m.get(&TagId::Metadata).map(|t| &t.value) {
+        Some(TagValue::Json(v)) => Some(v.get()),
+        _ => None,
+    });
+    match camera {
+        // ClipMeta.eis_status (dvtm_library.proto): EIS_OFF is 0. With EIS on the cameras don't record motion data at
+        // all (Osmo Action 6), so this mostly confirms it. EIS_OFF_WITH_CROP (7) and the horizon modes count as on
+        // until a clip shows what they do
+        "DJI" => match metadata().find_map(|v| find_key(v, "eis_status").and_then(|x| x["status"].as_i64())) {
+            Some(0) => Ok(()),
+            Some(s) => Err(format!("in-camera stabilization is on (EIS status {s})")),
+            None => Err("in-camera stabilization state unknown".into()),
+        },
+        // GoPro records the gyro whatever HyperSmooth is, so only its settings tell: EISA (what was applied: "N", "Y",
+        // "HS EIS", "HS HLevel", ...; "N/A" says nothing), else EISE (enabled: "Y"/"N"). For HERO5/6 telemetry-parser
+        // reads EISA from the SETT box. Checked on GoPro's sample clips (gopro/gpmf-parser): HERO5/6 "N", HERO7/8 "HS EIS"
+        "GoPro" => {
+            let tag = |fourcc: &[u8; 4]| default_tags().find_map(|m| match m.get(&TagId::Unknown(u32::from_be_bytes(*fourcc))).map(|t| &t.value) {
+                Some(TagValue::String(v)) => Some(v.get().trim().to_string()).filter(|v| v != "N/A"),
+                _ => None,
+            });
+            match tag(b"EISA").or_else(|| tag(b"EISE")).as_deref() {
+                Some("N") => Ok(()),
+                Some(v) => Err(format!("HyperSmooth is on ({v})")),
+                None => Err("GoPro: HyperSmooth state unknown".into()),
+            }
+        },
+        // Insta360 records the gyro always, and is_flowstate_online when the camera applied FlowState itself. A camera
+        // that predates the field reads as false too (protobuf's default), as it does in Gyroflow
+        "Insta360" => match metadata().find_map(|v| v.get("is_flowstate_online")?.as_bool()) {
+            Some(false) => Ok(()),
+            Some(true) => Err("FlowState is on in the camera".into()),
+            None => Err("Insta360: FlowState state unknown".into()),
+        },
+        _ => Err(format!("{camera}: only DJI, GoPro and Insta360 files are stabilized without a project")),
+    }
+}
+
+// Without a lens profile the stabilization is worse than none. Newer GoPros and some Insta360s record their lens in
+// the file; the rest are looked up in Gyroflow's database the way Gyroflow does when it opens the video
+fn has_lens_profile(input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
+    let builtin = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
+        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
+    if builtin { return true; }
+    let Ok(id) = CameraIdentifier::from_telemetry_parser(input, width, height, fps) else { return false };
+    let id = id.get_identifier_for_autoload();
+    if id.is_empty() { return false; }
+    let mut db = LensProfileDatabase::default();
+    db.load_all();
+    db.contains_id(&id)
 }
 
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {

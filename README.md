@@ -30,7 +30,8 @@ Player, a Mac app that carries them and opens your MP4s with them:
 - **`dji-telemetry`**: the camera's telemetry over the video. Plain Lua, any mpv on any system.
 
 None needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
-Gyroflow part works with any camera Gyroflow supports when there's a project.
+Gyroflow part works with any camera Gyroflow supports when there's a project. Other DJI models, GoPro and Insta360
+are on the way, and need clips from their owners: see [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 ## Install
 
@@ -171,7 +172,11 @@ The project is appended to the MP4 as a box of its own: the video data isn't tou
 date, players and Gyroflow open it as before, and it moves with the file. Apps that rewrite the file
 (trimming, remuxing) drop it.
 
-Clips with gyro data and EIS off play stabilized even without a project, with Gyroflow's default preset
+Clips with gyro data of their own, recorded with the camera's stabilization off, play stabilized even without a
+project: DJI with EIS off, and (not yet tried on a real clip, see Other cameras) GoPro with HyperSmooth off and
+Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
+that it was off: footage the camera stabilized already gets worse stabilized again, so a clip that doesn't say
+plays as it is. These clips get Gyroflow's default preset
 and then `default.gyroflow`: yours in `~/Library/Application Support/Steady Player/gyroflow/` if you put one
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in Steady Player). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
@@ -281,6 +286,49 @@ python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # ev
 python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
 ```
 
+## Other cameras, and how to help
+
+Everything here was worked out on clips from an Osmo Action 6. The camera's metadata says what the plugins
+need (whether the camera stabilized the picture itself, the color profile, the telemetry), but each maker, and
+often each model, writes it differently, and without clips there's nothing to check a guess against. Where
+things stand:
+
+| | Stabilization without a project | Log footage (HDR, Rec.709 LUT) | Telemetry |
+|---|---|---|---|
+| DJI Osmo Action 6 | yes | D-Log M | yes |
+| DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
+| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | `_D` file name only, a guess | no |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips | no (GP-Log) | no |
+| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | no (I-Log) | no |
+
+The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
+off, so a wrong guess about a camera means its clips play as they are, not worse.
+
+**Clips that would help**, straight from the camera (not exported or trimmed by an app: that drops the metadata):
+
+- a few seconds each, any resolution, the camera moving (walking with it is enough);
+- the camera's stabilization off, and the same on (DJI: EIS/RockSteady; GoPro: HyperSmooth; Insta360: FlowState);
+- in the log profile (D-Log M, GP-Log, I-Log) and in the normal one;
+- under water, if the camera records depth or a "wet" flag;
+- the model, firmware and settings (lens/FOV, frame rate) in a word.
+
+Share them through a link (Google Drive, Dropbox, WeTransfer, ...) in a
+[new issue](https://github.com/anton-belkin/dlogm-gyroflow-player/issues/new). The clips are used only to work out
+the camera's metadata; if anything from them goes into the repo, it's the metadata alone as test data (a few kB,
+no picture), and only if you're fine with that. The files carry the camera's serial number, and the place they
+were shot if the camera had GPS, so shoot somewhere you don't mind showing.
+
+If you can't share the video, its metadata alone helps a lot:
+
+```bash
+python3 tools/dji_meta_dump.py summary DJI_0001_D.MP4 > dji.txt            # DJI
+gyro2bb --dump GX010001.MP4 > gopro.txt                                     # any camera, telemetry-parser's tool
+```
+
+`gyro2bb` is [telemetry-parser](https://github.com/AdrianEddy/telemetry-parser)'s command-line tool (built from
+its `bin/gyro2bb`). telemetry-parser is the library Gyroflow, and through it this project, reads camera metadata
+with; what a clip shows about a camera that it doesn't read yet goes there too, so Gyroflow gets it as well.
+
 ## How it works
 
 ### D-Log M
@@ -308,7 +356,8 @@ The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl
 
 The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) adds `vf=vapoursynth` with its `gyroflow.vpy`, which runs the
 `gyroflow.Stabilize` plugin from `vs-gyroflow/`. Without a `.gyroflow` next to the video, `gyroflow-probe`
-decides first whether the video carries a project, or its own gyro data recorded with EIS off. Frames are
+decides first whether the video carries a project, or its own gyro data recorded with the camera's stabilization
+off (where each camera records that: `vs-gyroflow/src/probe.rs`). Frames are
 stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit; 8K is
 scaled to 4K on the GPU first. Details, measurements and the plugin's options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
 
@@ -359,6 +408,9 @@ GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to 
 DJI's site at install.
 
 ## Credits
+
+Camera metadata (motion data, lens, in-camera stabilization) is read by Adrian Eddy's
+[telemetry-parser](https://github.com/AdrianEddy/telemetry-parser), through Gyroflow.
 
 `luts/dlogm_hlg.cube` (D-Log M → Rec.2100 HLG, 1000-nit, no DaVinci DRT) was composed in DaVinci Resolve
 from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide Gamut/Intermediate shaper LUT

@@ -5,8 +5,9 @@
 // Steady Router. Prints one JSON line:
 //   {"mode":"embedded","width":3840,"height":2160,"fps":59.94,...}  a project stored in the video (by gyroflow-embed)
 //   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
-//                                                       in-camera stabilization (DJI with EIS off): stabilize it with
-//                                                       the default preset
+//                                                       in-camera stabilization (DJI with EIS off, GoPro with
+//                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
+//                                                       stabilize it with the default preset
 //   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here).
