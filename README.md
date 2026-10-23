@@ -243,7 +243,7 @@ leaves parts of the window empty, which Gyroflow fills with the project's backgr
 with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
 them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
 
-- **sphere**, the default (experimental): what was last seen in that direction, by the gyro. It's taken from the
+- **sphere**, the default: what was last seen in that direction, by the gyro. It's taken from the
   whole source frame, not just what the output shows, so it also has what the zoom crops away and what the camera
   saw while shaking with no edges showing, and it stays where it was in the world, so it lines up with the picture
   through a pan. Only the camera's turning is known: near things that moved past it, or by themselves, are off.
