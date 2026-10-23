@@ -7,7 +7,9 @@
 #                          none yet
 #   ./install.sh --apps    also Steady Player.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
-#                          it's updated by every later run
+#                          it's updated by every later run. macOS only
+#
+# On Linux it installs the same plugins (the binaries built for Linux); Steady Player is macOS's.
 #
 # Files it replaces that differ from the new ones are kept as <file>.bak-<date> (for scripts/, in scripts-backup/).
 # The layout of earlier versions (loose scripts, profiles in mpv.conf, keys in input.conf, ~~/gyroflow) is moved
@@ -28,6 +30,12 @@ ROUTER_NAME="Steady Router"
 ROUTER_IDS="io.github.anton-belkin.steady-router com.antonbelkin.dji-router io.github.dji-router"
 BUILD=build
 
+macos=0
+[ "$(uname -s)" = Darwin ] && macos=1
+# The gyroflow plugin's binaries, as cargo names them here
+if [ $macos = 1 ]; then LIBRARY=libvs_gyroflow.dylib; else LIBRARY=libvs_gyroflow.so; fi
+BINARIES="$LIBRARY gyroflow-probe gyroflow-embed gyroflow-export"
+
 apps=0
 for arg in "$@"; do
     case "$arg" in
@@ -35,11 +43,21 @@ for arg in "$@"; do
         *) echo "usage: $0 [--apps]" >&2; exit 2 ;;
     esac
 done
+if [ $macos = 0 ] && [ $apps = 1 ]; then
+    echo "--apps is for macOS: Steady Player is a Mac app" >&2
+    exit 2
+fi
 [ -d "$APPS_DIR/$PLAYER_NAME.app" ] && apps=1
 
 need() { command -v "$1" >/dev/null || { echo "Missing $1 ($2)" >&2; exit 1; }; }
-need mpv "brew install mpv"
-need python3 "Xcode command line tools"
+if [ $macos = 1 ]; then
+    need mpv "brew install mpv"
+    need python3 "Xcode command line tools"
+else
+    need mpv "your distribution's mpv, built with VapourSynth for the stabilization"
+    need python3 "your distribution's python3"
+    need curl "your distribution's curl, to download DJI's LUT"
+fi
 # A release download has the binaries prebuilt in bin/; a git checkout builds them
 if [ -d bin ]; then
     BIN=bin
@@ -49,7 +67,7 @@ else
     BIN=vs-gyroflow/target/release
     need cargo "https://rustup.rs, or download a release, which has the binaries prebuilt"
 fi
-command -v ffmpeg >/dev/null || echo "Warning: no ffmpeg (brew install ffmpeg); exporting needs it" >&2
+command -v ffmpeg >/dev/null || echo "Warning: no ffmpeg ($([ $macos = 1 ] && echo "brew install ffmpeg" || echo "install your distribution's")); exporting needs it" >&2
 if ! grep -q vapoursynth <<< "$(mpv --vf=help 2>/dev/null)"; then
     echo "Warning: this mpv has no VapourSynth filter; videos will play, but not stabilized" >&2
 fi
@@ -116,7 +134,7 @@ remove_ours() {
     for f in "$@"; do rm -f "$dir/$f" "$dir/$f".bak-*; done
     rmdir "$dir" 2>/dev/null || echo "   left $dir: there's more in it than this setup put there"
 }
-remove_ours "$MPV_DIR/gyroflow" gyroflow.vpy libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export \
+remove_ours "$MPV_DIR/gyroflow" gyroflow.vpy $BINARIES \
     gyroflow-router export-finder.sh
 remove_ours "$MPV_DIR/shaders" dlogm_lut3d.glsl dlogm_hlg.glsl
 remove_ours "$MPV_DIR/luts" dlogm_hlg.cube dji-dlogm-rec709.cube
@@ -164,12 +182,14 @@ put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
 put mpv/scripts/gyroflow/export.lua  "$GYROFLOW/export.lua" 644
+put mpv/scripts/gyroflow/platform.lua "$GYROFLOW/platform.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
 if [ ! -e "$GYROFLOW/default.gyroflow" ]; then
     install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$GYROFLOW/default.gyroflow"
 fi
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
+for f in $BINARIES; do
+    [ -f "$BIN/$f" ] || { echo "$BIN/$f is missing: a release for another system? (tools/make_release.sh, tools/make_plugin_zip.sh)" >&2; exit 1; }
     put "$BIN/$f" "$GYROFLOW/$f" 755
 done
 

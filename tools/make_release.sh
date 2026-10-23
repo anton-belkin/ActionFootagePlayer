@@ -4,10 +4,12 @@
 #                                                       unzipped into Applications, its setup downloads DJI's LUT
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
-#                                                       redistributed (install.sh downloads it from DJI)
+#                                                       redistributed (install.sh downloads it from DJI). With the
+#                                                       HLG LUT itself, for the gyroflow plugin's exports
 #   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
-#                                                       mpv: unzipped into ~~/scripts/
+#                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
+#                                                       tools/make_plugin_zip.sh's)
 #   dlogm-gyroflow-player-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
 #                                                       install.sh needs no Rust (it uses bin/ when it's there)
 #
@@ -62,9 +64,10 @@ rm -rf "dist/$gyroflow" "dist/$name"
 
 dlogm="mpv-dlogm-$version"
 rm -rf "dist/$dlogm" "dist/$dlogm.zip"
-mkdir -p "dist/$dlogm/dlogm/shaders"
+mkdir -p "dist/$dlogm/dlogm/shaders" "dist/$dlogm/dlogm/luts"
 git archive HEAD mpv/scripts/dlogm | tar -x --strip-components 2 -C "dist/$dlogm"
 cp dist/dlogm_hlg.glsl "dist/$dlogm/dlogm/shaders/dlogm_hlg.glsl"
+git show HEAD:luts/dlogm_hlg.cube > "dist/$dlogm/dlogm/luts/dlogm_hlg.cube"
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 

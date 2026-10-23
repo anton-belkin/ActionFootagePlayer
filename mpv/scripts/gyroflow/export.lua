@@ -5,22 +5,25 @@
 --
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
--- keeps its frame rate, the export nearly stops), and at full speed (~35 fps for 4K60 on an M1 Pro) while it's
--- paused. gyroflow-export switches itself and its ffmpegs on SIGUSR1/SIGUSR2, and reports its progress (and pid)
--- in a file this polls: mpv's subprocess only gives the output at the end.
+-- keeps its frame rate, the export nearly stops; on Linux and Windows a few frames a second), and at full speed
+-- (~35 fps for 4K60 on an M1 Pro) while it's paused. gyroflow-export switches itself and its ffmpegs on
+-- SIGUSR1/SIGUSR2 (on Windows, which has no signals, a word in a control file it polls), and reports its progress
+-- (and pid) in a file this polls: mpv's subprocess only gives the output at the end.
 --
 -- Loaded by main.lua.
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
+local platform = require 'platform'
 
-local EXPORT = utils.join_path(mp.get_script_directory(), "gyroflow-export")
+local EXPORT = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-export"))
 -- Shift+E twice within this many seconds cancels
 local CONFIRM_SECONDS = 3
 -- After SIGTERM, how long gyroflow-export gets to stop before mpv kills it
 local KILL_AFTER = 5
 
--- path -> { name, range, id (the async command), progress (file), state (its last contents), cancelling }
+-- path -> { name, range, id (the async command), progress (file), control (file, Windows), state (the progress
+-- file's last contents), cancelling }
 local running = {}
 local order = {}
 local overlay = mp.create_osd_overlay("ass-events")
@@ -28,16 +31,40 @@ local confirm = nil
 local playing = false
 local timer
 
+-- On Windows, the OSD message is all
 local function notify(title, text)
-    local script = string.format("display notification %q with title %q", text, title)
-    mp.command_native_async({ name = "subprocess", args = { "osascript", "-e", script }, playback_only = false }, function() end)
+    local args
+    if platform.macos then
+        args = { "osascript", "-e", string.format("display notification %q with title %q", text, title) }
+    elseif not platform.windows then
+        args = { "notify-send", "--app-name=mpv", title, text }
+    end
+    if args then mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end) end
 end
 
+-- What gyroflow-export reads in its control file for each signal
+local CONTROL_WORDS = { TERM = "stop", USR1 = "background", USR2 = "normal" }
+
 local function signal(job, sig)
+    if job.control then
+        local f = io.open(job.control, "w")
+        if not f then return false end
+        f:write(CONTROL_WORDS[sig])
+        f:close()
+        return true
+    end
     local pid = job.state and job.state.pid
     if not pid then return false end
     mp.command_native({ name = "subprocess", args = { "kill", "-" .. sig, tostring(pid) }, playback_only = false })
     return true
+end
+
+-- os.tmpname() on Windows names a file in the root of the drive, which isn't writable
+local temp_count = 0
+local function temp_name(kind)
+    if not platform.windows then return os.tmpname() end
+    temp_count = temp_count + 1
+    return utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.%s", utils.getpid(), temp_count, kind))
 end
 
 -- The last line gyroflow-export printed for this video: "...: skipped, <why>" or "...: failed, <why>"
@@ -97,6 +124,7 @@ local function finish(path)
     for i, p in ipairs(order) do if p == path then table.remove(order, i) break end end
     os.remove(job.progress)
     os.remove(job.progress .. ".tmp")
+    if job.control then os.remove(job.control) end
     if #order == 0 and timer then timer:kill(); timer = nil end
     redraw()
     return job
@@ -139,6 +167,7 @@ mp.register_event("shutdown", function()
         if job.state and job.state.partial then os.remove(job.state.partial) end
         os.remove(job.progress)
         os.remove(job.progress .. ".tmp")
+        if job.control then os.remove(job.control) end
     end
 end)
 
@@ -166,8 +195,10 @@ mp.add_key_binding("E", "export", function()
         return
     end
 
-    local progress = os.tmpname()
+    local progress = temp_name("progress")
+    local control = platform.windows and temp_name("control") or nil
     local args = { EXPORT, "--force", "--progress", progress }
+    if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local range = ""
@@ -178,8 +209,8 @@ mp.add_key_binding("E", "export", function()
     end
     table.insert(args, path)
 
-    local name = path:match("([^/]+)$")
-    job = { name = name, range = range, progress = progress }
+    local name = platform.file_name(path)
+    job = { name = name, range = range, progress = progress, control = control }
     running[path] = job
     table.insert(order, path)
     mp.osd_message("Exporting " .. name .. range .. (playing and " (slowly while the video plays)" or ""), 3)
@@ -187,7 +218,8 @@ mp.add_key_binding("E", "export", function()
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         finish(path)
         local err = r and r.stderr or ""
-        local out = err:match("%-> (/[^\n]+)")
+        -- gyroflow-export's last line for a video it exported: "  -> <output>"
+        local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if job.cancelling then
             mp.osd_message("Export cancelled: " .. name .. range, 4)
             notify("Export cancelled", name .. range)
