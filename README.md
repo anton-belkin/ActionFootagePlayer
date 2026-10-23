@@ -193,7 +193,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
+| `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
@@ -220,10 +220,10 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
 | `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
-| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` |
+| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` (`Ctrl+[` and `Ctrl+]` change it while playing) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
-| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height; `Ctrl+[` and `Ctrl+]` change it while playing), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -296,7 +296,7 @@ their own.
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
 with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
-them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
+them while playing, and `edges_blur` (Options) sets how blurred:
 
 - **sphere**, the default: what was last seen in that direction, by the gyro. It's taken from the
   whole source frame, not just what the output shows, so it also has what the zoom crops away and what the camera

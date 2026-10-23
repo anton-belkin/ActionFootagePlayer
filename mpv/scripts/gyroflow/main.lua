@@ -28,8 +28,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
---   Ctrl+[   blur-less   less blur of the edge fill (Ctrl+] more): steps of edges_blur, shown on screen
---   Ctrl+]   blur-more
+--   Ctrl+[   fov-less   the wider view, narrower by 0.1 of FOV (Ctrl+] wider), 1 to 3; from the normal view or off,
+--   Ctrl+]   fov-more   the first press just goes to the wider view. Sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
@@ -57,11 +57,12 @@
 --                frame plays. 0: always every frame
 --   view=normal  the view clips start in: normal, or wide (the wider view)
 --   wide_fov=1.4 Gyroflow's FOV (Advanced) for the wider view of Ctrl+g: more of the picture, the edges at times
+--                (Ctrl+[ and Ctrl+] change it while playing)
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
---   edges_blur=2 blur of the edge fill, % of the frame height (Ctrl+[ and Ctrl+] change it while playing)
+--   edges_blur=2 blur of the edge fill, % of the frame height
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
@@ -175,8 +176,6 @@ local EDGE_LABELS = { off = "background color", original = "original frame, blur
                       trail = "trail of earlier frames, blurred", sphere = "trail by direction, blurred" }
 local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.edges", utils.getpid()))
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
--- Ctrl+[ and Ctrl+] step through these (% of the frame height), from wherever edges_blur is
-local EDGE_BLURS = { 0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10 }
 local edge_blur = o.edges_blur
 
 -- The mode, then the blur: "sphere blur=2"
@@ -329,21 +328,6 @@ mp.add_key_binding("Ctrl+b", "edges", function()
     set_edges(EDGE_MODES[i % #EDGE_MODES + 1])
 end)
 
--- The next step of EDGE_BLURS below (-1) or above (1) the blur; sticks for the next clips too
-local function step_blur(dir)
-    return function()
-        local next = nil
-        for _, b in ipairs(EDGE_BLURS) do
-            if (dir < 0 and b < edge_blur - 1e-6) or (dir > 0 and b > edge_blur + 1e-6 and not next) then next = b end
-        end
-        edge_blur = next or edge_blur
-        write_edge_control()
-        mp.osd_message(string.format("Gyroflow edge blur: %g %%", edge_blur) .. (edge_mode == "off" and " (edges off: Ctrl+b)" or ""), 2)
-    end
-end
-mp.add_key_binding("Ctrl+[", "blur-less", step_blur(-1))
-mp.add_key_binding("Ctrl+]", "blur-more", step_blur(1))
-
 mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
 local function no_source()
@@ -377,15 +361,31 @@ mp.register_script_message("view", function(v)
     if v == "normal" or v == "wide" or v == "off" then show(v) end
 end)
 
-mp.register_script_message("fov", function(value)
-    local fov = tonumber(value)
-    if not fov or fov <= 0 then return end
+-- The wider view at this FOV, now and for the next clips
+local function set_fov(fov)
     wide_fov = fov
     if current_source then return show("wide") end
     view = "wide"
     publish()
     mp.osd_message("Gyroflow: " .. view_label("wide"), 1.5)
+end
+
+mp.register_script_message("fov", function(value)
+    local fov = tonumber(value)
+    if fov and fov > 0 then set_fov(fov) end
 end)
+
+-- The wider view's FOV a step narrower (-1) or wider (1), between FOV_MIN and FOV_MAX; from the normal view or off,
+-- the wider view as it is. Each step sets the filter up again, which costs a few dropped frames
+local FOV_STEP, FOV_MIN, FOV_MAX = 0.1, 1.0, 3.0
+local function step_fov(dir)
+    return function()
+        if view ~= "wide" or stab_off then return set_fov(wide_fov) end
+        set_fov(math.max(FOV_MIN, math.min(FOV_MAX, math.floor((wide_fov + dir * FOV_STEP) * 10 + 0.5) / 10)))
+    end
+end
+mp.add_key_binding("Ctrl+[", "fov-less", step_fov(-1))
+mp.add_key_binding("Ctrl+]", "fov-more", step_fov(1))
 
 mp.register_script_message("horizon-lock", function(value)
     if value == "toggle" then
