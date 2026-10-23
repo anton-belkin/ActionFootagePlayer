@@ -111,11 +111,22 @@ jobs:
       # plugin loaded, the way ActionFootagePlayer.exe starts it (no GPU here: the stabilization itself isn't run)
       - name: Windows app smoke test
         if: matrix.os == 'windows'
+        timeout-minutes: 15
         shell: pwsh
         run: |
+          # Each with a time limit: a GUI program that waits (mpv idling, a dialog) would hold the job for hours
+          function Run([string] $file, [string[]] $arguments, [string] $log) {
+              $p = Start-Process -PassThru -FilePath $file -ArgumentList $arguments
+              $null = $p.Handle  # without it, ExitCode stays empty
+              $done = $p.WaitForExit(180000)
+              # To the log, not the function's output (its exit code)
+              if ($log -and (Test-Path $log)) { Get-Content $log -Tail 40 | Write-Host }
+              if (-not $done) { $p.Kill($true); throw "$file didn't finish in 3 minutes" }
+              return $p.ExitCode
+          }
           $setup = "dist\ActionFootagePlayer-$env:VERSION-windows-x86_64-setup.exe"
-          $p = Start-Process -Wait -PassThru -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/TASKS=', '/LOG=install.log'
-          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 30; throw "the installer failed: $($p.ExitCode)" }
+          $code = Run $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=', "/LOG=$PWD\install.log") "$PWD\install.log"
+          if ($code -ne 0) { throw "the installer failed: $code" }
           $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
           foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'python\python.exe', 'plugins\gyroflow\vs_gyroflow.dll', 'plugins\gyroflow\ffmpeg.exe') {
               if (-not (Test-Path "$app\$f")) { throw "not installed: $f" }
@@ -129,12 +140,14 @@ jobs:
               'video_in.std.Invert().set_output()')
           $env:VSSCRIPT_PATH = "$app\python\Lib\site-packages\vapoursynth\vsscript.dll"
           $env:PATH = "$app\python;$env:PATH"
-          $mpv = Start-Process -Wait -PassThru -FilePath "$app\mpv\mpv.exe" -ArgumentList '--no-config', '--vo=null', '--ao=null', '--frames=10', 'av://lavfi:testsrc=duration=2:size=320x240:rate=10', "--vf=vapoursynth=file=[$PWD\vs-test.vpy]", '--log-file=mpv-vs.log'
-          Select-String -Path mpv-vs.log -Pattern 'vapoursynth|error|fatal' | Select-Object -First 20
-          if ($mpv.ExitCode -ne 0) { throw "mpv didn't play through VapourSynth: $($mpv.ExitCode)" }
+          # Started without a console, mpv would be the pseudo-GUI, which waits idle after a file that failed
+          $code = Run "$app\mpv\mpv.exe" @('--no-config', '--player-operation-mode=cplayer', '--idle=no', '--force-window=no',
+              '--vo=null', '--ao=null', '--frames=10', '--msg-level=all=v', "--log-file=$PWD\mpv-vs.log",
+              "--vf=vapoursynth=file=[$PWD\vs-test.vpy]", 'av://lavfi:testsrc=duration=2:size=320x240:rate=10') "$PWD\mpv-vs.log"
+          if ($code -ne 0) { throw "mpv didn't play through VapourSynth: $code" }
           # The setup, with the app's Python: DJI's LUT (DJI's server, so a warning only)
-          & "$app\python\python.exe" -I "$app\tools\setup.py" lut
-          if ($LASTEXITCODE -ne 0) { Write-Output "::warning::setup.py couldn't fetch DJI's LUT" }
+          $code = Run "$app\python\python.exe" @('-I', "$app\tools\setup.py", 'lut') $null
+          if ($code -ne 0) { Write-Output "::warning::setup.py couldn't fetch DJI's LUT" }
 
       - uses: actions/upload-artifact@v4
         with:
