@@ -129,7 +129,7 @@ jobs:
           if ($code -ne 0) { throw "the installer failed: $code" }
           $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
           foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'vulkan\vulkan-1.dll', 'python\python.exe', 'plugins\gyroflow\vs_gyroflow.dll', 'plugins\gyroflow\ffmpeg.exe', 'plugins\footage-menu\main.lua',
-                     'plugins\dlogm\video_color.lua', 'plugins\dlogm\luts\dlog_hlg.cube', 'plugins\dlogm\luts\gplog_hlg.cube') {
+                     'app.conf', 'plugins\dlogm\video_color.lua', 'plugins\dlogm\luts\dlog_hlg.cube', 'plugins\dlogm\luts\gplog_hlg.cube') {
               if (-not (Test-Path "$app\$f")) { throw "not installed: $f" }
           }
           $plugin = "$app\plugins\gyroflow\vs_gyroflow.dll"

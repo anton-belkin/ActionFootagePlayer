@@ -166,6 +166,7 @@ cp "$launcher_bin/ActionFootagePlayer.exe" "$app/"
 $set_icon "$app/ActionFootagePlayer.exe" windows/AppIcon.ico
 mkdir -p "$app/tools"
 cp windows/setup.py tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$app/tools/"
+cp mpv/app.conf "$app/"
 # DJI's LUT as macos/setup.sh has it
 lut_url=$(sed -n 's/^DJI_LUT_URL="\(.*\)"$/\1/p' macos/setup.sh)
 lut_sha=$(sed -n 's/^DJI_LUT_SHA256="\(.*\)"$/\1/p' macos/setup.sh)

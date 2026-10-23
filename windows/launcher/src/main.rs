@@ -14,9 +14,12 @@
 //   vulkan\vulkan-1.dll       the Vulkan loader, which mpv.exe can't start without, for a PC whose GPU driver hasn't
 //                             installed one (last in mpv's PATH: the system's comes first)
 //   tools\setup.py            what fetches DJI's LUT
+//   app.conf                  the app's mpv settings (mpv/app.conf)
 //
-// mpv reads the config in %APPDATA%\mpv (MPV_HOME) like any mpv, and gets the app's plugins except one the config has
-// a copy of (mpv would load both). DJI's LUT and your default preset are in %LOCALAPPDATA%\ActionFootagePlayer\
+// The app is whole by itself: mpv gets the app's plugins and no others, and its settings (app.conf), with a config
+// folder of its own, %LOCALAPPDATA%\ActionFootagePlayer\mpv\, where the plugins keep what you set (script-opts\). An
+// mpv you may also have, its %APPDATA%\mpv (MPV_HOME), isn't read: the first time, only the four plugins' settings
+// are copied over from it. DJI's LUT and your default preset are in %LOCALAPPDATA%\ActionFootagePlayer\ too
 // (DLOGM_DATA, GYROFLOW_DATA): the app's folder is replaced by every update. While DJI's LUT isn't there, it's
 // fetched in the background (the installer does it first).
 //
@@ -36,6 +39,8 @@ const NAME: &str = "ActionFootagePlayer";
 // The playing one's IPC pipe: videos opened with the app go there while it plays
 const PIPE: &str = r"\\.\pipe\ActionFootagePlayer";
 const PLUGINS: [&str; 4] = ["gyroflow", "dlogm", "dji-telemetry", "footage-menu"];
+// Their settings' files, in script-opts\
+const PLUGIN_OPTS: [&str; 4] = ["gyroflow", "dlogm", "dji_telemetry", "footage_menu"];
 // A video sent to a player started less than this long ago goes into its playlist (several opened together), later
 // in place of what plays
 const TOGETHER: std::time::Duration = std::time::Duration::from_secs(3);
@@ -63,15 +68,23 @@ fn data_dir() -> PathBuf {
     local.join(NAME)
 }
 
-// mpv's config: MPV_HOME, else %APPDATA%\mpv
-fn mpv_config() -> Option<PathBuf> {
-    std::env::var_os("MPV_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from(std::env::var_os("APPDATA")?).join("mpv")))
-}
-
-// Whether mpv's config has a copy of the plugin (install.sh, or the plugin zips)
-fn config_has(plugin: &str) -> bool {
-    mpv_config().is_some_and(|c| c.join("scripts").join(plugin).exists())
+// mpv's config folder, the app's own. The first time, the plugins' settings come over from mpv's (MPV_HOME, else
+// %APPDATA%\mpv: up to 0.6.0 the app read that one)
+fn mpv_config() -> PathBuf {
+    let config = data_dir().join("mpv");
+    if !config.is_dir() {
+        let opts = config.join("script-opts");
+        let _ = std::fs::create_dir_all(&opts);
+        let theirs = std::env::var_os("MPV_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
+            .or_else(|| Some(PathBuf::from(std::env::var_os("APPDATA")?).join("mpv")));
+        if let Some(theirs) = theirs {
+            for name in PLUGIN_OPTS {
+                let file = format!("{name}.conf");
+                let _ = std::fs::copy(theirs.join("script-opts").join(&file), opts.join(&file));
+            }
+        }
+    }
+    config
 }
 
 // What the plugins and their binaries find their things by. Python's folder in PATH too: vsscript.dll loads its
@@ -120,11 +133,11 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
     let mpv = app.join(r"mpv\mpv.exe");
     let mut cmd = Command::new(&mpv);
     environment(&mut cmd, app);
-    cmd.arg("--player-operation-mode=pseudo-gui").arg(format!("--input-ipc-server={PIPE}"));
+    cmd.arg("--player-operation-mode=pseudo-gui").arg(format!("--input-ipc-server={PIPE}"))
+        .arg(format!("--config-dir={}", mpv_config().display())).arg("--load-scripts=no")
+        .arg(format!("--include={}", app.join("app.conf").display()));
     for plugin in PLUGINS {
-        if !config_has(plugin) {
-            cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
-        }
+        cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
     }
     cmd.args(&args);
     cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
@@ -205,11 +218,7 @@ fn take_queue(queue: &Path) -> Vec<PathBuf> {
 }
 
 fn run_export(app: &Path, videos: &[PathBuf]) {
-    // The app's gyroflow-export, or the one in mpv's config when it has the plugin (as mpv uses that one)
-    let bin = match mpv_config().filter(|_| config_has("gyroflow")) {
-        Some(config) => config.join(r"scripts\gyroflow\gyroflow-export.exe"),
-        None => app.join(r"plugins\gyroflow\gyroflow-export.exe"),
-    };
+    let bin = app.join(r"plugins\gyroflow\gyroflow-export.exe");
     println!("Exporting {} video(s), each into a stabilized folder next to it:", videos.len());
     for video in videos {
         println!("  {}", video.display());

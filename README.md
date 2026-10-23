@@ -229,8 +229,10 @@ e.g. `Ctrl+k script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-m
 
 ### Options
 
-In `~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--script-opts=dlogm-mode=sdr` (a value
-with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
+In ActionFootagePlayer, `~/Library/Application Support/ActionFootagePlayer/mpv/script-opts/<plugin>.conf`
+(Windows: `%LOCALAPPDATA%\ActionFootagePlayer\mpv\script-opts\`); with the plugins in your own mpv,
+`~/.config/mpv/script-opts/<plugin>.conf`, or on the command line as `--script-opts=dlogm-mode=sdr` (a value with
+commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's Remember as default writes them there:
 
 | | |
 |---|---|
@@ -521,20 +523,25 @@ installing: mpv ([shinchiro's build](https://github.com/shinchiro/mpv-winbuild-c
 and with the app's icon), Python with VapourSynth, the VC++ runtime VapourSynth needs, a Vulkan loader for a PC whose graphics driver hasn't
 installed one (mpv can't start without), ffmpeg and ffprobe for exports
 ([Gyan's build](https://www.gyan.dev/ffmpeg/builds/)), and the plugins. `ActionFootagePlayer.exe`
-(`windows/launcher/`) starts that mpv with the plugins and tells it where VapourSynth is. Like the Mac app, it reads
-your `%APPDATA%\mpv` (`mpv.conf`, `input.conf`, `script-opts\`), uses a copy of a plugin there instead of its own,
-and plays a video opened while one plays in its place. What's yours is in `%LOCALAPPDATA%\ActionFootagePlayer\`:
-DJI's LUT and its shader (`dlogm\`, fetched in the background if the installer couldn't), and your own default
-preset if you make one (`gyroflow\default.gyroflow`); uninstalling leaves it. The stabilization renders on DirectX 12
+(`windows/launcher/`) starts that mpv with the plugins and tells it where VapourSynth is, and plays a video opened
+while one plays in its place. Like the Mac app, it's whole by itself: its own plugins only, and its own mpv settings
+and config folder, not an mpv you may also have (`%APPDATA%\mpv`). What's yours is in
+`%LOCALAPPDATA%\ActionFootagePlayer\`: what you set in the plugins (`mpv\script-opts\`), DJI's LUT and its shader
+(`dlogm\`, fetched in the background if the installer couldn't), and your own default preset if you make one
+(`gyroflow\default.gyroflow`); uninstalling leaves it. The stabilization renders on DirectX 12
 or Vulkan.
 
 ### What the app keeps where
 
-ActionFootagePlayer uses the plugins it carries (`Contents/Resources/plugins/`), or the copy in `~/.config/mpv/scripts/`
-when there is one (`install.sh` puts them there for mpv in a terminal), so they're never loaded twice. It reads
-your `~/.config/mpv` (`mpv.conf`, `input.conf`, `script-opts/`) like any mpv. The app is read-only once signed;
-what's yours is in `~/Library/Application Support/ActionFootagePlayer/`: DJI's LUT and its shader (`dlogm/`), and
-your own default preset if you make one (`gyroflow/default.gyroflow`, see Stabilization).
+ActionFootagePlayer is whole by itself: it plays with the plugins it carries (`Contents/Resources/plugins/`) and no
+others, with its own mpv settings (`Contents/Resources/app.conf`: hardware decoding, the window at most 85% of the
+screen, a playlist of the folder's videos) and a config folder of its own. An mpv you may also have isn't read: its
+`~/.config/mpv` (`mpv.conf`, `input.conf`, scripts), and the plugins `install.sh` puts there, are for that mpv. To
+put the plugins together with other scripts of your own, take the plugins instead of the app (see
+[Plugins in your own mpv](#plugins-in-your-own-mpv)). The app is read-only once signed; what's yours is in
+`~/Library/Application Support/ActionFootagePlayer/`: what you set in the plugins (`mpv/script-opts/`, with Remember
+as default), DJI's LUT and its shader (`dlogm/`), and your own default preset if you make one
+(`gyroflow/default.gyroflow`, see Stabilization).
 
 ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts the mpv it
 carries (`Contents/Helpers/`, or Homebrew's in an app built without it) with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
@@ -543,6 +550,12 @@ items still say mpv (About mpv, Quit mpv). The setup is offered from inside mpv 
 it runs.
 
 ### Upgrading
+
+**From 0.6.0**, the app no longer reads mpv's own config (`~/.config/mpv`, `%APPDATA%\mpv`) nor the plugins in it:
+it plays with its own plugins and settings only. The first time it starts, the plugins' settings
+(`script-opts/dlogm.conf`, `gyroflow.conf`, `dji_telemetry.conf`, `footage_menu.conf`) are copied over to its own
+config folder; the rest of mpv's config stays with that mpv. Plugins `install.sh` put in `~/.config/mpv/scripts/`
+are only for mpv in a terminal now: delete them if that's not how you use it.
 
 **From 0.3**, when the app was called Steady Player (its files were `Steady-Player-<version>-macos-arm64.zip` and
 `dlogm-gyroflow-player-<version>-macos-arm64.tar.gz`), `install.sh --apps` replaces it with ActionFootagePlayer:
