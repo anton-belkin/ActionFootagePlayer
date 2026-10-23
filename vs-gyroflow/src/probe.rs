@@ -245,9 +245,7 @@ fn klv<'a>(s: &'a [u8], wanted: &[u8; 4]) -> Option<&'a [u8]> {
         let n = s[pos + 5] as usize * u16::from_be_bytes([s[pos + 6], s[pos + 7]]) as usize;
         let data = s.get(pos + 8..pos + 8 + n)?;
         if &s[pos..pos + 4] == wanted { return Some(data); }
-        if s[pos + 4] == 0 {
-            if let Some(v) = klv(data, wanted) { return Some(v); }
-        }
+        if s[pos + 4] == 0 && let Some(v) = klv(data, wanted) { return Some(v); }
         pos += 8 + n.div_ceil(4) * 4;
     }
     None

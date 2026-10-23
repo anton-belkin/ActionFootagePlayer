@@ -332,8 +332,9 @@ full rate, 85 %.
 ### Exporting
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
-plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the horizon
-locked or not as the menu has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
+plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
+of `Ctrl+g` at the FOV it plays with, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
+has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
 whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
@@ -361,6 +362,9 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead.
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
+- `--fov <x>` renders at that FOV (the wider view's `wide_fov`), `--edges sphere|trail|original|zoom|off` fills the
+  edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
+  background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
@@ -372,7 +376,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   writes the progress there as JSON twice a second (that's how mpv shows it).
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
-playback uses). The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
+playback uses), without edges to fill. Filling them costs more: the export fills every frame, where playback above
+`max_fps` plays every other one. The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
 stabilizes it on the GPU, the LUT is applied on the GPU too (`vs-gyroflow/src/gpu_lut.rs`, the shader's math),
 and ffmpeg encodes it with VideoToolbox.
 
@@ -752,9 +757,6 @@ Each goes from here once it's fixed.
 
 - **`Shift+E` exports D-Log M in HDR even after `Ctrl+s`.** Rec.709 is `gyroflow-export --sdr` in a terminal for
   now. [#21](https://github.com/anton-belkin/ActionFootagePlayer/issues/21)
-- **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
-  preset as Gyroflow would, edges in the project's background color.
-  [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
 - **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
   the default is depth and in-water, which GoPro doesn't record.
   [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)

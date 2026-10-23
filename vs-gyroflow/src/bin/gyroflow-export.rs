@@ -8,7 +8,8 @@
 // embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
 // metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
 // nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
-// clip with neither is skipped, there being nothing to change.
+// clip with neither is skipped, there being nothing to change. --fov and --edges give it the gyroflow plugin's wider
+// view and edge fill (edges.rs), as the plugin passes them to the VapourSynth filter.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
 // LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,
@@ -43,7 +44,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut } };
+use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
@@ -55,6 +56,11 @@ video with nothing to stabilize it with is color-converted only.
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
+  --fov <x>        Gyroflow's FOV (Advanced) instead of the project's: the gyroflow plugin's wider view (wide_fov)
+  --edges <mode>   what fills the edges the stabilized frame leaves: sphere, trail, original, zoom, or off (the
+                   project's background color, the default)
+  --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
+  --edges-zoom <x> how much the zoom fill scales the frame up (default 1.5)
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
@@ -77,6 +83,9 @@ struct Options {
     sdr: bool,
     no_stabilize: bool,
     horizon_lock: Option<f64>,
+    fov: Option<f64>,
+    edges: EdgeMode,
+    edge_settings: EdgeSettings,
     prores: bool,
     from: Option<f64>,
     to: Option<f64>,
@@ -91,7 +100,8 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, fov: None,
+                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -107,6 +117,15 @@ fn main() {
             "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
+            // The ranges the VapourSynth filter takes them in (lib.rs)
+            "--fov" => opts.fov = Some(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
+                .unwrap_or_else(|| fail("--fov takes a number above 0")).clamp(0.1, 4.0)),
+            "--edges" => { let v = value("--edges"); opts.edges = EdgeMode::parse(&v)
+                .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, original, zoom, trail, sphere)"))); }
+            "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
+                .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
+            "--edges-zoom" => opts.edge_settings.zoom = value("--edges-zoom").parse::<f32>()
+                .unwrap_or_else(|_| fail("--edges-zoom takes a number")).clamp(1.0, 4.0),
             "--prores" => opts.prores = true,
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
@@ -510,10 +529,17 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let workers = 3;
     let key = format!("export|{}", path.display());
     let engine = match &source {
-        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, opts.horizon_lock, (w, h), 3, (1, 1), None,
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
         None => None,
     };
+    // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to
+    // fill: off then, which saves the mask rendered for each frame and gives the same frames
+    let edges = match &engine {
+        Some(e) if e.uncovered_frames.0 > 0 => opts.edges,
+        _ => EdgeMode::Off,
+    };
+    if let Some(e) = &engine { e.edges.configure(edges, opts.edge_settings, None); }
     let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 
     let mut graph = graph;
@@ -533,7 +559,9 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
 
     let duration_label = { let t = (to - from).max(0.0) as u64; format!("{}:{:02}", t / 60, t % 60) };
-    let source_label = source.as_ref().map_or("color only", |s| s.label);
+    let mut source_label = source.as_ref().map_or("color only", |s| s.label).to_string();
+    if let (Some(fov), Some(_)) = (opts.fov, &source) { source_label += &format!(", FOV {fov}"); }
+    if edges != EdgeMode::Off { source_label += &format!(", edges {}", format!("{edges:?}").to_lowercase()); }
     eprintln!("{}: {color_label} · {source_label} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), w, h);
 
     if stopped() { return Err("cancelled".into()); }
