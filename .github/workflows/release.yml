@@ -34,10 +34,19 @@ jobs:
           key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vs-gyroflow/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
 
+      # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew. The bottles are built for the
+      # runner's macOS, and the app needs that one or later: the oldest runner that Homebrew has bottles for. Updated
+      # first: the runner's Homebrew is as old as its image, and doesn't update itself there
+      - name: mpv and ffmpeg
+        env:
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+        run: brew update && brew install mpv ffmpeg
+
       - name: Build
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
-          tools/make_release.sh "$version"
+          BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
 
       - uses: actions/upload-artifact@v4
         with:

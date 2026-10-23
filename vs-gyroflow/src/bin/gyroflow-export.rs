@@ -290,9 +290,13 @@ fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
 }
 
 // Homebrew's ffmpeg: a Finder Quick Action or mpv doesn't have /opt/homebrew/bin in its PATH. On Windows, where
-// ffmpeg is rarely in PATH, one copied next to this binary (the gyroflow plugin's folder) comes first
+// ffmpeg is rarely in PATH, one copied next to this binary (the gyroflow plugin's folder) comes first. The one in
+// GYROFLOW_TOOLS (ActionFootagePlayer.app's own) comes before all of them
 fn tool(name: &str) -> PathBuf {
     let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    if let Some(p) = std::env::var_os("GYROFLOW_TOOLS").map(|d| Path::new(&d).join(&name)).filter(|p| p.is_file()) {
+        return p;
+    }
     let here = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join(&name))).filter(|p| p.is_file());
     if cfg!(windows) || cfg!(target_os = "linux") {
         if let Some(p) = here { return p; }
