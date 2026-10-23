@@ -21,11 +21,17 @@
 //
 // Decoding and encoding are ffmpeg (Homebrew's), as child processes with raw frames over pipes; the LUT is ffmpeg's
 // lut3d filter, in RGB, the same place mpv's shader applies it.
+//
+// For a player running it (the gyroflow plugin's export.lua): --progress writes the progress to a file twice a
+// second; SIGTERM (or Ctrl+C) stops it, the ffmpegs too, and removes the unfinished file; SIGUSR1 puts it and the
+// ffmpegs at background priority (macOS's lowest, CPU, disk and GPU: playback keeps its frame rate, the export
+// nearly stops) and SIGUSR2 back.
 
 use std::io::{ Read, Write };
 use std::path::{ Path, PathBuf };
 use std::process::{ Command, Stdio };
 use std::sync::{ Arc, mpsc };
+use std::sync::atomic::{ AtomicBool, AtomicI32, Ordering::Relaxed };
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -42,7 +48,9 @@ Renders each video stabilized (and, for D-Log M, color-converted) into a stabili
   --to <time>      end at this time
   --out <folder>   write here instead of <video's folder>/stabilized
   --force          replace an existing output instead of skipping the video
-  --interpolation  bilinear | bicubic | lanczos (default lanczos)";
+  --interpolation  bilinear | bicubic | lanczos (default lanczos)
+  --progress <file>  write the progress there as JSON, twice a second
+  --background     start at background priority (SIGUSR1 / SIGUSR2 switch it later)";
 
 struct Options {
     sdr: bool,
@@ -52,11 +60,14 @@ struct Options {
     out: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
+    progress: Progress,
 }
 
 fn main() {
     vs_gyroflow::init_logging();
-    let mut opts = Options { sdr: false, prores: false, from: None, to: None, out: None, force: false, interpolation: Interpolation::Lanczos4 };
+    catch_signals();
+    let mut opts = Options { sdr: false, prores: false, from: None, to: None, out: None, force: false,
+                             interpolation: Interpolation::Lanczos4, progress: Progress(None) };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -74,6 +85,8 @@ fn main() {
                 "lanczos" => Interpolation::Lanczos4,
                 other => fail(&format!("unknown interpolation {other}")),
             },
+            "--progress" => opts.progress = Progress(Some(PathBuf::from(value("--progress")))),
+            "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
             "-h" | "--help" => { println!("{USAGE}"); return; }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
             _ => files.push(a),
@@ -82,11 +95,17 @@ fn main() {
     if files.is_empty() { fail(USAGE); }
     if let (Some(f), Some(t)) = (opts.from, opts.to) { if t <= f { fail("--to must be after --from"); } }
 
+    // The pid first: a player stops or reprioritizes it by it, from the start
+    opts.progress.write(serde_json::json!({ "pid": std::process::id() }));
     let mut failed = 0;
     for file in &files {
         match export(file, &opts) {
             Ok(Outcome::Done(out)) => eprintln!("  -> {}", out.display()),
             Ok(Outcome::Skipped(why)) => eprintln!("{}: skipped, {why}", file_name(file)),
+            Err(_) if stopped() => {
+                eprintln!("{}: cancelled", file_name(file));
+                std::process::exit(128 + STOP.load(Relaxed));
+            }
             Err(e) => { eprintln!("{}: failed, {e}", file_name(file)); failed += 1; }
         }
     }
@@ -96,6 +115,45 @@ fn main() {
 fn fail(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(2);
+}
+
+// Set by the signal handlers: the signal that asked to stop, and the priority asked for
+static STOP: AtomicI32 = AtomicI32::new(0);
+static BACKGROUND: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_signal(sig: libc::c_int) {
+    match sig {
+        libc::SIGUSR1 => BACKGROUND.store(true, Relaxed),
+        libc::SIGUSR2 => BACKGROUND.store(false, Relaxed),
+        _ => STOP.store(sig, Relaxed),
+    }
+}
+
+fn catch_signals() {
+    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1, libc::SIGUSR2] {
+        unsafe { libc::signal(sig, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t); }
+    }
+}
+
+fn stopped() -> bool { STOP.load(Relaxed) != 0 }
+
+// PRIO_DARWIN_BG, for these processes (0: this one). Set on the ffmpegs too: the decoding and encoding compete
+// with the player's as much as the GPU work does
+fn set_background(pids: &[u32], on: bool) {
+    for &pid in pids {
+        unsafe { libc::setpriority(libc::PRIO_DARWIN_PROCESS, pid as libc::id_t, if on { libc::PRIO_DARWIN_BG } else { 0 }); }
+    }
+}
+
+// --progress: the file is replaced whole (written next to it, then renamed), so a reader never sees half of it
+struct Progress(Option<PathBuf>);
+
+impl Progress {
+    fn write(&self, value: serde_json::Value) {
+        let Some(path) = &self.0 else { return };
+        let tmp = PathBuf::from(format!("{}.tmp", path.display()));
+        if std::fs::write(&tmp, value.to_string()).is_ok() { let _ = std::fs::rename(&tmp, path); }
+    }
 }
 
 fn parse_time(s: &str) -> f64 {
@@ -294,6 +352,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let duration_label = { let t = (to - from).max(0.0) as u64; format!("{}:{:02}", t / 60, t % 60) };
     eprintln!("{}: {color_label} · {} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), source.label, w, h);
 
+    if stopped() { return Err("cancelled".into()); }
+
     // Decoder: raw 10-bit planar frames on stdout
     let mut dec_cmd = Command::new(tool("ffmpeg"));
     dec_cmd.args(["-nostdin", "-v", "error", "-hwaccel", "videotoolbox"]);
@@ -391,8 +451,16 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let mut next = 0u64;
     let started = Instant::now();
     let mut last_report = Instant::now();
+    let (mut reported, mut rate) = (0u64, 0.0);
+    let mut background = None;
     let mut error = None;
     for (n, result) in done_rx {
+        if stopped() { error = Some("cancelled".to_string()); break; }
+        let want = BACKGROUND.load(Relaxed);
+        if background != Some(want) {
+            set_background(&[0, decoder.id(), encoder.id()], want);
+            background = Some(want);
+        }
         match result {
             Ok(buf) => { pending.insert(n, buf); }
             Err(e) => { error = Some(format!("frame {n}: {e}")); break; }
@@ -403,17 +471,28 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
         if error.is_some() { break; }
         if last_report.elapsed().as_millis() >= 500 {
+            // The recent rate, not the average: it changes with the priority
+            let now = (next - reported) as f64 / last_report.elapsed().as_secs_f64();
+            rate = if reported == 0 { now } else { rate * 0.7 + now * 0.3 };
             last_report = Instant::now();
+            reported = next;
             let done = next as f64;
-            let rate = done / started.elapsed().as_secs_f64().max(1e-3);
             let pct = (done / total_frames as f64 * 100.0).min(100.0);
-            let eta = ((total_frames as f64 - done).max(0.0) / rate.max(1e-3)) as u64;
+            let eta = ((total_frames as f64 - done).max(0.0) / rate.max(1e-3)).min(359_999.0) as u64;
             eprint!("\r  {pct:3.0}%  {rate:4.0} fps  ETA {}:{:02}   ", eta / 60, eta % 60);
+            opts.progress.write(serde_json::json!({
+                "pid": std::process::id(), "done": next, "total": total_frames, "fps": rate, "eta": eta,
+                "background": want, "partial": tmp_path,
+            }));
         }
     }
     drop(enc_in);
-    if error.is_some() {
+    if error.is_some() || stopped() {
         let _ = decoder.kill();
+    }
+    // Cancelled: no point in the encoder finishing the file (the decoder may have stopped first, on Ctrl+C)
+    if stopped() {
+        let _ = encoder.kill();
     }
     for t in gpu_threads { let _ = t.join(); }
     let read = reader.join().map_err(|_| "reader panicked".to_string())?;
@@ -429,6 +508,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     eprint!("\r{:60}\r", "");
 
     let result = (|| {
+        if stopped() { return Err("cancelled".to_string()); }
         if let Some(e) = error { return Err(e); }
         let read = read?;
         if !dec_status.success() { return Err(format!("decoding: {dec_err}")); }

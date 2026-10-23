@@ -112,7 +112,7 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | `Ctrl+g` | Stabilization on/off | `gyroflow/toggle` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
-| `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part | `gyroflow/export` |
+| `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
 
@@ -166,8 +166,19 @@ their own.
 ### Exporting
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, and for
-D-Log M the same LUT. With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile; a
-notification says where the file went. The same from a terminal, for one clip or many:
+D-Log M the same LUT. With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+progress in the top right corner (several clips can export at once, a line each); a notification says where
+the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
+removed. Quitting mpv cancels the exports too.
+
+The export and playback share the GPU and the video encoder/decoder. At the same priority a 4K60 clip
+stabilized in mpv plays at half speed during an export (on an M1 Pro: 480 frames dropped in 20 s instead of
+40). So while the video plays, the export runs at background priority, macOS's lowest for CPU, disk and GPU:
+playback is as smooth as without it, but the export nearly stops ("slowed while playing"). Pause, and it goes on
+at full speed. In short: start the export, then pause to let it run, or keep watching and let it catch up
+whenever you pause.
+
+The same from a terminal, for one clip or many:
 
 ```bash
 ~/.config/mpv/scripts/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
@@ -182,6 +193,9 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - Audio is copied as it is, and the file keeps the clip's dates. Clips with nothing to stabilize them with are
   skipped; an existing output is kept unless `--force`.
+- `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
+  working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
+  writes the progress there as JSON twice a second (that's how mpv shows it).
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses). The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
