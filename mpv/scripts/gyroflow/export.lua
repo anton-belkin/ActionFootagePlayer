@@ -6,7 +6,7 @@
 -- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
 -- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
 -- standard look (Ctrl+s) with DJI's LUT (--sdr), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
--- only), in Ctrl+g's wider view (--fov, Ctrl+[ and Ctrl+]'s FOV) with Ctrl+b's edge fill (--edges, --edges-blur,
+-- only), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges, --edges-blur,
 -- --edges-zoom), and with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock). A log
 -- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
 -- right-click menu:
@@ -224,9 +224,7 @@ local function start(path, sdr)
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
     local view = gyroflow("view")
     if view == "off" then table.insert(args, "--no-stabilize") end
-    if view == "wide" and gyroflow("fov") then
-        table.insert(args, "--fov"); table.insert(args, string.format("%g", gyroflow("fov")))
-    end
+    if view == "wide" then table.insert(args, "--wide") end
     if gyroflow("edges") then
         table.insert(args, "--edges"); table.insert(args, gyroflow("edges"))
         if gyroflow("edges_blur") then table.insert(args, "--edges-blur"); table.insert(args, string.format("%g", gyroflow("edges_blur"))) end

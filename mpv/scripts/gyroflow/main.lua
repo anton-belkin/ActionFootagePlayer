@@ -23,13 +23,12 @@
 -- Windows it's scaled on the CPU, after the copy.
 --
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
---   Ctrl+g   toggle   stabilization on, on with a wider view (wide_fov: the edges show at times, filled as Ctrl+b says),
---                     off for the current file. On or wide sticks for the next clips
+--   Ctrl+g   toggle   stabilization on, on with a wider view (no zoom, at the FOV where the stabilized picture covers about
+--                     as much area as the frame, for each clip's lens: the edges show at times, filled as Ctrl+b
+--                     says), off for the current file. On or wide sticks for the next clips
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
---   Ctrl+[   fov-less   the wider view, narrower by 0.1 of FOV (Ctrl+] wider), 1 to 3; from the normal view or off,
---   Ctrl+]   fov-more   the first press just goes to the wider view. Sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
@@ -38,12 +37,11 @@
 --
 -- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; mpv/menu.conf):
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
---   fov <value>             the wider view's FOV, and the wider view on
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, FOV, horizon lock and edges as the defaults, in gyroflow.conf
+--   remember                the view, horizon lock and edges as the defaults, in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
--- the preset), view (normal, wide, off), fov,
+-- the preset), view (normal, wide, off),
 -- horizon_lock (yes, no, project), edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting,
 -- last_export.
 --
@@ -57,8 +55,6 @@
 --                does), and they're filled (Ctrl+b not off): the fill is what doesn't keep up. Otherwise every
 --                frame plays. 0: always every frame
 --   view=normal  the view clips start in: normal, or wide (the wider view)
---   wide_fov=1.4 Gyroflow's FOV (Advanced) for the wider view of Ctrl+g: more of the picture, the edges at times
---                (Ctrl+[ and Ctrl+] change it while playing)
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
@@ -72,7 +68,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, view = "normal", wide_fov = 1.4, horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 30, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -187,11 +183,10 @@ local function write_edge_control()
     f:close()
 end
 
--- On, or on with a wider view (Gyroflow's FOV at wide_fov), for the next clips too; off is per clip
+-- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov), for the next clips too; off is per clip
 local view = o.view == "wide" and "wide" or "normal"
-local wide_fov = o.wide_fov
 local function view_label(v)
-    if v == "wide" then return string.format("on, wider view (FOV %g)", wide_fov) end
+    if v == "wide" then return "on, wider view" end
     return v == "normal" and "on" or "off"
 end
 -- true or false: locked or not, whatever the project says; nil: the project's
@@ -215,7 +210,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                fov = view == "wide" and wide_fov or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -233,7 +228,7 @@ local waiting = false
 local function publish()
     local state = {
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
-        view = stab_off and "off" or view, fov = wide_fov,
+        view = stab_off and "off" or view,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         edges_blur = edge_blur, edges_zoom = o.edges_zoom,
     }
@@ -363,32 +358,6 @@ mp.register_script_message("view", function(v)
     if v == "normal" or v == "wide" or v == "off" then show(v) end
 end)
 
--- The wider view at this FOV, now and for the next clips
-local function set_fov(fov)
-    wide_fov = fov
-    if current_source then return show("wide") end
-    view = "wide"
-    publish()
-    mp.osd_message("Gyroflow: " .. view_label("wide"), 1.5)
-end
-
-mp.register_script_message("fov", function(value)
-    local fov = tonumber(value)
-    if fov and fov > 0 then set_fov(fov) end
-end)
-
--- The wider view's FOV a step narrower (-1) or wider (1), between FOV_MIN and FOV_MAX; from the normal view or off,
--- the wider view as it is. Each step sets the filter up again, which costs a few dropped frames
-local FOV_STEP, FOV_MIN, FOV_MAX = 0.1, 1.0, 3.0
-local function step_fov(dir)
-    return function()
-        if view ~= "wide" or stab_off then return set_fov(wide_fov) end
-        set_fov(math.max(FOV_MIN, math.min(FOV_MAX, math.floor((wide_fov + dir * FOV_STEP) * 10 + 0.5) / 10)))
-    end
-end
-mp.add_key_binding("Ctrl+[", "fov-less", step_fov(-1))
-mp.add_key_binding("Ctrl+]", "fov-more", step_fov(1))
-
 mp.register_script_message("horizon-lock", function(value)
     if value == "toggle" then
         horizon = not horizon
@@ -410,7 +379,7 @@ end)
 
 mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
-        { "view", view }, { "wide_fov", string.format("%g", wide_fov) },
+        { "view", view },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
     })
