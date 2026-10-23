@@ -5,10 +5,11 @@
 #                                                            VapourSynth to install), for the user alone (no admin)
 #
 # The app (windows/launcher/src/main.rs has its layout): the launcher, mpv, Python with VapourSynth, the VC++ runtime
-# VapourSynth needs, ffmpeg for exports, the three plugins and the setup. What it carries from elsewhere is
-# downloaded once into build/windows-deps/, at the versions pinned here, and checked; build/windows-app/ is the
-# app's folder as installed. The installer is windows/installer.iss, made with Inno Setup 6 or 7 (ISCC.exe, in PATH or
-# where its installer puts it; without it, the folder is made and the installer isn't).
+# VapourSynth needs, a Vulkan loader, ffmpeg for exports, the plugins (and their right-click menu) and the setup.
+# What it carries from elsewhere is downloaded once into build/windows-deps/, at the versions pinned here, and
+# checked; build/windows-app/ is the app's folder as installed. The installer is windows/installer.iss, made with
+# Inno Setup 6 or 7 (ISCC.exe, in PATH or where its installer puts it; without it, the folder is made and the
+# installer isn't).
 #
 # Runs on Windows in Git Bash (.github/workflows/release.yml runs it after tools/make_plugin_zip.sh, whose binaries
 # it uses). Built from HEAD's sources, like the plugin zip.
@@ -127,7 +128,8 @@ plugins="$app/plugins"
 dlogm="$plugins/dlogm"
 gyroflow="$plugins/gyroflow"
 telemetry="$plugins/dji-telemetry"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry"
+menu="$plugins/footage-menu"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$menu"
 cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
 cp luts/dlogm_hlg.cube "$dlogm/luts/"
@@ -144,6 +146,7 @@ for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-embed.exe gyroflow-export.e
     cp "$gyroflow_bin/$f" "$gyroflow/"
 done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
+cp mpv/scripts/footage-menu/main.lua "$menu/"
 
 echo "== ffmpeg"
 archive=$(fetch "$FFMPEG_URL" "$FFMPEG_SHA256")
