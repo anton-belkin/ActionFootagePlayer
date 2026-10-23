@@ -119,6 +119,7 @@ mpv stayed tied to it and macOS throttled it as a background process.
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part | `gyroflow/export` |
+| `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`.
@@ -144,13 +145,21 @@ anything but letters and digits made `_`.
 
 ### Stabilization
 
-Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow): mpv uses it. To carry one
-file instead of two, move the project into the video (the commands here are in `~/.config/mpv/scripts/gyroflow/`;
-with just Steady Player, in `/Applications/Steady Player.app/Contents/Resources/plugins/gyroflow/`):
+Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow): mpv uses it. Or start from
+what's playing: `Ctrl+e` pauses the clip and opens its project in Gyroflow. A clip that plays without a
+`.gyroflow` next to it (a project stored in the video, or the default preset) gets one first, written by the
+plugin from what it renders: the same lens profile, smoothing, zoom and refraction, so Gyroflow starts from
+what you saw. A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
+Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilization with it, at the same spot
+in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
+
+To carry one file instead of two, move the project into the video (the commands here are in
+`~/.config/mpv/scripts/gyroflow/`; with just Steady Player, in
+`/Applications/Steady Player.app/Contents/Resources/plugins/gyroflow/`):
 
 ```bash
 ~/.config/mpv/scripts/gyroflow/gyroflow-embed --move DJI_0009_D.MP4     # DJI_0009_D.gyroflow → inside the MP4
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # back out, to open it in Gyroflow
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # back out, to open it in Gyroflow (Ctrl+e does it too)
 ~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
 ```
 
