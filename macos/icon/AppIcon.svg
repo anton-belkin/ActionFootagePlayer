@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The app icon: the same scene, flat grey log on one side, vivid color on the other, with a play button on the seam -->
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-opacity=".3"/>
+    </filter>
+    <filter id="soft"><feDropShadow dx="0" dy="8" stdDeviation="14" flood-opacity=".35"/></filter>
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <clipPath id="log"><path d="M0 0h760L264 1024H0z"/></clipPath>
+    <clipPath id="vivid"><path d="M760 0h264v1024H264z"/></clipPath>
+    <linearGradient id="skyV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5e62"/><stop offset=".55" stop-color="#ff9a3c"/><stop offset="1" stop-color="#ffd66b"/>
+    </linearGradient>
+    <linearGradient id="seaV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#00a6c0"/><stop offset="1" stop-color="#003a6b"/>
+    </linearGradient>
+    <linearGradient id="skyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8f8d8c"/><stop offset="1" stop-color="#a8a6a2"/>
+    </linearGradient>
+    <linearGradient id="seaL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7d8282"/><stop offset="1" stop-color="#5f6466"/>
+    </linearGradient>
+  </defs>
+  <g filter="url(#shadow)"><rect x="100" y="100" width="824" height="824" rx="185" fill="#5f6466"/></g>
+  <g clip-path="url(#body)">
+    <g clip-path="url(#log)">
+      <rect width="1024" height="600" fill="url(#skyL)"/>
+      <circle cx="512" cy="600" r="150" fill="#b9b6b0"/>
+      <rect y="600" width="1024" height="424" fill="url(#seaL)"/>
+      <path d="M100 700q60-22 120 0t120 0 120 0 120 0 120 0 120 0 120 0M100 790q60-22 120 0t120 0 120 0 120 0 120 0 120 0 120 0" fill="none" stroke="#9a9e9e" stroke-width="16" stroke-linecap="round"/>
+    </g>
+    <g clip-path="url(#vivid)">
+      <rect width="1024" height="600" fill="url(#skyV)"/>
+      <circle cx="512" cy="600" r="150" fill="#fff3c4"/>
+      <rect y="600" width="1024" height="424" fill="url(#seaV)"/>
+      <path d="M100 700q60-22 120 0t120 0 120 0 120 0 120 0 120 0 120 0M100 790q60-22 120 0t120 0 120 0 120 0 120 0 120 0 120 0" fill="none" stroke="#5fe3f0" stroke-width="16" stroke-linecap="round"/>
+    </g>
+    <path d="M760 0L264 1024" stroke="#fff" stroke-width="10"/>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="512" cy="512" r="170" fill="#fff"/>
+    <path d="M462 422v180c0 12 13 19 23 13l146-90c10-6 10-20 0-26l-146-90c-10-6-23 1-23 13z" fill="#1c1d22"/>
+  </g>
+</svg>

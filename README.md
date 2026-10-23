@@ -455,7 +455,9 @@ tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
 macos/                        ActionFootagePlayer: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
                               DJI's LUT), default-app.py, the Quick Actions' export script
+macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
+tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns (renders with Google Chrome)
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
 tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for Linux or Windows
