@@ -3,7 +3,7 @@
 # background (the Quick Action returns at once), with a notification as each one is done. The log of the last
 # run is ~/Library/Logs/gyroflow-export.log.
 #
-# In ActionFootagePlayer.app (Contents/Resources/), with the same plugins and data as the player (mpv-launcher.sh): the
+# In ActionFootagePlayer.app (Contents/Resources/), with the same plugins and data as the player (player.sh): the
 # app's gyroflow-export, or the one in mpv's config when it has the plugin.
 
 res=${0:A:h}

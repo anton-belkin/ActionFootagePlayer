@@ -249,7 +249,7 @@ if [ $apps = 1 ]; then
         done
         defaults delete "$OLD_PLAYER_ID" 2>/dev/null || true
     fi
-    echo "   Opening $PLAYER_NAME on its own offers the same setup (it's what a downloaded copy does)"
+    echo "   A downloaded $PLAYER_NAME offers the same setup the first time it opens"
 fi
 
 echo "Done."
