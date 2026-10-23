@@ -2,9 +2,7 @@
 --
 -- D-Log M is recognized by the color profile the camera wrote into the file (dji_color.lua: Osmo Action 6,
 -- Osmo 360). DJI tags D-Log M video as BT.709 and names Normal-color clips *_D.MP4 too, so the metadata is the only
--- reliable sign. For files it can't tell (other DJI models), the old guess:
---   file name ends with _D.MP4 / _D.MOV  (DJI Osmo convention)
---   OR container "encoder" / "make" metadata contains "DJI"
+-- reliable sign. Files it can't tell (other DJI models) play as they are.
 --
 -- Modes, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh):
 --   hdr  dlogm_hlg.glsl, a HOOK OUTPUT shader: D-Log M -> Rec.2100 HLG 1000-nit. It replaces mpv's final output,
@@ -12,7 +10,7 @@
 --        target-colorspace-hint=yes switch the display to HDR (vo=gpu-next). On an SDR display macOS tone-maps
 --        the HLG output down, which looks better than an explicit SDR fallback.
 --   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR.
---   off  the file as it is, for *_D files that aren't D-Log M (e.g. HDR photos)
+--   off  the file as it is, flat as the camera recorded it
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
 --   Ctrl+h  hdr  this file, and D-Log M files after it
@@ -71,30 +69,13 @@ local function plugin_file(name)
     return nil
 end
 
-local function guessed_dlogm(path)
-    local lower = path:lower()
-    if lower:match("_d%.mp4$") or lower:match("_d%.mov$") then return true end
-    local meta = mp.get_property_native("metadata") or {}
-    for k, v in pairs(meta) do
-        if type(v) == "string" and v:lower():find("dji", 1, true) then
-            local kl = k:lower()
-            if kl == "encoder" or kl == "make" or kl == "com.apple.quicktime.make" then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 local function is_dlogm(path)
     if path:find("://", 1, true) then return false end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     local color = PROBED_EXTENSIONS[ext] and dji_color.read(path) or nil
-    if color then
-        mp.msg.verbose("recorded in " .. color)
-        return color == "dlogm"
-    end
-    return guessed_dlogm(path)
+    if not color then return false end
+    mp.msg.verbose("recorded in " .. color)
+    return color == "dlogm"
 end
 
 local function apply(m)
