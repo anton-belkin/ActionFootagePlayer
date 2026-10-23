@@ -1,6 +1,6 @@
 #!/bin/sh
-# ActionFootagePlayer's setup, in Contents/Resources/ of the app. Opening the app on its own offers `setup.sh all`;
-# install.sh --apps runs the parts.
+# ActionFootagePlayer's setup, in Contents/Resources/ of the app. The app offers `setup.sh all` the first time it
+# starts (macos/player.sh), unless this has run; install.sh --apps runs the parts.
 #
 #   setup.sh all [<cube>]       the three below
 #   setup.sh lut [<cube>]       DJI's D-Log M -> Rec.709 LUT, and the sdr shader made from it, into
@@ -94,6 +94,8 @@ case "$app" in
 esac
 player_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Contents/Info.plist")
 xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
+# Set up: the app doesn't offer it at its first launch
+mkdir -p "$data" && : > "$data/setup-offered"
 
 case "${1:-}" in
     all) lut "${2:-}" || echo "(Without DJI's LUT, Ctrl+s and Rec.709 exports aren't available; the rest is)"
