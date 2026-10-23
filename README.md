@@ -193,7 +193,7 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
-| `gyroflow.conf`: `max_fps=30` | while edges are expected and filled (the wider view, or a project with a FOV above 1 or no zoom), clips faster than this play every other frame (60 fps at 30): the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
+| `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
 | `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height; `Ctrl+[` and `Ctrl+]` change it while playing), and how much `zoom` scales the frame up |
@@ -276,10 +276,13 @@ them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
 - **off**: the project's background color, as Gyroflow renders it.
 
 With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
-have any, and play at their full rate; the sphere is then written only on frames that have some. The wider view of
-`Ctrl+g` (`wide_fov`) shows more of the picture and the edges at times: while they're filled, 60 fps clips play at 30
-(`max_fps`), every other frame. On an M1 Pro, 4K60 in a window with the HDR shader drops 0-9 % of the frames in the
-normal view and 70-77 % in the wider one at full rate (sphere or trail); at half rate, none.
+have any. Whether a clip does is Gyroflow's own measurement when it loads, for any project: where the frame it renders
+is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written every frame,
+edges showing or not, so it has what to fill them with when they show, and above `max_fps` it plays every other frame:
+filling them is what doesn't keep up. A clip without any plays every frame, with no sphere to write. The wider view of
+`Ctrl+g` (`wide_fov`) shows more of the picture and has edges throughout. On an M1 Pro, 4K60 in a window with the HDR
+shader: the default preset, every frame, none dropped; the wider view, every other frame, none; the wider view at
+full rate, 85 %.
 
 ### Exporting
 

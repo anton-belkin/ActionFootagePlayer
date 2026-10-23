@@ -39,9 +39,10 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
---   max_fps=30   while edges are expected and filled (the wider view, or a project that leaves edges; Ctrl+b not
---                off), clips faster than this play every other frame (a 60 fps clip at 30): the fill is what
---                doesn't keep up. Otherwise every frame plays. 0: always every frame
+--   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30) when the stabilized frame
+--                leaves edges anywhere in the clip, as Gyroflow measures it for the project and view (the wider view
+--                does), and they're filled (Ctrl+b not off): the fill is what doesn't keep up. Otherwise every
+--                frame plays. 0: always every frame
 --   wide_fov=1.4 Gyroflow's FOV (Advanced) for the wider view of Ctrl+g: more of the picture, the edges at times
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
@@ -175,23 +176,13 @@ end
 local view = "normal"
 local VIEW_LABELS = { normal = "on", wide = string.format("on, wider view (FOV %g)", o.wide_fov) }
 
--- Whether the stabilized frame leaves parts of the output uncovered: the wider view, or a project (or the preset)
--- whose FOV is above 1 or whose zoom is off. An embedded project isn't read here: taken as covering
-local function leaves_edges(source)
-    if view == "wide" then return true end
-    local settings = source.project:lower():match("%.gyroflow$") and source.project or source.preset
-    local json = settings and read_json(settings)
-    local s = json and json.stabilization
-    if not s then return false end
-    return (tonumber(s.fov) or 1) > 1.001 or tonumber(s.adaptive_zoom_window) == 0
-end
-
--- Only while edges are expected and filled: on an M1 Pro 4K60 then drops 70-77 % of the frames (sphere or trail), while
--- the stabilization alone, with edges only where the zoom limit runs out, keeps up (0-9 %). Interpolation stays the
--- one for the clip's own rate: at half rate there's headroom for the fill instead
-local function half_rate(source)
+-- Faster than max_fps: such a clip plays every other frame if its stabilized frame leaves edges anywhere and they're
+-- filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and view). On an M1 Pro
+-- 4K60 with edges filled drops 70-77 % of the frames (sphere or trail); without edges it keeps up (0-9 %).
+-- Interpolation stays the one for the clip's own rate: at half rate there's headroom for the fill instead
+local function fast(source)
     local fps = tonumber(source.fps)
-    return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1 and edge_mode ~= "off" and leaves_edges(source)
+    return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1
 end
 
 local function gyroflow_filter(source, enabled)
@@ -201,8 +192,8 @@ local function gyroflow_filter(source, enabled)
         enabled = enabled,
         params = {
             file = SCRIPT,
-            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, half_rate = half_rate(source),
-                                                fov = view == "wide" and o.wide_fov or nil, edges = edge_mode, edges_expected = leaves_edges(source) and 1 or 0, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
+                                                fov = view == "wide" and o.wide_fov or nil, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -258,7 +249,7 @@ mp.add_hook("on_load", 50, function()
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
-                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "") .. (half_rate(source) and ", every other frame" or ""))
+                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end)
 
 mp.register_event("file-loaded", function()
@@ -271,13 +262,11 @@ mp.add_key_binding("Ctrl+b", "edges", function()
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
     end
-    local was_half = current_source and half_rate(current_source)
+    local was_off = edge_mode == "off"
     edge_mode = EDGE_MODES[i % #EDGE_MODES + 1]
     write_edge_control()
-    if current_source and half_rate(current_source) ~= was_half then
-        rebuild_filter()
-        mp.msg.info(half_rate(current_source) and "edges filled: every other frame" or "every frame")
-    end
+    -- Filling edges or not decides the rate of a fast clip that leaves some (gyroflow.vpy)
+    if current_source and fast(current_source) and (edge_mode == "off") ~= was_off then rebuild_filter() end
     mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
 end)
 
@@ -319,7 +308,7 @@ mp.add_key_binding("Ctrl+g", "toggle", function()
         if f.label == LABEL then vf[i] = gyroflow_filter(current_source, enabled) end
     end
     mp.set_property_native("vf", vf)
-    mp.msg.info("stabilization " .. (enabled and VIEW_LABELS[view] or "off") .. (enabled and half_rate(current_source) and ", every other frame" or ""))
+    mp.msg.info("stabilization " .. (enabled and VIEW_LABELS[view] or "off"))
     mp.osd_message("Gyroflow: " .. (enabled and VIEW_LABELS[view] or "off"), 1.5)
 end)
 
