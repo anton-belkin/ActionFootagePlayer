@@ -202,8 +202,8 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
-| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
+| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
+| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
@@ -363,6 +363,11 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
+
+Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
+an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
+for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it tone-mapped
+to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses). The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
