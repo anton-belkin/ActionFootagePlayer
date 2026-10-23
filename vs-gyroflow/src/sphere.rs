@@ -327,20 +327,21 @@ impl Row<'_> {
             if x > x0 { d += step; }
             let Some((u, v)) = view.project_camera(&d) else { continue };
             if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { continue; }
-            // Bilinear on the grid, the same taps for the coverage and the planes
+            // Bilinear on the grid. The planes by each tap's coverage too: past the frame's edge the grid has the
+            // edge repeated at about half its value (blended with black), which would darken the line the edge leaves
             let (gx, gy) = ((u * gw as f32).min((gw - 1) as f32), (v * gh as f32).min((gh - 1) as f32));
             let (cx, cy) = (gx as usize, gy as usize);
             let (fx, fy) = (gx - cx as f32, gy - cy as f32);
             let (k00, k01) = (cy * gw + cx, cy * gw + (cx + 1).min(gw - 1));
             let down = if cy + 1 < gh { gw } else { 0 };
             let taps = [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)];
-            let at = |g: &[f32]| taps.iter().map(|&(k, t)| g[k] * t).sum::<f32>();
-            let c = at(coverage);
+            let c = taps.iter().map(|&(k, t)| coverage[k] * t).sum::<f32>();
             if c <= 0.01 { continue; }
             let old = (self.weight[x] * fade).min(1.0) * (1.0 - c);
             let total = c + old;
             for (p, l) in planes.iter_mut().zip(lo) {
-                p[x] = (at(l) * c + p[x] * old) / total;
+                let new = taps.iter().map(|&(k, t)| l[k] * coverage[k] * t).sum::<f32>();
+                p[x] = (new + p[x] * old) / total;
             }
             self.weight[x] = total / fade;
         }
