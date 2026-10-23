@@ -15,6 +15,9 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
 | `workers` | 3 | GPU worker threads (each has its own GPU context) |
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
+| `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail` |
+| `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
+| `edges_control` | — | file with the mode in it, read while playing (at most every 50 ms) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow
@@ -36,6 +39,15 @@ made by `src/project.rs` with gyroflow-core's own project writer) to open it in 
   advances by exactly the frame duration), instead of hardcoding one mpv version's struct layout.
 - **Cached across seeks.** mpv reloads the script on every seek; the loaded project, its GPU contexts and
   worker threads are kept per (project, mtime, size, format, settings), the last two.
+- **Edges from a coverage mask** (`src/edges.rs`). Which output pixels the frame covers comes from the
+  kernel itself: each frame it also renders a white plane with a feathered border (3 % of the height) onto black,
+  at 1/4 size, with the frame's transform, so lens, rolling shutter and refraction are all in it. The fills are
+  blurred anyway, so they're made on a ~240x135 grid: the source scaled down there on the CPU, the stabilized
+  frame rendered from it on the GPU (edges repeated, so it has no hole of its own), the trail kept per cell.
+  Only the 32x32 blocks the mask says aren't covered are blended at full size, over 4 threads. The trail starts
+  over at a jump in time (a seek), a new filter, or a cut (the frame and the trail differ by >12 % where both
+  have content). The mode comes from a control file rather than a filter argument, so switching it doesn't
+  rebuild mpv's filter chain (7-15 dropped frames each time).
 - **wgpu (Metal), several GPU workers.** Each frame is uploaded, rendered and read back in blocking calls,
   so three workers keep the GPU busy. Built without OpenCL: with frames in system memory, wgpu is 40-60%
   faster on the M1 Pro (4K60 clip: 55 → 87 fps). They set up their GPU contexts and render
@@ -57,6 +69,11 @@ stabilizes from the smaller frame (the core scales the source rect): mean abs di
 8K render 0.99/255. With that, both clips play in a window with 0 drops at start and through seeks;
 7-15 when toggling it on mid-playback (mpv rebuilds the filter chain). The processing is the
 GPU work itself (`process_pixels`); computing the frame transform is ~0.
+
+Edge fill, per frame on a GPU worker, with ~20 % of a 4K frame uncovered: mask 2-3 ms, the stabilized frame
+on the grid 4-7 ms (both mostly waiting on the GPU, which the other workers keep busy), fill 1.7 ms, blending
+4 ms; at full 60 fps this cost the underwater 4K60 clip (~63 fps of capacity) a few percent and it dropped
+frames, so the mpv plugin plays clips above 30 fps at half rate: 0 dropped frames after the start.
 
 Matches Gyroflow's own render of the project (CLI, same branch): same mean level, mean abs difference
 0.85/255; what differs is the antialiasing of the black border's edge and single pixels of fine detail

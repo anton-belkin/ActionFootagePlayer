@@ -20,6 +20,7 @@ pub mod embedded;
 pub mod probe;
 pub mod project;
 pub mod gpu_lut;
+pub mod edges;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
 use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
@@ -67,6 +68,7 @@ struct Job {
     timestamp_us: i64,
     planes: Vec<PlaneJob>,
     limited_range: bool,
+    edges: Option<edges::EdgeJob>,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -78,6 +80,8 @@ pub struct Engine {
     tx: mpsc::Sender<Job>,
     pub render_size: (usize, usize),
     pub frame_offset_us: i64,
+    /// What fills the parts the frame doesn't cover; off unless set
+    pub edges: Arc<edges::Edges>,
 }
 
 impl Engine {
@@ -157,25 +161,30 @@ impl Engine {
         let rx = Arc::new(Mutex::new(rx));
         let stab = Arc::new(stab);
         let config = WorkerConfig { kind, max_value, is_yuv, interpolation };
+        let edges = Arc::new(edges::Edges::new(edges::EdgeGeometry::new(&geometry, kind, max_value)));
         // Each worker sets up its GPU context and renders one frame before playback starts: mpv waits for the
         // filter to be created, but the first frames already run against the clock, and dropped ~1 s of video
         let (ready_tx, ready_rx) = mpsc::channel::<()>();
         let workers = workers.max(1);
         for i in 0..workers {
-            let (stab, rx, geometry, ready_tx) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone());
+            let (stab, rx, geometry, ready_tx, edges) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone());
             std::thread::Builder::new().name(format!("gyroflow-vs-{i}")).spawn(move || {
-                worker(&stab, &rx, config, &geometry, ready_tx);
+                worker(&stab, &rx, config, &geometry, &edges, ready_tx);
             }).map_err(|e| e.to_string())?;
         }
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
 
-        Ok(Engine { key, tx, render_size, frame_offset_us })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges })
     }
 
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
-        self.tx.send(Job { timestamp_us, planes, limited_range, reply }).map_err(|_| "Gyroflow worker is gone".to_string())?;
+        let edges = match self.edges.mode() {
+            edges::EdgeMode::Off => None,
+            mode => Some(self.edges.prepare(mode, &planes)),
+        };
+        self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())?;
         result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?
     }
 }
@@ -262,10 +271,12 @@ fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64
 }
 
 /// `geometry`: per plane, (input size, output size)
-fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], ready: mpsc::Sender<()>) {
+fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, ready: mpsc::Sender<()>) {
     // Video without a range property is almost always limited; rebuilt if a frame says otherwise
     let mut limited_range = cfg.is_yuv;
     let mut planes = create_planes(mgr, cfg, geometry.len(), limited_range);
+    let mut edge_worker = edges::EdgeWorker::new(mgr, cfg, &edges.geometry, limited_range);
+    if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
         let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
@@ -293,7 +304,10 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
                 plane.stab.set_compute_params(plane_compute_params(mgr, cfg, plane.index, limited_range));
             }
         }
-        let result = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes).map(|_| ());
+        let mut result = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes).map(|_| ());
+        if let (Ok(()), Some(e)) = (&result, &job.edges) {
+            result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
+        }
         let _ = job.reply.send(result);
 
         frames += 1;
@@ -561,6 +575,17 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
         Err(e) => return fail(node, e),
     };
 
+    let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
+    let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
+        return fail(node, format!("unknown edges {edge_mode} (off, original, zoom, trail)"));
+    };
+    let mut edge_settings = edges::EdgeSettings::default();
+    if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }
+    if let Some(v) = unsafe { map_get_f64(api, input, c"edges_zoom") } { edge_settings.zoom = (v as f32).clamp(1.0, 4.0); }
+    let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
+    // Also starts the trail over: mpv reloads the script on every seek
+    engine.edges.configure(edge_mode, edge_settings, edge_control);
+
     let mut out_vi = vi.clone();
     out_vi.width  = align(engine.render_size.0 as i64, fmt.sub_sampling_w) as c_int;
     out_vi.height = align(engine.render_size.1 as i64, fmt.sub_sampling_h) as c_int;
@@ -584,7 +609,7 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
     }
 }

@@ -21,6 +21,8 @@
 --
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
 --   Ctrl+g   toggle   stabilization on/off for the current file
+--   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
+--                     the original frame, the frame zoomed, or a trail of earlier frames (all blurred)
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here
@@ -29,12 +31,18 @@
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox), whatever mpv's hwdec is: software
 --                decoding doesn't keep up with 4K. no: leave it to mpv's hwdec
 --   workers=3    GPU worker threads
+--   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30), so the stabilization does
+--                half the work; 0: every frame
+--   edges=trail  what fills the edges: trail (what was last shown there), original, zoom, off (the project's
+--                background color)
+--   edges_blur=2 blur of the edge fill, % of the frame height
+--   edges_zoom=1.5  how much the zoom fill scales the frame up
 
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3 }
+local o = { hwdec = true, workers = 3, max_fps = 30, edges = "trail", edges_blur = 2, edges_zoom = 1.5 }
 options.read_options(o, "gyroflow")
 
 local LABEL = "gyroflow"
@@ -125,6 +133,27 @@ local function interpolation(source)
     return INTERPOLATION_FAST
 end
 
+-- The plugin fills the uncovered edges itself (vs-gyroflow/src/edges.rs). The mode goes through a control file
+-- it reads while playing: changing the filter's parameters would rebuild mpv's filter chain, which drops frames
+local EDGE_MODES = { "off", "original", "zoom", "trail" }
+local EDGE_LABELS = { off = "background color", original = "original frame, blurred", zoom = "zoomed frame, blurred",
+                      trail = "trail of earlier frames, blurred" }
+local EDGE_CONTROL = utils.join_path(os.getenv("TMPDIR") or "/tmp", string.format("mpv-gyroflow-%d.edges", utils.getpid()))
+local edge_mode = EDGE_LABELS[o.edges] and o.edges or "trail"
+
+local function write_edge_mode()
+    local f = io.open(EDGE_CONTROL, "w")
+    if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
+    f:write(edge_mode)
+    f:close()
+end
+
+-- Interpolation stays the one for the clip's own rate: at half rate there's headroom for the edge fill instead
+local function half_rate(source)
+    local fps = tonumber(source.fps)
+    return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1
+end
+
 local function gyroflow_filter(source, enabled)
     return {
         name = "vapoursynth",
@@ -132,7 +161,8 @@ local function gyroflow_filter(source, enabled)
         enabled = enabled,
         params = {
             file = SCRIPT,
-            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers }),
+            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, half_rate = half_rate(source),
+                                                edges = edge_mode, edges_blur = o.edges_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -151,6 +181,7 @@ mp.add_hook("on_load", 50, function()
     local source = find_source(mp.get_property("path"))
     if not source then return end
     current_source = source
+    write_edge_mode()
 
     local hwdec = o.hwdec and "yes" or mp.get_property("hwdec") or "no"
     local vf = mp.get_property_native("vf") or {}
@@ -168,12 +199,25 @@ mp.add_hook("on_load", 50, function()
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
-                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or ""))
+                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (half_rate(source) and ", every other frame" or ""))
 end)
 
 mp.register_event("file-loaded", function()
     if current_source then mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind], 1.5) end
 end)
+
+-- Sticks for the next clips, like the dlogm plugin's modes
+mp.add_key_binding("Ctrl+b", "edges", function()
+    local i = 1
+    for k, m in ipairs(EDGE_MODES) do
+        if m == edge_mode then i = k end
+    end
+    edge_mode = EDGE_MODES[i % #EDGE_MODES + 1]
+    write_edge_mode()
+    mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
+end)
+
+mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
 mp.add_key_binding("Ctrl+g", "toggle", function()
     if not current_source then
