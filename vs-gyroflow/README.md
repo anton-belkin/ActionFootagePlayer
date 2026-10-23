@@ -17,7 +17,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
-| `edges_control` | — | file with the mode in it, read while playing (at most every 50 ms) |
+| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow

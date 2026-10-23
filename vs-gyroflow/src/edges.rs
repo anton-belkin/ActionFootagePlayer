@@ -16,8 +16,8 @@
 // frame at that size is rendered on the GPU too, from the source scaled down here. Only the blocks of the
 // frame the mask says are uncovered are touched at full size.
 //
-// The mode can change while playing: mpv's script writes it to a control file, read here at most every
-// 50 ms, so switching doesn't rebuild mpv's filter chain.
+// The mode and the blur can change while playing: mpv's script writes them to a control file, read here at
+// most every 50 ms, so switching doesn't rebuild mpv's filter chain.
 
 use std::path::PathBuf;
 use std::sync::atomic::{ AtomicU8, Ordering };
@@ -151,7 +151,7 @@ impl Edges {
         }
     }
 
-    /// From the filter's arguments; the control file, when there is one, overrides `mode`
+    /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, if it has one)
     pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, control: Option<PathBuf>) {
         self.mode.store(mode as u8, Ordering::Relaxed);
         *self.settings.lock() = settings;
@@ -177,13 +177,21 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        match EdgeMode::parse(&text) {
+        let (mode, blur) = parse_control(&text);
+        match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
                     log::info!("Edges: {mode:?}");
                 }
             }
             None => log::warn!("Edges: unknown mode {text:?} in {path:?}"),
+        }
+        if let Some(blur) = blur {
+            let mut s = self.settings.lock();
+            if s.blur != blur {
+                s.blur = blur;
+                log::info!("Edges: blur {:.1} %", blur * 100.0);
+            }
         }
     }
 
@@ -200,6 +208,24 @@ impl Edges {
         log::trace!("Edges: source scaled down in {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
         EdgeJob { mode, settings: *self.settings.lock(), src_lo }
     }
+}
+
+/// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
+/// filter's `edges_blur`). A file with only the mode in it leaves the settings as the filter was given them
+fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>) {
+    let mut words = text.split_whitespace();
+    let mode = EdgeMode::parse(words.next().unwrap_or(""));
+    let mut blur = None;
+    for w in words {
+        match w.split_once('=') {
+            Some(("blur", v)) => match v.parse::<f32>() {
+                Ok(v) if v.is_finite() => blur = Some((v / 100.0).clamp(0.0, 0.2)),
+                _ => log::warn!("Edges: bad blur {v:?} in the control file"),
+            },
+            _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
+        }
+    }
+    (mode, blur)
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -707,4 +733,20 @@ unsafe fn composite<T: Sample>(pj: &PlaneJob, mask: &[u8], (mw, mh): (usize, usi
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_file() {
+        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None));
+        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None));
+        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0)));
+        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2)));
+        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None));
+        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None));
+        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0)));
+    }
 }

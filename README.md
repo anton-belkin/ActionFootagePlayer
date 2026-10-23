@@ -157,6 +157,7 @@ mpv stayed tied to it and macOS throttled it as a background process.
 |---|---|---|
 | `Ctrl+g` | Stabilization on/off | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
+| `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
@@ -176,8 +177,8 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30), so the stabilization does half the work; `0`: every frame |
-| `gyroflow.conf`: `edges=trail` | what fills the edges the stabilized frame doesn't cover: `trail`, `sphere`, `original`, `zoom`, or `off` (the project's background color) |
-| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
+| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height; `Ctrl+[` and `Ctrl+]` change it while playing), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -240,18 +241,18 @@ their own.
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
 with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
-them while playing:
+them while playing, and `Ctrl+[` / `Ctrl+]` set how blurred:
 
-- **trail**, the default: what was last shown at that spot in earlier frames. The stabilized frame stays put while
-  the camera shakes, so a part it uncovers now was usually in view a moment ago. Where nothing was yet (the first
-  frames, after a seek or a cut), the zoom fill; older trail fades into it too (half-life 3 s).
-- **sphere**, experimental: what was last seen in that direction, by the gyro. The trail above is only right while
-  the smoothed view holds still; when it pans, what was at a spot of the screen was in another direction, and the
-  fill slides against the picture. This one keeps it where it was in the world, so it lines up with the picture
-  through a pan. It's taken from the whole source frame, not just what the output shows, so it also has what the
-  zoom crops away and what the camera saw while shaking with no edges showing. Only the camera's turning is known:
-  near things that moved past it, or by themselves, are off as in the trail. Where a direction wasn't seen yet,
-  the trail (half-life 5 s).
+- **sphere**, the default (experimental): what was last seen in that direction, by the gyro. It's taken from the
+  whole source frame, not just what the output shows, so it also has what the zoom crops away and what the camera
+  saw while shaking with no edges showing, and it stays where it was in the world, so it lines up with the picture
+  through a pan. Only the camera's turning is known: near things that moved past it, or by themselves, are off.
+  Where a direction wasn't seen yet, the trail (half-life 5 s).
+- **trail**: what was last shown at that spot in earlier frames. The stabilized frame stays put while the camera
+  shakes, so a part it uncovers now was usually in view a moment ago. But it's only right while the smoothed view
+  holds still: when it pans, what was at a spot of the screen was in another direction, and the fill slides
+  against the picture. Where nothing was yet (the first frames, after a seek or a cut), the zoom fill; older trail
+  fades into it too (half-life 3 s).
 - **original**: the unstabilized frame behind.
 - **zoom**: the stabilized frame scaled up 1.5× behind.
 - **off**: the project's background color, as Gyroflow renders it.

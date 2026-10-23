@@ -15,7 +15,7 @@ if not hasattr(core, 'gyroflow'):
 options = {}
 if args.get('preset'):
     options['preset'] = args['preset']
-# What fills the uncovered edges; the control file has the mode as it changes while playing
+# What fills the uncovered edges; the control file has the mode and the blur as they change while playing
 for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_control', str)):
     if args.get(key) is not None:
         options[key] = kind(args[key])
