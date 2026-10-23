@@ -6,15 +6,17 @@
 //
 // It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
 // embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
-// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). Clips there's
-// nothing to stabilize with are skipped.
+// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
+// nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
+// clip with neither is skipped, there being nothing to change.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
 // LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,
 // as for the plugins (ActionFootagePlayer keeps your preset and DJI's LUT there, its own copy of the plugins being
 // read-only).
 //
-// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov), 10-bit
+// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only,
+// _color instead of _stab), 10-bit
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
@@ -45,11 +47,13 @@ use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it.
+Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it. A log
+video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
+  --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --from <time>    start at this time (seconds, or m:ss)
@@ -71,6 +75,7 @@ struct Options {
     // None: from the metadata; Some(None): none
     curve: Option<Option<&'static str>>,
     sdr: bool,
+    no_stabilize: bool,
     horizon_lock: Option<f64>,
     prores: bool,
     from: Option<f64>,
@@ -86,7 +91,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -99,6 +104,7 @@ fn main() {
                     .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, none)")))),
             }),
             "--sdr" => opts.sdr = true,
+            "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
             "--prores" => opts.prores = true,
@@ -436,11 +442,14 @@ fn filter_path(p: &Path) -> String {
 
 fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
-    let source = match find_source(&path) {
-        Ok(s) => s,
-        Err(why) => return Ok(Outcome::Skipped(why)),
-    };
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path) };
+    let source = match (source, curve) {
+        (Ok(s), _) => Some(s),
+        (Err(_), Some(_)) => None,
+        (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
+    };
     let info = ffprobe(&path)?;
 
     let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
@@ -450,7 +459,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (None, None) => String::new(),
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
-    let stem = format!("{stem}_stab{range}");
+    let stem = format!("{stem}_{}{range}", if source.is_some() { "stab" } else { "color" });
     let out_path = out_dir.join(format!("{stem}.mov"));
     if out_path.exists() && !opts.force {
         return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
@@ -495,13 +504,17 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let first_frame = (from * fps - 1e-6).ceil().max(0.0) as u64;
     let total_frames = if opts.from.is_some() || opts.to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) };
 
-    // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size
+    // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size. Color only: none,
+    // the frames go to the LUT as they are decoded
     let (w, h) = (info.width & !1, info.height & !1);
     let workers = 3;
     let key = format!("export|{}", path.display());
-    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, opts.horizon_lock, (w, h), 3, (1, 1), None,
-                                       SampleKind::U16, 1023.0, true, opts.interpolation, workers)?);
-    let (ow, oh) = (engine.render_size.0 & !1, engine.render_size.1 & !1);
+    let engine = match &source {
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, opts.horizon_lock, (w, h), 3, (1, 1), None,
+                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
+        None => None,
+    };
+    let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 
     let mut graph = graph;
     let gpu_lut = match lut_job {
@@ -520,7 +533,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
 
     let duration_label = { let t = (to - from).max(0.0) as u64; format!("{}:{:02}", t / 60, t % 60) };
-    eprintln!("{}: {color_label} · {} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), source.label, w, h);
+    let source_label = source.as_ref().map_or("color only", |s| s.label);
+    eprintln!("{}: {color_label} · {source_label} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), w, h);
 
     if stopped() { return Err("cancelled".into()); }
     let enc = pick_encoder(opts)?;
@@ -593,7 +607,6 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
     });
     let frame_rx = Arc::new(Mutex::new(frame_rx));
-    let frame_offset_us = engine.frame_offset_us;
     let gpu_threads: Vec<_> = (0..workers).map(|_| {
         let (frame_rx, done_tx, engine) = (frame_rx.clone(), done_tx.clone(), engine.clone());
         let full_range = info.full_range;
@@ -601,22 +614,26 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         std::thread::spawn(move || {
             loop {
                 let Ok((n, src)) = frame_rx.lock().recv() else { break };
-                let mut dst = vec![0u8; out_frame];
-                // Frame times from the start of the file, as Gyroflow and mpv count them
-                let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + frame_offset_us;
-                let mut planes = Vec::with_capacity(3);
-                let (mut so, mut doff) = (0, 0);
-                for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
-                    planes.push(PlaneJob {
-                        src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
-                        dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
-                    });
-                    so += sw * sh * 2;
-                    doff += dw * dh * 2;
-                }
-                let result = engine.process(timestamp_us, planes, !full_range)
-                    .and_then(|_| match lut.as_mut() { Some(l) => l.apply(&mut dst), None => Ok(()) })
-                    .map(|_| dst);
+                let frame = match &engine {
+                    None => Ok(src),
+                    Some(engine) => {
+                        let mut dst = vec![0u8; out_frame];
+                        // Frame times from the start of the file, as Gyroflow and mpv count them
+                        let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                        let mut planes = Vec::with_capacity(3);
+                        let (mut so, mut doff) = (0, 0);
+                        for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
+                            planes.push(PlaneJob {
+                                src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
+                                dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
+                            });
+                            so += sw * sh * 2;
+                            doff += dw * dh * 2;
+                        }
+                        engine.process(timestamp_us, planes, !full_range).map(|_| dst)
+                    }
+                };
+                let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|_| f), None => Ok(f) });
                 if done_tx.send((n, result)).is_err() { break; }
             }
         })

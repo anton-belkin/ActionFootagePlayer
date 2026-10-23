@@ -31,8 +31,8 @@ ready for your phone.
   bends light (on a test clip, the jitter between frames went from 0.16 px to 0.02 px).
   <!-- before/after GIF of an underwater clip here: this is the proof divers need -->
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
-- **One key to share**: mark the moment, press `Shift+E`, and get a stabilized file that an iPhone, a Mac or
-  YouTube shows in HDR.
+- **One key to share**: mark the moment, press `Shift+E`, and get a file as it plays, stabilized or not, that an
+  iPhone, a Mac or YouTube shows in HDR.
 
 ## Who it's for
 
@@ -121,7 +121,7 @@ this reads):
 
 **verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
 published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
-Export covers the clips that play stabilized, and not all of what plays yet: see [Known issues](#known-issues). Details, and how clips from your camera
+Export covers what plays: stabilized, in color, or both. Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet, where there's no app,
@@ -331,7 +331,8 @@ full rate, 85 %.
 
 ### Exporting
 
-`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, the horizon
+`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
+plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the horizon
 locked or not as the menu has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
 whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
@@ -361,8 +362,11 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   DJI's LUT instead.
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
-- Audio is copied as it is, and the file keeps the clip's dates. Clips with nothing to stabilize them with are
-  skipped; an existing output is kept unless `--force`.
+- **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
+  `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
+  as `<name>_color.mov` in the same folder, at the clip's own size. Clips with neither, nothing to stabilize and
+  not log, are skipped: there's nothing to change.
+- Audio is copied as it is, and the file keeps the clip's dates. An existing output is kept unless `--force`.
 - `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
@@ -751,8 +755,6 @@ Each goes from here once it's fixed.
 - **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
   preset as Gyroflow would, edges in the project's background color.
   [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
-- **A clip that plays without stabilization isn't exported**, e.g. D-Log M shot with EIS on; and after `Ctrl+g`
-  turns it off, the export is stabilized all the same. [#24](https://github.com/anton-belkin/ActionFootagePlayer/issues/24)
 - **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
   the default is depth and in-water, which GoPro doesn't record.
   [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)
