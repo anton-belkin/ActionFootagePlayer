@@ -196,6 +196,10 @@ done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
+put luts/gplog_hlg.cube             "$DLOGM/luts/gplog_hlg.cube" 644
+for curve in $HDR_CURVES; do
+    put "$BUILD/${curve}_hlg.cube"  "$DLOGM/luts/${curve}_hlg.cube" 644
+done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 
 # The gyroflow plugin

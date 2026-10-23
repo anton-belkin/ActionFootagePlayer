@@ -44,7 +44,8 @@
 --   remember                the view, FOV, horizon lock and edges as the defaults, in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
 -- the preset), view (normal, wide, off), fov,
--- horizon_lock (yes, no, project), edges, waiting (for a project from Gyroflow), exporting, last_export.
+-- horizon_lock (yes, no, project), edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting,
+-- last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -234,6 +235,7 @@ local function publish()
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
         view = stab_off and "off" or view, fov = wide_fov,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
+        edges_blur = edge_blur, edges_zoom = o.edges_zoom,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
