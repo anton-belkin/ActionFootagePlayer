@@ -1,10 +1,11 @@
 #!/bin/bash
 # tools/make_release.sh <version>: into dist/
-#   Steady-Player-<version>-macos-arm64.zip             Steady Player.app with both plugins in it (tools/make_app.sh):
+#   Steady-Player-<version>-macos-arm64.zip             Steady Player.app with the plugins in it (tools/make_app.sh):
 #                                                       unzipped into Applications, its setup downloads DJI's LUT
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI)
+#   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/
 #   dlogm-gyroflow-player-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
@@ -69,6 +70,13 @@ rm -rf "dist/$dlogm"
 
 rm dist/dlogm_hlg.glsl
 
-(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+telemetry="mpv-dji-telemetry-$version"
+rm -rf "dist/$telemetry" "dist/$telemetry.zip"
+mkdir -p "dist/$telemetry"
+git archive HEAD mpv/scripts/dji-telemetry | tar -x --strip-components 2 -C "dist/$telemetry"
+(cd "dist/$telemetry" && zip -qr "../$telemetry.zip" dji-telemetry)
+rm -rf "dist/$telemetry"
+
+(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS

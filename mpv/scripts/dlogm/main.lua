@@ -38,6 +38,10 @@ options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
 local DATA = os.getenv("DLOGM_DATA")
+-- Where the plugin's files are looked for, in order
+local DIRS = {}
+if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
+table.insert(DIRS, DIR)
 local SHADERS = {
     hdr = "shaders/dlogm_hlg.glsl",
     sdr = "shaders/dlogm_lut3d.glsl",
@@ -61,8 +65,8 @@ end
 -- A file of the plugin's, from $DLOGM_DATA or this folder; nil when it's in neither. Looked up each time: the app
 -- may fetch DJI's LUT while a file plays
 local function plugin_file(name)
-    for _, dir in ipairs({ DATA, DIR }) do
-        if dir and dir ~= "" and file_exists(utils.join_path(dir, name)) then return utils.join_path(dir, name) end
+    for _, dir in ipairs(DIRS) do
+        if file_exists(utils.join_path(dir, name)) then return utils.join_path(dir, name) end
     end
     return nil
 end
@@ -97,7 +101,7 @@ local function apply(m)
     if not base then return false end
     local shader = SHADERS[m] and plugin_file(SHADERS[m])
     if SHADERS[m] and not shader then
-        mp.msg.warn("missing " .. SHADERS[m] .. " in " .. DIR .. (DATA and (" and " .. DATA) or "") .. " (run install.sh)")
+        mp.msg.warn("missing " .. SHADERS[m] .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
         mp.osd_message(LABELS[m] .. ": its shader isn't installed", 3)
         return false
     end

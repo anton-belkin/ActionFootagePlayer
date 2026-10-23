@@ -4,15 +4,15 @@
 //
 //   gyroflow-embed [--move] <video> [project.gyroflow]   store the project (default: the .gyroflow next to the video);
 //                                                         --move deletes the .gyroflow once it's stored and read back
-//   gyroflow-embed --extract <video> [project.gyroflow]  write the stored project next to the video, to open it in Gyroflow
+//   gyroflow-embed --extract [--preset <preset.gyroflow>] <video> [project.gyroflow]
+//                                                         write the stored project next to the video, to open it in Gyroflow.
+//                                                         A video without one gets the project the plugin plays it with:
+//                                                         its own motion data, Gyroflow's default preset, then --preset
 //   gyroflow-embed --remove <video>                      remove the stored project
 //   gyroflow-embed --show <video>                        print the stored project
 
-#[path = "../embedded.rs"]
-#[allow(dead_code)]
-mod embedded;
-
 use std::path::{ Path, PathBuf };
+use vs_gyroflow::{ embedded, project as motion_project };
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -20,19 +20,26 @@ fn main() {
         Some(m @ ("--move" | "--extract" | "--remove" | "--show")) => { let m = m.to_string(); args.remove(0); m },
         _ => String::new(),
     };
+    let mut preset = None;
+    if mode == "--extract" {
+        if let Some(i) = args.iter().position(|a| a == "--preset") {
+            if i + 1 < args.len() { preset = Some(args.remove(i + 1)); }
+            args.remove(i);
+        }
+    }
     if args.is_empty() || args.len() > 2 || args[0].starts_with("--") {
-        eprintln!("usage: gyroflow-embed [--move|--extract|--remove|--show] <video> [project.gyroflow]");
+        eprintln!("usage: gyroflow-embed [--move|--extract [--preset <preset.gyroflow>]|--remove|--show] <video> [project.gyroflow]");
         std::process::exit(2);
     }
     let video = PathBuf::from(&args[0]);
     let project = args.get(1).map(PathBuf::from).unwrap_or_else(|| video.with_extension("gyroflow"));
-    if let Err(e) = run(&mode, &video, &project) {
+    if let Err(e) = run(&mode, &video, &project, preset.as_deref()) {
         eprintln!("gyroflow-embed: {e}");
         std::process::exit(1);
     }
 }
 
-fn run(mode: &str, video: &Path, project: &Path) -> Result<(), String> {
+fn run(mode: &str, video: &Path, project: &Path, preset: Option<&str>) -> Result<(), String> {
     match mode {
         "" | "--move" => {
             let data = std::fs::read(project).map_err(|e| format!("{}: {e}", project.display()))?;
@@ -51,12 +58,24 @@ fn run(mode: &str, video: &Path, project: &Path) -> Result<(), String> {
             }
         },
         "--extract" => {
-            let obj = embedded::read(video).map_err(|e| format!("{}: {e}", video.display()))?
-                .ok_or_else(|| format!("{} has no project in it", video.display()))?;
             if project.exists() {
                 return Err(format!("{} already exists", project.display()));
             }
-            std::fs::write(project, serde_json::to_string_pretty(&obj).unwrap()).map_err(|e| format!("{}: {e}", project.display()))?;
+            let data = match embedded::read(video).map_err(|e| format!("{}: {e}", video.display()))? {
+                Some(obj) => serde_json::to_string_pretty(&obj).unwrap(),
+                None => {
+                    let video = std::fs::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
+                    let project_path = std::path::absolute(project).map_err(|e| format!("{}: {e}", project.display()))?;
+                    let preset = preset.map(|p| std::fs::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
+                    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), &project_path.to_string_lossy());
+                    // On macOS the core makes the project file, empty, to bookmark the video relative to it
+                    if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {
+                        let _ = std::fs::remove_file(project);
+                    }
+                    data?
+                }
+            };
+            std::fs::write(project, data).map_err(|e| format!("{}: {e}", project.display()))?;
             println!("Wrote {}", project.display());
         },
         "--remove" => {

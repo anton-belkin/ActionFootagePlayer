@@ -18,6 +18,7 @@ use gyroflow_core::{ StabilizationManager, filesystem };
 #[allow(dead_code)]
 pub mod embedded;
 pub mod probe;
+pub mod project;
 pub mod gpu_lut;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;

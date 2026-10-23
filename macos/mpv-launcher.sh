@@ -13,7 +13,7 @@ res=$(cd "$(dirname "$0")/../../.." && pwd)
 data="$HOME/Library/Application Support/Steady Player"
 export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
 config=${MPV_HOME:-$HOME/.config/mpv}
-for plugin in gyroflow dlogm; do
+for plugin in gyroflow dlogm dji-telemetry; do
     [ -e "$config/scripts/$plugin" ] || set -- "--script=$res/plugins/$plugin" "$@"
 done
 
