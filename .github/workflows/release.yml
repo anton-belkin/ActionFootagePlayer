@@ -35,12 +35,13 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
 
       # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew. The bottles are built for the
-      # runner's macOS, and the app needs that one or later: the oldest runner that Homebrew has bottles for
+      # runner's macOS, and the app needs that one or later: the oldest runner that Homebrew has bottles for. Updated
+      # first: the runner's Homebrew is as old as its image, and doesn't update itself there
       - name: mpv and ffmpeg
         env:
           HOMEBREW_NO_INSTALL_CLEANUP: 1
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-        run: brew install mpv ffmpeg
+        run: brew update && brew install mpv ffmpeg
 
       - name: Build
         run: |

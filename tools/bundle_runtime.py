@@ -100,6 +100,25 @@ def find_vapoursynth():
     raise SystemExit("No Python in " + prefix + " imports vapoursynth")
 
 
+# Homebrew's builds the app mustn't carry: what `brew upgrade` would fix stays in the app
+MIN_KEGS = {
+    # mpv crashed when the audio device changed, headphones plugged in while it plays (Homebrew's backport)
+    "mpv": "0.41.0_10",
+}
+
+
+def keg_version(v):
+    """0.41.0_10 as ((0, 41, 0), 10), for comparing"""
+    version, _, revision = v.partition("_")
+    return tuple(int(x) for x in re.findall(r"\d+", version)), int(revision or 0)
+
+
+for name, least in MIN_KEGS.items():
+    m = re.search(rf"/Cellar/{re.escape(name)}/([^/]+)/", os.path.realpath(os.path.join(prefix, "bin", name)))
+    if not m or keg_version(m.group(1)) < keg_version(least):
+        raise SystemExit(f"Homebrew's {name} is {m and m.group(1)}: the app needs {least} or later "
+                         f"(brew update && brew upgrade {name})")
+
 vs_module, src_ver, py_version = find_vapoursynth()
 py_fw = os.path.join(frameworks, "Python.framework")
 py_ver = os.path.join(py_fw, "Versions", py_version)
