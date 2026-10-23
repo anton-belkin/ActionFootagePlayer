@@ -5,17 +5,20 @@
 
 The template's `@LUT_SIZE@` becomes the LUT's edge size and `@LUT_DATA@` the LUT as an inline `rgba16` texture:
 one line of hex, 4 little-endian unorm16 per texel (alpha 0xffff), red fastest, the .cube's own order. mpv wants
-the hex on a single line, and `rgba16f` would want 16 bytes per texel, hence unorm16.
+the hex on a single line, and `rgba16f` would want 16 bytes per texel, hence unorm16. The .cube's comments (where it
+comes from, its credits) go on top of the shader.
 """
 import struct
 import sys
 
 
 def read_cube(path):
-    size, values = None, []
+    size, values, comments = None, [], []
     with open(path) as f:
         for line in f:
             t = line.split()
+            if t and t[0].startswith('#'):
+                comments.append(line.strip().lstrip('#').strip())
             if not t or t[0].startswith('#'):
                 continue
             if t[0] == 'LUT_3D_SIZE':
@@ -26,7 +29,7 @@ def read_cube(path):
                 values.append(tuple(float(x) for x in t[:3]))
     if size is None or len(values) != size ** 3:
         sys.exit(f'{path}: not a 3D .cube LUT ({len(values)} entries, LUT_3D_SIZE {size})')
-    return size, values
+    return size, values, comments
 
 
 def texture_hex(values):
@@ -38,10 +41,12 @@ def main():
     if len(sys.argv) != 4:
         sys.exit(__doc__)
     template, cube, out = sys.argv[1:]
-    size, values = read_cube(cube)
+    size, values, comments = read_cube(cube)
     with open(template, newline='') as f:
         text = f.read()
     text = text.replace('@LUT_SIZE@', str(size)).replace('@LUT_DATA@', texture_hex(values))
+    if comments:
+        text = ''.join(f'// {c}\n' if c else '//\n' for c in comments) + '//\n' + text
     with open(out, 'w', newline='') as f:
         f.write(text)
     print(f'{out}: {size}³ LUT from {cube}')

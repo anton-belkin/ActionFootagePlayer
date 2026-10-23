@@ -61,9 +61,16 @@ dlogm="$res/plugins/dlogm"
 gyroflow="$res/plugins/gyroflow"
 telemetry="$res/plugins/dji-telemetry"
 mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry"
-install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua "$dlogm/"
+install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 luts/dlogm_hlg.cube "$dlogm/luts/dlogm_hlg.cube"
+# The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py)
+cubes=$(mktemp -d)
+for curve in dlog gplog2 ilog; do
+    python3 -I tools/make_hdr_lut.py "$curve" "$cubes/$curve.cube" >/dev/null
+    python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$cubes/$curve.cube" "$dlogm/shaders/${curve}_hlg.glsl" >/dev/null
+done
+rm -rf "$cubes"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"

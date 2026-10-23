@@ -1,0 +1,26 @@
+// A log curve -> Rec.2100 HLG (1000-nit) at HOOK OUTPUT, mpv-standalone only: dlog_hlg.glsl, gplog2_hlg.glsl and
+// ilog_hlg.glsl, baked from the LUTs tools/make_hdr_lut.py makes. The same as dlogm_hlg.glsl.in, which says why
+// HOOK OUTPUT: the source is re-sampled via BIND MAIN, the LUT applied, and HLG written straight to the
+// (HDR-engaged) surface, past mpv's color pipeline. The dlogm plugin sets target-trc=hlg and
+// target-colorspace-hint=yes along with it.
+
+//!TEXTURE HLGLUT
+//!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
+//!FORMAT rgba16
+//!FILTER LINEAR
+//!BORDER CLAMP
+@LUT_DATA@
+
+//!HOOK OUTPUT
+//!BIND HOOKED
+//!BIND MAIN
+//!BIND HLGLUT
+//!DESC Log -> Rec.2100 HLG (LUT at OUTPUT, bypasses mpv color pipeline)
+
+vec4 hook() {
+    vec3 c = MAIN_tex(HOOKED_pos).rgb;
+    c = clamp(c, 0.0, 1.0);
+    const float N = @LUT_SIZE@.0;
+    vec3 lut_coord = c * ((N - 1.0) / N) + (0.5 / N);
+    return vec4(texture(HLGLUT, lut_coord).rgb, 1.0);
+}

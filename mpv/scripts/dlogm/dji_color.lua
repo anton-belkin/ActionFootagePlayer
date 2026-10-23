@@ -201,4 +201,7 @@ function M.read(path)
     return COLOR_MODES[mode] or "other"
 end
 
+-- The MP4 reading, for gopro_color.lua
+M.read_moov, M.boxes, M.child = read_moov, boxes, child
+
 return M
