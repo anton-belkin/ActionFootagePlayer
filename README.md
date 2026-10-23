@@ -203,8 +203,10 @@ them while playing:
 - **sphere**, experimental: what was last seen in that direction, by the gyro. The trail above is only right while
   the smoothed view holds still; when it pans, what was at a spot of the screen was in another direction, and the
   fill slides against the picture. This one keeps it where it was in the world, so it lines up with the picture
-  through a pan. Only the camera's turning is known: near things that moved past it, or by themselves, are off as
-  in the trail. Where a direction wasn't seen yet, the trail (half-life 5 s).
+  through a pan. It's taken from the whole source frame, not just what the output shows, so it also has what the
+  zoom crops away and what the camera saw while shaking with no edges showing. Only the camera's turning is known:
+  near things that moved past it, or by themselves, are off as in the trail. Where a direction wasn't seen yet,
+  the trail (half-life 5 s).
 - **original**: the unstabilized frame behind.
 - **zoom**: the stabilized frame scaled up 1.5× behind.
 - **off**: the project's background color, as Gyroflow renders it.

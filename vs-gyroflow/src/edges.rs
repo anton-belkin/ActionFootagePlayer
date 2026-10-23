@@ -7,7 +7,7 @@
 //   zoom      the stabilized frame scaled up behind (+50 % by default), blurred
 //   trail     what was last drawn there in earlier frames, blurred; where nothing was yet, the zoom fill
 //   sphere    what was last seen in that direction of the world (sphere.rs), blurred; where it wasn't seen yet,
-//             the trail
+//             the trail. It's written from a view wider than the output, so it has what the output crops away too
 //
 // Which output pixels the video covers comes from Gyroflow's own kernel: each frame it renders a white plane
 // with a feathered border onto black, with the frame's transform, at 1/4 size. That's the same geometry as the
@@ -29,7 +29,7 @@ use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma8, Luma16,
 use gyroflow_core::stabilization_params::BackgroundMode;
 
 use crate::{ PlaneJob, PlaneStab, SampleKind, WorkerConfig, plane_compute_params, process_plane };
-use crate::sphere::{ Sphere, View };
+use crate::sphere::{ GridFrame, Sphere, View, WIDE, wide_params };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EdgeMode { Off = 0, Original = 1, Zoom = 2, Trail = 3, Sphere = 4 }
@@ -84,6 +84,8 @@ pub struct EdgeGeometry {
     pub mask: (usize, usize),
     pub grid_src: (usize, usize),
     pub grid: (usize, usize),
+    /// The sphere trail's wide view (sphere::wide_params), as fine as `grid` would be unzoomed
+    pub wide: (usize, usize),
 }
 
 impl EdgeGeometry {
@@ -92,10 +94,12 @@ impl EdgeGeometry {
         let div = |(w, h): (usize, usize), f: usize| (w.div_ceil(f).max(2), h.div_ceil(f).max(2));
         // ~135 rows whatever the size: 4K is 16 pixels per cell
         let f = (oh / 135).max(4);
+        let grid = div((ow, oh), f);
         EdgeGeometry {
             kind, max_value, planes: planes.to_vec(),
             mask_src: div((sw, sh), 4), mask: div((ow, oh), 4),
-            grid_src: div((sw, sh), f), grid: div((ow, oh), f),
+            grid_src: div((sw, sh), f), grid,
+            wide: ((grid.0 as f64 * WIDE).round() as usize, (grid.1 as f64 * WIDE).round() as usize),
         }
     }
 }
@@ -350,8 +354,15 @@ pub(crate) struct EdgeWorker {
     /// no hole of its own to fill
     lo: Vec<PlaneStab>,
     lo_buf: Vec<GpuBuffers>,
-    /// The project's parameters, for the directions the sphere trail is written and read by
+    /// The same two from the sphere trail's wide view, that it's written from: what the frame covers there (the
+    /// mask rendered at the grid's size is coverage enough), and the frame
+    wide_mask: PlaneStab,
+    wide_mask_buf: GpuBuffers,
+    wide: Vec<PlaneStab>,
+    wide_buf: Vec<GpuBuffers>,
+    /// The project's parameters, for the directions the sphere trail is read by, and the wide view's it's written by
     params: ComputeParams,
+    wide_params: ComputeParams,
     /// ms spent: mask, low-res frame, fill, composite; and frames
     timing: ([f64; 4], u32),
 }
@@ -371,27 +382,39 @@ impl EdgeWorker {
             stab.set_compute_params(params);
             stab
         };
-        let mut params = plane_compute_params(mgr, cfg, 0, false);
-        params.background.fill(0.0);
-        params.background_mode = BackgroundMode::SolidColor;
-        let mask = PlaneStab { stab: stab(params), index: 0 };
-        let mut mask_buf = GpuBuffers::new(g.mask_src, g.mask, 1);
-        mask_buf.input_of::<u8>().copy_from_slice(&mask_source(g.mask_src));
-
+        let mask_params = || {
+            let mut params = plane_compute_params(mgr, cfg, 0, false);
+            params.background.fill(0.0);
+            params.background_mode = BackgroundMode::SolidColor;
+            params
+        };
+        let mask_buf = |size: (usize, usize)| {
+            let mut buf = GpuBuffers::new(g.mask_src, size, 1);
+            buf.input_of::<u8>().copy_from_slice(&mask_source(g.mask_src));
+            buf
+        };
         let bytes = if g.kind == SampleKind::U8 { 1 } else { 2 };
-        let lo = (0..g.planes.len()).map(|index| {
+        let lo = |wide: bool| (0..g.planes.len()).map(|index| {
             let mut params = plane_compute_params(mgr, cfg, index, limited_range);
             params.background_mode = BackgroundMode::RepeatPixels;
-            PlaneStab { stab: stab(params), index }
-        }).collect();
-        let lo_buf = (0..g.planes.len()).map(|_| GpuBuffers::new(g.grid_src, g.grid, bytes)).collect();
-        EdgeWorker { mask, mask_buf, lo, lo_buf, params: ComputeParams::from_manager(mgr), timing: ([0.0; 4], 0) }
+            PlaneStab { stab: stab(if wide { wide_params(params) } else { params }), index }
+        }).collect::<Vec<_>>();
+        let lo_buf = |size: (usize, usize)| (0..g.planes.len()).map(|_| GpuBuffers::new(g.grid_src, size, bytes)).collect::<Vec<_>>();
+        EdgeWorker {
+            mask: PlaneStab { stab: stab(mask_params()), index: 0 }, mask_buf: mask_buf(g.mask),
+            lo: lo(false), lo_buf: lo_buf(g.grid),
+            wide_mask: PlaneStab { stab: stab(wide_params(mask_params())), index: 0 }, wide_mask_buf: mask_buf(g.wide),
+            wide: lo(true), wide_buf: lo_buf(g.wide),
+            params: ComputeParams::from_manager(mgr), wide_params: wide_params(ComputeParams::from_manager(mgr)),
+            timing: ([0.0; 4], 0),
+        }
     }
 
     /// Sets up the GPU side before playback, like the planes' own warm-up
     pub(crate) fn warm_up(&mut self, cfg: WorkerConfig) -> Result<(), String> {
         process_plane::<Luma8>(&mut self.mask, 0, 255.0, &self.mask_buf.job())?;
-        for (plane, buf) in self.lo.iter_mut().zip(self.lo_buf.iter_mut()) {
+        process_plane::<Luma8>(&mut self.wide_mask, 0, 255.0, &self.wide_mask_buf.job())?;
+        for (plane, buf) in self.lo.iter_mut().zip(self.lo_buf.iter_mut()).chain(self.wide.iter_mut().zip(self.wide_buf.iter_mut())) {
             let job = buf.job();
             match cfg.kind {
                 SampleKind::U8  => process_plane::<Luma8>(plane, 0, cfg.max_value, &job)?,
@@ -415,21 +438,33 @@ impl EdgeWorker {
         let mut lap = |i: usize, timing: &mut ([f64; 4], u32)| { timing.0[i] += t.elapsed().as_secs_f64() * 1000.0; t = Instant::now(); };
         process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
         lap(0, &mut self.timing);
+
+        // The sphere is written every frame, edges or not: what the camera sees while the output covers is what
+        // fills the edges later
+        if job.mode == EdgeMode::Sphere {
+            let wide = render_grid::<T, P>(&mut self.wide, &mut self.wide_buf, &job.src_lo, timestamp_us, cfg.max_value)?;
+            process_plane::<Luma8>(&mut self.wide_mask, timestamp_us, 255.0, &self.wide_mask_buf.job())?;
+            let coverage: Vec<f32> = self.wide_mask_buf.output_of::<u8>().iter().map(|&v| v as f32 / 255.0).collect();
+            lap(1, &mut self.timing);
+            let view = View::at(&self.wide_params, timestamp_us);
+            write_sphere(&mut edges.sphere.lock(), &GridFrame { view: &view, grid: g.wide, planes: &wide, coverage: &coverage }, timestamp_us, g.max_value);
+            lap(2, &mut self.timing);
+        }
+
         let mask = self.mask_buf.output_of::<u8>();
         let blocks = Blocks::new(mask, g.mask);
         log::trace!("Edges: {} of {} mask blocks to fill at {timestamp_us} us, mask mean {:.1}", blocks.flags.iter().filter(|&&b| b).count(), blocks.flags.len(),
                     mask.iter().map(|&v| v as f32).sum::<f32>() / mask.len() as f32);
-        if !blocks.any { return Ok(()); }
-
-        let need_lo = job.mode != EdgeMode::Original;
-        let mut lo: Vec<Vec<f32>> = Vec::new();
-        if need_lo {
-            for ((plane, buf), src) in self.lo.iter_mut().zip(self.lo_buf.iter_mut()).zip(&job.src_lo) {
-                for (d, s) in buf.input_of::<T>().iter_mut().zip(src) { *d = T::from_f32(*s); }
-                process_plane::<P>(plane, timestamp_us, cfg.max_value, &buf.job())?;
-                lo.push(buf.output_of::<T>().iter().map(|v| v.to_f32()).collect());
-            }
+        if !blocks.any {
+            self.count_frame();
+            return Ok(());
         }
+
+        let lo = if job.mode != EdgeMode::Original {
+            render_grid::<T, P>(&mut self.lo, &mut self.lo_buf, &job.src_lo, timestamp_us, cfg.max_value)?
+        } else {
+            Vec::new()
+        };
         lap(1, &mut self.timing);
 
         let zoom = |lo: &[f32]| resample(lo, g.grid, g.grid, (job.settings.zoom.max(1.0), job.settings.zoom.max(1.0)));
@@ -454,7 +489,7 @@ impl EdgeWorker {
                 };
                 if job.mode == EdgeMode::Sphere {
                     let view = View::at(&self.params, timestamp_us);
-                    update_sphere(&mut edges.sphere.lock(), &view, &lo, &coverage, timestamp_us, g, &mut fills);
+                    read_sphere(&edges.sphere.lock(), &view, g.grid, &coverage, timestamp_us, &mut fills);
                 }
                 fills
             }
@@ -467,14 +502,27 @@ impl EdgeWorker {
             unsafe { composite::<T>(pj, mask, g.mask, &blocks, fill, g.grid) };
         }
         lap(3, &mut self.timing);
+        self.count_frame();
+        Ok(())
+    }
+
+    fn count_frame(&mut self) {
         self.timing.1 += 1;
         if self.timing.1 == 300 {
             let ms = self.timing.0.map(|v| v / 300.0);
-            log::debug!("Edges per frame: mask {:.2} ms, low-res frame {:.2}, fill {:.2}, composite {:.2}", ms[0], ms[1], ms[2], ms[3]);
+            log::debug!("Edges per frame: mask {:.2} ms, low-res frames {:.2}, fill {:.2}, composite {:.2}", ms[0], ms[1], ms[2], ms[3]);
             self.timing = ([0.0; 4], 0);
         }
-        Ok(())
     }
+}
+
+/// The source on the coarse grid through each plane's stabilizer, back as f32
+fn render_grid<T: Sample, P: PixelType>(stabs: &mut [PlaneStab], bufs: &mut [GpuBuffers], src_lo: &[Vec<f32>], timestamp_us: i64, max_value: f32) -> Result<Vec<Vec<f32>>, String> {
+    stabs.iter_mut().zip(bufs.iter_mut()).zip(src_lo).map(|((plane, buf), src)| {
+        for (d, s) in buf.input_of::<T>().iter_mut().zip(src) { *d = T::from_f32(*s); }
+        process_plane::<P>(plane, timestamp_us, max_value, &buf.job())?;
+        Ok(buf.output_of::<T>().iter().map(|v| v.to_f32()).collect())
+    }).collect()
 }
 
 /// How much of each grid cell the frame covers, from the mask
@@ -523,57 +571,44 @@ fn update_trail(trail: &mut Trail, lo: &[Vec<f32>], coverage: &[f32], timestamp_
     trail.last_us = Some(timestamp_us);
 }
 
-/// Reads the sphere over `fills` (the screen trail), by how much it has in each cell's direction, then writes
-/// the frame to it
-fn update_sphere(st: &mut SphereTrail, view: &View, lo: &[Vec<f32>], coverage: &[f32], timestamp_us: i64, g: &EdgeGeometry, fills: &mut [Vec<f32>]) {
+/// Writes the wide view's frame to the sphere; starts it over at a seek, or where it no longer matches the frame
+/// (a cut, or a jump the gyro didn't see)
+fn write_sphere(st: &mut SphereTrail, frame: &GridFrame, timestamp_us: i64, max_value: f32) {
     let sphere = st.sphere.get_or_insert_with(|| {
-        let s = Sphere::new(view.cells_per_radian(g.grid.0), lo.len(), SPHERE_HALF_LIFE_S);
+        let s = Sphere::new(frame.view.cells_per_radian(frame.grid.0), frame.planes.len(), SPHERE_HALF_LIFE_S);
         log::debug!("Edges: sphere of 6 x {0}x{0}", s.n);
         s
     });
     let now = timestamp_us as f32 / 1e6;
-    let write = match st.last_us {
-        None => { sphere.reset(now); true }
-        Some(last) if (timestamp_us - last).abs() > TRAIL_MAX_GAP_US => { sphere.reset(now); true }
-        // Another worker already wrote a newer frame; this one still reads
-        Some(last) => timestamp_us > last,
-    };
-    let fade = sphere.fade(now);
-    let (gw, gh) = g.grid;
-    let mut read: Vec<Vec<f32>> = vec![vec![0.0; gw * gh]; lo.len()];
-    let mut weight = vec![0.0f32; gw * gh];
-    let mut values = vec![0.0f32; lo.len()];
-    let (mut diff, mut n) = (0.0f32, 0usize);
+    match st.last_us {
+        None => sphere.reset(now),
+        Some(last) if (timestamp_us - last).abs() > TRAIL_MAX_GAP_US => sphere.reset(now),
+        // Another worker already wrote a newer frame
+        Some(last) if timestamp_us <= last => return,
+        Some(_) => {
+            if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * max_value) {
+                log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
+                sphere.reset(now);
+            }
+        }
+    }
+    sphere.write(frame, now);
+    st.last_us = Some(timestamp_us);
+}
+
+/// Reads the sphere over `fills` (the screen trail) where the frame doesn't cover, by how much it has in each cell's
+/// direction. Where it covers, the fill is the frame anyway: the screen trail has just taken it
+fn read_sphere(st: &SphereTrail, view: &View, (gw, gh): (usize, usize), coverage: &[f32], timestamp_us: i64, fills: &mut [Vec<f32>]) {
+    let Some(sphere) = st.sphere.as_ref() else { return };
+    let fade = sphere.fade(timestamp_us as f32 / 1e6);
+    let mut values = vec![0.0f32; fills.len()];
     for j in 0..gh {
         for i in 0..gw {
             let k = j * gw + i;
-            // Where the frame covers, the fill is the frame anyway (the screen trail has just taken it); there, only
-            // every third cell each way is read, to see whether the sphere still holds: a cut, or a jump the gyro
-            // didn't see
-            let covered = coverage[k] >= 0.999;
-            let check = covered && i % 3 == 0 && j % 3 == 0;
-            if covered && !check { continue; }
-            let w = view.dir(i as f32 / gw as f32, j as f32 / gh as f32);
-            let s = sphere.sample(&w, fade, &mut values).min(1.0);
-            if check {
-                if s > 0.5 { diff += (values[0] - lo[0][k]).abs(); n += 1; }
-                continue;
-            }
-            weight[k] = s;
-            for (r, v) in read.iter_mut().zip(&values) { r[k] = *v; }
+            if coverage[k] >= 0.999 { continue; }
+            let w = sphere.sample(&view.dir(i as f32 / gw as f32, j as f32 / gh as f32), fade, &mut values).min(1.0);
+            for (f, v) in fills.iter_mut().zip(&values) { f[k] = v * w + f[k] * (1.0 - w); }
         }
-    }
-    if n > coverage.len() / 200 && diff / n as f32 > SCENE_CUT * g.max_value {
-        log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
-        sphere.reset(now);
-    } else {
-        for (f, r) in fills.iter_mut().zip(&read) {
-            for ((f, r), w) in f.iter_mut().zip(r).zip(&weight) { *f = r * w + *f * (1.0 - w); }
-        }
-    }
-    if write {
-        sphere.write(view, g.grid, lo, coverage, now);
-        st.last_us = Some(timestamp_us);
     }
 }
 

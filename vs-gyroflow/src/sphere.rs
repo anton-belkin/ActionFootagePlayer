@@ -19,7 +19,31 @@
 // as on the screen trail; it fades the same way.
 
 use nalgebra::{ Matrix3, Vector3 };
+use gyroflow_core::keyframes::KeyframeType;
 use gyroflow_core::stabilization::{ ComputeParams, FrameTransform };
+use gyroflow_core::stabilization::projection::OutputProjection;
+
+/// How much wider than the source, unzoomed, the sphere's own view is
+pub const WIDE: f64 = 1.6;
+
+/// The parameters the sphere is written by: the smoothed camera as the output has it, but at a fixed field of view
+/// `WIDE` times the source's and centered, so the source frame lands in it whole however the camera shook, and what
+/// the output's zoom crops away is kept too. On a grid `WIDE` times the output's, it's about as fine as that one
+/// unzoomed. Equidistant, so the cells are as fine at the sides as in the middle: rectilinear stretches the sides
+/// as the tangent, and a fisheye's frame with some shake on top doesn't fit in it at any sensible size. Fully lens
+/// corrected, so the view's directions are exact
+pub fn wide_params(mut params: ComputeParams) -> ComputeParams {
+    params.fovs.clear();
+    params.fov_scale = WIDE;
+    params.fov_overview = false;
+    params.output_projection = OutputProjection::Equidistant as i32;
+    params.lens_correction_amount = 1.0;
+    params.adaptive_zoom_center_offset = (0.0, 0.0);
+    for key in [KeyframeType::Fov, KeyframeType::ZoomingCenterX, KeyframeType::ZoomingCenterY] {
+        params.keyframes.clear_type(&key);
+    }
+    params
+}
 
 /// One frame's output positions and directions in the world. Positions are normalized: the kernel renders pixel `i`
 /// of a buffer `w` wide at `i / w` of the output (its compute path maps the pixel's index, not its middle), so a
@@ -77,19 +101,21 @@ impl View {
         self.rot * d
     }
 
-    /// Where a direction of the world is in the output, normalized; None behind the camera
+    /// Where a direction of the world is in the output, normalized; None where the projection doesn't reach
     pub fn project(&self, w: &Vector3<f32>) -> Option<(f32, f32)> {
         self.project_camera(&self.rot.tr_mul(w))
     }
 
     /// The same for a direction of the output camera
     fn project_camera(&self, d: &Vector3<f32>) -> Option<(f32, f32)> {
-        if d.z <= 1e-9 * d.norm() { return None; }
         if self.projection == 0 {
+            if d.z <= 1e-9 * d.norm() { return None; }
             return Some(((d.x / d.z * self.f.0 + self.c.0) / self.size.0, (d.y / d.z * self.f.1 + self.c.1) / self.size.1));
         }
         let rxy = (d.x * d.x + d.y * d.y).sqrt();
         let theta = rxy.atan2(d.z);
+        // The others reach past 90 degrees, all but the orthographic one; none straight back
+        if (self.projection == 4 && d.z <= 0.0) || (rxy < 1e-6 * d.norm() && d.z < 0.0) { return None; }
         let (nx, ny) = if rxy < 1e-9 { (0.0, 0.0) } else {
             let k = ray_radius(theta, self.projection) / rxy;
             (d.x * k, d.y * k)
@@ -116,6 +142,14 @@ fn ray_radius(theta: f32, projection: i32) -> f32 {
         4 => theta.sin(),
         _ => theta.tan(),
     }
+}
+
+/// A frame on a coarse grid, its coverage, and where it looks
+pub struct GridFrame<'a> {
+    pub view: &'a View,
+    pub grid: (usize, usize),
+    pub planes: &'a [Vec<f32>],
+    pub coverage: &'a [f32],
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -198,10 +232,32 @@ impl Sphere {
         total
     }
 
+    /// The mean difference of the first plane between the sphere and the frame, where both have it; None where they
+    /// hardly overlap. Every third cell each way is enough
+    pub fn mismatch(&self, frame: &GridFrame, now: f32) -> Option<f32> {
+        let (gw, gh) = frame.grid;
+        let fade = self.fade(now);
+        let mut values = vec![0.0f32; self.planes.len()];
+        let (mut diff, mut n) = (0.0f32, 0usize);
+        for j in (0..gh).step_by(3) {
+            for i in (0..gw).step_by(3) {
+                let k = j * gw + i;
+                if frame.coverage[k] < 0.999 { continue; }
+                let w = frame.view.dir(i as f32 / gw as f32, j as f32 / gh as f32);
+                if self.sample(&w, fade, &mut values) > 0.5 {
+                    diff += (values[0] - frame.planes[0][k]).abs();
+                    n += 1;
+                }
+            }
+        }
+        (n > gw * gh / 200).then(|| diff / n as f32)
+    }
+
     /// Writes the frame where it covers: each texel in view takes the frame (bilinear on the grid) by its coverage,
     /// over what was there before, faded. Texels are gathered rather than cells splatted, so nothing's left out
     /// where the sphere is finer than the grid
-    pub fn write(&mut self, view: &View, grid: (usize, usize), lo: &[Vec<f32>], coverage: &[f32], now: f32) {
+    pub fn write(&mut self, frame: &GridFrame, now: f32) {
+        let (view, grid, coverage) = (frame.view, frame.grid, frame.coverage);
         let n = self.n;
         // The unfaded weights grow by twice every half life after the epoch; well before they'd lose precision, fade
         // them all and start from here
@@ -211,11 +267,13 @@ impl Sphere {
             self.epoch = now;
         }
         let fade = self.fade(now);
-        // The texels in view, per face: the box around where every other cell lands, with room for the texels
-        // between them (up to three times finer than the grid at a face's corners)
+        // The texels the frame covers, per face: the box around where every other covered cell lands, with room for
+        // the texels between them (up to three times finer than the grid at a face's corners)
         let mut boxes = [(usize::MAX, usize::MAX, 0usize, 0usize); 6];
         for j in (0..grid.1).step_by(2).chain([grid.1 - 1]) {
             for i in (0..grid.0).step_by(2).chain([grid.0 - 1]) {
+                let near = |i: usize, j: usize| coverage[j.min(grid.1 - 1) * grid.0 + i.min(grid.0 - 1)] > 0.01;
+                if !(near(i, j) || near(i + 1, j) || near(i, j + 1) || near(i + 1, j + 1)) { continue; }
                 let w = view.dir(i as f32 / grid.0 as f32, j as f32 / grid.1 as f32);
                 let (face, x, y) = to_face(&w, n);
                 let b = &mut boxes[face];
@@ -223,36 +281,68 @@ impl Sphere {
                 *b = (b.0.min(x.saturating_sub(8)), b.1.min(y.saturating_sub(8)), b.2.max((x + 9).min(n)), b.3.max((y + 9).min(n)));
             }
         }
-        let (gw, gh) = grid;
+        // Each texel row is a slice of its own, so the rows go to a few threads, taken in turn: the rows of a box
+        // aren't all as busy
+        let mut weight_rows: Vec<Option<&mut [f32]>> = self.weight.chunks_mut(n).map(Some).collect();
+        let mut plane_rows: Vec<Vec<Option<&mut [f32]>>> = self.planes.iter_mut().map(|p| p.chunks_mut(n).map(Some).collect()).collect();
+        let mut work: Vec<Vec<Row>> = (0..THREADS).map(|_| Vec::new()).collect();
         for (face, &(x0, y0, x1, y1)) in boxes.iter().enumerate() {
             for y in y0..y1 {
-                // Along a row of a face the direction, and so the camera's, steps by the same amount
-                let start = from_face(face, x0 as f32 + 0.5, y as f32 + 0.5, n);
-                let mut d = view.rot.tr_mul(&start);
-                let step = view.rot.tr_mul(&(from_face(face, x0 as f32 + 1.5, y as f32 + 0.5, n) - start));
-                for x in x0..x1 {
-                    if x > x0 { d += step; }
-                    let Some((u, v)) = view.project_camera(&d) else { continue };
-                    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { continue; }
-                    // Bilinear on the grid, the same taps for the coverage and the planes
-                    let (gx, gy) = ((u * gw as f32).min((gw - 1) as f32), (v * gh as f32).min((gh - 1) as f32));
-                    let (cx, cy) = (gx as usize, gy as usize);
-                    let (fx, fy) = (gx - cx as f32, gy - cy as f32);
-                    let (k00, k01) = (cy * gw + cx, cy * gw + (cx + 1).min(gw - 1));
-                    let down = if cy + 1 < gh { gw } else { 0 };
-                    let taps = [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)];
-                    let at = |g: &[f32]| taps.iter().map(|&(k, t)| g[k] * t).sum::<f32>();
-                    let c = at(coverage);
-                    if c <= 0.01 { continue; }
-                    let i = face * n * n + y * n + x;
-                    let old = (self.weight[i] * fade).min(1.0) * (1.0 - c);
-                    let total = c + old;
-                    for (p, l) in self.planes.iter_mut().zip(lo) {
-                        p[i] = (at(l) * c + p[i] * old) / total;
-                    }
-                    self.weight[i] = total / fade;
-                }
+                let r = face * n + y;
+                let (Some(weight), Some(planes)) = (weight_rows[r].take(), plane_rows.iter_mut().map(|p| p[r].take()).collect::<Option<Vec<_>>>()) else { continue };
+                let k = work.iter().map(|w| w.len()).enumerate().min_by_key(|&(_, l)| l).map_or(0, |(k, _)| k);
+                work[k].push(Row { face, y, xs: (x0, x1), weight, planes });
             }
+        }
+        std::thread::scope(|scope| {
+            for rows in work {
+                scope.spawn(move || for row in rows { row.write(n, frame, fade) });
+            }
+        });
+    }
+}
+
+const THREADS: usize = 4;
+
+/// One row of a face's texels, from `xs.0` to `xs.1`, to be written
+struct Row<'a> {
+    face: usize,
+    y: usize,
+    xs: (usize, usize),
+    /// The whole row of the weights and of each plane
+    weight: &'a mut [f32],
+    planes: Vec<&'a mut [f32]>,
+}
+
+impl Row<'_> {
+    fn write(self, n: usize, frame: &GridFrame, fade: f32) {
+        let (view, (gw, gh), lo, coverage) = (frame.view, frame.grid, frame.planes, frame.coverage);
+        let (face, y, (x0, x1)) = (self.face, self.y, self.xs);
+        // Along a row of a face the direction, and so the camera's, steps by the same amount
+        let start = from_face(face, x0 as f32 + 0.5, y as f32 + 0.5, n);
+        let mut d = view.rot.tr_mul(&start);
+        let step = view.rot.tr_mul(&(from_face(face, x0 as f32 + 1.5, y as f32 + 0.5, n) - start));
+        let mut planes = self.planes;
+        for x in x0..x1 {
+            if x > x0 { d += step; }
+            let Some((u, v)) = view.project_camera(&d) else { continue };
+            if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { continue; }
+            // Bilinear on the grid, the same taps for the coverage and the planes
+            let (gx, gy) = ((u * gw as f32).min((gw - 1) as f32), (v * gh as f32).min((gh - 1) as f32));
+            let (cx, cy) = (gx as usize, gy as usize);
+            let (fx, fy) = (gx - cx as f32, gy - cy as f32);
+            let (k00, k01) = (cy * gw + cx, cy * gw + (cx + 1).min(gw - 1));
+            let down = if cy + 1 < gh { gw } else { 0 };
+            let taps = [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)];
+            let at = |g: &[f32]| taps.iter().map(|&(k, t)| g[k] * t).sum::<f32>();
+            let c = at(coverage);
+            if c <= 0.01 { continue; }
+            let old = (self.weight[x] * fade).min(1.0) * (1.0 - c);
+            let total = c + old;
+            for (p, l) in planes.iter_mut().zip(lo) {
+                p[x] = (at(l) * c + p[x] * old) / total;
+            }
+            self.weight[x] = total / fade;
         }
     }
 }
@@ -301,7 +391,8 @@ mod tests {
         let lo: Vec<Vec<f32>> = vec![(0..grid.0 * grid.1).map(|k| ((k % grid.0) / 8) as f32).collect()];
         let coverage = vec![1.0; grid.0 * grid.1];
         let mut s = Sphere::new(a.cells_per_radian(grid.0), 1, 3.0);
-        s.write(&a, grid, &lo, &coverage, 0.0);
+        s.write(&GridFrame { view: &a, grid, planes: &lo, coverage: &coverage }, 0.0);
+        assert!(s.mismatch(&GridFrame { view: &a, grid, planes: &lo, coverage: &coverage }, 0.0).unwrap() < 0.3);
         let mut out = [0.0f32];
         let mut checked = 0;
         for i in 0..grid.0 {
@@ -327,7 +418,7 @@ mod gyroflow_geometry {
     use nalgebra::{ UnitQuaternion, Vector3 };
     use gyroflow_core::StabilizationManager;
     use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma16, Stabilization, undistort_points_with_rolling_shutter };
-    use super::View;
+    use super::{ View, wide_params };
     use crate::{ PlaneJob, PlaneStab, process_plane };
 
     const SIZE: (usize, usize) = (1920, 1080);
@@ -431,8 +522,8 @@ mod gyroflow_geometry {
         let (xs, ys) = (read(0), read(1));
         let view = View::at(p, ts);
         let (mut worst, mut n) = (0.0f32, 0);
-        for j in (5..oh - 5).step_by(13) {
-            for i in (5..ow - 5).step_by(23) {
+        for j in (5..oh - 5).step_by(7) {
+            for i in (5..ow - 5).step_by(11) {
                 let (x, y) = (xs[j * ow + i] as f32 / 16.0, ys[j * ow + i] as f32 / 16.0);
                 let want = source_pixel(p, &view.dir(i as f32 / ow as f32, j as f32 / oh as f32), t_ms);
                 // Off the source, or at its edge where the interpolation takes in the background
@@ -457,6 +548,28 @@ mod gyroflow_geometry {
         rendered(&params(&stab, 0.0, (0.0, 0.0), 25.0), 500.0, "turning, rolling shutter");
         for t_ms in [500.0, 2345.0, 7010.0] {
             rendered(&params(&stab, 7.0, (0.04, -0.03), 25.0), t_ms, "all");
+            rendered(&wide_params(params(&stab, 7.0, (0.04, -0.03), 25.0)), t_ms, "wide");
+        }
+    }
+
+    /// The source's corners and the middles of its sides all land in the wide view while the camera turns: a
+    /// fisheye seeing 57 degrees to its corners, shaken by up to 16 degrees off the smoothed view
+    #[test]
+    fn the_wide_view_holds_the_source() {
+        let stab = manager(true);
+        let p = wide_params(params(&stab, 0.0, (0.04, -0.03), 0.0));
+        for t_ms in (0..20).map(|k| 250.0 + k as f64 * 480.0) {
+            let view = View::at(&p, (t_ms * 1000.0) as i64);
+            let o = p.gyro.read().org_quat_at_timestamp(t_ms);
+            for (x, y) in [(0.0, 0.0), (960.0, 0.0), (1920.0, 0.0), (0.0, 540.0), (1920.0, 540.0), (0.0, 1080.0), (960.0, 1080.0), (1920.0, 1080.0)] {
+                // The ray the lens images there, in the world: camera = D · body
+                let (dx, dy) = ((x - 960.0) / F, (y - 540.0) / F);
+                let theta = dx.hypot(dy);
+                let s = Vector3::new(dx / theta * theta.sin(), dy / theta * theta.sin(), theta.cos());
+                let w = o * Vector3::new(s.x, -s.y, -s.z);
+                let (u, v) = view.project(&nalgebra::convert(w)).unwrap();
+                assert!((0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v), "{t_ms} ms: the source's ({x}, {y}) is at ({u}, {v})");
+            }
         }
     }
 }

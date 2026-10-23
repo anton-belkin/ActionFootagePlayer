@@ -49,7 +49,10 @@ made by `src/project.rs` with gyroflow-core's own project writer) to open it in 
   have content). The sphere trail (`src/sphere.rs`) keeps the same grid by direction instead, in a cube map about
   as fine as the grid: each output cell's direction is the kernel's own geometry (output projection, smoothed
   orientation, video rotation, zoom center), the same for every row because the stabilized frame has the rolling
-  shutter undone. The unit tests hold it against Gyroflow's CPU kernel to 0.25 source pixels. The mode comes
+  shutter undone. It's written every frame from a view of its own, rendered like the coarse frame but centered,
+  equidistant and 1.6x as wide as the unzoomed source (on a grid as much bigger), so the whole source frame lands
+  in it, shake and all, and what the output's zoom crops away is kept too. The unit tests hold the directions
+  against Gyroflow's CPU kernel to 0.25 source pixels, the wide view's included. The mode comes
   from a control file rather than a filter argument, so switching it doesn't rebuild mpv's filter chain (7-15
   dropped frames each time).
 - **wgpu (Metal), several GPU workers.** Each frame is uploaded, rendered and read back in blocking calls,
