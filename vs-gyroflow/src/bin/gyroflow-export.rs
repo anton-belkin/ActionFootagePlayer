@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// `gyroflow-export <video>...`: renders videos the way mpv plays them, stabilized and with the D-Log M LUT, in one
+// `gyroflow-export <video>...`: renders videos the way mpv plays them, stabilized and with the log curve's LUT, in one
 // pass: decode -> Gyroflow (the plugin's own engine, on the GPU) -> LUT -> encode. The source is decoded and
 // encoded once, so there's no intermediate file to lose quality in.
 //
 // It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
-// embedded in it, or the clip's own motion data with the default preset) and the LUT from the color profile in
-// the camera's metadata, as the dlogm plugin does. Clips there's nothing to stabilize with are skipped.
+// embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
+// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
+// nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
+// clip with neither is skipped, there being nothing to change. --fov and --edges give it the gyroflow plugin's wider
+// view and edge fill (edges.rs), as the plugin passes them to the VapourSynth filter.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
 // LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,
 // as for the plugins (ActionFootagePlayer keeps your preset and DJI's LUT there, its own copy of the plugins being
 // read-only).
 //
-// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov), 10-bit
-//   D-Log M:        HEVC Main10, Rec.2100 HLG (luts/dlogm_hlg.cube), or Rec.709 with --sdr (DJI's LUT)
+// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only,
+// _color instead of _stab), 10-bit
+//   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
 // Audio is copied as it is; the file gets the source's dates.
@@ -40,14 +44,23 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut } };
+use vs_gyroflow::{ Engine, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for D-Log M, color-converted) into a stabilized/ folder next to it.
+Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it. A log
+video with nothing to stabilize it with is color-converted only.
 
+  --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
+                   one the camera's metadata says
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
+  --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
+  --fov <x>        Gyroflow's FOV (Advanced) instead of the project's: the gyroflow plugin's wider view (wide_fov)
+  --edges <mode>   what fills the edges the stabilized frame leaves: sphere, trail, original, zoom, or off (the
+                   project's background color, the default)
+  --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
+  --edges-zoom <x> how much the zoom fill scales the frame up (default 1.5)
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
@@ -61,9 +74,18 @@ Renders each video stabilized (and, for D-Log M, color-converted) into a stabili
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
                    SIGUSR1/SIGUSR2)";
 
+// The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
+const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
+
 struct Options {
+    // None: from the metadata; Some(None): none
+    curve: Option<Option<&'static str>>,
     sdr: bool,
+    no_stabilize: bool,
     horizon_lock: Option<f64>,
+    fov: Option<f64>,
+    edges: EdgeMode,
+    edge_settings: EdgeSettings,
     prores: bool,
     from: Option<f64>,
     to: Option<f64>,
@@ -78,16 +100,32 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { sdr: false, horizon_lock: None, prores: false, from: None, to: None, out: None, force: false,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, fov: None,
+                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().unwrap_or_else(|| fail(&format!("{name} needs a value")));
         match a.as_str() {
+            "--curve" => opts.curve = Some(match value("--curve").as_str() {
+                "none" => None,
+                c => Some(CURVES.iter().find(|(id, _)| *id == c).map(|(id, _)| *id)
+                    .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, none)")))),
+            }),
             "--sdr" => opts.sdr = true,
+            "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
+            // The ranges the VapourSynth filter takes them in (lib.rs)
+            "--fov" => opts.fov = Some(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
+                .unwrap_or_else(|| fail("--fov takes a number above 0")).clamp(0.1, 4.0)),
+            "--edges" => { let v = value("--edges"); opts.edges = EdgeMode::parse(&v)
+                .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, original, zoom, trail, sphere)"))); }
+            "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
+                .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
+            "--edges-zoom" => opts.edge_settings.zoom = value("--edges-zoom").parse::<f32>()
+                .unwrap_or_else(|_| fail("--edges-zoom takes a number")).clamp(1.0, 4.0),
             "--prores" => opts.prores = true,
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
@@ -405,6 +443,16 @@ fn lut(name: &str) -> Result<PathBuf, String> {
     if p.is_file() { Ok(p) } else { Err(format!("{} is missing (install the dlogm plugin: install.sh)", p.display())) }
 }
 
+// The YUV matrix the video is decoded with, as mpv does: the one it's tagged with, else BT.709 (DJI tags D-Log M
+// BT.709; a GoPro's or Insta360's 10-bit may be tagged BT.2020). By the names of ffmpeg's scale and gpu_lut
+fn yuv_matrix(tag: Option<&str>) -> &'static str {
+    match tag {
+        Some("bt2020nc" | "bt2020c") => "bt2020",
+        Some("smpte170m" | "bt470bg") => "bt601",
+        _ => "bt709",
+    }
+}
+
 // ffmpeg's filter syntax: quote the path for the option value, then for the filter graph
 fn filter_path(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "\\\\").replace('\'', "\\'").replace(':', "\\:");
@@ -413,11 +461,14 @@ fn filter_path(p: &Path) -> String {
 
 fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
-    let source = match find_source(&path) {
-        Ok(s) => s,
-        Err(why) => return Ok(Outcome::Skipped(why)),
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path) };
+    let source = match (source, curve) {
+        (Ok(s), _) => Some(s),
+        (Err(_), Some(_)) => None,
+        (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
-    let color = probe::color_profile(&path.to_string_lossy());
     let info = ffprobe(&path)?;
 
     let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
@@ -427,7 +478,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (None, None) => String::new(),
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
-    let stem = format!("{stem}_stab{range}");
+    let stem = format!("{stem}_{}{range}", if source.is_some() { "stab" } else { "color" });
     let out_path = out_dir.join(format!("{stem}.mov"));
     if out_path.exists() && !opts.force {
         return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
@@ -435,18 +486,22 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let tmp_path = out_dir.join(format!(".{stem}.partial.mov"));
 
-    // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's BT.709
-    // matrix and range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs)
-    // when the output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed
+    // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
+    // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
+    // output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed. Only D-Log M has a Rec.709 LUT:
+    // the others are HLG whatever --sdr says, as they play
     let in_range = if info.full_range { "pc" } else { "tv" };
+    let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
-    let (graph, tags, color_label) = if color == Some("dlogm") {
-        let (cube, matrix, primaries, transfer, label) = if opts.sdr {
-            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", "D-Log M -> Rec.709")
+    let (graph, tags, color_label) = if let Some(curve) = curve {
+        let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
+        let (cube, matrix, primaries, transfer, label) = if opts.sdr && curve == "dlogm" {
+            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709"))
         } else {
-            (lut("dlogm_hlg.cube")?, "bt2020", "bt2020", "arib-std-b67", "D-Log M -> HLG")
+            let no_sdr = if opts.sdr { " (no Rec.709 LUT for it)" } else { "" };
+            (lut(&format!("{curve}_hlg.cube"))?, "bt2020", "bt2020", "arib-std-b67", format!("{name} -> HLG{no_sdr}"))
         };
-        let graph = format!("scale=in_color_matrix=bt709:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
+        let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
                              scale=out_color_matrix={matrix}:out_range=tv", filter_path(&cube));
         lut_job = Some((cube, matrix, graph));
         let space = if matrix == "bt2020" { "bt2020nc" } else { "bt709" };
@@ -458,7 +513,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
             info.matrix.clone().unwrap_or_else(|| "bt709".into()),
             in_range.to_string(),
         ];
-        (String::new(), tags, "colors as recorded")
+        (String::new(), tags, "colors as recorded".to_string())
     };
 
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
@@ -468,20 +523,31 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let first_frame = (from * fps - 1e-6).ceil().max(0.0) as u64;
     let total_frames = if opts.from.is_some() || opts.to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) };
 
-    // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size
+    // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size. Color only: none,
+    // the frames go to the LUT as they are decoded
     let (w, h) = (info.width & !1, info.height & !1);
     let workers = 3;
     let key = format!("export|{}", path.display());
-    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, opts.horizon_lock, (w, h), 3, (1, 1), None,
-                                       SampleKind::U16, 1023.0, true, opts.interpolation, workers)?);
-    let (ow, oh) = (engine.render_size.0 & !1, engine.render_size.1 & !1);
+    let engine = match &source {
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, (w, h), 3, (1, 1), None,
+                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
+        None => None,
+    };
+    // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to
+    // fill: off then, which saves the mask rendered for each frame and gives the same frames
+    let edges = match &engine {
+        Some(e) if e.uncovered_frames.0 > 0 => opts.edges,
+        _ => EdgeMode::Off,
+    };
+    if let Some(e) = &engine { e.edges.configure(edges, opts.edge_settings, None); }
+    let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 
     let mut graph = graph;
     let gpu_lut = match lut_job {
         None => None,
         Some((cube, matrix, cpu_graph)) => {
             let out_matrix = gpu_lut::matrix_coefficients(matrix).unwrap();
-            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients("bt709").unwrap(), info.full_range, out_matrix) {
+            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix) {
                 Ok(l) => Some(l),
                 Err(e) => {
                     eprintln!("  LUT on the CPU (slower): {e}");
@@ -493,7 +559,10 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
 
     let duration_label = { let t = (to - from).max(0.0) as u64; format!("{}:{:02}", t / 60, t % 60) };
-    eprintln!("{}: {color_label} · {} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), source.label, w, h);
+    let mut source_label = source.as_ref().map_or("color only", |s| s.label).to_string();
+    if let (Some(fov), Some(_)) = (opts.fov, &source) { source_label += &format!(", FOV {fov}"); }
+    if edges != EdgeMode::Off { source_label += &format!(", edges {}", format!("{edges:?}").to_lowercase()); }
+    eprintln!("{}: {color_label} · {source_label} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), w, h);
 
     if stopped() { return Err("cancelled".into()); }
     let enc = pick_encoder(opts)?;
@@ -566,7 +635,6 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
     });
     let frame_rx = Arc::new(Mutex::new(frame_rx));
-    let frame_offset_us = engine.frame_offset_us;
     let gpu_threads: Vec<_> = (0..workers).map(|_| {
         let (frame_rx, done_tx, engine) = (frame_rx.clone(), done_tx.clone(), engine.clone());
         let full_range = info.full_range;
@@ -574,22 +642,26 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         std::thread::spawn(move || {
             loop {
                 let Ok((n, src)) = frame_rx.lock().recv() else { break };
-                let mut dst = vec![0u8; out_frame];
-                // Frame times from the start of the file, as Gyroflow and mpv count them
-                let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + frame_offset_us;
-                let mut planes = Vec::with_capacity(3);
-                let (mut so, mut doff) = (0, 0);
-                for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
-                    planes.push(PlaneJob {
-                        src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
-                        dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
-                    });
-                    so += sw * sh * 2;
-                    doff += dw * dh * 2;
-                }
-                let result = engine.process(timestamp_us, planes, !full_range)
-                    .and_then(|_| match lut.as_mut() { Some(l) => l.apply(&mut dst), None => Ok(()) })
-                    .map(|_| dst);
+                let frame = match &engine {
+                    None => Ok(src),
+                    Some(engine) => {
+                        let mut dst = vec![0u8; out_frame];
+                        // Frame times from the start of the file, as Gyroflow and mpv count them
+                        let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                        let mut planes = Vec::with_capacity(3);
+                        let (mut so, mut doff) = (0, 0);
+                        for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
+                            planes.push(PlaneJob {
+                                src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
+                                dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
+                            });
+                            so += sw * sh * 2;
+                            doff += dw * dh * 2;
+                        }
+                        engine.process(timestamp_us, planes, !full_range).map(|_| dst)
+                    }
+                };
+                let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|_| f), None => Ok(f) });
                 if done_tx.send((n, result)).is_err() { break; }
             }
         })

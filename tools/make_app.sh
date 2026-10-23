@@ -68,16 +68,15 @@ gyroflow="$res/plugins/gyroflow"
 telemetry="$res/plugins/dji-telemetry"
 menu="$res/plugins/footage-menu"
 mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$menu"
-install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua "$dlogm/"
+install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
-install -m 644 luts/dlogm_hlg.cube "$dlogm/luts/dlogm_hlg.cube"
-# The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py)
-cubes=$(mktemp -d)
+install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
+# The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
+# for gyroflow-export
 for curve in dlog gplog2 ilog; do
-    python3 -I tools/make_hdr_lut.py "$curve" "$cubes/$curve.cube" >/dev/null
-    python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$cubes/$curve.cube" "$dlogm/shaders/${curve}_hlg.glsl" >/dev/null
+    python3 -I tools/make_hdr_lut.py "$curve" "$dlogm/luts/${curve}_hlg.cube" >/dev/null
+    python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$dlogm/luts/${curve}_hlg.cube" "$dlogm/shaders/${curve}_hlg.glsl" >/dev/null
 done
-rm -rf "$cubes"
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$dlogm/shaders/gplog_hlg.glsl" >/dev/null
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"

@@ -26,13 +26,16 @@
 --   units metric|imperial
 --   field <name> [yes|no]      show a field or not (without yes or no: the other way round); a field shown anew
 --                              goes after the others
---   remember                   these, and whether it shows, as the defaults in dji_telemetry.conf
+--   remember                   these, and whether it shows, as the defaults in dji_telemetry.conf (the fields
+--                              only once picked: until then each clip gets its own, as without fields=)
 -- The state is in user-data/dji_telemetry/ for the menu: available (the file has telemetry it reads), model (the
 -- camera's, as its telemetry says), visible,
 -- position, units, and shown/<field> for each field.
 --
 -- Options (~~/script-opts/dji_telemetry.conf):
---   fields=depth,water   which, from the list above
+--   fields=              which, from the list above. Not set: each clip's own, those of depth, water, gps, speed
+--                        it has (DJI: depth and in water; GoPro with a GPS fix: GPS and speed), else exposure (a
+--                        GoPro without GPS, as the HERO12)
 --   units=metric         or imperial: feet, mph, °F
 --   position=bottom-left top-left, top-right, bottom-right (top left has mpv's messages, top right the exports'
 --                        progress)
@@ -44,7 +47,7 @@ local options = require 'mp.options'
 local utils = require 'mp.utils'
 local telemetry = require 'telemetry'
 
-local o = { fields = "depth,water", units = "metric", position = "bottom-left", font_size = 28, visible = true }
+local o = { fields = "", units = "metric", position = "bottom-left", font_size = 28, visible = true }
 options.read_options(o, "dji_telemetry")
 
 local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrf = true, lrv = true }
@@ -153,6 +156,10 @@ local FIELDS = {
     end },
 }
 
+-- Without fields=: what a clip shows, those of these it has, and if none, the fallback
+local DEFAULT_FIELDS = { "depth", "water", "gps", "speed" }
+local FALLBACK_FIELDS = { "exposure" }
+
 -- The fields shown, in order, and the telemetry values they read
 local fields, wanted = {}, {}
 local function set_fields(names)
@@ -169,9 +176,12 @@ local function set_fields(names)
         end
     end
 end
+-- Whether the fields are each clip's own: fields= isn't set, and none picked in the menu
+local per_clip
 do
     local names = {}
     for name in o.fields:gmatch("[^,%s]+") do names[#names + 1] = name end
+    per_clip = #names == 0
     set_fields(names)
 end
 
@@ -230,10 +240,40 @@ end
 -- The values the file was read for
 local read_for = {}
 
+-- Whether a field shows anything in the clip: its line at each time one of its values changes
+local function has(name)
+    for _, v in ipairs(FIELDS[name].values) do
+        local series = track.values[v]
+        for _, t in ipairs(series and series.t or {}) do
+            if FIELDS[name].line(function(n) return telemetry.at(track.values[n], t) end) then return true end
+        end
+    end
+    return false
+end
+
+-- The clip's own fields: the defaults it has, else the fallbacks it has
+local function own_fields()
+    for _, names in ipairs({ DEFAULT_FIELDS, FALLBACK_FIELDS }) do
+        local found = {}
+        for _, name in ipairs(names) do
+            if has(name) then found[#found + 1] = name end
+        end
+        if #found > 0 then return found end
+    end
+    return {}
+end
+
 -- The file's telemetry, the values the fields read
 local function load()
     track, shown, read_for = nil, nil, {}
     overlay:remove()
+    -- Each clip's own fields are picked once it's read: it's read for all the ones it could have
+    if per_clip then
+        local names = {}
+        for _, name in ipairs(DEFAULT_FIELDS) do names[#names + 1] = name end
+        for _, name in ipairs(FALLBACK_FIELDS) do names[#names + 1] = name end
+        set_fields(names)
+    end
     local path = mp.get_property("path")
     if not path or path:find("://", 1, true) or #wanted == 0 then return end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
@@ -246,7 +286,8 @@ local function load()
         mp.msg.verbose("no telemetry with a known layout")
         return
     end
-    mp.msg.verbose("telemetry: " .. track.model)
+    if per_clip then set_fields(own_fields()) end
+    mp.msg.verbose("telemetry: " .. track.model .. ", showing " .. table.concat(fields, ","))
     update()
 end
 
@@ -306,7 +347,7 @@ mp.register_script_message("field", function(name, on)
         return
     end
     set_fields(names)
-    visible = true
+    per_clip, visible = false, true
     -- Values it didn't read are read now: the file is read again
     local reread = false
     for _, v in ipairs(wanted) do
@@ -350,7 +391,8 @@ local function save_options(values)
 end
 
 mp.register_script_message("remember", function()
-    local saved = save_options({ fields = table.concat(fields, ","), units = imperial and "imperial" or "metric",
-                                 position = corner, visible = visible and "yes" or "no" })
+    local saved = save_options({ fields = per_clip and "" or table.concat(fields, ","),
+                                 units = imperial and "imperial" or "metric", position = corner,
+                                 visible = visible and "yes" or "no" })
     mp.osd_message(saved and "Telemetry: saved as the defaults (dji_telemetry.conf)" or "Telemetry: couldn't write dji_telemetry.conf", 2)
 end)

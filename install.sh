@@ -194,6 +194,7 @@ fi
 put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
 put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
+put mpv/scripts/dlogm/video_color.lua "$DLOGM/video_color.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
 for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
@@ -201,6 +202,10 @@ done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
+put luts/gplog_hlg.cube             "$DLOGM/luts/gplog_hlg.cube" 644
+for curve in $HDR_CURVES; do
+    put "$BUILD/${curve}_hlg.cube"  "$DLOGM/luts/${curve}_hlg.cube" 644
+done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 
 # The gyroflow plugin

@@ -31,8 +31,8 @@ ready for your phone.
   bends light (on a test clip, the jitter between frames went from 0.16 px to 0.02 px).
   <!-- before/after GIF of an underwater clip here: this is the proof divers need -->
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
-- **One key to share**: mark the moment, press `Shift+E`, and get a stabilized file that an iPhone, a Mac or
-  YouTube shows in HDR.
+- **One key to share**: mark the moment, press `Shift+E`, and get a file as it plays, stabilized or not, that an
+  iPhone, a Mac or YouTube shows in HDR.
 
 ## Who it's for
 
@@ -46,8 +46,8 @@ watch and share. [Why that works](#why-log-and-why-hdr)
 corner, and the turtle is on everyone's phone the same evening. [Back from the dive](#example-back-from-the-dive)
 
 **You already shoot log and grade.** This is the step between the card and your editor. Stabilization and the
-log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass
-(D-Log M so far, see [Known issues](#known-issues)): no project, no render, no separate grading step. In Gyroflow,
+log-to-HDR conversion happen together, while the clip plays, and `Shift+E` exports exactly that in one pass:
+no project, no render, no separate grading step. In Gyroflow,
 stabilization is a render of its own, and the color comes later in an editor. Go through a card's worth of clips
 with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT; open a clip
 in Gyroflow with one key to fine-tune it and see the result back in playback when you save; batch-export ProRes
@@ -111,17 +111,17 @@ this reads):
 
 | | Log in color: HDR, Rec.709 LUT ¹ | Stabilized from the camera's gyro, no project ² | Stabilized with a Gyroflow project ² | Telemetry ³ | Export what you see ² |
 |---|---|---|---|---|---|
-| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 |
+| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 (`Ctrl+s`) |
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | should work, with a project |
-| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
+| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS and speed; exposure on one without GPS | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | should work, with a project |
 
 **verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
 published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
-Export covers the clips that play stabilized, and not all of what plays yet: see [Known issues](#known-issues). Details, and how clips from your camera
+Export covers what plays: stabilized, in color, or both. Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet: the Windows app
@@ -133,7 +133,7 @@ carries the same plugins, and on Linux they're in an mpv of your own:
    Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
 4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
-   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), and not in exports yet. `Ctrl+l`
+   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
    picks the curve for a clip whose metadata doesn't say it.
 
 ## Install
@@ -213,8 +213,8 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips | `dlogm/sdr`, `dlogm/hdr` |
-| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
+| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
+| `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
@@ -244,7 +244,7 @@ with commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`):
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
-| `dji_telemetry.conf`: `fields=depth,water` | what to show, in that order (see Telemetry) |
+| `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
@@ -342,9 +342,12 @@ full rate, 85 %.
 
 ### Exporting
 
-`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset, the horizon
-locked or not as the menu has it, and for D-Log M the same LUT: HDR, or DJI's Rec.709 one in the standard look
-(`Ctrl+s`; the menu's Export in standard look does that whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+`Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
+plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
+of `Ctrl+g` at the FOV it plays with, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
+has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
+or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
+whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -365,18 +368,32 @@ The same from a terminal, for one clip or many:
 
 The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
 
-- **D-Log M:** HEVC Main10, Rec.2100 HLG, tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes it
-  Rec.709 with DJI's LUT instead.
-- **Other clips:** HEVC Main10 in the colors they were recorded in.
+- **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
+  reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,
+  `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
+  DJI's LUT instead.
+- **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
+- `--fov <x>` renders at that FOV (the wider view's `wide_fov`), `--edges sphere|trail|original|zoom|off` fills the
+  edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
+  background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
-- Audio is copied as it is, and the file keeps the clip's dates. Clips with nothing to stabilize them with are
-  skipped; an existing output is kept unless `--force`.
+- **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
+  `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
+  as `<name>_color.mov` in the same folder, at the clip's own size. Clips with neither, nothing to stabilize and
+  not log, are skipped: there's nothing to change.
+- Audio is copied as it is, and the file keeps the clip's dates. An existing output is kept unless `--force`.
 - `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
 
+Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
+an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
+for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it tone-mapped
+to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
+
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
-playback uses). The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
+playback uses), without edges to fill. Filling them costs more: the export fills every frame, where playback above
+`max_fps` plays every other one. The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
 stabilizes it on the GPU, the LUT is applied on the GPU too (`vs-gyroflow/src/gpu_lut.rs`, the shader's math),
 and ffmpeg encodes it with VideoToolbox.
 
@@ -384,8 +401,7 @@ and ffmpeg encodes it with VideoToolbox.
 
 DJI cameras record, next to the video, a message per frame with what the camera knew at that moment, and GoPro
 cameras about a second of it at a time (GPMF). The dji-telemetry plugin reads all of it when a clip opens and
-shows, by default, the depth and whether the camera is in the water, bottom left. Each field shows when the clip
-has it:
+shows it bottom left. Each field shows when the clip has it:
 
 | `fields=` | |
 |---|---|
@@ -399,7 +415,12 @@ has it:
 | `heartrate` | from a device paired with an Osmo 360 |
 | `exposure` | ISO, shutter, aperture, white balance |
 
-GoPro records GPS, shutter, ISO and white balance, and no barometer: for its clips set `fields=gps,speed,exposure`.
+Without `fields=`, each clip shows what it has of `depth`, `water`, `gps` and `speed`, and `exposure` only when it
+has none of them: a DJI clip shows the depth and whether the camera is in the water, a GoPro one the position and
+speed once the GPS has a fix (GoPro has no barometer), and a GoPro without GPS (HERO12 Black), or with it off, the
+exposure. Exposure isn't shown next to the others by default: it's a long line that changes all the time, so it's
+there for the asking (`fields=`, or the right-click menu). A `fields=` you set is shown as it is, in every clip, and
+so are fields picked in the menu, from then on (Remember as default keeps them).
 
 **In a dive housing the depth isn't recorded.** The barometer then measures the air in the housing (1050-1100 hPa
 whatever the depth), and the camera doesn't set its in-water flag; `water` still shows *In water*, from the picture.
@@ -679,7 +700,7 @@ beyond stock Gyroflow.
 The metadata track (the first with a `meta` handler, as for D-Log M) holds one protobuf message per frame,
 `ProductMeta` in DJI's `dvtm_*.proto`: the clip's and the stream's metadata in the first, then `FrameMeta` in each.
 `mpv/scripts/dji-telemetry/telemetry.lua` finds every sample through the track's sample table (`stts`, `stsc`,
-`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the fields the chosen `fields=` need,
+`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the values the fields shown need,
 along paths of field numbers per model (`LAYOUTS`, by `proto_file_name`). Each value is kept only where it changes;
 `main.lua` looks it up by `time-pos` and redraws the OSD overlay (ASS) when the text changes. A 3.7-minute 4K60 clip
 (2.5 GB) is read in 0.4 s.
@@ -776,15 +797,6 @@ same in every LUT it writes):
 
 Each goes from here once it's fixed.
 
-- **`Shift+E` exports D-Log M in HDR even after `Ctrl+s`.** Rec.709 is `gyroflow-export --sdr` in a terminal for
-  now. [#21](https://github.com/anton-belkin/ActionFootagePlayer/issues/21)
-- **The export has neither the wider view of `Ctrl+g` nor the edge fill.** It renders the project or the default
-  preset as Gyroflow would, edges in the project's background color.
-  [#22](https://github.com/anton-belkin/ActionFootagePlayer/issues/22)
-- **Only D-Log M is exported in HDR.** D-Log, GP-Log, GP-Log2 and 10-bit I-Log play in HDR but export flat, as
-  recorded, and so does a curve picked with `Ctrl+l`. [#23](https://github.com/anton-belkin/ActionFootagePlayer/issues/23)
-- **A clip that plays without stabilization isn't exported**, e.g. D-Log M shot with EIS on; and after `Ctrl+g`
-  turns it off, the export is stabilized all the same. [#24](https://github.com/anton-belkin/ActionFootagePlayer/issues/24)
-- **GoPro clips show no telemetry until `fields=` is set** (`fields=gps,speed,exposure` in `dji_telemetry.conf`):
-  the default is depth and in-water, which GoPro doesn't record.
-  [#25](https://github.com/anton-belkin/ActionFootagePlayer/issues/25)
+- **The wider view's FOV is a fixed number** (`wide_fov`, `Ctrl+[` / `Ctrl+]`), which suits some clips and lenses
+  and not others. It should be picked by itself, so the stabilized picture covers about the frame's area.
+  [#32](https://github.com/anton-belkin/ActionFootagePlayer/issues/32)
