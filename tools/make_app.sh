@@ -1,14 +1,15 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds Steady Player.app, with the three mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export and
+#                    camera-telemetry
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS, Resources/Scripts   the applet (macos/player.applescript)
 #   Contents/Resources/mpv.app           the launcher that starts mpv as an app of its own (macos/mpv-launcher.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
-#                                        and dji-telemetry
+#                                        and dji-telemetry, with camera-telemetry
 #   Contents/Resources/setup.sh          the setup, and the export script of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
 #
@@ -57,6 +58,7 @@ for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
+install -m 755 "$bin/camera-telemetry" "$telemetry/camera-telemetry"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 mkdir -p "$res/tools"
@@ -81,7 +83,7 @@ plist="$app/Contents/Info.plist"
     "$plist"
 
 # Inside out: the binaries, the launcher, then the app, which seals the rest
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-embed" "$gyroflow/gyroflow-export"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-embed" "$gyroflow/gyroflow-export" "$telemetry/camera-telemetry"; do
     codesign --force -s - "$f" 2>/dev/null
 done
 codesign --force -s - "$launcher" 2>/dev/null

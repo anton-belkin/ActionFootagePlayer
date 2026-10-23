@@ -5,7 +5,8 @@
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI)
-#   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua)
+#   mpv-dji-telemetry-<version>.zip                     the dji-telemetry plugin alone, the same way (plain Lua,
+#                                                       without camera-telemetry: DJI only)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/
 #   dlogm-gyroflow-player-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
@@ -30,7 +31,7 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export camera-telemetry; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
@@ -56,7 +57,9 @@ rm -rf "dist/$gyroflow" "dist/$gyroflow.zip"
 mkdir -p "dist/$gyroflow/gyroflow"
 git archive HEAD mpv/scripts/gyroflow | tar -x --strip-components 2 -C "dist/$gyroflow"
 mv "dist/$gyroflow/gyroflow/underwater.gyroflow" "dist/$gyroflow/gyroflow/default.gyroflow"
-cp -p "dist/$name/bin/"* "dist/$gyroflow/gyroflow/"
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
+    cp -p "dist/$name/bin/$f" "dist/$gyroflow/gyroflow/"
+done
 (cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow)
 rm -rf "dist/$gyroflow" "dist/$name"
 

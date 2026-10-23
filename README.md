@@ -27,7 +27,8 @@ Player, a Mac app that carries them and opens your MP4s with them:
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT. Plain
   Lua and GPU shaders, so it runs in any mpv on any system (`vo=gpu-next`).
 - **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS, Apple Silicon).
-- **`dji-telemetry`**: the camera's telemetry over the video. Plain Lua, any mpv on any system.
+- **`dji-telemetry`**: the camera's telemetry over the video. Plain Lua for DJI, any mpv on any system; other
+  cameras (GoPro) through a binary built from `vs-gyroflow/` when it's installed (macOS, Apple Silicon).
 
 None needs anything in `mpv.conf` or `input.conf`. Made for the DJI Osmo Action 6 on Apple Silicon; the
 Gyroflow part works with any camera Gyroflow supports when there's a project. Other DJI models, GoPro and Insta360
@@ -63,7 +64,8 @@ setup:
       ~/.config/mpv/scripts/dlogm/shaders/dlogm_lut3d.glsl
   ```
 
-- `mpv-dji-telemetry-<version>.zip` (releases after 0.3.0), on any system: plain Lua.
+- `mpv-dji-telemetry-<version>.zip` (releases after 0.3.0), on any system: plain Lua, DJI only (the binary for other
+  cameras comes with Steady Player, the release tarball and `install.sh`).
 
 - `mpv-gyroflow-0.3.0-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon, with its binaries. Downloaded with
   a browser, they carry the quarantine flag, and macOS would refuse them:
@@ -264,11 +266,13 @@ in the water, bottom left. Each field shows when the clip has it:
 | `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing |
 | `pressure` | hPa, ~100 more per meter of water |
 | `altitude` | the barometer's altitude out of water. It's relative and drifts by meters, so it's a rough guide |
-| `gps` | position, when the camera has a fix (a remote or Mimo connected) |
+| `gps` | position, when the camera has a fix (DJI: a remote or Mimo connected) |
 | `speed` | ground speed from the GPS (Osmo 360 on an e-bike: the bike's) |
 | `temperature` | Osmo 360's image sensor, not the water |
 | `heartrate` | from a device paired with an Osmo 360 |
 | `exposure` | ISO, shutter, aperture, white balance |
+
+For GoPro clips set `fields=gps,speed,exposure`: they have no barometer, so the default shows nothing.
 
 **In a dive housing the depth isn't recorded.** The barometer then measures the air in the housing (1050-1100 hPa
 whatever the depth), and the camera doesn't set its in-water flag; `water` still shows *In water*, from the picture.
@@ -276,8 +280,17 @@ The Osmo Action 6 records no temperature at all: no clip had any.
 
 Models: the Osmo Action 6 (its schema isn't published; the layout was worked out from its recordings with
 `tools/dji_meta_dump.py`, below) and the Osmo 360 (from its schema). No Action 6 clip here had a GPS fix, so its
-`gps` and `speed` follow the Osmo 360's layout and haven't been seen working yet. Clips from other cameras, and
-files that aren't from a camera at all (exports included), show nothing.
+`gps` and `speed` follow the Osmo 360's layout and haven't been seen working yet. Files that aren't from a camera
+at all (exports included) show nothing.
+
+Other cameras are read by `camera-telemetry`, next to the plugin's Lua when it's installed (Steady Player,
+`install.sh`): built from `vs-gyroflow/` with [telemetry-parser](https://github.com/AdrianEddy/telemetry-parser), the
+library Gyroflow reads camera metadata with. It runs in the background as a clip opens, so its values show a
+moment later. So far it reads GoPro's GPS, speed, shutter, ISO and white balance (checked on GoPro's own sample
+clips, HERO5 to 8 and MAX), and the GPS of other cameras telemetry-parser decodes. A clip the Lua reads (the
+models above) stays the Lua's: its layouts are the ones checked on the cameras' recordings, and reading a few GB
+again as playback starts would take CPU from the stabilization. Without the binary (the plain-Lua zip, an mpv on
+Linux or Windows), or when it fails, the plugin reads what the Lua reads, as before.
 
 To look at what a clip recorded, or to work out another model's layout:
 
@@ -297,9 +310,9 @@ things stand:
 |---|---|---|---|
 | DJI Osmo Action 6 | yes | D-Log M | yes |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
-| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | `_D` file name only, a guess | no |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips | no (GP-Log) | no |
-| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | no (I-Log) | no |
+| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | `_D` file name only, a guess | GPS (`camera-telemetry`), not seen |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips | no (GP-Log: the Protune color is in `PTCL`, `FLAT` on a HERO6; what GP-Log writes there isn't known) | GPS, speed, exposure (`camera-telemetry`), checked on GoPro's sample clips |
+| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | no (I-Log) | GPS (`camera-telemetry`), not seen |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
 off, so a wrong guess about a camera means its clips play as they are, not worse.
@@ -378,6 +391,11 @@ along paths of field numbers per model (`LAYOUTS`, by `proto_file_name`). Each v
 On the Action 6 the barometer is `Barometer { is_in_water = 1; altitude_dm = 2; atmospheric_hpa = 3; }` at
 field 13 of the frame's camera part (`3.2.13`); the other camera fields are numbered as on the Osmo 360.
 
+`camera-telemetry` (`vs-gyroflow/src/bin/camera-telemetry.rs`) prints the same kind of series as JSON, under the
+Lua's names where they mean the same (`iso`, `exposure_time`, `white_balance_k`) and its own otherwise
+(`latitude_deg`, `longitude_deg`, `speed_ms`), so `main.lua` shows them with the same fields. GoPro's GPMF values
+are spread evenly over their sample (GPS5 at 18 Hz in samples of a second), and scaled by its `SCAL`.
+
 ## Layout
 
 ```
@@ -393,7 +411,8 @@ shaders/*.glsl.in             shader templates; the LUT goes in at install
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 tools/cube_to_glsl.py         .cube → mpv shader
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export, and
+                              camera-telemetry for the telemetry plugin (Rust)
 macos/                        Steady Player: the applet, its mpv launcher, setup.sh (default app, Quick Actions,
                               DJI's LUT), default-app.py, the Quick Actions' export script
 tools/make_app.sh             builds Steady Player.app, with the plugins in it

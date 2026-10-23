@@ -87,11 +87,16 @@ install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/scripts/gyroflo
 install -m 755 target/release/gyroflow-probe ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-embed ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/camera-telemetry ~/.config/mpv/scripts/dji-telemetry/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
 stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
 or nothing, with the reason.
+
+`camera-telemetry <video>` gives the dji-telemetry mpv plugin the telemetry of cameras its Lua doesn't read (GoPro's
+GPS, speed and exposure; other cameras' GPS), read with telemetry-parser, as JSON (see the top of
+`src/bin/camera-telemetry.rs`).
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
