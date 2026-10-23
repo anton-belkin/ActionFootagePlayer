@@ -118,7 +118,8 @@ impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
     /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
     /// Gyroflow's default preset and then `preset`
-    pub fn load(key: String, project: &str, preset: Option<&str>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `fov`: Gyroflow's FOV (Advanced) instead of the project's; above 1 the view is wider than the zoom covers
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
@@ -154,6 +155,9 @@ impl Engine {
         // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
         // so apply them before smoothing (same as the frei0r plugin)
         stab.recompute_gyro();
+        if let Some(fov) = fov {
+            stab.set_fov(fov);
+        }
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
@@ -596,11 +600,12 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     };
 
     let preset = unsafe { map_get_str(api, input, c"preset") }.filter(|p| !p.is_empty());
+    let fov = unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| v.clamp(0.1, 4.0));
     // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    let engine = match get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers)) {
+    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    let engine = match get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers)) {
         Ok(e) => e,
         Err(e) => return fail(node, e),
     };
@@ -612,6 +617,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let mut edge_settings = edges::EdgeSettings::default();
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_zoom") } { edge_settings.zoom = (v as f32).clamp(1.0, 4.0); }
+    if let Some(v) = unsafe { map_get_i64(api, input, c"edges_expected") } { edge_settings.expected = v != 0; }
     let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
     // Also starts the trail over: mpv reloads the script on every seek
     engine.edges.configure(edge_mode, edge_settings, edge_control);
@@ -639,7 +645,7 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_expected:int:opt;edges_control:data:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
     }
 }

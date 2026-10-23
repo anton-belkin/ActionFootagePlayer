@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, half_rate, edges*). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, half_rate, fov, edges*). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -15,8 +15,9 @@ if not hasattr(core, 'gyroflow'):
 options = {}
 if args.get('preset'):
     options['preset'] = args['preset']
-# What fills the uncovered edges; the control file has the mode and the blur as they change while playing
-for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_control', str)):
+# fov: the wider view (Ctrl+g), in place of the project's FOV. What fills the uncovered edges; the control file has
+# the mode and the blur as they change while playing
+for key, kind in (('fov', float), ('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_expected', int), ('edges_control', str)):
     if args.get(key) is not None:
         options[key] = kind(args[key])
 

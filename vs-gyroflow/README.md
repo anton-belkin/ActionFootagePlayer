@@ -17,6 +17,8 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
+| `edges_expected` | 1 | 1: the view leaves edges (sphere written every frame); 0: only on frames that have some |
+| `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
 | `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
@@ -80,7 +82,10 @@ GPU work itself (`process_pixels`); computing the frame transform is ~0.
 Edge fill, per frame on a GPU worker, with ~20 % of a 4K frame uncovered: mask 2-3 ms, the stabilized frame
 on the grid 4-7 ms (both mostly waiting on the GPU, which the other workers keep busy), fill 1.7 ms, blending
 4 ms; at full 60 fps this cost the underwater 4K60 clip (~63 fps of capacity) a few percent and it dropped
-frames, so the mpv plugin plays clips above 30 fps at half rate: 0 dropped frames after the start.
+frames. The sphere trail adds writing the sphere from a wider view each frame. So the mpv plugin plays clips above 30 fps
+at half rate while edges are expected and filled (a wider FOV): 0 dropped frames after the start, against 70-77 % at
+full rate. Where the view covers (the default preset's zoom), the sphere is written only on frames with edges
+(`edges_expected=0`), and 4K60 plays at full rate.
 
 Matches Gyroflow's own render of the project (CLI, same branch): same mean level, mean abs difference
 0.85/255; what differs is the antialiasing of the black border's edge and single pixels of fine detail

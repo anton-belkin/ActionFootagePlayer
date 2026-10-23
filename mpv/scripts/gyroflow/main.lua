@@ -23,7 +23,8 @@
 -- Windows it's scaled on the CPU, after the copy.
 --
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
---   Ctrl+g   toggle   stabilization on/off for the current file
+--   Ctrl+g   toggle   stabilization on, on with a wider view (wide_fov: the edges show at times, filled as Ctrl+b says),
+--                     off for the current file. On or wide sticks for the next clips
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
@@ -38,8 +39,10 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
---   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30), so the stabilization does
---                half the work; 0: every frame
+--   max_fps=30   while edges are expected and filled (the wider view, or a project that leaves edges; Ctrl+b not
+--                off), clips faster than this play every other frame (a 60 fps clip at 30): the fill is what
+--                doesn't keep up. Otherwise every frame plays. 0: always every frame
+--   wide_fov=1.4 Gyroflow's FOV (Advanced) for the wider view of Ctrl+g: more of the picture, the edges at times
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height (Ctrl+[ and Ctrl+] change it while playing)
@@ -51,7 +54,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 30, wide_fov = 1.4, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -93,12 +96,17 @@ local function find_project(path)
     return nil
 end
 
--- The video size the project was made for (mpv doesn't know the size yet in on_load)
-local function project_video_size(project)
-    local f = io.open(project, "r")
+local function read_json(path)
+    local f = io.open(path, "r")
     if not f then return nil end
     local json = utils.parse_json(f:read("*a"))
     f:close()
+    return json
+end
+
+-- The video size the project was made for (mpv doesn't know the size yet in on_load)
+local function project_video_size(project)
+    local json = read_json(project)
     local info = json and json.video_info
     if not info or not info.width or not info.height then return nil end
     return info.width, info.height, info.fps
@@ -163,10 +171,27 @@ local function write_edge_control()
     f:close()
 end
 
--- Interpolation stays the one for the clip's own rate: at half rate there's headroom for the edge fill instead
+-- On, or on with a wider view (Gyroflow's FOV at wide_fov), for the next clips too; off is per clip
+local view = "normal"
+local VIEW_LABELS = { normal = "on", wide = string.format("on, wider view (FOV %g)", o.wide_fov) }
+
+-- Whether the stabilized frame leaves parts of the output uncovered: the wider view, or a project (or the preset)
+-- whose FOV is above 1 or whose zoom is off. An embedded project isn't read here: taken as covering
+local function leaves_edges(source)
+    if view == "wide" then return true end
+    local settings = source.project:lower():match("%.gyroflow$") and source.project or source.preset
+    local json = settings and read_json(settings)
+    local s = json and json.stabilization
+    if not s then return false end
+    return (tonumber(s.fov) or 1) > 1.001 or tonumber(s.adaptive_zoom_window) == 0
+end
+
+-- Only while edges are expected and filled: on an M1 Pro 4K60 then drops 70-77 % of the frames (sphere or trail), while
+-- the stabilization alone, with edges only where the zoom limit runs out, keeps up (0-9 %). Interpolation stays the
+-- one for the clip's own rate: at half rate there's headroom for the fill instead
 local function half_rate(source)
     local fps = tonumber(source.fps)
-    return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1
+    return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1 and edge_mode ~= "off" and leaves_edges(source)
 end
 
 local function gyroflow_filter(source, enabled)
@@ -177,7 +202,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, half_rate = half_rate(source),
-                                                edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                fov = view == "wide" and o.wide_fov or nil, edges = edge_mode, edges_expected = leaves_edges(source) and 1 or 0, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -186,6 +211,17 @@ local function gyroflow_filter(source, enabled)
 end
 
 local current_source = nil
+
+-- The filter set up again for current_source (another view, or the rate changing with the edge fill); mpv rebuilds
+-- the filter chain, so it costs a few dropped frames
+local function rebuild_filter()
+    if not current_source then return end
+    local vf = mp.get_property_native("vf") or {}
+    for i, f in ipairs(vf) do
+        if f.label == LABEL then vf[i] = gyroflow_filter(current_source, f.enabled) end
+    end
+    mp.set_property_native("vf", vf)
+end
 
 mp.add_hook("on_load", 50, function()
     current_source = nil
@@ -222,11 +258,11 @@ mp.add_hook("on_load", 50, function()
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
-                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (half_rate(source) and ", every other frame" or ""))
+                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "") .. (half_rate(source) and ", every other frame" or ""))
 end)
 
 mp.register_event("file-loaded", function()
-    if current_source then mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind], 1.5) end
+    if current_source then mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (view == "wide" and ", wider view" or ""), 1.5) end
 end)
 
 -- Sticks for the next clips, like the dlogm plugin's modes
@@ -235,8 +271,13 @@ mp.add_key_binding("Ctrl+b", "edges", function()
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
     end
+    local was_half = current_source and half_rate(current_source)
     edge_mode = EDGE_MODES[i % #EDGE_MODES + 1]
     write_edge_control()
+    if current_source and half_rate(current_source) ~= was_half then
+        rebuild_filter()
+        mp.msg.info(half_rate(current_source) and "edges filled: every other frame" or "every frame")
+    end
     mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
 end)
 
@@ -263,17 +304,23 @@ mp.add_key_binding("Ctrl+g", "toggle", function()
         return
     end
     local vf = mp.get_property_native("vf") or {}
-    local enabled = nil
+    local was = nil
     for _, f in ipairs(vf) do
-        if f.label == LABEL then enabled = not f.enabled end
+        if f.label == LABEL then was = f.enabled end
     end
-    if enabled == nil then return end
-    -- The input scaling goes with it: off shows the video as it is
-    for _, f in ipairs(vf) do
-        if f.label == LABEL or f.label == SCALE_LABEL then f.enabled = enabled end
+    if was == nil then return end
+    -- on -> wider view -> off -> on
+    local enabled = not was or view == "normal"
+    if was then view = view == "normal" and "wide" or "normal" end
+    if not was then view = "normal" end
+    for i, f in ipairs(vf) do
+        -- The input scaling goes with it: off shows the video as it is
+        if f.label == SCALE_LABEL then f.enabled = enabled end
+        if f.label == LABEL then vf[i] = gyroflow_filter(current_source, enabled) end
     end
     mp.set_property_native("vf", vf)
-    mp.osd_message(enabled and "Gyroflow: on" or "Gyroflow: off", 1.5)
+    mp.msg.info("stabilization " .. (enabled and VIEW_LABELS[view] or "off") .. (enabled and half_rate(current_source) and ", every other frame" or ""))
+    mp.osd_message("Gyroflow: " .. (enabled and VIEW_LABELS[view] or "off"), 1.5)
 end)
 
 -- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it

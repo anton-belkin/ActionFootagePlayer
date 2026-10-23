@@ -56,9 +56,12 @@ pub struct EdgeSettings {
     pub blur: f32,
     /// How much the zoom fill scales the stabilized frame up
     pub zoom: f32,
+    /// Whether the view leaves edges uncovered (a wider FOV, no zoom): the sphere is then written every frame, to have
+    /// what the camera saw when they show. Otherwise only on frames that have some, since it costs a fifth of 4K60
+    pub expected: bool,
 }
 impl Default for EdgeSettings {
-    fn default() -> Self { EdgeSettings { blur: 0.02, zoom: 1.5 } }
+    fn default() -> Self { EdgeSettings { blur: 0.02, zoom: 1.5, expected: true } }
 }
 
 // The mask's feather, as a fraction of the source height, and how far in it starts: the interpolation's taps
@@ -464,10 +467,11 @@ impl EdgeWorker {
         let mut lap = |i: usize, timing: &mut ([f64; 4], u32)| { timing.0[i] += t.elapsed().as_secs_f64() * 1000.0; t = Instant::now(); };
         process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
         lap(0, &mut self.timing);
+        let blocks = Blocks::new(self.mask_buf.output_of::<u8>(), g.mask);
 
-        // The sphere is written every frame, edges or not: what the camera sees while the output covers is what
-        // fills the edges later
-        if job.mode == EdgeMode::Sphere {
+        // Where edges are expected the sphere is written every frame, edges or not: what the camera sees while the
+        // output covers is what fills the edges later. Elsewhere only when this frame has some to fill
+        if job.mode == EdgeMode::Sphere && (job.settings.expected || blocks.any) {
             let wide = render_grid::<T, P>(&mut self.wide, &mut self.wide_buf, &job.src_lo, timestamp_us, cfg.max_value)?;
             process_plane::<Luma8>(&mut self.wide_mask, timestamp_us, 255.0, &self.wide_mask_buf.job())?;
             let coverage: Vec<f32> = self.wide_mask_buf.output_of::<u8>().iter().map(|&v| v as f32 / 255.0).collect();
@@ -478,7 +482,6 @@ impl EdgeWorker {
         }
 
         let mask = self.mask_buf.output_of::<u8>();
-        let blocks = Blocks::new(mask, g.mask);
         log::trace!("Edges: {} of {} mask blocks to fill at {timestamp_us} us, mask mean {:.1}", blocks.flags.iter().filter(|&&b| b).count(), blocks.flags.len(),
                     mask.iter().map(|&v| v as f32).sum::<f32>() / mask.len() as f32);
         if !blocks.any {

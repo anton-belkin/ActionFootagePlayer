@@ -464,7 +464,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (w, h) = (info.width & !1, info.height & !1);
     let workers = 3;
     let key = format!("export|{}", path.display());
-    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), (w, h), 3, (1, 1), None,
+    let engine = Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), None, (w, h), 3, (1, 1), None,
                                        SampleKind::U16, 1023.0, true, opts.interpolation, workers)?);
     let (ow, oh) = (engine.render_size.0 & !1, engine.render_size.1 & !1);
 
