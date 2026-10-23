@@ -102,7 +102,7 @@ this reads):
 |---|---|---|---|---|---|
 | DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 |
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
-| Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | a guess, by the `_D` file name | should work (EIS off) | should work | not yet | should work |
+| Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
 | DJI drones | not yet | not yet | should work | not yet | should work, with a project |
 | GoPro | not yet (GP-Log) | should work (HyperSmooth off) | should work | should work: GPS, speed, exposure | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | not yet (I-Log) | should work (FlowState off) | should work | not yet | should work |
@@ -174,7 +174,7 @@ them with ActionFootagePlayer from Finder's Open With, or right click → Quick 
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+[` / `Ctrl+]` | Less or more blur of the edge fill (0-10 % of the frame height, shown on screen); it sticks for the next clips | `gyroflow/blur-less`, `gyroflow/blur-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next D-Log M clips | `dlogm/sdr`, `dlogm/hdr` |
-| `L` | D-Log M handling off for this clip, for `_D` files that aren't D-Log (e.g. HDR photos) | `dlogm/off` |
+| `L` | D-Log M handling off for this clip: the file as it is, flat as the camera recorded it | `dlogm/off` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -464,7 +464,7 @@ camera's metadata is read from (what has been tried: [What works, camera by came
 |---|---|---|---|
 | DJI Osmo Action 6 | yes | D-Log M | yes |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
-| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | `_D` file name only, a guess | no |
+| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no |
 | GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | no (GP-Log: the Protune color is in `PTCL`, `FLAT` on a HERO6; what GP-Log writes there isn't known) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | no (I-Log) | no |
 
@@ -516,8 +516,8 @@ None needs anything in `mpv.conf` or `input.conf`.
 DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
 DJI's own metadata, though: `ColorMode` in the stream metadata of the `CAM meta` track (19 is D-Log M).
 The dlogm plugin reads it in Lua (`mpv/scripts/dlogm/dji_color.lua`: the first sample of the metadata track,
-a few protobuf fields), for the Osmo Action 6 and Osmo 360, whose layouts are known; other models fall back
-to the file name. `gyroflow-probe` reads it the same way, for the export. The plugin
+a few protobuf fields), for the Osmo Action 6 and Osmo 360, whose layouts are known; other models' clips play as
+they are. `gyroflow-probe` reads it the same way, for the export. The plugin
 (`mpv/scripts/dlogm/main.lua`) sets the shader and the display options as file-local options, added to any
 shaders of your own, so mpv undoes them when a playlist moves on to a clip that isn't D-Log M:
 
