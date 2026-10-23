@@ -28,6 +28,40 @@ and hashing it. Sizes are the 3D LUT's grid (33 = 33×33×33). Dates are those t
   undocumented; GoPro's LUT depends on firmware, so the plugin would need the firmware version from the file;
   some models with a log mode have no LUT listed (below).
 
+## Camera by camera
+
+Rows are grouped by log curve, then by LUT file: cameras in one row share the file. **SDR** is a LUT to
+Rec.709 from the maker. **HDR** is what an HDR path could be built from: the maker's LUT to HLG/PQ, our own
+conversion (as `luts/dlogm_hlg.cube`), or a published curve and gamut to build one from.
+
+| Curve | Cameras | SDR (Rec.709) | HDR | Missing |
+|---|---|---|---|---|
+| DJI D-Log M | Osmo Action 6 | DJI's 11.17 (file C) | ours, `dlogm_hlg.cube`, verified on real clips | — |
+| | Mavic 3, 3 Classic, 3 Pro; Air 3, Air 3S; Mini 4 Pro; Avata 2; Flip; O4 Air Unit; Osmo Action 4, Action 5 Pro; Pocket 3; Osmo 360, 360 II; Osmo Nano | DJI's, one file for all (file A, 2023) | no DJI LUT; ours, if their D-Log M is the Action 6's curve | whether the curve is the same; clips |
+| | Mavic 4 Pro, Mini 5 Pro, Avata 360, Lito X1 | DJI's, one file (file B, 2025) | as above | as above |
+| | Mavic 2, Air 2S | DJI's (file D, 2018) | as above | as above |
+| DJI D-Log | Mavic 3 family | DJI's, plain and vivid (2021, 2022) | no LUT; D-Log/D-Gamut white paper | an HLG conversion of ours; metadata telling D-Log from D-Log M |
+| | Mavic 4 Pro; Osmo Pocket 4, 4P | DJI's V1, one file for all three; Pocket 4 and 4P each have their own V2 (2026) and vivid | no LUT; the white paper, if it's the same D-Log | as above |
+| | Zenmuse X9 (Inspire 3, Ronin 4D) | DJI's | **DJI's LUT to Rec.2020 HLG** | — (not a camera this player targets) |
+| DJI D-Log2 | Osmo Pocket 4P | DJI's, 33 and 65, plain and vivid | none: no LUT, curve not published | everything for HDR; metadata |
+| GoPro GP-Log | HERO12 Black, firmware 1.10/1.12 | GoPro's, 16³, one per white balance | no LUT; curve known (Protune log, base 400, community), gamut not | gamut; firmware version from the file |
+| | HERO12 Black, firmware 1.20 | GoPro's | as above | as above |
+| | HERO12 Black firmware 2.00+, HERO13 Black | GoPro's, one file | as above | gamut |
+| | MAX2 | GoPro's, technical and creative | as above | gamut |
+| | HERO11 Black (Labs firmware, `WIDE=1`, log base 400) | only the Labs maintainer's, unofficial | as above | an official LUT |
+| GoPro GP-Log2 | MISSION 1, MISSION 1 PRO | GoPro's, five (technical, creative, 33 and 65) | no LUT; curve (base 600) and Rec.2020 from community transforms (MIT), not from GoPro | GoPro's own spec |
+| Insta360 10-bit I-Log | X6; Luna Ultra, Luna Pro | Insta360's, one set for all | **Insta360's LUTs to HLG and PQ**, and the curve and BT.2020 gamut in a white paper | metadata |
+| Insta360 8-bit I-Log | Ace Pro 2, GO Ultra | Insta360's, one file | none: no LUT, curve not published | everything for HDR; metadata |
+| | X5 | Insta360's | as above | as above |
+| | X3, ONE X2 | Insta360's, one file | as above | as above |
+| | ONE X | Insta360's (64³) | as above | as above |
+| | ONE R; ONE RS; Sphere | Insta360's, one per lens (Sphere's = ONE RS's 360) | as above | as above |
+| ? | Insta360 Ace Pro, Ace, X4, X4 Air, GO 3, GO 3S | none listed | none | whether they have I-Log at all |
+
+Of all of these, only the Action 6 has been tried in the player; everything else is from the makers' files and
+pages. How the camera marks its log profile in the file is known for DJI's Action 6 (and guessed from the `_D`
+file name for other DJI cameras) and for GoPro (`PTCL`, not yet seen on a GP-Log clip); for Insta360 it isn't.
+
 ## DJI
 
 All on DJI's Download Center, one page per LUT (`https://www.dji.com/global/downloads/softwares/<slug>`; the
