@@ -7,16 +7,18 @@
 #                          scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when there's
 #                          none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
-#                          the default app for MP4 videos, with the Finder Quick Actions (see README). Installed once,
-#                          it's updated by every later run. macOS only
+#                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
+#                          ActionFootagePlayer in the applications menu instead: the system's mpv with the plugins
+#                          installed here, by its own name and icon, the default app for MP4 videos. Installed once,
+#                          it's updated by every later run
 #
-# On Linux it installs the same plugins (the binaries built for Linux); ActionFootagePlayer is macOS's.
+# On Linux it installs the same plugins (the binaries built for Linux).
 #
 # Files it replaces that differ from the new ones are kept as <file>.bak-<date> (for scripts/, in scripts-backup/).
 # The layout of earlier versions (loose scripts, profiles in mpv.conf, keys in input.conf, ~~/gyroflow) is moved
 # over to the plugins, and Steady Router (0.2 and earlier) is removed: ActionFootagePlayer is the default player itself.
 # MPV_CONFIG_DIR, APPS_DIR and SERVICES_DIR override where it installs (default ~/.config/mpv, ~/Applications and
-# ~/Library/Services).
+# ~/Library/Services); on Linux, XDG_DATA_HOME where the menu entry goes (default ~/.local/share).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -49,11 +51,15 @@ for arg in "$@"; do
         *) echo "usage: $0 [--apps]" >&2; exit 2 ;;
     esac
 done
-if [ $macos = 0 ] && [ $apps = 1 ]; then
-    echo "--apps is for macOS: ActionFootagePlayer is a Mac app" >&2
-    exit 2
+# Linux's ActionFootagePlayer: a menu entry, named by the bundle id as Wayland wants it (mpv's window has it as its
+# app id, which is how the desktop finds the entry's name and icon for it)
+XDG_DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+DESKTOP_FILE="$XDG_DATA/applications/$PLAYER_ID.desktop"
+if [ $macos = 1 ]; then
+    [ -d "$APPS_DIR/$PLAYER_NAME.app" ] || [ -d "$APPS_DIR/$OLD_PLAYER_NAME.app" ] && apps=1
+else
+    [ -f "$DESKTOP_FILE" ] && apps=1
 fi
-[ -d "$APPS_DIR/$PLAYER_NAME.app" ] || [ -d "$APPS_DIR/$OLD_PLAYER_NAME.app" ] && apps=1
 
 need() { command -v "$1" >/dev/null || { echo "Missing $1 ($2)" >&2; exit 1; }; }
 if [ $macos = 1 ]; then
@@ -228,7 +234,39 @@ for f in gyroflow-router export-finder.sh; do
     rm -f "$GYROFLOW/$f"
 done
 
-if [ $apps = 1 ]; then
+if [ $apps = 1 ] && [ $macos = 0 ]; then
+    echo "== $PLAYER_NAME in the applications menu"
+    # mpv's own: the plugins are in its config. Older mpv (before 0.35) has no --wayland-app-id, and would refuse to
+    # start with it
+    window="--x11-name=$PLAYER_ID"
+    mpv --list-options 2>/dev/null | grep -q -- '--wayland-app-id' && window="--wayland-app-id=$PLAYER_ID $window"
+    icon="$XDG_DATA/icons/hicolor/scalable/apps/$PLAYER_ID.svg"
+    mkdir -p "$(dirname "$icon")" "$(dirname "$DESKTOP_FILE")"
+    install -m 644 macos/icon/AppIcon.svg "$icon"
+    cat > "$DESKTOP_FILE.part" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=$PLAYER_NAME
+GenericName=Video Player
+Comment=Action camera footage in full color, stabilized, with what the camera measured
+Icon=$PLAYER_ID
+Exec=mpv --player-operation-mode=pseudo-gui $window -- %F
+Terminal=false
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/quicktime;
+StartupWMClass=$PLAYER_ID
+DESKTOP
+    mv "$DESKTOP_FILE.part" "$DESKTOP_FILE"
+    command -v update-desktop-database >/dev/null && update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
+    command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q "$XDG_DATA/icons/hicolor" 2>/dev/null || true
+    echo "   $DESKTOP_FILE"
+    # Only for the real one: an install elsewhere (a test) leaves the system's defaults alone
+    if [ -z "${XDG_DATA_HOME:-}" ] && command -v xdg-mime >/dev/null; then
+        xdg-mime default "$PLAYER_ID.desktop" video/mp4 && echo "   $PLAYER_NAME is the default app for MP4 videos"
+    fi
+fi
+
+if [ $apps = 1 ] && [ $macos = 1 ]; then
     echo "== $PLAYER_NAME in $APPS_DIR"
     mkdir -p "$APPS_DIR"
     player="$APPS_DIR/$PLAYER_NAME.app"
