@@ -20,7 +20,7 @@
 // most every 50 ms, so switching doesn't rebuild mpv's filter chain.
 
 use std::path::PathBuf;
-use std::sync::atomic::{ AtomicU8, Ordering };
+use std::sync::atomic::{ AtomicBool, AtomicU8, Ordering };
 use std::time::{ Instant, SystemTime };
 
 use parking_lot::Mutex;
@@ -130,6 +130,9 @@ pub struct Edges {
     settings: Mutex<EdgeSettings>,
     trail: Mutex<Trail>,
     sphere: Mutex<SphereTrail>,
+    /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
+    /// written only then, and every frame, to have what the camera saw when they show
+    expected: AtomicBool,
 }
 
 pub struct EdgeJob {
@@ -148,7 +151,12 @@ impl Edges {
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
             sphere: Mutex::new(SphereTrail { last_us: None, sphere: None }),
+            expected: AtomicBool::new(true),
         }
+    }
+
+    pub fn set_expected(&self, expected: bool) {
+        self.expected.store(expected, Ordering::Relaxed);
     }
 
     /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, if it has one)
@@ -464,10 +472,11 @@ impl EdgeWorker {
         let mut lap = |i: usize, timing: &mut ([f64; 4], u32)| { timing.0[i] += t.elapsed().as_secs_f64() * 1000.0; t = Instant::now(); };
         process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
         lap(0, &mut self.timing);
+        let blocks = Blocks::new(self.mask_buf.output_of::<u8>(), g.mask);
 
-        // The sphere is written every frame, edges or not: what the camera sees while the output covers is what
-        // fills the edges later
-        if job.mode == EdgeMode::Sphere {
+        // In a clip with edges the sphere is written every frame, edges or not: what the camera sees while the output
+        // covers is what fills the edges later. A clip without any doesn't need it, and it costs a fifth of 4K60
+        if job.mode == EdgeMode::Sphere && edges.expected.load(Ordering::Relaxed) {
             let wide = render_grid::<T, P>(&mut self.wide, &mut self.wide_buf, &job.src_lo, timestamp_us, cfg.max_value)?;
             process_plane::<Luma8>(&mut self.wide_mask, timestamp_us, 255.0, &self.wide_mask_buf.job())?;
             let coverage: Vec<f32> = self.wide_mask_buf.output_of::<u8>().iter().map(|&v| v as f32 / 255.0).collect();
@@ -478,7 +487,6 @@ impl EdgeWorker {
         }
 
         let mask = self.mask_buf.output_of::<u8>();
-        let blocks = Blocks::new(mask, g.mask);
         log::trace!("Edges: {} of {} mask blocks to fill at {timestamp_us} us, mask mean {:.1}", blocks.flags.iter().filter(|&&b| b).count(), blocks.flags.len(),
                     mask.iter().map(|&v| v as f32).sum::<f32>() / mask.len() as f32);
         if !blocks.any {

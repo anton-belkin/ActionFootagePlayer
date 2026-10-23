@@ -112,13 +112,16 @@ pub struct Engine {
     pub frame_offset_us: i64,
     /// What fills the parts the frame doesn't cover; off unless set
     pub edges: Arc<edges::Edges>,
+    /// Frames of the clip whose stabilized frame leaves part of the output uncovered (`leaves_edges`), of all
+    pub uncovered_frames: (usize, usize),
 }
 
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
     /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
     /// Gyroflow's default preset and then `preset`
-    pub fn load(key: String, project: &str, preset: Option<&str>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `fov`: Gyroflow's FOV (Advanced) instead of the project's; above 1 the view is wider than the zoom covers
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
@@ -154,6 +157,9 @@ impl Engine {
         // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
         // so apply them before smoothing (same as the frei0r plugin)
         stab.recompute_gyro();
+        if let Some(fov) = fov {
+            stab.set_fov(fov);
+        }
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
@@ -171,6 +177,7 @@ impl Engine {
         }
         stab.invalidate_smoothing();
         stab.recompute_blocking();
+        let uncovered_frames = leaves_edges(&ComputeParams::from_manager(&stab), stab.params.read().fps);
 
         let (size, output_size, frame_offset_us) = {
             let p = stab.params.read();
@@ -180,7 +187,7 @@ impl Engine {
             return Err(format!("{project} has no video size, is it a Gyroflow project?"));
         }
         let render_size = render_size.unwrap_or(output_size);
-        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us);
+        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us; edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, uncovered_frames.0, uncovered_frames.1);
 
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
@@ -192,6 +199,7 @@ impl Engine {
         let stab = Arc::new(stab);
         let config = WorkerConfig { kind, max_value, is_yuv, interpolation };
         let edges = Arc::new(edges::Edges::new(edges::EdgeGeometry::new(&geometry, kind, max_value)));
+        edges.set_expected(uncovered_frames.0 > 0);
         // Each worker sets up its GPU context and renders one frame before playback starts: mpv waits for the
         // filter to be created, but the first frames already run against the clock, and dropped ~1 s of video
         let (ready_tx, ready_rx) = mpsc::channel::<()>();
@@ -205,7 +213,7 @@ impl Engine {
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames })
     }
 
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
@@ -217,6 +225,19 @@ impl Engine {
         self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())?;
         result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?
     }
+}
+
+/// Frames where the stabilized frame leaves part of the output uncovered, and all frames measured: the FOV it renders at
+/// (the zoom's, times the FOV setting or its keyframe) wider than the widest one the frame still covers, the measurement
+/// Gyroflow's own FOV warning compares (`minimal_fovs`). Whatever the project's zoom: static, dynamic, off, or limited
+pub fn leaves_edges(p: &ComputeParams, fps: f64) -> (usize, usize) {
+    let frames = p.fovs.len().min(p.minimal_fovs.len());
+    let uncovered = (0..frames).filter(|&i| {
+        let ts = gyroflow_core::timestamp_at_frame(i as i32, fps.max(1.0));
+        let scale = p.keyframes.value_at_video_timestamp(&gyroflow_core::keyframes::KeyframeType::Fov, ts).unwrap_or(p.fov_scale);
+        p.fovs[i] * scale > p.minimal_fovs[i] * 1.001
+    }).count();
+    (uncovered, frames)
 }
 
 fn is_project_file(path: &str) -> bool {
@@ -550,60 +571,72 @@ unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64>
     (err == VSMapPropertyError::Success).then_some(v)
 }
 
-unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
-    init_logging();
-    let api = unsafe { &*vsapi };
-    let fail = |node: *mut VSNode, msg: String| {
-        log::error!("{msg}");
-        let msg = CString::new(format!("Stabilize: {msg}")).unwrap_or_default();
-        unsafe {
-            (api.mapSetError)(out, msg.as_ptr());
-            if !node.is_null() { (api.freeNode)(node); }
-        }
-    };
-
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    let fmt = vi.format.clone();
-
+/// The engine the arguments of Stabilize ask for, loaded or from the cache, so LeavesEdges and Stabilize share it
+unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Result<Arc<Engine>, String> {
+    let fmt = &vi.format;
     let is_yuv = fmt.color_family == VSColorFamily::YUV;
     if !(is_yuv || fmt.color_family == VSColorFamily::Gray) || fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || vi.width == 0 {
-        return fail(node, "only constant-size YUV or Gray clips with 8-16 bit integer samples are supported".into());
+        return Err("only constant-size YUV or Gray clips with 8-16 bit integer samples are supported".into());
     }
     let kind = if fmt.bytes_per_sample == 1 { SampleKind::U8 } else { SampleKind::U16 };
     let max_value = ((1u32 << fmt.bits_per_sample) - 1) as f32;
 
     let Some(project) = (unsafe { map_get_str(api, input, c"project") }) else {
-        return fail(node, "project is required".into());
+        return Err("project is required".into());
     };
-    let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
-    let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
     let interpolation_name = unsafe { map_get_str(api, input, c"interpolation") }.unwrap_or_else(|| "bicubic".into());
     let interpolation = match interpolation_name.to_ascii_lowercase().as_str() {
         "bilinear" => Interpolation::Bilinear,
         "bicubic"  => Interpolation::Bicubic,
         "lanczos" | "lanczos4" => Interpolation::Lanczos4,
-        other => return fail(node, format!("unknown interpolation {other} (bilinear, bicubic, lanczos)")),
+        other => return Err(format!("unknown interpolation {other} (bilinear, bicubic, lanczos)")),
     };
     let workers = unsafe { map_get_i64(api, input, c"workers") }.unwrap_or(3).clamp(1, 6) as usize;
-    // Chroma planes need the size to be a multiple of the subsampling
-    let align = |v: i64, ss: c_int| (v as usize) & !((1usize << ss) - 1);
     let output_override = match (unsafe { map_get_i64(api, input, c"width") }, unsafe { map_get_i64(api, input, c"height") }) {
         (Some(w), Some(h)) if w > 0 && h > 0 => Some((align(w, fmt.sub_sampling_w), align(h, fmt.sub_sampling_h))),
         (None, None) => None,
-        _ => return fail(node, "width and height go together".into()),
+        _ => return Err("width and height go together".into()),
     };
 
     let preset = unsafe { map_get_str(api, input, c"preset") }.filter(|p| !p.is_empty());
+    let fov = unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| v.clamp(0.1, 4.0));
     // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    let engine = match get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers)) {
+    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+}
+
+/// Chroma planes need the size to be a multiple of the subsampling
+fn align(v: i64, ss: c_int) -> usize {
+    (v as usize) & !((1usize << ss) - 1)
+}
+
+unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
+    log::error!("{msg}");
+    let msg = CString::new(format!("{what}: {msg}")).unwrap_or_default();
+    unsafe {
+        (api.mapSetError)(out, msg.as_ptr());
+        if !node.is_null() { (api.freeNode)(node); }
+    }
+}
+
+unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
+    init_logging();
+    let api = unsafe { &*vsapi };
+    let fail = |node: *mut VSNode, msg: String| unsafe { set_error(api, out, node, "Stabilize", msg) };
+
+    let mut err = VSMapPropertyError::Success;
+    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
+    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
+    let fmt = vi.format.clone();
+    let engine = match unsafe { engine_for(api, input, &vi) } {
         Ok(e) => e,
         Err(e) => return fail(node, e),
     };
+    let is_yuv = fmt.color_family == VSColorFamily::YUV;
+    let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
+    let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
@@ -632,6 +665,24 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     }
 }
 
+/// `core.gyroflow.LeavesEdges(clip, ...Stabilize's arguments)`: the frames of the clip whose stabilized frame leaves part
+/// of the output uncovered (Engine's `uncovered_frames`). Loads the engine Stabilize then gets from the cache: the mpv
+/// script asks first, to play a fast clip every other frame where the edge fill has work to do
+unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
+    init_logging();
+    let api = unsafe { &*vsapi };
+    let mut err = VSMapPropertyError::Success;
+    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
+    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
+    match unsafe { engine_for(api, input, &vi) } {
+        Ok(engine) => unsafe {
+            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.uncovered_frames.0 as i64, VSMapAppendMode::Replace);
+            (api.freeNode)(node);
+        },
+        Err(e) => unsafe { set_error(api, out, node, "LeavesEdges", e) },
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugin, vspapi: *const VSPLUGINAPI) {
     let api = unsafe { &*vspapi };
@@ -639,7 +690,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
+        (api.registerFunction)(c"LeavesEdges".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;".as_ptr(),
+                               c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
     }
 }
