@@ -27,7 +27,6 @@ local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "trail", "Trail of earlier frames" }, { "original", "Original frame" },
                 { "zoom", "Zoomed frame" }, { "off", "Background color" } }
-local FOVS = { 1.2, 1.4, 1.6, 1.8, 2.0 }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
@@ -45,8 +44,6 @@ local KEY_LABELS = {
     { "script-binding dlogm/curve", "The next log curve, by hand" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
-    { "script-binding gyroflow/fov-less", "Wider view: narrower" },
-    { "script-binding gyroflow/fov-more", "Wider view: wider" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
@@ -164,24 +161,15 @@ local function stabilization_menu(g, key)
                 or item("Stabilize in Gyroflow (optical flow)…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         }
     end
-    local fovs, listed = {}, false
-    for _, f in ipairs(FOVS) do
-        local on = math.abs(f - g.fov) < 1e-3
-        listed = listed or on
-        table.insert(fovs, item(string.format("%.1f", f) .. (f == 1.4 and "  (default)" or ""), "script-message-to gyroflow fov " .. f, { checked = on }))
-    end
-    if not listed then table.insert(fovs, item(string.format("%g", g.fov), "script-message-to gyroflow fov " .. g.fov, { checked = true })) end
     local edges = {}
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
     end
     return {
         item("On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
-        item(string.format("Wider view (FOV %g)", g.fov), "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
+        item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
         item("Off", "script-message-to gyroflow view off", { checked = g.view == "off", shortcut = toggle }),
         SEPARATOR,
-        submenu("Wider view FOV", fovs, { shortcut = (key["script-binding gyroflow/fov-less"] and key["script-binding gyroflow/fov-more"])
-                                                     and (key["script-binding gyroflow/fov-less"] .. " / " .. key["script-binding gyroflow/fov-more"]) }),
         item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),

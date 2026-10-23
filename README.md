@@ -194,7 +194,7 @@ exported after the others, in the same window).
 Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry); then playing, marking a
 part and exporting it; **Look** (HDR, the standard look, as recorded, the log curve by hand); **Stabilization** (on,
-the wider view and its FOV, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
 Report this camera…, which opens an issue on GitHub with what the plugins found in the clip.
@@ -210,9 +210,8 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on → on with a wider view (`wide_fov`: more of the picture, the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+[` / `Ctrl+]` | The wider view narrower or wider, by 0.1 of FOV (1 to 3, shown on screen); from the normal view the first press goes to the wider view. It sticks for the next clips | `gyroflow/fov-less`, `gyroflow/fov-more` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
@@ -223,7 +222,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
-e.g. `Ctrl+k script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-message-to gyroflow fov 2`.
+e.g. `Ctrl+k script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-message-to gyroflow view wide`.
 
 ## In detail
 
@@ -241,7 +240,6 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
 | `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
-| `gyroflow.conf`: `wide_fov=1.4` | Gyroflow's FOV (Advanced) for the wider view of `Ctrl+g` (`Ctrl+[` and `Ctrl+]` change it while playing) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
@@ -338,7 +336,11 @@ have any. Whether a clip does is Gyroflow's own measurement when it loads, for a
 is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written every frame,
 edges showing or not, so it has what to fill them with when they show, and above `max_fps` it plays every other frame:
 filling them is what doesn't keep up. A clip without any plays every frame, with no sphere to write. The wider view of
-`Ctrl+g` (`wide_fov`) shows more of the picture and has edges throughout. On an M1 Pro, 4K60 in a window with the HDR
+`Ctrl+g` shows more of the picture and has edges throughout: it turns the zoom off and picks Gyroflow's FOV for the
+clip so the stabilized picture covers about as much area as the frame, what falls outside the frame and the edges
+inside it taken together. That's the area of the frame's outline after the lens correction (the one Gyroflow's zoom
+fits its rectangle in), `FOV = √(area / frame's area)`, the median over the clip (`vs-gyroflow/src/lib.rs`,
+`wide_fov`; the log has it). On an M1 Pro, 4K60 in a window with the HDR
 shader: the default preset, every frame, none dropped; the wider view, every other frame, none; the wider view at
 full rate, 85 %.
 
@@ -346,7 +348,7 @@ full rate, 85 %.
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
 plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
-of `Ctrl+g` at the FOV it plays with, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
+of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
 has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
 whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
@@ -375,7 +377,7 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead.
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
-- `--fov <x>` renders at that FOV (the wider view's `wide_fov`), `--edges sphere|trail|original|zoom|off` fills the
+- `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|trail|original|zoom|off` fills the
   edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
@@ -810,6 +812,4 @@ same in every LUT it writes):
 
 Each goes from here once it's fixed.
 
-- **The wider view's FOV is a fixed number** (`wide_fov`, `Ctrl+[` / `Ctrl+]`), which suits some clips and lenses
-  and not others. It should be picked by itself, so the stabilized picture covers about the frame's area.
-  [#32](https://github.com/anton-belkin/ActionFootagePlayer/issues/32)
+None at the moment.

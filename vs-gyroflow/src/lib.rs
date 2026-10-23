@@ -104,6 +104,18 @@ struct Job {
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
 unsafe impl Send for Job { }
 
+/// The FOV the stabilization renders at
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fov {
+    /// The project's: its zoom, and its FOV (Advanced)
+    Project,
+    /// Gyroflow's FOV (Advanced) instead of the project's; above 1 the view is wider than the zoom covers
+    Set(f64),
+    /// The wider view: no zoom, at the FOV where the stabilized picture covers about as much area as the frame
+    /// (`wide_fov`), whatever the lens
+    Wide,
+}
+
 /// Also used by gyroflow-export, so a video renders the same as it plays
 pub struct Engine {
     key: String,
@@ -114,15 +126,17 @@ pub struct Engine {
     pub edges: Arc<edges::Edges>,
     /// Frames of the clip whose stabilized frame leaves part of the output uncovered (`leaves_edges`), of all
     pub uncovered_frames: (usize, usize),
+    /// The wider view's FOV, as `wide_fov` found it for the clip
+    pub wide_fov: Option<f64>,
 }
 
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
     /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
     /// Gyroflow's default preset and then `preset`
-    /// `fov`: Gyroflow's FOV (Advanced) instead of the project's; above 1 the view is wider than the zoom covers
+    /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
     /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Option<f64>, horizon_lock: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
@@ -158,8 +172,11 @@ impl Engine {
         // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
         // so apply them before smoothing (same as the frei0r plugin)
         stab.recompute_gyro();
-        if let Some(fov) = fov {
-            stab.set_fov(fov);
+        match fov {
+            Fov::Set(fov) => stab.set_fov(fov),
+            // No zoom: the FOV alone says how much of the picture shows, once the smoothing below is there to measure it
+            Fov::Wide => stab.set_adaptive_zoom(0.0),
+            Fov::Project => {}
         }
         if let Some(amount) = horizon_lock {
             // The project's roll, pitch and turn settings stay; only the amount is the player's
@@ -183,6 +200,16 @@ impl Engine {
         }
         stab.invalidate_smoothing();
         stab.recompute_blocking();
+        let wide_fov = (fov == Fov::Wide).then(|| {
+            let params = ComputeParams::from_manager(&stab);
+            let fov = wide_fov(&params, stab.params.read().fps);
+            let mut covered = params.minimal_fovs.clone();
+            covered.sort_by(|a, b| a.total_cmp(b));
+            log::info!("{project}: wider view at FOV {fov:.3}; the frame is covered up to FOV {:.3} (median)", covered.get(covered.len() / 2).copied().unwrap_or(0.0));
+            stab.set_fov(fov);
+            stab.recompute_undistortion();
+            fov
+        });
         let uncovered_frames = leaves_edges(&ComputeParams::from_manager(&stab), stab.params.read().fps);
 
         let (size, output_size, frame_offset_us) = {
@@ -193,7 +220,7 @@ impl Engine {
             return Err(format!("{project} has no video size, is it a Gyroflow project?"));
         }
         let render_size = render_size.unwrap_or(output_size);
-        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us; edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, uncovered_frames.0, uncovered_frames.1);
+        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
 
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
@@ -219,7 +246,7 @@ impl Engine {
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov })
     }
 
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
@@ -244,6 +271,69 @@ pub fn leaves_edges(p: &ComputeParams, fps: f64) -> (usize, usize) {
         p.fovs[i] * scale > p.minimal_fovs[i] * 1.001
     }).count();
     (uncovered, frames)
+}
+
+/// The wider view's FOV: where the stabilized picture covers about as much area as the frame, what falls outside the
+/// frame and the edges it leaves inside it taken together (#32). Gyroflow's zoom fits its rectangle inside the outline
+/// of each frame after the lens correction, rotation and rolling shutter (`FovIterative::find_fov`, at FOV 1, in the
+/// source's pixels); here it's that outline's area `A` that counts. At FOV `F` the output shows an `F·W × F·H` window
+/// of that plane (`W` the source's width, `H` the output's height at that width), so the picture covers the frame's
+/// area at `F = sqrt(A / (W·H))`. Rotation doesn't change an area, so `F` hardly changes over a clip: about 1 for a
+/// lens without distortion, more for a wide one with its correction on. One for the clip, the median of every tenth
+/// frame's, so the view doesn't breathe. `p` as `from_manager` has it
+pub fn wide_fov(p: &ComputeParams, fps: f64) -> f64 {
+    use gyroflow_core::keyframes::KeyframeType;
+    use gyroflow_core::stabilization::{ is_valid_point, undistort_points_with_rolling_shutter };
+    // As `zooming::calculate_fovs` measures: at FOV 1, in the source's size
+    let org_output = (p.output_width.max(1), p.output_height.max(1));
+    let mut cp = p.clone();
+    cp.fov_scale = 1.0;
+    cp.fovs.clear();
+    cp.minimal_fovs.clear();
+    cp.output_width = cp.width;
+    cp.output_height = cp.height;
+    let (w, h) = (cp.width as f32, cp.height as f32);
+    let out_h = org_output.1 as f32 * w / org_output.0 as f32;
+    if w <= 0.0 || out_h <= 0.0 { return 1.0; }
+    // Around the frame, in order (`FovIterative::points_around_rect`, 31 × 31)
+    let n = 30;
+    let mut rect = Vec::with_capacity(4 * n);
+    for i in 0..n { rect.push((i as f32 * w / n as f32, 0.0)); }
+    for i in 0..n { rect.push((w, i as f32 * h / n as f32)); }
+    for i in 0..n { rect.push(((n - i) as f32 * w / n as f32, h)); }
+    for i in 0..n { rect.push((0.0, (n - i) as f32 * h / n as f32)); }
+    let center = (w / 2.0, h / 2.0);
+
+    let frames = cp.frame_count.max(p.fovs.len());
+    let mut fovs: Vec<f64> = (0..frames).step_by(10).filter_map(|frame| {
+        let ts = gyroflow_core::timestamp_at_frame(frame as i32, fps.max(1.0));
+        let amount = cp.keyframes.value_at_video_timestamp(&KeyframeType::LensCorrectionStrength, ts).unwrap_or(cp.lens_correction_amount);
+        // A point of a very wide lens whose ray the output can't hold runs off to infinity; it stands on the edge of
+        // how far the zoom may open at all, as in `find_fov`, which is also what the render draws there
+        let max_fov = gyroflow_core::zooming::max_zoom_out_fov(&cp, amount, org_output.0, ts);
+        let half = ((max_fov as f32 * w / 2.0), (max_fov as f32 * out_h / 2.0));
+        let polygon: Vec<(f64, f64)> = undistort_points_with_rolling_shutter(&rect, ts, Some(frame), &cp, amount, false, true)
+            .into_iter()
+            .filter(|p| is_valid_point(*p))
+            .map(|(x, y)| {
+                let d = (x - center.0, y - center.1);
+                let m = (d.0.abs() / half.0).max(d.1.abs() / half.1);
+                if d.0.abs().max(d.1.abs()) > 1.0e6 && half.0 > 0.0 && half.1 > 0.0 && m.is_finite() && m > 0.0 {
+                    ((center.0 + d.0 / m) as f64, (center.1 + d.1 / m) as f64)
+                } else {
+                    (x as f64, y as f64)
+                }
+            })
+            .collect();
+        if polygon.len() < 3 { return None; }
+        // Shoelace
+        let area = polygon.iter().zip(polygon.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum::<f64>().abs() / 2.0;
+        let fov = (area / (w as f64 * out_h as f64)).sqrt();
+        fov.is_finite().then_some(fov)
+    }).collect();
+    if fovs.is_empty() { return 1.0; }
+    fovs.sort_by(|a, b| a.total_cmp(b));
+    fovs[fovs.len() / 2].clamp(0.5, 4.0)
 }
 
 fn is_project_file(path: &str) -> bool {
@@ -605,7 +695,11 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     };
 
     let preset = unsafe { map_get_str(api, input, c"preset") }.filter(|p| !p.is_empty());
-    let fov = unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| v.clamp(0.1, 4.0));
+    let fov = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 {
+        Fov::Wide
+    } else {
+        unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project)
+    };
     let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
     // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
@@ -697,10 +791,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;horizon_lock:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
     }
 }

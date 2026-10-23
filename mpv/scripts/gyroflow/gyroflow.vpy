@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, fov, horizon_lock, edges*). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, horizon_lock, edges*). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -12,13 +12,14 @@ args = json.loads(user_data)  # noqa: F821 (set by mpv)
 if not hasattr(core, 'gyroflow'):
     core.std.LoadPlugin(args['plugin'])
 
-# The stabilization: the same for LeavesEdges and Stabilize, so they share one loaded project. fov: the wider view
-# (Ctrl+g), in place of the project's FOV; horizon_lock: the lock's amount (%), in place of the project's
+# The stabilization: the same for LeavesEdges and Stabilize, so they share one loaded project. wide: the wider view
+# (Ctrl+g), no zoom at the FOV the plugin finds for the clip; horizon_lock: the lock's amount (%), in place of the
+# project's
 stab = dict(project=args['project'], interpolation=args.get('interpolation', 'bicubic'), workers=args.get('workers', 2))
 if args.get('preset'):
     stab['preset'] = args['preset']
-if args.get('fov') is not None:
-    stab['fov'] = float(args['fov'])
+if args.get('wide'):
+    stab['wide'] = 1
 if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 # What fills the uncovered edges; the control file has the mode and the blur as they change while playing
