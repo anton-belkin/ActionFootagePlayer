@@ -27,6 +27,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
+--   Ctrl+[   blur-less   less blur of the edge fill (Ctrl+] more): steps of edges_blur, shown on screen
+--   Ctrl+]   blur-more
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here
@@ -38,9 +40,9 @@
 --   workers=3    GPU worker threads
 --   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30), so the stabilization does
 --                half the work; 0: every frame
---   edges=trail  what fills the edges: trail (what was last shown there), sphere (what was last seen in that
---                direction), original, zoom, off (the project's background color)
---   edges_blur=2 blur of the edge fill, % of the frame height
+--   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
+--                shown there), original, zoom, off (the project's background color)
+--   edges_blur=2 blur of the edge fill, % of the frame height (Ctrl+[ and Ctrl+] change it while playing)
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
@@ -49,7 +51,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, edges = "trail", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 30, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -142,18 +144,22 @@ local function interpolation(source)
     return INTERPOLATION_FAST
 end
 
--- The plugin fills the uncovered edges itself (vs-gyroflow/src/edges.rs). The mode goes through a control file
--- it reads while playing: changing the filter's parameters would rebuild mpv's filter chain, which drops frames
+-- The plugin fills the uncovered edges itself (vs-gyroflow/src/edges.rs). The mode and the blur go through a control
+-- file it reads while playing: changing the filter's parameters would rebuild mpv's filter chain, which drops frames
 local EDGE_MODES = { "off", "original", "zoom", "trail", "sphere" }
 local EDGE_LABELS = { off = "background color", original = "original frame, blurred", zoom = "zoomed frame, blurred",
                       trail = "trail of earlier frames, blurred", sphere = "trail by direction, blurred" }
 local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.edges", utils.getpid()))
-local edge_mode = EDGE_LABELS[o.edges] and o.edges or "trail"
+local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
+-- Ctrl+[ and Ctrl+] step through these (% of the frame height), from wherever edges_blur is
+local EDGE_BLURS = { 0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10 }
+local edge_blur = o.edges_blur
 
-local function write_edge_mode()
+-- The mode, then the blur: "sphere blur=2"
+local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(edge_mode)
+    f:write(string.format("%s blur=%g", edge_mode, edge_blur))
     f:close()
 end
 
@@ -171,7 +177,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, half_rate = half_rate(source),
-                                                edges = edge_mode, edges_blur = o.edges_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -190,7 +196,7 @@ mp.add_hook("on_load", 50, function()
     local source = find_source(mp.get_property("path"))
     if not source then return end
     current_source = source
-    write_edge_mode()
+    write_edge_control()
 
     local hwdec = o.hwdec and "yes" or mp.get_property("hwdec") or "no"
     local vf = mp.get_property_native("vf") or {}
@@ -230,9 +236,24 @@ mp.add_key_binding("Ctrl+b", "edges", function()
         if m == edge_mode then i = k end
     end
     edge_mode = EDGE_MODES[i % #EDGE_MODES + 1]
-    write_edge_mode()
+    write_edge_control()
     mp.osd_message("Gyroflow edges: " .. EDGE_LABELS[edge_mode], 2)
 end)
+
+-- The next step of EDGE_BLURS below (-1) or above (1) the blur; sticks for the next clips too
+local function step_blur(dir)
+    return function()
+        local next = nil
+        for _, b in ipairs(EDGE_BLURS) do
+            if (dir < 0 and b < edge_blur - 1e-6) or (dir > 0 and b > edge_blur + 1e-6 and not next) then next = b end
+        end
+        edge_blur = next or edge_blur
+        write_edge_control()
+        mp.osd_message(string.format("Gyroflow edge blur: %g %%", edge_blur) .. (edge_mode == "off" and " (edges off: Ctrl+b)" or ""), 2)
+    end
+end
+mp.add_key_binding("Ctrl+[", "blur-less", step_blur(-1))
+mp.add_key_binding("Ctrl+]", "blur-more", step_blur(1))
 
 mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
