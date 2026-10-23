@@ -22,7 +22,8 @@
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
 --   Ctrl+g   toggle   stabilization on/off for the current file
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
---                     the original frame, the frame zoomed, or a trail of earlier frames (all blurred)
+--                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
+--                     direction in the world (all blurred)
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here
@@ -33,8 +34,8 @@
 --   workers=3    GPU worker threads
 --   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30), so the stabilization does
 --                half the work; 0: every frame
---   edges=trail  what fills the edges: trail (what was last shown there), original, zoom, off (the project's
---                background color)
+--   edges=trail  what fills the edges: trail (what was last shown there), sphere (what was last seen in that
+--                direction), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
 
@@ -135,9 +136,9 @@ end
 
 -- The plugin fills the uncovered edges itself (vs-gyroflow/src/edges.rs). The mode goes through a control file
 -- it reads while playing: changing the filter's parameters would rebuild mpv's filter chain, which drops frames
-local EDGE_MODES = { "off", "original", "zoom", "trail" }
+local EDGE_MODES = { "off", "original", "zoom", "trail", "sphere" }
 local EDGE_LABELS = { off = "background color", original = "original frame, blurred", zoom = "zoomed frame, blurred",
-                      trail = "trail of earlier frames, blurred" }
+                      trail = "trail of earlier frames, blurred", sphere = "trail by direction, blurred" }
 local EDGE_CONTROL = utils.join_path(os.getenv("TMPDIR") or "/tmp", string.format("mpv-gyroflow-%d.edges", utils.getpid()))
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "trail"
 

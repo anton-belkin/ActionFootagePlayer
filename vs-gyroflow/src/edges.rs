@@ -6,6 +6,8 @@
 //   original  the unstabilized frame behind, blurred
 //   zoom      the stabilized frame scaled up behind (+50 % by default), blurred
 //   trail     what was last drawn there in earlier frames, blurred; where nothing was yet, the zoom fill
+//   sphere    what was last seen in that direction of the world (sphere.rs), blurred; where it wasn't seen yet,
+//             the trail
 //
 // Which output pixels the video covers comes from Gyroflow's own kernel: each frame it renders a white plane
 // with a feathered border onto black, with the frame's transform, at 1/4 size. That's the same geometry as the
@@ -23,13 +25,14 @@ use std::time::{ Instant, SystemTime };
 
 use parking_lot::Mutex;
 use gyroflow_core::StabilizationManager;
-use gyroflow_core::stabilization::{ Interpolation, Luma8, Luma16, PixelType, Stabilization };
+use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma8, Luma16, PixelType, Stabilization };
 use gyroflow_core::stabilization_params::BackgroundMode;
 
 use crate::{ PlaneJob, PlaneStab, SampleKind, WorkerConfig, plane_compute_params, process_plane };
+use crate::sphere::{ Sphere, View };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum EdgeMode { Off = 0, Original = 1, Zoom = 2, Trail = 3 }
+pub enum EdgeMode { Off = 0, Original = 1, Zoom = 2, Trail = 3, Sphere = 4 }
 
 impl EdgeMode {
     pub fn parse(s: &str) -> Option<EdgeMode> {
@@ -38,11 +41,12 @@ impl EdgeMode {
             "original" => Some(EdgeMode::Original),
             "zoom" => Some(EdgeMode::Zoom),
             "trail" => Some(EdgeMode::Trail),
+            "sphere" => Some(EdgeMode::Sphere),
             _ => None,
         }
     }
     fn from_u8(v: u8) -> EdgeMode {
-        match v { 1 => EdgeMode::Original, 2 => EdgeMode::Zoom, 3 => EdgeMode::Trail, _ => EdgeMode::Off }
+        match v { 1 => EdgeMode::Original, 2 => EdgeMode::Zoom, 3 => EdgeMode::Trail, 4 => EdgeMode::Sphere, _ => EdgeMode::Off }
     }
 }
 
@@ -63,6 +67,8 @@ const FEATHER: f32 = 0.03;
 const INSET: f32 = 0.002;
 // Older trail fades into the zoom fill, so stale content doesn't stay forever
 const TRAIL_HALF_LIFE_S: f32 = 3.0;
+// On the sphere content is where it belongs, so it can stay longer
+const SPHERE_HALF_LIFE_S: f32 = 5.0;
 // A jump in time this big is a seek: the trail starts over
 const TRAIL_MAX_GAP_US: i64 = 300_000;
 // Mean difference (of the range) between the frame and the trail where both are, above which it's a cut
@@ -106,6 +112,12 @@ struct Trail {
     planes: Vec<Vec<f32>>,
 }
 
+struct SphereTrail {
+    last_us: Option<i64>,
+    /// Made on the first frame, as fine as the grid is then
+    sphere: Option<Sphere>,
+}
+
 /// Per engine: the mode, its settings, and the trail (shared by the workers, frames come in any order)
 pub struct Edges {
     pub geometry: EdgeGeometry,
@@ -113,6 +125,7 @@ pub struct Edges {
     control: Mutex<Control>,
     settings: Mutex<EdgeSettings>,
     trail: Mutex<Trail>,
+    sphere: Mutex<SphereTrail>,
 }
 
 pub struct EdgeJob {
@@ -130,6 +143,7 @@ impl Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
+            sphere: Mutex::new(SphereTrail { last_us: None, sphere: None }),
         }
     }
 
@@ -139,6 +153,7 @@ impl Edges {
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
         self.trail.lock().last_us = None;
+        self.sphere.lock().last_us = None;
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
     }
@@ -335,6 +350,8 @@ pub(crate) struct EdgeWorker {
     /// no hole of its own to fill
     lo: Vec<PlaneStab>,
     lo_buf: Vec<GpuBuffers>,
+    /// The project's parameters, for the directions the sphere trail is written and read by
+    params: ComputeParams,
     /// ms spent: mask, low-res frame, fill, composite; and frames
     timing: ([f64; 4], u32),
 }
@@ -368,7 +385,7 @@ impl EdgeWorker {
             PlaneStab { stab: stab(params), index }
         }).collect();
         let lo_buf = (0..g.planes.len()).map(|_| GpuBuffers::new(g.grid_src, g.grid, bytes)).collect();
-        EdgeWorker { mask, mask_buf, lo, lo_buf, timing: ([0.0; 4], 0) }
+        EdgeWorker { mask, mask_buf, lo, lo_buf, params: ComputeParams::from_manager(mgr), timing: ([0.0; 4], 0) }
     }
 
     /// Sets up the GPU side before playback, like the planes' own warm-up
@@ -426,13 +443,20 @@ impl EdgeWorker {
                 job.src_lo.iter().map(|s| resample(s, g.grid_src, g.grid, scale)).collect()
             }
             EdgeMode::Zoom => lo.iter().map(|l| zoom(l)).collect(),
-            EdgeMode::Trail => {
+            EdgeMode::Trail | EdgeMode::Sphere => {
                 let coverage = cell_coverage(mask, g.mask, g.grid);
-                let mut trail = edges.trail.lock();
-                update_trail(&mut trail, &lo, &coverage, timestamp_us, g.max_value);
-                lo.iter().zip(&trail.planes).map(|(l, t)| {
-                    zoom(l).iter().zip(t).zip(&trail.weight).map(|((z, t), w)| t * w + z * (1.0 - w)).collect()
-                }).collect()
+                let mut fills: Vec<Vec<f32>> = {
+                    let mut trail = edges.trail.lock();
+                    update_trail(&mut trail, &lo, &coverage, timestamp_us, g.max_value);
+                    lo.iter().zip(&trail.planes).map(|(l, t)| {
+                        zoom(l).iter().zip(t).zip(&trail.weight).map(|((z, t), w)| t * w + z * (1.0 - w)).collect()
+                    }).collect()
+                };
+                if job.mode == EdgeMode::Sphere {
+                    let view = View::at(&self.params, timestamp_us);
+                    update_sphere(&mut edges.sphere.lock(), &view, &lo, &coverage, timestamp_us, g, &mut fills);
+                }
+                fills
             }
         };
         let sigma = job.settings.blur * g.grid.1 as f32;
@@ -497,6 +521,60 @@ fn update_trail(trail: &mut Trail, lo: &[Vec<f32>], coverage: &[f32], timestamp_
         trail.weight[i] = w;
     }
     trail.last_us = Some(timestamp_us);
+}
+
+/// Reads the sphere over `fills` (the screen trail), by how much it has in each cell's direction, then writes
+/// the frame to it
+fn update_sphere(st: &mut SphereTrail, view: &View, lo: &[Vec<f32>], coverage: &[f32], timestamp_us: i64, g: &EdgeGeometry, fills: &mut [Vec<f32>]) {
+    let sphere = st.sphere.get_or_insert_with(|| {
+        let s = Sphere::new(view.cells_per_radian(g.grid.0), lo.len(), SPHERE_HALF_LIFE_S);
+        log::debug!("Edges: sphere of 6 x {0}x{0}", s.n);
+        s
+    });
+    let now = timestamp_us as f32 / 1e6;
+    let write = match st.last_us {
+        None => { sphere.reset(now); true }
+        Some(last) if (timestamp_us - last).abs() > TRAIL_MAX_GAP_US => { sphere.reset(now); true }
+        // Another worker already wrote a newer frame; this one still reads
+        Some(last) => timestamp_us > last,
+    };
+    let fade = sphere.fade(now);
+    let (gw, gh) = g.grid;
+    let mut read: Vec<Vec<f32>> = vec![vec![0.0; gw * gh]; lo.len()];
+    let mut weight = vec![0.0f32; gw * gh];
+    let mut values = vec![0.0f32; lo.len()];
+    let (mut diff, mut n) = (0.0f32, 0usize);
+    for j in 0..gh {
+        for i in 0..gw {
+            let k = j * gw + i;
+            // Where the frame covers, the fill is the frame anyway (the screen trail has just taken it); there, only
+            // every third cell each way is read, to see whether the sphere still holds: a cut, or a jump the gyro
+            // didn't see
+            let covered = coverage[k] >= 0.999;
+            let check = covered && i % 3 == 0 && j % 3 == 0;
+            if covered && !check { continue; }
+            let w = view.dir(i as f32 / gw as f32, j as f32 / gh as f32);
+            let s = sphere.sample(&w, fade, &mut values).min(1.0);
+            if check {
+                if s > 0.5 { diff += (values[0] - lo[0][k]).abs(); n += 1; }
+                continue;
+            }
+            weight[k] = s;
+            for (r, v) in read.iter_mut().zip(&values) { r[k] = *v; }
+        }
+    }
+    if n > coverage.len() / 200 && diff / n as f32 > SCENE_CUT * g.max_value {
+        log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
+        sphere.reset(now);
+    } else {
+        for (f, r) in fills.iter_mut().zip(&read) {
+            for ((f, r), w) in f.iter_mut().zip(r).zip(&weight) { *f = r * w + *f * (1.0 - w); }
+        }
+    }
+    if write {
+        sphere.write(view, g.grid, lo, coverage, now);
+        st.last_us = Some(timestamp_us);
+    }
 }
 
 /// Which 8x8 blocks of the mask aren't fully covered, grown by a block (bilinear sampling reaches into the next)

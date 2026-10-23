@@ -15,7 +15,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
 | `workers` | 3 | GPU worker threads (each has its own GPU context) |
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
-| `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail` |
+| `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
 | `edges_control` | — | file with the mode in it, read while playing (at most every 50 ms) |
 
@@ -46,8 +46,12 @@ made by `src/project.rs` with gyroflow-core's own project writer) to open it in 
   frame rendered from it on the GPU (edges repeated, so it has no hole of its own), the trail kept per cell.
   Only the 32x32 blocks the mask says aren't covered are blended at full size, over 4 threads. The trail starts
   over at a jump in time (a seek), a new filter, or a cut (the frame and the trail differ by >12 % where both
-  have content). The mode comes from a control file rather than a filter argument, so switching it doesn't
-  rebuild mpv's filter chain (7-15 dropped frames each time).
+  have content). The sphere trail (`src/sphere.rs`) keeps the same grid by direction instead, in a cube map about
+  as fine as the grid: each output cell's direction is the kernel's own geometry (output projection, smoothed
+  orientation, video rotation, zoom center), the same for every row because the stabilized frame has the rolling
+  shutter undone. The unit tests hold it against Gyroflow's CPU kernel to 0.25 source pixels. The mode comes
+  from a control file rather than a filter argument, so switching it doesn't rebuild mpv's filter chain (7-15
+  dropped frames each time).
 - **wgpu (Metal), several GPU workers.** Each frame is uploaded, rendered and read back in blocking calls,
   so three workers keep the GPU busy. Built without OpenCL: with frames in system memory, wgpu is 40-60%
   faster on the M1 Pro (4K60 clip: 55 → 87 fps). They set up their GPU contexts and render
