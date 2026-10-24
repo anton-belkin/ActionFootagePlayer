@@ -45,6 +45,7 @@ local KEY_LABELS = {
     { "script-binding dlogm/sdr", "Log in the standard look (DJI's LUT)" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
+    { "script-binding dlogm/denoise", "Noise reduction on / off" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
@@ -152,7 +153,9 @@ local function look_menu(d, key)
     end
     table.insert(items, submenu("Log curve", curves, { shortcut = key["script-binding dlogm/curve"] }))
     table.insert(items, SEPARATOR)
-    table.insert(items, item("Remember as default", "script-message-to dlogm remember", { disabled = not d.log }))
+    table.insert(items, item("Noise reduction", "script-binding dlogm/denoise", { checked = d.denoise, shortcut = key["script-binding dlogm/denoise"] }))
+    table.insert(items, SEPARATOR)
+    table.insert(items, item("Remember as default", "script-message-to dlogm remember"))
     return items
 end
 

@@ -22,6 +22,9 @@
 --        by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
 --   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
 --   off  the file as it is, flat as the camera recorded it
+-- Noise reduction, with any of them and on any YUV video, log or not: shaders/denoise.glsl, on the video's planes
+-- before mpv turns them into RGB (so before the LUT lifts log's shadows, and their noise with them): the color noise
+-- mostly goes, the brightness keeps its detail. Off by default; playback only, exports are as before.
 -- An HDR file has two of its own, for that file only (the mode log files start in stays as it was): as it is, in
 -- HDR (Ctrl+h, and L: the file as it is), or tone-mapped to SDR by mpv, as without the plugin (Ctrl+s). Ctrl+l still
 -- grades one with a log curve by hand.
@@ -31,16 +34,19 @@
 --   Ctrl+s  sdr    this file, and log files after it
 --   L       off    this file
 --   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
+--   Ctrl+n  denoise  noise reduction on / off, for this file and the ones after it
 --
 -- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
 --   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
---   remember          the mode (hdr or sdr) as the default, in dlogm.conf
+--   remember          the mode (hdr or sdr) and the noise reduction as the default, in dlogm.conf
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
 -- ""), curve (the one applied, or ""), look (hdr, sdr, off, or "" when untouched), mode, sdr (DJI's LUT is there for
--- the curve), hdr (the file is tagged HDR: hlg or pq, or "").
+-- the curve), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on).
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   mode=hdr     what log files start in: hdr or sdr
+--   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
+--                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
 --
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
 -- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
@@ -55,7 +61,7 @@ local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
 local video_color = require 'video_color'
 
-local o = { mode = "hdr" }
+local o = { mode = "hdr", denoise = false }
 options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
@@ -72,6 +78,8 @@ local CURVES = {
     { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
     { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
 }
+-- The noise reduction's shader
+local DENOISE = "shaders/denoise.glsl"
 local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- What the cameras' metadata says, as a curve
@@ -91,6 +99,7 @@ local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
 local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 
 local mode = o.mode == "sdr" and "sdr" or "hdr"
+local denoise = o.denoise
 -- For the current file: the user's own values of what this changes, its log curve, and the mode it's in (nil:
 -- untouched)
 local base = nil
@@ -136,6 +145,7 @@ local function publish()
     local state = {
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
         look = current or "", mode = mode, sdr = c.sdr ~= nil and plugin_file(c.sdr) ~= nil, hdr = hdr and hdr.trc or "",
+        denoise = denoise,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -192,6 +202,22 @@ local function hdr_target(target, trc, prim)
     target["target-colorspace-hint"] = "yes"
 end
 
+-- The file's shaders: the user's own, the noise reduction's when it's on, and the look's (a path, or nil)
+local function shader_list(look)
+    local shaders = {}
+    for _, s in ipairs(base.shaders) do table.insert(shaders, s) end
+    if denoise then
+        local shader = plugin_file(DENOISE)
+        if shader then
+            table.insert(shaders, shader)
+        else
+            mp.msg.warn("missing " .. DENOISE .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
+        end
+    end
+    if look then table.insert(shaders, look) end
+    return shaders
+end
+
 local function set_target(target)
     for _, opt in ipairs(TARGET_OPTIONS) do
         mp.set_property("file-local-options/" .. opt, target[opt])
@@ -204,7 +230,7 @@ local function apply_hdr_file(m)
     for k, v in pairs(base.target) do target[k] = v end
     if m ~= "sdr" then hdr_target(target, hdr.trc, hdr.prim) end
     tag_hlg(false)
-    mp.set_property_native("file-local-options/glsl-shaders", base.shaders)
+    mp.set_property_native("file-local-options/glsl-shaders", shader_list())
     set_target(target)
     current = m == "sdr" and "sdr" or "hdr"
     publish()
@@ -226,11 +252,8 @@ local function apply(m)
         mp.osd_message(label(m) .. ": its shader isn't installed", 3)
         return false
     end
-    local shaders = {}
-    for _, s in ipairs(base.shaders) do table.insert(shaders, s) end
     local target = {}
     for k, v in pairs(base.target) do target[k] = v end
-    if shader then table.insert(shaders, shader) end
     if m == "hdr" then
         hdr_target(target, "hlg", "bt.2020")
     elseif m == "off" and hdr then
@@ -238,7 +261,7 @@ local function apply(m)
         hdr_target(target, hdr.trc, hdr.prim)
     end
     tag_hlg(m == "hdr")
-    mp.set_property_native("file-local-options/glsl-shaders", shaders)
+    mp.set_property_native("file-local-options/glsl-shaders", shader_list(shader))
     set_target(target)
     current = m
     publish()
@@ -265,6 +288,7 @@ mp.add_hook("on_preloaded", 50, function()
     curve = recorded
     if not curve then
         mp.msg.verbose("not log footage it knows")
+        if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
         return publish()
     end
     -- A curve without a Rec.709 LUT starts in HDR whatever the mode
@@ -329,10 +353,24 @@ local function next_curve()
     if apply(m) then mp.osd_message(label(m), 2) end
 end
 
+-- The noise reduction on or off: the file's look applied again with it, or without one (not log), the shader alone
+local function toggle_denoise()
+    if not base then return end
+    denoise = not denoise
+    if current then
+        apply(current)
+    else
+        mp.set_property_native("file-local-options/glsl-shaders", shader_list())
+        publish()
+    end
+    mp.osd_message(denoise and "Noise reduction on" or "Noise reduction off", 1.5)
+end
+
 mp.add_key_binding("Ctrl+h", "hdr", choose("hdr", true))
 mp.add_key_binding("Ctrl+s", "sdr", choose("sdr", true))
 mp.add_key_binding("L", "off", choose("off", false))
 mp.add_key_binding("Ctrl+l", "curve", next_curve)
+mp.add_key_binding("Ctrl+n", "denoise", toggle_denoise)
 
 -- This file's curve by name, or the one its metadata says (auto: for a file it says isn't log, as it is again; an
 -- HDR file in HDR)
@@ -393,7 +431,7 @@ local function save_options(values)
 end
 
 mp.register_script_message("remember", function()
-    local saved = save_options({ mode = mode })
-    mp.osd_message(saved and ("Log clips start in " .. (mode == "sdr" and "the standard look" or "HDR") .. " (dlogm.conf)")
-                         or "Couldn't write dlogm.conf", 2)
+    local saved = save_options({ mode = mode, denoise = denoise and "yes" or "no" })
+    mp.osd_message(saved and ("Log clips start in " .. (mode == "sdr" and "the standard look" or "HDR") .. ", noise reduction "
+                              .. (denoise and "on" or "off") .. " (dlogm.conf)") or "Couldn't write dlogm.conf", 2)
 end)
