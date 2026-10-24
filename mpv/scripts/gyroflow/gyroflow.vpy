@@ -30,8 +30,8 @@ for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), 
 
 clip = video_in  # noqa: F821 (set by mpv)
 if args.get('fast') and options.get('edges', 'off') != 'off':
-    # A clip faster than max_fps whose stabilized frame leaves edges somewhere (Gyroflow's measurement, see
-    # LeavesEdges): filling them, the sphere trail above all, doesn't keep up with every frame. So every other one,
+    # A clip faster than max_fps (main.lua; off unless set) whose stabilized frame leaves edges somewhere (Gyroflow's
+    # measurement, see LeavesEdges), on a computer where filling them doesn't keep up with every frame. So every other one,
     # before the stabilization: the skipped ones cost nothing but decoding. The durations double with it, which is
     # what mpv times the output by
     edges = core.gyroflow.LeavesEdges(clip, **stab)

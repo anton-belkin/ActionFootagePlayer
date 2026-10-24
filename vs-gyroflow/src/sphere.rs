@@ -17,7 +17,12 @@
 //
 // Only rotation is known, so near things that moved relative to the camera (parallax) or by themselves are off,
 // as on the screen trail; it fades the same way.
+//
+// The texels are atomics, read and written without a lock: in playback the sphere is written on a thread of its own
+// (edges.rs) while the frames read it. A frame may read a texel half written, or a weight a moment older than its
+// value; under the blur of the fill that's nothing to see.
 
+use std::sync::atomic::{ AtomicU32, Ordering };
 use nalgebra::{ Matrix3, Vector3 };
 use gyroflow_core::keyframes::KeyframeType;
 use gyroflow_core::stabilization::{ ComputeParams, FrameTransform };
@@ -180,15 +185,26 @@ fn from_face(face: usize, x: f32, y: f32, n: usize) -> Vector3<f32> {
     }
 }
 
+/// An f32 shared between threads, relaxed: on ARM and x86 these are plain loads and stores
+#[derive(Default)]
+struct F32(AtomicU32);
+impl F32 {
+    #[inline] fn get(&self) -> f32 { f32::from_bits(self.0.load(Ordering::Relaxed)) }
+    #[inline] fn set(&self, v: f32) { self.0.store(v.to_bits(), Ordering::Relaxed) }
+}
+fn texels(len: usize) -> Vec<F32> {
+    (0..len).map(|_| F32::default()).collect()
+}
+
 pub struct Sphere {
     /// Texels per face side
     pub n: usize,
     half_life: f32,
     /// How much each texel holds, as of `epoch`: faded by half every `half_life`, all of them alike, so the weight
     /// is kept unfaded from `epoch` and faded when read, by one factor for the whole frame
-    weight: Vec<f32>,
-    epoch: f32,
-    planes: Vec<Vec<f32>>,
+    weight: Vec<F32>,
+    epoch: F32,
+    planes: Vec<Vec<F32>>,
 }
 
 impl Sphere {
@@ -196,17 +212,17 @@ impl Sphere {
     pub fn new(cells_per_radian: f32, num_planes: usize, half_life: f32) -> Sphere {
         let n = ((2.0 * cells_per_radian).round() as usize).clamp(32, 512);
         let len = 6 * n * n;
-        Sphere { n, half_life, weight: vec![0.0; len], epoch: 0.0, planes: vec![vec![0.0; len]; num_planes] }
+        Sphere { n, half_life, weight: texels(len), epoch: F32::default(), planes: (0..num_planes).map(|_| texels(len)).collect() }
     }
 
-    pub fn reset(&mut self, now: f32) {
-        self.weight.iter_mut().for_each(|w| *w = 0.0);
-        self.epoch = now;
+    pub fn reset(&self, now: f32) {
+        self.weight.iter().for_each(|w| w.set(0.0));
+        self.epoch.set(now);
     }
 
     /// What the weights are worth at `now` (s)
     pub fn fade(&self, now: f32) -> f32 {
-        0.5f32.powf((now - self.epoch) / self.half_life)
+        0.5f32.powf((now - self.epoch.get()) / self.half_life)
     }
 
     /// The planes and how much there is, bilinear over the texels around `w`, each by its weight
@@ -223,9 +239,9 @@ impl Sphere {
         let mut total = 0.0;
         for (tx, ty, b) in taps {
             let i = base + ty * n + tx;
-            let k = b * self.weight[i] * fade;
+            let k = b * self.weight[i].get() * fade;
             if k <= 0.0 { continue; }
-            for (o, p) in out.iter_mut().zip(&self.planes) { *o += p[i] * k; }
+            for (o, p) in out.iter_mut().zip(&self.planes) { *o += p[i].get() * k; }
             total += k;
         }
         if total > 1e-6 { out.iter_mut().for_each(|o| *o /= total); }
@@ -256,15 +272,15 @@ impl Sphere {
     /// Writes the frame where it covers: each texel in view takes the frame (bilinear on the grid) by its coverage,
     /// over what was there before, faded. Texels are gathered rather than cells splatted, so nothing's left out
     /// where the sphere is finer than the grid
-    pub fn write(&mut self, frame: &GridFrame, now: f32) {
+    pub fn write(&self, frame: &GridFrame, now: f32) {
         let (view, grid, coverage) = (frame.view, frame.grid, frame.coverage);
         let n = self.n;
         // The unfaded weights grow by twice every half life after the epoch; well before they'd lose precision, fade
         // them all and start from here
-        if now - self.epoch > 20.0 * self.half_life {
+        if now - self.epoch.get() > 20.0 * self.half_life {
             let fade = self.fade(now);
-            self.weight.iter_mut().for_each(|w| *w *= fade);
-            self.epoch = now;
+            self.weight.iter().for_each(|w| w.set(w.get() * fade));
+            self.epoch.set(now);
         }
         let fade = self.fade(now);
         // The texels the frame covers, per face: the box around where every other covered cell lands, with room for
@@ -281,17 +297,13 @@ impl Sphere {
                 *b = (b.0.min(x.saturating_sub(8)), b.1.min(y.saturating_sub(8)), b.2.max((x + 9).min(n)), b.3.max((y + 9).min(n)));
             }
         }
-        // Each texel row is a slice of its own, so the rows go to a few threads, taken in turn: the rows of a box
-        // aren't all as busy
-        let mut weight_rows: Vec<Option<&mut [f32]>> = self.weight.chunks_mut(n).map(Some).collect();
-        let mut plane_rows: Vec<Vec<Option<&mut [f32]>>> = self.planes.iter_mut().map(|p| p.chunks_mut(n).map(Some).collect()).collect();
+        // The rows go to a few threads, taken in turn: the rows of a box aren't all as busy
         let mut work: Vec<Vec<Row>> = (0..THREADS).map(|_| Vec::new()).collect();
         for (face, &(x0, y0, x1, y1)) in boxes.iter().enumerate() {
             for y in y0..y1 {
-                let r = face * n + y;
-                let (Some(weight), Some(planes)) = (weight_rows[r].take(), plane_rows.iter_mut().map(|p| p[r].take()).collect::<Option<Vec<_>>>()) else { continue };
+                let r = (face * n + y) * n;
                 let k = work.iter().map(|w| w.len()).enumerate().min_by_key(|&(_, l)| l).map_or(0, |(k, _)| k);
-                work[k].push(Row { face, y, xs: (x0, x1), weight, planes });
+                work[k].push(Row { face, y, xs: (x0, x1), weight: &self.weight[r..r + n], planes: self.planes.iter().map(|p| &p[r..r + n]).collect() });
             }
         }
         std::thread::scope(|scope| {
@@ -310,8 +322,8 @@ struct Row<'a> {
     y: usize,
     xs: (usize, usize),
     /// The whole row of the weights and of each plane
-    weight: &'a mut [f32],
-    planes: Vec<&'a mut [f32]>,
+    weight: &'a [F32],
+    planes: Vec<&'a [F32]>,
 }
 
 impl Row<'_> {
@@ -322,7 +334,6 @@ impl Row<'_> {
         let start = from_face(face, x0 as f32 + 0.5, y as f32 + 0.5, n);
         let mut d = view.rot.tr_mul(&start);
         let step = view.rot.tr_mul(&(from_face(face, x0 as f32 + 1.5, y as f32 + 0.5, n) - start));
-        let mut planes = self.planes;
         for x in x0..x1 {
             if x > x0 { d += step; }
             let Some((u, v)) = view.project_camera(&d) else { continue };
@@ -337,13 +348,13 @@ impl Row<'_> {
             let taps = [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)];
             let c = taps.iter().map(|&(k, t)| coverage[k] * t).sum::<f32>();
             if c <= 0.01 { continue; }
-            let old = (self.weight[x] * fade).min(1.0) * (1.0 - c);
+            let old = (self.weight[x].get() * fade).min(1.0) * (1.0 - c);
             let total = c + old;
-            for (p, l) in planes.iter_mut().zip(lo) {
+            for (p, l) in self.planes.iter().zip(lo) {
                 let new = taps.iter().map(|&(k, t)| l[k] * coverage[k] * t).sum::<f32>();
-                p[x] = (new + p[x] * old) / total;
+                p[x].set((new + p[x].get() * old) / total);
             }
-            self.weight[x] = total / fade;
+            self.weight[x].set(total / fade);
         }
     }
 }
@@ -391,7 +402,7 @@ mod tests {
         // A vertical stripe pattern, by the first view's columns
         let lo: Vec<Vec<f32>> = vec![(0..grid.0 * grid.1).map(|k| ((k % grid.0) / 8) as f32).collect()];
         let coverage = vec![1.0; grid.0 * grid.1];
-        let mut s = Sphere::new(a.cells_per_radian(grid.0), 1, 3.0);
+        let s = Sphere::new(a.cells_per_radian(grid.0), 1, 3.0);
         s.write(&GridFrame { view: &a, grid, planes: &lo, coverage: &coverage }, 0.0);
         assert!(s.mismatch(&GridFrame { view: &a, grid, planes: &lo, coverage: &coverage }, 0.0).unwrap() < 0.3);
         let mut out = [0.0f32];

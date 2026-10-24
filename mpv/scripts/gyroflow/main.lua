@@ -50,10 +50,11 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
---   max_fps=30   clips faster than this play every other frame (a 60 fps clip at 30) when the stabilized frame
---                leaves edges anywhere in the clip, as Gyroflow measures it for the project and view (the wider view
---                does), and they're filled (Ctrl+b not off): the fill is what doesn't keep up. Otherwise every
---                frame plays. 0: always every frame
+--   max_fps=0    every frame plays: the sphere trail is written as the GPU has room (vs-gyroflow/src/edges.rs).
+--                Above 0, clips faster than this play every other frame (30: a 60 fps clip at 30) when the
+--                stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and
+--                view (the wider view does), and they're filled (Ctrl+b not off), for a computer where the fill
+--                doesn't keep up
 --   view=normal  the view clips start in: normal, or wide (the wider view)
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
@@ -68,7 +69,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 30, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -193,10 +194,9 @@ end
 local HORIZON = { yes = true, no = false }
 local horizon = HORIZON[o.horizon_lock]
 
--- Faster than max_fps: such a clip plays every other frame if its stabilized frame leaves edges anywhere and they're
--- filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and view). On an M1 Pro
--- 4K60 with edges filled drops 70-77 % of the frames (sphere or trail); without edges it keeps up (0-9 %).
--- Interpolation stays the one for the clip's own rate: at half rate there's headroom for the fill instead
+-- Faster than max_fps (when it's set): such a clip plays every other frame if its stabilized frame leaves edges
+-- anywhere and they're filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and
+-- view). Interpolation stays the one for the clip's own rate: at half rate there's headroom for the fill instead
 local function fast(source)
     local fps = tonumber(source.fps)
     return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1

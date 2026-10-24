@@ -128,6 +128,8 @@ pub struct Engine {
     pub uncovered_frames: (usize, usize),
     /// The wider view's FOV, as `wide_fov` found it for the clip
     pub wide_fov: Option<f64>,
+    /// Frames done since when, for the rate in the log
+    throughput: Mutex<(u32, std::time::Instant)>,
 }
 
 impl Engine {
@@ -231,7 +233,7 @@ impl Engine {
         let rx = Arc::new(Mutex::new(rx));
         let stab = Arc::new(stab);
         let config = WorkerConfig { kind, max_value, is_yuv, interpolation };
-        let edges = Arc::new(edges::Edges::new(edges::EdgeGeometry::new(&geometry, kind, max_value)));
+        let edges = Arc::new(edges::Edges::new(edges::EdgeGeometry::new(&geometry, kind, max_value), workers));
         edges.set_expected(uncovered_frames.0 > 0);
         // Each worker sets up its GPU context and renders one frame before playback starts: mpv waits for the
         // filter to be created, but the first frames already run against the clock, and dropped ~1 s of video
@@ -245,8 +247,13 @@ impl Engine {
         }
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        // Playback's sphere trail (edges.rs); a clip without edges doesn't need one
+        if uncovered_frames.0 > 0 {
+            let (edges, stab) = (edges.clone(), stab.clone());
+            std::thread::Builder::new().name("gyroflow-sphere".into()).spawn(move || edges::sphere_writer(edges, stab, config)).map_err(|e| e.to_string())?;
+        }
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
@@ -255,8 +262,25 @@ impl Engine {
             edges::EdgeMode::Off => None,
             mode => Some(self.edges.prepare(mode, &planes)),
         };
-        self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())?;
-        result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?
+        // The sphere writer waits while every worker has a frame
+        self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+            .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
+        self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
+        let result = sent?;
+        let mut t = self.throughput.lock();
+        t.0 += 1;
+        if t.0 == 300 {
+            log::debug!("{:.1} frames per second through the engine", t.0 as f64 / t.1.elapsed().as_secs_f64());
+            *t = (0, std::time::Instant::now());
+        }
+        result
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.edges.stop();
     }
 }
 
@@ -749,6 +773,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
     // Also starts the trail over: mpv reloads the script on every seek
     engine.edges.configure(edge_mode, edge_settings, edge_control);
+    engine.edges.set_realtime(true);
 
     let mut out_vi = vi.clone();
     out_vi.width  = align(engine.render_size.0 as i64, fmt.sub_sampling_w) as c_int;

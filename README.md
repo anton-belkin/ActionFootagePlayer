@@ -238,7 +238,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
-| `gyroflow.conf`: `max_fps=30` | clips faster than this play every other frame (60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: the fill is what doesn't keep up. Otherwise every frame plays; `0`: always every frame |
+| `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
 | `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
@@ -333,16 +333,18 @@ them while playing, and `edges_blur` (Options) sets how blurred:
 
 With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
 have any. Whether a clip does is Gyroflow's own measurement when it loads, for any project: where the frame it renders
-is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written every frame,
-edges showing or not, so it has what to fill them with when they show, and above `max_fps` it plays every other frame:
-filling them is what doesn't keep up. A clip without any plays every frame, with no sphere to write. The wider view of
+is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written as it plays,
+edges showing or not, so it has what to fill them with when they show. That's on a thread of its own, and only while
+the GPU has room: the frames come first, and where they need all of it the sphere is written less often, what it has
+fades into the trail by place, and every frame still plays. A clip without any has no sphere to write. The wider view of
 `Ctrl+g` shows more of the picture and has edges throughout: it turns the zoom off and picks Gyroflow's FOV for the
 clip so the stabilized picture covers about as much area as the frame, what falls outside the frame and the edges
 inside it taken together. That's the area of the frame's outline after the lens correction (the one Gyroflow's zoom
 fits its rectangle in), `FOV = √(area / frame's area)`, the median over the clip (`vs-gyroflow/src/lib.rs`,
-`wide_fov`; the log has it). On an M1 Pro, 4K60 in a window with the HDR
-shader: the default preset, every frame, none dropped; the wider view, every other frame, none; the wider view at
-full rate, 85 %.
+`wide_fov`; the log has it). On an M1 Pro, 4K60 in the wider view, the filter
+keeps up with ~84 fps with the sphere as with the trail (it was ~75 with the sphere written with each frame), and
+plays at 60 with the sphere written ~57 times a second; with the GPU short of room (two workers instead of three),
+every frame still plays and the sphere is written ~25 times a second, where it used to drop frames.
 
 ### Exporting
 
@@ -396,8 +398,8 @@ for log and graded a second time, whatever camera metadata or `_D` name it carri
 to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
-playback uses), without edges to fill. Filling them costs more: the export fills every frame, where playback above
-`max_fps` plays every other one. The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
+playback uses), without edges to fill. Filling them costs more: the export writes the sphere with every frame, where
+playback writes it as the GPU has room. The video is decoded once and encoded once: ffmpeg decodes it, the plugin's own engine
 stabilizes it on the GPU, the LUT is applied on the GPU too (`vs-gyroflow/src/gpu_lut.rs`, the shader's math),
 and ffmpeg encodes it with VideoToolbox.
 
