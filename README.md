@@ -31,6 +31,9 @@ ready for your phone.
   bends light (on a test clip, the jitter between frames went from 0.16 px to 0.02 px).
   <!-- before/after GIF of an underwater clip here: this is the proof divers need -->
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
+- **The moments you marked, a key away.** Press the camera's highlight button while it records (GoPro's HiLight; on
+  a DJI Osmo Action, the quick switch button or the remote): the marks show on the seek bar, and `Ctrl+]` /
+  `Ctrl+[` jump to the next one and back, a couple of seconds before it.
 - **One key to share**: mark the moment, press `Shift+E`, and get a file as it plays, stabilized or not, that an
   iPhone, a Mac or YouTube shows in HDR.
 
@@ -52,7 +55,7 @@ stabilization is a render of its own, and the color comes later in an editor. Go
 with a fixed technical transform (D-Log M → Rec.2100 HLG, no creative look), or DJI's own Rec.709 LUT; open a clip
 in Gyroflow with one key to fine-tune it and see the result back in playback when you save; batch-export ProRes
 422 HQ from the command line. 10-bit stays 10-bit, the originals are never re-encoded, and log is recognized from
-the camera's metadata, not the file name. Prefer your own mpv? The three plugins work on their own, on any system.
+the camera's metadata, not the file name. Prefer your own mpv? The plugins work on their own, on any system.
 [How it works](#how-it-works)
 
 ## Quick start (Mac with Apple Silicon, DJI Osmo Action 6)
@@ -109,15 +112,15 @@ useful right now:
 In the Mac app, with clips straight from the camera (an app that exports or trims them drops the metadata
 this reads):
 
-| | Log in color: HDR, Rec.709 LUT ¹ | Stabilized from the camera's gyro, no project ² | Stabilized with a Gyroflow project ² | Telemetry ³ | Export what you see ² |
-|---|---|---|---|---|---|
-| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | **verified**: HDR. Should work: Rec.709 (`Ctrl+s`) |
-| DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | should work |
-| Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work |
-| DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | should work, with a project |
-| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS and speed; exposure on one without GPS | should work |
-| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | should work |
-| Other cameras Gyroflow supports | | not yet | should work | not yet | should work, with a project |
+| | Log in color: HDR, Rec.709 LUT ¹ | Stabilized from the camera's gyro, no project ² | Stabilized with a Gyroflow project ² | Telemetry ³ | Highlights ³ | Export what you see ² |
+|---|---|---|---|---|---|---|
+| DJI Osmo Action 6 | **verified** (D-Log M) | **verified** (EIS off) | **verified** | **verified**: depth, in water. Should work: the rest; GPS not seen | should work | **verified**: HDR. Should work: Rec.709 (`Ctrl+s`) |
+| DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | none: the camera doesn't mark them | should work |
+| Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work: Action 4, Action 5 Pro | should work |
+| DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | | should work, with a project |
+| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
+| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | not yet | should work |
+| Other cameras Gyroflow supports | | not yet | should work | not yet | | should work, with a project |
 
 **verified**: played in the app on a Mac, on real footage. **should work**: built for it, from the maker's
 published metadata layout or sample clips, but not tried on real footage yet. **not yet**: doesn't work yet.
@@ -142,8 +145,8 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all three plugins and their menu, mpv and ffmpeg in it |
-| a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all three plugins and their menu, mpv, VapourSynth and ffmpeg in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
+| a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
 
@@ -192,8 +195,9 @@ exported after the others, in the same window).
 ### The menu
 
 Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
-top, what the clip is (the camera, its log curve, whether it has motion data and telemetry); then playing, marking a
-part and exporting it; **Look** (HDR, the standard look, as recorded, the log curve by hand); **Stabilization** (on,
+top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
+then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
+**Look** (HDR, the standard look, as recorded, the log curve by hand); **Stabilization** (on,
 the wider view, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
@@ -218,6 +222,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
+| `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | right click | The menu | `footage_menu/menu` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
@@ -249,6 +254,8 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
 | `dji_telemetry.conf`: `visible=yes` | `no`: shown only after `Ctrl+t` |
+| `highlights.conf`: `before=2` | seconds before each highlight a jump lands: the button is pressed once the moment has happened |
+| `highlights.conf`: `chapters=yes` | the highlights as chapters too, which mpv's seek bar shows as marks; `no`: only the keys and the menu |
 | `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
 
 The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with
@@ -445,6 +452,26 @@ python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # ev
 python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
 ```
 
+### Highlights
+
+A press of the camera's highlight button while it records marks that moment in the clip, and the highlights plugin
+reads the marks when the clip opens: they show on the seek bar as chapters ("Highlight 1", ...), `Ctrl+]` and
+`Ctrl+[` jump to the next and the previous one, and the menu's **Highlights** lists them all by time. A jump lands
+two seconds before the mark (`before=` in `highlights.conf`): by the time the button is pressed, the moment has
+usually happened.
+
+- **DJI Osmo Action 4, Action 5 Pro and Action 6**: the quick switch button, or the GPS Bluetooth remote, while
+  recording (in video, slow motion and hyperlapse; 190 at most). DJI's other cameras (Osmo 360, Pocket 3, the
+  drones) don't mark highlights. Whether the ones added later, in the camera's playback, go into the file isn't
+  known yet.
+- **GoPro HERO5 and later**: the HiLight button (the mode button, while recording), the voice command "GoPro,
+  HiLight", or the remote.
+
+Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
+come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
+[Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
+settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
 ## Installing, in detail
 
 ### Plugins in your own mpv
@@ -461,6 +488,8 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
   ```
 
 - `mpv-dji-telemetry-<version>.zip`, on any system: plain Lua.
+
+- `mpv-highlights-<version>.zip`, on any system: plain Lua.
 
 - `mpv-footage-menu-<version>.zip`, on any system with mpv 0.41 or later: the right-click menu (plain Lua). It
   shows the plugins that are there.
@@ -481,7 +510,7 @@ cd ActionFootagePlayer-*-macos-arm64     # or: git clone https://github.com/anto
 ./install.sh --apps
 ```
 
-`./install.sh` alone installs the three plugins and their menu into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
+`./install.sh` alone installs the plugins and their menu into `~/.config/mpv/scripts/` (and an `mpv.conf` with a few
 recommended settings, when there's none yet); `--apps` also builds ActionFootagePlayer into `~/Applications` and runs
 its setup, and once it's installed, later runs update it too. It downloads DJI's LUT and checks it, bakes the
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
@@ -489,7 +518,7 @@ LUTs into shaders and installs everything; existing files it replaces are kept a
 
 ### Linux and Windows
 
-The gyroflow plugin runs there too, with binaries of its own; dlogm and dji-telemetry are the same zips as on a Mac.
+The gyroflow plugin runs there too, with binaries of its own; dlogm, dji-telemetry and highlights are the same zips as on a Mac.
 None of it has been tried there by hand yet (the release builds it on Linux and Windows). It needs:
 
 - **mpv built with VapourSynth**: `mpv --vf=help` lists `vapoursynth`. On Windows, the usual builds
@@ -503,7 +532,7 @@ None of it has been tried there by hand yet (the release builds it on Linux and 
 
 Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip`
 into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
-next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all three plugins (with
+next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all the plugins (with
 DJI's LUT, as on a Mac). With `--apps` it also puts ActionFootagePlayer in the applications menu: the same mpv, by
 its own name and icon (`~/.local/share/applications/`), made the default app for MP4 videos. On Windows, the app
 has all of it: [The Windows app](#the-windows-app).
@@ -583,13 +612,13 @@ need (whether the camera stabilized the picture itself, the color profile, the t
 often each model, writes it differently, and without clips there's nothing to check a guess against. What each
 camera's metadata is read from (what has been tried: [What works, camera by camera](#what-works-camera-by-camera)):
 
-| | Stabilization without a project | Log footage (HDR, Rec.709 LUT) | Telemetry |
-|---|---|---|---|
-| DJI Osmo Action 6 | yes | D-Log M | yes |
-| DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen |
-| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip |
-| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no |
+| | Stabilization without a project | Log footage (HDR, Rec.709 LUT) | Telemetry | Highlights |
+|---|---|---|---|---|
+| DJI Osmo Action 6 | yes | D-Log M | yes | the `hglg` box, as ExifTool reads it from an Action 4, not seen |
+| DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen | none |
+| Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no | Action 4, Action 5 Pro: as the Action 6, not seen |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
+| Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no | not yet (telemetry-parser reads them) |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
 off, so a wrong guess about a camera means its clips play as they are, not worse.
@@ -600,6 +629,7 @@ off, so a wrong guess about a camera means its clips play as they are, not worse
 - the camera's stabilization off, and the same on (DJI: EIS/RockSteady; GoPro: HyperSmooth; Insta360: FlowState);
 - in the log profile (D-Log M, GP-Log, I-Log) and in the normal one;
 - under water, if the camera records depth or a "wet" flag;
+- with a few highlights marked while recording, and the seconds you marked them at;
 - the model, firmware and settings (lens/FOV, frame rate) in a word.
 
 Share them through a link (Google Drive, Dropbox, WeTransfer, ...) in a
@@ -618,12 +648,12 @@ gyro2bb --dump GX010001.MP4 > gopro.txt                                     # an
 `gyro2bb` is [telemetry-parser](https://github.com/AdrianEddy/telemetry-parser)'s command-line tool (built from
 its `bin/gyro2bb`). telemetry-parser is the library Gyroflow, and through it the stabilization here, reads camera
 metadata with; what a clip shows about the camera's motion or lens goes there too, so Gyroflow gets it as well. The
-color profile and the telemetry are read in plain Lua by the dlogm and dji-telemetry plugins, which don't depend on
-Gyroflow, so they work in any mpv on any system.
+color profile, the telemetry and the highlights are read in plain Lua by the dlogm, dji-telemetry and highlights
+plugins, which don't depend on Gyroflow, so they work in any mpv on any system.
 
 ## How it works
 
-It's three mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
+It's four mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
 ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 
 - **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT; D-Log,
@@ -632,6 +662,8 @@ ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 - **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
   Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
 - **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
+- **`highlights`**: the moments the camera marked (DJI, GoPro), on the seek bar and a key away. Plain Lua, any mpv
+  on any system.
 
 None needs anything in `mpv.conf` or `input.conf`.
 
@@ -729,6 +761,26 @@ GoPro's metadata track is the one whose samples are `gpmd`: GPMF, nested KLV ite
 `SHUT`, ...), big-endian, each scaled by the `SCAL` before it. A sample holds about a second; its values are spread
 evenly over it. GPS5 (HERO5-10) has the fix for the whole sample in `GPSF`, GPS9 (HERO11 and later) in each row.
 
+### Highlights
+
+`mpv/scripts/highlights/markers.lua` walks the file's boxes with seeks (mdat isn't read) and reads the few that
+hold the highlights:
+
+- **DJI** (Osmo Action 4, 5 Pro, 6): a `free` box at the top level that starts `data`, then a box `hglg` (size
+  32-bit big-endian, its type, 5 bytes), then 5 bytes per highlight: a byte, and the time in ms, 32-bit
+  little-endian. Another `free` box lists where `hglg` is, with the cover (`covr`): the camera seems to keep room
+  to write it again. The layout is ExifTool's (`HighlightMarkers`, worked out on an Action 4); what the single
+  byte and the 5 bytes say isn't known.
+- **GoPro HERO5 and HERO6**: `moov/udta/HMMT`, the count, then each time in ms, 32-bit big-endian. FFmpeg already
+  makes chapters of these: the plugin gives them their titles rather than adding them twice.
+- **GoPro HERO7 and later**: `udta`'s `GPMF` box (the one the Protune settings are in), the `DEVC` whose `DVID` is
+  `HLMT` ("Highlights"): an `HLMT` item of one struct per highlight, as its `TYPE` lays it out (on a HERO7 Black
+  `LLLllfFff`: time, in, out in ms, the place, the type, `MANL` for one marked by hand, a confidence and a score).
+  The time is the first.
+
+`main.lua` adds them to mpv's `chapter-list`, next to the file's own chapters, and its keys seek to them
+themselves, `before=` seconds early.
+
 ## Layout
 
 ```
@@ -740,6 +792,8 @@ mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scrip
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
+mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
+                              markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
@@ -785,6 +839,10 @@ at build). The sources are also available from this project on request.
 
 Camera metadata (motion data, lens, in-camera stabilization) is read by Adrian Eddy's
 [telemetry-parser](https://github.com/AdrianEddy/telemetry-parser), through Gyroflow.
+
+Where the cameras keep their highlights: DJI's from Phil Harvey's [ExifTool](https://exiftool.org)
+(`HighlightMarkers`), GoPro's `HMMT` as VLC and FFmpeg read it, and its GPMF `HLMT` from Juan Irache's
+[gopro-telemetry](https://github.com/JuanIrache/gopro-telemetry) and the HERO7 Black header among its samples.
 
 `luts/dlogm_hlg.cube` (D-Log M → Rec.2100 HLG, 1000-nit, no DaVinci DRT) was composed in DaVinci Resolve
 from [Zeb Gardner](https://www.zebgardner.com/)'s free D-Log M → DaVinci Wide Gamut/Intermediate shaper LUT

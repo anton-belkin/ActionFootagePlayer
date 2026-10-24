@@ -1,5 +1,6 @@
--- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry) and the player: what their keys
--- do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into ~~/scripts/.
+-- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights) and the player: what
+-- their keys do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into
+-- ~~/scripts/.
 --
 -- The menu is mpv's own (context_menu.lua; on Windows the native one), so it needs mpv 0.41 or later; with an older
 -- mpv right click stays as it was. It's filled each time it opens (menu-data) from what the plugins keep in
@@ -38,6 +39,8 @@ local KEY_LABELS = {
     { "cycle pause", "Play / pause" },
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
+    { "script-binding highlights/next", "Next highlight the camera marked" },
+    { "script-binding highlights/prev", "Previous highlight" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/sdr", "Log in the standard look (DJI's LUT)" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
@@ -101,8 +104,8 @@ local function local_file(path)
     return path and not path:find("://", 1, true)
 end
 
--- What the clip is, as the plugins found it: "DJI Osmo Action 6 · D-Log M · gyro · telemetry"
-local function passport(d, g, t)
+-- What the clip is, as the plugins found it: "DJI Osmo Action 6 · D-Log M · gyro · telemetry · 3 highlights"
+local function passport(d, g, t, h)
     local parts = {}
     if t and t.model and t.model ~= "" then
         table.insert(parts, CAMERAS[t.model] or (t.model:find("^dvtm_") and "DJI" or t.model))
@@ -118,6 +121,7 @@ local function passport(d, g, t)
     end
     if g then table.insert(parts, g.available and (KIND_LABELS[g.kind] or "gyro") or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
+    if h and h.times then table.insert(parts, #h.times == 1 and "1 highlight" or (#h.times .. " highlights")) end
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
@@ -226,6 +230,18 @@ local function tracks_menu(kind, command)
     return any and items or nil
 end
 
+local function highlights_menu(h, key)
+    local items = {
+        item("Next", "script-binding highlights/next", { shortcut = key["script-binding highlights/next"] }),
+        item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"] }),
+        SEPARATOR,
+    }
+    for i, t in ipairs(h.times) do
+        table.insert(items, item(i .. "    " .. clock(t), "script-message-to highlights go " .. i))
+    end
+    return items
+end
+
 local function clip_menu(path, key)
     local pos, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -268,13 +284,13 @@ end
 
 local function build()
     local key = shortcuts()
-    local d, g, t = state("dlogm"), state("gyroflow"), state("dji_telemetry")
+    local d, g, t, h = state("dlogm"), state("gyroflow"), state("dji_telemetry"), state("highlights")
     local path = mp.get_property("path")
     local items = {}
     local add = function(it) table.insert(items, it) end
 
     if path then
-        local about = passport(d, g, t)
+        local about = passport(d, g, t, h)
         if about then add(info(about)); add(SEPARATOR) end
     end
     add(item(mp.get_property_native("pause") and "Play" or "Pause", "cycle pause", { shortcut = key["cycle pause"], disabled = not path }))
@@ -291,6 +307,7 @@ local function build()
                 add(item((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip", "script-binding gyroflow/export", { shortcut = export }))
             end
         end
+        if h and h.times then add(submenu("Highlights (" .. #h.times .. ")", highlights_menu(h, key))) end
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end
         if g and local_file(path) then add(submenu("Stabilization", stabilization_menu(g, key))) end
@@ -390,7 +407,7 @@ end
 mp.register_script_message("report", function()
     local path = mp.get_property("path")
     if not local_file(path) then return end
-    local d, g, t = state("dlogm"), state("gyroflow"), state("dji_telemetry")
+    local d, g, t, h = state("dlogm"), state("gyroflow"), state("dji_telemetry"), state("highlights")
     local camera = t and t.model ~= "" and (CAMERAS[t.model] or t.model) or "(which camera?)"
     local lines = {
         "Camera: " .. camera,
@@ -398,6 +415,7 @@ mp.register_script_message("report", function()
         "Log curve from the metadata: " .. (d and (d.recorded ~= "" and (CURVE_NAMES[d.recorded] or d.recorded) or "none") or "dlogm plugin not loaded"),
         "Motion data: " .. (g and (g.available and (KIND_LABELS[g.kind] or g.kind) or "none") or "gyroflow plugin not loaded"),
         "Telemetry: " .. (t and (t.available and ((t.model ~= "" and t.model) or "yes") or "none") or "dji_telemetry plugin not loaded"),
+        "Highlights: " .. (h and (h.times and (#h.times .. " (" .. h.camera .. ")") or "none") or "highlights plugin not loaded"),
         "Player: " .. (mp.get_property("mpv-version") or "mpv") .. ", " .. platform,
         "",
         "What it did, and what you expected:",
