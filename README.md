@@ -516,6 +516,27 @@ its setup, and once it's installed, later runs update it too. It downloads DJI's
 LUTs into shaders and installs everything; existing files it replaces are kept as `*.bak-<date>` (for
 `scripts/`, in `scripts-backup/`, where mpv doesn't load them).
 
+### The app from a checkout, as the release builds it
+
+To try a branch or a fix in the app without waiting for a release, from a checkout on a Mac with
+[Homebrew](https://brew.sh) (`brew install mpv ffmpeg rustup`):
+
+```bash
+tools/dev_app.sh
+```
+
+It builds ActionFootagePlayer the way the release does: the plugins, and Homebrew's mpv, ffmpeg, Python and
+VapourSynth in the app (so it needs no Homebrew to run). Then it puts it in `~/Applications` in place of the one
+there, which it keeps as `build/ActionFootagePlayer-previous.app`, and runs the setup (the default app for MP4, the
+Quick Actions, DJI's LUT).
+- **What it builds:** uncommitted changes too, and `~/.config/mpv` isn't touched. The version says what it is: `0.6.2`
+  on a release's tag, else e.g. `0.6.2-dev.3+1a2b3c4` (`.dirty` with uncommitted changes).
+- **How long:** a few minutes, most of it the first cargo build.
+- **How it differs from the release:** the mpv and ffmpeg in it are this Mac's Homebrew ones, where the release's
+  build gets the latest (`brew upgrade mpv ffmpeg` first). Each build is signed anew (ad hoc), so macOS may ask
+  again for access to a folder like Downloads.
+- `--no-install` only builds `build/ActionFootagePlayer.app`.
+
 ### Linux and Windows
 
 The gyroflow plugin runs there too, with binaries of its own; dlogm, dji-telemetry and highlights are the same zips as on a Mac.
@@ -811,6 +832,7 @@ macos/                        ActionFootagePlayer: player.sh (the app's executab
                               the Quick Actions' export script
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
+tools/dev_app.sh              builds it from the checkout as the release does, and puts it in ~/Applications
 windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
                               gives mpv.exe the app's icon (Rust, no dependencies)
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
