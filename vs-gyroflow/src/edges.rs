@@ -18,12 +18,18 @@
 //
 // The mode and the blur can change while playing: mpv's script writes them to a control file, read here at
 // most every 50 ms, so switching doesn't rebuild mpv's filter chain.
+//
+// In playback the sphere is written on a thread of its own (sphere_writer), from the newest frame it can take, and
+// only while a GPU worker is free: the frames come first, and if they take all of the GPU the sphere is written less
+// often, or not at all, and what it has fades into the screen trail. The frames read it every frame, by their own
+// directions, so the fill stays where it belongs however old what's in it is. An export writes it with each frame.
 
 use std::path::PathBuf;
-use std::sync::atomic::{ AtomicBool, AtomicU8, Ordering };
-use std::time::{ Instant, SystemTime };
+use std::sync::{ Arc, OnceLock };
+use std::sync::atomic::{ AtomicBool, AtomicU8, AtomicUsize, Ordering };
+use std::time::{ Duration, Instant, SystemTime };
 
-use parking_lot::Mutex;
+use parking_lot::{ Condvar, Mutex };
 use gyroflow_core::StabilizationManager;
 use gyroflow_core::stabilization::{ ComputeParams, Interpolation, Luma8, Luma16, PixelType, Stabilization };
 use gyroflow_core::stabilization_params::BackgroundMode;
@@ -116,10 +122,11 @@ struct Trail {
     planes: Vec<Vec<f32>>,
 }
 
-struct SphereTrail {
-    last_us: Option<i64>,
-    /// Made on the first frame, as fine as the grid is then
-    sphere: Option<Sphere>,
+/// The newest frame for the sphere writer, and whether it should stop
+struct Feed {
+    frame: Mutex<Option<(i64, Arc<Vec<Vec<f32>>>)>>,
+    ready: Condvar,
+    stop: AtomicBool,
 }
 
 /// Per engine: the mode, its settings, and the trail (shared by the workers, frames come in any order)
@@ -129,34 +136,95 @@ pub struct Edges {
     control: Mutex<Control>,
     settings: Mutex<EdgeSettings>,
     trail: Mutex<Trail>,
-    sphere: Mutex<SphereTrail>,
+    /// Made on the first frame written, as fine as the grid is then; read without a lock (sphere.rs)
+    sphere: OnceLock<Sphere>,
+    /// The time of the frame last written to the sphere; held while writing, so writers take turns
+    sphere_written: Mutex<Option<i64>>,
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
+    /// Playback: the sphere is written by sphere_writer, when the GPU workers leave room for it
+    realtime: AtomicBool,
+    writer: AtomicBool,
+    feed: Feed,
+    /// Frames sent to the GPU workers and not back yet (Engine::process), and how many workers there are
+    pub(crate) in_flight: AtomicUsize,
+    workers: usize,
 }
 
 pub struct EdgeJob {
     mode: EdgeMode,
     settings: EdgeSettings,
-    /// The source planes on the coarse grid
-    src_lo: Vec<Vec<f32>>,
+    /// The source planes on the coarse grid; shared with the sphere writer
+    src_lo: Arc<Vec<Vec<f32>>>,
 }
 
 impl Edges {
-    pub fn new(geometry: EdgeGeometry) -> Edges {
+    pub fn new(geometry: EdgeGeometry, workers: usize) -> Edges {
         let n = geometry.grid.0 * geometry.grid.1;
         let trail = Trail { last_us: None, weight: vec![0.0; n], planes: vec![vec![0.0; n]; geometry.planes.len()] };
         Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
-            sphere: Mutex::new(SphereTrail { last_us: None, sphere: None }),
+            sphere: OnceLock::new(), sphere_written: Mutex::new(None),
             expected: AtomicBool::new(true),
+            realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
+            feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
+            in_flight: AtomicUsize::new(0), workers: workers.max(1),
         }
     }
 
     pub fn set_expected(&self, expected: bool) {
         self.expected.store(expected, Ordering::Relaxed);
+    }
+
+    /// Playback (the VapourSynth filter): the sphere written on its own thread, as the GPU has room. Off, as in an
+    /// export, it's written with each frame
+    pub fn set_realtime(&self, realtime: bool) {
+        self.realtime.store(realtime, Ordering::Relaxed);
+    }
+
+    /// Ends the sphere writer (Engine's drop)
+    pub(crate) fn stop(&self) {
+        let _frame = self.feed.frame.lock();
+        self.feed.stop.store(true, Ordering::Relaxed);
+        self.feed.ready.notify_all();
+    }
+
+    /// The frame for the sphere writer, in place of one it hasn't taken yet: only the newest counts. Not an older one
+    /// finished after it, unless it's a seek back
+    fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>) {
+        let mut frame = self.feed.frame.lock();
+        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < TRAIL_MAX_GAP_US) { return; }
+        *frame = Some((timestamp_us, src_lo.clone()));
+        self.feed.ready.notify_one();
+    }
+
+    /// The wide view's frame onto the sphere; starts it over at a seek, or where it no longer matches the frame (a cut,
+    /// or a jump the gyro didn't see)
+    fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64) {
+        let mut last = self.sphere_written.lock();
+        let sphere = self.sphere.get_or_init(|| {
+            let s = Sphere::new(frame.view.cells_per_radian(frame.grid.0), frame.planes.len(), SPHERE_HALF_LIFE_S);
+            log::debug!("Edges: sphere of 6 x {0}x{0}", s.n);
+            s
+        });
+        let now = timestamp_us as f32 / 1e6;
+        match *last {
+            None => sphere.reset(now),
+            Some(l) if (timestamp_us - l).abs() > TRAIL_MAX_GAP_US => sphere.reset(now),
+            // Another worker already wrote a newer frame
+            Some(l) if timestamp_us <= l => return,
+            Some(_) => {
+                if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * self.geometry.max_value) {
+                    log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
+                    sphere.reset(now);
+                }
+            }
+        }
+        sphere.write(frame, now);
+        *last = Some(timestamp_us);
     }
 
     /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, if it has one)
@@ -165,7 +233,7 @@ impl Edges {
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
         self.trail.lock().last_us = None;
-        self.sphere.lock().last_us = None;
+        *self.sphere_written.lock() = None;
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
     }
@@ -207,12 +275,12 @@ impl Edges {
     pub fn prepare(&self, mode: EdgeMode, planes: &[PlaneJob]) -> EdgeJob {
         let g = &self.geometry;
         let t = Instant::now();
-        let src_lo = planes.iter().map(|pj| unsafe {
+        let src_lo = Arc::new(planes.iter().map(|pj| unsafe {
             match g.kind {
                 SampleKind::U8  => downscale::<u8>(pj.src, pj.src_stride, (pj.src_w, pj.src_h), g.grid_src),
                 SampleKind::U16 => downscale::<u16>(pj.src, pj.src_stride, (pj.src_w, pj.src_h), g.grid_src),
             }
-        }).collect();
+        }).collect());
         log::trace!("Edges: source scaled down in {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
         EdgeJob { mode, settings: *self.settings.lock(), src_lo }
     }
@@ -381,65 +449,131 @@ impl GpuBuffers {
     }
 }
 
+/// What the GPU stabilizers of the edges are made from, taken from the project once
+struct StabSetup {
+    size: (usize, usize),
+    output_size: (usize, usize),
+    device: isize,
+}
+impl StabSetup {
+    fn new(mgr: &StabilizationManager) -> StabSetup {
+        let p = mgr.params.read();
+        StabSetup { size: p.size, output_size: p.output_size, device: p.current_device as isize }
+    }
+    fn stab(&self, params: ComputeParams, index: usize) -> PlaneStab {
+        let mut stab = Stabilization::default();
+        stab.interpolation = Interpolation::Bilinear;
+        stab.share_wgpu_instances = false;
+        stab.set_device(self.device);
+        stab.init_size(self.size, self.output_size);
+        stab.set_compute_params(params);
+        PlaneStab { stab, index }
+    }
+}
+
+/// The mask's parameters: white on black, nothing else
+fn mask_params(mgr: &StabilizationManager, cfg: WorkerConfig) -> ComputeParams {
+    let mut params = plane_compute_params(mgr, cfg, 0, false);
+    params.background.fill(0.0);
+    params.background_mode = BackgroundMode::SolidColor;
+    params
+}
+
+/// A plane's parameters on the coarse grid: edges repeated rather than background, so it has no hole of its own
+fn grid_params(mgr: &StabilizationManager, cfg: WorkerConfig, index: usize, limited_range: bool) -> ComputeParams {
+    let mut params = plane_compute_params(mgr, cfg, index, limited_range);
+    params.background_mode = BackgroundMode::RepeatPixels;
+    params
+}
+
+fn mask_buf(g: &EdgeGeometry, size: (usize, usize)) -> GpuBuffers {
+    let mut buf = GpuBuffers::new(g.mask_src, size, 1);
+    buf.input_of::<u8>().copy_from_slice(&mask_source(g.mask_src));
+    buf
+}
+
+fn grid_bufs(g: &EdgeGeometry, size: (usize, usize)) -> Vec<GpuBuffers> {
+    let bytes = if g.kind == SampleKind::U8 { 1 } else { 2 };
+    (0..g.planes.len()).map(|_| GpuBuffers::new(g.grid_src, size, bytes)).collect()
+}
+
+/// The sphere trail's wide view (sphere::wide_params), that it's written from, with GPU stabilizers of its own: the
+/// frame on a grid as fine as the output's would be unzoomed, and what the frame covers there (the mask rendered at
+/// the grid's size is coverage enough)
+struct WideView {
+    mask: PlaneStab,
+    mask_buf: GpuBuffers,
+    planes: Vec<PlaneStab>,
+    bufs: Vec<GpuBuffers>,
+    /// For the directions it's written by
+    params: ComputeParams,
+}
+
+/// What a WideView is made from, so it's made only when the sphere is written there
+struct WideSetup {
+    setup: StabSetup,
+    mask: ComputeParams,
+    planes: Vec<ComputeParams>,
+    params: ComputeParams,
+}
+
+impl WideSetup {
+    fn new(mgr: &StabilizationManager, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> WideSetup {
+        WideSetup {
+            setup: StabSetup::new(mgr),
+            mask: wide_params(mask_params(mgr, cfg)),
+            planes: (0..g.planes.len()).map(|index| wide_params(grid_params(mgr, cfg, index, limited_range))).collect(),
+            params: wide_params(ComputeParams::from_manager(mgr)),
+        }
+    }
+
+    fn view(&self, g: &EdgeGeometry) -> WideView {
+        WideView {
+            mask: self.setup.stab(self.mask.clone(), 0), mask_buf: mask_buf(g, g.wide),
+            planes: self.planes.iter().enumerate().map(|(index, p)| self.setup.stab(p.clone(), index)).collect(), bufs: grid_bufs(g, g.wide),
+            params: self.params.clone(),
+        }
+    }
+}
+
+impl WideView {
+    /// The frame and its coverage, on the wide grid
+    fn render<T: Sample, P: PixelType>(&mut self, src_lo: &[Vec<f32>], timestamp_us: i64, max_value: f32) -> Result<(Vec<Vec<f32>>, Vec<f32>), String> {
+        let planes = render_grid::<T, P>(&mut self.planes, &mut self.bufs, src_lo, timestamp_us, max_value)?;
+        process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
+        let coverage = self.mask_buf.output_of::<u8>().iter().map(|&v| v as f32 / 255.0).collect();
+        Ok((planes, coverage))
+    }
+
+    fn write(&self, edges: &Edges, planes: &[Vec<f32>], coverage: &[f32], timestamp_us: i64) {
+        let view = View::at(&self.params, timestamp_us);
+        edges.write_sphere(&GridFrame { view: &view, grid: edges.geometry.wide, planes, coverage }, timestamp_us);
+    }
+}
+
 pub(crate) struct EdgeWorker {
     mask: PlaneStab,
     mask_buf: GpuBuffers,
-    /// The stabilized frame on the coarse grid, per plane; edges repeated rather than background, so it has
-    /// no hole of its own to fill
+    /// The stabilized frame on the coarse grid, per plane
     lo: Vec<PlaneStab>,
     lo_buf: Vec<GpuBuffers>,
-    /// The same two from the sphere trail's wide view, that it's written from: what the frame covers there (the
-    /// mask rendered at the grid's size is coverage enough), and the frame
-    wide_mask: PlaneStab,
-    wide_mask_buf: GpuBuffers,
-    wide: Vec<PlaneStab>,
-    wide_buf: Vec<GpuBuffers>,
-    /// The project's parameters, for the directions the sphere trail is read by, and the wide view's it's written by
+    /// Where the sphere is written with each frame (an export), made on the first
+    wide_setup: WideSetup,
+    wide: Option<WideView>,
+    /// The project's parameters, for the directions the sphere trail is read by
     params: ComputeParams,
-    wide_params: ComputeParams,
-    /// ms spent: mask, low-res frame, fill, composite; and frames
+    /// ms spent: mask, low-res frames, fill, composite; and frames
     timing: ([f64; 4], u32),
 }
 
 impl EdgeWorker {
     pub(crate) fn new(mgr: &StabilizationManager, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> EdgeWorker {
-        let (size, output_size, device) = {
-            let p = mgr.params.read();
-            (p.size, p.output_size, p.current_device as isize)
-        };
-        let stab = |params: gyroflow_core::stabilization::ComputeParams| {
-            let mut stab = Stabilization::default();
-            stab.interpolation = Interpolation::Bilinear;
-            stab.share_wgpu_instances = false;
-            stab.set_device(device);
-            stab.init_size(size, output_size);
-            stab.set_compute_params(params);
-            stab
-        };
-        let mask_params = || {
-            let mut params = plane_compute_params(mgr, cfg, 0, false);
-            params.background.fill(0.0);
-            params.background_mode = BackgroundMode::SolidColor;
-            params
-        };
-        let mask_buf = |size: (usize, usize)| {
-            let mut buf = GpuBuffers::new(g.mask_src, size, 1);
-            buf.input_of::<u8>().copy_from_slice(&mask_source(g.mask_src));
-            buf
-        };
-        let bytes = if g.kind == SampleKind::U8 { 1 } else { 2 };
-        let lo = |wide: bool| (0..g.planes.len()).map(|index| {
-            let mut params = plane_compute_params(mgr, cfg, index, limited_range);
-            params.background_mode = BackgroundMode::RepeatPixels;
-            PlaneStab { stab: stab(if wide { wide_params(params) } else { params }), index }
-        }).collect::<Vec<_>>();
-        let lo_buf = |size: (usize, usize)| (0..g.planes.len()).map(|_| GpuBuffers::new(g.grid_src, size, bytes)).collect::<Vec<_>>();
+        let setup = StabSetup::new(mgr);
         EdgeWorker {
-            mask: PlaneStab { stab: stab(mask_params()), index: 0 }, mask_buf: mask_buf(g.mask),
-            lo: lo(false), lo_buf: lo_buf(g.grid),
-            wide_mask: PlaneStab { stab: stab(wide_params(mask_params())), index: 0 }, wide_mask_buf: mask_buf(g.wide),
-            wide: lo(true), wide_buf: lo_buf(g.wide),
-            params: ComputeParams::from_manager(mgr), wide_params: wide_params(ComputeParams::from_manager(mgr)),
+            mask: setup.stab(mask_params(mgr, cfg), 0), mask_buf: mask_buf(g, g.mask),
+            lo: (0..g.planes.len()).map(|index| setup.stab(grid_params(mgr, cfg, index, limited_range), index)).collect(), lo_buf: grid_bufs(g, g.grid),
+            wide_setup: WideSetup::new(mgr, cfg, g, limited_range), wide: None,
+            params: ComputeParams::from_manager(mgr),
             timing: ([0.0; 4], 0),
         }
     }
@@ -447,8 +581,7 @@ impl EdgeWorker {
     /// Sets up the GPU side before playback, like the planes' own warm-up
     pub(crate) fn warm_up(&mut self, cfg: WorkerConfig) -> Result<(), String> {
         process_plane::<Luma8>(&mut self.mask, 0, 255.0, &self.mask_buf.job())?;
-        process_plane::<Luma8>(&mut self.wide_mask, 0, 255.0, &self.wide_mask_buf.job())?;
-        for (plane, buf) in self.lo.iter_mut().zip(self.lo_buf.iter_mut()).chain(self.wide.iter_mut().zip(self.wide_buf.iter_mut())) {
+        for (plane, buf) in self.lo.iter_mut().zip(self.lo_buf.iter_mut()) {
             let job = buf.job();
             match cfg.kind {
                 SampleKind::U8  => process_plane::<Luma8>(plane, 0, cfg.max_value, &job)?,
@@ -475,15 +608,18 @@ impl EdgeWorker {
         let blocks = Blocks::new(self.mask_buf.output_of::<u8>(), g.mask);
 
         // In a clip with edges the sphere is written every frame, edges or not: what the camera sees while the output
-        // covers is what fills the edges later. A clip without any doesn't need it, and it costs a fifth of 4K60
+        // covers is what fills the edges later. A clip without any doesn't need it, and it costs a fifth of 4K60.
+        // In playback the sphere writer does it, as the GPU has room
         if job.mode == EdgeMode::Sphere && edges.expected.load(Ordering::Relaxed) {
-            let wide = render_grid::<T, P>(&mut self.wide, &mut self.wide_buf, &job.src_lo, timestamp_us, cfg.max_value)?;
-            process_plane::<Luma8>(&mut self.wide_mask, timestamp_us, 255.0, &self.wide_mask_buf.job())?;
-            let coverage: Vec<f32> = self.wide_mask_buf.output_of::<u8>().iter().map(|&v| v as f32 / 255.0).collect();
-            lap(1, &mut self.timing);
-            let view = View::at(&self.wide_params, timestamp_us);
-            write_sphere(&mut edges.sphere.lock(), &GridFrame { view: &view, grid: g.wide, planes: &wide, coverage: &coverage }, timestamp_us, g.max_value);
-            lap(2, &mut self.timing);
+            if edges.realtime.load(Ordering::Relaxed) && edges.writer.load(Ordering::Relaxed) {
+                edges.post(timestamp_us, &job.src_lo);
+            } else {
+                let wide = self.wide.get_or_insert_with(|| self.wide_setup.view(g));
+                let (planes, coverage) = wide.render::<T, P>(&job.src_lo, timestamp_us, cfg.max_value)?;
+                lap(1, &mut self.timing);
+                wide.write(edges, &planes, &coverage, timestamp_us);
+                lap(2, &mut self.timing);
+            }
         }
 
         let mask = self.mask_buf.output_of::<u8>();
@@ -523,7 +659,9 @@ impl EdgeWorker {
                 };
                 if job.mode == EdgeMode::Sphere {
                     let view = View::at(&self.params, timestamp_us);
-                    read_sphere(&edges.sphere.lock(), &view, g.grid, &coverage, timestamp_us, &mut fills);
+                    if let Some(sphere) = edges.sphere.get() {
+                        read_sphere(sphere, &view, g.grid, &coverage, timestamp_us, &mut fills);
+                    }
                 }
                 fills
             }
@@ -548,6 +686,48 @@ impl EdgeWorker {
             self.timing = ([0.0; 4], 0);
         }
     }
+}
+
+/// Playback's sphere writer, on a thread of its own: the newest frame posted, through the wide view, onto the sphere.
+/// Only while some GPU worker has no frame: the frames come first, and when they keep all the workers busy the sphere
+/// waits, written less often or not at all. Its GPU stabilizers are made on the first frame
+pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, cfg: WorkerConfig) {
+    let setup = WideSetup::new(&mgr, cfg, &edges.geometry, cfg.is_yuv);
+    drop(mgr);
+    edges.writer.store(true, Ordering::Relaxed);
+    let stop = || edges.feed.stop.load(Ordering::Relaxed);
+    let mut wide: Option<WideView> = None;
+    let (mut written, mut waited, mut since) = (0u32, Duration::ZERO, Instant::now());
+    loop {
+        {
+            let mut frame = edges.feed.frame.lock();
+            while frame.is_none() && !stop() { edges.feed.ready.wait(&mut frame); }
+        }
+        let t = Instant::now();
+        while edges.in_flight.load(Ordering::Relaxed) >= edges.workers && !stop() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if stop() { break; }
+        waited += t.elapsed();
+        // The newest by now
+        let Some((timestamp_us, src_lo)) = edges.feed.frame.lock().take() else { continue };
+        let wide = wide.get_or_insert_with(|| setup.view(&edges.geometry));
+        let rendered = match cfg.kind {
+            SampleKind::U8  => wide.render::<u8, Luma8>(&src_lo, timestamp_us, cfg.max_value),
+            SampleKind::U16 => wide.render::<u16, Luma16>(&src_lo, timestamp_us, cfg.max_value),
+        };
+        match rendered {
+            Ok((planes, coverage)) => wide.write(&edges, &planes, &coverage, timestamp_us),
+            Err(e) => log::error!("Sphere writer: {e}"),
+        }
+        written += 1;
+        let elapsed = since.elapsed();
+        if elapsed >= Duration::from_secs(5) {
+            log::debug!("Sphere written {:.1} times a second, waiting for a free GPU worker {:.0} % of the time", written as f64 / elapsed.as_secs_f64(), waited.as_secs_f64() / elapsed.as_secs_f64() * 100.0);
+            (written, waited, since) = (0, Duration::ZERO, Instant::now());
+        }
+    }
+    log::debug!("Sphere writer finished");
 }
 
 /// The source on the coarse grid through each plane's stabilizer, back as f32
@@ -605,35 +785,9 @@ fn update_trail(trail: &mut Trail, lo: &[Vec<f32>], coverage: &[f32], timestamp_
     trail.last_us = Some(timestamp_us);
 }
 
-/// Writes the wide view's frame to the sphere; starts it over at a seek, or where it no longer matches the frame
-/// (a cut, or a jump the gyro didn't see)
-fn write_sphere(st: &mut SphereTrail, frame: &GridFrame, timestamp_us: i64, max_value: f32) {
-    let sphere = st.sphere.get_or_insert_with(|| {
-        let s = Sphere::new(frame.view.cells_per_radian(frame.grid.0), frame.planes.len(), SPHERE_HALF_LIFE_S);
-        log::debug!("Edges: sphere of 6 x {0}x{0}", s.n);
-        s
-    });
-    let now = timestamp_us as f32 / 1e6;
-    match st.last_us {
-        None => sphere.reset(now),
-        Some(last) if (timestamp_us - last).abs() > TRAIL_MAX_GAP_US => sphere.reset(now),
-        // Another worker already wrote a newer frame
-        Some(last) if timestamp_us <= last => return,
-        Some(_) => {
-            if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * max_value) {
-                log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
-                sphere.reset(now);
-            }
-        }
-    }
-    sphere.write(frame, now);
-    st.last_us = Some(timestamp_us);
-}
-
 /// Reads the sphere over `fills` (the screen trail) where the frame doesn't cover, by how much it has in each cell's
 /// direction. Where it covers, the fill is the frame anyway: the screen trail has just taken it
-fn read_sphere(st: &SphereTrail, view: &View, (gw, gh): (usize, usize), coverage: &[f32], timestamp_us: i64, fills: &mut [Vec<f32>]) {
-    let Some(sphere) = st.sphere.as_ref() else { return };
+fn read_sphere(sphere: &Sphere, view: &View, (gw, gh): (usize, usize), coverage: &[f32], timestamp_us: i64, fills: &mut [Vec<f32>]) {
     let fade = sphere.fade(timestamp_us as f32 / 1e6);
     let mut values = vec![0.0f32; fills.len()];
     for j in 0..gh {

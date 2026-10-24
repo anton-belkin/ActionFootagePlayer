@@ -83,14 +83,17 @@ GPU work itself (`process_pixels`); computing the frame transform is ~0.
 Edge fill, per frame on a GPU worker, with ~20 % of a 4K frame uncovered: mask 2-3 ms, the stabilized frame
 on the grid 4-7 ms (both mostly waiting on the GPU, which the other workers keep busy), fill 1.7 ms, blending
 4 ms; at full 60 fps this cost the underwater 4K60 clip (~63 fps of capacity) a few percent and it dropped
-frames. The sphere trail adds writing the sphere from a wider view each frame. Whether a clip has edges at all is
+frames. The sphere trail adds writing the sphere from a wider view: in an export with each frame, in playback on a thread of its
+own (`sphere_writer`), from the newest frame, only while some GPU worker is free, and without a lock against the frames
+reading it (its texels are atomics). Whether a clip has edges at all is
 measured when the project loads, with Gyroflow's own numbers: a frame leaves some where the FOV it renders at (the
 zoom's, times the FOV setting) is wider than the widest one it still covers (`minimal_fovs`, what Gyroflow's FOV
-warning compares), for any project and zoom setting. Only in such a clip is the sphere written, every frame, edges
-showing or not, so it has what the camera saw when they do; and `core.gyroflow.LeavesEdges(clip, ...)` (Stabilize's
-arguments, the same loaded project) tells the mpv plugin to play it every other frame above 30 fps. 4K60 in a window
-with the HDR shader on the M1 Pro: no edges, every frame, 0 dropped; edges filled, every other frame, 0 dropped;
-edges filled at full rate, 85 %.
+warning compares), for any project and zoom setting. Only in such a clip is the sphere written, edges showing or not,
+so it has what the camera saw when they do; and `core.gyroflow.LeavesEdges(clip, ...)` (Stabilize's arguments, the same
+loaded project) tells the mpv plugin whether to play it every other frame when `max_fps` is set. 4K60 in the wider
+view on the M1 Pro, untimed: ~84 fps through the engine with the sphere, the same as the trail (~75 with the sphere
+written by the frames); in real time 60, with the sphere written ~57 times a second. With two workers instead of
+three: 0 frames dropped in 20 s and the sphere written ~25 times a second, where writing it with each frame dropped 69.
 
 Matches Gyroflow's own render of the project (CLI, same branch): same mean level, mean abs difference
 0.85/255; what differs is the antialiasing of the black border's edge and single pixels of fine detail
