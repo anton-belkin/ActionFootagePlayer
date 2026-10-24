@@ -67,6 +67,13 @@ if [ -x "$contents/Helpers/mpv" ]; then
     for vs in "$PYTHONHOME"/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
         [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
     done
+    # VSScript finds that Python in ~/.config/vapoursynth/vapoursynth.toml, by its python3 and that file's time. An app
+    # put in place of another (an update, tools/dev_app.sh) has a newer one, and VSScript's own `vapoursynth config`
+    # fails from inside mpv: the stabilization is then off. So it's written here first when it isn't this app's
+    py="$PYTHONHOME/bin/python3"
+    entry="\"$py\",\"$PYTHONHOME/Python\",\"$(stat -L -f %m "$py" 2>/dev/null)\""
+    grep -qF "$entry" "${XDG_CONFIG_HOME:-$HOME/.config}/vapoursynth/vapoursynth.toml" 2>/dev/null \
+        || "$res/bin/vapoursynth" config >/dev/null 2>&1 || true
     export VK_DRIVER_FILES="$res/vulkan/icd.d/MoltenVK_icd.json"
     export VK_ICD_FILENAMES="$VK_DRIVER_FILES" GYROFLOW_TOOLS="$contents/Helpers"
     exec "$contents/Helpers/mpv" "$@"
