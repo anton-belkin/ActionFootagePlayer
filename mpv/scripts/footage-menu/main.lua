@@ -1,5 +1,6 @@
 -- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights) and the player: what
--- their keys do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into ~~/scripts/.
+-- their keys do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into
+-- ~~/scripts/.
 --
 -- The menu is mpv's own (context_menu.lua; on Windows the native one), so it needs mpv 0.41 or later; with an older
 -- mpv right click stays as it was. It's filled each time it opens (menu-data) from what the plugins keep in

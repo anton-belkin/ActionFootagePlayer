@@ -4,8 +4,9 @@
 #   ./install.sh           the plugins: scripts/dlogm (D-Log M and other log curves; its shaders are baked here, with
 #                          DJI's LUT downloaded from DJI), scripts/gyroflow (stabilization, with the binaries built
 #                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video),
-#                          scripts/highlights (the moments the camera marked, on the seek bar) and scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when there's
-#                          none yet
+#                          scripts/highlights (the moments the camera marked, on the seek bar) and
+#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when
+#                          there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
 #                          ActionFootagePlayer in the applications menu instead: the system's mpv with the plugins
