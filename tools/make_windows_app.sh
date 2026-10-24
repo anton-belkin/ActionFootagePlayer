@@ -128,8 +128,9 @@ plugins="$app/plugins"
 dlogm="$plugins/dlogm"
 gyroflow="$plugins/gyroflow"
 telemetry="$plugins/dji-telemetry"
+highlights="$plugins/highlights"
 menu="$plugins/footage-menu"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$menu"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu"
 cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
 cp luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
@@ -147,6 +148,7 @@ for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-embed.exe gyroflow-export.e
     cp "$gyroflow_bin/$f" "$gyroflow/"
 done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
+cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
 
 echo "== ffmpeg"

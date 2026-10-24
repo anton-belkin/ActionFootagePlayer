@@ -3,8 +3,8 @@
 #
 #   ./install.sh           the plugins: scripts/dlogm (D-Log M and other log curves; its shaders are baked here, with
 #                          DJI's LUT downloaded from DJI), scripts/gyroflow (stabilization, with the binaries built
-#                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video) and
-#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when there's
+#                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video),
+#                          scripts/highlights (the moments the camera marked, on the seek bar) and scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when there's
 #                          none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
@@ -111,6 +111,7 @@ echo "== Installing into $MPV_DIR"
 DLOGM="$MPV_DIR/scripts/dlogm"
 GYROFLOW="$MPV_DIR/scripts/gyroflow"
 TELEMETRY="$MPV_DIR/scripts/dji-telemetry"
+HIGHLIGHTS="$MPV_DIR/scripts/highlights"
 MENU="$MPV_DIR/scripts/footage-menu"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -225,6 +226,10 @@ done
 # The telemetry plugin
 put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644
 put mpv/scripts/dji-telemetry/telemetry.lua "$TELEMETRY/telemetry.lua" 644
+
+# The highlights plugin
+put mpv/scripts/highlights/main.lua    "$HIGHLIGHTS/main.lua" 644
+put mpv/scripts/highlights/markers.lua "$HIGHLIGHTS/markers.lua" 644
 
 # The right-click menu
 put mpv/scripts/footage-menu/main.lua "$MENU/main.lua" 644
