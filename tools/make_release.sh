@@ -72,6 +72,7 @@ rm -rf "dist/$dlogm" "dist/$dlogm.zip"
 mkdir -p "dist/$dlogm/dlogm/shaders" "dist/$dlogm/dlogm/luts"
 git archive HEAD mpv/scripts/dlogm | tar -x --strip-components 2 -C "dist/$dlogm"
 cp dist/dlogm_hlg.glsl "dist/$dlogm/dlogm/shaders/dlogm_hlg.glsl"
+git show HEAD:shaders/denoise.glsl > "dist/$dlogm/dlogm/shaders/denoise.glsl"
 git show HEAD:luts/dlogm_hlg.cube > "dist/$dlogm/dlogm/luts/dlogm_hlg.cube"
 # The other log curves' HDR shaders, from their makers' published formulas (the app's are made by make_app.sh)
 for curve in dlog gplog2 ilog; do

@@ -200,6 +200,7 @@ for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
 done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
+put shaders/denoise.glsl            "$DLOGM/shaders/denoise.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
 put luts/gplog_hlg.cube             "$DLOGM/luts/gplog_hlg.cube" 644
