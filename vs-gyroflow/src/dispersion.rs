@@ -17,15 +17,13 @@ use gyroflow_core::stabilization::{ FrameTransform, KernelParamsFlags };
 
 use crate::{ PlaneJob, SampleKind };
 
-/// Water's refractive index for the camera's red, green and blue: Cauchy's n = A + B/λ² through the F (486.1 nm,
-/// 1.33713) and C (656.3 nm, 1.33110) lines, at 20 °C, at each color's effective wavelength. Those are measured, not
-/// the filters' peaks: in Osmo Action 6 clips under water (the fringes on edges, before and after the correction, over
-/// a dozen frames), red lands from green as Snell's law says at ~585 nm, within ~0.3 px of a 4K frame where it was off
-/// by up to 2.4. The water has taken the deep red out of the light by then. Blue follows the law less: its fringe grows
-/// about in proportion to the radius, not faster, so one index can't be right everywhere. At ~505 nm it's off by up to
-/// ~0.4 px where it was by 1.3 (the sensor's blue reaches well into green). Salt and temperature move all three
-/// alike; what parts the colors is the difference, which they hardly change
-const WATER_RGB: [f64; 3] = [1.33300, 1.33501, 1.33615];
+/// Water's refractive index as the camera's red, green and blue see it, from physics alone (tools/water_dispersion.py):
+/// water's index over the spectrum (Quan & Fry), averaged by how much each wavelength counts in the channel, for a grey
+/// object in daylight seen through 3 m of water, the channels being D-Gamut's (DJI's log gamut; a raw sensor's are
+/// within ~10 % of it). Nothing is fitted to footage: the depth and what's filmed aren't known. The path moves red's
+/// difference from green by about a fifth either way between the surface and 5 m, and hardly blue's. Salt and
+/// temperature move all three alike; what parts the colors is the difference, which they hardly change
+const WATER_RGB: [f64; 3] = [1.33369, 1.33530, 1.33875];
 
 /// What the shader needs for a frame. Its coordinates are the output's pixels, as Gyroflow's kernel has them
 /// (undistort_coord in wgpu_undistort.wgsl): a pixel's ray is `(pixel - middle - center) / focal`, under the output
@@ -150,8 +148,8 @@ mod tests {
     fn water_ratios_are_the_spread() {
         assert_eq!(water_ratios(1.0), [1.0, 1.0]);
         let [r, b] = water_ratios(1.33);
-        assert!((r - 0.9985113).abs() < 2e-6, "{r}");
-        assert!((b - 1.0008443).abs() < 2e-6, "{b}");
+        assert!((r - 0.9988086).abs() < 2e-6, "{r}");
+        assert!((b - 1.002553).abs() < 2e-6, "{b}");
     }
 
     #[test]
