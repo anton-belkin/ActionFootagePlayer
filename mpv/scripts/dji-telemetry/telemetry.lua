@@ -516,102 +516,140 @@ function M.layout(model)
     return LAYOUTS[model]
 end
 
--- { model, values = { <name> = { t = { times }, v = { values } } } }: each series only where the value changes
--- (false where it isn't recorded), for the names asked for that the model's layout has
-function M.read(path, names)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local ok, result = pcall(function()
-        local moov, first = read_moov(f)
-        if not moov then return nil end
-        local timescale, sa, sb = metadata_track(moov, first)
-        if not timescale then return nil end
-        local chunks, times, sizes = sample_table(moov, sa, sb, timescale)
-        if not chunks or #chunks == 0 then return nil end
-        moov = nil
+-- Chunks of the track read between the steps of reader(): a long clip from an SD card takes ~20 s (a read per frame,
+-- spread over the file), and the script that reads stays free for mpv's events meanwhile, quitting among them
+local CHUNKS_PER_STEP = 50
+-- stdio's buffer, read whole on each seek: by default the file system's block, which is 1 MB on an SD card's exFAT,
+-- so reading the samples read the whole file (7 GB: 75 s). A sample is a few hundred bytes
+local BUFFER = 16384
 
-        local out, wanted, model = nil, nil, nil
-        -- GoPro: the names asked for, and what pushes a value of one
-        local gpmf, push = nil, nil
-        for _, chunk in ipairs(chunks) do
-            local total = 0
-            for k = chunk.first, chunk.first + chunk.count - 1 do total = total + sizes[k] end
-            if total > MAX_CHUNK then return nil end
-            f:seek("set", chunk.offset)
-            local data = f:read(total)
-            if not data or #data ~= total then break end
-            local pos = 1
-            for k = chunk.first, chunk.first + chunk.count - 1 do
-                local size = sizes[k]
-                local t = times[k]
-                if size <= MAX_SAMPLE and size > 4 and t then
-                    local sample = data:sub(pos, pos + size - 1)
-                    if not model and not gpmf and sample:sub(1, 4) == "DEVC" then
-                        gpmf, out = {}, { model = "GoPro", values = {} }
-                        for _, name in ipairs(names) do gpmf[name] = true end
-                        push = function(name, time, v)
-                            if not gpmf[name] then return end
-                            local series = out.values[name]
-                            if not series then
-                                series = { t = {}, v = {} }
-                                out.values[name] = series
-                            end
-                            local n = #series.t
-                            if n == 0 or not same(series.v[n], v) then
-                                series.t[n + 1], series.v[n + 1] = time, v
-                            end
+local function read_all(f, names)
+    local moov, first = read_moov(f)
+    if not moov then return nil end
+    local timescale, sa, sb = metadata_track(moov, first)
+    if not timescale then return nil end
+    local chunks, times, sizes = sample_table(moov, sa, sb, timescale)
+    if not chunks or #chunks == 0 then return nil end
+    moov = nil
+
+    local out, wanted, model = nil, nil, nil
+    -- GoPro: the names asked for, and what pushes a value of one
+    local gpmf, push = nil, nil
+    for c, chunk in ipairs(chunks) do
+        if c % CHUNKS_PER_STEP == 0 then coroutine.yield() end
+        local total = 0
+        for k = chunk.first, chunk.first + chunk.count - 1 do total = total + sizes[k] end
+        if total > MAX_CHUNK then return nil end
+        f:seek("set", chunk.offset)
+        local data = f:read(total)
+        if not data or #data ~= total then break end
+        local pos = 1
+        for k = chunk.first, chunk.first + chunk.count - 1 do
+            local size = sizes[k]
+            local t = times[k]
+            if size <= MAX_SAMPLE and size > 4 and t then
+                local sample = data:sub(pos, pos + size - 1)
+                if not model and not gpmf and sample:sub(1, 4) == "DEVC" then
+                    gpmf, out = {}, { model = "GoPro", values = {} }
+                    for _, name in ipairs(names) do gpmf[name] = true end
+                    push = function(name, time, v)
+                        if not gpmf[name] then return end
+                        local series = out.values[name]
+                        if not series then
+                            series = { t = {}, v = {} }
+                            out.values[name] = series
                         end
-                    end
-                    if gpmf then
-                        local dur = (times[k + 1] or t + 1) - t
-                        local device = gpmf_sample(sample, t, dur, push)
-                        if device and out.model == "GoPro" then out.model = device:find("^GoPro") and device or "GoPro " .. device end
-                    elseif not model then
-                        model = model_of(sample)
-                        if model then
-                            local layout = LAYOUTS[model]
-                            if not layout then return nil end
-                            wanted, out = {}, { model = model, values = {} }
-                            for _, name in ipairs(names) do
-                                if layout[name] then
-                                    wanted[#wanted + 1] = { name = name, path = split_path(layout[name][1]), kind = layout[name][2] }
-                                    out.values[name] = { t = {}, v = {} }
-                                end
-                            end
-                            if #wanted == 0 then return nil end
-                        end
-                    end
-                    if wanted and not gpmf then
-                        local cache = {}
-                        for _, w in ipairs(wanted) do
-                            local v = extract(sample, w.path, w.kind, cache)
-                            if v == nil then v = false end
-                            local s = out.values[w.name]
-                            local n = #s.t
-                            if n == 0 or not same(s.v[n], v) then
-                                s.t[n + 1], s.v[n + 1] = t, v
-                            end
+                        local n = #series.t
+                        if n == 0 or not same(series.v[n], v) then
+                            series.t[n + 1], series.v[n + 1] = time, v
                         end
                     end
                 end
-                pos = pos + size
+                if gpmf then
+                    local dur = (times[k + 1] or t + 1) - t
+                    local device = gpmf_sample(sample, t, dur, push)
+                    if device and out.model == "GoPro" then out.model = device:find("^GoPro") and device or "GoPro " .. device end
+                elseif not model then
+                    model = model_of(sample)
+                    if model then
+                        local layout = LAYOUTS[model]
+                        if not layout then return nil end
+                        wanted, out = {}, { model = model, values = {} }
+                        for _, name in ipairs(names) do
+                            if layout[name] then
+                                wanted[#wanted + 1] = { name = name, path = split_path(layout[name][1]), kind = layout[name][2] }
+                                out.values[name] = { t = {}, v = {} }
+                            end
+                        end
+                        if #wanted == 0 then return nil end
+                    end
+                end
+                if wanted and not gpmf then
+                    local cache = {}
+                    for _, w in ipairs(wanted) do
+                        local v = extract(sample, w.path, w.kind, cache)
+                        if v == nil then v = false end
+                        local s = out.values[w.name]
+                        local n = #s.t
+                        if n == 0 or not same(s.v[n], v) then
+                            s.t[n + 1], s.v[n + 1] = t, v
+                        end
+                    end
+                end
             end
+            pos = pos + size
         end
-        if gpmf then
-            -- A series that never had a value says nothing
-            local any = false
-            for name, series in pairs(out.values) do
-                local has = false
-                for _, v in ipairs(series.v) do has = has or v ~= false end
-                if has then any = true else out.values[name] = nil end
-            end
-            if not any then return nil end
+    end
+    if gpmf then
+        -- A series that never had a value says nothing
+        local any = false
+        for name, series in pairs(out.values) do
+            local has = false
+            for _, v in ipairs(series.v) do has = has or v ~= false end
+            if has then any = true else out.values[name] = nil end
         end
-        return out
-    end)
-    f:close()
-    if not ok then return nil, result end
-    return result
+        if not any then return nil end
+    end
+    return out
+end
+
+-- { model, values = { <name> = { t = { times }, v = { values } } } }: each series only where the value changes
+-- (false where it isn't recorded), for the names asked for that the model's layout has. Read in steps:
+-- reader(path, names) returns step(), which reads a part and returns false while there's more, else true, the result
+-- (or nil) and an error; and close(), to give it up
+function M.reader(path, names)
+    local f = io.open(path, "rb")
+    if not f then return function() return true end, function() end end
+    f:setvbuf("full", BUFFER)
+    -- The coroutine's own error handling: Lua 5.1 can't yield inside a pcall
+    local co = coroutine.create(function() return read_all(f, names) end)
+    local finished, result, err = false, nil, nil
+    local function close()
+        if not finished then f:close() end
+        finished = true
+    end
+    local function step()
+        if finished then return true, result, err end
+        local ok, value = coroutine.resume(co)
+        if not ok then
+            close()
+            err = value
+        elseif coroutine.status(co) == "dead" then
+            close()
+            result = value
+        end
+        return finished, result, err
+    end
+    return step, close
+end
+
+-- The same at once
+function M.read(path, names)
+    local step = M.reader(path, names)
+    while true do
+        local finished, result, err = step()
+        if finished then return result, err end
+    end
 end
 
 return M

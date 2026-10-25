@@ -25,6 +25,8 @@ local M = {}
 -- What's read of a box: HMMT is 404 bytes, the udta GPMF some KB, hglg 13 + 5 per highlight
 local MAX_READ = 1024 * 1024
 local HGLG_HEAD = 17
+-- stdio's buffer, read whole on each seek: by default the file system's block, which is 1 MB on an SD card's exFAT
+local BUFFER = 16384
 
 -- Big-endian integers (doubles hold them exactly up to 2^53)
 local function u32(s, i)
@@ -151,6 +153,7 @@ end
 function M.read(path)
     local f = io.open(path, "rb")
     if not f then return nil end
+    f:setvbuf("full", BUFFER)
     local size = f:seek("end")
     local gopro, dji = {}, {}
     local found_dji = false

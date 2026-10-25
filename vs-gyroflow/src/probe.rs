@@ -6,7 +6,7 @@
 use std::io::{ Read, Seek, SeekFrom };
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
-use gyroflow_core::telemetry_parser::{ self, Input, util::SampleInfo, tags_impl::* };
+use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
 use crate::embedded;
 
@@ -22,7 +22,11 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
 
     let (mut file, size) = embedded::Content::new(&mut file, size);
     let video = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
-    let input = Input::from_stream(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false))).map_err(|e| e.to_string())?;
+    // Up to the first metadata sample and gyro reading, which have what's decided here: a long clip has one sample
+    // per frame spread over the whole file (36 538 in 7 GB of 4K60), ~20 s of reads from an SD card. The plugin
+    // reads them all once it plays (Engine::load)
+    let options = InputOptions { probe_only: true, ..Default::default() };
+    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
     let samples = input.samples.as_deref().unwrap_or_default();
 

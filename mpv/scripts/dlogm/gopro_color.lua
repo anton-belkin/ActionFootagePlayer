@@ -51,6 +51,7 @@ end
 function M.read(path)
     local f = io.open(path, "rb")
     if not f then return nil end
+    f:setvbuf("full", mp4.BUFFER)
     local ok, color, camera, firmware = pcall(protune_color, f)
     f:close()
     if not ok then return nil end

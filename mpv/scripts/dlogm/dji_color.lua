@@ -190,9 +190,14 @@ local function color_mode(sample)
     return type(v) == "number" and v or 0
 end
 
+-- stdio's buffer for these files, read whole on each seek: by default the file system's block, which is 1 MB on an
+-- SD card's exFAT. The boxes' headers and a sample are a few bytes to a few hundred
+M.BUFFER = 16384
+
 function M.read(path)
     local f = io.open(path, "rb")
     if not f then return nil end
+    f:setvbuf("full", M.BUFFER)
     local ok, sample = pcall(metadata_sample, f)
     f:close()
     if not ok or not sample then return nil end
