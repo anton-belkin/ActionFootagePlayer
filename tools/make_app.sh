@@ -72,6 +72,7 @@ menu="$res/plugins/footage-menu"
 mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
+install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
 # for gyroflow-export

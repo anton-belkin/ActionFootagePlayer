@@ -79,7 +79,13 @@ if [ -x "$contents/Helpers/mpv" ]; then
     exec "$contents/Helpers/mpv" "$@"
 fi
 for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
-    [ -x "$mpv" ] && exec "$mpv" "$@"
+    [ -x "$mpv" ] || continue
+    # The same with Homebrew's VapourSynth (74 and later): without it mpv can't make the gyroflow filter, and plays
+    # the sound alone
+    for vs in "${mpv%/bin/mpv}"/opt/vapoursynth/libexec/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
+        [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
+    done
+    exec "$mpv" "$@"
 done
 osascript -e 'display alert "ActionFootagePlayer needs mpv" message "Install it with Homebrew: brew install mpv"' >/dev/null
 exit 1
