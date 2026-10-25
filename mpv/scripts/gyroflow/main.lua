@@ -32,6 +32,9 @@
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
 --   Shift+E  export   the clip as it plays (export.lua)
+--   Ctrl+a   chromatic  the color fringes of a flat port under water taken out, or not (chromatic.glsl, which the
+--                     stabilization tells where the lens's axis is each frame: vs-gyroflow/src/dispersion.rs). Only
+--                     where the project has the lens under water (its refraction); on by default, sticks
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
 --                     is, for Gyroflow to find the motion from the picture (optical flow): once the project is saved
@@ -41,10 +44,12 @@
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, horizon lock and edges as the defaults, in gyroflow.conf
+--   chromatic yes|no|toggle  the water's color fringes taken out, or not (Ctrl+a)
+--   remember                the view, horizon lock, edges and the fringes as the defaults, in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
 -- the preset), view (normal, wide, off),
--- horizon_lock (yes, no, project), edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting,
+-- horizon_lock (yes, no, project), edges, edges_blur, edges_zoom, chromatic (the fringes taken out), waiting (for a
+-- project from Gyroflow), exporting,
 -- last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
@@ -64,6 +69,7 @@
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
+--   chromatic=yes   the color fringes under water taken out (Ctrl+a)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -71,7 +77,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, chromatic = true, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -83,6 +89,7 @@ local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local EMBED = utils.join_path(DIR, platform.exe("gyroflow-embed"))
+local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -181,11 +188,14 @@ local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyr
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
 local edge_blur = o.edges_blur
 
--- The mode, then the blur: "sphere blur=2"
+-- The water's color fringes taken out (Ctrl+a): the plugin reads it from the control file too
+local chromatic = o.chromatic
+
+-- The mode, then the blur and the fringes: "sphere blur=2 chromatic=1"
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g", edge_mode, edge_blur))
+    f:write(string.format("%s blur=%g chromatic=%d", edge_mode, edge_blur, chromatic and 1 or 0))
     f:close()
 end
 
@@ -198,6 +208,20 @@ end
 -- true or false: locked or not, whatever the project says; nil: the project's
 local HORIZON = { yes = true, no = false }
 local horizon = HORIZON[o.horizon_lock]
+
+-- The water's color fringes (Ctrl+a). The shader is in mpv's own glsl-shaders from the start, ahead of the dlogm
+-- plugin's, which builds its list from them: it reads the frame's marker before the noise reduction and the log
+-- curve. It leaves video without the marker as it is. The stabilization writes one whenever the shader is there, as
+-- the shader paints it over; with the correction off, one that moves no color. Only vo=gpu-next, gpu and libmpv (an
+-- app's own window) run shaders: with another vo (or without the file) there's no marker
+local chromatic_shader = false
+if file_exists(CHROMATIC_SHADER) then
+    local vo = mp.get_property("vo") or ""
+    if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
+        mp.commandv("change-list", "glsl-shaders", "append", CHROMATIC_SHADER)
+        chromatic_shader = true
+    end
+end
 
 -- Faster than max_fps (when it's set): such a clip plays every other frame if its stabilized frame leaves edges
 -- anywhere and they're filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and
@@ -215,7 +239,8 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
+                                                chromatic = chromatic_shader or nil }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -235,7 +260,7 @@ local function publish()
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
         view = stab_off and "off" or view,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
-        edges_blur = edge_blur, edges_zoom = o.edges_zoom,
+        edges_blur = edge_blur, edges_zoom = o.edges_zoom, chromatic = chromatic,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -395,11 +420,33 @@ mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
 
+-- The fringes taken out or not, for this clip and the next ones; nothing to rebuild, the plugin reads it as it plays
+local function set_chromatic(on)
+    chromatic = on
+    write_edge_control()
+    -- A paused frame is the stabilization's from before: the same frame again, with or without
+    if current_source and not stab_off and mp.get_property_bool("pause") then mp.commandv("seek", "0", "relative+exact") end
+    publish()
+    if not chromatic_shader then
+        mp.osd_message("Gyroflow: color fringes need vo=gpu-next (or gpu) and chromatic.glsl", 2)
+    else
+        mp.osd_message("Gyroflow: color fringes under water " .. (on and "taken out" or "as recorded"), 1.5)
+    end
+end
+
+mp.add_key_binding("Ctrl+a", "chromatic", function() set_chromatic(not chromatic) end)
+
+mp.register_script_message("chromatic", function(value)
+    if value == "toggle" then set_chromatic(not chromatic)
+    elseif value == "yes" or value == "no" then set_chromatic(value == "yes") end
+end)
+
 mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
         { "view", view },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
+        { "chromatic", chromatic and "yes" or "no" },
     })
     mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)

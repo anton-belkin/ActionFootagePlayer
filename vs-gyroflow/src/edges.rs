@@ -17,7 +17,8 @@
 // frame the mask says are uncovered are touched at full size.
 //
 // The mode and the blur can change while playing: mpv's script writes them to a control file, read here at
-// most every 50 ms, so switching doesn't rebuild mpv's filter chain.
+// most every 50 ms, so switching doesn't rebuild mpv's filter chain. Whether the water's color fringes are taken out
+// (dispersion.rs) goes through it too.
 //
 // In playback the sphere is written on a thread of its own (sphere_writer), from the newest frame it can take, and
 // only while a GPU worker is free: the frames come first, and if they take all of the GPU the sphere is written less
@@ -133,6 +134,8 @@ struct Feed {
 pub struct Edges {
     pub geometry: EdgeGeometry,
     mode: AtomicU8,
+    /// The water's color fringes taken out (the control file's `chromatic`): the frames' markers say where (dispersion.rs)
+    chromatic: AtomicBool,
     control: Mutex<Control>,
     settings: Mutex<EdgeSettings>,
     trail: Mutex<Trail>,
@@ -164,7 +167,7 @@ impl Edges {
         let n = geometry.grid.0 * geometry.grid.1;
         let trail = Trail { last_us: None, weight: vec![0.0; n], planes: vec![vec![0.0; n]; geometry.planes.len()] };
         Edges {
-            geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
+            geometry, mode: AtomicU8::new(EdgeMode::Off as u8), chromatic: AtomicBool::new(true),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None),
@@ -243,6 +246,11 @@ impl Edges {
         EdgeMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
+    pub fn chromatic(&self) -> bool {
+        self.check_control(false);
+        self.chromatic.load(Ordering::Relaxed)
+    }
+
     fn check_control(&self, now: bool) {
         // Another worker is already looking
         let Some(mut c) = self.control.try_lock() else { return };
@@ -253,7 +261,7 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let (mode, blur) = parse_control(&text);
+        let (mode, blur, chromatic) = parse_control(&text);
         match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
@@ -261,6 +269,11 @@ impl Edges {
                 }
             }
             None => log::warn!("Edges: unknown mode {text:?} in {path:?}"),
+        }
+        if let Some(on) = chromatic {
+            if self.chromatic.swap(on, Ordering::Relaxed) != on {
+                log::info!("Color fringes under water {}", if on { "taken out" } else { "as recorded" });
+            }
         }
         if let Some(blur) = blur {
             let mut s = self.settings.lock();
@@ -287,21 +300,23 @@ impl Edges {
 }
 
 /// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
-/// filter's `edges_blur`). A file with only the mode in it leaves the settings as the filter was given them
-fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>) {
+/// filter's `edges_blur`; `chromatic` 1 or 0, the water's color fringes taken out or not). A file with only the mode
+/// in it leaves the settings as the filter was given them
+fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>, Option<bool>) {
     let mut words = text.split_whitespace();
     let mode = EdgeMode::parse(words.next().unwrap_or(""));
-    let mut blur = None;
+    let (mut blur, mut chromatic) = (None, None);
     for w in words {
         match w.split_once('=') {
             Some(("blur", v)) => match v.parse::<f32>() {
                 Ok(v) if v.is_finite() => blur = Some((v / 100.0).clamp(0.0, 0.2)),
                 _ => log::warn!("Edges: bad blur {v:?} in the control file"),
             },
+            Some(("chromatic", v)) => chromatic = Some(v != "0"),
             _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
         }
     }
-    (mode, blur)
+    (mode, blur, chromatic)
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -903,12 +918,14 @@ mod tests {
 
     #[test]
     fn control_file() {
-        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None));
-        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None));
-        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0)));
-        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2)));
-        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None));
-        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None));
-        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0)));
+        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None, None));
+        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None, None));
+        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0), None));
+        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2), None));
+        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None, None));
+        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None, None));
+        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0), None));
+        assert_eq!(parse_control("sphere blur=2 chromatic=0"), (Some(EdgeMode::Sphere), Some(2.0 / 100.0), Some(false)));
+        assert_eq!(parse_control("off chromatic=1"), (Some(EdgeMode::Off), None, Some(true)));
     }
 }

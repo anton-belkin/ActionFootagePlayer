@@ -143,7 +143,7 @@ for curve in dlog gplog2 ilog; do
 done
 "$py" -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$dlogm/shaders/gplog_hlg.glsl" >/dev/null
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
+    mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-embed.exe gyroflow-export.exe; do
     cp "$gyroflow_bin/$f" "$gyroflow/"

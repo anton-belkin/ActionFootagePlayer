@@ -22,6 +22,7 @@ pub mod project;
 pub mod gpu_lut;
 pub mod edges;
 pub mod sphere;
+pub mod dispersion;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
 use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
@@ -99,6 +100,8 @@ struct Job {
     planes: Vec<PlaneJob>,
     limited_range: bool,
     edges: Option<edges::EdgeJob>,
+    /// The frame's lens geometry written into its luma for mpv's chromatic.glsl (dispersion.rs)
+    marker: bool,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -256,7 +259,8 @@ impl Engine {
         Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
-    pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
+    /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
+    pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool, marker: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
@@ -264,7 +268,7 @@ impl Engine {
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -430,15 +434,18 @@ fn create_planes(mgr: &StabilizationManager, cfg: WorkerConfig, num_planes: usiz
     }).collect()
 }
 
-fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64, jobs: &[PlaneJob]) -> Result<&'static str, String> {
-    let mut backend = "";
+/// The backend, and the luma's geometry for the marker (dispersion.rs)
+fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64, jobs: &[PlaneJob]) -> Result<(&'static str, Option<dispersion::Marker>), String> {
+    let (mut backend, mut marker) = ("", None);
     for (plane, pj) in planes.iter_mut().zip(jobs) {
-        backend = match cfg.kind {
+        let (b, m) = match cfg.kind {
             SampleKind::U8  => process_plane::<Luma8>(plane, timestamp_us, cfg.max_value, pj)?,
             SampleKind::U16 => process_plane::<Luma16>(plane, timestamp_us, cfg.max_value, pj)?,
         };
+        backend = b;
+        if plane.index == 0 { marker = Some(m); }
     }
-    Ok(backend)
+    Ok((backend, marker))
 }
 
 /// `geometry`: per plane, (input size, output size)
@@ -457,7 +464,7 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
             dst: dst.as_mut_ptr(), dst_stride: ow * bytes, dst_w: *ow, dst_h: *oh,
         }).collect();
         match process_planes(&mut planes, cfg, 0, &jobs) {
-            Ok(backend) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
+            Ok((backend, _)) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
             Err(e) => log::error!("Warm-up: {e}"),
         }
     }
@@ -475,9 +482,16 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
                 plane.stab.set_compute_params(plane_compute_params(mgr, cfg, plane.index, limited_range));
             }
         }
-        let mut result = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes).map(|_| ());
+        let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
+        let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
+        let mut result = processed.map(|_| ());
         if let (Ok(()), Some(e)) = (&result, &job.edges) {
             result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
+        }
+        // Last: the edge fill would draw over it. Without the correction the colors stay where they are
+        if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
+            if !edges.chromatic() { m.k = [1.0, 1.0]; }
+            m.write(luma, cfg.kind, cfg.max_value);
         }
         let _ = job.reply.send(result);
 
@@ -491,7 +505,8 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
     log::debug!("Worker finished");
 }
 
-fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_value: f32, pj: &PlaneJob) -> Result<&'static str, String> {
+/// The backend, and the plane's geometry for the marker (dispersion.rs)
+fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_value: f32, pj: &PlaneJob) -> Result<(&'static str, dispersion::Marker), String> {
     // gyroflow-core takes mutable slices for both sides, but only writes the output
     let src = unsafe { std::slice::from_raw_parts_mut(pj.src as *mut u8, pj.src_stride * pj.src_h) };
     let dst = unsafe { std::slice::from_raw_parts_mut(pj.dst, pj.dst_stride * pj.dst_h) };
@@ -515,7 +530,7 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
     transform.kernel_params.plane_index = plane.index as i32;
 
     stab.process_pixels::<T>(timestamp_us, None, &mut buffers, Some(&transform))
-        .map(|info| info.backend)
+        .map(|info| (info.backend, dispersion::Marker::from_transform(&transform)))
         .map_err(|e| format!("process_pixels: {e:?}"))
 }
 
@@ -565,6 +580,8 @@ struct Filter {
     start_time: f64,
     time_offset: f64,
     fallback_duration: f64,
+    /// Each frame's lens geometry in its luma, for mpv's chromatic.glsl
+    marker: bool,
 }
 
 impl Filter {
@@ -651,7 +668,7 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
                 dst_w: (api.getFrameWidth)(dst, p) as usize, dst_h: (api.getFrameHeight)(dst, p) as usize,
             }).collect();
 
-            let result = f.engine.process(timestamp_us, planes, limited_range);
+            let result = f.engine.process(timestamp_us, planes, limited_range, f.marker);
             (api.freeFrame)(src);
 
             match result {
@@ -762,6 +779,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let is_yuv = fmt.color_family == VSColorFamily::YUV;
     let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
     let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
+    let marker = unsafe { map_get_i64(api, input, c"chromatic") }.unwrap_or(0) != 0;
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
@@ -782,7 +800,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
     let filter = Box::new(Filter {
         node, engine, out_size: (out_vi.width, out_vi.height), num_planes: fmt.num_planes as usize, is_yuv,
-        start_time, time_offset, fallback_duration,
+        start_time, time_offset, fallback_duration, marker,
     });
     let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
     unsafe {
@@ -816,7 +834,7 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
                                c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;".as_ptr(),

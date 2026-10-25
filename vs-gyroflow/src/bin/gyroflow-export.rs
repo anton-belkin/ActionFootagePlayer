@@ -665,7 +665,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        engine.process(timestamp_us, planes, !full_range).map(|_| dst)
+                        engine.process(timestamp_us, planes, !full_range, false).map(|_| dst)
                     }
                 };
                 let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|_| f), None => Ok(f) });

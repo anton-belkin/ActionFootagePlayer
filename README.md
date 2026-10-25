@@ -216,6 +216,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
+| `Ctrl+a` | Color fringes under water taken out, or not: on clips the stabilization has under water (see Stabilization). It sticks for the next clips. Playback only: exports are as before | `gyroflow/chromatic` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
@@ -250,6 +251,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `chromatic=yes` | `no`: clips start with the color fringes under water as recorded (`Ctrl+a`) |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -320,6 +322,18 @@ you've changed in `~/.config/mpv/scripts/gyroflow/`):
 For clips shot with EIS off in air, use a preset without the refraction (save one from Gyroflow: Export →
 Create settings preset, as `default.gyroflow` in one of the places above), or give those clips a project of
 their own.
+
+**Color fringes under water.** Water bends blue more than red, so behind the flat glass of an action camera red and
+blue land apart from green towards the edges of the frame (lateral chromatic aberration): red inwards, blue outwards,
+1-2 px of a 4K frame halfway out and more further out. The camera takes out its lens's own fringes, but knows nothing
+of the water. Where the stabilization has the lens under water (its refraction), each color is taken from where its
+own ray lands, with water's index for that color (`Ctrl+a` turns it off). It's done on the GPU in RGB
+(`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame from the plugin
+(`vs-gyroflow/src/dispersion.rs`). On Osmo Action 6 dive clips the fringes along the radius went from up to 2.4 px
+(red) and 1.6 px (blue) to mostly under 0.5 px, at most ~0.8. Red follows the physics closely; blue only roughly (its
+fringe grows about in proportion to the radius), so a little of it stays further out. Where the frame's own border
+shows (the wider view, edge fill), it gets a thin colored rim: the colors are moved apart there, where the sensor had
+none. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
 
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
@@ -814,6 +828,7 @@ mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scrip
                               ActionFootagePlayer
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out (Ctrl+a)
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
                               markers.lua reads them from the file
