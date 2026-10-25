@@ -44,7 +44,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vs_gyroflow::{ Engine, Fov, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
+use vs_gyroflow::{ Engine, Fov, Interpolation, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
@@ -56,6 +56,9 @@ video with nothing to stabilize it with is color-converted only.
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
+  --underwater <yes|no|auto>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the camera says
+                   over the clip, the default: its In water / Out of water (Osmo Action 6), elsewhere the project's or
+                   preset's
   --wide           the gyroflow plugin's wider view (Ctrl+g): no zoom, at the FOV where the stabilized picture
                    covers about as much area as the frame
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
@@ -85,6 +88,7 @@ struct Options {
     sdr: bool,
     no_stabilize: bool,
     horizon_lock: Option<f64>,
+    underwater: Underwater,
     fov: Fov,
     edges: EdgeMode,
     edge_settings: EdgeSettings,
@@ -102,7 +106,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, fov: Fov::Project,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
@@ -119,6 +123,7 @@ fn main() {
             "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
+            "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no or auto")),
             // The ranges the VapourSynth filter takes them in (lib.rs)
             "--wide" => opts.fov = Fov::Wide,
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
@@ -532,7 +537,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let workers = 3;
     let key = format!("export|{}", path.display());
     let engine = match &source {
-        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, (w, h), 3, (1, 1), None,
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
         None => None,
     };
