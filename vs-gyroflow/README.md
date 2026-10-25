@@ -21,7 +21,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `wide` | 0 | 1: the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median); `fov` is then ignored |
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
 | `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>` and `chromatic=<1 or 0>`, read while playing (at most every 50 ms) |
-| `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`). Red and blue move only where the refraction says under water, and with the control file's `chromatic=1` (the default) |
+| `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`); with `edges` off it carries the project's background color too, which the shader leaves as it is. Red and blue move only where the refraction says under water, and with the control file's `chromatic=1` (the default) |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow

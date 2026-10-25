@@ -14,7 +14,7 @@
 //!HOOK LUMA
 //!BIND HOOKED
 //!SAVE CHROMATIC_MARKER
-//!WIDTH 13
+//!WIDTH 15
 //!HEIGHT 1
 //!COMPONENTS 4
 //!DESC Chromatic aberration (the frame's marker)
@@ -34,8 +34,8 @@ vec4 hook() {
 //!BIND CHROMATIC_MARKER
 //!DESC Chromatic aberration (water)
 
-#define VALUES 13
-#define PIXELS 52.0
+#define VALUES 15
+#define PIXELS 60.0
 #define MAGIC 51838
 
 int marker(int i) {
@@ -88,7 +88,7 @@ vec4 hook() {
         v[i] = marker(i);
         if (i < VALUES - 1) sum += v[i];
     }
-    if (v[0] != MAGIC || v[VALUES - 1] != sum % 65536 || (v[1] >> 8) != 1)
+    if (v[0] != MAGIC || v[VALUES - 1] != sum % 65536 || (v[1] >> 8) != 2)
         return HOOKED_texOff(vec2(0.0));
 
     // The marker's pixels show the row above
@@ -101,12 +101,29 @@ vec4 hook() {
     vec2 k = 1.0 + vec2(signed16(v[2]), signed16(v[3])) / 2097152.0;
     if (k == vec2(1.0))
         return color;
+    // The project's background, where the frame doesn't reach and nothing fills it: as it is, or the picture's colors,
+    // taken from nearer the axis, would spill onto it. And the picture within ~6 px of it too: its edge is blended and
+    // rings into the background there, which the colors taken from further in don't have (a thin line along it). Dark
+    // grey in the picture as the background is stays too, where no fringe shows anyway
+    if ((v[13] & 1) == 1) {
+        vec3 bg = vec3(float(v[12] >> 8), float(v[12] & 255), float(v[13] >> 8)) / 255.0;
+        for (int r = 3; r <= 6; r += 3)
+            for (int y = -r; y <= r; y += r)
+                for (int x = -r; x <= r; x += r)
+                    if (all(lessThan(abs(HOOKED_tex((px + vec2(x, y)) / size).rgb - bg), vec3(0.015))))
+                        return color;
+    }
     vec2 focal = vec2(float(v[4]), float(v[5])) / 2.0;
     vec2 center = 0.5 * size + vec2(signed16(v[6]), signed16(v[7])) / 4.0;
     // The axis between the sensor's first and last row (column), as the rolling shutter read them
     float t = clamp(horizontal ? px.x / size.x : px.y / size.y, 0.0, 1.0);
     vec2 a = mix(vec2(signed16(v[8]), signed16(v[9])), vec2(signed16(v[10]), signed16(v[11])), t) / 32767.0;
     vec3 axis = vec3(a, sqrt(max(1.0 - dot(a, a), 0.0)));
+
+    // The color that lands furthest out (blue, under water) stays where it is, and the others are moved out to it: each
+    // is taken from nearer the axis than where it shows. So within the picture none is ever taken from past its edge,
+    // from the background or the edge fill (a colored rim along the frame's border, were they moved apart from green)
+    vec3 kc = vec3(k.x, 1.0, k.y) / max(1.0, max(k.x, k.y));
 
     // This pixel's ray, at angle theta from the axis. A color whose index is k times green's bends there as green
     // does at the angle whose sine is k sin(theta) (Snell's law at the port): its pixel is green's ray at that angle
@@ -117,13 +134,14 @@ vec4 hook() {
     if (sin_t < 1e-7)
         return color;
     side /= sin_t;
-    for (int c = 0; c < 2; c++) {
-        float s = min(k[c] * sin_t, 1.0);
+    for (int c = 0; c < 3; c++) {
+        if (kc[c] == 1.0)
+            continue;
+        float s = min(kc[c] * sin_t, 1.0);
         vec2 p = center + focal * project(sqrt(1.0 - s * s) * axis + s * side, proj);
         // Never the marker's row
         p.y = min(p.y, size.y - 1.5);
-        float value = HOOKED_tex(p / size)[c == 0 ? 0 : 2];
-        if (c == 0) color.r = value; else color.b = value;
+        color[c] = HOOKED_tex(p / size)[c];
     }
     return color;
 }

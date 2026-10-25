@@ -454,6 +454,8 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
     let mut limited_range = cfg.is_yuv;
     let mut planes = create_planes(mgr, cfg, geometry.len(), limited_range);
     let mut edge_worker = edges::EdgeWorker::new(mgr, cfg, &edges.geometry, limited_range);
+    // For the marker (dispersion.rs): what the frame shows where it doesn't cover the output and nothing fills it
+    let background = { let b = mgr.params.read().background; [b[0], b[1], b[2]] };
     if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
@@ -491,6 +493,7 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         // Last: the edge fill would draw over it. Without the correction the colors stay where they are
         if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
             if !edges.chromatic() { m.k = [1.0, 1.0]; }
+            if job.edges.is_none() { m.background = Some(background); }
             m.write(luma, cfg.kind, cfg.max_value);
         }
         let _ = job.reply.send(result);

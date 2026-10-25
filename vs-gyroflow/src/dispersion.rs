@@ -45,13 +45,16 @@ pub struct Marker {
     /// The lens's axis as the output's camera sees it (x, y of the unit vector; z towards the scene) when the sensor
     /// read its first and its last row (column)
     pub axis: [[f32; 2]; 2],
+    /// The project's background color (RGB, 0-1), where the frame doesn't cover the output and nothing fills it: the
+    /// shader moves no color there, or the picture's colors would spill onto it
+    pub background: Option<[f32; 3]>,
 }
 
 /// The marker's first value, so the shader knows a frame that has none
 const MAGIC: u16 = 0xCA7E;
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 /// 16-bit values, then their sum
-const VALUES: usize = 13;
+const VALUES: usize = 15;
 /// Each value is four pixels of four bits, highest first
 pub const PIXELS: usize = VALUES * 4;
 
@@ -78,6 +81,7 @@ impl Marker {
             projection: p.output_projection,
             horizontal: flags.contains(KernelParamsFlags::HORIZONTAL_RS),
             axis: [first.map(axis).unwrap_or([0.0, 0.0]), last.map(axis).unwrap_or([0.0, 0.0])],
+            background: None,
         }
     }
 
@@ -85,6 +89,8 @@ impl Marker {
     pub fn values(&self) -> [u16; VALUES] {
         let signed = |v: f32, scale: f32| (v * scale).round().clamp(-32768.0, 32767.0) as i16 as u16;
         let unsigned = |v: f32, scale: f32| (v * scale).round().clamp(0.0, 65535.0) as u16;
+        let byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u16;
+        let bg = self.background.unwrap_or([0.0; 3]);
         let mut v = [
             MAGIC,
             VERSION << 8 | (self.horizontal as u16) << 4 | (self.projection.clamp(0, 15) as u16),
@@ -95,6 +101,8 @@ impl Marker {
             signed(self.center[0], 4.0), signed(self.center[1], 4.0),
             signed(self.axis[0][0], 32767.0), signed(self.axis[0][1], 32767.0),
             signed(self.axis[1][0], 32767.0), signed(self.axis[1][1], 32767.0),
+            // 8 bits a color, and whether there is one
+            byte(bg[0]) << 8 | byte(bg[1]), byte(bg[2]) << 8 | self.background.is_some() as u16,
             0,
         ];
         v[VALUES - 1] = v[..VALUES - 1].iter().fold(0u16, |s, x| s.wrapping_add(*x));
@@ -149,7 +157,7 @@ mod tests {
     #[test]
     fn values_round_trip() {
         let m = Marker { k: [0.99815, 1.00275], focal: [1834.5, 1834.5], center: [-3.25, 12.0], projection: 0, horizontal: false,
-                         axis: [[0.031, -0.012], [0.029, -0.0135]] };
+                         axis: [[0.031, -0.012], [0.029, -0.0135]], background: Some([0.0667, 0.0667, 0.5]) };
         let v = m.values();
         assert_eq!(v[0], MAGIC);
         assert_eq!(v[VALUES - 1], v[..VALUES - 1].iter().fold(0u16, |s, x| s.wrapping_add(*x)));
@@ -158,11 +166,12 @@ mod tests {
         assert_eq!(v[4] as f32 / 2.0, 1834.5);
         assert_eq!(v[6] as i16 as f32 / 4.0, -3.25);
         assert!((v[9] as i16 as f32 / 32767.0 - m.axis[0][1]).abs() < 1e-4);
+        assert_eq!((v[12] >> 8, v[12] & 255, v[13] >> 8, v[13] & 1), (17, 17, 128, 1));
     }
 
     #[test]
     fn written_nibbles_read_back() {
-        let m = Marker { k: [0.998, 1.003], focal: [2000.0, 2000.0], center: [0.0, 0.0], projection: 0, horizontal: true, axis: [[0.1, -0.2], [0.11, -0.19]] };
+        let m = Marker { k: [0.998, 1.003], focal: [2000.0, 2000.0], center: [0.0, 0.0], projection: 0, horizontal: true, axis: [[0.1, -0.2], [0.11, -0.19]], background: None };
         for (kind, max) in [(SampleKind::U16, 1023.0f32), (SampleKind::U8, 255.0)] {
             let bytes = if kind == SampleKind::U8 { 1 } else { 2 };
             let (w, h) = (64usize, 2usize);
