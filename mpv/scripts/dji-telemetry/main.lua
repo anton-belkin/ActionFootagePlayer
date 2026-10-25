@@ -2,7 +2,8 @@
 -- it as mpv plays. An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- The values come from the camera's own metadata track, read whole when the file is loaded (telemetry.lua, plain
--- Lua: 0.1-0.4 s for a few minutes of 4K60). Cameras it reads: DJI Osmo Action 6 (worked out from its recordings)
+-- Lua: 0.1-0.4 s for a few minutes of 4K60 on a local disk, ~20 s for 7 GB from an SD card, in steps that leave mpv
+-- free meanwhile). Cameras it reads: DJI Osmo Action 6 (worked out from its recordings)
 -- and Osmo 360 (from its schema), and GoPro (GPMF: GPS, speed, exposure). Any other file: nothing happens.
 --
 -- Fields, shown in the order given, each when the clip has it:
@@ -263,8 +264,19 @@ local function own_fields()
     return {}
 end
 
--- The file's telemetry, the values the fields read
+-- The read under way: { close } (telemetry.reader)
+local reading = nil
+-- Reading for this long at a time, then the script's events (quitting among them) before it goes on
+local STEP_TIME = 0.02
+
+local function stop_reading()
+    if reading then reading.close() end
+    reading = nil
+end
+
+-- The file's telemetry, the values the fields read. In steps: a long clip from an SD card takes ~20 s
 local function load()
+    stop_reading()
     track, shown, read_for = nil, nil, {}
     overlay:remove()
     -- Each clip's own fields are picked once it's read: it's read for all the ones it could have
@@ -279,16 +291,28 @@ local function load()
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     if not PROBED_EXTENSIONS[ext] then return end
     for _, v in ipairs(wanted) do read_for[v] = true end
-    local err
-    track, err = telemetry.read(path, wanted)
-    if err then mp.msg.warn("couldn't read the telemetry: " .. tostring(err)) end
-    if not track then
-        mp.msg.verbose("no telemetry with a known layout")
-        return
+    local step, close = telemetry.reader(path, wanted)
+    local this = { close = close }
+    reading = this
+    local function continue()
+        if reading ~= this then return end
+        local start = mp.get_time()
+        local finished, result, err
+        repeat finished, result, err = step() until finished or mp.get_time() - start > STEP_TIME
+        if not finished then return mp.add_timeout(0, continue) end
+        reading = nil
+        if err then mp.msg.warn("couldn't read the telemetry: " .. tostring(err)) end
+        if not result then
+            mp.msg.verbose("no telemetry with a known layout")
+            return
+        end
+        track = result
+        if per_clip then set_fields(own_fields()) end
+        mp.msg.verbose("telemetry: " .. track.model .. ", showing " .. table.concat(fields, ","))
+        update()
+        publish()
     end
-    if per_clip then set_fields(own_fields()) end
-    mp.msg.verbose("telemetry: " .. track.model .. ", showing " .. table.concat(fields, ","))
-    update()
+    continue()
 end
 
 mp.register_event("file-loaded", function()
@@ -297,6 +321,7 @@ mp.register_event("file-loaded", function()
 end)
 
 mp.register_event("end-file", function()
+    stop_reading()
     track, shown = nil, nil
     overlay:remove()
     publish()

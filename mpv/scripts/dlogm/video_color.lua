@@ -54,6 +54,7 @@ end
 function M.read(path)
     local f = io.open(path, "rb")
     if not f then return nil end
+    f:setvbuf("full", mp4.BUFFER)
     local ok, transfer, primaries = pcall(colr, f)
     f:close()
     if not ok or not transfer then return nil end

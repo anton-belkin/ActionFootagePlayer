@@ -9,8 +9,10 @@
 --       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
 --
--- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip; ~0.5 s more
--- for GoPro and Insta360 clips it would stabilize, to find their lens in Gyroflow's database) before playback starts.
+-- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip, ~1 s from an
+-- SD card; ~0.5 s more for GoPro and Insta360 clips it would stabilize, to find their lens in Gyroflow's database)
+-- before playback starts. The motion data itself the plugin reads as the filter starts (~20 s for a 7 GB clip from an
+-- SD card: issue #40).
 --
 -- The stabilization is the gyroflow VapourSynth plugin (libvs_gyroflow.dylib on macOS, libvs_gyroflow.so on Linux,
 -- vs_gyroflow.dll on Windows), so it's the same as rendering the
@@ -127,29 +129,32 @@ local function project_video_size(project)
     return info.width, info.height, info.fps
 end
 
--- What to stabilize the video with: { project = <.gyroflow or the video itself>, kind, width, height, preset }
-local function find_source(path)
+-- What to stabilize the video with, to done(): { project = <.gyroflow or the video itself>, kind, width, height,
+-- preset }, or nil. The probe isn't waited for in the script's thread: from an SD card it takes a second, and quitting
+-- or the next clip ends it (playback_only)
+local function find_source(path, done)
     local project = find_project(path)
     if project then
         local w, h, fps = project_video_size(project)
-        return { project = project, kind = "project", width = w, height = h, fps = fps }
+        return done({ project = project, kind = "project", width = w, height = h, fps = fps })
     end
-    if not path or path:find("://", 1, true) then return nil end
+    if not path or path:find("://", 1, true) then return done(nil) end
     local ext = (path:match("%.([^./\\]+)$") or ""):lower()
-    if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return nil end
-    local r = mp.command_native({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = false })
-    local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
-    if not info or not info.mode then
-        mp.msg.verbose("not stabilizing: " .. (info and info.reason or "probe failed"))
-        return nil
-    end
-    local preset = nil
-    if info.mode == "default" then
-        for _, p in ipairs(PRESETS) do
-            if not preset and file_exists(p) then preset = p end
+    if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return done(nil) end
+    mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
+        local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        if not info or not info.mode then
+            mp.msg.verbose("not stabilizing: " .. (info and info.reason or "probe failed"))
+            return done(nil)
         end
-    end
-    return { project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset }
+        local preset = nil
+        if info.mode == "default" then
+            for _, p in ipairs(PRESETS) do
+                if not preset and file_exists(p) then preset = p end
+            end
+        end
+        done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset })
+    end)
 end
 
 local KIND_LABELS = { project = "", embedded = " (embedded project)", default = " (default preset)" }
@@ -249,17 +254,7 @@ end
 -- A clip played again from where it was (play_again)
 local resume = nil
 
-local function setup()
-    current_source, stab_off = nil, false
-    local path = mp.get_property("path")
-    if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
-    resume = nil
-    if not file_exists(PLUGIN) then
-        if find_project(path) then mp.msg.warn("plugin missing at " .. PLUGIN) end
-        return
-    end
-    local source = find_source(path)
-    if not source then return end
+local function add_filter(source)
     current_source = source
     write_edge_control()
 
@@ -291,9 +286,32 @@ local function setup()
                 .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
-mp.add_hook("on_load", 50, function()
-    setup()
-    publish()
+-- The filter for the clip, to done() once it's decided
+local function setup(done)
+    current_source, stab_off = nil, false
+    local path = mp.get_property("path")
+    if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
+    resume = nil
+    if not file_exists(PLUGIN) then
+        if find_project(path) then mp.msg.warn("plugin missing at " .. PLUGIN) end
+        return done()
+    end
+    find_source(path, function(source)
+        if source then add_filter(source) end
+        done()
+    end)
+end
+
+-- Loading waits for the probe, with the script free meanwhile: quitting doesn't wait for it
+mp.add_hook("on_load", 50, function(hook)
+    hook:defer()
+    local slow = mp.add_timeout(0.7, function() mp.osd_message("Gyroflow: reading the clip…", 30) end)
+    setup(function()
+        if not slow:is_enabled() then mp.osd_message("", 0) end
+        slow:kill()
+        publish()
+        hook:cont()
+    end)
 end)
 
 -- The clip loaded again from where it plays: to stabilize it with a project that wasn't there when it loaded
