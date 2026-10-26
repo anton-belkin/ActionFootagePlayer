@@ -31,6 +31,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
+--   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
+--                     sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
@@ -433,9 +435,12 @@ mp.register_script_message("horizon-lock", function(value)
     mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the project says" or (horizon and "locked" or "not locked")), 1.5)
 end)
 
-mp.register_script_message("underwater", function(value)
-    if not UNDERWATER_LABELS[value] then return end
+-- Under water or auto, before Ctrl+u took the lens out of the water
+local underwater_back = underwater ~= "no" and underwater or "auto"
+
+local function set_underwater(value)
     underwater = value
+    if value ~= "no" then underwater_back = value end
     rebuild_filter()
     publish()
     local note = ""
@@ -444,6 +449,15 @@ mp.register_script_message("underwater", function(value)
     end
     mp.msg.info(UNDERWATER_LABELS[value] .. note)
     mp.osd_message("Gyroflow: " .. UNDERWATER_LABELS[value] .. note, 2)
+end
+
+mp.register_script_message("underwater", function(value)
+    if UNDERWATER_LABELS[value] then set_underwater(value) end
+end)
+
+-- Above water <-> what it was (under water, or as the camera says)
+mp.add_key_binding("Ctrl+u", "lens", function()
+    set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
 mp.register_script_message("edges", function(mode)
