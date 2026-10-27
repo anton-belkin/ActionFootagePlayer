@@ -1,0 +1,10 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+wv-xdr,start,1793139091.506,2.526,0.506,36,0,0,155.647,3.363,59.940,59.940,7.648,first frame 3.113 s after launch
+wv-xdr,steady,1793139099.154,,,0,0,0,0.050,,59.940,59.940,15.004,
+wv-xdr,view_wide,1793139114.159,,,37,0,0,95.767,4.329,59.940,59.940,5.000,from normal
+wv-xdr,steady,1793139119.160,,,0,0,0,0.044,,59.940,59.940,15.017,
+wv-xdr,view_normal,1793139134.177,,,0,0,0,0.067,,59.940,59.940,5.002,from wide
+wv-xdr,steady,1793139139.180,2.577,,0,0,0,12.160,,59.940,59.940,15.010,
+wv-xdr,view_wide,1793139154.189,,,24,0,0,124.512,0.696,59.940,59.940,5.011,from normal
+wv-xdr,view_off,1793139159.207,,,4,0,0,21.635,0.346,57.074,58.946,5.005,from wide
+wv-xdr,view_normal,1793139164.212,,,19,0,0,163.094,0.564,59.940,59.940,5.009,from off

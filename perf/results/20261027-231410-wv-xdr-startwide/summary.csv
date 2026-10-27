@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+wv-xdr-startwide,start,1793139251.369,1.915,1.448,25,0,0,47.419,2.519,59.940,59.940,7.016,first frame 2.242 s after launch
+wv-xdr-startwide,steady,1793139258.385,,,4,0,0,20.133,9.926,59.940,59.940,15.018,
+wv-xdr-startwide,view_normal,1793139273.404,,,0,0,0,0.023,,59.940,59.940,5.003,from wide
+wv-xdr-startwide,steady,1793139278.406,,,0,0,0,0.045,,59.940,59.940,15.006,

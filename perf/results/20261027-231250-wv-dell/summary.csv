@@ -1,0 +1,10 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+wv-dell,start,1793139171.756,2.055,0.466,0,0,0,8.863,,59.940,59.940,7.157,first frame 2.615 s after launch
+wv-dell,steady,1793139178.913,,,0,0,0,0.017,,59.940,59.940,15.045,
+wv-dell,view_wide,1793139193.959,,,14,0,0,81.978,0.521,59.940,59.940,5.005,from normal
+wv-dell,steady,1793139198.963,,,25,0,0,161.192,1.555,59.940,59.940,15.046,
+wv-dell,view_normal,1793139214.019,,,0,0,0,0.014,,59.940,59.940,5.005,from wide
+wv-dell,steady,1793139219.023,2.497,,0,0,0,9.849,,59.940,59.940,15.028,
+wv-dell,view_wide,1793139234.051,,,6,0,0,25.777,0.351,59.940,59.940,5.007,from normal
+wv-dell,view_off,1793139239.059,,,4,0,0,42.125,0.298,57.086,59.008,5.007,from wide
+wv-dell,view_normal,1793139244.066,,,9,0,0,112.923,0.327,59.940,59.940,5.009,from off
