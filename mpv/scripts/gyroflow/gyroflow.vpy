@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, wide, horizon_lock, underwater, edges*, chromatic). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, horizon_lock, underwater, width, height, edges*, chromatic). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -24,6 +24,10 @@ if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 if args.get('underwater'):
     stab['underwater'] = args['underwater']
+# The size to render at, for the display (main.lua); the project's or the input's without it
+if args.get('width') and args.get('height'):
+    stab['width'] = int(args['width'])
+    stab['height'] = int(args['height'])
 # What fills the uncovered edges; the control file has the mode and the blur as they change while playing
 options = {}
 for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_control', str)):

@@ -518,7 +518,7 @@ mod gyroflow_geometry {
             s.set_device(-1);
             s.init_size(SIZE, (p.output_width, p.output_height));
             s.set_compute_params(p.clone());
-            PlaneStab { stab: s, index: 0 }
+            PlaneStab::new(s, 0, -1)
         };
         let ts = (t_ms * 1000.0) as i64;
         let mut read = |coord: usize| -> Vec<u16> {
