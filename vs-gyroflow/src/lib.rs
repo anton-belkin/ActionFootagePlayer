@@ -402,6 +402,18 @@ fn get_engine(key: &str, load: impl FnOnce() -> Result<Engine, String>) -> Resul
 struct PlaneStab {
     stab: Stabilization,
     index: usize,
+    /// The GPU device it's set up for, and the bytes of the input and output buffers it was set up with (stride times
+    /// height): gyroflow-core's wgpu backend is made for one size and writes nothing for another, though it reports
+    /// the frame done (the chroma of a 3024-wide output, whose rows VapourSynth pads: a green picture). So another
+    /// size sets it up again
+    device: isize,
+    buffers: (usize, usize),
+}
+
+impl PlaneStab {
+    fn new(stab: Stabilization, index: usize, device: isize) -> PlaneStab {
+        PlaneStab { stab, index, device, buffers: (0, 0) }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -436,7 +448,7 @@ fn create_planes(mgr: &StabilizationManager, cfg: WorkerConfig, num_planes: usiz
         stab.set_device(device);
         stab.init_size(size, output_size);
         stab.set_compute_params(plane_compute_params(mgr, cfg, index, limited_range));
-        PlaneStab { stab, index }
+        PlaneStab::new(stab, index, device)
     }).collect()
 }
 
@@ -465,11 +477,13 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
     if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
+        // Rows as VapourSynth lays out its frames' (64-byte aligned), so the GPU set up here fits the frames that come
         let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
-        let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; w * h * bytes], vec![0u8; ow * oh * bytes])).collect();
+        let stride = |w: usize| (w * bytes).div_ceil(64) * 64;
+        let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; stride(*w) * h], vec![0u8; stride(*ow) * oh])).collect();
         let jobs: Vec<PlaneJob> = geometry.iter().zip(buffers.iter_mut()).map(|(((w, h), (ow, oh)), (src, dst))| PlaneJob {
-            src: src.as_ptr(), src_stride: w * bytes, src_w: *w, src_h: *h,
-            dst: dst.as_mut_ptr(), dst_stride: ow * bytes, dst_w: *ow, dst_h: *oh,
+            src: src.as_ptr(), src_stride: stride(*w), src_w: *w, src_h: *h,
+            dst: dst.as_mut_ptr(), dst_stride: stride(*ow), dst_w: *ow, dst_h: *oh,
         }).collect();
         match process_planes(&mut planes, cfg, 0, &jobs) {
             Ok((backend, _)) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
@@ -523,6 +537,14 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
         output: BufferDescription { size: (pj.dst_w, pj.dst_h, pj.dst_stride), data: BufferSource::Cpu { buffer: dst }, ..Default::default() },
     };
 
+    let sizes = (pj.src_stride * pj.src_h, pj.dst_stride * pj.dst_h);
+    if plane.buffers != sizes {
+        if plane.buffers != (0, 0) {
+            log::info!("Plane {}: buffers of {:?} bytes, not {:?}: its GPU set up again", plane.index, sizes, plane.buffers);
+            plane.stab.set_device(plane.device);
+        }
+        plane.buffers = sizes;
+    }
     let stab = &mut plane.stab;
     if stab.initialized_backend.is_none() || stab.pending_device_change.is_some() {
         stab.ensure_ready_for_processing::<T>(timestamp_us, None, &mut buffers);
@@ -538,7 +560,7 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
     transform.kernel_params.plane_index = plane.index as i32;
 
     stab.process_pixels::<T>(timestamp_us, None, &mut buffers, Some(&transform))
-        .map(|info| (info.backend, dispersion::Marker::from_transform(&transform)))
+        .map(|info| (info.backend, dispersion::Marker::from_transform(&transform, (pj.dst_w, pj.dst_h))))
         .map_err(|e| format!("process_pixels: {e:?}"))
 }
 
@@ -851,5 +873,75 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
                                c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
+    }
+}
+
+#[cfg(test)]
+mod plane_tests {
+    use gyroflow_core::StabilizationManager;
+    use crate::*;
+
+    const SIZE: (usize, usize) = (1920, 1080);
+
+    fn manager(output: (usize, usize)) -> StabilizationManager {
+        let stab = StabilizationManager::default();
+        stab.init_from_video_data(10_000.0, 30.0, 300, SIZE);
+        let lens = serde_json::json!({
+            "name": "test", "calibrated_by": "test", "camera_brand": "test", "camera_model": "test",
+            "calib_dimension": { "w": SIZE.0, "h": SIZE.1 }, "orig_dimension": { "w": SIZE.0, "h": SIZE.1 },
+            "fps": 30.0, "calibrator_version": "---",
+            "fisheye_params": { "camera_matrix": [[1100.0, 0.0, 960.0], [0.0, 1100.0, 540.0], [0.0, 0.0, 1.0]], "distortion_coeffs": [1e-6, 0.0, 0.0, 0.0] }
+        }).to_string();
+        stab.load_lens_profile(&lens).unwrap();
+        stab.set_output_size(output.0, output.1);
+        stab.recompute_blocking();
+        stab
+    }
+
+    // The same smooth picture in every plane, each at its own size: what the luma shows at a point, the chroma does
+    fn pattern(x: usize, y: usize, (w, h): (usize, usize)) -> u16 {
+        let (u, v) = ((x as f64 + 0.5) / w as f64, (y as f64 + 0.5) / h as f64);
+        (20000.0 + 15000.0 * (u * 9.0).sin() * (v * 7.0).cos() + 10000.0 * u) as u16
+    }
+
+    /// A luma and a chroma plane rendered as the plugin renders them, into rows `pad` bytes longer than the picture
+    /// (VapourSynth's frames have them); how far the chroma is from the luma at the same place, on average (of 65535)
+    fn chroma_vs_luma(planes: &mut [PlaneStab], out: (usize, usize), pad: usize) -> f64 {
+        let geometry = [(SIZE, out), ((SIZE.0 / 2, SIZE.1 / 2), (out.0 / 2, out.1 / 2))];
+        let mut outputs = Vec::new();
+        for (plane, ((w, h), (ow, oh))) in planes.iter_mut().zip(geometry) {
+            let (stride, ostride) = (w + pad / 2, ow + pad / 2);
+            let mut src = vec![0u16; stride * h];
+            for y in 0..h { for x in 0..w { src[y * stride + x] = pattern(x, y, (w, h)); } }
+            let mut dst = vec![0u16; ostride * oh];
+            let job = PlaneJob { src: src.as_ptr() as *const u8, src_stride: stride * 2, src_w: w, src_h: h,
+                                 dst: dst.as_mut_ptr() as *mut u8, dst_stride: ostride * 2, dst_w: ow, dst_h: oh };
+            process_plane::<Luma16>(plane, 1_000_000, 65535.0, &job).unwrap();
+            outputs.push((dst, ostride));
+        }
+        let ((luma, ls), (chroma, cs)) = (&outputs[0], &outputs[1]);
+        let (mut sum, mut n) = (0.0, 0);
+        // Away from the edges, where the background may show
+        for y in 8..out.1 / 2 - 8 {
+            for x in 8..out.0 / 2 - 8 {
+                sum += (chroma[y * cs + x] as f64 - luma[2 * y * ls + 2 * x] as f64).abs();
+                n += 1;
+            }
+        }
+        sum / n as f64
+    }
+
+    #[test]
+    fn chroma_lands_with_the_luma_at_another_output_size_and_stride() {
+        // The output smaller than the input (the display's size), its chroma rows 3024 bytes: VapourSynth pads them
+        let out = (1512, 850);
+        let mgr = manager(out);
+        let cfg = WorkerConfig { kind: SampleKind::U16, max_value: 65535.0, is_yuv: true, interpolation: Interpolation::Bicubic };
+        let mut planes = create_planes(&mgr, cfg, 2, false);
+        let tight = chroma_vs_luma(&mut planes, out, 0);
+        // The same stabilizers, then frames whose rows are padded: set up again, not left unwritten
+        let padded = chroma_vs_luma(&mut planes, out, 64);
+        assert!(tight < 600.0 && padded < 600.0, "chroma off the luma by {tight} (rows as wide as the picture), {padded} (padded)");
+        assert_eq!(planes[1].buffers, ((SIZE.0 / 2 + 32) * 2 * SIZE.1 / 2, (out.0 / 2 + 32) * 2 * out.1 / 2));
     }
 }

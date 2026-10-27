@@ -467,7 +467,7 @@ impl StabSetup {
         stab.set_device(self.device);
         stab.init_size(self.size, self.output_size);
         stab.set_compute_params(params);
-        PlaneStab { stab, index }
+        PlaneStab::new(stab, index, self.device)
     }
 }
 

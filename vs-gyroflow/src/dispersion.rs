@@ -57,10 +57,12 @@ const VALUES: usize = 15;
 pub const PIXELS: usize = VALUES * 4;
 
 impl Marker {
-    /// The frame's, from the transform Gyroflow renders its luma with. Out of the water, and where the output isn't
-    /// the lens fully corrected (the colors' rays would be the lens's own, which the shader doesn't model), the colors
-    /// stay where they are: the marker is still written, for the shader to paint over
-    pub fn from_transform(t: &FrameTransform) -> Marker {
+    /// The frame's, from the transform Gyroflow renders its luma with, into a buffer of `output` pixels: Gyroflow's
+    /// kernel stretches its output to it (the core's output size is the aspect, at the input's scale), so its
+    /// coordinates are scaled to it. Out of the water, and where the output isn't the lens fully corrected (the colors'
+    /// rays would be the lens's own, which the shader doesn't model), the colors stay where they are: the marker is
+    /// still written, for the shader to paint over
+    pub fn from_transform(t: &FrameTransform, output: (usize, usize)) -> Marker {
         let p = t.kernel_params;
         let flags = KernelParamsFlags::from_bits_truncate(p.flags);
         let (f, fov, stretch, translation) = (p.f, p.fov, p.input_horizontal_stretch, p.translation2d);
@@ -70,12 +72,14 @@ impl Marker {
             [m[6] / l, m[7] / l]
         };
         let (first, last) = (t.matrices.first(), t.matrices.last());
-        let exact = p.lens_correction_amount >= 0.999 && !flags.intersects(KernelParamsFlags::HAS_DIGITAL_LENS | KernelParamsFlags::HAS_OUTPUT_RECT);
+        // The plugin sets no rect of its own: an output rect is the whole buffer, scaled to as below
+        let exact = p.lens_correction_amount >= 0.999 && !flags.intersects(KernelParamsFlags::HAS_DIGITAL_LENS);
+        let scale = [output.0 as f32 / p.output_width.max(1) as f32, output.1 as f32 / p.output_height.max(1) as f32];
         let n = if flags.contains(KernelParamsFlags::ANY_UNDERWATER) { p.light_refraction_coefficient as f64 } else { 1.0 };
         Marker {
             k: if exact && first.is_some() { water_ratios(n) } else { [1.0, 1.0] },
-            focal: [f[0] * stretch / fov, f[1] * stretch / fov],
-            center: [-translation[0], -translation[1]],
+            focal: [f[0] * stretch / fov * scale[0], f[1] * stretch / fov * scale[1]],
+            center: [-translation[0] * scale[0], -translation[1] * scale[1]],
             projection: p.output_projection,
             horizontal: flags.contains(KernelParamsFlags::HORIZONTAL_RS),
             axis: [first.map(axis).unwrap_or([0.0, 0.0]), last.map(axis).unwrap_or([0.0, 0.0])],
