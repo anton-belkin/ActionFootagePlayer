@@ -101,10 +101,11 @@ opts=(--script-opts-append="perf-out=$out" --script-opts-append="perf-label=$lab
 
 echo "== Playing $clip ($label); results in $out"
 launched=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
-# The clip loops, so a short one doesn't run into the next before the scenario asks for it
+# The clip loops, so a short one doesn't run into the next before the scenario asks for it. The window comes up first,
+# as when Finder opens the app (pseudo-gui): the clip loads knowing the display it's on
 VS_GYROFLOW_PERF=1 "$app/Contents/MacOS/ActionFootagePlayer" \
     "--script=$repo/tools/perf/scenario.lua" --script-opts-append="perf-launched=$launched" "${opts[@]}" \
-    "--log-file=$out/mpv.log" --loop-file=inf ${extra[@]+"${extra[@]}"} "$clip" || true
+    "--log-file=$out/mpv.log" --loop-file=inf --force-window=immediate ${extra[@]+"${extra[@]}"} "$clip" || true
 
 tail -c +"$((offset + 1))" "$log" > "$out/vs-gyroflow.log" 2>/dev/null || true
 grep ' perf ' "$out/vs-gyroflow.log" > "$out/perf.log" || true
