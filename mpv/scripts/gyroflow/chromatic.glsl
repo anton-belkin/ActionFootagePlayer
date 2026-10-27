@@ -7,27 +7,50 @@
 //
 // Where the lens's axis is in the stabilized frame changes every frame, so the gyroflow VapourSynth plugin writes it,
 // with the rest of the frame's geometry, into the start of the frame's last row of luma (Stabilize(chromatic=1)). The
-// first pass reads that, the second moves the colors and paints over it with the row above. A frame without it (not
+// first pass reads that, once a frame, the second moves the colors and paints over it with the row above. A frame without it (not
 // stabilized, or by an older plugin) shows as it is; out of the water (the lens's refraction 1) the plugin writes red
 // and blue where green is. The noise reduction (shaders/denoise.glsl) may run before this: it leaves the marker as it
 // is.
+//
+// The second pass runs for every pixel of the frame at the video's own size (4K), so it reads the marker already
+// decoded, and the usual rectilinear output takes its rays without trigonometry.
 
 //!HOOK LUMA
 //!BIND HOOKED
 //!SAVE CHROMATIC_MARKER
-//!WIDTH 15
+//!WIDTH 7
 //!HEIGHT 1
 //!COMPONENTS 4
 //!DESC Chromatic aberration (the frame's marker)
 
-// One texel per 16-bit value: its four pixels' nibbles, over 15. A nibble is one of 17 levels from black to white
-vec4 hook() {
-    int x = int(gl_FragCoord.x) * 4;
+#define VALUES 15
+#define MAGIC 51838
+#define VERSION 2
+
+// The i-th 16-bit value: its four pixels' nibbles, each one of 17 levels from black to white
+int value(int i) {
     int y = int(HOOKED_size.y) - 1;
-    vec4 n;
+    int v = 0;
     for (int j = 0; j < 4; j++)
-        n[j] = clamp(floor(texelFetch(HOOKED_raw, ivec2(x + j, y), 0).x * HOOKED_mul * 17.0 - 0.5), 0.0, 15.0);
-    return n / 15.0;
+        v = v * 16 + int(clamp(floor(texelFetch(HOOKED_raw, ivec2(i * 4 + j, y), 0).x * HOOKED_mul * 17.0 - 0.5), 0.0, 15.0));
+    return v;
+}
+
+// The values between the magic number and the sum (1 to 13), two to a texel as their bytes over 255; all 0, which no
+// version is, when the frame has no marker of this version
+vec4 hook() {
+    int v[VALUES];
+    int sum = 0;
+    for (int i = 0; i < VALUES; i++) {
+        v[i] = value(i);
+        if (i < VALUES - 1) sum += v[i];
+    }
+    if (v[0] != MAGIC || v[VALUES - 1] != sum % 65536 || (v[1] >> 8) != VERSION)
+        return vec4(0.0);
+    int t = int(gl_FragCoord.x) * 2 + 1;
+    int a = v[t];
+    int b = t + 1 < VALUES - 1 ? v[t + 1] : 0;
+    return vec4(float(a >> 8), float(a & 255), float(b >> 8), float(b & 255)) / 255.0;
 }
 
 //!HOOK MAIN
@@ -37,12 +60,9 @@ vec4 hook() {
 
 #define VALUES 15
 #define PIXELS 60.0
-#define MAGIC 51838
-
-int marker(int i) {
-    vec4 n = floor(texelFetch(CHROMATIC_MARKER_raw, ivec2(i, 0), 0) * CHROMATIC_MARKER_mul * 15.0 + 0.5);
-    return int(n.x) * 4096 + int(n.y) * 256 + int(n.z) * 16 + int(n.w);
-}
+#define VERSION 2
+// tan(1.5707): how far out the rectilinear projection reaches, as ray_radius has it
+#define RECTILINEAR_MAX 10381.3
 
 float signed16(int v) {
     return float(v >= 32768 ? v - 65536 : v);
@@ -66,10 +86,12 @@ float ray_radius(float theta, int proj) {
     return tan(min(theta, 1.5707));
 }
 
-// The output's ray through a point of the image plane (pixels from its center, over the focal length), and back
+// The output's ray through a point of the image plane (pixels from its center, over the focal length), and back.
+// Rectilinear, the same without the angles: tan(theta) is the radius
 vec3 ray(vec2 n, int proj) {
     float r = length(n);
     if (r < 1e-9) return vec3(0.0, 0.0, 1.0);
+    if (proj == 0) return vec3(n, 1.0) / sqrt(1.0 + r * r);
     float theta = ray_theta(r, proj);
     return vec3(n / r * sin(theta), cos(theta));
 }
@@ -77,19 +99,21 @@ vec3 ray(vec2 n, int proj) {
 vec2 project(vec3 d, int proj) {
     float s = length(d.xy);
     if (s < 1e-9) return vec2(0.0);
+    if (proj == 0) return d.xy / s * (d.z > 0.0 ? min(s / d.z, RECTILINEAR_MAX) : RECTILINEAR_MAX);
     return d.xy / s * ray_radius(acos(clamp(d.z / length(d), -1.0, 1.0)), proj);
 }
 
 vec4 hook() {
     vec2 size = HOOKED_size;
     vec2 px = HOOKED_pos * size;
+    // As the first pass decoded them; v[0] and the sum it has checked
     int v[VALUES];
-    int sum = 0;
-    for (int i = 0; i < VALUES; i++) {
-        v[i] = marker(i);
-        if (i < VALUES - 1) sum += v[i];
+    for (int t = 0; t < 7; t++) {
+        vec4 b = floor(texelFetch(CHROMATIC_MARKER_raw, ivec2(t, 0), 0) * CHROMATIC_MARKER_mul * 255.0 + 0.5);
+        v[t * 2 + 1] = int(b.x) * 256 + int(b.y);
+        v[t * 2 + 2] = int(b.z) * 256 + int(b.w);
     }
-    if (v[0] != MAGIC || v[VALUES - 1] != sum % 65536 || (v[1] >> 8) != 2)
+    if ((v[1] >> 8) != VERSION)
         return HOOKED_texOff(vec2(0.0));
 
     // The marker's pixels show the row above
