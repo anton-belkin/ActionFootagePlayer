@@ -547,7 +547,10 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         Some(e) if e.uncovered_frames.0 > 0 => opts.edges,
         _ => EdgeMode::Off,
     };
-    if let Some(e) = &engine { e.edges.configure(edges, opts.edge_settings, None); }
+    if let Some(e) = &engine {
+        let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
+        e.edges.configure(edges, opts.edge_settings, view, None);
+    }
     let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 
     let mut graph = graph;

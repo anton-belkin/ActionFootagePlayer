@@ -18,9 +18,9 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
 | `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
-| `wide` | 0 | 1: the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median); `fov` is then ignored |
+| `wide` | 0 | 1: start in the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median). The engine renders both views with the same smoothing, as a FOV change in Gyroflow doesn't recompute it, and the control file's `view=` switches between them on the next frame |
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
-| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
+| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>` and `view=normal\|wide`, read while playing (at most every 50 ms) |
 | `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`); with `edges` off it carries the project's background color too, which the shader leaves as it is. Red and blue move only where the refraction says under water, frame by frame |
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
