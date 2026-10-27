@@ -12,10 +12,13 @@
 --
 -- The steps (perf-steps= to pick, in order):
 --   start           the app opening the clip, until its first frame (also from run.sh's launch), then `observe` s
---   steady          `steady` s of plain playback
+--   steady          `steady` s of plain playback; mpv's video output passes after it go into meta.txt. It can come more
+--                   than once, to measure the state other steps leave
 --   fullscreen_on, fullscreen_off
 --   view_wide, view_off, view_normal       the stabilization's view (Ctrl+g), when the clip is stabilized
 --   look_sdr, look_hdr                     DJI's Rec.709 look and back (Ctrl+s, Ctrl+h), when the clip is log
+--   chromatic_off   the water's color fringe shader (gyroflow's chromatic.glsl) taken out of the file's shaders, to
+--                   measure what it costs: an experiment, the app has no such switch
 --   seek_forward, seek_back                10 s
 --   next_clip       the next clip in the folder's playlist, until its first frame, then `observe` s
 --   monitor, monitor_back                  with perf-monitor=yes: the window moved to the other monitor and back, by
@@ -253,7 +256,29 @@ local STEPS = {
             write_meta("start")
         end,
     },
-    steady = { duration = function() return o.steady end, after = function() meta:write("vo-passes=" .. value(mp.get_property_native("vo-passes")) .. "\n\n") end },
+    steady = {
+        duration = function() return o.steady end,
+        after = function()
+            meta:write("[vo-passes after step " .. step.number .. ", steady, " .. string.format("%.3f", now()) .. "]\nvo-passes="
+                       .. value(mp.get_property_native("vo-passes")) .. "\nglsl-shaders=" .. value(mp.get_property_native("glsl-shaders"))
+                       .. "\nuser-data/gyroflow=" .. value(mp.get_property_native("user-data/gyroflow")) .. "\n\n")
+        end,
+    },
+    chromatic_off = {
+        needs = function()
+            for _, shader in ipairs(mp.get_property_native("glsl-shaders") or {}) do
+                if shader:find("chromatic.glsl", 1, true) then return nil end
+            end
+            return "no chromatic.glsl in the shaders"
+        end,
+        run = function()
+            local kept = {}
+            for _, shader in ipairs(mp.get_property_native("glsl-shaders") or {}) do
+                if not shader:find("chromatic.glsl", 1, true) then table.insert(kept, shader) end
+            end
+            mp.set_property_native("file-local-options/glsl-shaders", kept)
+        end,
+    },
     fullscreen_on = { run = function() mp.set_property_bool("fullscreen", true) end },
     fullscreen_off = { run = function() mp.set_property_bool("fullscreen", false) end },
     view_wide = message_gyroflow("wide"),
@@ -300,13 +325,14 @@ local function names()
 end
 
 local function scenario()
-    for _, name in ipairs(names()) do
+    for number, name in ipairs(names()) do
         local s = STEPS[name]
         local reason = not s and "unknown step" or (s.needs and s.needs())
         if reason then
             skipped(name, reason)
         else
             begin(name)
+            step.number = number
             step.ready = not s.wait
             if s.run then s.run() end
             if s.wait then wait_restart(s.wait) end
