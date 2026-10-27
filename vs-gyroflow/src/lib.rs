@@ -520,23 +520,6 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
             Ok((backend, _)) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
             Err(e) => log::error!("Warm-up: {e}"),
         }
-        // The other view too, its edge fill with it (a blank frame through the zoom fill, which has no state of its own),
-        // then back: its first frames, on the clock, took 140-160 ms on the Mac's GPU workers, a jolt on the first
-        // Ctrl+g (#43)
-        let other = if view == edges::VIEW_WIDE { edges::VIEW_NORMAL } else { edges::VIEW_WIDE };
-        for v in [other, view] {
-            let base = &views.params[v as usize];
-            for plane in planes.iter_mut() {
-                plane.stab.set_compute_params(plane_compute_params(base, cfg, plane.index, limited_range));
-            }
-            edge_worker.set_view(base, cfg, limited_range);
-            if v == view { break; }
-            let mut warmed = process_planes(&mut planes, cfg, 0, &jobs).map(|_| ());
-            if warmed.is_ok() && views.uncovered[v as usize].0 > 0 {
-                warmed = edge_worker.apply(edges, cfg, &edges.prepare(edges::EdgeMode::Zoom, &jobs), 0, &jobs);
-            }
-            if let Err(e) = warmed { log::error!("Warm-up of the other view: {e}"); }
-        }
     }
     let _ = ready.send(());
 
