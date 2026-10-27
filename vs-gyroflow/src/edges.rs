@@ -741,7 +741,18 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
     drop(mgr);
     edges.writer.store(true, Ordering::Relaxed);
     let stop = || edges.feed.stop.load(Ordering::Relaxed);
-    let mut wide: Option<WideView> = None;
+    // Its GPU side set up, and a frame rendered, now, while the engine loads: set up on the first frame it was to write,
+    // on the clock, it cost the first seconds of a wider view ~15-40 dropped frames on the Mac (#43)
+    let mut wide = setup.view(&edges.geometry);
+    {
+        let g = &edges.geometry;
+        let blank = vec![vec![0.0f32; g.grid_src.0 * g.grid_src.1]; g.planes.len()];
+        let warmed = match cfg.kind {
+            SampleKind::U8  => wide.render::<u8, Luma8>(&blank, 0, cfg.max_value),
+            SampleKind::U16 => wide.render::<u16, Luma16>(&blank, 0, cfg.max_value),
+        };
+        if let Err(e) = warmed { log::error!("Sphere writer warm-up: {e}"); }
+    }
     let (mut written, mut waited, mut since) = (0u32, Duration::ZERO, Instant::now());
     loop {
         {
@@ -756,7 +767,6 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
         waited += t.elapsed();
         // The newest by now
         let Some((timestamp_us, src_lo)) = edges.feed.frame.lock().take() else { continue };
-        let wide = wide.get_or_insert_with(|| setup.view(&edges.geometry));
         let rendered = match cfg.kind {
             SampleKind::U8  => wide.render::<u8, Luma8>(&src_lo, timestamp_us, cfg.max_value),
             SampleKind::U16 => wide.render::<u16, Luma16>(&src_lo, timestamp_us, cfg.max_value),
