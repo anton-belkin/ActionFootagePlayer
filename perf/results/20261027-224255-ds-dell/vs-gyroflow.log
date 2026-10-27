@@ -1,0 +1,150 @@
+21:42:57 [INFO] Settings file path: /Users/antonbelkin/Library/Application Support/Gyroflow/settings.json
+21:42:57 [INFO] Loading video file: VideoMetadata { width: 3840, height: 2160, fps: 59.940059940059946, duration_s: 47.580866666666665, rotation: 0 }
+21:42:57 [WARN] IMU duration 47580.35992868185 is different than video duration (47580.86666666667)
+21:42:57 [WARN] Unknown lens directory: "../Resources/camera_presets/", exe: Some("/Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Helpers")
+21:42:57 [INFO] start_accessing_url: file:///Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/default.gyroflow - OPEN
+21:42:57 [INFO] /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4: own motion data, default preset
+21:42:57 [INFO] /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4: lens under water as the camera says, read in 15 ms: in 0.0-47.6 s
+21:42:58 [INFO] Loaded /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4 in 714 ms: 3840x2160 -> 1920x1080 (frame 3840x2160), frame offset 0 us; edges uncovered in 0 of 2852 frames
+21:42:58 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(14)
+21:42:58 [INFO] Processing on wgpu, U16, max value 1023
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(13)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(15)
+21:42:58 [INFO] Processing on wgpu, U16, max value 1023
+21:42:58 [INFO] Processing on wgpu, U16, max value 1023
+21:42:58 [INFO] 3 GPU workers ready after 800 ms
+21:42:58 [INFO] perf 1793137378.297 engine_load project=DJI_20261022152841_0068_D.MP4 view=Project horizon_lock=Some(100.0) underwater=Auto input=2400x1350 render=1920x1080 interpolation=Bicubic workers=3 uncovered=0/2852 project_ms=372 gyro_ms=1 water_ms=15 smoothing_ms=327 wide_fov_ms=0 leaves_edges_ms=0 warmup_ms=86 total_ms=800
+21:42:58 [INFO] perf 1793137378.297 filter_create ms=801 edges=Sphere
+21:42:58 [INFO] Found the pts in mpv's _MP_IMAGE at offset 400
+21:42:58 [INFO] Found the pts in mpv's _MP_IMAGE at offset 400
+21:42:58 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(14)
+21:42:58 [INFO] Found the pts in mpv's _MP_IMAGE at offset 400
+21:42:58 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(13)
+21:42:58 [INFO] Found the pts in mpv's _MP_IMAGE at offset 400
+21:42:58 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(14)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(15)
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(13)
+21:42:58 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:42:58 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(15)
+21:42:59 [INFO] perf 1793137379.221 frames fps=42.6 prep_ms=0.01 wait_ms=16.74 wait_max_ms=42.6 planes_ms=16.42 edges_ms=0.00 gpu_max_ms=42.6 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:00 [INFO] perf 1793137380.239 frames fps=59.9 prep_ms=0.01 wait_ms=12.55 wait_max_ms=25.9 planes_ms=12.52 edges_ms=0.00 gpu_max_ms=25.9 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:01 [INFO] perf 1793137381.243 frames fps=59.8 prep_ms=0.01 wait_ms=11.44 wait_max_ms=18.8 planes_ms=11.41 edges_ms=0.00 gpu_max_ms=18.7 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:02 [INFO] perf 1793137382.263 frames fps=59.8 prep_ms=0.01 wait_ms=12.01 wait_max_ms=17.8 planes_ms=11.98 edges_ms=0.00 gpu_max_ms=17.7 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:03 [INFO] perf 1793137383.275 frames fps=60.3 prep_ms=0.01 wait_ms=11.42 wait_max_ms=18.9 planes_ms=11.39 edges_ms=0.00 gpu_max_ms=18.9 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:04 [INFO] perf 1793137384.277 frames fps=59.9 prep_ms=0.01 wait_ms=11.26 wait_max_ms=19.0 planes_ms=11.24 edges_ms=0.00 gpu_max_ms=19.0 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:05 [INFO] perf 1793137385.285 frames fps=59.6 prep_ms=0.01 wait_ms=11.82 wait_max_ms=18.5 planes_ms=11.79 edges_ms=0.00 gpu_max_ms=18.4 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:06 [INFO] perf 1793137386.294 frames fps=60.4 prep_ms=0.01 wait_ms=11.44 wait_max_ms=17.2 planes_ms=11.41 edges_ms=0.00 gpu_max_ms=17.2 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:07 [INFO] perf 1793137387.302 frames fps=59.5 prep_ms=0.01 wait_ms=11.29 wait_max_ms=18.9 planes_ms=11.26 edges_ms=0.00 gpu_max_ms=18.8 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:07 [INFO] stop_accessing_url: file:///Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/default.gyroflow - CLOSE
+21:43:08 [INFO] perf 1793137388.304 frames fps=59.9 prep_ms=0.01 wait_ms=11.13 wait_max_ms=18.6 planes_ms=11.10 edges_ms=0.00 gpu_max_ms=18.6 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:09 [INFO] perf 1793137389.313 frames fps=59.4 prep_ms=0.01 wait_ms=11.74 wait_max_ms=21.3 planes_ms=11.71 edges_ms=0.00 gpu_max_ms=21.2 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:10 [INFO] perf 1793137390.318 frames fps=60.7 prep_ms=0.01 wait_ms=11.09 wait_max_ms=19.2 planes_ms=11.06 edges_ms=0.00 gpu_max_ms=19.2 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:11 [INFO] perf 1793137391.320 frames fps=59.9 prep_ms=0.01 wait_ms=11.42 wait_max_ms=18.3 planes_ms=11.39 edges_ms=0.00 gpu_max_ms=18.3 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:12 [INFO] perf 1793137392.334 frames fps=60.2 prep_ms=0.01 wait_ms=11.48 wait_max_ms=19.0 planes_ms=11.45 edges_ms=0.00 gpu_max_ms=19.0 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:13 [INFO] perf 1793137393.350 frames fps=60.0 prep_ms=0.01 wait_ms=11.64 wait_max_ms=20.0 planes_ms=11.61 edges_ms=0.00 gpu_max_ms=20.0 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:13 [INFO] 11.7 ms per frame on the GPU worker
+21:43:13 [INFO] 11.7 ms per frame on the GPU worker
+21:43:13 [INFO] 11.9 ms per frame on the GPU worker
+21:43:14 [INFO] perf 1793137394.351 frames fps=60.0 prep_ms=0.01 wait_ms=11.67 wait_max_ms=18.2 planes_ms=11.64 edges_ms=0.00 gpu_max_ms=18.1 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:15 [INFO] perf 1793137395.357 frames fps=59.6 prep_ms=0.01 wait_ms=11.76 wait_max_ms=22.0 planes_ms=11.73 edges_ms=0.00 gpu_max_ms=22.0 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:16 [INFO] perf 1793137396.359 frames fps=59.9 prep_ms=0.01 wait_ms=11.76 wait_max_ms=17.1 planes_ms=11.73 edges_ms=0.00 gpu_max_ms=17.1 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:17 [INFO] perf 1793137397.372 frames fps=60.3 prep_ms=0.01 wait_ms=11.72 wait_max_ms=20.0 planes_ms=11.69 edges_ms=0.00 gpu_max_ms=20.0 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:18 [INFO] perf 1793137398.378 frames fps=59.7 prep_ms=0.01 wait_ms=11.95 wait_max_ms=19.9 planes_ms=11.92 edges_ms=0.00 gpu_max_ms=19.8 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:43:18 [INFO] Loading video file: VideoMetadata { width: 3840, height: 2160, fps: 59.940059940059946, duration_s: 47.580866666666665, rotation: 0 }
+21:43:18 [WARN] IMU duration 47580.35992868185 is different than video duration (47580.86666666667)
+21:43:18 [WARN] Unknown lens directory: "../Resources/camera_presets/", exe: Some("/Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Helpers")
+21:43:18 [INFO] start_accessing_url: file:///Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/default.gyroflow - OPEN
+21:43:19 [INFO] /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4: own motion data, default preset
+21:43:19 [INFO] /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4: lens under water as the camera says, read in 16 ms: in 0.0-47.6 s
+21:43:19 [INFO] /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4: wider view at FOV 0.683; the frame is covered up to FOV 0.534 (median)
+21:43:19 [INFO] Loaded /Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4 in 368 ms: 3840x2160 -> 1920x1080 (frame 3840x2160), frame offset 0 us; wider view at FOV 0.683; edges uncovered in 2852 of 2852 frames
+21:43:19 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (600, 338, 600) -> (480, 270, 480) | key: 500837856|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (240, 135, 480) | key: 147644696|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (2400, 1350, 4800) -> (1920, 1080, 3840) | key: 3873316833|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(27)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(26)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2432) -> (960, 540, 1920) | key: 2712017079|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(28)
+21:43:19 [INFO] Processing on wgpu, U16, max value 1023
+21:43:19 [INFO] Processing on wgpu, U16, max value 1023
+21:43:19 [INFO] Processing on wgpu, U16, max value 1023
+21:43:19 [INFO] 3 GPU workers ready after 669 ms
+21:43:19 [INFO] perf 1793137399.528 engine_load project=DJI_20261022152841_0068_D.MP4 view=Wide horizon_lock=Some(100.0) underwater=Auto input=2400x1350 render=1920x1080 interpolation=Bicubic workers=3 uncovered=2852/2852 project_ms=288 gyro_ms=1 water_ms=16 smoothing_ms=50 wide_fov_ms=13 leaves_edges_ms=0 warmup_ms=301 total_ms=669
+21:43:19 [INFO] perf 1793137399.529 filter_create ms=670 edges=Sphere
+21:43:19 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(27)
+21:43:19 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(26)
+21:43:19 [INFO] Plane 1: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(27)
+21:43:19 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(26)
+21:43:19 [INFO] Plane 2: buffers of (1620000, 1036800) bytes, not (1641600, 1036800): its GPU set up again
+21:43:19 [INFO] Initialized wgpu for (1200, 675, 2400) -> (960, 540, 1920) | key: 3847465094|opencv_fisheye||4|2144|(3840, 2160)|(3840, 2160)|Bicubic|ThreadId(28)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (384, 216, 768) | key: 591224565|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(29)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (384, 216, 768) | key: 591224565|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(29)
+21:43:19 [INFO] Initialized wgpu for (300, 169, 600) -> (384, 216, 768) | key: 591224565|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(29)
+21:43:19 [INFO] Initialized wgpu for (600, 338, 600) -> (384, 216, 384) | key: 1410076279|opencv_fisheye||2|2144|(3840, 2160)|(3840, 2160)|Bilinear|ThreadId(29)
+21:43:20 [INFO] perf 1793137400.229 frames fps=66.9 prep_ms=1.29 wait_ms=23.30 wait_max_ms=40.5 planes_ms=12.03 edges_ms=10.29 gpu_max_ms=40.3 in_flight=3/3 sphere_writes=50.9 edge_mode=Sphere
+21:43:21 [INFO] perf 1793137401.249 frames fps=75.5 prep_ms=1.25 wait_ms=20.56 wait_max_ms=27.7 planes_ms=11.05 edges_ms=9.46 gpu_max_ms=27.6 in_flight=2/3 sphere_writes=73.6 edge_mode=Sphere
+21:43:22 [INFO] perf 1793137402.266 frames fps=60.0 prep_ms=1.24 wait_ms=20.85 wait_max_ms=31.1 planes_ms=11.66 edges_ms=9.15 gpu_max_ms=31.0 in_flight=2/3 sphere_writes=60.0 edge_mode=Sphere
+21:43:23 [INFO] perf 1793137403.267 frames fps=60.0 prep_ms=1.22 wait_ms=20.54 wait_max_ms=29.4 planes_ms=11.62 edges_ms=8.89 gpu_max_ms=29.3 in_flight=2/3 sphere_writes=59.0 edge_mode=Sphere
+21:43:24 [INFO] perf 1793137404.269 frames fps=58.9 prep_ms=1.26 wait_ms=22.52 wait_max_ms=47.3 planes_ms=12.46 edges_ms=10.00 gpu_max_ms=47.3 in_flight=3/3 sphere_writes=53.9 edge_mode=Sphere
+21:43:25 [INFO] perf 1793137405.283 frames fps=61.2 prep_ms=1.38 wait_ms=22.83 wait_max_ms=38.7 planes_ms=12.48 edges_ms=10.30 gpu_max_ms=38.7 in_flight=2/3 sphere_writes=58.2 edge_mode=Sphere
+21:43:26 [INFO] perf 1793137406.293 frames fps=59.4 prep_ms=1.21 wait_ms=20.18 wait_max_ms=30.1 planes_ms=10.78 edges_ms=9.37 gpu_max_ms=30.0 in_flight=2/3 sphere_writes=59.4 edge_mode=Sphere
+21:43:27 [INFO] perf 1793137407.305 frames fps=60.3 prep_ms=1.23 wait_ms=21.42 wait_max_ms=31.1 planes_ms=11.81 edges_ms=9.58 gpu_max_ms=31.1 in_flight=2/3 sphere_writes=60.3 edge_mode=Sphere
+21:43:28 [INFO] perf 1793137408.311 frames fps=60.7 prep_ms=1.27 wait_ms=22.16 wait_max_ms=65.6 planes_ms=11.97 edges_ms=10.03 gpu_max_ms=65.2 in_flight=1/3 sphere_writes=57.7 edge_mode=Sphere
+21:43:28 [INFO] stop_accessing_url: file:///Users/antonbelkin/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/default.gyroflow - CLOSE
+21:43:29 [INFO] perf 1793137409.315 frames fps=60.8 prep_ms=1.22 wait_ms=19.55 wait_max_ms=27.2 planes_ms=10.77 edges_ms=8.75 gpu_max_ms=27.2 in_flight=1/3 sphere_writes=60.8 edge_mode=Sphere
+21:43:30 [INFO] perf 1793137410.337 frames fps=58.7 prep_ms=1.21 wait_ms=19.44 wait_max_ms=25.4 planes_ms=10.71 edges_ms=8.70 gpu_max_ms=25.4 in_flight=2/3 sphere_writes=58.7 edge_mode=Sphere
+21:43:31 [INFO] perf 1793137411.350 frames fps=60.2 prep_ms=1.20 wait_ms=20.10 wait_max_ms=28.4 planes_ms=10.96 edges_ms=9.10 gpu_max_ms=28.4 in_flight=2/3 sphere_writes=60.2 edge_mode=Sphere
+21:43:32 [INFO] perf 1793137412.374 frames fps=59.6 prep_ms=1.19 wait_ms=20.53 wait_max_ms=30.3 planes_ms=11.84 edges_ms=8.66 gpu_max_ms=30.3 in_flight=2/3 sphere_writes=59.6 edge_mode=Sphere
+21:43:33 [INFO] perf 1793137413.388 frames fps=60.2 prep_ms=1.20 wait_ms=19.44 wait_max_ms=26.8 planes_ms=10.84 edges_ms=8.56 gpu_max_ms=26.8 in_flight=2/3 sphere_writes=60.2 edge_mode=Sphere
+21:43:33 [INFO] 21.0 ms per frame on the GPU worker
+21:43:33 [INFO] 20.9 ms per frame on the GPU worker
+21:43:33 [INFO] 20.7 ms per frame on the GPU worker
+21:43:34 [INFO] perf 1793137414.394 frames fps=59.6 prep_ms=1.21 wait_ms=19.98 wait_max_ms=28.5 planes_ms=10.96 edges_ms=8.99 gpu_max_ms=28.5 in_flight=2/3 sphere_writes=59.6 edge_mode=Sphere
+21:43:35 [INFO] perf 1793137415.412 frames fps=59.9 prep_ms=1.21 wait_ms=20.17 wait_max_ms=26.5 planes_ms=11.16 edges_ms=8.98 gpu_max_ms=26.4 in_flight=2/3 sphere_writes=59.9 edge_mode=Sphere
+21:43:36 [INFO] perf 1793137416.421 frames fps=60.5 prep_ms=1.19 wait_ms=19.62 wait_max_ms=28.9 planes_ms=10.76 edges_ms=8.83 gpu_max_ms=28.9 in_flight=1/3 sphere_writes=60.5 edge_mode=Sphere
+21:43:37 [INFO] perf 1793137417.424 frames fps=59.9 prep_ms=1.19 wait_ms=19.11 wait_max_ms=27.8 planes_ms=10.57 edges_ms=8.51 gpu_max_ms=27.8 in_flight=2/3 sphere_writes=59.9 edge_mode=Sphere
+21:43:38 [INFO] perf 1793137418.429 frames fps=59.7 prep_ms=1.20 wait_ms=20.47 wait_max_ms=26.8 planes_ms=11.20 edges_ms=9.24 gpu_max_ms=26.8 in_flight=2/3 sphere_writes=59.7 edge_mode=Sphere
+21:43:39 [INFO] perf 1793137419.435 frames fps=60.7 prep_ms=1.20 wait_ms=19.70 wait_max_ms=26.0 planes_ms=10.61 edges_ms=9.05 gpu_max_ms=26.0 in_flight=1/3 sphere_writes=60.7 edge_mode=Sphere

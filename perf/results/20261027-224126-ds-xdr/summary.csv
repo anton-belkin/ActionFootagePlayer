@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+ds-xdr,start,1793137287.387,2.221,1.722,16,0,0,36.888,2.711,59.940,59.940,7.297,first frame 2.773 s after launch
+ds-xdr,steady,1793137294.683,,,25,0,0,208.120,12.125,59.940,59.940,15.020,
+ds-xdr,view_wide,1793137309.704,,,147,0,0,754.390,2.964,57.073,59.140,5.005,from normal
+ds-xdr,steady,1793137314.709,,,2,0,0,3.848,3.549,59.940,59.940,15.033,

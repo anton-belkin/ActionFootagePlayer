@@ -1,5 +1,0 @@
-label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
-ds-dell-video,start,1793136210.046,1.826,1.365,57,0,0,135.871,4.909,59.940,59.940,7.009,first frame 2.043 s after launch
-ds-dell-video,steady,1793136217.055,,,3,0,0,0.019,9.908,59.940,59.940,15.009,
-ds-dell-video,view_wide,1793136232.064,,,251,0,0,862.707,5.005,57.073,58.916,5.005,from normal
-ds-dell-video,steady,1793136237.070,,,123,0,0,143.035,14.632,59.940,59.940,15.019,

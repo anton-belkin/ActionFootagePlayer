@@ -1,0 +1,44 @@
+21:42:13 [INFO] perf 1793137333.597 engine_load project=DJI_20261022152841_0068_D.MP4 view=Project horizon_lock=Some(100.0) underwater=Auto input=3840x2160 render=3840x2160 interpolation=Bicubic workers=3 uncovered=0/2852 project_ms=357 gyro_ms=1 water_ms=15 smoothing_ms=316 wide_fov_ms=0 leaves_edges_ms=0 warmup_ms=108 total_ms=797
+21:42:13 [INFO] perf 1793137333.597 filter_create ms=797 edges=Sphere
+21:42:14 [INFO] perf 1793137334.497 frames fps=20.8 prep_ms=0.01 wait_ms=53.84 wait_max_ms=91.6 planes_ms=52.03 edges_ms=0.00 gpu_max_ms=91.5 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:15 [INFO] perf 1793137335.503 frames fps=66.7 prep_ms=0.01 wait_ms=35.42 wait_max_ms=73.5 planes_ms=34.17 edges_ms=0.00 gpu_max_ms=73.2 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:16 [INFO] perf 1793137336.505 frames fps=59.9 prep_ms=0.01 wait_ms=29.54 wait_max_ms=43.6 planes_ms=29.47 edges_ms=0.00 gpu_max_ms=43.5 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:17 [INFO] perf 1793137337.505 frames fps=60.0 prep_ms=0.01 wait_ms=28.80 wait_max_ms=43.7 planes_ms=28.74 edges_ms=0.00 gpu_max_ms=43.6 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:18 [INFO] perf 1793137338.514 frames fps=59.5 prep_ms=0.01 wait_ms=29.42 wait_max_ms=39.7 planes_ms=29.20 edges_ms=0.00 gpu_max_ms=39.6 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:19 [INFO] perf 1793137339.537 frames fps=59.7 prep_ms=0.01 wait_ms=28.18 wait_max_ms=44.9 planes_ms=27.98 edges_ms=0.00 gpu_max_ms=44.9 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:20 [INFO] perf 1793137340.538 frames fps=61.0 prep_ms=0.01 wait_ms=29.06 wait_max_ms=49.8 planes_ms=29.03 edges_ms=0.00 gpu_max_ms=49.8 in_flight=1/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:21 [INFO] perf 1793137341.545 frames fps=59.6 prep_ms=0.01 wait_ms=29.88 wait_max_ms=42.7 planes_ms=29.77 edges_ms=0.00 gpu_max_ms=42.6 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:22 [INFO] perf 1793137342.577 frames fps=59.1 prep_ms=0.01 wait_ms=32.70 wait_max_ms=63.8 planes_ms=31.72 edges_ms=0.00 gpu_max_ms=63.8 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:23 [INFO] perf 1793137343.594 frames fps=60.0 prep_ms=0.01 wait_ms=34.92 wait_max_ms=61.6 planes_ms=34.08 edges_ms=0.00 gpu_max_ms=54.4 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:24 [INFO] perf 1793137344.604 frames fps=60.4 prep_ms=0.01 wait_ms=30.03 wait_max_ms=49.5 planes_ms=29.94 edges_ms=0.00 gpu_max_ms=49.4 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:25 [INFO] perf 1793137345.616 frames fps=60.3 prep_ms=0.01 wait_ms=29.68 wait_max_ms=43.8 planes_ms=29.65 edges_ms=0.00 gpu_max_ms=43.7 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:26 [INFO] perf 1793137346.645 frames fps=59.3 prep_ms=0.01 wait_ms=30.41 wait_max_ms=47.3 planes_ms=30.31 edges_ms=0.00 gpu_max_ms=47.3 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:27 [INFO] perf 1793137347.654 frames fps=60.5 prep_ms=0.01 wait_ms=29.98 wait_max_ms=46.7 planes_ms=29.95 edges_ms=0.00 gpu_max_ms=46.7 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:28 [INFO] perf 1793137348.655 frames fps=60.0 prep_ms=0.01 wait_ms=39.92 wait_max_ms=161.6 planes_ms=36.83 edges_ms=0.00 gpu_max_ms=161.5 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:29 [INFO] perf 1793137349.667 frames fps=59.3 prep_ms=0.01 wait_ms=29.94 wait_max_ms=45.3 planes_ms=29.59 edges_ms=0.00 gpu_max_ms=41.0 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:30 [INFO] perf 1793137350.688 frames fps=60.8 prep_ms=0.01 wait_ms=29.78 wait_max_ms=41.7 planes_ms=29.74 edges_ms=0.00 gpu_max_ms=41.7 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:31 [INFO] perf 1793137351.689 frames fps=58.9 prep_ms=0.01 wait_ms=29.94 wait_max_ms=46.6 planes_ms=29.91 edges_ms=0.00 gpu_max_ms=46.5 in_flight=3/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:32 [INFO] perf 1793137352.690 frames fps=60.9 prep_ms=0.01 wait_ms=29.46 wait_max_ms=43.7 planes_ms=29.41 edges_ms=0.00 gpu_max_ms=43.7 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:33 [INFO] perf 1793137353.701 frames fps=60.4 prep_ms=0.01 wait_ms=29.26 wait_max_ms=36.4 planes_ms=29.20 edges_ms=0.00 gpu_max_ms=36.4 in_flight=2/3 sphere_writes=0.0 edge_mode=Sphere
+21:42:35 [INFO] perf 1793137355.044 engine_load project=DJI_20261022152841_0068_D.MP4 view=Wide horizon_lock=Some(100.0) underwater=Auto input=3840x2160 render=3840x2160 interpolation=Bicubic workers=3 uncovered=2852/2852 project_ms=284 gyro_ms=1 water_ms=23 smoothing_ms=50 wide_fov_ms=13 leaves_edges_ms=0 warmup_ms=300 total_ms=671
+21:42:35 [INFO] perf 1793137355.049 filter_create ms=675 edges=Sphere
+21:42:35 [INFO] perf 1793137355.754 frames fps=31.7 prep_ms=2.50 wait_ms=54.86 wait_max_ms=87.0 planes_ms=30.39 edges_ms=18.27 gpu_max_ms=79.5 in_flight=3/3 sphere_writes=14.9 edge_mode=Sphere
+21:42:36 [INFO] perf 1793137356.779 frames fps=71.3 prep_ms=1.89 wait_ms=43.55 wait_max_ms=65.6 planes_ms=24.24 edges_ms=13.69 gpu_max_ms=47.3 in_flight=4/3 sphere_writes=22.5 edge_mode=Sphere
+21:42:37 [INFO] perf 1793137357.781 frames fps=71.9 prep_ms=1.88 wait_ms=42.99 wait_max_ms=72.4 planes_ms=23.40 edges_ms=13.86 gpu_max_ms=49.5 in_flight=4/3 sphere_writes=23.0 edge_mode=Sphere
+21:42:38 [INFO] perf 1793137358.790 frames fps=71.4 prep_ms=1.87 wait_ms=43.97 wait_max_ms=69.4 planes_ms=24.70 edges_ms=12.87 gpu_max_ms=47.3 in_flight=4/3 sphere_writes=23.8 edge_mode=Sphere
+21:42:39 [INFO] perf 1793137359.793 frames fps=69.8 prep_ms=1.90 wait_ms=45.09 wait_max_ms=69.1 planes_ms=23.94 edges_ms=14.61 gpu_max_ms=46.9 in_flight=4/3 sphere_writes=23.9 edge_mode=Sphere
+21:42:40 [INFO] perf 1793137360.823 frames fps=64.1 prep_ms=1.97 wait_ms=49.87 wait_max_ms=68.0 planes_ms=27.16 edges_ms=16.46 gpu_max_ms=54.6 in_flight=4/3 sphere_writes=20.4 edge_mode=Sphere
+21:42:41 [INFO] perf 1793137361.824 frames fps=60.0 prep_ms=1.96 wait_ms=53.52 wait_max_ms=68.9 planes_ms=28.05 edges_ms=19.00 gpu_max_ms=56.3 in_flight=4/3 sphere_writes=14.0 edge_mode=Sphere
+21:42:42 [INFO] perf 1793137362.830 frames fps=59.7 prep_ms=2.05 wait_ms=54.39 wait_max_ms=69.4 planes_ms=28.88 edges_ms=19.58 gpu_max_ms=59.2 in_flight=4/3 sphere_writes=14.9 edge_mode=Sphere
+21:42:43 [INFO] perf 1793137363.839 frames fps=60.5 prep_ms=2.25 wait_ms=51.67 wait_max_ms=86.7 planes_ms=26.93 edges_ms=19.58 gpu_max_ms=73.3 in_flight=3/3 sphere_writes=20.8 edge_mode=Sphere
+21:42:44 [INFO] perf 1793137364.864 frames fps=59.5 prep_ms=1.97 wait_ms=52.98 wait_max_ms=76.0 planes_ms=29.01 edges_ms=17.57 gpu_max_ms=60.6 in_flight=4/3 sphere_writes=18.5 edge_mode=Sphere
+21:42:45 [INFO] perf 1793137365.878 frames fps=60.2 prep_ms=1.97 wait_ms=53.75 wait_max_ms=71.0 planes_ms=29.45 edges_ms=18.76 gpu_max_ms=62.5 in_flight=4/3 sphere_writes=18.7 edge_mode=Sphere
+21:42:46 [INFO] perf 1793137366.887 frames fps=59.5 prep_ms=2.01 wait_ms=53.30 wait_max_ms=74.3 planes_ms=28.42 edges_ms=18.95 gpu_max_ms=58.2 in_flight=4/3 sphere_writes=19.8 edge_mode=Sphere
+21:42:47 [INFO] perf 1793137367.895 frames fps=60.5 prep_ms=1.97 wait_ms=53.35 wait_max_ms=72.3 planes_ms=28.87 edges_ms=18.11 gpu_max_ms=61.3 in_flight=4/3 sphere_writes=17.9 edge_mode=Sphere
+21:42:48 [INFO] perf 1793137368.905 frames fps=60.4 prep_ms=1.97 wait_ms=52.84 wait_max_ms=77.1 planes_ms=29.37 edges_ms=17.11 gpu_max_ms=75.3 in_flight=4/3 sphere_writes=20.8 edge_mode=Sphere
+21:42:49 [INFO] perf 1793137369.907 frames fps=58.9 prep_ms=2.02 wait_ms=53.67 wait_max_ms=74.8 planes_ms=28.98 edges_ms=18.35 gpu_max_ms=60.0 in_flight=4/3 sphere_writes=20.0 edge_mode=Sphere
+21:42:50 [INFO] perf 1793137370.910 frames fps=60.8 prep_ms=1.98 wait_ms=53.74 wait_max_ms=77.9 planes_ms=29.18 edges_ms=18.25 gpu_max_ms=58.1 in_flight=3/3 sphere_writes=16.9 edge_mode=Sphere
+21:42:51 [INFO] perf 1793137371.916 frames fps=59.7 prep_ms=1.95 wait_ms=53.23 wait_max_ms=71.9 planes_ms=29.24 edges_ms=17.38 gpu_max_ms=59.8 in_flight=3/3 sphere_writes=20.9 edge_mode=Sphere
+21:42:52 [INFO] perf 1793137372.924 frames fps=59.5 prep_ms=1.97 wait_ms=53.57 wait_max_ms=72.5 planes_ms=29.13 edges_ms=18.14 gpu_max_ms=61.4 in_flight=4/3 sphere_writes=20.8 edge_mode=Sphere
+21:42:53 [INFO] perf 1793137373.932 frames fps=60.6 prep_ms=1.98 wait_ms=53.93 wait_max_ms=73.8 planes_ms=28.31 edges_ms=18.90 gpu_max_ms=62.0 in_flight=3/3 sphere_writes=18.9 edge_mode=Sphere
+21:42:54 [INFO] perf 1793137374.942 frames fps=59.4 prep_ms=1.93 wait_ms=53.74 wait_max_ms=75.5 planes_ms=28.57 edges_ms=18.48 gpu_max_ms=60.7 in_flight=4/3 sphere_writes=17.8 edge_mode=Sphere

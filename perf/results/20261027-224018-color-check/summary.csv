@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+color-check,start,1793137220.314,2.829,0.583,17,0,0,23.803,7.891,59.940,59.940,8.034,first frame 3.732 s after launch
+color-check,steady,1793137228.349,,,0,0,0,0.041,,59.940,59.940,15.018,
+color-check,view_wide,1793137243.366,,,206,0,0,1141.584,4.101,57.073,58.936,5.002,from normal
+color-check,steady,1793137248.368,,,38,0,0,88.422,10.482,59.940,59.940,15.020,

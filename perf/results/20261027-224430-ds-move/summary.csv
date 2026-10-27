@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+ds-move,start,1793137471.892,2.114,1.685,0,0,0,13.511,,59.940,59.940,7.201,first frame 2.515 s after launch
+ds-move,steady,1793137479.093,,,0,0,0,0.043,,59.940,59.940,15.032,
+ds-move,monitor,1793137494.125,5.141,,0,0,0,0.049,,59.940,59.940,15.009,"displays before: [""Built-in Retina Display (4251086178)""]; after: [""DELL P2217H (827215170)""]"
+ds-move,monitor_back,1793137509.134,3.154,,0,0,0,0.057,,59.940,59.940,15.040,"displays before: [""DELL P2217H (827215170)""]; after: [""Built-in Retina Display (4251086178)""]"

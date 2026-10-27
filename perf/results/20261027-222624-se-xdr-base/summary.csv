@@ -1,3 +1,0 @@
-label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
-se-xdr-base,start,1793136384.977,2.207,0.461,44,0,0,174.927,3.292,59.940,59.940,7.465,first frame 2.433 s after launch
-se-xdr-base,steady,1793136392.442,,,4,0,0,29.323,13.480,59.940,59.940,15.027,
