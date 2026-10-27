@@ -19,10 +19,12 @@
 -- project in Gyroflow, including the project's smoothing, zoom and output size. It runs before any shaders (the
 -- dlogm plugin's D-Log M ones), at the source bit depth.
 --
--- Video bigger than 4K (8K) is scaled down to 4K on the GPU (VideoToolbox) before it's copied to memory
--- for VapourSynth: copying, converting and uploading 8K frames left too little headroom in a window
--- with the HDR shader (dropped frames, a slow start). The window shows less than 4K anyway. On Linux and
--- Windows it's scaled on the CPU, after the copy.
+-- The stabilized frame is rendered no bigger than the display the window is on shows it fullscreen: what's on it is
+-- the same, and every step after the decoder, the plugin's and mpv's shaders alike, has that many fewer pixels to do
+-- (on a 1080p display a quarter of 4K's; #43). The input is scaled down to match on the GPU (VideoToolbox) before
+-- it's copied to memory for VapourSynth, keeping a margin for the stabilization's zoom, which enlarges the part of the
+-- frame that shows; and never more than 4K's pixels (8K), whatever the display. A move to a display of another size
+-- sets it up again, paused for a moment. On Linux and Windows the input is scaled on the CPU, after the copy.
 --
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
 --   Ctrl+g   toggle   stabilization on, on with a wider view (no zoom, at the FOV where the stabilized picture covers about
@@ -71,6 +73,10 @@
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
 --   edges_zoom=1.5  how much the zoom fill scales the frame up
+--   resolution=display  the stabilized frame no bigger than the display shows it (above), or video: at the video's own
+--                size (up to 4K's pixels), whatever the display
+--   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
+--                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -78,7 +84,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -104,8 +110,10 @@ local PROBE_EXTENSIONS = { mp4 = true, mov = true }
 local INTERPOLATION_SLOW = "lanczos"
 local INTERPOLATION_FAST = "bicubic"
 local SLOW_MAX_FPS = 31
--- Larger video is scaled down to this many pixels (aspect kept) before stabilizing
+-- Larger video is scaled down to this many pixels (aspect kept) before stabilizing, whatever the display
 local MAX_INPUT_PIXELS = 3840 * 2160
+-- The display's size as last seen, for a clip that loads before the window is up (the first one): `<width> <height>`
+local DISPLAY_STATE = mp.command_native({ "expand-path", "~~state/gyroflow-display" })
 
 local function file_exists(path)
     local info = utils.file_info(path)
@@ -129,12 +137,14 @@ local function read_json(path)
     return json
 end
 
--- The video size the project was made for (mpv doesn't know the size yet in on_load)
+-- The video size the project was made for (mpv doesn't know the size yet in on_load), its rate, and the size it
+-- renders at (nil: the video's)
 local function project_video_size(project)
     local json = read_json(project)
     local info = json and json.video_info
     if not info or not info.width or not info.height then return nil end
-    return info.width, info.height, info.fps
+    local out = json.output or {}
+    return info.width, info.height, info.fps, tonumber(out.output_width), tonumber(out.output_height)
 end
 
 -- What to stabilize the video with, to done(): { project = <.gyroflow or the video itself>, kind, width, height,
@@ -143,8 +153,8 @@ end
 local function find_source(path, done)
     local project = find_project(path)
     if project then
-        local w, h, fps = project_video_size(project)
-        return done({ project = project, kind = "project", width = w, height = h, fps = fps })
+        local w, h, fps, ow, oh = project_video_size(project)
+        return done({ project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh })
     end
     if not path or path:find("://", 1, true) then return done(nil) end
     local ext = (path:match("%.([^./\\]+)$") or ""):lower()
@@ -167,11 +177,45 @@ end
 
 local KIND_LABELS = { project = "", embedded = " (embedded project)", default = " (default preset)" }
 
--- Even width and height that fit MAX_INPUT_PIXELS, or nil when the video already does
-local function scaled_input_size(w, h)
-    if not w or w * h <= MAX_INPUT_PIXELS then return nil end
-    local s = math.sqrt(MAX_INPUT_PIXELS / (w * h))
-    return math.floor(w * s / 2) * 2, math.floor(h * s / 2) * 2
+-- The display the window is on, in its own pixels (a Retina display's, not its points); as last seen while the window
+-- isn't up yet, nil when it never was
+local function display_size()
+    local w, h = mp.get_property_number("display-width"), mp.get_property_number("display-height")
+    if w and h and w > 0 and h > 0 then return w, h end
+    local f = DISPLAY_STATE and io.open(DISPLAY_STATE, "r")
+    if not f then return nil end
+    w, h = (f:read("*a") or ""):match("^(%d+) (%d+)")
+    f:close()
+    return tonumber(w), tonumber(h)
+end
+
+local function even(v)
+    return math.max(2, math.floor(v / 2) * 2)
+end
+
+-- The sizes to stabilize at: { input = { w, h } the video is scaled down to on the way (nil: as it is), output =
+-- { w, h } the plugin renders (nil: the project's, or the input's), key: both, to tell a change }. The output fits the
+-- display; the input keeps zoom_margin more, so the part of the frame that shows isn't enlarged
+local function render_sizes(source)
+    local w, h = source.width, source.height
+    if not w or not h or w <= 0 or h <= 0 then return { key = "" } end
+    local ow, oh = source.out_width or w, source.out_height or h
+    local scale = 1
+    local dw, dh = display_size()
+    if o.resolution == "display" and dw then scale = math.min(1, dw / ow, dh / oh) end
+    local input = math.min(1, scale * o.zoom_margin * math.max(ow / w, oh / h))
+    -- Scaling the input costs a pass of its own on the GPU: not for less than a fifth of the pixels
+    if input > 0.9 then input = 1 end
+    input = math.min(input, math.sqrt(MAX_INPUT_PIXELS / (w * h)))
+    -- Nor an output bigger than the input it's made from (8K scaled down to 4K's pixels, on a 5K display)
+    scale = math.min(scale, input * math.min(w / ow, h / oh))
+    local sizes = {
+        input = input < 1 and { even(w * input), even(h * input) } or nil,
+        output = scale < 1 and { even(ow * scale), even(oh * scale) } or nil,
+    }
+    local size = function(s) return s and string.format("%dx%d", s[1], s[2]) or "-" end
+    sizes.key = size(sizes.input) .. " " .. size(sizes.output)
+    return sizes
 end
 
 local function interpolation(source)
@@ -236,6 +280,7 @@ local function fast(source)
 end
 
 local function gyroflow_filter(source, enabled)
+    local output = render_sizes(source).output
     return {
         name = "vapoursynth",
         label = LABEL,
@@ -244,7 +289,7 @@ local function gyroflow_filter(source, enabled)
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
                                                 wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
-                                                chromatic = chromatic_shader or nil }),
+                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2] }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -284,35 +329,42 @@ end
 -- A clip played again from where it was (play_again)
 local resume = nil
 
+-- The decoding (mpv's hwdec, nil: as it is) and the input's scaling (a filter, nil: none) for the sizes
+local function input_scaling(sizes, enabled)
+    local hwdec = o.hwdec and "yes" or mp.get_property("hwdec") or "no"
+    local s = sizes.input
+    if not platform.macos then
+        -- Whichever hardware decoder mpv finds (VAAPI, NVDEC, D3D11...), copied back to memory for VapourSynth,
+        -- and scaled down there: there's no one GPU scaler for all of them
+        return hwdec ~= "no" and "auto-copy" or nil, s and { name = "lavfi", label = SCALE_LABEL, enabled = enabled,
+            params = { graph = string.format("scale=w=%d:h=%d:flags=area", s[1], s[2]) } } or nil
+    elseif s and hwdec ~= "no" then
+        -- Frames stay on the GPU through scale_vt; mpv copies the smaller result to memory for VapourSynth.
+        -- Without hardware frames (software decoding) scale_vt fails and mpv drops just that filter
+        return "videotoolbox", { name = "lavfi", label = SCALE_LABEL, enabled = enabled,
+                                 params = { graph = string.format("scale_vt=w=%d:h=%d", s[1], s[2]) } }
+    elseif hwdec ~= "no" then
+        -- VapourSynth needs frames in system memory; keep hardware decoding, copied back
+        return "videotoolbox-copy", nil
+    end
+    return nil, nil
+end
+
 local function add_filter(source)
     current_source = source
     write_edge_control()
 
-    local hwdec = o.hwdec and "yes" or mp.get_property("hwdec") or "no"
+    local sizes = render_sizes(source)
+    source.sizes = sizes.key
+    local hwdec, scale = input_scaling(sizes, true)
+    if hwdec then mp.set_property("file-local-options/hwdec", hwdec) end
     local vf = mp.get_property_native("vf") or {}
-    local sw, sh = scaled_input_size(source.width, source.height)
-    if not platform.macos then
-        -- Whichever hardware decoder mpv finds (VAAPI, NVDEC, D3D11...), copied back to memory for VapourSynth,
-        -- and >4K scaled down there: there's no one GPU scaler for all of them
-        if hwdec ~= "no" then mp.set_property("file-local-options/hwdec", "auto-copy") end
-        if sw then
-            table.insert(vf, { name = "lavfi", label = SCALE_LABEL, enabled = true,
-                               params = { graph = string.format("scale=w=%d:h=%d:flags=bilinear", sw, sh) } })
-        end
-    elseif sw and hwdec ~= "no" then
-        -- Frames stay on the GPU through scale_vt; mpv copies the 4K result to memory for VapourSynth.
-        -- Without hardware frames (software decoding) scale_vt fails and mpv drops just that filter
-        mp.set_property("file-local-options/hwdec", "videotoolbox")
-        table.insert(vf, { name = "lavfi", label = SCALE_LABEL, enabled = true,
-                           params = { graph = string.format("scale_vt=w=%d:h=%d", sw, sh) } })
-    elseif hwdec ~= "no" then
-        -- VapourSynth needs frames in system memory; keep hardware decoding, copied back
-        mp.set_property("file-local-options/hwdec", "videotoolbox-copy")
-    end
+    if scale then table.insert(vf, scale) end
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
-                .. (sw and string.format(" (input scaled to %dx%d)", sw, sh) or "") .. (view == "wide" and ", wider view" or "")
+                .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
+                .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
                 .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
@@ -389,6 +441,72 @@ end)
 
 mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
+-- The input scaling and the stabilization set up again in the filter chain where they are, for the sizes as they are
+-- now (the display's); the decoding with them, when the input scaling comes or goes (the Mac's: on the GPU or not)
+local function place_filters(enabled)
+    local sizes = render_sizes(current_source)
+    current_source.sizes = sizes.key
+    local hwdec, scale = input_scaling(sizes, enabled)
+    local vf, at = {}, nil
+    for _, f in ipairs(mp.get_property_native("vf") or {}) do
+        if f.label == LABEL then
+            at = #vf + 1
+            table.insert(vf, gyroflow_filter(current_source, enabled))
+        elseif f.label ~= SCALE_LABEL then
+            table.insert(vf, f)
+        end
+    end
+    if not at then return end
+    if scale then table.insert(vf, at, scale) end
+    if hwdec and hwdec ~= mp.get_property("file-local-options/hwdec") then mp.set_property("file-local-options/hwdec", hwdec) end
+    mp.set_property_native("vf", vf)
+end
+
+-- A change that sets the chain up again while it plays, paused through it with a word on screen: it plays on once
+-- the first frame is through (or after a few seconds), instead of dropping frames to catch up
+local function with_pause(message, change)
+    local paused = mp.get_property_native("pause")
+    if not paused then mp.set_property_native("pause", true) end
+    mp.osd_message(message, 10)
+    change()
+    if paused then return mp.osd_message("", 0) end
+    local timer = nil
+    local function resume()
+        mp.unregister_event(resume)
+        timer:kill()
+        mp.add_timeout(0.3, function()
+            mp.set_property_native("pause", false)
+            mp.osd_message("", 0)
+        end)
+    end
+    mp.register_event("playback-restart", resume)
+    timer = mp.add_timeout(5, resume)
+end
+
+-- The display the window is on, kept for the next start, and the stabilization set up for its size when that changes
+-- (the window moved to another display, or the first clip loaded before the window was up), once the window settles
+local display_timer = nil
+local function display_changed()
+    local w, h = mp.get_property_number("display-width"), mp.get_property_number("display-height")
+    if not w or not h or w <= 0 or h <= 0 then return end
+    local f = DISPLAY_STATE and io.open(DISPLAY_STATE, "w")
+    if f then
+        f:write(string.format("%d %d", w, h))
+        f:close()
+    end
+    if display_timer then display_timer:kill() end
+    display_timer = mp.add_timeout(0.5, function()
+        display_timer = nil
+        if not current_source or stab_off or o.resolution ~= "display" then return end
+        local sizes = render_sizes(current_source)
+        if sizes.key == current_source.sizes then return end
+        mp.msg.info(string.format("display %dx%d: stabilizing at %s", w, h, sizes.key))
+        with_pause("Gyroflow: setting up for this display…", function() place_filters(true) end)
+    end)
+end
+mp.observe_property("display-width", "number", display_changed)
+mp.observe_property("display-height", "number", display_changed)
+
 local function no_source()
     mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
 end
@@ -399,13 +517,8 @@ local function show(v)
     local enabled = v ~= "off"
     if enabled then view = v end
     stab_off = not enabled
-    local vf = mp.get_property_native("vf") or {}
-    for i, f in ipairs(vf) do
-        -- The input scaling goes with it: off shows the video as it is
-        if f.label == SCALE_LABEL then f.enabled = enabled end
-        if f.label == LABEL then vf[i] = gyroflow_filter(current_source, enabled) end
-    end
-    mp.set_property_native("vf", vf)
+    -- The input scaling goes with it: off shows the video as it is
+    place_filters(enabled)
     publish()
     mp.msg.info("stabilization " .. view_label(v))
     mp.osd_message("Gyroflow: " .. view_label(v), 1.5)
@@ -498,13 +611,14 @@ local function stop_watching()
 end
 
 local function reload_project(project, version)
-    local w, h, fps = project_video_size(project)
+    local w, h, fps, ow, oh = project_video_size(project)
     if not w then
         mp.msg.warn("not reloading " .. project .. ": not a Gyroflow project")
         return
     end
     -- The same video: its camera records the water or not as it did
-    local source = { project = project, kind = "project", width = w, height = h, fps = fps, water = current_source and current_source.water }
+    local source = { project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh,
+                     water = current_source and current_source.water, sizes = current_source and current_source.sizes }
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do
         if f.label == LABEL then
