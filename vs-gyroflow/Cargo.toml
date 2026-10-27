@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 # uses nothing beyond what upstream exports.
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon
 gyroflow-core = { git = "https://github.com/gyroflow/gyroflow.git", rev = "3d9f610", default-features = false, features = ["bundle-lens-profiles", "cache-gyro-metadata"] }
+# The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
+mp4parse = { package = "mp4parse-patched", version = "0.17.1", features = ["unstable-api"] }
 url = "2"
 vapoursynth4-sys = "0.4.1"
 log = "0.4"
