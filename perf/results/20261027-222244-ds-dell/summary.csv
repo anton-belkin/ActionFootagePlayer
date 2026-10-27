@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+ds-dell,start,1793136164.807,3.015,0.481,0,0,0,16.681,,59.940,59.940,8.128,first frame 3.254 s after launch
+ds-dell,steady,1793136172.935,,,0,0,0,0.048,,59.940,59.940,15.014,
+ds-dell,view_wide,1793136187.948,,,103,0,0,910.087,2.196,57.086,59.343,5.007,from normal
+ds-dell,steady,1793136192.964,,,0,0,0,0.033,,59.940,59.940,15.044,

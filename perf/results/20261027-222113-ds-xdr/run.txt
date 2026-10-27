@@ -1,0 +1,24 @@
+label=ds-xdr
+clip=/Users/antonbelkin/Movies/afp-perf-clips/DJI_20261022152841_0068_D.MP4
+cold=0
+view=normal
+commit=v0.6.3-9-ga7237f3 (HEAD)
+app=/Users/antonbelkin/Applications/ActionFootagePlayer.app 0.6.3-dev.9+a7237f3
+macos=27.0.1
+cpu=Apple M1 Pro (16 GB)
+power=Now drawing from 'AC Power'
+lowpower=0
+thermal:
+  Note: No thermal warning level has been recorded
+  Note: No performance warning level has been recorded
+  Note: No CPU power status has been recorded
+displays:
+  Chipset Model: Apple M1 Pro
+  Resolution: 1920 x 1080 (1080p FHD - Full High Definition)
+  UI Looks like: 1920 x 1080 @ 60.00Hz
+  Main Display: Yes
+  Display Type: Built-in Liquid Retina XDR Display
+  Resolution: 3024 x 1964 Retina
+  Connection Type: Internal
+  Resolution: 1920 x 1080 (1080p FHD - Full High Definition)
+  UI Looks like: 1920 x 1080 @ 60.00Hz
