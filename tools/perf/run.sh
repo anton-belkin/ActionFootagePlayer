@@ -20,21 +20,24 @@
 #   --cold            unmount and mount the clip's volume first, so it's read cold (an SD card, a USB drive; not the
 #                     Mac's own disk). Fails while something else holds the volume
 #   --monitor         also the window moved to the other monitor and back, by hand, when the OSD says
+#   --view <view>     the stabilization's view the clip starts in, normal (default) or wide, whatever gyroflow.conf
+#                     says; log clips start in HDR, whatever dlogm.conf says. So runs compare
 #   --steps <list>    the steps, comma separated (scenario.lua's names)
 #   --observe <s>     how long each action is watched (default 5)
 #   --app <path>      the app (default ~/Applications/ActionFootagePlayer.app, else /Applications's)
 #   --keep            leave the app open at the end
-# Anything after -- goes to mpv as it is.
+# Anything after -- goes to mpv as it is: -- --screen=1 --fs-screen=1 opens the window on another display.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-label="" cold=0 monitor=0 steps="" observe="" app="" keep=0 clip=""
+label="" cold=0 monitor=0 view=normal steps="" observe="" app="" keep=0 clip=""
 extra=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --label) label=$2; shift 2 ;;
         --cold) cold=1; shift ;;
         --monitor) monitor=1; shift ;;
+        --view) view=$2; shift 2 ;;
         --steps) steps=$2; shift 2 ;;
         --observe) observe=$2; shift 2 ;;
         --app) app=$2; shift 2 ;;
@@ -74,6 +77,7 @@ fi
     echo "label=$label"
     echo "clip=$clip"
     echo "cold=$cold"
+    echo "view=$view"
     echo "commit=$(git -C "$repo" describe --always --dirty 2>/dev/null || echo unknown) ($(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ?))"
     echo "app=$app $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || echo ?)"
     echo "macos=$(sw_vers -productVersion)"
@@ -87,7 +91,9 @@ fi
 log="$HOME/Library/Logs/vs-gyroflow.log"
 offset=$(stat -f %z "$log" 2>/dev/null || echo 0)
 
-opts=(--script-opts-append="perf-out=$out" --script-opts-append="perf-label=$label")
+case "$view" in normal|wide) ;; *) echo "--view: normal or wide" >&2; exit 2 ;; esac
+opts=(--script-opts-append="perf-out=$out" --script-opts-append="perf-label=$label"
+      --script-opts-append="gyroflow-view=$view" --script-opts-append="dlogm-mode=hdr")
 [ -n "$steps" ] && opts+=(--script-opts-append="perf-steps=$steps")
 [ -n "$observe" ] && opts+=(--script-opts-append="perf-observe=$observe")
 [ $monitor = 1 ] && opts+=(--script-opts-append="perf-monitor=yes")
