@@ -1,0 +1,11 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+local-xdr-nofs,start,1793133451.309,3.051,0.521,250,0,0,508.751,8.147,59.940,59.940,8.148,first frame 3.320 s after launch
+local-xdr-nofs,steady,1793133459.457,,,364,0,0,29.039,15.005,59.940,59.940,15.005,
+local-xdr-nofs,view_wide,1793133474.462,,,135,0,0,79.989,5.005,59.940,59.940,5.005,from wide
+local-xdr-nofs,view_off,1793133479.467,,,0,0,0,13.514,,57.069,59.021,5.003,from wide
+local-xdr-nofs,view_normal,1793133484.471,,,249,0,0,1184.769,5.005,59.940,59.940,5.005,from off
+local-xdr-nofs,look_sdr,1793133489.476,,,95,0,0,6.977,5.001,59.940,59.940,5.002,
+local-xdr-nofs,look_hdr,1793133494.478,,,75,0,0,0.164,4.999,59.940,59.940,5.005,
+local-xdr-nofs,seek_forward,1793133499.484,0.080,,66,0,0,9.845,5.176,59.940,59.940,5.199,
+local-xdr-nofs,seek_back,1793133504.683,0.176,,71,0,0,16.681,5.279,59.940,59.940,5.279,
+local-xdr-nofs,next_clip,1793133509.962,1.283,0.191,73,0,0,8.862,6.379,59.940,59.940,6.389,clip DJI_20261022152937_0069_D.MP4
