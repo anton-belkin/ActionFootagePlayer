@@ -477,9 +477,10 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
     if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
-        // Rows as VapourSynth lays out its frames' (64-byte aligned), so the GPU set up here fits the frames that come
+        // Rows as VapourSynth lays out its frames' (32-byte aligned: mpv's 1512-pixel chroma rows of 16 bits come 3040
+        // bytes apart), so the GPU set up here fits the frames that come
         let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
-        let stride = |w: usize| (w * bytes).div_ceil(64) * 64;
+        let stride = |w: usize| (w * bytes).div_ceil(32) * 32;
         let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; stride(*w) * h], vec![0u8; stride(*ow) * oh])).collect();
         let jobs: Vec<PlaneJob> = geometry.iter().zip(buffers.iter_mut()).map(|(((w, h), (ow, oh)), (src, dst))| PlaneJob {
             src: src.as_ptr(), src_stride: stride(*w), src_w: *w, src_h: *h,
