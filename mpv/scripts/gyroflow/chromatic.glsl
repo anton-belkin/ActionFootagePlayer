@@ -1,5 +1,5 @@
-// The color fringes of a flat port under water taken out, for mpv (the gyroflow plugin's Ctrl+a; vo=gpu-next, gpu or
-// libmpv).
+// The color fringes of a flat port under water taken out, for mpv (the gyroflow plugin's; vo=gpu-next, gpu or
+// libmpv): wherever the stabilization has the lens under water.
 // Water bends blue more than red, so towards the edges of an underwater clip red and blue land apart from green, along
 // the radius from the lens's axis: 1-2 px of a 4K frame halfway out, more further out. Here, in RGB, red and blue
 // are each taken from where their ray lands with their own refractive index (vs-gyroflow/src/dispersion.rs has the
@@ -8,8 +8,9 @@
 // Where the lens's axis is in the stabilized frame changes every frame, so the gyroflow VapourSynth plugin writes it,
 // with the rest of the frame's geometry, into the start of the frame's last row of luma (Stabilize(chromatic=1)). The
 // first pass reads that, the second moves the colors and paints over it with the row above. A frame without it (not
-// stabilized, or by an older plugin) shows as it is; out of the water, and with Ctrl+a off, the plugin writes red and
-// blue where green is. The noise reduction (shaders/denoise.glsl) may run before this: it leaves the marker as it is.
+// stabilized, or by an older plugin) shows as it is; out of the water (the lens's refraction 1) the plugin writes red
+// and blue where green is. The noise reduction (shaders/denoise.glsl) may run before this: it leaves the marker as it
+// is.
 
 //!HOOK LUMA
 //!BIND HOOKED

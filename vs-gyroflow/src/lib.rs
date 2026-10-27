@@ -490,9 +490,8 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         if let (Ok(()), Some(e)) = (&result, &job.edges) {
             result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
         }
-        // Last: the edge fill would draw over it. Without the correction the colors stay where they are
+        // Last: the edge fill would draw over it. Out of the water the colors stay where they are (its k is 1)
         if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
-            if !edges.chromatic() { m.k = [1.0, 1.0]; }
             if job.edges.is_none() { m.background = Some(background); }
             m.write(luma, cfg.kind, cfg.max_value);
         }
