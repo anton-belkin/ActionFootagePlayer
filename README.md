@@ -336,8 +336,8 @@ above), or give those clips a project of their own.
 **Color fringes under water.** Water bends blue more than red, so behind the flat glass of an action camera red and
 blue land apart from green towards the edges of the frame (lateral chromatic aberration): red inwards, blue outwards,
 1-2 px of a 4K frame halfway out and more further out. The camera takes out its lens's own fringes, but knows nothing
-of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame, as the project or
-preset says), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
+of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame: as the camera's
+*In water* / *Out of water* says, or the project or preset, or as Stabilization → Lens / `Ctrl+u` sets it), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
 furthest out, stays, and red and green are moved out to it, so nothing is taken from past the picture's edge. It's
 done on the GPU in RGB (`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
 from the plugin (`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
