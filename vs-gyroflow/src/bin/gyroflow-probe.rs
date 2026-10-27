@@ -10,10 +10,11 @@
 //                                                       stabilize it with the default preset
 //   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
-// DJI file, or a model whose metadata layout isn't known here).
+// DJI file, or a model whose metadata layout isn't known here), and "water": whether the camera records when it's in
+// the water, for the lens under water to follow it (water.rs).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 
-use vs_gyroflow::probe::{ probe, color_profile };
+use vs_gyroflow::{ probe::{ probe, color_profile }, water };
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
@@ -29,5 +30,6 @@ fn main() {
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
     };
     out["color"] = color_profile(&path).into();
+    out["water"] = water::recorded(&path).into();
     println!("{out}");
 }

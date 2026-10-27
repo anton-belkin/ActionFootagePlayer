@@ -160,7 +160,7 @@ local function look_menu(d, key)
 end
 
 local function stabilization_menu(g, key)
-    local toggle = key["script-binding gyroflow/toggle"]
+    local toggle, lens = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"]
     if not g.available then
         return {
             info("No motion data in this clip"),
@@ -178,6 +178,14 @@ local function stabilization_menu(g, key)
         item("Off", "script-message-to gyroflow view off", { checked = g.view == "off", shortcut = toggle }),
         SEPARATOR,
         item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
+        submenu("Lens", {
+            item("Under water", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
+            -- Only a camera that records when it's in the water has it; elsewhere auto is the project's or preset's
+            item(g.water and "Auto: as the camera says (In water / Out of water)" or "Auto: this camera doesn't say, so as the "
+                 .. (g.kind == "default" and "preset" or "project") .. " says",
+                 "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
+            item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
+        }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
         SEPARATOR,

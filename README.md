@@ -198,7 +198,7 @@ Right-click the video for the menu: everything the keys do, with the keys beside
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
 Report this camera…, which opens an issue on GitHub with what the plugins found in the clip.
@@ -216,6 +216,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
+| `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
@@ -248,6 +249,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
 | `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
+| `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
@@ -317,15 +319,25 @@ you've changed in `~/.config/mpv/scripts/gyroflow/`):
   frames went from 0.16 px to 0.02 px with it.
 - smoothing 0.5, zoom limit 140 %, horizon lock off.
 
-For clips shot with EIS off in air, use a preset without the refraction (save one from Gyroflow: Export →
-Create settings preset, as `default.gyroflow` in one of the places above), or give those clips a project of
-their own.
+**Lens under water, above it, or as the camera says.** The menu's Stabilization → Lens sets the refraction for
+any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above water* (none), or
+*Auto*, the default: as the camera says over the clip, its *In water* / *Out of water* (the telemetry's `water`:
+the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
+the refraction where it's in and none where it's out, changing over the one frame between. Only a camera that
+records it has Auto (the Osmo Action 6); for clips from other cameras it's greyed, and the clip plays as its
+project or preset says (the default preset: under water). A project that keyframes the refraction itself keeps
+its keyframes in Auto. It sticks for the next clips, like the horizon lock, and goes into exports and into the
+project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline).
+
+For clips from a camera without Auto shot with EIS off in air, pick Above water, or use a preset without the
+refraction (save one from Gyroflow: Export → Create settings preset, as `default.gyroflow` in one of the places
+above), or give those clips a project of their own.
 
 **Color fringes under water.** Water bends blue more than red, so behind the flat glass of an action camera red and
 blue land apart from green towards the edges of the frame (lateral chromatic aberration): red inwards, blue outwards,
 1-2 px of a 4K frame halfway out and more further out. The camera takes out its lens's own fringes, but knows nothing
-of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame, as the project or
-preset says), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
+of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame: as the camera's
+*In water* / *Out of water* says, or the project or preset, or as Stabilization → Lens / `Ctrl+u` sets it), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
 furthest out, stays, and red and green are moved out to it, so nothing is taken from past the picture's edge. It's
 done on the GPU in RGB (`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
 from the plugin (`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
@@ -374,8 +386,8 @@ every frame still plays and the sphere is written ~25 times a second, where it u
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
 plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
-of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
-has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
+of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
+the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
 whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
@@ -406,6 +418,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|trail|original|zoom|off` fills the
   edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
+- `--underwater yes|no|auto`: the lens under water, above it, or (the default) as the camera says over the clip, as
+  the menu's Lens has it (see Stabilization).
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
@@ -436,7 +450,7 @@ shows it bottom left. Each field shows when the clip has it:
 | `fields=` | |
 |---|---|
 | `depth` | under water: the barometer's altitude below the surface, in 0.1 m steps, about once a second. The camera starts recording it a second or two after it goes in |
-| `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing |
+| `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing. The lens's refraction follows it (Stabilization: Lens → Auto) |
 | `pressure` | hPa, ~100 more per meter of water |
 | `altitude` | the barometer's altitude out of water. It's relative and drifts by meters, so it's a rough guide |
 | `gps` | position, when the camera has a fix (DJI: a remote or Mimo connected) |

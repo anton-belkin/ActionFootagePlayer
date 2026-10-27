@@ -31,6 +31,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
+--   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
+--                     sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
 --                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
@@ -40,12 +42,13 @@
 -- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; mpv/menu.conf):
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
+--   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, horizon lock and edges as the defaults, in gyroflow.conf
+--   remember                the view, horizon lock, lens and edges as the defaults, in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
 -- the preset), view (normal, wide, off),
--- horizon_lock (yes, no, project), edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting,
--- last_export.
+-- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
+-- edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -60,6 +63,10 @@
 --   view=normal  the view clips start in: normal, or wide (the wider view)
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
+--   underwater=auto  the lens under water (Gyroflow's "Lens is underwater": the light bends where it enters the
+--                lens), yes, or above water, no. auto: as the camera says over the clip, its In water / Out of water
+--                (the dji-telemetry plugin's `water`; the Osmo Action 6 records it), and for clips from other
+--                cameras as the project or preset says (the default preset: under water). vs-gyroflow/src/water.rs
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
@@ -71,7 +78,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -154,7 +161,7 @@ local function find_source(path, done)
                 if not preset and file_exists(p) then preset = p end
             end
         end
-        done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset })
+        done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water })
     end)
 end
 
@@ -199,6 +206,10 @@ end
 -- true or false: locked or not, whatever the project says; nil: the project's
 local HORIZON = { yes = true, no = false }
 local horizon = HORIZON[o.horizon_lock]
+-- The lens under water (yes), above water (no), or as the camera says (auto); sticks for the next clips like the
+-- horizon lock. A clip's camera that doesn't record it (source.water) leaves auto to the project or preset
+local UNDERWATER_LABELS = { yes = "lens under water", no = "lens above water", auto = "lens under water as the camera says" }
+local underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "auto"
 
 -- The water's color fringes, taken out wherever the stabilization has the lens under water (its refraction, frame by
 -- frame: vs-gyroflow/src/dispersion.rs); there's no switch of its own. The shader is in mpv's own glsl-shaders from
@@ -232,7 +243,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
+                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -253,6 +264,7 @@ local function publish()
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
         view = stab_off and "off" or view,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
+        underwater = underwater, water = current_source and current_source.water or false,
         edges_blur = edge_blur, edges_zoom = o.edges_zoom,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
@@ -304,6 +316,19 @@ local function add_filter(source)
                 .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
+-- Whether the camera of a clip with a project next to it records when it's in the water (gyroflow-probe; a clip
+-- without one was probed before it loaded), for the menu: it plays meanwhile
+local function find_water(path, source)
+    if not file_exists(PROBE) then return end
+    mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
+        local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        if info and info.water and current_source == source then
+            source.water = true
+            publish()
+        end
+    end)
+end
+
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
@@ -317,6 +342,7 @@ local function setup(done)
     find_source(path, function(source)
         if source then add_filter(source) end
         done()
+        if source and source.kind == "project" then find_water(path, source) end
     end)
 end
 
@@ -409,6 +435,31 @@ mp.register_script_message("horizon-lock", function(value)
     mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the project says" or (horizon and "locked" or "not locked")), 1.5)
 end)
 
+-- Under water or auto, before Ctrl+u took the lens out of the water
+local underwater_back = underwater ~= "no" and underwater or "auto"
+
+local function set_underwater(value)
+    underwater = value
+    if value ~= "no" then underwater_back = value end
+    rebuild_filter()
+    publish()
+    local note = ""
+    if value == "auto" and current_source and not current_source.water then
+        note = ": this camera doesn't record it, so as the " .. (current_source.kind == "default" and "preset" or "project") .. " says"
+    end
+    mp.msg.info(UNDERWATER_LABELS[value] .. note)
+    mp.osd_message("Gyroflow: " .. UNDERWATER_LABELS[value] .. note, 2)
+end
+
+mp.register_script_message("underwater", function(value)
+    if UNDERWATER_LABELS[value] then set_underwater(value) end
+end)
+
+-- Above water <-> what it was (under water, or as the camera says)
+mp.add_key_binding("Ctrl+u", "lens", function()
+    set_underwater(underwater == "no" and underwater_back or "no")
+end)
+
 mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
@@ -417,6 +468,7 @@ mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
         { "view", view },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
+        { "underwater", underwater },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
     })
     mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
@@ -451,7 +503,8 @@ local function reload_project(project, version)
         mp.msg.warn("not reloading " .. project .. ": not a Gyroflow project")
         return
     end
-    local source = { project = project, kind = "project", width = w, height = h, fps = fps }
+    -- The same video: its camera records the water or not as it did
+    local source = { project = project, kind = "project", width = w, height = h, fps = fps, water = current_source and current_source.water }
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do
         if f.label == LABEL then
@@ -556,7 +609,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         return
     end
     project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
-    local args = { EMBED, "--extract" }
+    local args = { EMBED, "--extract", "--underwater", underwater }
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)
     end

@@ -23,6 +23,8 @@ pub mod gpu_lut;
 pub mod edges;
 pub mod sphere;
 pub mod dispersion;
+pub mod water;
+pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
 use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
@@ -141,7 +143,8 @@ impl Engine {
     /// Gyroflow's default preset and then `preset`
     /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
     /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
@@ -188,6 +191,9 @@ impl Engine {
             let h = stab.smoothing.read().horizon_lock.clone();
             stab.set_horizon_lock(amount, h.horizonroll, h.lock_pitch, h.horizonpitch, h.automatic_lock, h.turn_threshold, h.turn_smoothing_ms, h.turn_multiplier, h.tilt_accel_limit);
         }
+        // The camera's In water / Out of water is in the video: a project's, or the one being played
+        let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+        water::apply(&stab, underwater, &video);
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
@@ -744,11 +750,15 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
         unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project)
     };
     let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
+    let underwater = match unsafe { map_get_str(api, input, c"underwater") } {
+        None => Underwater::Auto,
+        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
+    };
     // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov:?}|{horizon_lock:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov:?}|{horizon_lock:?}|{underwater:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
 }
 
 /// Chroma planes need the size to be a multiple of the subsampling
@@ -836,10 +846,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
     }
 }
