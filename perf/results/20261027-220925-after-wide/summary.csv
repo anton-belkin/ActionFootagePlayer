@@ -1,0 +1,3 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+after-wide,start,1793135366.119,1.641,0.460,105,0,0,190.130,6.724,59.940,59.940,6.724,first frame 1.877 s after launch
+after-wide,steady,1793135372.843,,,123,0,0,24.692,14.726,59.940,59.940,15.040,

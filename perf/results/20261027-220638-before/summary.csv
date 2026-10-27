@@ -1,0 +1,7 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+before,start,1793135199.173,2.578,0.509,128,0,0,281.160,7.776,59.940,59.940,7.776,first frame 2.818 s after launch
+before,steady,1793135206.955,,,205,0,0,4.941,15.042,59.940,59.940,15.042,
+before,chromatic_off,1793135221.997,,,12,0,0,21.507,1.971,59.940,59.940,5.008,
+before,steady,1793135227.005,,,19,0,0,51.405,11.692,59.940,59.940,15.033,
+before,view_wide,1793135242.038,,,149,0,0,1153.721,3.731,57.060,58.788,5.003,from normal
+before,steady,1793135247.042,3.072,,82,0,0,85.994,7.540,59.940,59.940,15.034,
