@@ -1,0 +1,7 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+pr70b-xdr,start,1793140266.685,2.902,2.351,29,0,0,45.586,4.947,59.940,59.940,8.066,first frame 3.484 s after launch
+pr70b-xdr,steady,1793140274.751,,,6,0,0,20.832,13.570,59.940,59.940,15.025,
+pr70b-xdr,view_wide,1793140289.776,,,19,0,0,93.529,0.625,59.940,59.940,5.007,from normal
+pr70b-xdr,steady,1793140294.784,,,0,0,0,7.788,,59.940,59.940,15.031,
+pr70b-xdr,view_normal,1793140309.815,,,0,0,0,0.069,,59.940,59.940,5.003,from wide
+pr70b-xdr,view_wide,1793140314.818,2.466,,34,0,0,129.724,4.013,59.940,59.940,5.004,from normal
