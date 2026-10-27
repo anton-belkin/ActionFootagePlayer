@@ -175,6 +175,11 @@ impl Edges {
         }
     }
 
+    /// Whether some frame of the clip leaves edges (`set_expected`)
+    pub fn expected(&self) -> bool {
+        self.expected.load(Ordering::Relaxed)
+    }
+
     pub fn set_expected(&self, expected: bool) {
         self.expected.store(expected, Ordering::Relaxed);
     }

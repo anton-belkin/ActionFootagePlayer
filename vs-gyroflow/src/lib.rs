@@ -270,6 +270,9 @@ impl Engine {
         let (reply, result) = mpsc::sync_channel(1);
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
+            // No frame of the clip leaves edges (uncovered_frames): nothing to fill, nor the source scaled down and the
+            // mask rendered to find that out, ~4 ms a 4K frame on a GPU worker (#43)
+            _ if !self.edges.expected() => None,
             mode => Some(self.edges.prepare(mode, &planes)),
         };
         // The sphere writer waits while every worker has a frame
@@ -498,7 +501,9 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         }
         // Last: the edge fill would draw over it. Out of the water the colors stay where they are (its k is 1)
         if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
-            if job.edges.is_none() { m.background = Some(background); }
+            // Where the background shows: never in a clip whose frames all cover the output, so chromatic.glsl
+            // doesn't look for it there
+            if job.edges.is_none() && edges.expected() { m.background = Some(background); }
             m.write(luma, cfg.kind, cfg.max_value);
         }
         let _ = job.reply.send(result);
