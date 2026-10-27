@@ -68,6 +68,45 @@ pub fn log_path() -> std::path::PathBuf {
     }
 }
 
+/// Timings for tools/perf, when VS_GYROFLOW_PERF is set (not 0): lines `perf <unix time> <what> key=value...` in the
+/// log, with the time to the millisecond, so they line up with the scenario's CSV. Off, nothing is measured
+pub fn perf_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VS_GYROFLOW_PERF").is_ok_and(|v| !v.is_empty() && v != "0"))
+}
+
+pub fn perf_log(what: &str, fields: std::fmt::Arguments) {
+    if !perf_enabled() { return; }
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    log::info!("perf {t:.3} {what} {fields}");
+}
+
+/// Engine::load's stages, as `<stage>_ms=` fields for perf_log
+struct Stages { t: std::time::Instant, fields: String }
+
+impl Stages {
+    fn new() -> Stages { Stages { t: std::time::Instant::now(), fields: String::new() } }
+    fn lap(&mut self, stage: &str) {
+        use std::fmt::Write;
+        let _ = write!(self.fields, " {stage}_ms={:.0}", self.t.elapsed().as_secs_f64() * 1000.0);
+        self.t = std::time::Instant::now();
+    }
+}
+
+/// What the frames cost over the last second or so, for perf_log: the time Engine::process takes to prepare a frame
+/// (the edge fill's downscale) and then waits for it, and what the GPU workers spend on it
+#[derive(Default)]
+struct FrameStats {
+    frames: u32,
+    prep_us: u64,
+    wait_us: u64,
+    wait_max_us: u64,
+    gpu_frames: u32,
+    planes_us: u64,
+    edges_us: u64,
+    gpu_max_us: u64,
+}
+
 /// std::fs::canonicalize, without the \\?\ Windows puts in front of a drive path: ffmpeg's messages, Gyroflow's
 /// URLs and the paths printed for the player read better without it, and all of them take the plain path
 pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<std::path::PathBuf> {
@@ -135,6 +174,8 @@ pub struct Engine {
     pub wide_fov: Option<f64>,
     /// Frames done since when, for the rate in the log
     throughput: Mutex<(u32, std::time::Instant)>,
+    /// For perf_log: the frames since when; the workers add their part
+    perf: Arc<Mutex<(FrameStats, std::time::Instant)>>,
 }
 
 impl Engine {
@@ -146,6 +187,7 @@ impl Engine {
     /// `underwater`: the lens under water, not, or as the camera says (water.rs)
     pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
+        let mut stages = Stages::new();
         let stab = StabilizationManager::default();
         let url = filesystem::path_to_url(project);
         let project_json = if is_project_file(project) {
@@ -177,9 +219,12 @@ impl Engine {
             log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
             embedded
         };
+        // The project and the motion data, read from the file
+        stages.lap("project");
         // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
         // so apply them before smoothing (same as the frei0r plugin)
         stab.recompute_gyro();
+        stages.lap("gyro");
         match fov {
             Fov::Set(fov) => stab.set_fov(fov),
             // No zoom: the FOV alone says how much of the picture shows, once the smoothing below is there to measure it
@@ -194,6 +239,7 @@ impl Engine {
         // The camera's In water / Out of water is in the video: a project's, or the one being played
         let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
         water::apply(&stab, underwater, &video);
+        stages.lap("water");
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
@@ -211,6 +257,7 @@ impl Engine {
         }
         stab.invalidate_smoothing();
         stab.recompute_blocking();
+        stages.lap("smoothing");
         let wide_fov = (fov == Fov::Wide).then(|| {
             let params = ComputeParams::from_manager(&stab);
             let fov = wide_fov(&params, stab.params.read().fps);
@@ -221,7 +268,9 @@ impl Engine {
             stab.recompute_undistortion();
             fov
         });
+        stages.lap("wide_fov");
         let uncovered_frames = leaves_edges(&ComputeParams::from_manager(&stab), stab.params.read().fps);
+        stages.lap("leaves_edges");
 
         let (size, output_size, frame_offset_us) = {
             let p = stab.params.read();
@@ -248,35 +297,43 @@ impl Engine {
         // filter to be created, but the first frames already run against the clock, and dropped ~1 s of video
         let (ready_tx, ready_rx) = mpsc::channel::<()>();
         let workers = workers.max(1);
+        let perf = Arc::new(Mutex::new((FrameStats::default(), std::time::Instant::now())));
         for i in 0..workers {
-            let (stab, rx, geometry, ready_tx, edges) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone());
+            let (stab, rx, geometry, ready_tx, edges, perf) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone(), perf.clone());
             std::thread::Builder::new().name(format!("gyroflow-vs-{i}")).spawn(move || {
-                worker(&stab, &rx, config, &geometry, &edges, ready_tx);
+                worker(&stab, &rx, config, &geometry, &edges, &perf, ready_tx);
             }).map_err(|e| e.to_string())?;
         }
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        stages.lap("warmup");
+        let name = std::path::Path::new(project).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        perf_log("engine_load", format_args!("project={name} view={fov:?} horizon_lock={horizon_lock:?} underwater={underwater:?} input={}x{} render={}x{} interpolation={interpolation:?} workers={workers} uncovered={}/{}{} total_ms={:.0}",
+                                             input_size.0, input_size.1, render_size.0, render_size.1, uncovered_frames.0, uncovered_frames.1, stages.fields, t.elapsed().as_secs_f64() * 1000.0));
         // Playback's sphere trail (edges.rs); a clip without edges doesn't need one
         if uncovered_frames.0 > 0 {
             let (edges, stab) = (edges.clone(), stab.clone());
             std::thread::Builder::new().name("gyroflow-sphere".into()).spawn(move || edges::sphere_writer(edges, stab, config)).map_err(|e| e.to_string())?;
         }
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, throughput: Mutex::new((0, std::time::Instant::now())), perf })
     }
 
     /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool, marker: bool) -> Result<(), String> {
+        let start = std::time::Instant::now();
         let (reply, result) = mpsc::sync_channel(1);
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
             mode => Some(self.edges.prepare(mode, &planes)),
         };
+        let prepared = start.elapsed();
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
         let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
-        self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
+        let in_flight = self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
+        if perf_enabled() { self.perf_frame(prepared, start.elapsed() - prepared, in_flight); }
         let result = sent?;
         let mut t = self.throughput.lock();
         t.0 += 1;
@@ -285,6 +342,26 @@ impl Engine {
             *t = (0, std::time::Instant::now());
         }
         result
+    }
+
+    /// A frame for perf_log; about once a second, the line for the frames since the last one. `in_flight`: the frames
+    /// in the workers' hands when this one came back, itself included
+    fn perf_frame(&self, prep: std::time::Duration, wait: std::time::Duration, in_flight: usize) {
+        let mut perf = self.perf.lock();
+        let (s, since) = &mut *perf;
+        s.frames += 1;
+        s.prep_us += prep.as_micros() as u64;
+        let wait_us = wait.as_micros() as u64;
+        s.wait_us += wait_us;
+        s.wait_max_us = s.wait_max_us.max(wait_us);
+        let elapsed = since.elapsed().as_secs_f64();
+        if elapsed < 1.0 { return; }
+        let avg = |us: u64, n: u32| us as f64 / 1000.0 / n.max(1) as f64;
+        perf_log("frames", format_args!("fps={:.1} prep_ms={:.2} wait_ms={:.2} wait_max_ms={:.1} planes_ms={:.2} edges_ms={:.2} gpu_max_ms={:.1} in_flight={in_flight}/{} sphere_writes={:.1} edge_mode={:?}",
+            s.frames as f64 / elapsed, avg(s.prep_us, s.frames), avg(s.wait_us, s.frames), s.wait_max_us as f64 / 1000.0,
+            avg(s.planes_us, s.gpu_frames), avg(s.edges_us, s.gpu_frames), s.gpu_max_us as f64 / 1000.0, self.edges.workers(),
+            self.edges.sphere_writes.swap(0, Ordering::Relaxed) as f64 / elapsed, self.edges.mode()));
+        *perf = (FrameStats::default(), std::time::Instant::now());
     }
 }
 
@@ -455,7 +532,7 @@ fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64
 }
 
 /// `geometry`: per plane, (input size, output size)
-fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, ready: mpsc::Sender<()>) {
+fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, perf: &Mutex<(FrameStats, std::time::Instant)>, ready: mpsc::Sender<()>) {
     // Video without a range property is almost always limited; rebuilt if a frame says otherwise
     let mut limited_range = cfg.is_yuv;
     let mut planes = create_planes(mgr, cfg, geometry.len(), limited_range);
@@ -493,6 +570,7 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
         let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
         let mut result = processed.map(|_| ());
+        let planes_done = t.elapsed();
         if let (Ok(()), Some(e)) = (&result, &job.edges) {
             result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
         }
@@ -500,6 +578,14 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
             if job.edges.is_none() { m.background = Some(background); }
             m.write(luma, cfg.kind, cfg.max_value);
+        }
+        if perf_enabled() {
+            let (all, mut perf) = (t.elapsed(), perf.lock());
+            let s = &mut perf.0;
+            s.gpu_frames += 1;
+            s.planes_us += planes_done.as_micros() as u64;
+            s.edges_us += (all - planes_done).as_micros() as u64;
+            s.gpu_max_us = s.gpu_max_us.max(all.as_micros() as u64);
         }
         let _ = job.reply.send(result);
 
@@ -784,6 +870,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
     let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
     let fmt = vi.format.clone();
+    let created = std::time::Instant::now();
     let engine = match unsafe { engine_for(api, input, &vi) } {
         Ok(e) => e,
         Err(e) => return fail(node, e),
@@ -804,6 +891,9 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     // Also starts the trail over: mpv reloads the script on every seek
     engine.edges.configure(edge_mode, edge_settings, edge_control);
     engine.edges.set_realtime(true);
+    // mpv makes the filter again on every seek and every change of its chain: the engine comes from the cache then,
+    // unless an engine_load line comes just before
+    perf_log("filter_create", format_args!("ms={:.0} edges={edge_mode:?}", created.elapsed().as_secs_f64() * 1000.0));
 
     let mut out_vi = vi.clone();
     out_vi.width  = align(engine.render_size.0 as i64, fmt.sub_sampling_w) as c_int;

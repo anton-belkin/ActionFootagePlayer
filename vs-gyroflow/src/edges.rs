@@ -150,6 +150,8 @@ pub struct Edges {
     /// Frames sent to the GPU workers and not back yet (Engine::process), and how many workers there are
     pub(crate) in_flight: AtomicUsize,
     workers: usize,
+    /// Sphere writes since perf_log last took them
+    pub(crate) sphere_writes: AtomicUsize,
 }
 
 pub struct EdgeJob {
@@ -171,8 +173,12 @@ impl Edges {
             expected: AtomicBool::new(true),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
-            in_flight: AtomicUsize::new(0), workers: workers.max(1),
+            in_flight: AtomicUsize::new(0), workers: workers.max(1), sphere_writes: AtomicUsize::new(0),
         }
+    }
+
+    pub(crate) fn workers(&self) -> usize {
+        self.workers
     }
 
     pub fn set_expected(&self, expected: bool) {
@@ -721,6 +727,7 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, c
             Err(e) => log::error!("Sphere writer: {e}"),
         }
         written += 1;
+        edges.sphere_writes.fetch_add(1, Ordering::Relaxed);
         let elapsed = since.elapsed();
         if elapsed >= Duration::from_secs(5) {
             log::debug!("Sphere written {:.1} times a second, waiting for a free GPU worker {:.0} % of the time", written as f64 / elapsed.as_secs_f64(), waited.as_secs_f64() / elapsed.as_secs_f64() * 100.0);
