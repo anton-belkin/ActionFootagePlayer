@@ -321,6 +321,21 @@ For clips shot with EIS off in air, use a preset without the refraction (save on
 Create settings preset, as `default.gyroflow` in one of the places above), or give those clips a project of
 their own.
 
+**Color fringes under water.** Water bends blue more than red, so behind the flat glass of an action camera red and
+blue land apart from green towards the edges of the frame (lateral chromatic aberration): red inwards, blue outwards,
+1-2 px of a 4K frame halfway out and more further out. The camera takes out its lens's own fringes, but knows nothing
+of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame, as the project or
+preset says), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
+furthest out, stays, and red and green are moved out to it, so nothing is taken from past the picture's edge. It's
+done on the GPU in RGB (`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
+from the plugin (`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
+(`tools/water_dispersion.py`): the lens profile gives each pixel's angle to the flat port, and water's index for each
+channel is averaged over its spectrum, for a grey object in daylight through 3 m of water. On Osmo Action 6 dive clips
+red's fringe at the edges of the frame, up to 3-7 px, goes to within about a pixel; blue's, up to 2-4 px, turns over
+to about 1-1.5 px the other way. Where the frame's own border shows (the wider view), it stays as recorded, against
+the edge fill or the background alike. There's no switch of its own: out of the water nothing moves. Playback only,
+exports are as before. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
+
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
 with something less noticeable, blurred and blended into the picture over a soft edge; `Ctrl+b` switches between
@@ -814,6 +829,7 @@ mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scrip
                               ActionFootagePlayer
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
                               markers.lua reads them from the file

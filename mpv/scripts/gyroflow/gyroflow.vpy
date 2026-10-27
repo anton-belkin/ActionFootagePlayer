@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, wide, horizon_lock, edges*). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, horizon_lock, edges*, chromatic). The project can be the video itself (embedded project, or its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -27,6 +27,9 @@ options = {}
 for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_control', str)):
     if args.get(key) is not None:
         options[key] = kind(args[key])
+# Each frame's lens geometry in its last row, for chromatic.glsl (vs-gyroflow/src/dispersion.rs), which paints it over
+if args.get('chromatic'):
+    options['chromatic'] = 1
 
 clip = video_in  # noqa: F821 (set by mpv)
 if args.get('fast') and options.get('edges', 'off') != 'off':

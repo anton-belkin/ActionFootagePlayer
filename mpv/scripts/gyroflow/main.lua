@@ -83,6 +83,7 @@ local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local EMBED = utils.join_path(DIR, platform.exe("gyroflow-embed"))
+local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -199,6 +200,22 @@ end
 local HORIZON = { yes = true, no = false }
 local horizon = HORIZON[o.horizon_lock]
 
+-- The water's color fringes, taken out wherever the stabilization has the lens under water (its refraction, frame by
+-- frame: vs-gyroflow/src/dispersion.rs); there's no switch of its own. The shader is in mpv's own glsl-shaders from
+-- the start, ahead of the dlogm plugin's, which builds its list from them: it reads the frame's marker before the
+-- noise reduction and the log curve. It leaves video without the marker as it is. The stabilization writes one
+-- whenever the shader is there, as the shader paints it over; out of the water, one that moves no color. Only
+-- vo=gpu-next, gpu and libmpv (an app's own window) run shaders: with another vo (or without the file) there's no
+-- marker
+local chromatic_shader = false
+if file_exists(CHROMATIC_SHADER) then
+    local vo = mp.get_property("vo") or ""
+    if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
+        mp.commandv("change-list", "glsl-shaders", "append", CHROMATIC_SHADER)
+        chromatic_shader = true
+    end
+end
+
 -- Faster than max_fps (when it's set): such a clip plays every other frame if its stabilized frame leaves edges
 -- anywhere and they're filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and
 -- view). Interpolation stays the one for the clip's own rate: at half rate there's headroom for the fill instead
@@ -215,7 +232,8 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL }),
+                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
+                                                chromatic = chromatic_shader or nil }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
