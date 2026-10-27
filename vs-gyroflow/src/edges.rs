@@ -143,6 +143,8 @@ pub struct Edges {
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
+    /// The view the frames are rendered in (VIEW_NORMAL, VIEW_WIDE: lib.rs's Views), as the control file says
+    view: AtomicU8,
     /// Playback: the sphere is written by sphere_writer, when the GPU workers leave room for it
     realtime: AtomicBool,
     writer: AtomicBool,
@@ -168,7 +170,7 @@ impl Edges {
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None),
-            expected: AtomicBool::new(true),
+            expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
             in_flight: AtomicUsize::new(0), workers: workers.max(1),
@@ -232,9 +234,11 @@ impl Edges {
         *last = Some(timestamp_us);
     }
 
-    /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, if it has one)
-    pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, control: Option<PathBuf>) {
+    /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur and the view,
+    /// if it has them)
+    pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, view: u8, control: Option<PathBuf>) {
         self.mode.store(mode as u8, Ordering::Relaxed);
+        self.view.store(view, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
         self.trail.lock().last_us = None;
@@ -248,6 +252,15 @@ impl Edges {
         EdgeMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
+    pub fn view(&self) -> u8 {
+        self.check_control(false);
+        self.view.load(Ordering::Relaxed)
+    }
+
+    pub fn set_view(&self, view: u8) {
+        self.view.store(view, Ordering::Relaxed);
+    }
+
     fn check_control(&self, now: bool) {
         // Another worker is already looking
         let Some(mut c) = self.control.try_lock() else { return };
@@ -258,7 +271,7 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let (mode, blur) = parse_control(&text);
+        let (mode, blur, view) = parse_control(&text);
         match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
@@ -266,6 +279,14 @@ impl Edges {
                 }
             }
             None => log::warn!("Edges: unknown mode {text:?} in {path:?}"),
+        }
+        if let Some(view) = view {
+            if self.view.swap(view, Ordering::Relaxed) != view {
+                log::info!("View: {}", if view == VIEW_WIDE { "wide" } else { "normal" });
+                // The screen trail is in the output's pixels, which now show another FOV: it starts over. The sphere is in
+                // the world's directions, and stays
+                self.trail.lock().last_us = None;
+            }
         }
         if let Some(blur) = blur {
             let mut s = self.settings.lock();
@@ -291,22 +312,29 @@ impl Edges {
     }
 }
 
+/// The views (lib.rs's Views): the project's, and the wider one
+pub const VIEW_NORMAL: u8 = 0;
+pub const VIEW_WIDE: u8 = 1;
+
 /// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
-/// filter's `edges_blur`). A file with only the mode in it leaves the settings as the filter was given them
-fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>) {
+/// filter's `edges_blur`; `view`, normal or wide). A file with only the mode in it leaves the settings as the filter
+/// was given them
+fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>, Option<u8>) {
     let mut words = text.split_whitespace();
     let mode = EdgeMode::parse(words.next().unwrap_or(""));
-    let mut blur = None;
+    let (mut blur, mut view) = (None, None);
     for w in words {
         match w.split_once('=') {
             Some(("blur", v)) => match v.parse::<f32>() {
                 Ok(v) if v.is_finite() => blur = Some((v / 100.0).clamp(0.0, 0.2)),
                 _ => log::warn!("Edges: bad blur {v:?} in the control file"),
             },
+            Some(("view", "normal")) => view = Some(VIEW_NORMAL),
+            Some(("view", "wide")) => view = Some(VIEW_WIDE),
             _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
         }
     }
-    (mode, blur)
+    (mode, blur, view)
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -477,16 +505,16 @@ impl StabSetup {
 }
 
 /// The mask's parameters: white on black, nothing else
-fn mask_params(mgr: &StabilizationManager, cfg: WorkerConfig) -> ComputeParams {
-    let mut params = plane_compute_params(mgr, cfg, 0, false);
+fn mask_params(base: &ComputeParams, cfg: WorkerConfig) -> ComputeParams {
+    let mut params = plane_compute_params(base, cfg, 0, false);
     params.background.fill(0.0);
     params.background_mode = BackgroundMode::SolidColor;
     params
 }
 
 /// A plane's parameters on the coarse grid: edges repeated rather than background, so it has no hole of its own
-fn grid_params(mgr: &StabilizationManager, cfg: WorkerConfig, index: usize, limited_range: bool) -> ComputeParams {
-    let mut params = plane_compute_params(mgr, cfg, index, limited_range);
+fn grid_params(base: &ComputeParams, cfg: WorkerConfig, index: usize, limited_range: bool) -> ComputeParams {
+    let mut params = plane_compute_params(base, cfg, index, limited_range);
     params.background_mode = BackgroundMode::RepeatPixels;
     params
 }
@@ -523,12 +551,13 @@ struct WideSetup {
 }
 
 impl WideSetup {
-    fn new(mgr: &StabilizationManager, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> WideSetup {
+    /// `base`: either view's parameters (lib.rs's Views): its own wide view has no zoom and a FOV of its own either way
+    fn new(mgr: &StabilizationManager, base: &ComputeParams, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> WideSetup {
         WideSetup {
             setup: StabSetup::new(mgr),
-            mask: wide_params(mask_params(mgr, cfg)),
-            planes: (0..g.planes.len()).map(|index| wide_params(grid_params(mgr, cfg, index, limited_range))).collect(),
-            params: wide_params(ComputeParams::from_manager(mgr)),
+            mask: wide_params(mask_params(base, cfg)),
+            planes: (0..g.planes.len()).map(|index| wide_params(grid_params(base, cfg, index, limited_range))).collect(),
+            params: wide_params(base.clone()),
         }
     }
 
@@ -565,22 +594,33 @@ pub(crate) struct EdgeWorker {
     /// Where the sphere is written with each frame (an export), made on the first
     wide_setup: WideSetup,
     wide: Option<WideView>,
-    /// The project's parameters, for the directions the sphere trail is read by
+    /// The view's parameters, for the directions the sphere trail is read by
     params: ComputeParams,
     /// ms spent: mask, low-res frames, fill, composite; and frames
     timing: ([f64; 4], u32),
 }
 
 impl EdgeWorker {
-    pub(crate) fn new(mgr: &StabilizationManager, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> EdgeWorker {
+    /// `base`: the view's parameters (lib.rs's Views)
+    pub(crate) fn new(mgr: &StabilizationManager, base: &ComputeParams, cfg: WorkerConfig, g: &EdgeGeometry, limited_range: bool) -> EdgeWorker {
         let setup = StabSetup::new(mgr);
         EdgeWorker {
-            mask: setup.stab(mask_params(mgr, cfg), 0), mask_buf: mask_buf(g, g.mask),
-            lo: (0..g.planes.len()).map(|index| setup.stab(grid_params(mgr, cfg, index, limited_range), index)).collect(), lo_buf: grid_bufs(g, g.grid),
-            wide_setup: WideSetup::new(mgr, cfg, g, limited_range), wide: None,
-            params: ComputeParams::from_manager(mgr),
+            mask: setup.stab(mask_params(base, cfg), 0), mask_buf: mask_buf(g, g.mask),
+            lo: (0..g.planes.len()).map(|index| setup.stab(grid_params(base, cfg, index, limited_range), index)).collect(), lo_buf: grid_bufs(g, g.grid),
+            wide_setup: WideSetup::new(mgr, base, cfg, g, limited_range), wide: None,
+            params: base.clone(),
             timing: ([0.0; 4], 0),
         }
+    }
+
+    /// Another view (or range): what the output covers, and the frame on the grid, as it renders now. The sphere's
+    /// own wide view is the same for both
+    pub(crate) fn set_view(&mut self, base: &ComputeParams, cfg: WorkerConfig, limited_range: bool) {
+        self.mask.stab.set_compute_params(mask_params(base, cfg));
+        for plane in self.lo.iter_mut() {
+            plane.stab.set_compute_params(grid_params(base, cfg, plane.index, limited_range));
+        }
+        self.params = base.clone();
     }
 
     /// Sets up the GPU side before playback, like the planes' own warm-up
@@ -696,8 +736,8 @@ impl EdgeWorker {
 /// Playback's sphere writer, on a thread of its own: the newest frame posted, through the wide view, onto the sphere.
 /// Only while some GPU worker has no frame: the frames come first, and when they keep all the workers busy the sphere
 /// waits, written less often or not at all. Its GPU stabilizers are made on the first frame
-pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, cfg: WorkerConfig) {
-    let setup = WideSetup::new(&mgr, cfg, &edges.geometry, cfg.is_yuv);
+pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, base: ComputeParams, cfg: WorkerConfig) {
+    let setup = WideSetup::new(&mgr, &base, cfg, &edges.geometry, cfg.is_yuv);
     drop(mgr);
     edges.writer.store(true, Ordering::Relaxed);
     let stop = || edges.feed.stop.load(Ordering::Relaxed);
@@ -908,12 +948,15 @@ mod tests {
 
     #[test]
     fn control_file() {
-        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None));
-        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None));
-        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0)));
-        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2)));
-        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None));
-        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None));
-        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0)));
+        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None, None));
+        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None, None));
+        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0), None));
+        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2), None));
+        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None, None));
+        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None, None));
+        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0), None));
+        assert_eq!(parse_control("sphere blur=2 view=wide"), (Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_WIDE)));
+        assert_eq!(parse_control("off view=normal"), (Some(EdgeMode::Off), None, Some(VIEW_NORMAL)));
+        assert_eq!(parse_control("off view=sideways"), (Some(EdgeMode::Off), None, None));
     }
 }

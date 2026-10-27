@@ -233,16 +233,17 @@ local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyr
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
 local edge_blur = o.edges_blur
 
--- The mode, then the blur: "sphere blur=2"
+-- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov), for the next clips too; off is per clip
+local view = o.view == "wide" and "wide" or "normal"
+
+-- The mode, then the blur and the view: "sphere blur=2 view=wide". The plugin renders both views from one engine, and
+-- switches between them on the next frame it reads this (vs-gyroflow's Views)
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g", edge_mode, edge_blur))
+    f:write(string.format("%s blur=%g view=%s", edge_mode, edge_blur, view))
     f:close()
 end
-
--- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov), for the next clips too; off is per clip
-local view = o.view == "wide" and "wide" or "normal"
 local function view_label(v)
     if v == "wide" then return "on, wider view" end
     return v == "normal" and "on" or "off"
@@ -315,8 +316,8 @@ local function publish()
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
 
--- The filter set up again for current_source (another view, or the rate changing with the edge fill); mpv rebuilds
--- the filter chain, so it costs a few dropped frames
+-- The filter set up again for current_source (the horizon lock, the lens, or the rate changing with the edge fill);
+-- mpv rebuilds the filter chain, so it costs a few dropped frames
 local function rebuild_filter()
     if not current_source then return end
     local vf = mp.get_property_native("vf") or {}
@@ -514,11 +515,15 @@ end
 -- The stabilization on (normal), on with the wider view (wide), or off for this clip; normal and wide stick
 local function show(v)
     if not current_source then return no_source() end
+    local was_on = not stab_off
     local enabled = v ~= "off"
     if enabled then view = v end
     stab_off = not enabled
-    -- The input scaling goes with it: off shows the video as it is
-    place_filters(enabled)
+    write_edge_control()
+    -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
+    -- clip, whose rate depends on the view's edges (gyroflow.vpy), nor on or off: the input scaling goes with it, off
+    -- shows the video as it is
+    if not (was_on and enabled and not fast(current_source)) then place_filters(enabled) end
     publish()
     mp.msg.info("stabilization " .. view_label(v))
     mp.osd_message("Gyroflow: " .. view_label(v), 1.5)
