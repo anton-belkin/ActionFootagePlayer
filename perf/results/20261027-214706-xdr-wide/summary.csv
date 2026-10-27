@@ -1,0 +1,5 @@
+label,step,start,restart_s,file_loaded_s,drops,decoder_drops,delayed,max_avsync_ms,last_drop_s,vf_fps_min,vf_fps_avg,duration_s,notes
+xdr-wide,start,1793134027.286,2.572,0.546,254,0,0,283.860,7.685,59.940,59.940,7.686,first frame 3.160 s after launch
+xdr-wide,steady,1793134034.972,,,579,0,0,354.649,15.026,59.940,59.940,15.026,
+xdr-wide,chromatic_off,1793134049.999,,,28,0,0,34.308,5.010,59.940,59.940,5.010,
+xdr-wide,steady,1793134055.009,,,182,0,0,107.461,14.872,59.940,59.940,15.005,
