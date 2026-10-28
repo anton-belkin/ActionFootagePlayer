@@ -540,8 +540,10 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
         if let (Ok(()), Some(e)) = (&result, &job.edges) {
             result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
         }
-        // Last: the edge fill would draw over it. Out of the water the colors stay where they are (its k is 1)
+        // Last: the edge fill would draw over it. Out of the water the colors stay where they are (its k is 1), and so
+        // they do with the correction off (Ctrl+a): the marker is still written, for the shader to paint over
         if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
+            if !edges.chromatic() { m.k = [1.0, 1.0]; }
             // Where the background shows: never in a clip whose frames all cover the output, so chromatic.glsl
             // doesn't look for it there
             if job.edges.is_none() && edges.expected() { m.background = Some(background); }

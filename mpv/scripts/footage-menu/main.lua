@@ -188,6 +188,11 @@ local function stabilization_menu(g, key)
                  .. (g.kind == "default" and "preset" or "project") .. " says",
                  "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
             item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
+            SEPARATOR,
+            -- Only under water: above water no color moves either way
+            item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
+                 { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no",
+                   shortcut = key["script-binding gyroflow/fringes"] }),
         }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
