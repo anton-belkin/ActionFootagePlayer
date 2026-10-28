@@ -9,7 +9,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 
 | Argument | Default | |
 |---|---|---|
-| `project` | — | `.gyroflow` project file, or the video itself: the project embedded in it, else its own motion data with Gyroflow's default preset |
+| `project` | — | `.gyroflow` project file, or the video itself: its own motion data with Gyroflow's default preset |
 | `preset` | — | `.gyroflow` preset applied on top when the video has no project |
 | `interpolation` | `bicubic` | `bilinear`, `bicubic`, `lanczos` |
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
@@ -27,10 +27,9 @@ The project is rendered the way the Gyroflow app renders it (smoothing, zoom, le
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow
 master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
 uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
-settings need the PR. A project embedded in the video is read by the plugin itself (`src/embedded.rs`), so stock
-Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow` into the video, and
-`gyroflow-embed --extract` writes out the project a clip plays with (the stored one, or the default preset's,
-made by `src/project.rs` with gyroflow-core's own project writer) to open it in Gyroflow.
+settings need the PR. Stock Gyroflow works for making projects: `gyroflow-project` writes out the project a clip
+without one plays with (the default preset's, in the view and with the horizon lock the player has, made by
+`src/project.rs` with gyroflow-core's own project writer) next to it, to open it in Gyroflow.
 
 ## How it works
 
@@ -106,19 +105,19 @@ Matches Gyroflow's own render of the project (CLI, same branch): same mean level
 cargo build --release
 install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-probe ~/.config/mpv/scripts/gyroflow/
-install -m 755 target/release/gyroflow-embed ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/gyroflow-project ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
-stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
+stabilized with: `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
 or nothing, with the reason.
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
 On Linux and Windows it builds the same way (`cargo build --release`), as `libvs_gyroflow.so` and
-`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-embed(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
+`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-project(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
 on Vulkan (Windows: DirectX 12 or Vulkan). `../tools/make_plugin_zip.sh <version>` makes the plugin's zip of them,
 and cross-compiles with a Rust target, e.g. `x86_64-pc-windows-gnu` on Linux with mingw-w64. A build where
 gyroflow-core's build script can't download the lens profiles (no network) needs

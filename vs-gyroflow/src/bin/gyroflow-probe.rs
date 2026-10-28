@@ -3,7 +3,6 @@
 // `gyroflow-probe <video>`: what the plugin can stabilize the video with, for the gyroflow mpv plugin to decide
 // whether to add the filter, and the color profile the camera recorded it in (as the dlogm plugin reads it), for
 // Steady Router. Prints one JSON line:
-//   {"mode":"embedded","width":3840,"height":2160,"fps":59.94,...}  a project stored in the video (by gyroflow-embed)
 //   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera):

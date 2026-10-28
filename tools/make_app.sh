@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -86,7 +86,7 @@ python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$d
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
@@ -108,7 +108,7 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-embed" "$gyroflow/gyroflow-export"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export"; do
     sign "$f"
 done
 sign "$app"

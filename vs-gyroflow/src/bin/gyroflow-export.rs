@@ -4,9 +4,9 @@
 // pass: decode -> Gyroflow (the plugin's own engine, on the GPU) -> LUT -> encode. The source is decoded and
 // encoded once, so there's no intermediate file to lose quality in.
 //
-// It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
-// embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
-// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
+// It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, or the clip's
+// own motion data with the default preset) and the log curve from the camera's metadata, as the dlogm plugin does
+// (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
 // nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
 // clip with neither is skipped, there being nothing to change. --wide and --edges give it the gyroflow plugin's wider
 // view and edge fill (edges.rs), as the plugin passes them to the VapourSynth filter.
@@ -289,7 +289,6 @@ fn find_source(path: &Path) -> Result<Source, String> {
     }
     let info = probe::probe(&s)?;
     match info["mode"].as_str() {
-        Some("embedded") => Ok(Source { project: s, preset: None, label: "embedded project" }),
         Some("default") => {
             let preset = plugin_file("gyroflow", "default.gyroflow");
             Ok(Source { project: s, preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset" })

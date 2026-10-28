@@ -275,7 +275,7 @@ these files, keeping whatever else is in them.
 
 Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow): mpv uses it. Or start from
 what's playing: `Ctrl+e` pauses the clip and opens its project in Gyroflow. A clip that plays without a
-`.gyroflow` next to it (a project stored in the video, or the default preset) gets one first, written by the
+`.gyroflow` next to it (it plays with the default preset) gets one first, written by the
 plugin from what it renders: the same lens profile, smoothing, zoom and refraction, so Gyroflow starts from
 what you saw. The view and the horizon lock go into it as they are: from the wider view, the project has
 Gyroflow's zoom off at that view's FOV, so it looks the same there, and here once it's saved (a clip with a
@@ -291,19 +291,8 @@ it was, stabilized with it. On Linux and Windows this needs `gyroflow_app` (Opti
 The menu's Lock horizon keeps the horizon level, whatever the project says (Gyroflow's horizon lock at 100 %, its
 roll and pitch as the project has them); unticked, it isn't locked. It needs more zoom, so the edges show more.
 
-To carry one file instead of two, move the project into the video (the commands here are in
-`~/.config/mpv/scripts/gyroflow/`; with just ActionFootagePlayer, in
-`/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/`):
-
-```bash
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --move DJI_0009_D.MP4     # DJI_0009_D.gyroflow â†’ inside the MP4
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # back out, to open it in Gyroflow (Ctrl+e does it too)
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
-```
-
-The project is appended to the MP4 as a box of its own: the video data isn't touched, the file keeps its
-date, players and Gyroflow open it as before, and it moves with the file. Apps that rewrite the file
-(trimming, remuxing) drop it.
+The project is always the `.gyroflow` next to the clip: the video file itself is never written to, so a backup
+of it stays as it is.
 
 Clips with gyro data of their own, recorded with the camera's stabilization off, play stabilized even without a
 project: DJI with EIS off, and (not yet tried on a real clip, see Other cameras) GoPro with HyperSmooth off and
@@ -670,6 +659,18 @@ it runs.
 
 ### Upgrading
 
+**From 0.6.4**, a project stored inside a video (`gyroflow-embed --move`) isn't read any more: the project is
+the `.gyroflow` next to the clip, and the video file is never written to. Such a clip plays with the default
+preset. Before updating, take its project back out with 0.6.4's command, which also restores the file as the
+camera wrote it:
+
+```bash
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # DJI_0009_D.gyroflow next to it
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
+```
+
+`gyroflow-embed` is now `gyroflow-project`, which writes the project a clip plays with (what `Ctrl+e` runs).
+
 **From 0.6.0**, the app no longer reads mpv's own config (`~/.config/mpv`, `%APPDATA%\mpv`) nor the plugins in it:
 it plays with its own plugins and settings only. The first time it starts, the plugins' settings
 (`script-opts/dlogm.conf`, `gyroflow.conf`, `dji_telemetry.conf`, `footage_menu.conf`) are copied over to its own
@@ -896,7 +897,7 @@ tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) â
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export (Rust)
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script

@@ -2,14 +2,13 @@
 -- with the binaries built from vs-gyroflow/ in this repo (install.sh puts them here).
 --
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
---   DJI_..._D.MP4 with a project embedded in it (gyroflow-embed)   ->  same
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
 --       with HyperSmooth off and Insta360 ones with FlowState off in the camera, when Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
 --       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
 --
--- The last two are decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip, ~1 s from an
+-- The last is decided by gyroflow-probe, which reads the file's metadata (20-100 ms for a DJI clip, ~1 s from an
 -- SD card; ~0.5 s more for GoPro and Insta360 clips it would stabilize, to find their lens in Gyroflow's database)
 -- before playback starts. The motion data itself the plugin reads as the filter starts (~20 s for a 7 GB clip from an
 -- SD card: issue #40).
@@ -49,8 +48,8 @@
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   remember                the view, horizon lock, lens and edges as the defaults, in gyroflow.conf
--- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, embedded, default:
--- the preset), view (normal, wide, off),
+-- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
+-- preset), view (normal, wide, off),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting, last_export.
 --
@@ -97,7 +96,7 @@ local DIR = mp.get_script_directory()
 local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
-local EMBED = utils.join_path(DIR, platform.exe("gyroflow-embed"))
+local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
@@ -105,7 +104,7 @@ local DATA = os.getenv("GYROFLOW_DATA")
 local PRESETS = {}
 if DATA and DATA ~= "" then table.insert(PRESETS, utils.join_path(DATA, "default.gyroflow")) end
 table.insert(PRESETS, utils.join_path(DIR, "default.gyroflow"))
--- Containers a project can be embedded in, and that DJI cameras record
+-- Containers gyroflow-probe looks into: what DJI cameras record
 local PROBE_EXTENSIONS = { mp4 = true, mov = true }
 -- bilinear | bicubic | lanczos. Lanczos is sharper but slower: on the M1 Pro a 4K clip plays at ~38 fps of
 -- capacity with it and ~54 with bicubic, so lanczos up to 30 fps and bicubic above (and when the rate's unknown)
@@ -177,7 +176,7 @@ local function find_source(path, done)
     end)
 end
 
-local KIND_LABELS = { project = "", embedded = " (embedded project)", default = " (default preset)" }
+local KIND_LABELS = { project = "", default = " (default preset)" }
 
 -- The display the window is on, in its own pixels (a Retina display's, not its points); as last seen while the window
 -- isn't up yet, nil when it never was
@@ -606,8 +605,8 @@ mp.register_script_message("remember", function()
 end)
 
 -- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it
--- plays with, or for a video without one (an embedded project, or its own motion data with the default preset) the
--- same written out by gyroflow-embed --extract, so Gyroflow opens it as it plays here. Gyroflow overwrites the
+-- plays with, or for a video without one (its own motion data with the default preset) the same written out by
+-- gyroflow-project, so Gyroflow opens it as it plays here. Gyroflow overwrites the
 -- project it opened when it saves (Cmd+S), and the stabilization reloads with it while the video stays where it is.
 -- A video with no motion data opens as it is: Gyroflow finds the motion from the picture (optical flow), and the
 -- project it saves next to the video is waited for, then the video loads again to play with it.
@@ -740,13 +739,13 @@ mp.add_key_binding("Ctrl+e", "edit", function()
             .. "let it find the motion from the picture (optical flow) and save the project next to the video,\n"
             .. "then it plays here stabilized")
     end
-    if not file_exists(EMBED) then
-        mp.osd_message("Gyroflow: gyroflow-embed isn't installed", 2)
+    if not file_exists(PROJECT_WRITER) then
+        mp.osd_message("Gyroflow: gyroflow-project isn't installed", 2)
         return
     end
     project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
     -- As it plays here: the view (off: the preset's), the horizon lock, the lens
-    local args = { EMBED, "--extract", "--underwater", underwater }
+    local args = { PROJECT_WRITER, "--underwater", underwater }
     if view == "wide" and not stab_off then table.insert(args, "--wide") end
     if horizon ~= nil then
         table.insert(args, "--horizon-lock"); table.insert(args, horizon and "100" or "0")
@@ -762,7 +761,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
             edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")
-            mp.msg.warn("gyroflow-embed: " .. err)
+            mp.msg.warn("gyroflow-project: " .. err)
             mp.osd_message("Gyroflow: couldn't write the project: " .. (err:match("([^\n]+)$") or "failed"), 4)
         end
     end)

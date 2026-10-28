@@ -33,7 +33,7 @@ local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pre
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }
-local KIND_LABELS = { project = "Gyroflow project", embedded = "embedded project", default = "gyro" }
+local KIND_LABELS = { project = "Gyroflow project", default = "gyro" }
 -- What the keys do, for Keys…: the plugins' and the player's that the menu has
 local KEY_LABELS = {
     { "cycle pause", "Play / pause" },

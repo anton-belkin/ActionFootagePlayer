@@ -146,7 +146,7 @@ done
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-embed.exe gyroflow-export.exe; do
+for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe; do
     cp "$gyroflow_bin/$f" "$gyroflow/"
 done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"

@@ -7,8 +7,6 @@
 // macOS does behind it, 6-10 ms, so 14-34 s. Here they're read in parallel straight from the sample table, and the
 // parser's own reads come from memory. Its big reads (parse_mp4 reads the first and last 15 MB, more than once) are
 // kept too, so they cross the network once.
-//
-// The file is cut off before an embedded project, as Content (embedded.rs) cuts it.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -16,8 +14,6 @@ use std::io::{ Read, Seek, SeekFrom, Error, ErrorKind, Result };
 use std::path::Path;
 use std::sync::atomic::{ AtomicUsize, Ordering };
 use gyroflow_core::telemetry_parser;
-
-use crate::embedded;
 
 /// Reads at once: over SMB to a NAS each takes ~0.5 ms of its time with 64 (~0.9 with 16), more don't make it faster
 const THREADS: usize = 64;
@@ -35,11 +31,11 @@ pub struct Prefetched {
 }
 
 impl Prefetched {
-    /// The file without its embedded project, and that size, with the metadata track's samples read
+    /// The file and its size, with the metadata track's samples read
     pub fn open(path: impl AsRef<Path>) -> Result<(Self, usize)> {
-        let mut file = File::open(path)?;
+        let file = File::open(path)?;
         let size = file.metadata()?.len() as usize;
-        let len = embedded::content_size(&mut file, size) as u64;
+        let len = size as u64;
         let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new() };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
         if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len as usize) {
