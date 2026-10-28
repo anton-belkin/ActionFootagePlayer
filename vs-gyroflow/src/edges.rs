@@ -3,11 +3,14 @@
 // What shows where the stabilized frame doesn't cover the output, when the project's zoom isn't enough:
 //
 //   off       the project's background color (as Gyroflow renders it)
-//   original  the unstabilized frame behind, blurred
-//   zoom      the stabilized frame scaled up behind (+50 % by default), blurred
-//   trail     what was last drawn there in earlier frames, blurred; where nothing was yet, the zoom fill
-//   sphere    what was last seen in that direction of the world (sphere.rs), blurred; where it wasn't seen yet,
-//             the trail. It's written from a view wider than the output, so it has what the output crops away too
+//   sphere    the sphere around the frame (sphere.rs): what was last seen in that direction of the world, and where
+//             nothing was, or what was no longer matches the frame's edge, what's made up on the sphere itself from
+//             what it has, the colors around spread in, muted (smooth.rs). Blurred. The sphere is written from a view
+//             wider than the output, so it has what the output crops away too
+//   smooth    the frame's own colors spread out from its edge, muted (smooth.rs), blurred: nothing of earlier frames
+//
+// Where nothing is known, the colors around rather than the frame scaled up or the unstabilized one: those move at
+// another scale than the world, and catch the eye even blurred.
 //
 // Which output pixels the video covers comes from Gyroflow's own kernel: each frame it renders a white plane
 // with a feathered border onto black, with the frame's transform, at 1/4 size. That's the same geometry as the
@@ -21,8 +24,15 @@
 //
 // In playback the sphere is written on a thread of its own (sphere_writer), from the newest frame it can take, and
 // only while a GPU worker is free: the frames come first, and if they take all of the GPU the sphere is written less
-// often, or not at all, and what it has fades into the screen trail. The frames read it every frame, by their own
+// often, or not at all, and what it has fades into what's made up. The frames read it every frame, by their own
 // directions, so the fill stays where it belongs however old what's in it is. An export writes it with each frame.
+//
+// What's made up is made on the sphere, not on the screen: in the wide view, after each frame written (update_fill),
+// from all the sphere has, and kept on it, following what it has by half every FILL_HALF_LIFE_S. So it stays where
+// it belongs in the world as the camera turns, carries on what was seen seconds ago elsewhere, and doesn't flicker
+// with what passes the frame's edge. And what the sphere has just past the edge is checked against the edge first
+// (erode_stale): where they differ, it's what would show as a seam, and it's taken away for what's made up from the
+// edge as it is now.
 
 use std::path::PathBuf;
 use std::sync::{ Arc, OnceLock };
@@ -38,21 +48,19 @@ use crate::{ PlaneJob, PlaneStab, SampleKind, WorkerConfig, plane_compute_params
 use crate::sphere::{ GridFrame, Sphere, View, WIDE, wide_params };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum EdgeMode { Off = 0, Original = 1, Zoom = 2, Trail = 3, Sphere = 4 }
+pub enum EdgeMode { Off = 0, Sphere = 1, Smooth = 2 }
 
 impl EdgeMode {
     pub fn parse(s: &str) -> Option<EdgeMode> {
         match s.trim().to_ascii_lowercase().as_str() {
             "off" | "background" | "" => Some(EdgeMode::Off),
-            "original" => Some(EdgeMode::Original),
-            "zoom" => Some(EdgeMode::Zoom),
-            "trail" => Some(EdgeMode::Trail),
             "sphere" => Some(EdgeMode::Sphere),
+            "smooth" => Some(EdgeMode::Smooth),
             _ => None,
         }
     }
     fn from_u8(v: u8) -> EdgeMode {
-        match v { 1 => EdgeMode::Original, 2 => EdgeMode::Zoom, 3 => EdgeMode::Trail, 4 => EdgeMode::Sphere, _ => EdgeMode::Off }
+        match v { 1 => EdgeMode::Sphere, 2 => EdgeMode::Smooth, _ => EdgeMode::Off }
     }
 }
 
@@ -60,25 +68,30 @@ impl EdgeMode {
 pub struct EdgeSettings {
     /// Blur radius (sigma), as a fraction of the frame height
     pub blur: f32,
-    /// How much the zoom fill scales the stabilized frame up
-    pub zoom: f32,
 }
 impl Default for EdgeSettings {
-    fn default() -> Self { EdgeSettings { blur: 0.02, zoom: 1.5 } }
+    fn default() -> Self { EdgeSettings { blur: 0.02 } }
 }
 
 // The mask's feather, as a fraction of the source height, and how far in it starts: the interpolation's taps
 // past the picture's edge pull in the background, a few pixels in
 const FEATHER: f32 = 0.03;
 const INSET: f32 = 0.002;
-// Older trail fades into the zoom fill, so stale content doesn't stay forever
-const TRAIL_HALF_LIFE_S: f32 = 3.0;
-// On the sphere content is where it belongs, so it can stay longer
+// What was seen fades, into what's made up, so stale content doesn't stay forever
 const SPHERE_HALF_LIFE_S: f32 = 5.0;
-// A jump in time this big is a seek: the trail starts over
-const TRAIL_MAX_GAP_US: i64 = 300_000;
-// Mean difference (of the range) between the frame and the trail where both are, above which it's a cut
+// A jump in time this big is a seek: the sphere starts over
+const MAX_GAP_US: i64 = 300_000;
+// Mean difference (of the range) between the frame and the sphere where both are, above which it's a cut
 const SCENE_CUT: f32 = 0.12;
+// Past the frame's edge, what was seen is taken away where the edge differs from it by more than STALE_FROM (the
+// planes' differences summed, of the range), fully from STALE_AT, at half every STALE_HALF_LIFE_S. Measured in a band
+// EDGE_BAND (of the grid's height) wide along the edge, inside it
+const STALE_FROM: f32 = 0.03;
+const STALE_AT: f32 = 0.08;
+const STALE_HALF_LIFE_S: f32 = 0.1;
+const EDGE_BAND: f32 = 0.04;
+// What's made up follows what the sphere has by half every FILL_HALF_LIFE_S
+const FILL_HALF_LIFE_S: f32 = 0.2;
 
 /// Sizes, all luma-based: every buffer here covers the whole frame, so planes are sampled by normalized position
 pub struct EdgeGeometry {
@@ -116,12 +129,6 @@ struct Control {
     checked: Option<Instant>,
 }
 
-struct Trail {
-    last_us: Option<i64>,
-    weight: Vec<f32>,
-    planes: Vec<Vec<f32>>,
-}
-
 /// The newest frame for the sphere writer, and whether it should stop
 struct Feed {
     frame: Mutex<Option<(i64, Arc<Vec<Vec<f32>>>)>>,
@@ -129,13 +136,12 @@ struct Feed {
     stop: AtomicBool,
 }
 
-/// Per engine: the mode, its settings, and the trail (shared by the workers, frames come in any order)
+/// Per engine: the mode, its settings, and the sphere (shared by the workers, frames come in any order)
 pub struct Edges {
     pub geometry: EdgeGeometry,
     mode: AtomicU8,
     control: Mutex<Control>,
     settings: Mutex<EdgeSettings>,
-    trail: Mutex<Trail>,
     /// Made on the first frame written, as fine as the grid is then; read without a lock (sphere.rs)
     sphere: OnceLock<Sphere>,
     /// The time of the frame last written to the sphere; held while writing, so writers take turns
@@ -155,6 +161,8 @@ pub struct Edges {
     /// Frames sent to the GPU workers and not back yet (Engine::process), and how many workers there are
     pub(crate) in_flight: AtomicUsize,
     workers: usize,
+    /// Sphere writes: the edge's mean difference from the sphere, the part of what's past it being taken away, ms, writes
+    stats: Mutex<(f64, f64, f64, u32)>,
 }
 
 pub struct EdgeJob {
@@ -166,17 +174,15 @@ pub struct EdgeJob {
 
 impl Edges {
     pub fn new(geometry: EdgeGeometry, workers: usize) -> Edges {
-        let n = geometry.grid.0 * geometry.grid.1;
-        let trail = Trail { last_us: None, weight: vec![0.0; n], planes: vec![vec![0.0; n]; geometry.planes.len()] };
         Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
-            settings: Mutex::new(EdgeSettings::default()), trail: Mutex::new(trail),
+            settings: Mutex::new(EdgeSettings::default()),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None),
             expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), chromatic: AtomicBool::new(true),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
-            in_flight: AtomicUsize::new(0), workers: workers.max(1),
+            in_flight: AtomicUsize::new(0), workers: workers.max(1), stats: Mutex::new((0.0, 0.0, 0.0, 0)),
         }
     }
 
@@ -206,13 +212,14 @@ impl Edges {
     /// finished after it, unless it's a seek back
     fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>) {
         let mut frame = self.feed.frame.lock();
-        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < TRAIL_MAX_GAP_US) { return; }
+        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < MAX_GAP_US) { return; }
         *frame = Some((timestamp_us, src_lo.clone()));
         self.feed.ready.notify_one();
     }
 
     /// The wide view's frame onto the sphere; starts it over at a seek, or where it no longer matches the frame (a cut,
-    /// or a jump the gyro didn't see)
+    /// or a jump the gyro didn't see). What's past the frame's edge and doesn't match it is taken away first, and what's
+    /// made up is brought up to date after
     fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64) {
         let mut last = self.sphere_written.lock();
         let sphere = self.sphere.get_or_init(|| {
@@ -221,20 +228,88 @@ impl Edges {
             s
         });
         let now = timestamp_us as f32 / 1e6;
+        // The time since the last frame written; 0 when it starts over
+        let mut dt = 0.0;
         match *last {
             None => sphere.reset(now),
-            Some(l) if (timestamp_us - l).abs() > TRAIL_MAX_GAP_US => sphere.reset(now),
+            Some(l) if (timestamp_us - l).abs() > MAX_GAP_US => sphere.reset(now),
             // Another worker already wrote a newer frame
             Some(l) if timestamp_us <= l => return,
-            Some(_) => {
+            Some(l) => {
                 if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * self.geometry.max_value) {
                     log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
                     sphere.reset(now);
+                } else {
+                    dt = (timestamp_us - l) as f32 / 1e6;
                 }
             }
         }
+        let t = Instant::now();
+        let checked = if dt > 0.0 { self.erode_stale(sphere, frame, now, dt) } else { None };
         sphere.write(frame, now);
+        self.update_fill(sphere, frame, now, dt);
         *last = Some(timestamp_us);
+
+        let mut stats = self.stats.lock();
+        let (diff, eroding) = checked.unwrap_or((0.0, 0.0));
+        *stats = (stats.0 + diff as f64, stats.1 + eroding as f64, stats.2 + t.elapsed().as_secs_f64() * 1000.0, stats.3 + 1);
+        if stats.3 == 300 {
+            log::debug!("Edges: sphere written in {:.1} ms; the frame's edge differs from it by {:.3} on average, {:.0} % of what's past it taken away",
+                        stats.2 / 300.0, stats.0 / 300.0, stats.1 / 300.0 * 100.0);
+            *stats = (0.0, 0.0, 0.0, 0);
+        }
+    }
+
+    /// Where the frame's edge doesn't match what the sphere had there (a fish went by, the light changed, the camera
+    /// moved and near things shifted, the lens darkens its edge), what the sphere has just past the edge likely doesn't
+    /// either, and would show as a seam: it's taken away, the faster the more they differ, and what's made up from the
+    /// edge as it is now takes its place. The difference is measured in a band along the edge, inside the frame, and
+    /// spread out from there (smooth.rs), so each part of the edge speaks for what's past it. Returns the mean
+    /// difference in the band and the part of what's past it being taken away, when there was anything to compare
+    fn erode_stale(&self, sphere: &Sphere, frame: &GridFrame, now: f32, dt: f32) -> Option<(f32, f32)> {
+        let (gw, gh) = frame.grid;
+        let (old, seen) = sphere.read_grid(frame.view, frame.grid, sphere.fade(now));
+        let outside: Vec<f32> = frame.coverage.iter().map(|&c| if c < 0.5 { 1.0 } else { 0.0 }).collect();
+        let to_edge = crate::smooth::distance(&outside, frame.grid);
+        let band = (EDGE_BAND * gh as f32).max(2.0);
+        let mut diff = vec![0.0f32; gw * gh];
+        let mut measured = vec![0.0f32; gw * gh];
+        let (mut sum, mut n) = (0.0f32, 0usize);
+        for k in 0..gw * gh {
+            if frame.coverage[k] < 0.95 || to_edge[k] > band || seen[k] < 0.5 { continue; }
+            let d = frame.planes.iter().zip(&old).map(|(p, o)| (p[k] - o[k]).abs()).sum::<f32>() / self.geometry.max_value;
+            (diff[k], measured[k]) = (d, 1.0);
+            sum += d;
+            n += 1;
+        }
+        if n == 0 { return None; }
+        let mut spread = vec![diff];
+        crate::smooth::fill(&mut spread, &measured, frame.grid);
+        let (mut past, mut eroding) = (0usize, 0.0f32);
+        let amount: Vec<f32> = spread[0].iter().zip(frame.coverage).map(|(&d, &c)| {
+            if c >= 0.99 { return 0.0; }
+            let t = ((d - STALE_FROM) / (STALE_AT - STALE_FROM)).clamp(0.0, 1.0);
+            let s = t * t * (3.0 - 2.0 * t);
+            past += 1;
+            eroding += s;
+            1.0 - 0.5f32.powf(dt * s / STALE_HALF_LIFE_S)
+        }).collect();
+        sphere.erode(frame.view, frame.grid, &amount);
+        Some((sum / n as f32, eroding / past.max(1) as f32))
+    }
+
+    /// What's made up on the sphere, from all it has now: in the wide view, what was seen with the colors around it
+    /// spread into the rest and muted with the distance (smooth.rs), over what was made up before by the part of
+    /// FILL_HALF_LIFE_S the time since is. It follows the edge as it changes, without flickering with it
+    fn update_fill(&self, sphere: &Sphere, frame: &GridFrame, now: f32, dt: f32) {
+        let (mut planes, seen) = sphere.read_grid(frame.view, frame.grid, sphere.fade(now));
+        crate::smooth::fill(&mut planes, &seen, frame.grid);
+        // The wide grid is about as fine as the output's unzoomed: the output's ramp in its cells
+        let ramp = crate::smooth::MUTE_RAMP * self.geometry.grid.1 as f32;
+        let is_yuv = planes.len() == 3;
+        crate::smooth::mute(&mut planes, &seen, frame.grid, ramp, self.geometry.max_value, is_yuv);
+        let blend = 1.0 - 0.5f32.powf(dt / FILL_HALF_LIFE_S);
+        sphere.write_fill(frame.view, frame.grid, &planes, blend);
     }
 
     /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, the view and
@@ -245,7 +320,6 @@ impl Edges {
         self.chromatic.store(true, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
-        self.trail.lock().last_us = None;
         *self.sphere_written.lock() = None;
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
@@ -293,9 +367,6 @@ impl Edges {
         if let Some(view) = view {
             if self.view.swap(view, Ordering::Relaxed) != view {
                 log::info!("View: {}", if view == VIEW_WIDE { "wide" } else { "normal" });
-                // The screen trail is in the output's pixels, which now show another FOV: it starts over. The sphere is in
-                // the world's directions, and stays
-                self.trail.lock().last_us = None;
             }
         }
         if let Some(chromatic) = chromatic {
@@ -391,31 +462,6 @@ unsafe fn downscale<T: Sample>(ptr: *const u8, stride: usize, (w, h): (usize, us
         }
         for (i, c) in cell.iter_mut().enumerate() {
             *c /= (rows * (xb[i + 1] - xb[i]).max(1)) as f32;
-        }
-    }
-    out
-}
-
-#[inline]
-fn bilinear(grid: &[f32], (gw, gh): (usize, usize), x: f32, y: f32) -> f32 {
-    let x = x.clamp(0.0, (gw - 1) as f32);
-    let y = y.clamp(0.0, (gh - 1) as f32);
-    let (x0, y0) = (x as usize, y as usize);
-    let (x1, y1) = ((x0 + 1).min(gw - 1), (y0 + 1).min(gh - 1));
-    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
-    let a = grid[y0 * gw + x0] + (grid[y0 * gw + x1] - grid[y0 * gw + x0]) * fx;
-    let b = grid[y1 * gw + x0] + (grid[y1 * gw + x1] - grid[y1 * gw + x0]) * fx;
-    a + (b - a) * fy
-}
-
-/// `src` (covering the whole frame) on `to`, `scale` times bigger around the middle
-fn resample(src: &[f32], from: (usize, usize), to: (usize, usize), scale: (f32, f32)) -> Vec<f32> {
-    let mut out = vec![0.0f32; to.0 * to.1];
-    for j in 0..to.1 {
-        let v = 0.5 + ((j as f32 + 0.5) / to.1 as f32 - 0.5) / scale.1;
-        for i in 0..to.0 {
-            let u = 0.5 + ((i as f32 + 0.5) / to.0 as f32 - 0.5) / scale.0;
-            out[j * to.0 + i] = bilinear(src, from, u * from.0 as f32 - 0.5, v * from.1 as f32 - 0.5);
         }
     }
     out
@@ -692,42 +738,27 @@ impl EdgeWorker {
             return Ok(());
         }
 
-        let lo = if job.mode != EdgeMode::Original {
-            render_grid::<T, P>(&mut self.lo, &mut self.lo_buf, &job.src_lo, timestamp_us, cfg.max_value)?
-        } else {
-            Vec::new()
-        };
+        let lo = render_grid::<T, P>(&mut self.lo, &mut self.lo_buf, &job.src_lo, timestamp_us, cfg.max_value)?;
         lap(1, &mut self.timing);
 
-        let zoom = |lo: &[f32]| resample(lo, g.grid, g.grid, (job.settings.zoom.max(1.0), job.settings.zoom.max(1.0)));
-        let mut fills: Vec<Vec<f32>> = match job.mode {
+        // What's known, and how much in each cell; the rest spread in from it
+        let coverage = cell_coverage(mask, g.mask, g.grid);
+        let (mut fills, known) = match job.mode {
             EdgeMode::Off => return Ok(()),
-            EdgeMode::Original => {
-                // Cover the output with the source, aspect kept
-                let ((sw, sh), (ow, oh)) = g.planes[0];
-                let k = (ow as f32 / sw as f32).max(oh as f32 / sh as f32);
-                let scale = (k * sw as f32 / ow as f32, k * sh as f32 / oh as f32);
-                job.src_lo.iter().map(|s| resample(s, g.grid_src, g.grid, scale)).collect()
-            }
-            EdgeMode::Zoom => lo.iter().map(|l| zoom(l)).collect(),
-            EdgeMode::Trail | EdgeMode::Sphere => {
-                let coverage = cell_coverage(mask, g.mask, g.grid);
-                let mut fills: Vec<Vec<f32>> = {
-                    let mut trail = edges.trail.lock();
-                    update_trail(&mut trail, &lo, &coverage, timestamp_us, g.max_value);
-                    lo.iter().zip(&trail.planes).map(|(l, t)| {
-                        zoom(l).iter().zip(t).zip(&trail.weight).map(|((z, t), w)| t * w + z * (1.0 - w)).collect()
-                    }).collect()
-                };
-                if job.mode == EdgeMode::Sphere {
+            EdgeMode::Smooth => (lo, coverage),
+            EdgeMode::Sphere => {
+                // The frame where it covers, and the sphere around it
+                let (mut fills, mut known) = (lo, coverage);
+                if let Some(sphere) = edges.sphere.get() {
                     let view = View::at(&self.params, timestamp_us);
-                    if let Some(sphere) = edges.sphere.get() {
-                        read_sphere(sphere, &view, g.grid, &coverage, timestamp_us, &mut fills);
-                    }
+                    read_sphere(sphere, &view, g.grid, timestamp_us, &mut fills, &mut known);
                 }
-                fills
+                (fills, known)
             }
         };
+        // What's left (all past the frame in smooth; in sphere, only before the sphere has anything made up)
+        crate::smooth::fill(&mut fills, &known, g.grid);
+        crate::smooth::mute(&mut fills, &known, g.grid, crate::smooth::MUTE_RAMP * g.grid.1 as f32, g.max_value, cfg.is_yuv);
         let sigma = job.settings.blur * g.grid.1 as f32;
         for f in fills.iter_mut() { blur(f, g.grid, sigma); }
         lap(2, &mut self.timing);
@@ -825,49 +856,27 @@ fn cell_coverage(mask: &[u8], (mw, mh): (usize, usize), (gw, gh): (usize, usize)
     out
 }
 
-fn update_trail(trail: &mut Trail, lo: &[Vec<f32>], coverage: &[f32], timestamp_us: i64, max_value: f32) {
-    let reset = |trail: &mut Trail| trail.weight.iter_mut().for_each(|w| *w = 0.0);
-    let dt = match trail.last_us {
-        None => { reset(trail); 0 }
-        Some(last) if (timestamp_us - last).abs() > TRAIL_MAX_GAP_US => { reset(trail); 0 }
-        // A frame another worker finished after a newer one: the trail already has newer content
-        Some(last) if timestamp_us <= last => return,
-        Some(last) => timestamp_us - last,
-    };
-    // A cut: the frame and the trail differ where both have content
-    let (mut diff, mut n) = (0.0f32, 0usize);
-    for ((c, w), (s, t)) in coverage.iter().zip(&trail.weight).zip(lo[0].iter().zip(&trail.planes[0])) {
-        if *c > 0.95 && *w > 0.5 { diff += (s - t).abs(); n += 1; }
-    }
-    if n > coverage.len() / 20 && diff / n as f32 > SCENE_CUT * max_value {
-        log::debug!("Edges: scene cut at {timestamp_us} us, trail reset");
-        reset(trail);
-    }
-    let decay = 0.5f32.powf(dt as f32 / 1e6 / TRAIL_HALF_LIFE_S);
-    for (i, &c) in coverage.iter().enumerate() {
-        let old = trail.weight[i] * decay * (1.0 - c);
-        let w = c + old;
-        if w > 1e-4 {
-            for (t, l) in trail.planes.iter_mut().zip(lo) {
-                t[i] = (l[i] * c + t[i] * old) / w;
-            }
-        }
-        trail.weight[i] = w;
-    }
-    trail.last_us = Some(timestamp_us);
-}
-
-/// Reads the sphere over `fills` (the screen trail) where the frame doesn't cover, by how much it has in each cell's
-/// direction. Where it covers, the fill is the frame anyway: the screen trail has just taken it
-fn read_sphere(sphere: &Sphere, view: &View, (gw, gh): (usize, usize), coverage: &[f32], timestamp_us: i64, fills: &mut [Vec<f32>]) {
+/// Reads the sphere into `fills` where the frame (as much as `known` says, its coverage) doesn't cover: what was seen
+/// in each cell's direction over what's made up there, by how much was seen. `known` becomes how much there is of
+/// either; where nothing is made up yet (the first frame after a seek), the smooth fill takes what's left
+fn read_sphere(sphere: &Sphere, view: &View, (gw, gh): (usize, usize), timestamp_us: i64, fills: &mut [Vec<f32>], known: &mut [f32]) {
     let fade = sphere.fade(timestamp_us as f32 / 1e6);
-    let mut values = vec![0.0f32; fills.len()];
+    let (mut seen, mut made) = (vec![0.0f32; fills.len()], vec![0.0f32; fills.len()]);
     for j in 0..gh {
         for i in 0..gw {
             let k = j * gw + i;
-            if coverage[k] >= 0.999 { continue; }
-            let w = sphere.sample(&view.dir(i as f32 / gw as f32, j as f32 / gh as f32), fade, &mut values).min(1.0);
-            for (f, v) in fills.iter_mut().zip(&values) { f[k] = v * w + f[k] * (1.0 - w); }
+            let c = known[k];
+            if c >= 0.999 { continue; }
+            let d = view.dir(i as f32 / gw as f32, j as f32 / gh as f32);
+            let w = sphere.sample(&d, fade, &mut seen).min(1.0);
+            let m = sphere.sample_fill(&d, &mut made).min(1.0) * (1.0 - w);
+            let s = w + m;
+            if s <= 1e-6 { continue; }
+            let total = c + s * (1.0 - c);
+            for ((f, a), b) in fills.iter_mut().zip(&seen).zip(&made) {
+                f[k] = (f[k] * c + (a * w + b * m) * (1.0 - c)) / total;
+            }
+            known[k] = total;
         }
     }
 }
@@ -976,10 +985,13 @@ mod tests {
     #[test]
     fn control_file() {
         assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None, None, None));
-        assert_eq!(parse_control("trail\n"), (Some(EdgeMode::Trail), None, None, None));
+        assert_eq!(parse_control("smooth\n"), (Some(EdgeMode::Smooth), None, None, None));
         assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0), None, None));
-        assert_eq!(parse_control("zoom blur=50"), (Some(EdgeMode::Zoom), Some(0.2), None, None));
-        assert_eq!(parse_control("zoom blur=x"), (Some(EdgeMode::Zoom), None, None, None));
+        assert_eq!(parse_control("smooth blur=50"), (Some(EdgeMode::Smooth), Some(0.2), None, None));
+        assert_eq!(parse_control("smooth blur=x"), (Some(EdgeMode::Smooth), None, None, None));
+        // The modes there were before
+        assert_eq!(parse_control("trail").0, None);
+        assert_eq!(parse_control("zoom").0, None);
         assert_eq!(parse_control(""), (Some(EdgeMode::Off), None, None, None));
         assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0), None, None));
         assert_eq!(parse_control("sphere blur=2 view=wide"), (Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_WIDE), None));

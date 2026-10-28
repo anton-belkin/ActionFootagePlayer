@@ -200,11 +200,15 @@ pub struct Sphere {
     /// Texels per face side
     pub n: usize,
     half_life: f32,
-    /// How much each texel holds, as of `epoch`: faded by half every `half_life`, all of them alike, so the weight
-    /// is kept unfaded from `epoch` and faded when read, by one factor for the whole frame
+    /// How much each texel holds of what was seen, as of `epoch`: faded by half every `half_life`, all of them alike,
+    /// so the weight is kept unfaded from `epoch` and faded when read, by one factor for the whole frame
     weight: Vec<F32>,
     epoch: F32,
     planes: Vec<Vec<F32>>,
+    /// What's made up (edges.rs's fill): what was seen with the colors around it spread into where nothing was, over
+    /// the wide view; and whether a texel has any. It's under what was seen, wherever that's short
+    fill: Vec<Vec<F32>>,
+    filled: Vec<F32>,
 }
 
 impl Sphere {
@@ -212,11 +216,15 @@ impl Sphere {
     pub fn new(cells_per_radian: f32, num_planes: usize, half_life: f32) -> Sphere {
         let n = ((2.0 * cells_per_radian).round() as usize).clamp(32, 512);
         let len = 6 * n * n;
-        Sphere { n, half_life, weight: texels(len), epoch: F32::default(), planes: (0..num_planes).map(|_| texels(len)).collect() }
+        Sphere {
+            n, half_life, weight: texels(len), epoch: F32::default(), planes: (0..num_planes).map(|_| texels(len)).collect(),
+            fill: (0..num_planes).map(|_| texels(len)).collect(), filled: texels(len),
+        }
     }
 
     pub fn reset(&self, now: f32) {
         self.weight.iter().for_each(|w| w.set(0.0));
+        self.filled.iter().for_each(|w| w.set(0.0));
         self.epoch.set(now);
     }
 
@@ -225,8 +233,17 @@ impl Sphere {
         0.5f32.powf((now - self.epoch.get()) / self.half_life)
     }
 
-    /// The planes and how much there is, bilinear over the texels around `w`, each by its weight
+    /// What was seen around `w`, bilinear over the texels, each by its weight; and how much there is
     pub fn sample(&self, w: &Vector3<f32>, fade: f32, out: &mut [f32]) -> f32 {
+        self.gather(w, &self.weight, &self.planes, fade, out)
+    }
+
+    /// What's made up around `w`; and how much there is (1 once it's been made up there)
+    pub fn sample_fill(&self, w: &Vector3<f32>, out: &mut [f32]) -> f32 {
+        self.gather(w, &self.filled, &self.fill, 1.0, out)
+    }
+
+    fn gather(&self, w: &Vector3<f32>, weight: &[F32], planes: &[Vec<F32>], fade: f32, out: &mut [f32]) -> f32 {
         let n = self.n;
         let (face, x, y) = to_face(w, n);
         let (x, y) = ((x - 0.5).clamp(0.0, (n - 1) as f32), (y - 0.5).clamp(0.0, (n - 1) as f32));
@@ -239,13 +256,38 @@ impl Sphere {
         let mut total = 0.0;
         for (tx, ty, b) in taps {
             let i = base + ty * n + tx;
-            let k = b * self.weight[i].get() * fade;
+            let k = b * weight[i].get() * fade;
             if k <= 0.0 { continue; }
-            for (o, p) in out.iter_mut().zip(&self.planes) { *o += p[i].get() * k; }
+            for (o, p) in out.iter_mut().zip(planes) { *o += p[i].get() * k; }
             total += k;
         }
         if total > 1e-6 { out.iter_mut().for_each(|o| *o /= total); }
         total
+    }
+
+    /// What was seen, on a view's grid: the planes, and how much of each cell was seen (0-1). Rows split over a few
+    /// threads
+    pub fn read_grid(&self, view: &View, (gw, gh): (usize, usize), fade: f32) -> (Vec<Vec<f32>>, Vec<f32>) {
+        let np = self.planes.len();
+        // Per cell: how much was seen, then the planes
+        let mut cells = vec![0.0f32; gw * gh * (np + 1)];
+        let rows_per = gh.div_ceil(THREADS);
+        std::thread::scope(|scope| {
+            for (t, chunk) in cells.chunks_mut(rows_per * gw * (np + 1)).enumerate() {
+                scope.spawn(move || {
+                    let mut values = vec![0.0f32; np];
+                    for (c, cell) in chunk.chunks_exact_mut(np + 1).enumerate() {
+                        let k = t * rows_per * gw + c;
+                        let (i, j) = (k % gw, k / gw);
+                        cell[0] = self.sample(&view.dir(i as f32 / gw as f32, j as f32 / gh as f32), fade, &mut values).min(1.0);
+                        cell[1..].copy_from_slice(&values);
+                    }
+                });
+            }
+        });
+        let known = cells.chunks_exact(np + 1).map(|c| c[0]).collect();
+        let planes = (0..np).map(|p| cells.chunks_exact(np + 1).map(|c| c[p + 1]).collect()).collect();
+        (planes, known)
     }
 
     /// The mean difference of the first plane between the sphere and the frame, where both have it; None where they
@@ -270,11 +312,9 @@ impl Sphere {
     }
 
     /// Writes the frame where it covers: each texel in view takes the frame (bilinear on the grid) by its coverage,
-    /// over what was there before, faded. Texels are gathered rather than cells splatted, so nothing's left out
-    /// where the sphere is finer than the grid
+    /// over what was there before, faded
     pub fn write(&self, frame: &GridFrame, now: f32) {
-        let (view, grid, coverage) = (frame.view, frame.grid, frame.coverage);
-        let n = self.n;
+        let (grid, coverage, lo) = (frame.grid, frame.coverage, frame.planes);
         // The unfaded weights grow by twice every half life after the epoch; well before they'd lose precision, fade
         // them all and start from here
         if now - self.epoch.get() > 20.0 * self.half_life {
@@ -283,81 +323,96 @@ impl Sphere {
             self.epoch.set(now);
         }
         let fade = self.fade(now);
-        // The texels the frame covers, per face: the box around where every other covered cell lands, with room for
-        // the texels between them (up to three times finer than the grid at a face's corners)
+        self.each_texel(frame.view, grid, |k| coverage[k] > 0.01, |i, taps| {
+            // The planes by each tap's coverage too: past the frame's edge the grid has the edge repeated at about half
+            // its value (blended with black), which would darken the line the edge leaves
+            let c = taps.iter().map(|&(k, t)| coverage[k] * t).sum::<f32>();
+            if c <= 0.01 { return; }
+            let old = (self.weight[i].get() * fade).min(1.0) * (1.0 - c);
+            let total = c + old;
+            for (p, l) in self.planes.iter().zip(lo) {
+                let new = taps.iter().map(|&(k, t)| l[k] * coverage[k] * t).sum::<f32>();
+                p[i].set((new + p[i].get() * old) / total);
+            }
+            self.weight[i].set(total / fade);
+        });
+    }
+
+    /// Takes `amount` (per grid cell, 0-1) away from what was seen in the view's directions, where it's found not to
+    /// match any more (edges.rs)
+    pub fn erode(&self, view: &View, grid: (usize, usize), amount: &[f32]) {
+        self.each_texel(view, grid, |k| amount[k] > 0.0, |i, taps| {
+            let a = taps.iter().map(|&(k, t)| amount[k] * t).sum::<f32>().min(1.0);
+            if a > 0.0 { self.weight[i].set(self.weight[i].get() * (1.0 - a)); }
+        });
+    }
+
+    /// Writes what's made up, all over the view: `blend` of it over what was made up there before, all of it where
+    /// nothing was
+    pub fn write_fill(&self, view: &View, grid: (usize, usize), planes: &[Vec<f32>], blend: f32) {
+        self.each_texel(view, grid, |_| true, |i, taps| {
+            let had = self.filled[i].get() > 0.0;
+            for (p, l) in self.fill.iter().zip(planes) {
+                let new = taps.iter().map(|&(k, t)| l[k] * t).sum::<f32>();
+                p[i].set(if had { p[i].get() + (new - p[i].get()) * blend } else { new });
+            }
+            self.filled[i].set(1.0);
+        });
+    }
+
+    /// Calls `f` with each texel the view sees and its bilinear taps on the grid (cell, weight). The texels around the
+    /// cells `include` says, gathered rather than the cells splatted, so none is left out where the sphere is finer
+    /// than the grid. The rows go to a few threads
+    fn each_texel(&self, view: &View, (gw, gh): (usize, usize), include: impl Fn(usize) -> bool, f: impl Fn(usize, [(usize, f32); 4]) + Sync) {
+        let n = self.n;
+        // Per face, the box around where every other included cell lands, with room for the texels between them (up
+        // to three times finer than the grid at a face's corners)
         let mut boxes = [(usize::MAX, usize::MAX, 0usize, 0usize); 6];
-        for j in (0..grid.1).step_by(2).chain([grid.1 - 1]) {
-            for i in (0..grid.0).step_by(2).chain([grid.0 - 1]) {
-                let near = |i: usize, j: usize| coverage[j.min(grid.1 - 1) * grid.0 + i.min(grid.0 - 1)] > 0.01;
+        for j in (0..gh).step_by(2).chain([gh - 1]) {
+            for i in (0..gw).step_by(2).chain([gw - 1]) {
+                let near = |i: usize, j: usize| include(j.min(gh - 1) * gw + i.min(gw - 1));
                 if !(near(i, j) || near(i + 1, j) || near(i, j + 1) || near(i + 1, j + 1)) { continue; }
-                let w = view.dir(i as f32 / grid.0 as f32, j as f32 / grid.1 as f32);
+                let w = view.dir(i as f32 / gw as f32, j as f32 / gh as f32);
                 let (face, x, y) = to_face(&w, n);
                 let b = &mut boxes[face];
                 let (x, y) = (x as usize, y as usize);
                 *b = (b.0.min(x.saturating_sub(8)), b.1.min(y.saturating_sub(8)), b.2.max((x + 9).min(n)), b.3.max((y + 9).min(n)));
             }
         }
-        // The rows go to a few threads, taken in turn: the rows of a box aren't all as busy
-        let mut work: Vec<Vec<Row>> = (0..THREADS).map(|_| Vec::new()).collect();
+        // The rows go to the threads in turn: the rows of a box aren't all as busy
+        let mut work: Vec<Vec<(usize, usize, usize, usize)>> = (0..THREADS).map(|_| Vec::new()).collect();
         for (face, &(x0, y0, x1, y1)) in boxes.iter().enumerate() {
             for y in y0..y1 {
-                let r = (face * n + y) * n;
                 let k = work.iter().map(|w| w.len()).enumerate().min_by_key(|&(_, l)| l).map_or(0, |(k, _)| k);
-                work[k].push(Row { face, y, xs: (x0, x1), weight: &self.weight[r..r + n], planes: self.planes.iter().map(|p| &p[r..r + n]).collect() });
+                work[k].push((face, y, x0, x1));
             }
         }
+        let f = &f;
         std::thread::scope(|scope| {
             for rows in work {
-                scope.spawn(move || for row in rows { row.write(n, frame, fade) });
+                scope.spawn(move || for (face, y, x0, x1) in rows {
+                    // Along a row of a face the direction, and so the camera's, steps by the same amount
+                    let start = from_face(face, x0 as f32 + 0.5, y as f32 + 0.5, n);
+                    let mut d = view.rot.tr_mul(&start);
+                    let step = view.rot.tr_mul(&(from_face(face, x0 as f32 + 1.5, y as f32 + 0.5, n) - start));
+                    for x in x0..x1 {
+                        if x > x0 { d += step; }
+                        let Some((u, v)) = view.project_camera(&d) else { continue };
+                        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { continue; }
+                        let (gx, gy) = ((u * gw as f32).min((gw - 1) as f32), (v * gh as f32).min((gh - 1) as f32));
+                        let (cx, cy) = (gx as usize, gy as usize);
+                        let (fx, fy) = (gx - cx as f32, gy - cy as f32);
+                        let (k00, k01) = (cy * gw + cx, cy * gw + (cx + 1).min(gw - 1));
+                        let down = if cy + 1 < gh { gw } else { 0 };
+                        f((face * n + y) * n + x, [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)]);
+                    }
+                });
             }
         });
     }
 }
 
 const THREADS: usize = 4;
-
-/// One row of a face's texels, from `xs.0` to `xs.1`, to be written
-struct Row<'a> {
-    face: usize,
-    y: usize,
-    xs: (usize, usize),
-    /// The whole row of the weights and of each plane
-    weight: &'a [F32],
-    planes: Vec<&'a [F32]>,
-}
-
-impl Row<'_> {
-    fn write(self, n: usize, frame: &GridFrame, fade: f32) {
-        let (view, (gw, gh), lo, coverage) = (frame.view, frame.grid, frame.planes, frame.coverage);
-        let (face, y, (x0, x1)) = (self.face, self.y, self.xs);
-        // Along a row of a face the direction, and so the camera's, steps by the same amount
-        let start = from_face(face, x0 as f32 + 0.5, y as f32 + 0.5, n);
-        let mut d = view.rot.tr_mul(&start);
-        let step = view.rot.tr_mul(&(from_face(face, x0 as f32 + 1.5, y as f32 + 0.5, n) - start));
-        for x in x0..x1 {
-            if x > x0 { d += step; }
-            let Some((u, v)) = view.project_camera(&d) else { continue };
-            if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) { continue; }
-            // Bilinear on the grid. The planes by each tap's coverage too: past the frame's edge the grid has the
-            // edge repeated at about half its value (blended with black), which would darken the line the edge leaves
-            let (gx, gy) = ((u * gw as f32).min((gw - 1) as f32), (v * gh as f32).min((gh - 1) as f32));
-            let (cx, cy) = (gx as usize, gy as usize);
-            let (fx, fy) = (gx - cx as f32, gy - cy as f32);
-            let (k00, k01) = (cy * gw + cx, cy * gw + (cx + 1).min(gw - 1));
-            let down = if cy + 1 < gh { gw } else { 0 };
-            let taps = [(k00, (1.0 - fx) * (1.0 - fy)), (k01, fx * (1.0 - fy)), (k00 + down, (1.0 - fx) * fy), (k01 + down, fx * fy)];
-            let c = taps.iter().map(|&(k, t)| coverage[k] * t).sum::<f32>();
-            if c <= 0.01 { continue; }
-            let old = (self.weight[x].get() * fade).min(1.0) * (1.0 - c);
-            let total = c + old;
-            for (p, l) in self.planes.iter().zip(lo) {
-                let new = taps.iter().map(|&(k, t)| l[k] * coverage[k] * t).sum::<f32>();
-                p[x].set((new + p[x].get() * old) / total);
-            }
-            self.weight[x].set(total / fade);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -391,6 +446,33 @@ mod tests {
                 assert!((x - x2).abs() < 1e-3 && (y - y2).abs() < 1e-3);
             }
         }
+    }
+
+    /// What's made up is under what was seen, all over the view; taking away what was seen leaves it showing
+    #[test]
+    fn made_up_under_what_was_seen() {
+        let grid = (96, 54);
+        let n = grid.0 * grid.1;
+        let a = view(0.0, 0.0, 0);
+        let s = Sphere::new(a.cells_per_radian(grid.0), 1, 3.0);
+        // Seen: the left half
+        let coverage: Vec<f32> = (0..n).map(|k| if k % grid.0 < grid.0 / 2 { 1.0 } else { 0.0 }).collect();
+        s.write(&GridFrame { view: &a, grid, planes: &[vec![10.0; n]], coverage: &coverage }, 0.0);
+        s.write_fill(&a, grid, &[vec![20.0; n]], 0.1);
+        let (left, right) = (a.dir(0.2, 0.5), a.dir(0.8, 0.5));
+        let mut out = [0.0f32];
+        assert!(s.sample(&right, 1.0, &mut out) < 0.01);
+        // The first made up there is taken as it is
+        assert!(s.sample_fill(&right, &mut out) > 0.99 && (out[0] - 20.0).abs() < 1e-3, "{out:?}");
+        assert!(s.sample(&left, 1.0, &mut out) > 0.99 && (out[0] - 10.0).abs() < 1e-3);
+        s.erode(&a, grid, &vec![0.5; n]);
+        assert!((s.sample(&left, 1.0, &mut out) - 0.5).abs() < 0.01);
+        // Then a part of the new over the old
+        s.write_fill(&a, grid, &[vec![30.0; n]], 0.25);
+        s.sample_fill(&right, &mut out);
+        assert!((out[0] - 22.5).abs() < 1e-3, "{out:?}");
+        s.reset(1.0);
+        assert!(s.sample_fill(&right, &mut out) < 0.01);
     }
 
     /// A pan: what the first view saw at its right edge is, after turning right, nearer the middle of the second

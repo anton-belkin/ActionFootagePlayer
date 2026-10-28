@@ -31,8 +31,8 @@
 --                     says), off for the current file. On or wide sticks for the next clips without a project; a
 --                     clip with one starts in it as Gyroflow has it
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
---                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
---                     direction in the world (all blurred)
+--                     what was seen in that direction of the world, the rest the colors around spread in, or only
+--                     the frame's own colors spread out from its edge (both blurred)
 --   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
 --                     sticks for the next clips
 --   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
@@ -58,7 +58,7 @@
 -- preset), view (normal, wide, off), still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
--- edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting, last_export.
+-- edges, edges_blur, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -78,10 +78,9 @@
 --                (the dji-telemetry plugin's `water`; the Osmo Action 6 records it), and for clips from other
 --                cameras as the project or preset says (the default preset: under water). vs-gyroflow/src/water.rs
 --   chromatic=yes  the water's color fringes taken out where the lens is under water (Ctrl+a), or no: as recorded
---   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
---                shown there), original, zoom, off (the project's background color)
+--   edges=sphere what fills the edges: sphere (what was last seen in that direction, the rest the colors around
+--                spread in), smooth (the frame's colors spread out), off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
---   edges_zoom=1.5  how much the zoom fill scales the frame up
 --   resolution=display  the stabilized frame no bigger than the display shows it (above), or video: at the video's own
 --                size (up to 4K's pixels), whatever the display
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
@@ -96,7 +95,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -239,9 +238,9 @@ end
 
 -- The plugin fills the uncovered edges itself (vs-gyroflow/src/edges.rs). The mode and the blur go through a control
 -- file it reads while playing: changing the filter's parameters would rebuild mpv's filter chain, which drops frames
-local EDGE_MODES = { "off", "original", "zoom", "trail", "sphere" }
-local EDGE_LABELS = { off = "background color", original = "original frame, blurred", zoom = "zoomed frame, blurred",
-                      trail = "trail of earlier frames, blurred", sphere = "trail by direction, blurred" }
+local EDGE_MODES = { "off", "sphere", "smooth" }
+local EDGE_LABELS = { off = "background color", sphere = "trail by direction, blurred",
+                      smooth = "frame's edge spread out, blurred" }
 local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.edges", utils.getpid()))
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
 local edge_blur = o.edges_blur
@@ -315,7 +314,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
+                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -346,7 +345,7 @@ local function publish()
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
-        edges_blur = edge_blur, edges_zoom = o.edges_zoom,
+        edges_blur = edge_blur,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end

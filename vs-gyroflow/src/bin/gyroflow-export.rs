@@ -62,10 +62,9 @@ video with nothing to stabilize it with is color-converted only.
   --wide           the gyroflow plugin's wider view (Ctrl+g): no zoom, at the FOV where the stabilized picture
                    covers about as much area as the frame
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
-  --edges <mode>   what fills the edges the stabilized frame leaves: sphere, trail, original, zoom, or off (the
-                   project's background color, the default)
+  --edges <mode>   what fills the edges the stabilized frame leaves: sphere, smooth, or off (the project's
+                   background color, the default)
   --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
-  --edges-zoom <x> how much the zoom fill scales the frame up (default 1.5)
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
@@ -129,11 +128,9 @@ fn main() {
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
                 .unwrap_or_else(|| fail("--fov takes a number above 0")).clamp(0.1, 4.0)),
             "--edges" => { let v = value("--edges"); opts.edges = EdgeMode::parse(&v)
-                .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, original, zoom, trail, sphere)"))); }
+                .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, sphere, smooth)"))); }
             "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
                 .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
-            "--edges-zoom" => opts.edge_settings.zoom = value("--edges-zoom").parse::<f32>()
-                .unwrap_or_else(|_| fail("--edges-zoom takes a number")).clamp(1.0, 4.0),
             "--prores" => opts.prores = true,
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
