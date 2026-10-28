@@ -9,7 +9,7 @@
 use std::sync::{ Arc, atomic::AtomicBool };
 use gyroflow_core::{ StabilizationManager, GyroflowProjectType, filesystem };
 
-use crate::{ embedded, water::{ self, Underwater } };
+use crate::{ prefetch::Prefetched, water::{ self, Underwater } };
 
 /// The project JSON for `video` stabilized from its own motion data with Gyroflow's default preset and then `preset`.
 /// `project_path`: where it will be saved (macOS bookmarks to the video are made relative to it)
@@ -17,9 +17,7 @@ use crate::{ embedded, water::{ self, Underwater } };
 pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, project_path: &str) -> Result<String, String> {
     let stab = StabilizationManager::default();
     let url = filesystem::path_to_url(video);
-    let mut file = std::fs::File::open(video).map_err(|e| format!("Can't open {video}: {e}"))?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
-    let (mut content, size) = embedded::Content::new(&mut file, size);
+    let (mut content, size) = Prefetched::open(video).map_err(|e| format!("Can't open {video}: {e}"))?;
     stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {video}: {e:?}"))?;
     if !stab.gyro.read().has_motion() {
         return Err(format!("{video} has no motion data"));

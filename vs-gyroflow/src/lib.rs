@@ -24,6 +24,7 @@ pub mod edges;
 pub mod sphere;
 pub mod dispersion;
 pub mod water;
+pub mod prefetch;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
@@ -179,10 +180,9 @@ impl Engine {
         } else {
             let path = std::path::Path::new(project);
             let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
-            // The camera's file, without the embedded project at its end (see embedded.rs)
-            let mut file = std::fs::File::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
-            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
-            let (mut content, size) = embedded::Content::new(&mut file, size);
+            // The camera's file, without the embedded project at its end (see embedded.rs), its motion data read ahead
+            // (prefetch.rs)
+            let (mut content, size) = prefetch::Prefetched::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
             stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
             if let Some(obj) = embedded.as_ref() {
                 let mut is_preset = false;

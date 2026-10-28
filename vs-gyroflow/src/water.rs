@@ -11,7 +11,7 @@
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ StabilizationManager, telemetry_parser, keyframes::{ Easing, KeyframeType } };
 
-use crate::{ embedded, probe::{ dji_schema, pb_bytes, pb_varint } };
+use crate::{ embedded, prefetch::Prefetched, probe::{ dji_schema, pb_bytes, pb_varint } };
 
 /// Under water, not, or as the camera says (where it says; elsewhere as the project or preset says)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,9 +68,7 @@ pub fn recorded(path: &str) -> bool {
 
 /// The clip in stretches in and out of the water, in order; None when its camera doesn't record it
 pub fn spans(path: &str) -> Option<Vec<Span>> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
-    let (mut file, size) = embedded::Content::new(&mut file, size);
+    let (mut file, size) = Prefetched::open(path).ok()?;
     let mut layout = None;
     let mut samples = Vec::new();
     let cancel = Arc::new(AtomicBool::new(false));
