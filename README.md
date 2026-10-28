@@ -215,7 +215,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
@@ -249,7 +249,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
-| `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
+| `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
@@ -277,7 +277,9 @@ Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow)
 what's playing: `Ctrl+e` pauses the clip and opens its project in Gyroflow. A clip that plays without a
 `.gyroflow` next to it (a project stored in the video, or the default preset) gets one first, written by the
 plugin from what it renders: the same lens profile, smoothing, zoom and refraction, so Gyroflow starts from
-what you saw. A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
+what you saw. The view and the horizon lock go into it as they are: from the wider view, the project has
+Gyroflow's zoom off at that view's FOV, so it looks the same there, and here once it's saved (a clip with a
+project starts in it as it is: On (Gyroflow project)). A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
 Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilization with it, at the same spot
 in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
 
