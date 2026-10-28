@@ -4,12 +4,15 @@
 //
 //   gyroflow-embed [--move] <video> [project.gyroflow]   store the project (default: the .gyroflow next to the video);
 //                                                         --move deletes the .gyroflow once it's stored and read back
-//   gyroflow-embed --extract [--preset <preset.gyroflow>] [--underwater yes|no|auto] <video> [project.gyroflow]
+//   gyroflow-embed --extract [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--wide]
+//                  <video> [project.gyroflow]
 //                                                         write the stored project next to the video, to open it in Gyroflow.
 //                                                         A video without one gets the project the plugin plays it with:
 //                                                         its own motion data, Gyroflow's default preset, then --preset,
 //                                                         with the lens under water as --underwater says (default auto:
-//                                                         as the camera says, where it records it)
+//                                                         as the camera says, where it records it), the horizon lock's
+//                                                         amount (0-100, 0 off) instead of the preset's, and with --wide
+//                                                         in the plugin's wider view: no zoom, at its FOV
 //   gyroflow-embed --remove <video>                      remove the stored project
 //   gyroflow-embed --show <video>                        print the stored project
 
@@ -24,7 +27,21 @@ fn main() {
     };
     let mut preset = None;
     let mut underwater = Underwater::Auto;
+    let mut horizon_lock = None;
+    let mut wide = false;
     if mode == "--extract" {
+        if let Some(i) = args.iter().position(|a| a == "--wide") {
+            args.remove(i);
+            wide = true;
+        }
+        if let Some(i) = args.iter().position(|a| a == "--horizon-lock") {
+            let value = (i + 1 < args.len()).then(|| args.remove(i + 1));
+            args.remove(i);
+            horizon_lock = Some(value.and_then(|v| v.parse::<f64>().ok()).filter(|v| (0.0..=100.0).contains(v)).unwrap_or_else(|| {
+                eprintln!("--horizon-lock takes 0-100");
+                std::process::exit(2);
+            }));
+        }
         if let Some(i) = args.iter().position(|a| a == "--preset") {
             if i + 1 < args.len() { preset = Some(args.remove(i + 1)); }
             args.remove(i);
@@ -39,18 +56,18 @@ fn main() {
         }
     }
     if args.is_empty() || args.len() > 2 || args[0].starts_with("--") {
-        eprintln!("usage: gyroflow-embed [--move|--extract [--preset <preset.gyroflow>] [--underwater yes|no|auto]|--remove|--show] <video> [project.gyroflow]");
+        eprintln!("usage: gyroflow-embed [--move|--extract [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--wide]|--remove|--show] <video> [project.gyroflow]");
         std::process::exit(2);
     }
     let video = PathBuf::from(&args[0]);
     let project = args.get(1).map(PathBuf::from).unwrap_or_else(|| video.with_extension("gyroflow"));
-    if let Err(e) = run(&mode, &video, &project, preset.as_deref(), underwater) {
+    if let Err(e) = run(&mode, &video, &project, preset.as_deref(), underwater, horizon_lock, wide) {
         eprintln!("gyroflow-embed: {e}");
         std::process::exit(1);
     }
 }
 
-fn run(mode: &str, video: &Path, project: &Path, preset: Option<&str>, underwater: Underwater) -> Result<(), String> {
+fn run(mode: &str, video: &Path, project: &Path, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, wide: bool) -> Result<(), String> {
     match mode {
         "" | "--move" => {
             let data = std::fs::read(project).map_err(|e| format!("{}: {e}", project.display()))?;
@@ -78,7 +95,7 @@ fn run(mode: &str, video: &Path, project: &Path, preset: Option<&str>, underwate
                     let video = vs_gyroflow::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
                     let project_path = std::path::absolute(project).map_err(|e| format!("{}: {e}", project.display()))?;
                     let preset = preset.map(|p| vs_gyroflow::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
-                    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, &project_path.to_string_lossy());
+                    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, horizon_lock, wide, &project_path.to_string_lossy());
                     // On macOS the core makes the project file, empty, to bookmark the video relative to it
                     if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {
                         let _ = std::fs::remove_file(project);

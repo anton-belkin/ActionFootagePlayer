@@ -176,7 +176,7 @@ local function stabilization_menu(g, key)
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
     end
     return {
-        item("On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
+        item(g.kind == "project" and "On (Gyroflow project)" or "On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
         item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
         item("Off", "script-message-to gyroflow view off", { checked = g.view == "off", shortcut = toggle }),
         SEPARATOR,

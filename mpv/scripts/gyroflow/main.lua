@@ -29,15 +29,17 @@
 -- Keys (rebind with `<key> script-binding gyroflow/<name>` in input.conf):
 --   Ctrl+g   toggle   stabilization on, on with a wider view (no zoom, at the FOV where the stabilized picture covers about
 --                     as much area as the frame, for each clip's lens: the edges show at times, filled as Ctrl+b
---                     says), off for the current file. On or wide sticks for the next clips
+--                     says), off for the current file. On or wide sticks for the next clips without a project; a
+--                     clip with one starts in it as Gyroflow has it
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     the original frame, the frame zoomed, a trail of earlier frames, or the same trail kept by
 --                     direction in the world (all blurred)
 --   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
 --                     sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
---   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one;
---                     saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
+--   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one,
+--                     as it plays: in the view (the wider one's FOV, with Gyroflow's zoom off) and with the horizon
+--                     lock it has; saving it in Gyroflow reloads the stabilization here. A clip with no motion data opens as it
 --                     is, for Gyroflow to find the motion from the picture (optical flow): once the project is saved
 --                     next to it, it plays stabilized with it
 --
@@ -62,7 +64,7 @@
 --                stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and
 --                view (the wider view does), and they're filled (Ctrl+b not off), for a computer where the fill
 --                doesn't keep up
---   view=normal  the view clips start in: normal, or wide (the wider view)
+--   view=normal  the view clips without a project start in: normal, or wide (the wider view)
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
 --   underwater=auto  the lens under water (Gyroflow's "Lens is underwater": the light bends where it enters the
@@ -233,8 +235,14 @@ local EDGE_CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyr
 local edge_mode = EDGE_LABELS[o.edges] and o.edges or "sphere"
 local edge_blur = o.edges_blur
 
--- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov), for the next clips too; off is per clip
-local view = o.view == "wide" and "wide" or "normal"
+-- What the clip plays stabilized with (find_source), nil: not stabilized
+local current_source = nil
+
+-- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov); off is per clip. The view clips
+-- without a project start in sticks (sticky_view); a clip with a project starts in it as Gyroflow has it (normal), the
+-- wider view a choice for that clip only
+local sticky_view = o.view == "wide" and "wide" or "normal"
+local view = sticky_view
 
 -- The mode, then the blur and the view: "sphere blur=2 view=wide". The plugin renders both views from one engine, and
 -- switches between them on the next frame it reads this (vs-gyroflow's Views)
@@ -244,9 +252,13 @@ local function write_edge_control()
     f:write(string.format("%s blur=%g view=%s", edge_mode, edge_blur, view))
     f:close()
 end
+local function has_project(source)
+    return source ~= nil and source.kind == "project"
+end
 local function view_label(v)
     if v == "wide" then return "on, wider view" end
-    return v == "normal" and "on" or "off"
+    if v == "normal" then return has_project(current_source) and "on (Gyroflow project)" or "on" end
+    return "off"
 end
 -- true or false: locked or not, whatever the project says; nil: the project's
 local HORIZON = { yes = true, no = false }
@@ -298,7 +310,6 @@ local function gyroflow_filter(source, enabled)
     }
 end
 
-local current_source = nil
 -- Off for this clip (Ctrl+g)
 local stab_off = false
 -- Ctrl+e on a clip without motion data: the project Gyroflow will save for it is waited for
@@ -353,6 +364,7 @@ end
 
 local function add_filter(source)
     current_source = source
+    view = has_project(source) and "normal" or sticky_view
     write_edge_control()
 
     local sizes = render_sizes(source)
@@ -518,6 +530,7 @@ local function show(v)
     local was_on = not stab_off
     local enabled = v ~= "off"
     if enabled then view = v end
+    if enabled and not has_project(current_source) then sticky_view = v end
     stab_off = not enabled
     write_edge_control()
     -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
@@ -584,7 +597,7 @@ end)
 
 mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
-        { "view", view },
+        { "view", sticky_view },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
         { "underwater", underwater },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
@@ -624,6 +637,9 @@ local function reload_project(project, version)
     -- The same video: its camera records the water or not as it did
     local source = { project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh,
                      water = current_source and current_source.water, sizes = current_source and current_source.sizes }
+    -- The project as Gyroflow has it: written from the wider view, it has that view's FOV itself
+    view = "normal"
+    write_edge_control()
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do
         if f.label == LABEL then
@@ -637,6 +653,7 @@ local function reload_project(project, version)
     end
     current_source = source
     mp.set_property_native("vf", vf)
+    publish()
     mp.msg.info("reloaded " .. project)
     mp.osd_message("Gyroflow: project reloaded", 3)
 end
@@ -728,7 +745,12 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         return
     end
     project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
+    -- As it plays here: the view (off: the preset's), the horizon lock, the lens
     local args = { EMBED, "--extract", "--underwater", underwater }
+    if view == "wide" and not stab_off then table.insert(args, "--wide") end
+    if horizon ~= nil then
+        table.insert(args, "--horizon-lock"); table.insert(args, horizon and "100" or "0")
+    end
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)
     end

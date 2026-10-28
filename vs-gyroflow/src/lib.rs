@@ -162,6 +162,55 @@ pub struct Engine {
     throughput: Mutex<(u32, std::time::Instant)>,
 }
 
+/// A project loaded as the plugin plays it, before the output size and the smoothing: `project` a .gyroflow project,
+/// or the video itself: its embedded project, or else its own motion data with Gyroflow's default preset and then
+/// `preset`; the horizon lock and the lens as the player has them (see `Engine::load`). Also the project's JSON, nil
+/// for a video's own motion data. project.rs writes a project from it, so Gyroflow opens the clip as it plays
+pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater) -> Result<(StabilizationManager, Option<serde_json::Value>), String> {
+    let stab = StabilizationManager::default();
+    let url = filesystem::path_to_url(project);
+    let project_json = if is_project_file(project) {
+        stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
+            .map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
+    } else {
+        let path = std::path::Path::new(project);
+        let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
+        // The camera's file, without the embedded project at its end (see embedded.rs), its motion data read ahead
+        // (prefetch.rs)
+        let (mut content, size) = prefetch::Prefetched::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
+        stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        if let Some(obj) = embedded.as_ref() {
+            let mut is_preset = false;
+            let data = serde_json::to_vec(obj).map_err(|e| e.to_string())?;
+            stab.import_gyroflow_data(&data, true, None, |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
+                .map_err(|e| format!("Can't load the project embedded in {project}: {e:?}"))?;
+        } else {
+            if !stab.gyro.read().has_motion() {
+                return Err(format!("{project} has no project and no motion data"));
+            }
+            if let Some(preset) = preset {
+                stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
+                    .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
+            }
+        }
+        log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
+        embedded
+    };
+    // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
+    // so apply them before smoothing (same as the frei0r plugin)
+    stab.recompute_gyro();
+    if let Some(amount) = horizon_lock {
+        // The project's roll, pitch and turn settings stay; only the amount is the player's
+        let h = stab.smoothing.read().horizon_lock.clone();
+        stab.set_horizon_lock(amount, h.horizonroll, h.lock_pitch, h.horizonpitch, h.automatic_lock, h.turn_threshold, h.turn_smoothing_ms, h.turn_multiplier, h.tilt_accel_limit);
+    }
+    // The camera's In water / Out of water is in the video: a project's, or the one being played
+    let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+    water::apply(&stab, underwater, &video);
+    Ok((stab, project_json))
+}
+
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
     /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
@@ -171,49 +220,9 @@ impl Engine {
     /// `underwater`: the lens under water, not, or as the camera says (water.rs)
     pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
-        let stab = StabilizationManager::default();
-        let url = filesystem::path_to_url(project);
-        let project_json = if is_project_file(project) {
-            stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
-                .map_err(|e| format!("Can't load {project}: {e:?}"))?;
-            serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
-        } else {
-            let path = std::path::Path::new(project);
-            let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
-            // The camera's file, without the embedded project at its end (see embedded.rs), its motion data read ahead
-            // (prefetch.rs)
-            let (mut content, size) = prefetch::Prefetched::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
-            stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
-            if let Some(obj) = embedded.as_ref() {
-                let mut is_preset = false;
-                let data = serde_json::to_vec(obj).map_err(|e| e.to_string())?;
-                stab.import_gyroflow_data(&data, true, None, |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
-                    .map_err(|e| format!("Can't load the project embedded in {project}: {e:?}"))?;
-            } else {
-                if !stab.gyro.read().has_motion() {
-                    return Err(format!("{project} has no project and no motion data"));
-                }
-                if let Some(preset) = preset {
-                    stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
-                        .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
-                }
-            }
-            log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
-            embedded
-        };
-        // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
-        // so apply them before smoothing (same as the frei0r plugin)
-        stab.recompute_gyro();
+        let (stab, project_json) = load_manager(project, preset, horizon_lock, underwater)?;
         // The wider view is the project's zoom taken away afterwards (Views)
         if let Fov::Set(fov) = fov { stab.set_fov(fov); }
-        if let Some(amount) = horizon_lock {
-            // The project's roll, pitch and turn settings stay; only the amount is the player's
-            let h = stab.smoothing.read().horizon_lock.clone();
-            stab.set_horizon_lock(amount, h.horizonroll, h.lock_pitch, h.horizonpitch, h.automatic_lock, h.turn_threshold, h.turn_smoothing_ms, h.turn_multiplier, h.tilt_accel_limit);
-        }
-        // The camera's In water / Out of water is in the video: a project's, or the one being played
-        let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
-        water::apply(&stab, underwater, &video);
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
