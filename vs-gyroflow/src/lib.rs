@@ -2,8 +2,9 @@
 //
 // Gyroflow stabilization as a VapourSynth filter: `core.gyroflow.Stabilize(clip, project=...)`.
 //
-// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, a project embedded in it,
-// or motion data of its own (with a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's bit depth, the way
+// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, or motion data of its own (with
+// a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's
+// bit depth, the way
 // Gyroflow's exporter does it (src/rendering/mod.rs) - no RGB conversion, so 10-bit D-Log M stays 10-bit.
 
 use std::ffi::{ c_int, c_void, CStr, CString };
@@ -15,8 +16,6 @@ use vapoursynth4_sys::*;
 
 use gyroflow_core::{ StabilizationManager, filesystem };
 
-#[allow(dead_code)]
-pub mod embedded;
 pub mod probe;
 pub mod project;
 pub mod gpu_lut;
@@ -163,8 +162,7 @@ pub struct Engine {
 }
 
 /// A project loaded as the plugin plays it, before the output size and the smoothing: `project` a .gyroflow project,
-/// or the video itself: its embedded project, or else its own motion data with Gyroflow's default preset and then
-/// `preset`; the horizon lock and the lens as the player has them (see `Engine::load`). Also the project's JSON, nil
+/// or the video itself: its own motion data with Gyroflow's default preset and then `preset`; the horizon lock and the lens as the player has them (see `Engine::load`). Also the project's JSON, nil
 /// for a video's own motion data. project.rs writes a project from it, so Gyroflow opens the clip as it plays
 pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater) -> Result<(StabilizationManager, Option<serde_json::Value>), String> {
     let stab = StabilizationManager::default();
@@ -174,30 +172,20 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
             .map_err(|e| format!("Can't load {project}: {e:?}"))?;
         serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
     } else {
-        let path = std::path::Path::new(project);
-        let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
-        // The camera's file, without the embedded project at its end (see embedded.rs), its motion data read ahead
-        // (prefetch.rs)
-        let (mut content, size) = prefetch::Prefetched::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
+        // The camera's file, its motion data read ahead (prefetch.rs)
+        let (mut content, size) = prefetch::Prefetched::open(project).map_err(|e| format!("Can't open {project}: {e}"))?;
         stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
-        if let Some(obj) = embedded.as_ref() {
-            let mut is_preset = false;
-            let data = serde_json::to_vec(obj).map_err(|e| e.to_string())?;
-            stab.import_gyroflow_data(&data, true, None, |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
-                .map_err(|e| format!("Can't load the project embedded in {project}: {e:?}"))?;
-        } else {
-            if !stab.gyro.read().has_motion() {
-                return Err(format!("{project} has no project and no motion data"));
-            }
-            if let Some(preset) = preset {
-                stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
-                    .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
-            }
+        if !stab.gyro.read().has_motion() {
+            return Err(format!("{project} has no project and no motion data"));
         }
-        log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
-        embedded
+        if let Some(preset) = preset {
+            stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
+                .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
+        }
+        log::info!("{project}: own motion data, default preset");
+        None
     };
-    // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
+    // Project gyro transforms (including LPF) are restored after the video's motion data is loaded,
     // so apply them before smoothing (same as the frei0r plugin)
     stab.recompute_gyro();
     if let Some(amount) = horizon_lock {
@@ -213,8 +201,8 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
 
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
-    /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
-    /// Gyroflow's default preset and then `preset`
+    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
+    /// then `preset`
     /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
     /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
     /// `underwater`: the lens under water, not, or as the camera says (water.rs)
@@ -820,7 +808,7 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
         None => Underwater::Auto,
         Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
     };
-    // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
+    // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
     // One engine for both views (Views): the view it starts in isn't part of what it is

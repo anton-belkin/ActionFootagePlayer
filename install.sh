@@ -44,7 +44,7 @@ macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
 # The gyroflow plugin's binaries, as cargo names them here
 if [ $macos = 1 ]; then LIBRARY=libvs_gyroflow.dylib; else LIBRARY=libvs_gyroflow.so; fi
-BINARIES="$LIBRARY gyroflow-probe gyroflow-embed gyroflow-export"
+BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-export"
 
 apps=0
 for arg in "$@"; do
@@ -159,7 +159,7 @@ remove_ours() {
     rmdir "$dir" 2>/dev/null || echo "   left $dir: there's more in it than this setup put there"
 }
 remove_ours "$MPV_DIR/gyroflow" gyroflow.vpy $BINARIES \
-    gyroflow-router export-finder.sh
+    gyroflow-embed gyroflow-router export-finder.sh
 remove_ours "$MPV_DIR/shaders" dlogm_lut3d.glsl dlogm_hlg.glsl
 remove_ours "$MPV_DIR/luts" dlogm_hlg.cube dji-dlogm-rec709.cube
 # The keys the earlier input.conf had (the plugins bind them now): out of the user's input.conf, the rest kept
@@ -227,6 +227,8 @@ for f in $BINARIES; do
     [ -f "$BIN/$f" ] || { echo "$BIN/$f is missing: a release for another system? (tools/make_release.sh, tools/make_plugin_zip.sh)" >&2; exit 1; }
     put "$BIN/$f" "$GYROFLOW/$f" 755
 done
+# Up to 0.6.4 gyroflow-embed, which also stored projects inside the videos; gyroflow-project writes them next to them
+rm -f "$GYROFLOW/gyroflow-embed" "$GYROFLOW/gyroflow-embed".bak-*
 
 # The telemetry plugin
 put mpv/scripts/dji-telemetry/main.lua      "$TELEMETRY/main.lua" 644

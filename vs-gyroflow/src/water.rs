@@ -11,7 +11,7 @@
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ StabilizationManager, telemetry_parser, keyframes::{ Easing, KeyframeType } };
 
-use crate::{ embedded, prefetch::Prefetched, probe::{ dji_schema, pb_bytes, pb_varint } };
+use crate::{ prefetch::Prefetched, probe::{ dji_schema, pb_bytes, pb_varint } };
 
 /// Under water, not, or as the camera says (where it says; elsewhere as the project or preset says)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +55,6 @@ pub struct Span { pub start_ms: f64, pub end_ms: f64, pub in_water: bool }
 pub fn recorded(path: &str) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let Ok(size) = file.metadata().map(|m| m.len() as usize) else { return false };
-    let (mut file, size) = embedded::Content::new(&mut file, size);
     let mut found = false;
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
