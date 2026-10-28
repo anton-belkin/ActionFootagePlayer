@@ -130,7 +130,8 @@ gyroflow="$plugins/gyroflow"
 telemetry="$plugins/dji-telemetry"
 highlights="$plugins/highlights"
 menu="$plugins/footage-menu"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu"
+agent="$plugins/agent"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$agent"
 cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
 cp shaders/denoise.glsl "$dlogm/shaders/"
@@ -151,6 +152,7 @@ done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
+cp mpv/scripts/agent/main.lua "$agent/"
 
 echo "== ffmpeg"
 archive=$(fetch "$FFMPEG_URL" "$FFMPEG_SHA256")

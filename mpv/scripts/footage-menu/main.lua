@@ -1,4 +1,4 @@
--- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights) and the player: what
+-- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights, agent) and the player: what
 -- their keys do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into
 -- ~~/scripts/.
 --
@@ -52,6 +52,7 @@ local KEY_LABELS = {
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
     { "playlist-next", "Next clip in the folder" },
+    { "script-binding agent/report", "A note for the agent: areas of the frame and a comment" },
     { "script-binding footage_menu/menu", "This menu" },
 }
 
@@ -70,6 +71,8 @@ end
 local function shortcuts()
     local keys, priority = {}, {}
     for _, b in ipairs(mp.get_property_native("input-bindings") or {}) do
+        -- The scripts' keys are "nonscalable script-binding <script>/<name>" there
+        if b.cmd then b.cmd = b.cmd:gsub("^nonscalable ", "") end
         if b.cmd and not b.key:find("^MBTN") and not b.key:find("^MOUSE")
            and (not priority[b.cmd] or b.priority > priority[b.cmd] or (b.priority == priority[b.cmd] and b.key == "SPACE")) then
             keys[b.cmd] = b.key:match("^%u$") and ("Shift+" .. b.key) or b.key
@@ -283,8 +286,10 @@ local function player_menu(key)
     return items
 end
 
-local function app_menu(path)
+local function app_menu(path, key)
     local items = {
+        item("Note for the agent…", "script-binding agent/report", { disabled = not path or not state("agent"), shortcut = key["script-binding agent/report"] }),
+        SEPARATOR,
         item("Keys…", "script-message-to footage_menu keys"),
         item("Help", "script-message-to footage_menu help"),
         item("Report this camera…", "script-message-to footage_menu report", { disabled = not local_file(path) }),
@@ -331,7 +336,7 @@ local function build()
     end
     add(submenu("Player", player_menu(key)))
     add(SEPARATOR)
-    add(submenu("ActionFootagePlayer", app_menu(path)))
+    add(submenu("ActionFootagePlayer", app_menu(path, key)))
     -- No two separators in a row, none at either end
     local out = {}
     for _, it in ipairs(items) do

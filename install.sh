@@ -4,8 +4,9 @@
 #   ./install.sh           the plugins: scripts/dlogm (D-Log M and other log curves; its shaders are baked here, with
 #                          DJI's LUT downloaded from DJI), scripts/gyroflow (stabilization, with the binaries built
 #                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video),
-#                          scripts/highlights (the moments the camera marked, on the seek bar) and
-#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later); and mpv.conf when
+#                          scripts/highlights (the moments the camera marked, on the seek bar),
+#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later) and scripts/agent (notes
+#                          for an AI agent: areas of the frame and a comment); and mpv.conf when
 #                          there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
@@ -114,6 +115,7 @@ GYROFLOW="$MPV_DIR/scripts/gyroflow"
 TELEMETRY="$MPV_DIR/scripts/dji-telemetry"
 HIGHLIGHTS="$MPV_DIR/scripts/highlights"
 MENU="$MPV_DIR/scripts/footage-menu"
+AGENT="$MPV_DIR/scripts/agent"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
 backup_path() {
@@ -236,6 +238,9 @@ put mpv/scripts/highlights/markers.lua "$HIGHLIGHTS/markers.lua" 644
 
 # The right-click menu
 put mpv/scripts/footage-menu/main.lua "$MENU/main.lua" 644
+
+# Notes for an AI agent, and the player's IPC for it
+put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do

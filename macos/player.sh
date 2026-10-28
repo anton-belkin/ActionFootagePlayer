@@ -23,7 +23,7 @@ data="$HOME/Library/Application Support/ActionFootagePlayer"
 # Steady Player's, as the app was called up to 0.3
 old="$HOME/Library/Application Support/Steady Player"
 [ -d "$old" ] && [ ! -e "$data" ] && mv "$old" "$data"
-export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow"
+export DLOGM_DATA="$data/dlogm" GYROFLOW_DATA="$data/gyroflow" AGENT_DATA="$data/agent"
 
 # Downloaded, the whole app carries the quarantine flag, and macOS would refuse the plugin's binaries
 xattr -p com.apple.quarantine "$app" >/dev/null 2>&1 && xattr -dr com.apple.quarantine "$app" 2>/dev/null
@@ -33,14 +33,14 @@ xattr -p com.apple.quarantine "$app" >/dev/null 2>&1 && xattr -dr com.apple.quar
 config="$data/mpv"
 if [ ! -d "$config" ]; then
     mkdir -p "$config/script-opts"
-    for opts in dlogm gyroflow dji_telemetry highlights footage_menu; do
+    for opts in dlogm gyroflow dji_telemetry highlights footage_menu agent; do
         from="${MPV_HOME:-$HOME/.config/mpv}/script-opts/$opts.conf"
         [ -f "$from" ] && cp "$from" "$config/script-opts/"
     done
 fi
 # Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up
 [ $# = 0 ] && set -- --player-operation-mode=pseudo-gui
-for plugin in gyroflow dlogm dji-telemetry highlights footage-menu; do
+for plugin in gyroflow dlogm dji-telemetry highlights footage-menu agent; do
     set -- "--script=$res/plugins/$plugin" "$@"
 done
 set -- "--config-dir=$config" --load-scripts=no "--include=$res/app.conf" "$@"

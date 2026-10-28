@@ -200,8 +200,9 @@ then playing, marking a part and exporting it; **Highlights** (the next, the pre
 **Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
 the wider view, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
-previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
-Report this camera…, which opens an issue on GitHub with what the plugins found in the clip.
+previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
+agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
+issue on GitHub with what the plugins found in the clip.
 
 Look, Stabilization and Telemetry each have **Remember as default**: the settings as they are become the plugin's
 options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
@@ -225,6 +226,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
+| `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The menu | `footage_menu/menu` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
@@ -263,6 +265,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `highlights.conf`: `before=2` | seconds before each highlight a jump lands: the button is pressed once the moment has happened |
 | `highlights.conf`: `chapters=yes` | the highlights as chapters too, which mpv's seek bar shows as marks; `no`: only the keys and the menu |
 | `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
+| `agent.conf`: `socket=` | the IPC socket an agent reaches the player by, when mpv has none (`input-ipc-server`); empty: see [Notes for an AI agent](#notes-for-an-ai-agent) |
 
 The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with
 anything but letters and digits made `_` (the menu's: `footage_menu.conf`). The menu's Remember as default writes
@@ -505,6 +508,32 @@ come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPr
 [Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
+### Notes for an AI agent
+
+For working on the player together with an AI agent (Claude Code, in this repository): what you see, and what the
+player is doing as you see it, saved for the agent to read. `Ctrl+r` (or the menu's ActionFootagePlayer → Note for
+the agent…) pauses the video; drag a rectangle round what you mean (`Shift`+drag adds another, a plain drag starts
+again), press `Enter`, write a line, `Enter`. `Esc` in the comment goes back to the rectangles; `Esc` there leaves
+without saving. Each note is a folder of its own in
+`~/Library/Application Support/ActionFootagePlayer/agent/reports/` (Windows:
+`%LOCALAPPDATA%\ActionFootagePlayer\agent\reports\`; the plugins in your own mpv: `~/.config/mpv/agent/reports/`),
+named by date, time and clip:
+
+| | |
+|---|---|
+| `report.json` | the comment; the areas, in the frame's pixels, the window's, and 0..1 of the frame; the clip, the time and the frame number; and the state when the note started: every plugin's (`user-data/`) and the player's (the video before and after the filters, the filters and shaders, the window, the display, dropped frames) |
+| `screen.png` | the window as it was, with what was over the video (telemetry, messages) |
+| `marked.png` | the same with the areas drawn on it, numbered |
+| `frame.png` | the frame at its own size (after the stabilization), with nothing over it |
+| `log.txt` | mpv's last 2000 lines of log (verbose) |
+
+Then ask the agent to go through the notes. While the player runs, an agent can also reach it live, through mpv's
+[JSON IPC](https://mpv.io/manual/master/#json-ipc): the socket's path is in `agent/session.json` (`socket`, `pid`),
+`script-message-to agent snapshot [<file>]` writes the state as `report.json` has it (to `agent/state.json` by
+default), and `script-message-to agent say <text> [<seconds>]` shows a line over the video. The socket is mpv's
+`input-ipc-server` when one is set (the Windows app's pipe, an `mpv.conf`); otherwise `agent/mpv.sock` (Windows:
+`\\.\pipe\ActionFootagePlayer-agent`), or `socket=` in `agent.conf`.
+
 ## Installing, in detail
 
 ### Plugins in your own mpv
@@ -627,8 +656,9 @@ screen, a playlist of the folder's videos) and a config folder of its own. An mp
 put the plugins together with other scripts of your own, take the plugins instead of the app (see
 [Plugins in your own mpv](#plugins-in-your-own-mpv)). The app is read-only once signed; what's yours is in
 `~/Library/Application Support/ActionFootagePlayer/`: what you set in the plugins (`mpv/script-opts/`, with Remember
-as default), DJI's LUT and its shader (`dlogm/`), and your own default preset if you make one
-(`gyroflow/default.gyroflow`, see Stabilization).
+as default), DJI's LUT and its shader (`dlogm/`), your own default preset if you make one
+(`gyroflow/default.gyroflow`, see Stabilization), and the notes for an AI agent (`agent/reports/`, see
+[Notes for an AI agent](#notes-for-an-ai-agent)).
 
 ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts the mpv it
 carries (`Contents/Helpers/`, or Homebrew's in an app built without it) with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
@@ -852,6 +882,8 @@ mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/
                               markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
+mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
+                              ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is

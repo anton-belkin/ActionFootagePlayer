@@ -10,7 +10,8 @@
 //   python\                   Python, with VapourSynth in Lib\site-packages\vapoursynth\ (VSSCRIPT_PATH tells mpv
 //                             where its vsscript.dll is; it finds this Python from there)
 //   plugins\                  the plugins: dlogm, gyroflow (with ffmpeg.exe and ffprobe.exe for its exports),
-//                             dji-telemetry, highlights, and footage-menu (their right-click menu)
+//                             dji-telemetry, highlights, footage-menu (their right-click menu), and agent (notes
+//                             for an AI agent, and its IPC)
 //   vulkan\vulkan-1.dll       the Vulkan loader, which mpv.exe can't start without, for a PC whose GPU driver hasn't
 //                             installed one (last in mpv's PATH: the system's comes first)
 //   tools\setup.py            what fetches DJI's LUT
@@ -38,9 +39,9 @@ use std::process::Command;
 const NAME: &str = "ActionFootagePlayer";
 // The playing one's IPC pipe: videos opened with the app go there while it plays
 const PIPE: &str = r"\\.\pipe\ActionFootagePlayer";
-const PLUGINS: [&str; 5] = ["gyroflow", "dlogm", "dji-telemetry", "highlights", "footage-menu"];
+const PLUGINS: [&str; 6] = ["gyroflow", "dlogm", "dji-telemetry", "highlights", "footage-menu", "agent"];
 // Their settings' files, in script-opts\
-const PLUGIN_OPTS: [&str; 5] = ["gyroflow", "dlogm", "dji_telemetry", "highlights", "footage_menu"];
+const PLUGIN_OPTS: [&str; 6] = ["gyroflow", "dlogm", "dji_telemetry", "highlights", "footage_menu", "agent"];
 // A video sent to a player started less than this long ago goes into its playlist (several opened together), later
 // in place of what plays
 const TOGETHER: std::time::Duration = std::time::Duration::from_secs(3);
@@ -101,7 +102,8 @@ fn environment(cmd: &mut Command, app: &Path) {
     }
     cmd.env("VSSCRIPT_PATH", python.join(r"Lib\site-packages\vapoursynth\vsscript.dll"))
         .env("DLOGM_DATA", data.join("dlogm"))
-        .env("GYROFLOW_DATA", data.join("gyroflow"));
+        .env("GYROFLOW_DATA", data.join("gyroflow"))
+        .env("AGENT_DATA", data.join("agent"));
 }
 
 // A video's full path (mpv gets them relative to its own folder otherwise); a URL as it is
