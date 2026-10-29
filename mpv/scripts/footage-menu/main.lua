@@ -191,6 +191,7 @@ local function stabilization_menu(g, key)
         }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
+        item("Clean still frame on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         item("Remember as default", "script-message-to gyroflow remember"),

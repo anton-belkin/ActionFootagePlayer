@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, wide, horizon_lock, underwater, width, height, edges*, chromatic). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, horizon_lock, underwater, width, height, edges*, chromatic, still_control). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -47,4 +47,22 @@ if args.get('fast') and options.get('edges', 'off') != 'off':
     if (edges['uncovered'] if isinstance(edges, dict) else edges) > 0:
         clip = core.std.SelectEvery(clip, cycle=2, offsets=0)
 
-core.gyroflow.Stabilize(clip, **stab, **options).set_output()
+# The paused frame cleaned of its noise (still.lua): while mpv seeks to it again, the control file says which frame. The
+# frames before its neighbours aren't stabilized (mpv drops them), and Still rebuilds it from them; the others pass
+still = None
+if args.get('still_control'):
+    try:
+        with open(args['still_control']) as f:
+            still = json.load(f)
+    except (OSError, ValueError):
+        still = None
+if still:
+    options['skip_before'] = float(still['skip_before'])
+elif args.get('still_control'):
+    # The GPU for it set up a few seconds into playback, so the first pause doesn't wait for that (once per process)
+    options['still_warm_up'] = 5.0
+
+out = core.gyroflow.Stabilize(clip, **stab, **options)
+if still:
+    out = core.gyroflow.Still(out, time=float(still['time']), radius=int(still['radius']), luma_keep=float(still.get('luma_keep', 0.25)))
+out.set_output()
