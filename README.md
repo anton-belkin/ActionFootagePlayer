@@ -222,6 +222,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
+| `Ctrl+p` | Clean still frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -255,6 +256,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K) |
+| `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
@@ -877,6 +879,7 @@ mpv/scripts/dlogm/            the log plugin  →  ~/.config/mpv/scripts/dlogm (
                               ActionFootagePlayer; dji_color.lua and gopro_color.lua read the cameras' color profile
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               ActionFootagePlayer
+mpv/scripts/gyroflow/still.lua  the clean still frame (Ctrl+p): the paused frame again, through vs-gyroflow's Still
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out

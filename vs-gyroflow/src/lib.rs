@@ -24,6 +24,7 @@ pub mod sphere;
 pub mod dispersion;
 pub mod water;
 pub mod prefetch;
+pub mod still;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
@@ -644,19 +645,51 @@ struct Filter {
     fallback_duration: f64,
     /// Each frame's lens geometry in its luma, for mpv's chromatic.glsl
     marker: bool,
+    /// Frames before this time (s) come out blank, unprocessed: mpv seeks to a paused frame again from the keyframe
+    /// before it (still.lua), and only the frames just before it are needed
+    skip_before: f64,
+    blank: Mutex<BlankFrame>,
 }
+
+/// The blank frame skipped frames share (Filter::skipped), made with the first
+struct BlankFrame(*mut VSFrame);
+unsafe impl Send for BlankFrame {}
+
+/// A frame's duration in seconds, from its properties
+pub(crate) unsafe fn frame_duration(api: &VSAPI, props: *const VSMap, fallback: f64) -> f64 {
+    let mut e1 = VSMapPropertyError::Success;
+    let mut e2 = VSMapPropertyError::Success;
+    let num = unsafe { (api.mapGetInt)(props, c"_DurationNum".as_ptr(), 0, &mut e1) };
+    let den = unsafe { (api.mapGetInt)(props, c"_DurationDen".as_ptr(), 0, &mut e2) };
+    if e1 == VSMapPropertyError::Success && e2 == VSMapPropertyError::Success && num > 0 && den > 0 {
+        num as f64 / den as f64
+    } else {
+        fallback
+    }
+}
+
+/// Presentation time of frame `n` in seconds: _AbsoluteTime, mpv's pts, or by its number
+pub(crate) unsafe fn frame_pts(api: &VSAPI, props: *const VSMap, n: c_int, duration: f64) -> f64 {
+    let mut err = VSMapPropertyError::Success;
+    let t = unsafe { (api.mapGetFloat)(props, c"_AbsoluteTime".as_ptr(), 0, &mut err) };
+    if err == VSMapPropertyError::Success && t.is_finite() { return t; }
+
+    let off = MP_PTS_OFFSET.load(Ordering::Relaxed);
+    if off >= 0 {
+        if let Some(blob) = unsafe { mp_image(api, props) }.filter(|b| off as usize + 8 <= b.len()) {
+            let pts = read_f64(blob, off as usize);
+            if pts.is_finite() && pts > -1.0e3 { return pts; }
+        }
+    }
+    n as f64 * duration
+}
+
+/// Set on the frames Stabilize leaves out (skip_before): Still doesn't take them for neighbours
+pub(crate) const SKIPPED_PROP: &CStr = c"_GyroflowSkipped";
 
 impl Filter {
     unsafe fn frame_duration(&self, api: &VSAPI, props: *const VSMap) -> f64 {
-        let mut e1 = VSMapPropertyError::Success;
-        let mut e2 = VSMapPropertyError::Success;
-        let num = unsafe { (api.mapGetInt)(props, c"_DurationNum".as_ptr(), 0, &mut e1) };
-        let den = unsafe { (api.mapGetInt)(props, c"_DurationDen".as_ptr(), 0, &mut e2) };
-        if e1 == VSMapPropertyError::Success && e2 == VSMapPropertyError::Success && num > 0 && den > 0 {
-            num as f64 / den as f64
-        } else {
-            self.fallback_duration
-        }
+        unsafe { frame_duration(api, props, self.fallback_duration) }
     }
 
     /// Finds the pts in _MP_IMAGE from frame n and n + 1
@@ -674,18 +707,35 @@ impl Filter {
 
     /// Presentation time of frame `n`, in seconds
     unsafe fn frame_time(&self, n: c_int, api: &VSAPI, props: *const VSMap) -> f64 {
-        let mut err = VSMapPropertyError::Success;
-        let t = unsafe { (api.mapGetFloat)(props, c"_AbsoluteTime".as_ptr(), 0, &mut err) };
-        if err == VSMapPropertyError::Success && t.is_finite() { return t; }
+        unsafe { frame_pts(api, props, n, self.frame_duration(api, props)) }
+    }
 
-        let off = MP_PTS_OFFSET.load(Ordering::Relaxed);
-        if off >= 0 {
-            if let Some(blob) = unsafe { mp_image(api, props) }.filter(|b| off as usize + 8 <= b.len()) {
-                let pts = read_f64(blob, off as usize);
-                if pts.is_finite() && pts > -1.0e3 { return pts; }
+    /// A frame left out (before skip_before): the blank one's planes, without a copy, with `src`'s properties
+    unsafe fn skipped(&self, api: &VSAPI, src: *const VSFrame, core: *mut VSCore) -> *const VSFrame {
+        let format = unsafe { (api.getVideoFrameFormat)(src) };
+        let mut blank = self.blank.lock();
+        if blank.0.is_null() {
+            let b = unsafe { (api.newVideoFrame)(format, self.out_size.0, self.out_size.1, src, core) };
+            let fmt = unsafe { &*format };
+            for p in 0..fmt.num_planes {
+                let (h, stride) = unsafe { ((api.getFrameHeight)(b, p) as usize, (api.getStride)(b, p) as usize) };
+                let ptr = unsafe { (api.getWritePtr)(b, p) };
+                // Black: limited-range black luma, neutral chroma (never shown: mpv drops them as it seeks)
+                let v = if p == 0 && self.is_yuv { 16u32 << (fmt.bits_per_sample - 8) } else if p == 0 { 0 } else { 128u32 << (fmt.bits_per_sample - 8) };
+                if fmt.bytes_per_sample == 1 {
+                    unsafe { std::ptr::write_bytes(ptr, v as u8, h * stride) };
+                } else {
+                    let row = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u16, h * stride / 2) };
+                    row.fill(v as u16);
+                }
             }
+            blank.0 = b;
         }
-        n as f64 * unsafe { self.frame_duration(api, props) }
+        let sources = [blank.0 as *const VSFrame; 3];
+        let planes = [0, 1, 2];
+        let dst = unsafe { (api.newVideoFrame2)(format, self.out_size.0, self.out_size.1, sources.as_ptr(), planes.as_ptr(), src, core) };
+        unsafe { (api.mapSetInt)((api.getFramePropertiesRW)(dst), SKIPPED_PROP.as_ptr(), 1, VSMapAppendMode::Replace) };
+        dst
     }
 }
 
@@ -713,6 +763,11 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
             }
 
             let time = f.frame_time(n, api, props);
+            if time < f.skip_before {
+                let dst = f.skipped(api, src, core);
+                (api.freeFrame)(src);
+                return dst;
+            }
             let timestamp_us = ((time - f.start_time + f.time_offset) * 1_000_000.0).round() as i64 + f.engine.frame_offset_us;
 
             let mut err = VSMapPropertyError::Success;
@@ -750,7 +805,11 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
 
 unsafe extern "system-unwind" fn filter_free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
     let f = unsafe { Box::from_raw(instance as *mut Filter) };
-    unsafe { ((*vsapi).freeNode)(f.node) };
+    unsafe {
+        ((*vsapi).freeNode)(f.node);
+        let blank = f.blank.lock().0;
+        if !blank.is_null() { ((*vsapi).freeFrame)(blank); }
+    }
 }
 
 unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<String> {
@@ -759,12 +818,12 @@ unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<Stri
     if err != VSMapPropertyError::Success || ptr.is_null() { return None; }
     Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
 }
-unsafe fn map_get_f64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<f64> {
+pub(crate) unsafe fn map_get_f64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<f64> {
     let mut err = VSMapPropertyError::Success;
     let v = unsafe { (api.mapGetFloat)(map, key.as_ptr(), 0, &mut err) };
     (err == VSMapPropertyError::Success).then_some(v)
 }
-unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64> {
+pub(crate) unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64> {
     let mut err = VSMapPropertyError::Success;
     let v = unsafe { (api.mapGetInt)(map, key.as_ptr(), 0, &mut err) };
     (err == VSMapPropertyError::Success).then_some(v)
@@ -822,7 +881,7 @@ fn align(v: i64, ss: c_int) -> usize {
     (v as usize) & !((1usize << ss) - 1)
 }
 
-unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
+pub(crate) unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
     log::error!("{msg}");
     let msg = CString::new(format!("{what}: {msg}")).unwrap_or_default();
     unsafe {
@@ -848,6 +907,8 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
     let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
     let marker = unsafe { map_get_i64(api, input, c"chromatic") }.unwrap_or(0) != 0;
+    let skip_before = unsafe { map_get_f64(api, input, c"skip_before") }.unwrap_or(f64::NEG_INFINITY);
+    if let Some(after) = unsafe { map_get_f64(api, input, c"still_warm_up") } { still::warm_up_later(after); }
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
@@ -871,7 +932,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
     let filter = Box::new(Filter {
         node, engine, out_size: (out_vi.width, out_vi.height), num_planes: fmt.num_planes as usize, is_yuv,
-        start_time, time_offset, fallback_duration, marker,
+        start_time, time_offset, fallback_duration, marker, skip_before, blank: Mutex::new(BlankFrame(null_mut())),
     });
     let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
     unsafe {
@@ -907,11 +968,14 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
                                c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
+        (api.registerFunction)(c"Still".as_ptr(),
+                               c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
+                               c"clip:vnode;".as_ptr(), still::still_create, null_mut(), plugin);
     }
 }
 
