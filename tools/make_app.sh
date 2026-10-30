@@ -98,7 +98,7 @@ install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
 echo "$version" > "$res/VERSION"
-install -m 644 macos/setup-offer.lua "$res/"
+install -m 644 macos/setup-offer.lua macos/finder-launch.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"
 
