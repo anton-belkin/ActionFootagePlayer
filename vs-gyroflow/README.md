@@ -22,6 +22,16 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
 | `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, `view=normal\|wide` and `chromatic=yes\|no`, read while playing (at most every 50 ms) |
 | `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`); with `edges` off it carries the project's background color too, which the shader leaves as it is. Red and blue move only where the refraction says under water, frame by frame, and while the control file (`edges_control`) doesn't say `chromatic=no` |
+| `skip_before` | — | seconds: frames before this come out blank and unprocessed, marked `_GyroflowSkipped` (mpv seeks to a paused frame again from the keyframe before it, and `Still` needs only the frames just before it) |
+| `still_warm_up` | — | seconds: `Still`'s GPU set up that long from now, in the background at low priority, once per process |
+
+`core.gyroflow.Still(clip, time, radius=3, luma_strength=1.5, chroma_strength=1, luma_keep=0.25, chroma_keep=0, specks=1)`
+rebuilds the frame at `time` (mpv's pts) from it and `radius` frames on each side, moved onto it by the motion between
+them, on the GPU (`src/still.rs`): block matching over a pyramid, to a quarter pixel; the noise measured by brightness;
+each pixel averaged with its neighbours' where their patches match beyond the noise; specks (particles) replaced with
+what the neighbours agree on; `luma_keep` of the grain left. Every other frame passes as it is. With
+`VS_GYROFLOW_STILL_PROFILE=1` it logs each step's time; `VS_GYROFLOW_STILL_DEBUG=1` shows the share of neighbours that
+count instead of the picture, `2` the specks.
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow

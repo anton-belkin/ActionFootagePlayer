@@ -26,8 +26,10 @@ pub struct Prefetched {
     file: File,
     len: u64,
     pos: u64,
-    /// What's been read, by offset
+    /// The samples read ahead, by offset
     chunks: BTreeMap<u64, Vec<u8>>,
+    /// The parser's big reads, by offset: apart, as one can start before a sample and end after it
+    kept: BTreeMap<u64, Vec<u8>>,
 }
 
 impl Prefetched {
@@ -36,7 +38,7 @@ impl Prefetched {
         let file = File::open(path)?;
         let size = file.metadata()?.len() as usize;
         let len = size as u64;
-        let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new() };
+        let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new() };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
         if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len as usize) {
             this.fetch(merged(metadata_samples(&ctx)));
@@ -64,23 +66,37 @@ impl Prefetched {
     }
 }
 
+impl Prefetched {
+    /// What's been read from `pos` on, in the samples or the big reads
+    fn cached(&self, pos: u64) -> Option<&[u8]> {
+        [&self.chunks, &self.kept].into_iter().find_map(|map| {
+            let (&start, data) = map.range(..=pos).next_back()?;
+            data.get((pos - start) as usize..).filter(|rest| !rest.is_empty())
+        })
+    }
+}
+
 impl Read for Prefetched {
+    /// Fills `buf` up to the end of the file, as a file does: telemetry-parser reads the file's ends with one read()
+    /// and takes what it gets for all there is (read_beginning_and_end), so a read stopped at a sample's end leaves it
+    /// without the camera's tags
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let max = self.len.saturating_sub(self.pos).min(buf.len() as u64) as usize;
-        if max == 0 { return Ok(0); }
-        let pos = self.pos;
-        if let Some((&start, data)) = self.chunks.range(..=pos).next_back() {
-            let at = (pos - start) as usize;
-            if at < data.len() {
-                let n = max.min(data.len() - at);
-                buf[..n].copy_from_slice(&data[at..at + n]);
-                self.pos += n as u64;
-                return Ok(n);
+        let mut n = 0;
+        while n < max {
+            let pos = self.pos + n as u64;
+            if let Some(data) = self.cached(pos) {
+                let k = (max - n).min(data.len());
+                buf[n..n + k].copy_from_slice(&data[..k]);
+                n += k;
+                continue;
             }
+            // Not read ahead: a box header, or something read once
+            let k = read_full_at(&self.file, &mut buf[n..max], pos)?;
+            if k >= KEEP { self.kept.insert(pos, buf[n..n + k].to_vec()); }
+            n += k;
+            break;
         }
-        // Not read ahead: a box header, or something read once
-        let n = read_full_at(&self.file, &mut buf[..max], pos)?;
-        if n >= KEEP { self.chunks.insert(pos, buf[..n].to_vec()); }
         self.pos += n as u64;
         Ok(n)
     }
@@ -168,7 +184,7 @@ mod tests {
         f.seek(SeekFrom::Start(500_000)).unwrap();
         f.read_exact(&mut big).unwrap();
         assert_eq!(big, data[500_000..2_500_000]);
-        assert_eq!(f.chunks.len(), 1);
+        assert_eq!(f.kept.len(), 1);
         // Across the kept chunk's end, and from the end
         let mut buf = vec![0u8; 1000];
         f.seek(SeekFrom::Start(2_499_500)).unwrap();
@@ -178,6 +194,26 @@ mod tests {
         let mut tail = Vec::new();
         f.read_to_end(&mut tail).unwrap();
         assert_eq!(tail, data[data.len() - 10..]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn reads_past_a_sample_in_one_read() {
+        // Clip 0104: a sample read ahead started just before the file's last 5 MB, and the camera's detection got
+        // only the rest of the sample
+        let path = std::env::temp_dir().join(format!("vs-gyroflow-prefetch-sample-{}.bin", std::process::id()));
+        let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &data).unwrap();
+        let (mut f, _) = Prefetched::open(&path).unwrap();
+        f.chunks.insert(999_000, data[999_000..1_004_000].to_vec());
+        let mut buf = vec![0u8; 1_500_000];
+        f.seek(SeekFrom::Start(1_000_000)).unwrap();
+        assert_eq!(f.read(&mut buf).unwrap(), buf.len());
+        assert_eq!(buf, data[1_000_000..2_500_000]);
+        // A big read that covers a sample isn't hidden by it
+        f.seek(SeekFrom::Start(1_002_000)).unwrap();
+        assert_eq!(f.read(&mut buf[..100_000]).unwrap(), 100_000);
+        assert_eq!(buf[..100_000], data[1_002_000..1_102_000]);
         std::fs::remove_file(&path).unwrap();
     }
 }

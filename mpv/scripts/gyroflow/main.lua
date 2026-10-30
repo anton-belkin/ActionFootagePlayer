@@ -35,6 +35,8 @@
 --                     direction in the world (all blurred)
 --   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
 --                     sticks for the next clips
+--   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
+--                     sticks (still.lua)
 --   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
 --                     (above water nothing moves either way, and the lens stays as it is). It sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
@@ -50,9 +52,10 @@
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, horizon lock, lens, color fringes and edges as the defaults, in gyroflow.conf
+--   remember                the view, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
+--                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
--- preset), view (normal, wide, off),
+-- preset), view (normal, wide, off), still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting, last_export.
@@ -83,6 +86,9 @@
 --                size (up to 4K's pixels), whatever the display
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
+--   still=yes    the paused frame cleaned of its noise (Ctrl+p), from it and still_radius=5 frames on each side,
+--                still_delay=0.4 s after it pauses; still_grain=0.25 of the brightness's grain stays, so it doesn't
+--                look smeared (0: none)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -90,10 +96,11 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
+local still = require 'still'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
@@ -309,7 +316,7 @@ local function gyroflow_filter(source, enabled)
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
                                                 wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_zoom = o.edges_zoom, edges_control = EDGE_CONTROL,
-                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2] }),
+                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -321,6 +328,15 @@ end
 local stab_off = false
 -- Ctrl+e on a clip without motion data: the project Gyroflow will save for it is waited for
 local waiting = false
+
+-- The clean still frame needs the stabilization's filter in the chain, on
+still.init(o, function()
+    if not current_source or stab_off then return false end
+    for _, f in ipairs(mp.get_property_native("vf") or {}) do
+        if f.label == LABEL and f.enabled ~= false then return true end
+    end
+    return false
+end)
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
@@ -640,6 +656,7 @@ mp.register_script_message("remember", function()
         { "underwater", underwater },
         { "chromatic", chromatic and "yes" or "no" },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
+        { "still", still.enabled() and "yes" or "no" },
     })
     mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
