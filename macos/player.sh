@@ -38,8 +38,9 @@ if [ ! -d "$config" ]; then
         [ -f "$from" ] && cp "$from" "$config/script-opts/"
     done
 fi
-# Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up
-[ $# = 0 ] && set -- --player-operation-mode=pseudo-gui
+# Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up. The
+# video gets a window of its own (finder-launch.lua), for HDR to engage
+[ $# = 0 ] && set -- --player-operation-mode=pseudo-gui "--script=$res/finder-launch.lua"
 for plugin in gyroflow dlogm dji-telemetry highlights footage-menu; do
     set -- "--script=$res/plugins/$plugin" "$@"
 done
