@@ -37,6 +37,8 @@
 --                     sticks for the next clips
 --   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
 --                     sticks (still.lua)
+--   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
+--                     (above water nothing moves either way, and the lens stays as it is). It sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one,
 --                     as it plays: in the view (the wider one's FOV, with Gyroflow's zoom off) and with the horizon
@@ -48,11 +50,14 @@
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
+--   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, horizon lock, lens, edges and clean still frame as the defaults, in gyroflow.conf
+--   remember                the view, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
+--                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), view (normal, wide, off), still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
+-- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, edges_zoom, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
@@ -72,6 +77,7 @@
 --                lens), yes, or above water, no. auto: as the camera says over the clip, its In water / Out of water
 --                (the dji-telemetry plugin's `water`; the Osmo Action 6 records it), and for clips from other
 --                cameras as the project or preset says (the default preset: under water). vs-gyroflow/src/water.rs
+--   chromatic=yes  the water's color fringes taken out where the lens is under water (Ctrl+a), or no: as recorded
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction), trail (what was last
 --                shown there), original, zoom, off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
@@ -90,7 +96,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edges_zoom = 1.5, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -249,12 +255,15 @@ local current_source = nil
 local sticky_view = o.view == "wide" and "wide" or "normal"
 local view = sticky_view
 
--- The mode, then the blur and the view: "sphere blur=2 view=wide". The plugin renders both views from one engine, and
--- switches between them on the next frame it reads this (vs-gyroflow's Views)
+-- The water's color fringes taken out (Ctrl+a), or left as recorded; sticks for the next clips
+local chromatic = o.chromatic
+
+-- The mode, then the blur, the view and the color fringes: "sphere blur=2 view=wide chromatic=yes". The plugin renders
+-- both views from one engine, and switches between them on the next frame it reads this (vs-gyroflow's Views)
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s", edge_mode, edge_blur, view))
+    f:write(string.format("%s blur=%g view=%s chromatic=%s", edge_mode, edge_blur, view, chromatic and "yes" or "no"))
     f:close()
 end
 local function has_project(source)
@@ -274,12 +283,12 @@ local UNDERWATER_LABELS = { yes = "lens under water", no = "lens above water", a
 local underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "auto"
 
 -- The water's color fringes, taken out wherever the stabilization has the lens under water (its refraction, frame by
--- frame: vs-gyroflow/src/dispersion.rs); there's no switch of its own. The shader is in mpv's own glsl-shaders from
--- the start, ahead of the dlogm plugin's, which builds its list from them: it reads the frame's marker before the
--- noise reduction and the log curve. It leaves video without the marker as it is. The stabilization writes one
--- whenever the shader is there, as the shader paints it over; out of the water, one that moves no color. Only
--- vo=gpu-next, gpu and libmpv (an app's own window) run shaders: with another vo (or without the file) there's no
--- marker
+-- frame: vs-gyroflow/src/dispersion.rs), unless Ctrl+a leaves them as recorded (the control file's chromatic=). The
+-- shader is in mpv's own glsl-shaders from the start, ahead of the dlogm plugin's, which builds its list from them: it
+-- reads the frame's marker before the noise reduction and the log curve. It leaves video without the marker as it is.
+-- The stabilization writes one whenever the shader is there, as the shader paints it over; out of the water, or with
+-- Ctrl+a off, one that moves no color. Only vo=gpu-next, gpu and libmpv (an app's own window) run shaders: with
+-- another vo (or without the file) there's no marker
 local chromatic_shader = false
 if file_exists(CHROMATIC_SHADER) then
     local vo = mp.get_property("vo") or ""
@@ -336,6 +345,7 @@ local function publish()
         view = stab_off and "off" or view,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
+        chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur, edges_zoom = o.edges_zoom,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
@@ -605,6 +615,36 @@ mp.add_key_binding("Ctrl+u", "lens", function()
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
+-- The color fringes taken out or not. The plugin reads it from the control file on the next frame; a paused frame is
+-- rendered again (a seek to it sets the filter up again, which reads the file). It changes nothing where the lens is
+-- above water: its marker moves no color either way
+local function set_chromatic(value)
+    if not chromatic_shader then
+        return mp.osd_message("Gyroflow: color fringes are taken out only with vo=gpu-next or gpu", 2)
+    end
+    chromatic = value
+    write_edge_control()
+    publish()
+    if current_source and not stab_off and mp.get_property_native("pause") then
+        local pos = mp.get_property_number("time-pos")
+        if pos then mp.commandv("seek", tostring(pos), "absolute+exact") end
+    end
+    local note = ""
+    if chromatic and underwater == "no" then note = " (the lens is above water: nothing to take out)" end
+    mp.msg.info("color fringes under water " .. (chromatic and "taken out" or "as recorded"))
+    mp.osd_message("Gyroflow: color fringes under water " .. (chromatic and "taken out" or "as recorded") .. note, 2)
+end
+
+mp.register_script_message("chromatic", function(value)
+    if value == "toggle" then
+        set_chromatic(not chromatic)
+    elseif value == "yes" or value == "no" then
+        set_chromatic(value == "yes")
+    end
+end)
+
+mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)
+
 mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
@@ -614,6 +654,7 @@ mp.register_script_message("remember", function()
         { "view", sticky_view },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
         { "underwater", underwater },
+        { "chromatic", chromatic and "yes" or "no" },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
         { "still", still.enabled() and "yes" or "no" },
     })
