@@ -138,6 +138,10 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
     cmd.arg("--player-operation-mode=pseudo-gui").arg(format!("--input-ipc-server={PIPE}"))
         .arg(format!("--config-dir={}", mpv_config().display())).arg("--load-scripts=no")
         .arg(format!("--include={}", app.join("app.conf").display()));
+    // The menu says which version this is
+    if let Ok(version) = std::fs::read_to_string(app.join("VERSION")) {
+        cmd.arg(format!("--script-opts-append=footage_menu-version={}", version.trim()));
+    }
     for plugin in PLUGINS {
         cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
     }

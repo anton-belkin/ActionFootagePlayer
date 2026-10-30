@@ -47,6 +47,11 @@ done
 set -- "--config-dir=$config" --load-scripts=no "--include=$res/app.conf" "$@"
 # The menu offers the setup again
 set -- "--script-opts-append=footage_menu-setup=$res/setup.sh" "$@"
+# And says which version this is
+if [ -f "$res/VERSION" ]; then
+    read -r version < "$res/VERSION"
+    set -- "--script-opts-append=footage_menu-version=$version" "$@"
+fi
 
 # The first time, the setup's offered (from mpv: see setup-offer.lua). After that, DJI's LUT (Ctrl+s, exports
 # with --sdr) is fetched in the background when the setup hasn't got it
