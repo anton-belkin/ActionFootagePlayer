@@ -4,9 +4,9 @@
 // pass: decode -> Gyroflow (the plugin's own engine, on the GPU) -> LUT -> encode. The source is decoded and
 // encoded once, so there's no intermediate file to lose quality in.
 //
-// It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, a project
-// embedded in it, or the clip's own motion data with the default preset) and the log curve from the camera's
-// metadata, as the dlogm plugin does (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
+// It picks the stabilization the same way the gyroflow mpv plugin does (a .gyroflow next to the video, or the clip's
+// own motion data with the default preset) and the log curve from the camera's metadata, as the dlogm plugin does
+// (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
 // nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
 // clip with neither is skipped, there being nothing to change. --wide and --edges give it the gyroflow plugin's wider
 // view and edge fill (edges.rs), as the plugin passes them to the VapourSynth filter.
@@ -44,7 +44,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vs_gyroflow::{ Engine, Fov, Interpolation, PlaneJob, SampleKind, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
+use vs_gyroflow::{ Engine, Fov, Interpolation, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
@@ -56,6 +56,9 @@ video with nothing to stabilize it with is color-converted only.
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
+  --underwater <yes|no|auto>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the camera says
+                   over the clip, the default: its In water / Out of water (Osmo Action 6), elsewhere the project's or
+                   preset's
   --wide           the gyroflow plugin's wider view (Ctrl+g): no zoom, at the FOV where the stabilized picture
                    covers about as much area as the frame
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
@@ -85,6 +88,7 @@ struct Options {
     sdr: bool,
     no_stabilize: bool,
     horizon_lock: Option<f64>,
+    underwater: Underwater,
     fov: Fov,
     edges: EdgeMode,
     edge_settings: EdgeSettings,
@@ -102,7 +106,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, fov: Fov::Project,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
@@ -119,6 +123,7 @@ fn main() {
             "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
+            "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no or auto")),
             // The ranges the VapourSynth filter takes them in (lib.rs)
             "--wide" => opts.fov = Fov::Wide,
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
@@ -284,7 +289,6 @@ fn find_source(path: &Path) -> Result<Source, String> {
     }
     let info = probe::probe(&s)?;
     match info["mode"].as_str() {
-        Some("embedded") => Ok(Source { project: s, preset: None, label: "embedded project" }),
         Some("default") => {
             let preset = plugin_file("gyroflow", "default.gyroflow");
             Ok(Source { project: s, preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset" })
@@ -532,7 +536,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let workers = 3;
     let key = format!("export|{}", path.display());
     let engine = match &source {
-        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, (w, h), 3, (1, 1), None,
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
         None => None,
     };
@@ -542,7 +546,10 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         Some(e) if e.uncovered_frames.0 > 0 => opts.edges,
         _ => EdgeMode::Off,
     };
-    if let Some(e) = &engine { e.edges.configure(edges, opts.edge_settings, None); }
+    if let Some(e) = &engine {
+        let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
+        e.edges.configure(edges, opts.edge_settings, view, None);
+    }
     let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 
     let mut graph = graph;
@@ -665,7 +672,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        engine.process(timestamp_us, planes, !full_range).map(|_| dst)
+                        engine.process(timestamp_us, planes, !full_range, false).map(|_| dst)
                     }
                 };
                 let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|_| f), None => Ok(f) });

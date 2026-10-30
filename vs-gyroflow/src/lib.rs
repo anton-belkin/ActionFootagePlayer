@@ -2,8 +2,9 @@
 //
 // Gyroflow stabilization as a VapourSynth filter: `core.gyroflow.Stabilize(clip, project=...)`.
 //
-// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, a project embedded in it,
-// or motion data of its own (with a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's bit depth, the way
+// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, or motion data of its own (with
+// a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's
+// bit depth, the way
 // Gyroflow's exporter does it (src/rendering/mod.rs) - no RGB conversion, so 10-bit D-Log M stays 10-bit.
 
 use std::ffi::{ c_int, c_void, CStr, CString };
@@ -15,13 +16,16 @@ use vapoursynth4_sys::*;
 
 use gyroflow_core::{ StabilizationManager, filesystem };
 
-#[allow(dead_code)]
-pub mod embedded;
 pub mod probe;
 pub mod project;
 pub mod gpu_lut;
 pub mod edges;
 pub mod sphere;
+pub mod dispersion;
+pub mod water;
+pub mod prefetch;
+pub mod still;
+pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
 use gyroflow_core::stabilization::{ ComputeParams, Luma8, Luma16, PixelType, Stabilization };
@@ -99,6 +103,10 @@ struct Job {
     planes: Vec<PlaneJob>,
     limited_range: bool,
     edges: Option<edges::EdgeJob>,
+    /// The view to render it in (Views)
+    view: u8,
+    /// The frame's lens geometry written into its luma for mpv's chromatic.glsl (dispersion.rs)
+    marker: bool,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -112,8 +120,28 @@ pub enum Fov {
     /// Gyroflow's FOV (Advanced) instead of the project's; above 1 the view is wider than the zoom covers
     Set(f64),
     /// The wider view: no zoom, at the FOV where the stabilized picture covers about as much area as the frame
-    /// (`wide_fov`), whatever the lens
+    /// (`wide_fov`), whatever the lens. The view the engine starts in: it has both (Views)
     Wide,
+}
+
+/// The two views an engine renders, switched between while playing (the edge fill's control file, `view=`): the
+/// project's, with its zoom (VIEW_NORMAL), and the wider one (VIEW_WIDE), the same smoothing with no zoom, at the FOV
+/// `wide_fov` finds. As in Gyroflow, a FOV doesn't recompute the stabilization: switching is new parameters for the
+/// next frame, not another engine or another filter chain
+pub struct Views {
+    pub params: [ComputeParams; 2],
+    /// Per view, `leaves_edges`
+    pub uncovered: [(usize, usize); 2],
+    pub wide_fov: f64,
+}
+
+/// The project's parameters seen through the wider view: every frame's zoom 1, the FOV `fov`
+fn wide_view(base: &ComputeParams, fov: f64) -> ComputeParams {
+    let mut p = base.clone();
+    p.fovs = vec![1.0; base.fovs.len()];
+    p.fov_scale = fov;
+    p.adaptive_zoom_window = 0.0;
+    p
 }
 
 /// Also used by gyroflow-export, so a video renders the same as it plays
@@ -124,67 +152,66 @@ pub struct Engine {
     pub frame_offset_us: i64,
     /// What fills the parts the frame doesn't cover; off unless set
     pub edges: Arc<edges::Edges>,
-    /// Frames of the clip whose stabilized frame leaves part of the output uncovered (`leaves_edges`), of all
+    /// Frames of the clip whose stabilized frame leaves part of the output uncovered (`leaves_edges`), of all, in the
+    /// view it started in
     pub uncovered_frames: (usize, usize),
-    /// The wider view's FOV, as `wide_fov` found it for the clip
+    /// The wider view's FOV, as `wide_fov` found it for the clip, when it started in that view
     pub wide_fov: Option<f64>,
+    pub views: Arc<Views>,
     /// Frames done since when, for the rate in the log
     throughput: Mutex<(u32, std::time::Instant)>,
 }
 
+/// A project loaded as the plugin plays it, before the output size and the smoothing: `project` a .gyroflow project,
+/// or the video itself: its own motion data with Gyroflow's default preset and then `preset`; the horizon lock and the lens as the player has them (see `Engine::load`). Also the project's JSON, nil
+/// for a video's own motion data. project.rs writes a project from it, so Gyroflow opens the clip as it plays
+pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater) -> Result<(StabilizationManager, Option<serde_json::Value>), String> {
+    let stab = StabilizationManager::default();
+    let url = filesystem::path_to_url(project);
+    let project_json = if is_project_file(project) {
+        stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
+            .map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
+    } else {
+        // The camera's file, its motion data read ahead (prefetch.rs)
+        let (mut content, size) = prefetch::Prefetched::open(project).map_err(|e| format!("Can't open {project}: {e}"))?;
+        stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        if !stab.gyro.read().has_motion() {
+            return Err(format!("{project} has no project and no motion data"));
+        }
+        if let Some(preset) = preset {
+            stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
+                .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
+        }
+        log::info!("{project}: own motion data, default preset");
+        None
+    };
+    // Project gyro transforms (including LPF) are restored after the video's motion data is loaded,
+    // so apply them before smoothing (same as the frei0r plugin)
+    stab.recompute_gyro();
+    if let Some(amount) = horizon_lock {
+        // The project's roll, pitch and turn settings stay; only the amount is the player's
+        let h = stab.smoothing.read().horizon_lock.clone();
+        stab.set_horizon_lock(amount, h.horizonroll, h.lock_pitch, h.horizonpitch, h.automatic_lock, h.turn_threshold, h.turn_smoothing_ms, h.turn_multiplier, h.tilt_accel_limit);
+    }
+    // The camera's In water / Out of water is in the video: a project's, or the one being played
+    let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+    water::apply(&stab, underwater, &video);
+    Ok((stab, project_json))
+}
+
 impl Engine {
     /// `subsampling`: log2 of the chroma subsampling, (w, h)
-    /// `project`: a .gyroflow project, or the video itself: its embedded project, or else its own motion data with
-    /// Gyroflow's default preset and then `preset`
+    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
+    /// then `preset`
     /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
     /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
-        let stab = StabilizationManager::default();
-        let url = filesystem::path_to_url(project);
-        let project_json = if is_project_file(project) {
-            stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
-                .map_err(|e| format!("Can't load {project}: {e:?}"))?;
-            serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
-        } else {
-            let path = std::path::Path::new(project);
-            let embedded = embedded::read(path).map_err(|e| format!("Can't read the project embedded in {project}: {e}"))?;
-            // The camera's file, without the embedded project at its end (see embedded.rs)
-            let mut file = std::fs::File::open(path).map_err(|e| format!("Can't open {project}: {e}"))?;
-            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
-            let (mut content, size) = embedded::Content::new(&mut file, size);
-            stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
-            if let Some(obj) = embedded.as_ref() {
-                let mut is_preset = false;
-                let data = serde_json::to_vec(obj).map_err(|e| e.to_string())?;
-                stab.import_gyroflow_data(&data, true, None, |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
-                    .map_err(|e| format!("Can't load the project embedded in {project}: {e:?}"))?;
-            } else {
-                if !stab.gyro.read().has_motion() {
-                    return Err(format!("{project} has no project and no motion data"));
-                }
-                if let Some(preset) = preset {
-                    stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
-                        .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
-                }
-            }
-            log::info!("{project}: {}", if embedded.is_some() { "embedded project" } else { "own motion data, default preset" });
-            embedded
-        };
-        // Project gyro transforms (including LPF) are restored after the embedded motion data is loaded,
-        // so apply them before smoothing (same as the frei0r plugin)
-        stab.recompute_gyro();
-        match fov {
-            Fov::Set(fov) => stab.set_fov(fov),
-            // No zoom: the FOV alone says how much of the picture shows, once the smoothing below is there to measure it
-            Fov::Wide => stab.set_adaptive_zoom(0.0),
-            Fov::Project => {}
-        }
-        if let Some(amount) = horizon_lock {
-            // The project's roll, pitch and turn settings stay; only the amount is the player's
-            let h = stab.smoothing.read().horizon_lock.clone();
-            stab.set_horizon_lock(amount, h.horizonroll, h.lock_pitch, h.horizonpitch, h.automatic_lock, h.turn_threshold, h.turn_smoothing_ms, h.turn_multiplier, h.tilt_accel_limit);
-        }
+        let (stab, project_json) = load_manager(project, preset, horizon_lock, underwater)?;
+        // The wider view is the project's zoom taken away afterwards (Views)
+        if let Fov::Set(fov) = fov { stab.set_fov(fov); }
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
@@ -202,17 +229,19 @@ impl Engine {
         }
         stab.invalidate_smoothing();
         stab.recompute_blocking();
-        let wide_fov = (fov == Fov::Wide).then(|| {
-            let params = ComputeParams::from_manager(&stab);
-            let fov = wide_fov(&params, stab.params.read().fps);
-            let mut covered = params.minimal_fovs.clone();
+        let views = {
+            let fps = stab.params.read().fps;
+            let base = ComputeParams::from_manager(&stab);
+            let fov = wide_fov(&base, fps);
+            let mut covered = base.minimal_fovs.clone();
             covered.sort_by(|a, b| a.total_cmp(b));
             log::info!("{project}: wider view at FOV {fov:.3}; the frame is covered up to FOV {:.3} (median)", covered.get(covered.len() / 2).copied().unwrap_or(0.0));
-            stab.set_fov(fov);
-            stab.recompute_undistortion();
-            fov
-        });
-        let uncovered_frames = leaves_edges(&ComputeParams::from_manager(&stab), stab.params.read().fps);
+            let wide = wide_view(&base, fov);
+            Arc::new(Views { uncovered: [leaves_edges(&base, fps), leaves_edges(&wide, fps)], params: [base, wide], wide_fov: fov })
+        };
+        let view = if fov == Fov::Wide { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
+        let uncovered_frames = views.uncovered[view as usize];
+        let wide_fov = (fov == Fov::Wide).then_some(views.wide_fov);
 
         let (size, output_size, frame_offset_us) = {
             let p = stab.params.read();
@@ -234,37 +263,45 @@ impl Engine {
         let stab = Arc::new(stab);
         let config = WorkerConfig { kind, max_value, is_yuv, interpolation };
         let edges = Arc::new(edges::Edges::new(edges::EdgeGeometry::new(&geometry, kind, max_value), workers));
+        edges.set_view(view);
         edges.set_expected(uncovered_frames.0 > 0);
         // Each worker sets up its GPU context and renders one frame before playback starts: mpv waits for the
         // filter to be created, but the first frames already run against the clock, and dropped ~1 s of video
         let (ready_tx, ready_rx) = mpsc::channel::<()>();
         let workers = workers.max(1);
         for i in 0..workers {
-            let (stab, rx, geometry, ready_tx, edges) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone());
+            let (stab, rx, geometry, ready_tx, edges, views) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone(), views.clone());
             std::thread::Builder::new().name(format!("gyroflow-vs-{i}")).spawn(move || {
-                worker(&stab, &rx, config, &geometry, &edges, ready_tx);
+                worker(&stab, &views, view, &rx, config, &geometry, &edges, ready_tx);
             }).map_err(|e| e.to_string())?;
         }
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{workers} GPU workers ready after {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
-        // Playback's sphere trail (edges.rs); a clip without edges doesn't need one
-        if uncovered_frames.0 > 0 {
-            let (edges, stab) = (edges.clone(), stab.clone());
-            std::thread::Builder::new().name("gyroflow-sphere".into()).spawn(move || edges::sphere_writer(edges, stab, config)).map_err(|e| e.to_string())?;
+        // Playback's sphere trail (edges.rs); a clip without edges in either view doesn't need one
+        if views.uncovered.iter().any(|u| u.0 > 0) {
+            let (edges, stab, base) = (edges.clone(), stab.clone(), views.params[0].clone());
+            std::thread::Builder::new().name("gyroflow-sphere".into()).spawn(move || edges::sphere_writer(edges, stab, base, config)).map_err(|e| e.to_string())?;
         }
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
-    pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
+    /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
+    pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool, marker: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
+        // The view the frame is rendered in, as the control file has it now; the edges it leaves are that view's
+        let view = self.edges.view();
+        self.edges.set_expected(self.views.uncovered[view as usize].0 > 0);
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
+            // No frame of the clip leaves edges (uncovered_frames): nothing to fill, nor the source scaled down and the
+            // mask rendered to find that out, ~4 ms a 4K frame on a GPU worker (#43)
+            _ if !self.edges.expected() => None,
             mode => Some(self.edges.prepare(mode, &planes)),
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -392,6 +429,18 @@ fn get_engine(key: &str, load: impl FnOnce() -> Result<Engine, String>) -> Resul
 struct PlaneStab {
     stab: Stabilization,
     index: usize,
+    /// The GPU device it's set up for, and the bytes of the input and output buffers it was set up with (stride times
+    /// height): gyroflow-core's wgpu backend is made for one size and writes nothing for another, though it reports
+    /// the frame done (the chroma of a 3024-wide output, whose rows VapourSynth pads: a green picture). So another
+    /// size sets it up again
+    device: isize,
+    buffers: (usize, usize),
+}
+
+impl PlaneStab {
+    fn new(stab: Stabilization, index: usize, device: isize) -> PlaneStab {
+        PlaneStab { stab, index, device, buffers: (0, 0) }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -402,9 +451,9 @@ struct WorkerConfig {
     interpolation: Interpolation,
 }
 
-/// The project's parameters, with the background color in this plane's channel and range
-fn plane_compute_params(mgr: &StabilizationManager, cfg: WorkerConfig, index: usize, limited_range: bool) -> ComputeParams {
-    let mut compute_params = ComputeParams::from_manager(mgr);
+/// A view's parameters (Views), with the background color in this plane's channel and range
+fn plane_compute_params(base: &ComputeParams, cfg: WorkerConfig, index: usize, limited_range: bool) -> ComputeParams {
+    let mut compute_params = base.clone();
     let channel = if cfg.is_yuv { [index] } else { [0] };
     compute_params.background = match cfg.kind {
         SampleKind::U8  => <Luma8  as PixelType>::from_rgb_color(compute_params.background, &channel, limited_range),
@@ -413,7 +462,7 @@ fn plane_compute_params(mgr: &StabilizationManager, cfg: WorkerConfig, index: us
     compute_params
 }
 
-fn create_planes(mgr: &StabilizationManager, cfg: WorkerConfig, num_planes: usize, limited_range: bool) -> Vec<PlaneStab> {
+fn create_planes(mgr: &StabilizationManager, base: &ComputeParams, cfg: WorkerConfig, num_planes: usize, limited_range: bool) -> Vec<PlaneStab> {
     let (size, output_size, device) = {
         let p = mgr.params.read();
         (p.size, p.output_size, p.current_device as isize)
@@ -425,39 +474,48 @@ fn create_planes(mgr: &StabilizationManager, cfg: WorkerConfig, num_planes: usiz
         stab.share_wgpu_instances = false;
         stab.set_device(device);
         stab.init_size(size, output_size);
-        stab.set_compute_params(plane_compute_params(mgr, cfg, index, limited_range));
-        PlaneStab { stab, index }
+        stab.set_compute_params(plane_compute_params(base, cfg, index, limited_range));
+        PlaneStab::new(stab, index, device)
     }).collect()
 }
 
-fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64, jobs: &[PlaneJob]) -> Result<&'static str, String> {
-    let mut backend = "";
+/// The backend, and the luma's geometry for the marker (dispersion.rs)
+fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64, jobs: &[PlaneJob]) -> Result<(&'static str, Option<dispersion::Marker>), String> {
+    let (mut backend, mut marker) = ("", None);
     for (plane, pj) in planes.iter_mut().zip(jobs) {
-        backend = match cfg.kind {
+        let (b, m) = match cfg.kind {
             SampleKind::U8  => process_plane::<Luma8>(plane, timestamp_us, cfg.max_value, pj)?,
             SampleKind::U16 => process_plane::<Luma16>(plane, timestamp_us, cfg.max_value, pj)?,
         };
+        backend = b;
+        if plane.index == 0 { marker = Some(m); }
     }
-    Ok(backend)
+    Ok((backend, marker))
 }
 
 /// `geometry`: per plane, (input size, output size)
-fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, ready: mpsc::Sender<()>) {
+/// `views`: what it renders, starting in `view`
+fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, ready: mpsc::Sender<()>) {
     // Video without a range property is almost always limited; rebuilt if a frame says otherwise
     let mut limited_range = cfg.is_yuv;
-    let mut planes = create_planes(mgr, cfg, geometry.len(), limited_range);
-    let mut edge_worker = edges::EdgeWorker::new(mgr, cfg, &edges.geometry, limited_range);
+    let mut planes = create_planes(mgr, &views.params[view as usize], cfg, geometry.len(), limited_range);
+    let mut edge_worker = edges::EdgeWorker::new(mgr, &views.params[view as usize], cfg, &edges.geometry, limited_range);
+    // For the marker (dispersion.rs): what the frame shows where it doesn't cover the output and nothing fills it
+    let background = { let b = mgr.params.read().background; [b[0], b[1], b[2]] };
     if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
+        // Rows as VapourSynth lays out its frames' (32-byte aligned: mpv's 1512-pixel chroma rows of 16 bits come 3040
+        // bytes apart), so the GPU set up here fits the frames that come
         let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
-        let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; w * h * bytes], vec![0u8; ow * oh * bytes])).collect();
+        let stride = |w: usize| (w * bytes).div_ceil(32) * 32;
+        let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; stride(*w) * h], vec![0u8; stride(*ow) * oh])).collect();
         let jobs: Vec<PlaneJob> = geometry.iter().zip(buffers.iter_mut()).map(|(((w, h), (ow, oh)), (src, dst))| PlaneJob {
-            src: src.as_ptr(), src_stride: w * bytes, src_w: *w, src_h: *h,
-            dst: dst.as_mut_ptr(), dst_stride: ow * bytes, dst_w: *ow, dst_h: *oh,
+            src: src.as_ptr(), src_stride: stride(*w), src_w: *w, src_h: *h,
+            dst: dst.as_mut_ptr(), dst_stride: stride(*ow), dst_w: *ow, dst_h: *oh,
         }).collect();
         match process_planes(&mut planes, cfg, 0, &jobs) {
-            Ok(backend) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
+            Ok((backend, _)) => log::info!("Processing on {backend}, {:?}, max value {}", cfg.kind, cfg.max_value),
             Err(e) => log::error!("Warm-up: {e}"),
         }
     }
@@ -468,16 +526,27 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
         // Hold the lock only while waiting, so the other worker takes the next frame
         let Ok(job) = rx.lock().recv() else { break };
         let t = std::time::Instant::now();
-        if job.limited_range != limited_range {
-            // Only the background color depends on the range; the GPU setup stays
-            limited_range = job.limited_range;
+        if job.limited_range != limited_range || job.view != view {
+            // Another view, or the background color in another range: new parameters, the GPU setup stays
+            (limited_range, view) = (job.limited_range, job.view);
+            let base = &views.params[view as usize];
             for plane in planes.iter_mut() {
-                plane.stab.set_compute_params(plane_compute_params(mgr, cfg, plane.index, limited_range));
+                plane.stab.set_compute_params(plane_compute_params(base, cfg, plane.index, limited_range));
             }
+            edge_worker.set_view(base, cfg, limited_range);
         }
-        let mut result = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes).map(|_| ());
+        let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
+        let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
+        let mut result = processed.map(|_| ());
         if let (Ok(()), Some(e)) = (&result, &job.edges) {
             result = edge_worker.apply(edges, cfg, e, job.timestamp_us, &job.planes);
+        }
+        // Last: the edge fill would draw over it. Out of the water the colors stay where they are (its k is 1)
+        if let (Ok(()), true, Some(mut m), Some(luma)) = (&result, job.marker, marker, job.planes.first()) {
+            // Where the background shows: never in a clip whose frames all cover the output, so chromatic.glsl
+            // doesn't look for it there
+            if job.edges.is_none() && edges.expected() { m.background = Some(background); }
+            m.write(luma, cfg.kind, cfg.max_value);
         }
         let _ = job.reply.send(result);
 
@@ -491,7 +560,8 @@ fn worker(mgr: &StabilizationManager, rx: &Mutex<mpsc::Receiver<Job>>, cfg: Work
     log::debug!("Worker finished");
 }
 
-fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_value: f32, pj: &PlaneJob) -> Result<&'static str, String> {
+/// The backend, and the plane's geometry for the marker (dispersion.rs)
+fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_value: f32, pj: &PlaneJob) -> Result<(&'static str, dispersion::Marker), String> {
     // gyroflow-core takes mutable slices for both sides, but only writes the output
     let src = unsafe { std::slice::from_raw_parts_mut(pj.src as *mut u8, pj.src_stride * pj.src_h) };
     let dst = unsafe { std::slice::from_raw_parts_mut(pj.dst, pj.dst_stride * pj.dst_h) };
@@ -500,6 +570,14 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
         output: BufferDescription { size: (pj.dst_w, pj.dst_h, pj.dst_stride), data: BufferSource::Cpu { buffer: dst }, ..Default::default() },
     };
 
+    let sizes = (pj.src_stride * pj.src_h, pj.dst_stride * pj.dst_h);
+    if plane.buffers != sizes {
+        if plane.buffers != (0, 0) {
+            log::info!("Plane {}: buffers of {:?} bytes, not {:?}: its GPU set up again", plane.index, sizes, plane.buffers);
+            plane.stab.set_device(plane.device);
+        }
+        plane.buffers = sizes;
+    }
     let stab = &mut plane.stab;
     if stab.initialized_backend.is_none() || stab.pending_device_change.is_some() {
         stab.ensure_ready_for_processing::<T>(timestamp_us, None, &mut buffers);
@@ -515,7 +593,7 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
     transform.kernel_params.plane_index = plane.index as i32;
 
     stab.process_pixels::<T>(timestamp_us, None, &mut buffers, Some(&transform))
-        .map(|info| info.backend)
+        .map(|info| (info.backend, dispersion::Marker::from_transform(&transform, (pj.dst_w, pj.dst_h))))
         .map_err(|e| format!("process_pixels: {e:?}"))
 }
 
@@ -565,19 +643,53 @@ struct Filter {
     start_time: f64,
     time_offset: f64,
     fallback_duration: f64,
+    /// Each frame's lens geometry in its luma, for mpv's chromatic.glsl
+    marker: bool,
+    /// Frames before this time (s) come out blank, unprocessed: mpv seeks to a paused frame again from the keyframe
+    /// before it (still.lua), and only the frames just before it are needed
+    skip_before: f64,
+    blank: Mutex<BlankFrame>,
 }
+
+/// The blank frame skipped frames share (Filter::skipped), made with the first
+struct BlankFrame(*mut VSFrame);
+unsafe impl Send for BlankFrame {}
+
+/// A frame's duration in seconds, from its properties
+pub(crate) unsafe fn frame_duration(api: &VSAPI, props: *const VSMap, fallback: f64) -> f64 {
+    let mut e1 = VSMapPropertyError::Success;
+    let mut e2 = VSMapPropertyError::Success;
+    let num = unsafe { (api.mapGetInt)(props, c"_DurationNum".as_ptr(), 0, &mut e1) };
+    let den = unsafe { (api.mapGetInt)(props, c"_DurationDen".as_ptr(), 0, &mut e2) };
+    if e1 == VSMapPropertyError::Success && e2 == VSMapPropertyError::Success && num > 0 && den > 0 {
+        num as f64 / den as f64
+    } else {
+        fallback
+    }
+}
+
+/// Presentation time of frame `n` in seconds: _AbsoluteTime, mpv's pts, or by its number
+pub(crate) unsafe fn frame_pts(api: &VSAPI, props: *const VSMap, n: c_int, duration: f64) -> f64 {
+    let mut err = VSMapPropertyError::Success;
+    let t = unsafe { (api.mapGetFloat)(props, c"_AbsoluteTime".as_ptr(), 0, &mut err) };
+    if err == VSMapPropertyError::Success && t.is_finite() { return t; }
+
+    let off = MP_PTS_OFFSET.load(Ordering::Relaxed);
+    if off >= 0 {
+        if let Some(blob) = unsafe { mp_image(api, props) }.filter(|b| off as usize + 8 <= b.len()) {
+            let pts = read_f64(blob, off as usize);
+            if pts.is_finite() && pts > -1.0e3 { return pts; }
+        }
+    }
+    n as f64 * duration
+}
+
+/// Set on the frames Stabilize leaves out (skip_before): Still doesn't take them for neighbours
+pub(crate) const SKIPPED_PROP: &CStr = c"_GyroflowSkipped";
 
 impl Filter {
     unsafe fn frame_duration(&self, api: &VSAPI, props: *const VSMap) -> f64 {
-        let mut e1 = VSMapPropertyError::Success;
-        let mut e2 = VSMapPropertyError::Success;
-        let num = unsafe { (api.mapGetInt)(props, c"_DurationNum".as_ptr(), 0, &mut e1) };
-        let den = unsafe { (api.mapGetInt)(props, c"_DurationDen".as_ptr(), 0, &mut e2) };
-        if e1 == VSMapPropertyError::Success && e2 == VSMapPropertyError::Success && num > 0 && den > 0 {
-            num as f64 / den as f64
-        } else {
-            self.fallback_duration
-        }
+        unsafe { frame_duration(api, props, self.fallback_duration) }
     }
 
     /// Finds the pts in _MP_IMAGE from frame n and n + 1
@@ -595,18 +707,35 @@ impl Filter {
 
     /// Presentation time of frame `n`, in seconds
     unsafe fn frame_time(&self, n: c_int, api: &VSAPI, props: *const VSMap) -> f64 {
-        let mut err = VSMapPropertyError::Success;
-        let t = unsafe { (api.mapGetFloat)(props, c"_AbsoluteTime".as_ptr(), 0, &mut err) };
-        if err == VSMapPropertyError::Success && t.is_finite() { return t; }
+        unsafe { frame_pts(api, props, n, self.frame_duration(api, props)) }
+    }
 
-        let off = MP_PTS_OFFSET.load(Ordering::Relaxed);
-        if off >= 0 {
-            if let Some(blob) = unsafe { mp_image(api, props) }.filter(|b| off as usize + 8 <= b.len()) {
-                let pts = read_f64(blob, off as usize);
-                if pts.is_finite() && pts > -1.0e3 { return pts; }
+    /// A frame left out (before skip_before): the blank one's planes, without a copy, with `src`'s properties
+    unsafe fn skipped(&self, api: &VSAPI, src: *const VSFrame, core: *mut VSCore) -> *const VSFrame {
+        let format = unsafe { (api.getVideoFrameFormat)(src) };
+        let mut blank = self.blank.lock();
+        if blank.0.is_null() {
+            let b = unsafe { (api.newVideoFrame)(format, self.out_size.0, self.out_size.1, src, core) };
+            let fmt = unsafe { &*format };
+            for p in 0..fmt.num_planes {
+                let (h, stride) = unsafe { ((api.getFrameHeight)(b, p) as usize, (api.getStride)(b, p) as usize) };
+                let ptr = unsafe { (api.getWritePtr)(b, p) };
+                // Black: limited-range black luma, neutral chroma (never shown: mpv drops them as it seeks)
+                let v = if p == 0 && self.is_yuv { 16u32 << (fmt.bits_per_sample - 8) } else if p == 0 { 0 } else { 128u32 << (fmt.bits_per_sample - 8) };
+                if fmt.bytes_per_sample == 1 {
+                    unsafe { std::ptr::write_bytes(ptr, v as u8, h * stride) };
+                } else {
+                    let row = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u16, h * stride / 2) };
+                    row.fill(v as u16);
+                }
             }
+            blank.0 = b;
         }
-        n as f64 * unsafe { self.frame_duration(api, props) }
+        let sources = [blank.0 as *const VSFrame; 3];
+        let planes = [0, 1, 2];
+        let dst = unsafe { (api.newVideoFrame2)(format, self.out_size.0, self.out_size.1, sources.as_ptr(), planes.as_ptr(), src, core) };
+        unsafe { (api.mapSetInt)((api.getFramePropertiesRW)(dst), SKIPPED_PROP.as_ptr(), 1, VSMapAppendMode::Replace) };
+        dst
     }
 }
 
@@ -634,6 +763,11 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
             }
 
             let time = f.frame_time(n, api, props);
+            if time < f.skip_before {
+                let dst = f.skipped(api, src, core);
+                (api.freeFrame)(src);
+                return dst;
+            }
             let timestamp_us = ((time - f.start_time + f.time_offset) * 1_000_000.0).round() as i64 + f.engine.frame_offset_us;
 
             let mut err = VSMapPropertyError::Success;
@@ -651,7 +785,7 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
                 dst_w: (api.getFrameWidth)(dst, p) as usize, dst_h: (api.getFrameHeight)(dst, p) as usize,
             }).collect();
 
-            let result = f.engine.process(timestamp_us, planes, limited_range);
+            let result = f.engine.process(timestamp_us, planes, limited_range, f.marker);
             (api.freeFrame)(src);
 
             match result {
@@ -671,7 +805,11 @@ unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivation
 
 unsafe extern "system-unwind" fn filter_free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
     let f = unsafe { Box::from_raw(instance as *mut Filter) };
-    unsafe { ((*vsapi).freeNode)(f.node) };
+    unsafe {
+        ((*vsapi).freeNode)(f.node);
+        let blank = f.blank.lock().0;
+        if !blank.is_null() { ((*vsapi).freeFrame)(blank); }
+    }
 }
 
 unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<String> {
@@ -680,12 +818,12 @@ unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<Stri
     if err != VSMapPropertyError::Success || ptr.is_null() { return None; }
     Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
 }
-unsafe fn map_get_f64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<f64> {
+pub(crate) unsafe fn map_get_f64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<f64> {
     let mut err = VSMapPropertyError::Success;
     let v = unsafe { (api.mapGetFloat)(map, key.as_ptr(), 0, &mut err) };
     (err == VSMapPropertyError::Success).then_some(v)
 }
-unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64> {
+pub(crate) unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64> {
     let mut err = VSMapPropertyError::Success;
     let v = unsafe { (api.mapGetInt)(map, key.as_ptr(), 0, &mut err) };
     (err == VSMapPropertyError::Success).then_some(v)
@@ -725,11 +863,17 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
         unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project)
     };
     let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
-    // Saving a project into a video keeps the video's modification time, so the size tells the versions apart
+    let underwater = match unsafe { map_get_str(api, input, c"underwater") } {
+        None => Underwater::Auto,
+        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
+    };
+    // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov:?}|{horizon_lock:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+    // One engine for both views (Views): the view it starts in isn't part of what it is
+    let fov_key = match fov { Fov::Set(v) => format!("{v}"), Fov::Project | Fov::Wide => String::new() };
+    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
 }
 
 /// Chroma planes need the size to be a multiple of the subsampling
@@ -737,7 +881,7 @@ fn align(v: i64, ss: c_int) -> usize {
     (v as usize) & !((1usize << ss) - 1)
 }
 
-unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
+pub(crate) unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
     log::error!("{msg}");
     let msg = CString::new(format!("{what}: {msg}")).unwrap_or_default();
     unsafe {
@@ -762,6 +906,9 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let is_yuv = fmt.color_family == VSColorFamily::YUV;
     let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
     let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
+    let marker = unsafe { map_get_i64(api, input, c"chromatic") }.unwrap_or(0) != 0;
+    let skip_before = unsafe { map_get_f64(api, input, c"skip_before") }.unwrap_or(f64::NEG_INFINITY);
+    if let Some(after) = unsafe { map_get_f64(api, input, c"still_warm_up") } { still::warm_up_later(after); }
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
@@ -772,7 +919,10 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_zoom") } { edge_settings.zoom = (v as f32).clamp(1.0, 4.0); }
     let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
     // Also starts the trail over: mpv reloads the script on every seek
-    engine.edges.configure(edge_mode, edge_settings, edge_control);
+    // The view the filter is made in; the control file has the one switched to since, which wins (mpv makes the
+    // filter again on every seek with the arguments it was first given)
+    let view = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
+    engine.edges.configure(edge_mode, edge_settings, view, edge_control);
     engine.edges.set_realtime(true);
 
     let mut out_vi = vi.clone();
@@ -782,7 +932,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
     let filter = Box::new(Filter {
         node, engine, out_size: (out_vi.width, out_vi.height), num_planes: fmt.num_planes as usize, is_yuv,
-        start_time, time_offset, fallback_duration,
+        start_time, time_offset, fallback_duration, marker, skip_before, blank: Mutex::new(BlankFrame(null_mut())),
     });
     let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
     unsafe {
@@ -802,7 +952,9 @@ unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *
     let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
     match unsafe { engine_for(api, input, &vi) } {
         Ok(engine) => unsafe {
-            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.uncovered_frames.0 as i64, VSMapAppendMode::Replace);
+            // In the view asked for: an engine from the cache may have started in the other
+            let view = if map_get_i64(api, input, c"wide").unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
+            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.views.uncovered[view as usize].0 as i64, VSMapAppendMode::Replace);
             (api.freeNode)(node);
         },
         Err(e) => unsafe { set_error(api, out, node, "LeavesEdges", e) },
@@ -816,10 +968,112 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
+        (api.registerFunction)(c"Still".as_ptr(),
+                               c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
+                               c"clip:vnode;".as_ptr(), still::still_create, null_mut(), plugin);
+    }
+}
+
+#[cfg(test)]
+mod plane_tests {
+    use gyroflow_core::StabilizationManager;
+    use crate::*;
+
+    const SIZE: (usize, usize) = (1920, 1080);
+
+    fn manager(output: (usize, usize)) -> StabilizationManager {
+        let stab = StabilizationManager::default();
+        stab.init_from_video_data(10_000.0, 30.0, 300, SIZE);
+        let lens = serde_json::json!({
+            "name": "test", "calibrated_by": "test", "camera_brand": "test", "camera_model": "test",
+            "calib_dimension": { "w": SIZE.0, "h": SIZE.1 }, "orig_dimension": { "w": SIZE.0, "h": SIZE.1 },
+            "fps": 30.0, "calibrator_version": "---",
+            "fisheye_params": { "camera_matrix": [[1100.0, 0.0, 960.0], [0.0, 1100.0, 540.0], [0.0, 0.0, 1.0]], "distortion_coeffs": [1e-6, 0.0, 0.0, 0.0] }
+        }).to_string();
+        stab.load_lens_profile(&lens).unwrap();
+        stab.set_output_size(output.0, output.1);
+        stab.recompute_blocking();
+        stab
+    }
+
+    // The same smooth picture in every plane, each at its own size: what the luma shows at a point, the chroma does
+    fn pattern(x: usize, y: usize, (w, h): (usize, usize)) -> u16 {
+        let (u, v) = ((x as f64 + 0.5) / w as f64, (y as f64 + 0.5) / h as f64);
+        (20000.0 + 15000.0 * (u * 9.0).sin() * (v * 7.0).cos() + 10000.0 * u) as u16
+    }
+
+    /// A luma and a chroma plane rendered as the plugin renders them, into rows `pad` bytes longer than the picture
+    /// (VapourSynth's frames have them); how far the chroma is from the luma at the same place, on average (of 65535)
+    fn chroma_vs_luma(planes: &mut [PlaneStab], out: (usize, usize), pad: usize) -> f64 {
+        let geometry = [(SIZE, out), ((SIZE.0 / 2, SIZE.1 / 2), (out.0 / 2, out.1 / 2))];
+        let mut outputs = Vec::new();
+        for (plane, ((w, h), (ow, oh))) in planes.iter_mut().zip(geometry) {
+            let (stride, ostride) = (w + pad / 2, ow + pad / 2);
+            let mut src = vec![0u16; stride * h];
+            for y in 0..h { for x in 0..w { src[y * stride + x] = pattern(x, y, (w, h)); } }
+            let mut dst = vec![0u16; ostride * oh];
+            let job = PlaneJob { src: src.as_ptr() as *const u8, src_stride: stride * 2, src_w: w, src_h: h,
+                                 dst: dst.as_mut_ptr() as *mut u8, dst_stride: ostride * 2, dst_w: ow, dst_h: oh };
+            process_plane::<Luma16>(plane, 1_000_000, 65535.0, &job).unwrap();
+            outputs.push((dst, ostride));
+        }
+        let ((luma, ls), (chroma, cs)) = (&outputs[0], &outputs[1]);
+        let (mut sum, mut n) = (0.0, 0);
+        // Away from the edges, where the background may show
+        for y in 8..out.1 / 2 - 8 {
+            for x in 8..out.0 / 2 - 8 {
+                sum += (chroma[y * cs + x] as f64 - luma[2 * y * ls + 2 * x] as f64).abs();
+                n += 1;
+            }
+        }
+        sum / n as f64
+    }
+
+    /// The luma rendered with `planes` (its output)
+    fn render_luma(planes: &mut [PlaneStab], out: (usize, usize)) -> Vec<u16> {
+        let src: Vec<u16> = (0..SIZE.1).flat_map(|y| (0..SIZE.0).map(move |x| pattern(x, y, SIZE))).collect();
+        let mut dst = vec![0u16; out.0 * out.1];
+        let job = PlaneJob { src: src.as_ptr() as *const u8, src_stride: SIZE.0 * 2, src_w: SIZE.0, src_h: SIZE.1,
+                             dst: dst.as_mut_ptr() as *mut u8, dst_stride: out.0 * 2, dst_w: out.0, dst_h: out.1 };
+        process_plane::<Luma16>(&mut planes[0], 1_000_000, 65535.0, &job).unwrap();
+        dst
+    }
+
+    #[test]
+    fn the_wider_view_switched_to_renders_as_one_set_up_in_it() {
+        let out = (960, 540);
+        let mgr = manager(out);
+        let cfg = WorkerConfig { kind: SampleKind::U16, max_value: 65535.0, is_yuv: true, interpolation: Interpolation::Bicubic };
+        let base = ComputeParams::from_manager(&mgr);
+        let wide = wide_view(&base, 1.3);
+        assert!(wide.fovs.iter().all(|&f| f == 1.0) && wide.fov_scale == 1.3 && wide.fovs.len() == base.fovs.len());
+
+        let mut planes = create_planes(&mgr, &base, cfg, 1, false);
+        let normal = render_luma(&mut planes, out);
+        // As a worker switches: new parameters, the same GPU setup
+        planes[0].stab.set_compute_params(plane_compute_params(&wide, cfg, 0, false));
+        let switched = render_luma(&mut planes, out);
+        let fresh = render_luma(&mut create_planes(&mgr, &wide, cfg, 1, false), out);
+        assert_eq!(switched, fresh, "the view switched to renders as one set up in it");
+        assert_ne!(switched, normal, "the wider view shows more than the project's");
+    }
+
+    #[test]
+    fn chroma_lands_with_the_luma_at_another_output_size_and_stride() {
+        // The output smaller than the input (the display's size), its chroma rows 3024 bytes: VapourSynth pads them
+        let out = (1512, 850);
+        let mgr = manager(out);
+        let cfg = WorkerConfig { kind: SampleKind::U16, max_value: 65535.0, is_yuv: true, interpolation: Interpolation::Bicubic };
+        let mut planes = create_planes(&mgr, &ComputeParams::from_manager(&mgr), cfg, 2, false);
+        let tight = chroma_vs_luma(&mut planes, out, 0);
+        // The same stabilizers, then frames whose rows are padded: set up again, not left unwritten
+        let padded = chroma_vs_luma(&mut planes, out, 64);
+        assert!(tight < 600.0 && padded < 600.0, "chroma off the luma by {tight} (rows as wide as the picture), {padded} (padded)");
+        assert_eq!(planes[1].buffers, ((SIZE.0 / 2 + 32) * 2 * SIZE.1 / 2, (out.0 / 2 + 32) * 2 * out.1 / 2));
     }
 }

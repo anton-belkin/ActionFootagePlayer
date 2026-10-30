@@ -3206,6 +3206,7 @@ dependencies = [
  "gyroflow-core",
  "libc",
  "log",
+ "mp4parse-patched",
  "nalgebra 0.34.2",
  "parking_lot",
  "pollster",

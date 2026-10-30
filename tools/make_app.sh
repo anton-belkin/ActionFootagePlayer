@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-embed, gyroflow-export
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -9,7 +9,8 @@
 #   Contents/Resources/AppIcon.icns      the icon (macos/icon/, made by tools/make_icon.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
-#                                        dji-telemetry, highlights, and footage-menu (the right-click menu)
+#                                        dji-telemetry, highlights, footage-menu (the right-click menu), and
+#                                        agent (notes for an AI agent)
 #   Contents/Resources/app.conf          the app's mpv settings (mpv/app.conf)
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
@@ -69,7 +70,8 @@ gyroflow="$res/plugins/gyroflow"
 telemetry="$res/plugins/dji-telemetry"
 highlights="$res/plugins/highlights"
 menu="$res/plugins/footage-menu"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu"
+agent="$res/plugins/agent"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$agent"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
@@ -82,14 +84,15 @@ for curve in dlog gplog2 ilog; do
 done
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$dlogm/shaders/gplog_hlg.glsl" >/dev/null
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/gyroflow.vpy "$gyroflow/"
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-embed gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
+install -m 644 mpv/scripts/agent/main.lua "$agent/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -105,7 +108,7 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-embed" "$gyroflow/gyroflow-export"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export"; do
     sign "$f"
 done
 sign "$app"

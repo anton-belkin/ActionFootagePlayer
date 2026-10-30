@@ -9,7 +9,7 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 
 | Argument | Default | |
 |---|---|---|
-| `project` | — | `.gyroflow` project file, or the video itself: the project embedded in it, else its own motion data with Gyroflow's default preset |
+| `project` | — | `.gyroflow` project file, or the video itself: its own motion data with Gyroflow's default preset |
 | `preset` | — | `.gyroflow` preset applied on top when the video has no project |
 | `interpolation` | `bicubic` | `bilinear`, `bicubic`, `lanczos` |
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
@@ -18,18 +18,28 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
 | `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
 | `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
-| `wide` | 0 | 1: the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median); `fov` is then ignored |
+| `wide` | 0 | 1: start in the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median). The engine renders both views with the same smoothing, as a FOV change in Gyroflow doesn't recompute it, and the control file's `view=` switches between them on the next frame |
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
-| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, read while playing (at most every 50 ms) |
+| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>` and `view=normal\|wide`, read while playing (at most every 50 ms) |
+| `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`); with `edges` off it carries the project's background color too, which the shader leaves as it is. Red and blue move only where the refraction says under water, frame by frame |
+| `skip_before` | — | seconds: frames before this come out blank and unprocessed, marked `_GyroflowSkipped` (mpv seeks to a paused frame again from the keyframe before it, and `Still` needs only the frames just before it) |
+| `still_warm_up` | — | seconds: `Still`'s GPU set up that long from now, in the background at low priority, once per process |
+
+`core.gyroflow.Still(clip, time, radius=3, luma_strength=1.5, chroma_strength=1, luma_keep=0.25, chroma_keep=0, specks=1)`
+rebuilds the frame at `time` (mpv's pts) from it and `radius` frames on each side, moved onto it by the motion between
+them, on the GPU (`src/still.rs`): block matching over a pyramid, to a quarter pixel; the noise measured by brightness;
+each pixel averaged with its neighbours' where their patches match beyond the noise; specks (particles) replaced with
+what the neighbours agree on; `luma_keep` of the grain left. Every other frame passes as it is. With
+`VS_GYROFLOW_STILL_PROFILE=1` it logs each step's time; `VS_GYROFLOW_STILL_DEBUG=1` shows the share of neighbours that
+count instead of the picture, `2` the specks.
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
 `gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow
 master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
 uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
-settings need the PR. A project embedded in the video is read by the plugin itself (`src/embedded.rs`), so stock
-Gyroflow works for making projects: `gyroflow-embed` moves the saved `.gyroflow` into the video, and
-`gyroflow-embed --extract` writes out the project a clip plays with (the stored one, or the default preset's,
-made by `src/project.rs` with gyroflow-core's own project writer) to open it in Gyroflow.
+settings need the PR. Stock Gyroflow works for making projects: `gyroflow-project` writes out the project a clip
+without one plays with (the default preset's, in the view and with the horizon lock the player has, made by
+`src/project.rs` with gyroflow-core's own project writer) next to it, to open it in Gyroflow.
 
 ## How it works
 
@@ -105,19 +115,19 @@ Matches Gyroflow's own render of the project (CLI, same branch): same mean level
 cargo build --release
 install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-probe ~/.config/mpv/scripts/gyroflow/
-install -m 755 target/release/gyroflow-embed ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/gyroflow-project ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
-stabilized with: `embedded` (a project stored in the video by `gyroflow-embed`), `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
+stabilized with: `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
 or nothing, with the reason.
 
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
 On Linux and Windows it builds the same way (`cargo build --release`), as `libvs_gyroflow.so` and
-`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-embed(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
+`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-project(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
 on Vulkan (Windows: DirectX 12 or Vulkan). `../tools/make_plugin_zip.sh <version>` makes the plugin's zip of them,
 and cross-compiles with a Rust target, e.g. `x86_64-pc-windows-gnu` on Linux with mingw-w64. A build where
 gyroflow-core's build script can't download the lens profiles (no network) needs

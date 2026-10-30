@@ -8,19 +8,11 @@ use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
-use crate::embedded;
-
 pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
 
-    if let Some(project) = embedded::read(std::path::Path::new(path)).map_err(|e| e.to_string())? {
-        let info = &project["video_info"];
-        return Ok(serde_json::json!({ "mode": "embedded", "width": info["width"], "height": info["height"], "fps": info["fps"] }));
-    }
-
-    let (mut file, size) = embedded::Content::new(&mut file, size);
     let video = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     // Up to the first metadata sample and gyro reading, which have what's decided here: a long clip has one sample
     // per frame spread over the whole file (36 538 in 7 GB of 4K60), ~20 s of reads from an SD card. The plugin
@@ -134,16 +126,14 @@ pub fn color_profile(path: &str) -> Option<&'static str> {
     ];
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len() as usize;
-    let (mut file, size) = embedded::Content::new(&mut file, size);
     let mut mode = None;
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
     let _ = telemetry_parser::util::get_metadata_track_samples(&mut file, size, true, |_info, data: &[u8], _pos, _md| {
         if cancel2.load(Ordering::Relaxed) { return; }
         cancel2.store(true, Ordering::Relaxed);
-        // ProductMeta { clip_meta = 1 { clip_meta_header = 1 { proto_file_name = 1 } }, stream_meta = 2 }
-        let Some(header) = pb_bytes(data, 1).and_then(|c| pb_bytes(c, 1)) else { return };
-        let Some(proto) = pb_bytes(header, 1).and_then(|s| std::str::from_utf8(s).ok()) else { return };
+        // ProductMeta { clip_meta = 1, stream_meta = 2 }
+        let Some(proto) = dji_schema(data) else { return };
         let Some(&(_, field)) = STREAM_COLOR_MODE_FIELD.iter().find(|(p, _)| *p == proto) else { return };
         // A ColorMode message without its field is the default (0) in proto3
         mode = pb_bytes(data, 2).and_then(|s| pb_bytes(s, field)).map(|c| pb_varint(c, 1).unwrap_or(0));
@@ -187,7 +177,6 @@ pub fn log_curve(path: &str) -> Option<&'static str> {
 pub fn gopro_color(path: &str) -> Option<(String, Option<String>, Option<f64>)> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len() as usize;
-    let (mut file, size) = embedded::Content::new(&mut file, size);
     let moov = read_moov(&mut file, size as u64)?;
     let udta = mp4_child(&moov, b"udta")?;
     let gpmf = mp4_child(udta, b"GPMF")?;
@@ -271,6 +260,13 @@ fn firmware_version(firm: &str) -> Option<f64> {
     Some(parts[2].parse::<f64>().ok()? + parts[3].parse::<f64>().ok()? / 100.0)
 }
 
+/// The schema a DJI metadata sample (ProductMeta) names, which tells the model: "dvtm_ac206.proto" (clip_meta = 1 {
+/// clip_meta_header = 1 { proto_file_name = 1 } })
+pub(crate) fn dji_schema(sample: &[u8]) -> Option<&str> {
+    let header = pb_bytes(sample, 1).and_then(|c| pb_bytes(c, 1))?;
+    pb_bytes(header, 1).and_then(|s| std::str::from_utf8(s).ok())
+}
+
 // Minimal protobuf reading: the first occurrence of a field in a message
 enum PbValue<'a> { Varint(u64), Bytes(&'a [u8]) }
 
@@ -298,10 +294,10 @@ fn pb_field(mut msg: &[u8], wanted: u64) -> Option<PbValue<'_>> {
     }
     None
 }
-fn pb_bytes(msg: &[u8], field: u64) -> Option<&[u8]> {
+pub(crate) fn pb_bytes(msg: &[u8], field: u64) -> Option<&[u8]> {
     match pb_field(msg, field)? { PbValue::Bytes(b) => Some(b), _ => None }
 }
-fn pb_varint(msg: &[u8], field: u64) -> Option<u64> {
+pub(crate) fn pb_varint(msg: &[u8], field: u64) -> Option<u64> {
     match pb_field(msg, field)? { PbValue::Varint(v) => Some(v), _ => None }
 }
 

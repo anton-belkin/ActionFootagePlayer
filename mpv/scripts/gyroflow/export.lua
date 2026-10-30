@@ -7,7 +7,8 @@
 -- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
 -- standard look (Ctrl+s) with DJI's LUT (--sdr), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
 -- only), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges, --edges-blur,
--- --edges-zoom), and with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock). A log
+-- --edges-zoom), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
+-- under water, above it or as the camera says, as the menu has it (--underwater). A log
 -- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
 -- right-click menu:
 --   export [sdr]         the same as Shift+E, or in the standard look whatever plays
@@ -234,6 +235,7 @@ local function start(path, sdr)
     if horizon == "yes" or horizon == "no" then
         table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")
     end
+    if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local range = ""
     if a and b and b > a then

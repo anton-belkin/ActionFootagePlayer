@@ -1,4 +1,4 @@
--- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights) and the player: what
+-- footage-menu: a right-click menu for the plugins (dlogm, gyroflow, dji-telemetry, highlights, agent) and the player: what
 -- their keys do, with the keys beside it, and the settings that have no key. An mpv plugin: this folder goes into
 -- ~~/scripts/.
 --
@@ -33,7 +33,7 @@ local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pre
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }
-local KIND_LABELS = { project = "Gyroflow project", embedded = "embedded project", default = "gyro" }
+local KIND_LABELS = { project = "Gyroflow project", default = "gyro" }
 -- What the keys do, for Keys…: the plugins' and the player's that the menu has
 local KEY_LABELS = {
     { "cycle pause", "Play / pause" },
@@ -52,6 +52,7 @@ local KEY_LABELS = {
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
     { "playlist-next", "Next clip in the folder" },
+    { "script-binding agent/report", "A note for the agent: areas of the frame and a comment" },
     { "script-binding footage_menu/menu", "This menu" },
 }
 
@@ -70,6 +71,8 @@ end
 local function shortcuts()
     local keys, priority = {}, {}
     for _, b in ipairs(mp.get_property_native("input-bindings") or {}) do
+        -- The scripts' keys are "nonscalable script-binding <script>/<name>" there
+        if b.cmd then b.cmd = b.cmd:gsub("^nonscalable ", "") end
         if b.cmd and not b.key:find("^MBTN") and not b.key:find("^MOUSE")
            and (not priority[b.cmd] or b.priority > priority[b.cmd] or (b.priority == priority[b.cmd] and b.key == "SPACE")) then
             keys[b.cmd] = b.key:match("^%u$") and ("Shift+" .. b.key) or b.key
@@ -160,7 +163,7 @@ local function look_menu(d, key)
 end
 
 local function stabilization_menu(g, key)
-    local toggle = key["script-binding gyroflow/toggle"]
+    local toggle, lens = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"]
     if not g.available then
         return {
             info("No motion data in this clip"),
@@ -173,13 +176,22 @@ local function stabilization_menu(g, key)
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
     end
     return {
-        item("On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
+        item(g.kind == "project" and "On (Gyroflow project)" or "On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
         item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
         item("Off", "script-message-to gyroflow view off", { checked = g.view == "off", shortcut = toggle }),
         SEPARATOR,
         item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
+        submenu("Lens", {
+            item("Under water", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
+            -- Only a camera that records when it's in the water has it; elsewhere auto is the project's or preset's
+            item(g.water and "Auto: as the camera says (In water / Out of water)" or "Auto: this camera doesn't say, so as the "
+                 .. (g.kind == "default" and "preset" or "project") .. " says",
+                 "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
+            item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
+        }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
+        item("Clean still frame on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         item("Remember as default", "script-message-to gyroflow remember"),
@@ -275,8 +287,10 @@ local function player_menu(key)
     return items
 end
 
-local function app_menu(path)
+local function app_menu(path, key)
     local items = {
+        item("Note for the agent…", "script-binding agent/report", { disabled = not path or not state("agent"), shortcut = key["script-binding agent/report"] }),
+        SEPARATOR,
         item("Keys…", "script-message-to footage_menu keys"),
         item("Help", "script-message-to footage_menu help"),
         item("Report this camera…", "script-message-to footage_menu report", { disabled = not local_file(path) }),
@@ -323,7 +337,7 @@ local function build()
     end
     add(submenu("Player", player_menu(key)))
     add(SEPARATOR)
-    add(submenu("ActionFootagePlayer", app_menu(path)))
+    add(submenu("ActionFootagePlayer", app_menu(path, key)))
     -- No two separators in a row, none at either end
     local out = {}
     for _, it in ipairs(items) do

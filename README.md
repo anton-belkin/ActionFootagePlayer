@@ -198,10 +198,11 @@ Right-click the video for the menu: everything the keys do, with the keys beside
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the horizon locked level, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
-previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Keys…, Help and
-Report this camera…, which opens an issue on GitHub with what the plugins found in the clip.
+previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
+agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
+issue on GitHub with what the plugins found in the clip.
 
 Look, Stabilization and Telemetry each have **Remember as default**: the settings as they are become the plugin's
 options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
@@ -214,16 +215,19 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
+| `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
+| `Ctrl+p` | Clean still frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
+| `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The menu | `footage_menu/menu` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
@@ -246,10 +250,14 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
-| `gyroflow.conf`: `view=normal` | what clips start in: `normal`, or `wide` (the wider view) |
+| `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
+| `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K) |
+| `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -259,6 +267,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `highlights.conf`: `before=2` | seconds before each highlight a jump lands: the button is pressed once the moment has happened |
 | `highlights.conf`: `chapters=yes` | the highlights as chapters too, which mpv's seek bar shows as marks; `no`: only the keys and the menu |
 | `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
+| `agent.conf`: `socket=` | the IPC socket an agent reaches the player by, when mpv has none (`input-ipc-server`); empty: see [Notes for an AI agent](#notes-for-an-ai-agent) |
 
 The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with
 anything but letters and digits made `_` (the menu's: `footage_menu.conf`). The menu's Remember as default writes
@@ -268,9 +277,11 @@ these files, keeping whatever else is in them.
 
 Make the project in Gyroflow and save it next to the clip (`Ctrl+S` in Gyroflow): mpv uses it. Or start from
 what's playing: `Ctrl+e` pauses the clip and opens its project in Gyroflow. A clip that plays without a
-`.gyroflow` next to it (a project stored in the video, or the default preset) gets one first, written by the
+`.gyroflow` next to it (it plays with the default preset) gets one first, written by the
 plugin from what it renders: the same lens profile, smoothing, zoom and refraction, so Gyroflow starts from
-what you saw. A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
+what you saw. The view and the horizon lock go into it as they are: from the wider view, the project has
+Gyroflow's zoom off at that view's FOV, so it looks the same there, and here once it's saved (a clip with a
+project starts in it as it is: On (Gyroflow project)). A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
 Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilization with it, at the same spot
 in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
 
@@ -282,19 +293,8 @@ it was, stabilized with it. On Linux and Windows this needs `gyroflow_app` (Opti
 The menu's Lock horizon keeps the horizon level, whatever the project says (Gyroflow's horizon lock at 100 %, its
 roll and pitch as the project has them); unticked, it isn't locked. It needs more zoom, so the edges show more.
 
-To carry one file instead of two, move the project into the video (the commands here are in
-`~/.config/mpv/scripts/gyroflow/`; with just ActionFootagePlayer, in
-`/Applications/ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/`):
-
-```bash
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --move DJI_0009_D.MP4     # DJI_0009_D.gyroflow → inside the MP4
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # back out, to open it in Gyroflow (Ctrl+e does it too)
-~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
-```
-
-The project is appended to the MP4 as a box of its own: the video data isn't touched, the file keeps its
-date, players and Gyroflow open it as before, and it moves with the file. Apps that rewrite the file
-(trimming, remuxing) drop it.
+The project is always the `.gyroflow` next to the clip: the video file itself is never written to, so a backup
+of it stays as it is.
 
 Clips with gyro data of their own, recorded with the camera's stabilization off, play stabilized even without a
 project: DJI with EIS off, and (not yet tried on a real clip, see Other cameras) GoPro with HyperSmooth off and
@@ -317,9 +317,34 @@ you've changed in `~/.config/mpv/scripts/gyroflow/`):
   frames went from 0.16 px to 0.02 px with it.
 - smoothing 0.5, zoom limit 140 %, horizon lock off.
 
-For clips shot with EIS off in air, use a preset without the refraction (save one from Gyroflow: Export →
-Create settings preset, as `default.gyroflow` in one of the places above), or give those clips a project of
-their own.
+**Lens under water, above it, or as the camera says.** The menu's Stabilization → Lens sets the refraction for
+any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above water* (none), or
+*Auto*, the default: as the camera says over the clip, its *In water* / *Out of water* (the telemetry's `water`:
+the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
+the refraction where it's in and none where it's out, changing over the one frame between. Only a camera that
+records it has Auto (the Osmo Action 6); for clips from other cameras it's greyed, and the clip plays as its
+project or preset says (the default preset: under water). A project that keyframes the refraction itself keeps
+its keyframes in Auto. It sticks for the next clips, like the horizon lock, and goes into exports and into the
+project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline).
+
+For clips from a camera without Auto shot with EIS off in air, pick Above water, or use a preset without the
+refraction (save one from Gyroflow: Export → Create settings preset, as `default.gyroflow` in one of the places
+above), or give those clips a project of their own.
+
+**Color fringes under water.** Water bends blue more than red, so behind the flat glass of an action camera red and
+blue land apart from green towards the edges of the frame (lateral chromatic aberration): red inwards, blue outwards,
+1-2 px of a 4K frame halfway out and more further out. The camera takes out its lens's own fringes, but knows nothing
+of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame: as the camera's
+*In water* / *Out of water* says, or the project or preset, or as Stabilization → Lens / `Ctrl+u` sets it), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
+furthest out, stays, and red and green are moved out to it, so nothing is taken from past the picture's edge. It's
+done on the GPU in RGB (`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
+from the plugin (`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
+(`tools/water_dispersion.py`): the lens profile gives each pixel's angle to the flat port, and water's index for each
+channel is averaged over its spectrum, for a grey object in daylight through 3 m of water. On Osmo Action 6 dive clips
+red's fringe at the edges of the frame, up to 3-7 px, goes to within about a pixel; blue's, up to 2-4 px, turns over
+to about 1-1.5 px the other way. Where the frame's own border shows (the wider view), it stays as recorded, against
+the edge fill or the background alike. There's no switch of its own: out of the water nothing moves. Playback only,
+exports are as before. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
 
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
@@ -359,8 +384,8 @@ every frame still plays and the sphere is written ~25 times a second, where it u
 
 `Shift+E` exports the clip that's playing, the way it plays: the same project or default preset (or none, when it
 plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
-of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not as the menu
-has it, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
+of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
+the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
 whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
@@ -391,6 +416,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|trail|original|zoom|off` fills the
   edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
+- `--underwater yes|no|auto`: the lens under water, above it, or (the default) as the camera says over the clip, as
+  the menu's Lens has it (see Stabilization).
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
@@ -421,7 +448,7 @@ shows it bottom left. Each field shows when the clip has it:
 | `fields=` | |
 |---|---|
 | `depth` | under water: the barometer's altitude below the surface, in 0.1 m steps, about once a second. The camera starts recording it a second or two after it goes in |
-| `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing |
+| `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing. The lens's refraction follows it (Stabilization: Lens → Auto) |
 | `pressure` | hPa, ~100 more per meter of water |
 | `altitude` | the barometer's altitude out of water. It's relative and drifts by meters, so it's a rough guide |
 | `gps` | position, when the camera has a fix (DJI: a remote or Mimo connected) |
@@ -473,6 +500,32 @@ Each file of a recording the camera split has its own. None of it has been tried
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
 [Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
+### Notes for an AI agent
+
+For working on the player together with an AI agent (Claude Code, in this repository): what you see, and what the
+player is doing as you see it, saved for the agent to read. `Ctrl+r` (or the menu's ActionFootagePlayer → Note for
+the agent…) pauses the video; drag a rectangle round what you mean (`Shift`+drag adds another, a plain drag starts
+again), press `Enter`, write a line, `Enter`. `Esc` in the comment goes back to the rectangles; `Esc` there leaves
+without saving. Each note is a folder of its own in
+`~/Library/Application Support/ActionFootagePlayer/agent/reports/` (Windows:
+`%LOCALAPPDATA%\ActionFootagePlayer\agent\reports\`; the plugins in your own mpv: `~/.config/mpv/agent/reports/`),
+named by date, time and clip:
+
+| | |
+|---|---|
+| `report.json` | the comment; the areas, in the frame's pixels, the window's, and 0..1 of the frame; the clip, the time and the frame number; and the state when the note started: every plugin's (`user-data/`) and the player's (the video before and after the filters, the filters and shaders, the window, the display, dropped frames) |
+| `screen.png` | the window as it was, with what was over the video (telemetry, messages) |
+| `marked.png` | the same with the areas drawn on it, numbered |
+| `frame.png` | the frame at its own size (after the stabilization), with nothing over it |
+| `log.txt` | mpv's last 2000 lines of log (verbose) |
+
+Then ask the agent to go through the notes. While the player runs, an agent can also reach it live, through mpv's
+[JSON IPC](https://mpv.io/manual/master/#json-ipc): the socket's path is in `agent/session.json` (`socket`, `pid`),
+`script-message-to agent snapshot [<file>]` writes the state as `report.json` has it (to `agent/state.json` by
+default), and `script-message-to agent say <text> [<seconds>]` shows a line over the video. The socket is mpv's
+`input-ipc-server` when one is set (the Windows app's pipe, an `mpv.conf`); otherwise `agent/mpv.sock` (Windows:
+`\\.\pipe\ActionFootagePlayer-agent`), or `socket=` in `agent.conf`.
 
 ## Installing, in detail
 
@@ -562,8 +615,8 @@ has all of it: [The Windows app](#the-windows-app).
 
 What differs from macOS:
 
-- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than 4K is
-  scaled down to 4K on the CPU.
+- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than the
+  display (or than 4K) is scaled down on the CPU.
 - `Ctrl+e` starts `gyroflow` from `PATH` on Linux, and on Windows the app `.gyroflow` files open with (Gyroflow's
   installer sets it). Another one: `gyroflow_app=<path>` in `gyroflow.conf`.
 - Exports are encoded with the first of NVENC, VAAPI (Linux), Quick Sync and AMF (Windows) that works, else x265 on the
@@ -596,8 +649,9 @@ screen, a playlist of the folder's videos) and a config folder of its own. An mp
 put the plugins together with other scripts of your own, take the plugins instead of the app (see
 [Plugins in your own mpv](#plugins-in-your-own-mpv)). The app is read-only once signed; what's yours is in
 `~/Library/Application Support/ActionFootagePlayer/`: what you set in the plugins (`mpv/script-opts/`, with Remember
-as default), DJI's LUT and its shader (`dlogm/`), and your own default preset if you make one
-(`gyroflow/default.gyroflow`, see Stabilization).
+as default), DJI's LUT and its shader (`dlogm/`), your own default preset if you make one
+(`gyroflow/default.gyroflow`, see Stabilization), and the notes for an AI agent (`agent/reports/`, see
+[Notes for an AI agent](#notes-for-an-ai-agent)).
 
 ActionFootagePlayer is mpv itself, as an app of its own: the app's executable (`macos/player.sh`) starts the mpv it
 carries (`Contents/Helpers/`, or Homebrew's in an app built without it) with the plugins, as the app of the bundle (mpv's `MPVBUNDLE`), so it's ActionFootagePlayer in the Dock, with
@@ -606,6 +660,18 @@ items still say mpv (About mpv, Quit mpv). The setup is offered from inside mpv 
 it runs.
 
 ### Upgrading
+
+**From 0.6.4**, a project stored inside a video (`gyroflow-embed --move`) isn't read any more: the project is
+the `.gyroflow` next to the clip, and the video file is never written to. Such a clip plays with the default
+preset. Before updating, take its project back out with 0.6.4's command, which also restores the file as the
+camera wrote it:
+
+```bash
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --extract DJI_0009_D.MP4  # DJI_0009_D.gyroflow next to it
+~/.config/mpv/scripts/gyroflow/gyroflow-embed --remove DJI_0009_D.MP4
+```
+
+`gyroflow-embed` is now `gyroflow-project`, which writes the project a clip plays with (what `Ctrl+e` runs).
 
 **From 0.6.0**, the app no longer reads mpv's own config (`~/.config/mpv`, `%APPDATA%\mpv`) nor the plugins in it:
 it plays with its own plugins and settings only. The first time it starts, the plugins' settings
@@ -757,8 +823,9 @@ The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) adds `vf=vapoursynth` with
 `gyroflow.Stabilize` plugin from `vs-gyroflow/`. Without a `.gyroflow` next to the video, `gyroflow-probe`
 decides first whether the video carries a project, or its own gyro data recorded with the camera's stabilization
 off (where each camera records that: `vs-gyroflow/src/probe.rs`). Frames are
-stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit; 8K is
-scaled to 4K on the GPU first. It renders the stabilization while mpv plays, the way Gyroflow would render it
+stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit, and rendered no
+bigger than the display shows it: video larger than that (with a margin for the zoom), and 8K always to 4K, is scaled
+down on the GPU first. It renders the stabilization while mpv plays, the way Gyroflow would render it
 (smoothing, zoom, lens, horizon): 4K60 at ~87 fps of capacity on an M1 Pro. Clips up to 30 fps get Lanczos
 interpolation, faster ones bicubic (Lanczos holds only ~38 fps at 4K). Details, measurements and the plugin's
 options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
@@ -812,13 +879,17 @@ mpv/scripts/dlogm/            the log plugin  →  ~/.config/mpv/scripts/dlogm (
                               ActionFootagePlayer; dji_color.lua and gopro_color.lua read the cameras' color profile
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               ActionFootagePlayer
+mpv/scripts/gyroflow/still.lua  the clean still frame (Ctrl+p): the paused frame again, through vs-gyroflow's Still
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
+mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
                               markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
+mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
+                              ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is
@@ -829,7 +900,7 @@ tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) �
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-embed, gyroflow-export (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export (Rust)
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script
