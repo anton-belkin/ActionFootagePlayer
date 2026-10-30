@@ -202,7 +202,8 @@ the wider view, the horizon locked level, the lens under water or not, what fill
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
-issue on GitHub with what the plugins found in the clip.
+issue on GitHub with what the plugins found in the clip. In the app, that last submenu has the version beside its
+name: *ActionFootagePlayer 0.6.4*.
 
 Look, Stabilization and Telemetry each have **Remember as default**: the settings as they are become the plugin's
 options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
@@ -269,6 +270,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `highlights.conf`: `before=2` | seconds before each highlight a jump lands: the button is pressed once the moment has happened |
 | `highlights.conf`: `chapters=yes` | the highlights as chapters too, which mpv's seek bar shows as marks; `no`: only the keys and the menu |
 | `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
+| `footage_menu.conf`: `version=` | the version the menu shows beside the app's name (ActionFootagePlayer sets its own) |
 | `agent.conf`: `socket=` | the IPC socket an agent reaches the player by, when mpv has none (`input-ipc-server`); empty: see [Notes for an AI agent](#notes-for-an-ai-agent) |
 
 The telemetry plugin's file is `dji_telemetry.conf`, with an underscore: mpv names a script after its folder, with

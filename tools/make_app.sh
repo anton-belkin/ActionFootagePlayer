@@ -12,6 +12,7 @@
 #                                        dji-telemetry, highlights, footage-menu (the right-click menu), and
 #                                        agent (notes for an AI agent)
 #   Contents/Resources/app.conf          the app's mpv settings (mpv/app.conf)
+#   Contents/Resources/VERSION           its version, which the menu shows
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
@@ -96,6 +97,7 @@ install -m 644 mpv/scripts/agent/main.lua "$agent/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
+echo "$version" > "$res/VERSION"
 install -m 644 macos/setup-offer.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"

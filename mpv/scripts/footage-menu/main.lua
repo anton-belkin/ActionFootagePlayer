@@ -11,15 +11,18 @@
 --
 -- Options (~~/script-opts/footage_menu.conf):
 --   setup=   a setup script the menu offers to run again (ActionFootagePlayer's setup.sh, run with `all`)
+--   version= the app's version, for the menu to show beside its name (ActionFootagePlayer sets its own)
 
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { setup = "" }
+local o = { setup = "", version = "" }
 options.read_options(o, "footage_menu")
 
 local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
+-- The app, with its version when it's the app that runs the plugin
+local APP_NAME = o.version ~= "" and "ActionFootagePlayer " .. o.version or "ActionFootagePlayer"
 local platform = mp.get_property("platform") or ""
 -- DJI's telemetry names its schema, not the camera
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
@@ -342,7 +345,7 @@ local function build()
     end
     add(submenu("Player", player_menu(key)))
     add(SEPARATOR)
-    add(submenu("ActionFootagePlayer", app_menu(path, key)))
+    add(submenu(APP_NAME, app_menu(path, key)))
     -- No two separators in a row, none at either end
     local out = {}
     for _, it in ipairs(items) do
@@ -438,7 +441,7 @@ mp.register_script_message("report", function()
         "Motion data: " .. (g and (g.available and (KIND_LABELS[g.kind] or g.kind) or "none") or "gyroflow plugin not loaded"),
         "Telemetry: " .. (t and (t.available and ((t.model ~= "" and t.model) or "yes") or "none") or "dji_telemetry plugin not loaded"),
         "Highlights: " .. (h and (h.times and (#h.times .. " (" .. h.camera .. ")") or "none") or "highlights plugin not loaded"),
-        "Player: " .. (mp.get_property("mpv-version") or "mpv") .. ", " .. platform,
+        "Player: " .. (o.version ~= "" and APP_NAME .. ", " or "") .. (mp.get_property("mpv-version") or "mpv") .. ", " .. platform,
         "",
         "What it did, and what you expected:",
         "",
