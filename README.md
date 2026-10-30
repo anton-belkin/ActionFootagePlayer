@@ -217,7 +217,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | Key | | `script-binding` |
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
-| `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, the original frame, the frame zoomed, or a trail of earlier frames, by place on the screen or by direction (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
+| `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
@@ -256,8 +256,8 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
-| `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere`, `trail`, `original`, `zoom`, or `off` (the project's background color) |
-| `gyroflow.conf`: `edges_blur=2`, `edges_zoom=1.5` | blur of the edge fill (% of the frame height), and how much `zoom` scales the frame up |
+| `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
+| `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K) |
 | `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
@@ -359,16 +359,18 @@ them while playing, and `edges_blur` (Options) sets how blurred:
 - **sphere**, the default: what was last seen in that direction, by the gyro. It's taken from the
   whole source frame, not just what the output shows, so it also has what the zoom crops away and what the camera
   saw while shaking with no edges showing, and it stays where it was in the world, so it lines up with the picture
-  through a pan. Only the camera's turning is known: near things that moved past it, or by themselves, are off.
-  Where a direction wasn't seen yet, the trail (half-life 5 s).
-- **trail**: what was last shown at that spot in earlier frames. The stabilized frame stays put while the camera
-  shakes, so a part it uncovers now was usually in view a moment ago. But it's only right while the smoothed view
-  holds still: when it pans, what was at a spot of the screen was in another direction, and the fill slides
-  against the picture. Where nothing was yet (the first frames, after a seek or a cut), the zoom fill; older trail
-  fades into it too (half-life 3 s).
-- **original**: the unstabilized frame behind.
-- **zoom**: the stabilized frame scaled up 1.5× behind.
+  through a pan. Only the camera's turning is known: near things that moved past it, or by themselves, are off
+  (half-life 5 s). Where a direction wasn't seen yet, the colors around spread in, smoother the farther they go, a
+  little desaturated and darker, as a lens's periphery falls off; that's made up on the sphere too, from all it
+  has, so it stays put in the world and changes slowly instead of flickering with what passes the edge. Where what
+  the sphere has just past the frame's edge no longer matches the edge (something moved, the light changed), it's
+  taken away for what's made up from the edge as it is, so it doesn't show as a seam.
+- **smooth**: only the frame's own colors spread out from its edge the same way: nothing of earlier frames, so
+  nothing that can be off, and the cheapest.
 - **off**: the project's background color, as Gyroflow renders it.
+
+Where nothing is known, the colors around rather than a copy of the frame (scaled up, or unstabilized): its content
+moves at another scale than the world, and the eye catches that at the side even blurred.
 
 With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
 have any. Whether a clip does is Gyroflow's own measurement when it loads, for any project: where the frame it renders
@@ -418,8 +420,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead.
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
-- `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|trail|original|zoom|off` fills the
-  edges as playback does (`--edges-blur <%>`, `--edges-zoom <x>`); without them, as the project says, edges in its
+- `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
+  edges as playback does (`--edges-blur <%>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--underwater yes|no|auto`: the lens under water, above it, or (the default) as the camera says over the clip, as
   the menu's Lens has it (see Stabilization).

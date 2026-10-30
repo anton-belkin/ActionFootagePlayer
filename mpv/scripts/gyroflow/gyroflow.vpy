@@ -30,7 +30,7 @@ if args.get('width') and args.get('height'):
     stab['height'] = int(args['height'])
 # What fills the uncovered edges; the control file has the mode and the blur as they change while playing
 options = {}
-for key, kind in (('edges', str), ('edges_blur', float), ('edges_zoom', float), ('edges_control', str)):
+for key, kind in (('edges', str), ('edges_blur', float), ('edges_control', str)):
     if args.get(key) is not None:
         options[key] = kind(args[key])
 # Each frame's lens geometry in its last row, for chromatic.glsl (vs-gyroflow/src/dispersion.rs), which paints it over

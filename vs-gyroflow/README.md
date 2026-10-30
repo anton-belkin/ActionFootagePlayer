@@ -15,8 +15,8 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `width`, `height` | project's output size | render size; the aspect stays the project's |
 | `workers` | 3 | GPU worker threads (each has its own GPU context) |
 | `start_time`, `time_offset` | 0 | seconds; frame time = pts − start_time + time_offset |
-| `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `original`, `zoom`, `trail`, `sphere` |
-| `edges_blur`, `edges_zoom` | 2, 1.5 | blur of the fill (sigma, % of the frame height); how much `zoom` scales up |
+| `edges` | `off` | what fills what the frame doesn't cover: `off` (the project's background), `sphere` (what was seen in that direction, the rest the colors around spread in), `smooth` (the frame's colors spread out) |
+| `edges_blur` | 2 | blur of the fill (sigma, % of the frame height) |
 | `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
 | `wide` | 0 | 1: start in the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median). The engine renders both views with the same smoothing, as a FOV change in Gyroflow doesn't recompute it, and the control file's `view=` switches between them on the next frame |
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |

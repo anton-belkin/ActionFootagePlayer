@@ -29,8 +29,7 @@ local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto
 local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
 local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
-local EDGES = { { "sphere", "Trail by direction" }, { "trail", "Trail of earlier frames" }, { "original", "Original frame" },
-                { "zoom", "Zoomed frame" }, { "off", "Background color" } }
+local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },

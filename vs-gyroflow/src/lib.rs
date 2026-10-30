@@ -21,6 +21,7 @@ pub mod project;
 pub mod gpu_lut;
 pub mod edges;
 pub mod sphere;
+pub mod smooth;
 pub mod dispersion;
 pub mod water;
 pub mod prefetch;
@@ -914,11 +915,10 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
 
     let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
     let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
-        return fail(node, format!("unknown edges {edge_mode} (off, original, zoom, trail, sphere)"));
+        return fail(node, format!("unknown edges {edge_mode} (off, sphere, smooth)"));
     };
     let mut edge_settings = edges::EdgeSettings::default();
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }
-    if let Some(v) = unsafe { map_get_f64(api, input, c"edges_zoom") } { edge_settings.zoom = (v as f32).clamp(1.0, 4.0); }
     let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
     // Also starts the trail over: mpv reloads the script on every seek
     // The view the filter is made in; the control file has the one switched to since, which wins (mpv makes the
@@ -970,7 +970,7 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_zoom:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
                                c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
