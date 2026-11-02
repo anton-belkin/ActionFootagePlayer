@@ -20,6 +20,9 @@ site/            what is served, as is
   divers.html    the landing for divers and snorkelers
   styles.css     shared styles, light and dark
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
+  icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
+  favicon.ico, apple-touch-icon.png
+                 rendered from icon.svg (the touch icon with square corners: iOS rounds them)
 ```
 
 ## Preview
