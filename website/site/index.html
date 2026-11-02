@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Action Footage Player</title>
+<meta name="description" content="A free, open-source desktop player that gives you back control of your action-camera footage: no account, no feed, no look baked in, the full range of every scene. Plays D-Log M, GP-Log and I-Log in true HDR, stabilizes from the camera's motion data, shows depth and GPS. No grading, no rendering, originals untouched.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="styles.css">
+
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Action Footage Player, back to top">
+      <svg class="brand-mark" viewBox="0 0 26 26" aria-hidden="true">
+        <rect x="1" y="1" width="24" height="24" rx="6" style="fill: var(--ink)"/>
+        <path d="M4 18 C 9 18, 11 7, 22 7" fill="none" style="stroke: var(--bg)" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+        <path d="M4 20 C 12 20, 15 4, 22 4" fill="none" style="stroke: var(--accent)" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#how" class="opt">How it works</a>
+      <a href="#dive" class="opt">Under water</a>
+      <a href="#cameras">Cameras</a>
+      <a href="#faq" class="opt">FAQ</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <!-- Hero -->
+  <section class="hero band">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Action Footage Player · a free, open-source alternative to the maker's app</p>
+        <h1>Take back control of your action camera footage.</h1>
+        <p class="lede">Love your camera, but not its app? Keep using the app for settings and updates, and let Action Footage Player take care of your footage. Open the folder on your computer and watch it all on a big screen, with the light and color as you saw them. No account, no feed, no look you didn't choose.</p>
+        <div class="btns">
+          <a class="btn primary" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Download for Mac <small>Apple Silicon</small>
+          </a>
+          <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Download for Windows <small>10 / 11</small>
+          </a>
+        </div>
+        <div class="status">
+          <span><i class="dot" aria-hidden="true"></i>Early alpha</span>
+          <span>Used daily with DJI Osmo Action 6</span>
+          <span>Made by a diver in Geneva, Switzerland</span>
+          <span>Free · donations welcome</span>
+        </div>
+      </div>
+
+      <figure style="margin:0">
+        <div class="viewer" id="viewer" data-scene="sunset" data-compare="sdr">
+          <canvas class="log" id="cLog" aria-hidden="true"></canvas>
+          <canvas class="hdr" id="cHdr" aria-hidden="true"></canvas>
+          <div class="handle" aria-hidden="true"></div>
+          <span class="tag l">Camera default</span>
+          <span class="tag r">In the player · full range</span>
+          <div class="tele" aria-hidden="true">
+            <span>ISO <b>100</b></span>
+            <span class="opt">1/2000</span>
+            <span>STAB <b>CROP</b></span>
+          </div>
+          <input type="range" id="split" min="4" max="96" value="50" aria-label="Compare the camera's default look with full-range playback">
+        </div>
+        <figcaption class="caption">Drag to compare. Drawn illustration, not real footage: a web page can't show what your screen does with the real clip.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Control -->
+  <section class="section band" id="control">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">What you get back</p>
+        <h2>Your footage, on your terms.</h2>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Your files</h3>
+          <p>No account, no cloud, no feed. Plug in the card or copy the folder, and open it. Action Footage Player only reads your originals.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Your screen</h3>
+          <p>Watch on your computer, not squinting at a phone. When you want a clip on your phone or TV, export it in one step.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Everything your camera saw</h3>
+          <p>Your action camera sees more than its default mode keeps. Let your screen show it: a sunset, a bright day on the water, a dive, just as you saw them.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Your look, or none</h3>
+          <p>Nothing is styled for you. Clips play and export natural, so you can add a look later in the editor you like. A look baked into a file can't be taken out.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Your whole archive</h3>
+          <p>Years of clips play as they are, stabilized while they play, without rendering a copy of each one first.</p>
+        </div>
+        <div class="gap-item">
+          <h3>All your cameras</h3>
+          <p>One player for footage from DJI, GoPro and Insta360, instead of one app per camera maker. Support varies by model; see <a class="text-link" href="#cameras">Cameras</a>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The gap -->
+  <section class="section band" id="why">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">The full range</p>
+        <h2>Turn off your camera's compatibility mode. Capture the scene in all its beauty.</h2>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Your camera aims for the average screen</h3>
+          <p>Most cameras are built for standard screens. By default, every clip is processed to look good right away on an average phone or office screen. Modern cameras squeeze a scene's range cleverly, but they have to make trade-offs, and the clip can no longer use the extra brightness and color that most phones and TVs can show (that is what HDR means). In effect, the default mode is a compatibility mode.</p>
+        </div>
+        <div class="gap-item">
+          <h3>The full range, now for everyone</h3>
+          <p>Most of these cameras can also keep the full range, but it hides behind a pro setting called log, and getting a natural look from it on those screens used to take professional software. Action Footage Player does it as you press play, so a sunset, a sunny day, a dive or any high-contrast scene looks the way you remember it.</p>
+        </div>
+        <div class="gap-item">
+          <h3>The trade-off, plainly</h3>
+          <p>Most apps show log clips flat and grey, so you watch them in Action Footage Player or export them first. And on standard screens, even through it, log looks a little worse than the camera's default mode. You give up a little convenience and some sharing quality to keep the moment in full. A scene-aware conversion for standard screens is on the roadmap, and it will apply to the log you have already shot.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Routes -->
+  <section class="section routes-band band" aria-label="Choose your path">
+    <div class="wrap routes">
+      <a class="route" href="divers.html">
+        <span class="who">For divers and snorkelers</span>
+        <h3>Dive footage, steady and true to your eyes <span class="go" aria-hidden="true">→</span></h3>
+        <p>Why log and EIS-off change everything under water, what to set before the next dive, and which cameras work.</p>
+      </a>
+      <a class="route" href="#features">
+        <span class="who">You already shoot log</span>
+        <h3>D-Log M, GP-Log and I-Log in HDR <span class="go" aria-hidden="true">→</span></h3>
+        <p>What Action Footage Player does with your log clips, the export formats and the keyboard shortcuts.</p>
+      </a>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band" id="how" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How it works</p>
+        <h2>Three steps, and the second one is a double-click.</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Shoot in log</h3>
+          <p>If you watch on HDR screens, set the camera to D-Log M (or GP-Log, I-Log). Under water, also turn EIS off so the camera keeps recording motion data.</p>
+        </li>
+        <li>
+          <h3>Double-click a clip</h3>
+          <p>It opens in HDR, stabilized, with the telemetry the camera recorded. Highlights you marked with the camera's button show up on the seek bar.</p>
+        </li>
+        <li>
+          <h3>Share a moment</h3>
+          <p>Press <kbd>l</kbd> twice to mark a part, then <kbd>Shift</kbd>+<kbd>E</kbd>. You get an HDR file that iPhones, Macs and YouTube show correctly.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section band" id="features" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">What it does</p>
+        <h2>Everything happens while the clip plays.</h2>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <h3>Log in true HDR</h3>
+          <p>D-Log M, GP-Log and I-Log are decoded with the makers' own curves and shown as HDR, with no look added: the scene's brightness relationships stay as they were. Made for HDR screens: that is where log beats the camera's default mode.</p>
+          <span class="meta">D-Log M · GP-Log · I-Log (10-bit)</span>
+        </div>
+        <div class="feature">
+          <h3>Stabilized during playback</h3>
+          <p>Built on Gyroflow's engine and the motion data your camera already writes into every clip. Nothing is rendered before you can watch. Three modes: stabilization with crop, stabilization with filled edges, or off.</p>
+          <span class="meta">gyro + accelerometer from the file</span>
+        </div>
+        <div class="feature">
+          <h3>Telemetry on screen</h3>
+          <p>Depth, GPS, speed, altitude and exposure appear when the camera recorded them. Fields the clip doesn't have stay hidden.</p>
+          <span class="meta">depth · GPS · speed · ISO · shutter</span>
+        </div>
+        <div class="feature">
+          <h3>One-key export</h3>
+          <p>The part you're watching is exported as you see it, stabilization included, in one pass. You get a natural HDR file to share or to adjust to your taste. Exports pause while you play and resume when you stop.</p>
+          <span class="meta">HEVC Main10, HLG · or ProRes 422 HQ</span>
+        </div>
+        <div class="feature">
+          <h3>Highlights on the seek bar</h3>
+          <p>Moments you marked with the camera's highlight button become markers. Jump between them instead of scrubbing an hour of footage.</p>
+          <span class="meta"><kbd>Ctrl</kbd>+<kbd>]</kbd> next · <kbd>Ctrl</kbd>+<kbd>[</kbd> previous</span>
+        </div>
+        <div class="feature">
+          <h3>Originals stay as they are</h3>
+          <p>Action Footage Player only reads your files. Exports go to a separate <code>stabilized/</code> folder next to the clip.</p>
+          <span class="meta">read-only on your footage</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Archive -->
+  <section class="section band" id="archive" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Your archive</p>
+        <h2>Old trips play stabilized, without re-rendering anything.</h2>
+        <p class="lede">Stabilizing footage usually means rendering a new copy of every clip first. Here the stabilization is applied as the video plays, so a folder of old dives is ready to watch as it is.</p>
+      </div>
+      <div class="compare-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">You want to</th><th scope="col">Render-first workflow</th><th scope="col">Action Footage Player</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Watch an old dive, stabilized</th><td class="them">Open the clip, render a copy, wait, open the copy</td><td class="us">Open the folder and press play</td></tr>
+            <tr><th scope="row">Go through a terabyte of footage</th><td class="them">Hours of rendering, and new files that take extra space</td><td class="us">Nothing is rendered; the originals stay where they are</td></tr>
+            <tr><th scope="row">Find the moment you remember</th><td class="them">Render first, then search</td><td class="us">Scrub through footage that is already steady</td></tr>
+            <tr><th scope="row">Get a file to share</th><td class="them">You always end up with a copy</td><td class="us">Only for the parts you export</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">The stabilization itself comes from Gyroflow, which does this beautifully. Action Footage Player adds playback in real time, HDR from log and telemetry on top, so you can skip the render step when all you want is to watch.</p>
+    </div>
+  </section>
+
+  <!-- Dive -->
+  <section class="section band dive" id="dive">
+    <div class="wrap dive-grid">
+      <div style="display:grid; gap:18px">
+        <p class="eyebrow">Under water</p>
+        <h2>Steady footage below the surface.</h2>
+        <p class="lede">You already know in-camera stabilization falls apart under water. Turn EIS off, keep shooting, and let Action Footage Player stabilize from the motion data, with a correction for how water bends light through the lens.</p>
+        <div class="dive-points">
+          <div>
+            <h3>Tuned for water by default</h3>
+            <p>The default preset accounts for refraction at the dome port. Above water, DJI's own EIS works well, and a preset without refraction is there for EIS-off clips shot in air.</p>
+          </div>
+          <div>
+            <h3>Depth where the camera records it</h3>
+            <p>The Osmo Action 6 logs depth and water status. Turn the readout on and off with <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>t</kbd></span>.</p>
+          </div>
+          <p><a class="inline-link" href="divers.html">Everything for divers on one page →</a></p>
+        </div>
+      </div>
+      <div style="display:grid; gap:18px">
+        <div class="stat">
+          <p class="eyebrow" style="color:var(--deep-muted)">Frame-to-frame jitter, one test clip</p>
+          <div class="num"><span>0.16</span><span class="arrow">→</span><span>0.02</span><span class="unit">px</span></div>
+          <p>Measured on a single EIS-off clip from an Osmo Action 6, before and after stabilization.</p>
+        </div>
+        <dl class="preset" aria-label="Default underwater preset">
+          <dt>refraction index</dt><dd>1.33</dd>
+          <dt>smoothing</dt><dd>0.5</dd>
+          <dt>max zoom</dt><dd>140 %</dd>
+          <dt>horizon lock</dt><dd>off</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cameras -->
+  <section class="section band" id="cameras">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Cameras</p>
+        <h2>What works today.</h2>
+        <p class="lede">Action Footage Player is developed against real footage from one camera. Everything else is supported in code and waits for someone to try it on their own clips.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="cams">
+          <thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth telemetry and HDR export, used daily.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span></td><td>Should work; not yet checked on real footage.</td></tr>
+            <tr><th scope="row">GoPro HERO12, HERO13, MAX2</th><td><span class="pill exp">Expected</span></td><td>GP-Log and stabilization are in place; not yet checked on real footage.</td></tr>
+            <tr><th scope="row">Other DJI cameras<br><span style="font-weight:400;color:var(--muted)">Action 4, Action 5 Pro, Pocket 3…</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
+            <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand. 8-bit I-Log is not supported.</td></tr>
+            <tr><th scope="row">DJI drones</th><td><span class="pill part">Partial</span></td><td>Log by choosing the curve by hand; stabilization needs a Gyroflow project.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Have one of the cameras marked Expected or Partial? A short sample clip in a GitHub issue is the fastest way to move it to Verified.</p>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band" id="keys" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Keyboard</p>
+        <h2>The keys you'll actually use.</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Mark a part to export</span><span><kbd>l</kbd> twice</span></div>
+        <div class="key"><span>Export it (press again to cancel)</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>Stabilization: cropped, filled edges, off</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
+        <div class="key"><span>Telemetry on or off</span><span><kbd>Ctrl</kbd>+<kbd>t</kbd></span></div>
+        <div class="key"><span>Maker's official SDR look, and back</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd> / <kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>Next or previous highlight</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
+        <div class="key"><span>Noise reduction on or off</span><span><kbd>Ctrl</kbd>+<kbd>n</kbd></span></div>
+        <div class="key"><span>Open this clip in Gyroflow</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band" id="faq" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Questions</p>
+        <h2>Before you download.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Do I need an HDR screen?</summary>
+          <div class="a"><p>Yes, if you want the benefit. Log pays off when you, and most of the people you share with, watch on HDR screens: recent iPhones, MacBook Pros, HDR TVs and monitors.</p><p>On a standard screen, a log clip looks worse than the same scene recorded in the camera's default mode. That is true whether macOS tone-maps it automatically or you switch to the camera maker's official SDR conversion (its Rec.709 LUT) with <kbd>Ctrl</kbd>+<kbd>s</kbd>. The camera makers' own processing adapts to each scene and keeps bright what most likely matters in it. Getting the same result from log takes professional grading software and a colorist.</p><p>So if you mostly watch and share on standard screens, record in the default mode. If you and your audience have HDR screens, record in log.</p><p>For clips you mainly share to standard screens, you can still use the camera maker's app. A scene-aware SDR conversion in Action Footage Player is on the roadmap: squeezing the range always takes decisions, and the aim is to keep the result as close as possible to the full-range version rather than add a look of its own. When it lands, the log footage you have already shot gets better too.</p></div>
+        </details>
+        <details>
+          <summary>I dive and snorkel. Do I need this?</summary>
+          <div class="a"><p>Yes. Under water, log played in HDR is clearly better than the camera's default mode, especially on recent cameras. The difference is night and day. A dive scene runs from bright light at the surface to dark blue at depth, and the default mode has to squeeze all of it into a standard screen, with trade-offs along the way.</p><p>On top of that, you get stabilization that works under water (turn EIS off when you shoot) and the depth readout, if your camera records it.</p></div>
+        </details>
+        <details>
+          <summary>Who needs the stabilization in the player?</summary>
+          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes; GoPro footage in the player is still waiting to be verified.)</p></div>
+        </details>
+        <details>
+          <summary>Which computers does it run on?</summary>
+          <div class="a"><p>Mac: Apple Silicon with macOS 15 or later. Windows: 10 or 11 on 64-bit Intel or AMD.</p><p>Both apps are not signed yet. On a Mac, allow it once in System Settings, Privacy &amp; Security, Open Anyway. On Windows, SmartScreen shows a warning on first launch.</p></div>
+        </details>
+        <details>
+          <summary>Does it change my original files?</summary>
+          <div class="a"><p>No. Action Footage Player only reads them. Exports are written to a <code>stabilized/</code> folder next to the clip.</p></div>
+        </details>
+        <details>
+          <summary>What does an exported file look like?</summary>
+          <div class="a"><p>An HEVC Main10 file tagged as HLG, which iPhones, Macs, most HDR TVs and YouTube display as HDR. If you edit afterwards, ProRes 422 HQ is available as an option.</p><p>The file has no look added, so it is a natural starting point: adjust it to your taste in an HDR-capable editor such as iMovie. A look that is baked into a file can't be taken out again: shadows pushed to black stay black.</p></div>
+        </details>
+        <details>
+          <summary>Why not just use the camera maker's app?</summary>
+          <div class="a"><p>Use it if you like its look. Phone apps are great for quick edits, and some can now show and export log as HDR. That HDR tends to be styled for social media: exposure that shifts as the scene changes, brighter mid-tones, strong local contrast, deep shadows pushed to black.</p><p>Action Footage Player does the opposite: a direct conversion from log that keeps the scene's brightness relationships and adds no look of its own, so the clip looks the way the scene did. You can always add a look later; you can't take one out.</p><p>It also runs on your computer, plays your whole archive as it is, works with footage from several camera makers, and stabilizes while it plays.</p></div>
+        </details>
+        <details>
+          <summary>Is it really free?</summary>
+          <div class="a"><p>Yes. It's open source under GPL-3.0, and the code is on GitHub.</p><p>Once in a while Action Footage Player will offer you to make a voluntary donation. You can skip it, or ask it never to remind you again. Nothing is locked either way.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Help -->
+  <section class="section band" id="help" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Help it grow</p>
+        <h2>It gets better with your footage.</h2>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Test your camera</h3>
+          <p>Open an issue with your camera model and a short sample clip. That is how cameras move from Expected to Verified.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">Open an issue on GitHub</a>
+        </div>
+        <div class="help-card">
+          <h3>Tell a diving friend</h3>
+          <p>Most people who need this have never heard of it. A message in your dive club's chat does more than any ad.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer">Share the project</a>
+        </div>
+        <div class="help-card">
+          <h3>Star the repository</h3>
+          <p>Stars help other people find the project when they search for log, HDR or Gyroflow.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer">Star on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · Made by a diver in Geneva, Switzerland</span>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Downloads</a>
+    </div>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M HDR LUT derived from Zeb Gardner's shaper LUT (used with permission), and the log curves published by DJI, GoPro and Insta360. The app bundles mpv and ffmpeg under their own licenses. Not affiliated with DJI, GoPro or Insta360.</p>
+  </div>
+</footer>
+
+<script src="scene.js"></script>
+</body>
+</html>

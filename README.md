@@ -906,6 +906,7 @@ tools/cube_to_glsl.py         .cube → mpv shader
 tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) → Rec.2100 HLG LUT, from the makers'
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
+website/                      the product website (site/, static, not deployed yet); see website/README.md
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export (Rust)
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
