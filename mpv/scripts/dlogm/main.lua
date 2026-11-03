@@ -95,6 +95,7 @@ local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-col
 -- stabilization); enabled in hdr mode only
 local TAG_LABEL = "dlogm"
 local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
+local WINDOWS = package.config:sub(1, 1) == "\\"
 -- The HDR transfers, by mpv's names for them (target-trc, video-dec-params/gamma)
 local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 
@@ -194,12 +195,16 @@ local function tag_hlg(on)
 end
 
 -- The target for HDR: the display switched to HDR (vo=gpu-next) and the signal sent to it encoded as `trc`, so mpv
--- passes HDR video in it through as it is. 1000 nits, as the hdr shader's HLG is graded for
+-- passes HDR video in it through as it is. 1000 nits, as the hdr shader's HLG is graded for.
+-- On Windows only the hint: the display is in HDR or not as Windows has it (Settings > Display > Use HDR), and an app
+-- can't switch it. mpv sends HDR to one that is and tone-maps for one that isn't; HLG sent as it is to an SDR display
+-- shows flat, its BT.2020 colors read as BT.709 and washed out
 local function hdr_target(target, trc, prim)
+    target["target-colorspace-hint"] = "yes"
+    if WINDOWS then return end
     target["target-trc"] = trc
     target["target-prim"] = prim
     target["target-peak"] = "1000"
-    target["target-colorspace-hint"] = "yes"
 end
 
 -- The file's shaders: the user's own, the noise reduction's when it's on, and the look's (a path, or nil)
@@ -419,9 +424,8 @@ local function save_options(values)
     end
     local dir = path:match("^(.*)[/\\]")
     if dir and not utils.file_info(dir) then
-        local windows = package.config:sub(1, 1) == "\\"
         mp.command_native({ name = "subprocess", playback_only = false,
-                            args = windows and { "cmd", "/d", "/c", "mkdir", dir } or { "mkdir", "-p", dir } })
+                            args = WINDOWS and { "cmd", "/d", "/c", "mkdir", dir } or { "mkdir", "-p", dir } })
     end
     f = io.open(path, "w")
     if not f then return false end
