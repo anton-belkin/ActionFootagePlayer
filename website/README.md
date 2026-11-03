@@ -19,7 +19,7 @@ site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
   download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
-  download.js    fills download.html in from GitHub's API: each link straight to its file, its size, the version
+  download.js    fills download.html in from latest.json: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
@@ -39,10 +39,13 @@ Opening `site/index.html` straight from disk works too. The fonts come from Goog
 local.
 
 `download.html` links to GitHub's latest release, and works like that without JavaScript. `download.js` reads
-that release from <https://api.github.com/repos/anton-belkin/ActionFootagePlayer/releases/latest> (one request an
-hour per visitor, kept in `localStorage`; the API allows 60 an hour per address) and points each link at its file,
-found by its name's pattern (`ActionFootagePlayer-*-macos-arm64.zip`, …). A new release needs no change here,
-unless an asset's name changes: then its pattern in `download.js` too.
+that release from `/latest.json`, which the deploy writes from
+<https://api.github.com/repos/anton-belkin/ActionFootagePlayer/releases/latest> (only into the deployed copy), and
+points each link at its file, found by its name's pattern (`ActionFootagePlayer-*-macos-arm64.dmg`, …). The release
+workflow deploys the site again once it has published a release, so the page has it within a minute or two. Where
+there's no `latest.json`, as in a local preview, it asks GitHub's API itself (kept in `localStorage` for 5 minutes;
+the API allows 60 requests an hour per address, and when it refuses, the release kept from an earlier visit stays).
+A new release needs no change here, unless an asset's name changes: then its pattern in `download.js` too.
 
 ## Translations
 
