@@ -1,5 +1,6 @@
 -- When the stabilization doesn't keep up: playback pauses and offers lighter settings, and the one picked sticks (in
--- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges).
+-- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges), the
+-- color fringes under water left as recorded (chromatic).
 --
 -- A laptop's GPU keeps up for its first half-minute or so, at its boost power, then slows to half at its sustained
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
@@ -47,8 +48,14 @@ mp.observe_property("pause", "bool", function(_, paused) if not paused then quie
 -- The lighter settings than the ones it has, most effective first: { label, { { key, value }, ... } }. As measured on a
 -- 15 W laptop at its sustained power with a 4K60 clip: 30 fps with the frame's edge spread out, and 15 fps with any
 -- fill, play every frame. 30 fps with the sphere trail doesn't help: the trail is written whenever a GPU worker is
--- free, so it takes the time the skipped frames leave, so the rate comes down with the lighter fill. The resolution
--- only counts above 1080p: below that the input's scaling costs the same
+-- free, so it takes the time the skipped frames leave, so the rate comes down with the lighter fill. Writing it from
+-- fewer of the frames (edge_fill_rate 50 or 25 %, or 10) didn't change that there: ~45-55 % of the frames shown at
+-- 30 fps whatever the rate, the GPU workers at 75-90 ms a frame either way, so it isn't offered here. In those runs
+-- 30 fps with the frame's edge spread out showed only ~40 % too, and 15 fps with the sphere every frame: so 30 fps
+-- stays first, the lighter loss, and if it isn't enough it asks again and 15 fps is next. The resolution
+-- only counts above 1080p: below that the input's scaling costs the same. The color fringes under water last: their
+-- cost wasn't measured (the shader didn't compile under D3D11 on that laptop), and they're kept as recorded in
+-- gyroflow.conf like the other picks
 local function choices()
     local list = {}
     local function add(label, settings) table.insert(list, { label, settings }) end
@@ -66,6 +73,7 @@ local function choices()
     if edges ~= "off" then add("No edge fill: the background color", { { "edges", "off" } }) end
     local side = hooks.short_side()
     if side and side > 1080 then add("Render at 1080p", { { "resolution", "1080" } }) end
+    if hooks.chromatic() then add("Color fringes under water left as recorded", { { "chromatic", "no" } }) end
     return list
 end
 
@@ -120,7 +128,8 @@ local function check()
 end
 
 -- options: main.lua's (fps_limit, ask_when_slow); hooks: stabilizing() the stabilization is on, short_side() the short
--- side it renders at, edges() the edge fill, set(key, value) applies and keeps a setting
+-- side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be,
+-- set(key, value) applies and keeps a setting
 function M.init(options, h)
     o, hooks = options, h
     mp.add_periodic_timer(1, check)
