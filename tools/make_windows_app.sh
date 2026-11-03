@@ -66,9 +66,12 @@ else
     MPV_SHA256="736934c6f960f937851577d21f4d57695ff930a0b9aebe5521112f1c74d4c0d0"
     PYTHON_URL="https://api.nuget.org/v3-flatcontainer/pythonarm64/3.13.17/pythonarm64.3.13.17.nupkg"
     PYTHON_SHA256="aaa8c60c0adffde214ebd13e19bd79289aedb6452b4883eb08a59592c008456b"
-    # VapourSynth R81, its source: the wheel is built from it, once
+    # VapourSynth R81, its source: the wheel is built from it, once. On Windows it builds only with Python 3.14 or
+    # later, as its own wheels are; they're for any Python from 3.12 (the stable ABI), and so is this one
     VAPOURSYNTH_URL="https://files.pythonhosted.org/packages/69/6a/f9441173c91a3355a32b870522726ed2252cd3c7b04b45e499f30b1a2c98/vapoursynth-81.tar.gz"
     VAPOURSYNTH_SHA256="3bf6c90ad737e8ffc5605b05a1ff29cd884f8632fbe0eb49a2705942073a96be"
+    VAPOURSYNTH_PYTHON_URL="https://api.nuget.org/v3-flatcontainer/pythonarm64/3.14.10/pythonarm64.3.14.10.nupkg"
+    VAPOURSYNTH_PYTHON_SHA256="79cac95bc8219587eaf4b073a92162388f567a2509cd2bc497102feaf7dc8a38"
     MSVC_RUNTIME_URL="https://files.pythonhosted.org/packages/e3/ab/c21892fbc87d39ebd9763759d1ee499f9938ab4ce4e49e089ea020e6aaab/msvc_runtime-14.51.36231-cp313-cp313-win_arm64.whl"
     MSVC_RUNTIME_SHA256="52f9fd6e089eac9d72607d3ac4ffebcd5f0d6f940fca83db8a9c12ca11b1c26c"
     VULKAN_RID=win-arm64
@@ -154,13 +157,14 @@ find "$python" -name __pycache__ -type d -prune -exec rm -rf {} +
 site="$python/Lib/site-packages"
 archive=$(fetch "$VAPOURSYNTH_URL" "$VAPOURSYNTH_SHA256")
 if [ $arch = arm64 ]; then
-    # Its wheel, built from the source with the app's Python and kept with what's downloaded. meson finds Visual
-    # Studio (--vsenv) and builds for the Python's arm64
+    # Its wheel, built from the source with the Python 3.14 pinned for it and kept with what's downloaded. meson
+    # finds Visual Studio (--vsenv) and builds for the Python's arm64
     name=$(basename "$archive" .tar.gz)
     if ! ls "$deps/$name"-*-win_arm64.whl >/dev/null 2>&1; then
         echo "== Building $name for arm64"
+        unzip_to "$(fetch "$VAPOURSYNTH_PYTHON_URL" "$VAPOURSYNTH_PYTHON_SHA256")" "$tmp/build-python"
         PATH="$PATH:/c/Program Files/LLVM/bin" CC=clang-cl CXX=clang-cl AR=llvm-lib \
-            "$tmp/python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
+            "$tmp/build-python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
             -Csetup-args=--vsenv "$archive"
     fi
     archive=$(ls "$deps/$name"-*-win_arm64.whl | head -1)
