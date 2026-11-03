@@ -1,6 +1,6 @@
 # Website
 
-The product website for Action Footage Player: a static site (plain HTML, CSS and two scripts, no build step),
+The product website for Action Footage Player: a static site (plain HTML, CSS and three scripts, no build step),
 kept here so it can move to its own repository later without changes (`git subtree split --prefix=website`).
 
 Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 2026-10-29 and moved here on 2026-11-02.
@@ -21,6 +21,7 @@ site/            what is served, as is
   download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
   download.js    fills download.html in from GitHub's API: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
+  top.js         measures the sticky header, so links to #anchors land below it with the heading in view
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
   favicon.ico, apple-touch-icon.png

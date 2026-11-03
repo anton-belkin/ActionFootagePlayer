@@ -30,7 +30,7 @@ jobs:
       - name: Version the shared stylesheet and scripts
         working-directory: website/site
         run: |
-          for f in styles.css scene.js download.js; do
+          for f in styles.css top.js scene.js download.js; do
             v=$(sha256sum "$f" | cut -c1-8)
             find . -name '*.html' -exec perl -pi -e "s{((?:href|src)=\"(?:\.\./)?\Q$f\E)\"}{\$1?v=$v\"}g" {} +
           done
