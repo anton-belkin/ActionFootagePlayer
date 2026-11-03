@@ -178,6 +178,51 @@ fn read_cube(path: &std::path::Path) -> Result<(u32, Vec<f32>), String> {
     Ok((size, data))
 }
 
+/// The NBCU look's LUT, as one: a log curve's LUT to HLG (`log`), then NBCUniversal's HLG -> SDR (`nbcu`, a Type III
+/// LUT: the signal's 0..1 is (64 + 876 x) / 1023 of its domain, in and out), at the log LUT's grid points, written
+/// to `out` as a .cube with plain 0..1 Rec.709, clipped. The same as playback's two shaders (shaders/nbcu_sdr.glsl.in):
+/// NBCU's knee by tetrahedral interpolation, its highlights above 100 % clipped
+pub fn compose_nbcu(log: &std::path::Path, nbcu: &std::path::Path, out: &std::path::Path) -> Result<(), String> {
+    let (n, log_data) = read_cube(log)?;
+    let (m, nbcu_data) = read_cube(nbcu)?;
+    let (lo, span) = (64.0 / 1023.0, 876.0 / 1023.0);
+    let mut text = format!("# {} then {}, by gyroflow-export\nLUT_3D_SIZE {n}\n", file_name(log), file_name(nbcu));
+    for v in log_data.chunks(3) {
+        let o = tetrahedral(m as usize, &nbcu_data, [v[0] * span + lo, v[1] * span + lo, v[2] * span + lo]);
+        let c = |x: f32| ((x - lo) / span).clamp(0.0, 1.0);
+        text += &format!("{:.6} {:.6} {:.6}\n", c(o[0]), c(o[1]), c(o[2]));
+    }
+    std::fs::write(out, text).map_err(|e| format!("{}: {e}", out.display()))
+}
+
+fn file_name(p: &std::path::Path) -> String {
+    p.file_name().map_or_else(String::new, |f| f.to_string_lossy().to_string())
+}
+
+/// A 3D LUT (red fastest) at `rgb` (0..1), by tetrahedral interpolation
+fn tetrahedral(n: usize, lut: &[f32], rgb: [f32; 3]) -> [f32; 3] {
+    let p = rgb.map(|v| v.clamp(0.0, 1.0) * (n - 1) as f32);
+    let i = p.map(|x| (x as usize).min(n - 2));
+    let f = [p[0] - i[0] as f32, p[1] - i[1] as f32, p[2] - i[2] as f32];
+    let at = |c: [usize; 3]| {
+        let k = ((i[0] + c[0]) + (i[1] + c[1]) * n + (i[2] + c[2]) * n * n) * 3;
+        [lut[k], lut[k + 1], lut[k + 2]]
+    };
+    // From the cell's 000 corner to its 111, one axis at a time, the largest fraction first
+    let mut axes = [0, 1, 2];
+    axes.sort_by(|&a, &b| f[b].total_cmp(&f[a]));
+    let mut corner = [0; 3];
+    let mut prev = at(corner);
+    let mut out = prev;
+    for &axis in &axes {
+        corner[axis] = 1;
+        let cur = at(corner);
+        for c in 0..3 { out[c] += f[axis] * (cur[c] - prev[c]); }
+        prev = cur;
+    }
+    out
+}
+
 impl GpuLut {
     /// `in_full_range`: the decoded frames' range; the output is always limited range
     pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32)) -> Result<Arc<GpuLut>, String> {
