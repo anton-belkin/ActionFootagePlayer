@@ -12,8 +12,7 @@
 # installer isn't).
 #
 # <arch> is x86_64, or arm64 with the Rust target aarch64-pc-windows-msvc. Everything in mpv's process is then built
-# for arm64; VapourSynth has no such build, and is built here from its source (with Visual Studio and LLVM's
-# clang-cl, as its own Windows wheels are).
+# for arm64; VapourSynth has no such build, and is built here from its source, with Visual Studio.
 #
 # Runs on Windows in Git Bash (.github/workflows/release.yml runs it after tools/make_plugin_zip.sh, whose binaries
 # it uses). Built from HEAD's sources, like the plugin zip.
@@ -158,14 +157,16 @@ site="$python/Lib/site-packages"
 archive=$(fetch "$VAPOURSYNTH_URL" "$VAPOURSYNTH_SHA256")
 if [ $arch = arm64 ]; then
     # Its wheel, built from the source with the Python 3.14 pinned for it and kept with what's downloaded. meson
-    # finds Visual Studio (--vsenv) and builds for the Python's arm64
+    # finds Visual Studio (--vsenv) and builds for the Python's arm64. With Visual Studio's compiler, not clang-cl
+    # (as VapourSynth's x86-64 wheels are): zimg's NEON code takes clang-cl for it, and doesn't compile. Without
+    # VapourSynth's own NEON kernels, which test for the CPU's features with clang's options (its filters that
+    # have them aren't used here)
     name=$(basename "$archive" .tar.gz)
     if ! ls "$deps/$name"-*-win_arm64.whl >/dev/null 2>&1; then
         echo "== Building $name for arm64"
         unzip_to "$(fetch "$VAPOURSYNTH_PYTHON_URL" "$VAPOURSYNTH_PYTHON_SHA256")" "$tmp/build-python"
-        PATH="$PATH:/c/Program Files/LLVM/bin" CC=clang-cl CXX=clang-cl AR=llvm-lib \
-            "$tmp/build-python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
-            -Csetup-args=--vsenv "$archive"
+        "$tmp/build-python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
+            -Csetup-args=--vsenv -Csetup-args=-Denable_arm_asm=false "$archive"
     fi
     archive=$(ls "$deps/$name"-*-win_arm64.whl | head -1)
 fi
