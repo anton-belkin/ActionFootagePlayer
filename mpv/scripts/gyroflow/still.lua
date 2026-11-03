@@ -1,14 +1,16 @@
--- Paused, the frame at its best: at full size, and without its noise (Ctrl+p, on or off: it sticks; still=yes in
--- gyroflow.conf).
+-- Paused, the frame at its best: without its noise (Ctrl+p, on or off: it sticks; still=yes in gyroflow.conf), and at
+-- full size (Ctrl+f now; by itself with paused_full_size=auto).
 --
 -- While it plays, the stabilized frame may be rendered smaller than the source (to fit the display, or resolution=1080
--- or 720) from an input scaled down first, and with fps_limit only every 2nd or 4th frame is there. A moment after
--- the video pauses (still_delay, so stepping through frames stays quick), main.lua sets the chain up at full size: no
--- input scaling, every frame, the output at the project's or the video's own size (up to 4K's pixels), from the same
--- engine (vs-gyroflow's render_size_for). mpv seeks to the paused frame again with it. Playing on sets it up for
--- playback again at once, paused until its first frame is through; a step to the next frame plays one and pauses
--- again at full size. On each of these seeks the control file has the plugin leave out the frames before the one on
--- screen, which mpv decodes from the keyframe, and the edge fill's sphere carries on (vs-gyroflow's set_rejoin).
+-- or 720) from an input scaled down first, and with fps_limit only every 2nd or 4th frame is there. With Ctrl+f, or a
+-- moment after the video pauses with paused_full_size=auto (still_delay, so stepping through frames stays quick),
+-- main.lua sets the chain up at full size: no input scaling, every frame, the output at the project's or the video's
+-- own size (up to 4K's pixels), from the same engine (vs-gyroflow's render_size_for). mpv seeks to the paused frame
+-- again with it. Playing on sets it up for playback again at once, paused until its first frame is through; a step to
+-- the next frame plays one and pauses again at full size. It's off by default: on a slow GPU each set-up costs a
+-- moment, pausing and playing on. On each of these seeks the control file has the plugin leave out the frames before
+-- the one on screen, which mpv decodes from the keyframe, and the edge fill's sphere carries on (vs-gyroflow's
+-- Edges::seeked).
 --
 -- At 60 fps the eye averages the noise over time; a paused frame keeps all of it. So that same seek, or one of its
 -- own when the chain already is at full size, decodes the frames before it too (hr-seek-framedrop=no: from the
@@ -16,8 +18,8 @@
 -- from it and the still_radius frames on each side, moved onto it by the motion between them (vs-gyroflow/src/still.rs).
 -- The stabilization leaves the frames before that window blank and unprocessed (mpv drops them as it seeks), so it
 -- takes about a second for a 4K clip. The control file says which frame, only for that seek: the next one (or the
--- chain set up again) plays as usual. Playing on goes on from the cleaned frame, as it was. One re-render for both:
--- the cleaned frame is the full-size one.
+-- chain set up again) plays as usual. Playing on goes on from the cleaned frame, as it was. At full size it's one
+-- re-render for both: the cleaned frame is the full-size one.
 --
 -- Only video the plugin stabilizes: the filter is where the frames are (not where it failed to load the motion data).
 -- No clean frame in the last frames of a clip, whose neighbours after it aren't there.
@@ -42,8 +44,11 @@ local PLAYING_ON = 0.25
 local o = nil
 local stabilizing = nil
 local step = nil
--- main.lua's { needed(): playing renders smaller or skips frames, active(): the chain is at full size, set(on) }
+-- main.lua's { needed(): playing renders smaller or skips frames, active(): the chain is at full size, auto(): on
+-- pausing, set(on) }
 local full = nil
+-- Ctrl+f while the frame was being cleaned up at the playback size: at full size once that's done
+local full_next = false
 local enabled = true
 local timer = nil
 -- Played on from full size: the chain set up for playback once it plays on (PLAYING_ON); paused through that set-up
@@ -95,10 +100,11 @@ local function frame_only(t)
     if t and fps and fps > 0 and write_control({ skip_before = t - 0.5 / fps }) then pending = { ours = true } end
 end
 
-local function start()
+-- full_now: Ctrl+f, at full size whatever paused_full_size is
+local function start(full_now)
     timer = nil
     if pending or resuming or failed or not shown or not mp.get_property_native("pause") or not stabilizing() then return end
-    local bigger = full and full.needed()
+    local bigger = full and (full_now or full.auto()) and full.needed()
     local t = mp.get_property_number("time-pos")
     local fps = mp.get_property_number("container-fps") or mp.get_property_number("estimated-vf-fps")
     local duration = mp.get_property_number("duration")
@@ -129,7 +135,7 @@ local function schedule()
     if timer then timer:kill() end
     timer = nil
     if shown and not pending and not resuming and mp.get_property_native("pause") then
-        timer = mp.add_timeout(o.still_delay, start)
+        timer = mp.add_timeout(o.still_delay, function() start() end)
     end
 end
 
@@ -164,11 +170,17 @@ end)
 
 mp.register_event("playback-restart", function()
     shown = true
-    if pending and not pending.ours then
+    local done = pending and not pending.ours
+    if pending and not done then return end
+    if done then
         mp.msg.verbose(pending.framedrop and "frame cleaned up" or "frame shown again, the chain set up anew")
         finish()
         mp.osd_message("", 0)
-    elseif not pending then
+    end
+    if full_next then
+        full_next = false
+        start(true)
+    elseif not done then
         -- Paused on arriving (a seek while paused, a clip opened paused)
         schedule()
     end
@@ -177,7 +189,7 @@ end)
 mp.register_event("end-file", function()
     if timer then timer:kill() end
     if playing_on then playing_on:kill() end
-    timer, playing_on, shown, resuming = nil, nil, false, false
+    timer, playing_on, shown, resuming, full_next = nil, nil, false, false, false
     finish()
 end)
 mp.register_event("shutdown", function() os.remove(M.CONTROL) end)
@@ -191,7 +203,8 @@ function M.init(options, is_stabilizing, frame_step)
 end
 
 -- hooks: needed() playing renders the frame smaller than full size or skips frames, active() the chain is at full
--- size, set(on) sets it up at full size (while paused: mpv seeks to the frame again) or for playback
+-- size, auto() it's set up so on pausing (paused_full_size=auto), set(on) sets it up at full size (while paused: mpv
+-- seeks to the frame again) or for playback
 function M.full_size(hooks)
     full = hooks
 end
@@ -205,9 +218,29 @@ mp.add_key_binding("Ctrl+p", "still", function()
     if enabled then
         schedule()
     elseif mp.get_property_native("pause") and not pending then
-        -- The frame as it is again
+        -- The frame as it is again (the frames before it left out, the sphere carrying on)
         local t = mp.get_property_number("time-pos")
-        if t then mp.command_native({ "seek", t, "absolute+exact" }) end
+        if t then
+            frame_only(t)
+            mp.command_native({ "seek", t, "absolute+exact" })
+        end
+    end
+end)
+
+-- Ctrl+f: the paused frame at full size now (pausing first), cleaned up in the same re-render when Ctrl+p is on
+mp.add_key_binding("Ctrl+f", "full", function()
+    if not (full and stabilizing()) then return mp.osd_message("Full resolution: only while it's stabilized", 1.5) end
+    if full.active() then return mp.osd_message("Full resolution", 1.5) end
+    if not full.needed() then return mp.osd_message("Full resolution: it plays at full size already", 1.5) end
+    if not mp.get_property_native("pause") then mp.set_property_native("pause", true) end
+    if timer then timer:kill() end
+    timer = nil
+    if pending or not shown then
+        -- Once the frame being cleaned up, or sought to, is on screen
+        full_next = true
+        mp.osd_message("Full resolution…", 10)
+    else
+        start(true)
     end
 end)
 

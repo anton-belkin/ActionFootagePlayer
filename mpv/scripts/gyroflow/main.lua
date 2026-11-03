@@ -42,6 +42,8 @@
 --                     sticks for the next clips
 --   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
 --                     sticks (still.lua)
+--   Ctrl+f   full     the paused frame rendered at full size now, every frame there, cleaned too when Ctrl+p is on;
+--                     pauses first. What paused_full_size=auto does by itself (still.lua)
 --   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
 --                     (above water nothing moves either way, and the lens stays as it is). It sticks for the next clips
 --   Shift+E  export   the clip as it plays (export.lua)
@@ -58,15 +60,16 @@
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, edges <mode> or ask_when_slow
---                           yes|no, kept in gyroflow.conf at once (quality.lua)
+--   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
+--                           edges <mode> or ask_when_slow yes|no, kept in gyroflow.conf at once (quality.lua)
 --   remember               the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
--- edges, edges_blur, fps_limit, resolution, ask_when_slow, waiting (for a project from Gyroflow), exporting, last_export.
+-- edges, edges_blur, fps_limit, resolution, paused_full_size, ask_when_slow, waiting (for a project from Gyroflow),
+-- exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -108,8 +111,12 @@
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   still=yes    the paused frame cleaned of its noise (Ctrl+p), from it and still_radius=5 frames on each side,
 --                still_delay=0.4 s after it pauses; still_grain=0.25 of the brightness's grain stays, so it doesn't
---                look smeared (0: none). Paused, the frame is rendered at full size, every frame, whatever
---                resolution and fps_limit are, from still_delay after it pauses too (still.lua)
+--                look smeared (0: none)
+--   paused_full_size=off  paused, the frame stays as it played; Ctrl+f renders it at full size. auto: still_delay after
+--                it pauses, it's rendered at full size (no input scaling, the output at the project's or the video's own
+--                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
+--                re-render as the clean still frame; playing on sets the chain up for playback again, which costs a
+--                moment on a slow GPU each time (still.lua). The quality menu sets it
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -117,7 +124,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -401,7 +408,7 @@ local function publish()
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
-        fps_limit = o.fps_limit, resolution = o.resolution, ask_when_slow = o.ask_when_slow,
+        fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, ask_when_slow = o.ask_when_slow,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -623,6 +630,8 @@ still.full_size({
         return render_sizes(current_source).key ~= render_sizes(current_source, true).key or frame_step(current_source) > 1 or fast(current_source)
     end,
     active = function() return full_size end,
+    -- By itself on pausing (paused_full_size=auto), or only with Ctrl+f
+    auto = function() return o.paused_full_size == "auto" end,
     set = function(on)
         if on then
             local out = render_sizes(current_source, true).output
@@ -795,6 +804,7 @@ local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
     resolution = { display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
+    paused_full_size = { off = "paused, the frame as it played (Ctrl+f: at full size)", auto = "paused, the frame at full size" },
     edges = EDGE_LABELS,
 }
 
@@ -806,6 +816,8 @@ local function set_quality(key, value)
         o.fps_limit = tonumber(value)
     elseif key == "resolution" then
         o.resolution = value
+    elseif key == "paused_full_size" then
+        o.paused_full_size = value
     else
         o.ask_when_slow = value == "yes"
     end
