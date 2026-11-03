@@ -190,7 +190,7 @@
         </li>
         <li>
           <h3>Turn in-camera stabilization off</h3>
-          <p>EIS off lets the camera record clean motion data for Action Footage Player. On GoPro, turn HyperSmooth off; on Insta360, FlowState. Clips the camera already stabilized play as they are.</p>
+          <p>EIS off lets the camera record clean motion data for Action Footage Player. On GoPro HERO8 and newer you can leave HyperSmooth on: its result won't be perfect, and the player stabilizes it further. On HERO5, HERO6 and HERO7 Black it has to be off.</p>
         </li>
         <li>
           <h3>After the dive, double-click a clip</h3>
@@ -213,7 +213,7 @@
           <thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Under water</th></tr></thead>
           <tbody>
             <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth and water status, HDR export. Tested on real dive footage.</td></tr>
-            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span></td><td>GP-Log (HERO12 Black on firmware 1.20 or later) and stabilization with HyperSmooth off are in place. Not yet checked on real footage.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span></td><td>GP-Log (HERO12 Black on firmware 1.20 or later) and stabilization are in place; HyperSmooth may stay on. Not yet checked on real footage.</td></tr>
             <tr><th scope="row">Older GoPro<br><span class="cam-sub">HERO5 Black to HERO11</span></th><td><span class="pill part">Not verified</span></td><td>No log on these models. Gyroflow's engine reads their motion data (HERO5 Black and newer); support in the player has not been checked yet.</td></tr>
             <tr><th scope="row">Other DJI<br><span class="cam-sub">Action 4, Action 5 Pro</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
             <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-bit I-Log is not supported.</td></tr>

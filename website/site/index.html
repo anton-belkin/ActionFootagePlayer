@@ -193,7 +193,7 @@
       <div class="features">
         <div class="feature">
           <h3>Log in true HDR</h3>
-          <p>D-Log M, D-Log, GP-Log, GP-Log2 and 10-bit I-Log are converted from the makers' published curves, or LUTs tested against them, and shown as HDR, with no look added: the scene's brightness relationships stay as they were. Made for HDR screens: that is where log beats the camera's default mode.</p>
+          <p>D-Log M, D-Log, GP-Log, GP-Log2 and 10-bit I-Log are converted with curves the color community measured on the cameras themselves, or with the makers' own formulas where they publish them, and shown as HDR, with no look added: the scene's brightness relationships stay as they were. Made for HDR screens: that is where log beats the camera's default mode.</p>
           <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log (10-bit)</span>
         </div>
         <div class="feature">
@@ -303,7 +303,7 @@
           <tbody>
             <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth telemetry and HDR export, used daily.</td></tr>
             <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span></td><td>Should work; not yet checked on real footage.</td></tr>
-            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span></td><td>GP-Log (HERO12 Black on firmware 1.20 or later) and stabilization with HyperSmooth off are in place; not yet checked on real footage. MAX2's GP-Log is not supported yet.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span></td><td>GP-Log (HERO12 Black on firmware 1.20 or later) and stabilization are in place; not yet checked on real footage. MAX2's GP-Log is not supported yet.</td></tr>
             <tr><th scope="row">Other DJI cameras<br><span style="font-weight:400;color:var(--muted)">Action 4, Action 5 Pro, Pocket 3…</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
             <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-bit I-Log is not supported.</td></tr>
             <tr><th scope="row">DJI drones</th><td><span class="pill part">Partial</span></td><td>Log by choosing the curve by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>; stabilization needs a Gyroflow project.</td></tr>
@@ -353,7 +353,7 @@
         </details>
         <details>
           <summary>Who needs the stabilization in the player?</summary>
-          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>The same goes for GoPro's HyperSmooth and Insta360's FlowState: turn them off. Footage the camera already stabilized gets worse when stabilized again, so the player stabilizes only clips the camera recorded with its own stabilization off, and plays the others as they are. (GoPro and Insta360 footage in the player is still waiting to be verified.)</p></div>
+          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes; GoPro footage in the player is still waiting to be verified.)</p></div>
         </details>
         <details>
           <summary>Which computers does it run on?</summary>
