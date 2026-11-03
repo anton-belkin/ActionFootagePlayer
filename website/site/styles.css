@@ -53,7 +53,10 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+/* Links to #anchors land below the sticky header, not under it: top.js measures it into --top-h; these are its fallbacks */
+:root { --top-h: 58px; }
+@media (max-width: 519px) { :root { --top-h: 80px; } }
+html { scroll-behavior: smooth; scroll-padding-top: calc(env(safe-area-inset-top, 0px) + var(--top-h)); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
   background: var(--bg);
@@ -179,7 +182,7 @@ h1, h2, h3 { overflow-wrap: break-word; }
 }
 
 /* Generic section */
-.section { padding-block: 72px; }
+.section { padding-block: 72px; scroll-margin-top: -40px; } /* a link lands with the heading 32px under the header, not past the 72px padding */
 .section-head { display: grid; gap: 14px; margin-bottom: 36px; max-width: 760px; }
 
 /* Gap section */
@@ -276,7 +279,7 @@ footer a { color: var(--ink); }
 .route h3 .go { color: var(--accent-ink); font-family: var(--f-mono); font-weight: 500; }
 .route p { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .route { transition: none; } .route:hover { transform: none; } }
-.section.tight-top { padding-top: 0; }
+.section.tight-top { padding-top: 0; scroll-margin-top: 32px; }
 .section.routes-band { padding-block: 8px 72px; }
 .stack { display: grid; gap: 18px; align-content: start; }
 .inline-link { color: #FFB48A; font-weight: 600; text-underline-offset: 3px; }
@@ -299,7 +302,7 @@ footer a { color: var(--ink); }
 .dl-hero h1 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 3.8rem); }
 .dl-mobile { color: var(--ink); }
 .platforms { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
-.platform { scroll-margin-top: 80px; display: grid; grid-template-rows: auto 1fr auto auto; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.platform { scroll-margin-top: 24px; display: grid; grid-template-rows: auto 1fr auto auto; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
 .platform.is-yours { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .platform-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .platform-head h2, .platform-head h3 { font-size: var(--step-1); }
