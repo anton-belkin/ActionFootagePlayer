@@ -1105,7 +1105,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let level = match unsafe { level_arg(api, input) } { Ok(l) => l, Err(e) => return fail(node, e) };
     engine.edges.configure(edge_mode, edge_settings, view, level, edge_control);
     engine.edges.set_realtime(true);
-    engine.edges.set_rejoin(skip_before.is_finite());
+    engine.edges.seeked(skip_before.is_finite());
 
     let mut out_vi = vi.clone();
     out_vi.width  = align(render_size.0 as i64, fmt.sub_sampling_w) as c_int;
