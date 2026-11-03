@@ -146,6 +146,9 @@ pub struct Edges {
     sphere: OnceLock<Sphere>,
     /// The time of the frame last written to the sphere; held while writing, so writers take turns
     sphere_written: Mutex<Option<i64>>,
+    /// The filter was made for a seek back to the frame on screen (`set_rejoin`): frames up to the one last written
+    /// are ones the sphere has, however far back, not a jump
+    rejoin: AtomicBool,
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
@@ -180,7 +183,7 @@ impl Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()),
-            sphere: OnceLock::new(), sphere_written: Mutex::new(None),
+            sphere: OnceLock::new(), sphere_written: Mutex::new(None), rejoin: AtomicBool::new(false),
             expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
@@ -203,6 +206,14 @@ impl Edges {
         self.realtime.store(realtime, Ordering::Relaxed);
     }
 
+    /// The filter is made for a seek back to the frame on screen, set up again (still.lua: the clean still frame, the
+    /// paused frame at full size, and playing on from it): mpv decodes from the keyframe before it, and the frames up
+    /// to it and its neighbours after, which the sphere had while it played, come again. Without it they'd read as a
+    /// seek back and start the sphere over. Off for any other seek
+    pub fn set_rejoin(&self, rejoin: bool) {
+        self.rejoin.store(rejoin, Ordering::Relaxed);
+    }
+
     /// Ends the sphere writer (Engine's drop)
     pub(crate) fn stop(&self) {
         let _frame = self.feed.frame.lock();
@@ -214,7 +225,8 @@ impl Edges {
     /// finished after it, unless it's a seek back
     fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>) {
         let mut frame = self.feed.frame.lock();
-        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < MAX_GAP_US) { return; }
+        let rejoin = self.rejoin.load(Ordering::Relaxed);
+        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && (rejoin || *t - timestamp_us < MAX_GAP_US)) { return; }
         *frame = Some((timestamp_us, src_lo.clone()));
         self.feed.ready.notify_one();
     }
@@ -233,8 +245,16 @@ impl Edges {
         // The time since the last frame written; 0 when it starts over
         let mut dt = 0.0;
         match *last {
-            None => sphere.reset(now),
-            Some(l) if (timestamp_us - l).abs() > MAX_GAP_US => sphere.reset(now),
+            None => {
+                log::info!("Edges: the sphere starts at {timestamp_us} us");
+                sphere.reset(now);
+            }
+            // Seen again after a seek back to the frame on screen (set_rejoin)
+            Some(l) if timestamp_us <= l && self.rejoin.load(Ordering::Relaxed) => return,
+            Some(l) if (timestamp_us - l).abs() > MAX_GAP_US => {
+                log::info!("Edges: a jump from {l} to {timestamp_us} us, the sphere starts over");
+                sphere.reset(now);
+            }
             // Another worker already wrote a newer frame
             Some(l) if timestamp_us <= l => return,
             Some(l) => {
@@ -323,7 +343,9 @@ impl Edges {
         self.chromatic.store(true, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
-        *self.sphere_written.lock() = None;
+        // The sphere stays: mpv makes the filter again on every seek, the clean still frame's back to the paused frame
+        // and the chain set up at another size (full size while paused) among them. A seek that jumps (MAX_GAP_US)
+        // starts it over as it's written
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
     }
