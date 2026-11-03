@@ -70,7 +70,7 @@
     </div>
   </section>
 
-  <section class="section band tight-top" aria-label="L’app">
+  <section class="section band tight-top" id="apps" aria-label="L’app">
     <div class="wrap platforms">
 
       <article class="platform" id="mac" data-os="mac">
@@ -78,24 +78,30 @@
           <h2>macOS</h2>
           <span class="pill ok yours" hidden>Votre système</span>
         </div>
-        <p class="platform-req">Un Mac Apple Silicon (M1 ou plus récent), macOS 15 Sequoia ou ultérieur</p>
-        <a class="btn primary dl-btn" data-asset="mac-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+        <p class="platform-req">Apple Silicon (M1 ou plus récent), macOS 15 Sequoia ou ultérieur</p>
+        <a class="btn dl-btn" data-asset="mac-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-          Télécharger pour Mac <small data-fill="size">.zip</small>
+          Télécharger<span class="vh"> pour Mac</span> <small data-fill="size">.zip</small>
         </a>
-        <dl class="file-meta">
-          <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-macos-arm64.zip</code></dd>
-          <dt>Version</dt><dd data-release="version">la dernière</dd>
-          <dt>Publiée le</dt><dd data-release="date">voir la page de la version</dd>
-          <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
-        </dl>
-        <h3>Installation</h3>
-        <ol class="install">
-          <li>Décompressez le fichier téléchargé et déplacez <b>ActionFootagePlayer</b> dans Applications.</li>
-          <li>Ouvrez-la. La première fois, macOS refuse de l’ouvrir : l’app est signée ad hoc, et non par un compte développeur Apple. Ouvrez <b>Réglages Système → Confidentialité et sécurité</b>, faites défiler jusqu’à la rubrique Sécurité, cliquez sur <b>Ouvrir quand même</b> à côté d’ActionFootagePlayer et confirmez.</li>
-          <li>Acceptez sa configuration : elle devient le lecteur des vidéos MP4 (macOS vous demande de confirmer), le Finder reçoit les actions rapides <i>Play Stabilized</i> et <i>Stabilize + LUT</i>, et la LUT Rec.709 de DJI est téléchargée depuis le site de DJI.</li>
-        </ol>
-        <p class="platform-note">Elle embarque ses propres mpv et ffmpeg. Pour la mettre à jour, remplacez-la dans Applications par la nouvelle version. Pas de version pour les Mac Intel.</p>
+        <button type="button" class="steps-btn" popovertarget="install-mac">Étapes d’installation</button>
+        <div class="install-pop" id="install-mac" popover>
+          <div class="pop-head">
+            <h3>Installer sur macOS</h3>
+            <button type="button" class="pop-close" popovertarget="install-mac" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Décompressez le fichier téléchargé et déplacez <b>ActionFootagePlayer</b> dans Applications.</li>
+            <li>Ouvrez-la. La première fois, macOS refuse de l’ouvrir : l’app est signée ad hoc, et non par un compte développeur Apple. Ouvrez <b>Réglages Système → Confidentialité et sécurité</b>, faites défiler jusqu’à la rubrique Sécurité, cliquez sur <b>Ouvrir quand même</b> à côté d’ActionFootagePlayer et confirmez.</li>
+            <li>Acceptez sa configuration : elle devient le lecteur des vidéos MP4 (macOS vous demande de confirmer), le Finder reçoit les actions rapides <i>Play Stabilized</i> et <i>Stabilize + LUT</i>, et la LUT Rec.709 de DJI est téléchargée depuis le site de DJI.</li>
+          </ol>
+          <p class="platform-note">Elle embarque ses propres mpv et ffmpeg. Pour la mettre à jour, remplacez-la dans Applications par la nouvelle version. Pas de version pour les Mac Intel.</p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-macos-arm64.zip</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>Publiée le</dt><dd data-release="date">voir la page de la version</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
       </article>
 
       <article class="platform" id="windows" data-os="windows">
@@ -103,38 +109,61 @@
           <h2>Windows</h2>
           <span class="pill ok yours" hidden>Votre système</span>
         </div>
-        <p class="platform-req">Windows 10 ou 11, 64 bits (x86-64 ou ARM), une carte graphique compatible DirectX 12 ou Vulkan</p>
-        <a class="btn primary dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+        <p class="platform-req">Windows 10 ou 11 sur Intel ou AMD (x86-64), carte graphique DirectX 12 ou Vulkan</p>
+        <a class="btn dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-          Télécharger pour Windows <small data-fill="size">.exe</small>
+          Télécharger<span class="vh"> pour Windows</span> <small data-fill="size">.exe</small>
         </a>
-        <dl class="file-meta">
-          <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-x86_64-setup.exe</code></dd>
-          <dt>Version</dt><dd data-release="version">la dernière</dd>
-          <dt>Publiée le</dt><dd data-release="date">voir la page de la version</dd>
-          <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
-        </dl>
-        <div class="dl-alt" id="windows-arm">
-          <div class="platform-head">
-            <p><b>Un PC à processeur ARM</b> (Snapdragon) : l'application compilée pour lui. Celle ci-dessus y fonctionne aussi, émulée et plus lente.</p>
-            <span class="pill ok yours" hidden>Votre PC</span>
+        <button type="button" class="steps-btn" popovertarget="install-windows">Étapes d’installation</button>
+        <div class="install-pop" id="install-windows" popover>
+          <div class="pop-head">
+            <h3>Installer sur Windows</h3>
+            <button type="button" class="pop-close" popovertarget="install-windows" popovertargetaction="hide" aria-label="Fermer">&times;</button>
           </div>
-          <a class="btn dl-btn" data-asset="windows-arm-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-            Télécharger pour Windows sur ARM <small data-fill="size">.exe</small>
-          </a>
+          <ol class="install">
+            <li>Lancez le programme d’installation. Il ne demande aucun droit d’administrateur : il installe l’app pour vous seul, dans <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. Si votre navigateur signale que ce fichier n’est pas téléchargé fréquemment, choisissez <b>Conserver</b>.</li>
+            <li>Le programme d’installation n’est pas signé : la première fois, Windows SmartScreen affiche un avertissement. Cliquez sur <b>Informations complémentaires</b>, puis sur <b>Exécuter quand même</b>.</li>
+            <li>Il ajoute ActionFootagePlayer à « Ouvrir avec » pour les vidéos MP4 et MOV, avec <i>Play in ActionFootagePlayer</i> et <i>Stabilize + LUT</i> dans le menu de l’Explorateur de fichiers (sous Windows 11, dans « Afficher d’autres options »). Il télécharge la LUT Rec.709 de DJI et, si vous laissez la case cochée, ouvre les Paramètres pour en faire l’app par défaut des vidéos MP4.</li>
+          </ol>
+          <p class="platform-note">Elle embarque ses propres mpv, VapourSynth avec son Python, et ffmpeg. Pour la désinstaller : Paramètres → Applications.</p>
           <dl class="file-meta">
-            <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-arm64-setup.exe</code></dd>
+            <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-x86_64-setup.exe</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>Publiée le</dt><dd data-release="date">voir la page de la version</dd>
             <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
           </dl>
         </div>
-        <h3>Installation</h3>
-        <ol class="install">
-          <li>Lancez le programme d’installation. Il ne demande aucun droit d’administrateur : il installe l’app pour vous seul, dans <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. Si votre navigateur signale que ce fichier n’est pas téléchargé fréquemment, choisissez <b>Conserver</b>.</li>
-          <li>Le programme d’installation n’est pas signé : la première fois, Windows SmartScreen affiche un avertissement. Cliquez sur <b>Informations complémentaires</b>, puis sur <b>Exécuter quand même</b>.</li>
-          <li>Il ajoute ActionFootagePlayer à « Ouvrir avec » pour les vidéos MP4 et MOV, avec <i>Play in ActionFootagePlayer</i> et <i>Stabilize + LUT</i> dans le menu de l’Explorateur de fichiers (sous Windows 11, dans « Afficher d’autres options »). Il télécharge la LUT Rec.709 de DJI et, si vous laissez la case cochée, ouvre les Paramètres pour en faire l’app par défaut des vidéos MP4.</li>
-        </ol>
-        <p class="platform-note">Elle embarque ses propres mpv, VapourSynth avec son Python, et ffmpeg. Pour la désinstaller : Paramètres → Applications. Sur ARM, les exports sont encodés par le processeur (x265) : les encodeurs matériels qu'elle utilise sont ceux de NVIDIA, d'Intel et d'AMD.</p>
+      </article>
+
+      <article class="platform" id="windows-arm" data-os="windows-arm">
+        <div class="platform-head">
+          <h2>Windows sur ARM</h2>
+          <span class="pill ok yours" hidden>Votre système</span>
+        </div>
+        <p class="platform-req">Windows 10 ou 11 sur processeur ARM (Snapdragon), carte graphique DirectX 12 ou Vulkan</p>
+        <a class="btn dl-btn" data-asset="windows-arm-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> pour Windows sur ARM</span> <small data-fill="size">.exe</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="install-windows-arm">Étapes d’installation</button>
+        <div class="install-pop" id="install-windows-arm" popover>
+          <div class="pop-head">
+            <h3>Installer sur Windows sur ARM</h3>
+            <button type="button" class="pop-close" popovertarget="install-windows-arm" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Lancez le programme d’installation. Il ne demande aucun droit d’administrateur : il installe l’app pour vous seul, dans <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. Si votre navigateur signale que ce fichier n’est pas téléchargé fréquemment, choisissez <b>Conserver</b>.</li>
+            <li>Le programme d’installation n’est pas signé : la première fois, Windows SmartScreen affiche un avertissement. Cliquez sur <b>Informations complémentaires</b>, puis sur <b>Exécuter quand même</b>.</li>
+            <li>Il ajoute ActionFootagePlayer à « Ouvrir avec » pour les vidéos MP4 et MOV, avec <i>Play in ActionFootagePlayer</i> et <i>Stabilize + LUT</i> dans le menu de l’Explorateur de fichiers (sous Windows 11, dans « Afficher d’autres options »). Il télécharge la LUT Rec.709 de DJI et, si vous laissez la case cochée, ouvre les Paramètres pour en faire l’app par défaut des vidéos MP4.</li>
+          </ol>
+          <p class="platform-note">Elle embarque ses propres mpv, VapourSynth avec son Python, et ffmpeg, tous compilés pour ARM. Les exports sont encodés par le processeur (x265) : les encodeurs matériels qu’elle utilise sont ceux de NVIDIA, d’Intel et d’AMD. L’app x86-64 y fonctionne aussi, émulée et plus lente. Pour la désinstaller : Paramètres → Applications.</p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-arm64-setup.exe</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>Publiée le</dt><dd data-release="date">voir la page de la version</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
       </article>
 
       <article class="platform" id="linux" data-os="linux">
@@ -142,13 +171,32 @@
           <h2>Linux</h2>
           <span class="pill ok yours" hidden>Votre système</span>
         </div>
-        <p class="platform-req">x86-64, avec votre propre mpv</p>
+        <p class="platform-req">x86-64, avec votre propre mpv. Pas encore d’app pour Linux</p>
         <a class="btn dl-btn" href="#plugins">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-          Les plugins pour votre mpv
+          Les plugins
         </a>
-        <p>Pas encore d’app pour Linux : les plugins s’installent dans le mpv que vous avez déjà. Ou bien, depuis une copie du code source, <code>./install.sh</code> les compile et les installe tous, avec la LUT de DJI ; <code>./install.sh --apps</code> ajoute aussi ActionFootagePlayer au menu des applications, comme app par défaut des vidéos MP4.</p>
-        <p class="platform-note">Compilés à chaque version, mais pas encore essayés à la main sous Linux.</p>
+        <button type="button" class="steps-btn" popovertarget="install-linux">Étapes d’installation</button>
+        <div class="install-pop" id="install-linux" popover>
+          <div class="pop-head">
+            <h3>Installer sur Linux</h3>
+            <button type="button" class="pop-close" popovertarget="install-linux" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <p>Pas encore d’app pour Linux : les plugins s’installent dans le mpv que vous avez déjà. Ou bien, depuis une copie du code source, <code>./install.sh</code> les compile et les installe tous, avec la LUT de DJI ; <code>./install.sh --apps</code> ajoute aussi ActionFootagePlayer au menu des applications, comme app par défaut des vidéos MP4.</p>
+          <h4 class="compat-title">La stabilisation, distribution par distribution</h4>
+          <ul class="compat">
+            <li><span class="compat-name">Fedora 44 et ultérieures</span> <span class="pill ok">oui</span><span class="compat-note">Pour le HEVC et le H.264, le ffmpeg de RPM Fusion : <code>sudo dnf swap ffmpeg-free ffmpeg --allowerasing</code></span></li>
+            <li><span class="compat-name">Fedora 43</span> <span class="pill ok">oui</span><span class="compat-note">mpv 0.40 : pas de menu du clic droit. ffmpeg comme ci-dessus</span></li>
+            <li><span class="compat-name">openSUSE Tumbleweed</span> <span class="pill ok">oui</span><span class="compat-note">Pour le HEVC et le H.264, le ffmpeg de Packman</span></li>
+            <li><span class="compat-name">Le mpv de Flathub</span> <span class="pill exp">pas essayé</span><span class="compat-note">Il inclut VapourSynth, mais son bac à sable cache le ffmpeg du système, et les exports ne peuvent aller que dans Vidéos, Images et /tmp</span></li>
+            <li><span class="compat-name">Arch Linux, EndeavourOS</span> <span class="pill part">non</span><span class="compat-note">Son mpv 0.41.0 est compilé sans : le correctif de mpv pour le VapourSynth actuel n’est pas encore publié. Un mpv compilé depuis git l’a</span></li>
+            <li><span class="compat-name">Debian, Ubuntu, Linux Mint, Pop!_OS</span> <span class="pill part">non</span><span class="compat-note">Ni VapourSynth ni un mpv qui l’inclut dans leurs dépôts. Les compiler soi-même (mpv depuis git) peut marcher, mais c’est une soirée de travail, pas encore essayée ici. Les autres plugins fonctionnent</span></li>
+            <li><span class="compat-name">Le mpv de Snap</span> <span class="pill part">non</span><span class="compat-note">Compilé sans VapourSynth</span></li>
+            <li><span class="compat-name">ARM (aarch64)</span> <span class="pill part">non</span><span class="compat-note">La stabilisation n’est compilée que pour x86-64</span></li>
+          </ul>
+          <p class="platform-note">Vérifié le 3 novembre 2026. Partout, <code>mpv --vf=help | grep vapoursynth</code> indique si votre mpv l’a. Les autres plugins n’ont besoin que de mpv, le menu du clic droit de mpv 0.41 ou ultérieur.</p>
+          <p class="platform-note">Compilés à chaque version, mais pas encore essayés à la main sous Linux.</p>
+        </div>
       </article>
 
     </div>
@@ -157,74 +205,146 @@
   <section class="section band tight-top" id="plugins">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">Vous utilisez déjà mpv ?</p>
+        <p class="eyebrow">Vous utilisez déjà mpv ?</p>
         <h2>Les plugins seuls</h2>
-        <p class="lede">Les mêmes plugins que ceux de l’app, pour votre propre mpv. Décompressez-les dans le dossier <code>scripts</code> de mpv : <code>~/.config/mpv/scripts/</code>, ou <code>%APPDATA%\mpv\scripts\</code> sous Windows. Rien à ajouter dans <code>mpv.conf</code> ni dans <code>input.conf</code>.</p>
+        <p class="lede">Les mêmes plugins que ceux de l’app, pour votre propre mpv, tous dans un seul zip : le D-Log M et les autres courbes log en HDR, la télémétrie DJI à l’écran, les temps forts marqués par la caméra, le menu du clic droit (mpv 0.41 ou ultérieur), et la stabilisation avec l’export, compilée pour chaque système. Rien à ajouter dans <code>mpv.conf</code> ni dans <code>input.conf</code>.</p>
       </div>
-      <div class="compare-wrap">
-        <table class="dl-table">
-          <thead><tr><th scope="col">Plugin</th><th scope="col">Pour</th><th scope="col">Téléchargement</th></tr></thead>
-          <tbody>
-            <tr>
-              <th scope="row">D-Log M et autres courbes log, en HDR</th>
-              <td>tout mpv, tout système. HDR uniquement : la LUT Rec.709 de DJI n’est pas redistribuée</td>
-              <td><a class="text-link" data-asset="dlogm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-dlogm</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr>
-              <th scope="row">Télémétrie DJI à l’écran</th>
-              <td>tout mpv, tout système</td>
-              <td><a class="text-link" data-asset="telemetry" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-dji-telemetry</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr>
-              <th scope="row">Temps forts marqués par la caméra</th>
-              <td>tout mpv, tout système</td>
-              <td><a class="text-link" data-asset="highlights" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-highlights</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr>
-              <th scope="row">Le menu du clic droit</th>
-              <td>mpv 0.41 ou ultérieur, tout système</td>
-              <td><a class="text-link" data-asset="menu" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-footage-menu</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr data-os="mac">
-              <th scope="row">Stabilisation et export · macOS</th>
-              <td>le mpv de Homebrew sur Apple Silicon (<code>brew install mpv ffmpeg</code>)</td>
-              <td><a class="text-link" data-asset="gyroflow-mac" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, macOS</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr data-os="linux">
-              <th scope="row">Stabilisation et export · Linux</th>
-              <td>x86-64, mpv compilé avec VapourSynth</td>
-              <td><a class="text-link" data-asset="gyroflow-linux" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Linux</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr data-os="windows">
-              <th scope="row">Stabilisation et export · Windows</th>
-              <td>x86-64, mpv compilé avec VapourSynth</td>
-              <td><a class="text-link" data-asset="gyroflow-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-            <tr data-os="windows">
-              <th scope="row">Stabilisation et export · Windows sur ARM</th>
-              <td>arm64, mpv et VapourSynth compilés pour lui (VapourSynth n'en publie pas)</td>
-              <td><a class="text-link" data-asset="gyroflow-windows-arm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows sur ARM</a> <span class="size" data-fill="size"></span></td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="platforms">
+
+      <article class="platform" id="plugins-mac" data-os="mac">
+        <div class="platform-head">
+          <h3>macOS</h3>
+          <span class="pill ok yours" hidden>Votre système</span>
+        </div>
+        <p class="platform-req">Le mpv de Homebrew sur Apple Silicon</p>
+        <a class="btn dl-btn" data-asset="plugins-mac" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> les plugins</span> <small data-fill="size">.zip</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="plugins-mac-steps">Étapes d’installation</button>
+        <div class="install-pop" id="plugins-mac-steps" popover>
+          <div class="pop-head">
+            <h4>Les plugins sous macOS</h4>
+            <button type="button" class="pop-close" popovertarget="plugins-mac-steps" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Installez mpv, et ffmpeg pour les exports, avec Homebrew : <code>brew install mpv ffmpeg</code>.</li>
+            <li>Décompressez-le dans le dossier scripts de mpv : <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code>. Décompressé dans le Finder, c’est un dossier : déplacez les cinq dossiers qu’il contient dans <code>~/.config/mpv/scripts/</code>.</li>
+            <li>Téléchargés avec un navigateur, les binaires de la stabilisation portent l’attribut de quarantaine, et macOS refuse de les lancer : <code>xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow</code></li>
+          </ol>
+          <p class="platform-note">Le D-Log M s’affiche en HDR : la LUT Rec.709 de DJI n’est pas redistribuée. <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#plugins-in-your-own-mpv">L’ajouter, et le reste en détail</a></p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">mpv-plugins-&lt;version&gt;-macos-arm64.zip</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="platform" id="plugins-windows" data-os="windows">
+        <div class="platform-head">
+          <h3>Windows</h3>
+          <span class="pill ok yours" hidden>Votre système</span>
+        </div>
+        <p class="platform-req">mpv compilé avec VapourSynth, x86-64</p>
+        <a class="btn dl-btn" data-asset="plugins-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> les plugins</span> <small data-fill="size">.zip</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="plugins-windows-steps">Étapes d’installation</button>
+        <div class="install-pop" id="plugins-windows-steps" popover>
+          <div class="pop-head">
+            <h4>Les plugins sous Windows</h4>
+            <button type="button" class="pop-close" popovertarget="plugins-windows-steps" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Décompressez-le dans le dossier scripts de mpv, <code>%APPDATA%\mpv\scripts\</code> (créez le dossier s’il n’existe pas).</li>
+            <li>Pour la stabilisation : un mpv compilé avec VapourSynth (<code>mpv --vf=help</code> affiche <code>vapoursynth</code> ; les builds de shinchiro l’incluent), VapourSynth lui-même avec son Python, et une carte graphique DirectX 12 ou Vulkan.</li>
+            <li>Pour les exports : ffmpeg dans le <code>PATH</code>, ou <code>ffmpeg.exe</code> et <code>ffprobe.exe</code> copiés à côté de <code>gyroflow-export.exe</code>.</li>
+          </ol>
+          <p class="platform-note">Les autres plugins n’ont besoin que de mpv. L’app contient tout cela. <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#linux-and-windows">Linux et Windows, en détail</a></p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">mpv-plugins-&lt;version&gt;-windows-x86_64.zip</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="platform" id="plugins-windows-arm" data-os="windows-arm">
+        <div class="platform-head">
+          <h3>Windows sur ARM</h3>
+          <span class="pill ok yours" hidden>Votre système</span>
+        </div>
+        <p class="platform-req">mpv et VapourSynth compilés pour ARM</p>
+        <a class="btn dl-btn" data-asset="plugins-windows-arm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> les plugins</span> <small data-fill="size">.zip</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="plugins-windows-arm-steps">Étapes d’installation</button>
+        <div class="install-pop" id="plugins-windows-arm-steps" popover>
+          <div class="pop-head">
+            <h4>Les plugins sous Windows sur ARM</h4>
+            <button type="button" class="pop-close" popovertarget="plugins-windows-arm-steps" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Décompressez-le dans le dossier scripts de mpv, <code>%APPDATA%\mpv\scripts\</code> (créez le dossier s’il n’existe pas).</li>
+            <li>Pour la stabilisation : un mpv compilé pour ARM avec VapourSynth, VapourSynth lui-même compilé pour ARM avec son Python (VapourSynth n’en publie pas : il se compile depuis ses sources), et une carte graphique DirectX 12 ou Vulkan.</li>
+            <li>Pour les exports : ffmpeg dans le <code>PATH</code>, ou <code>ffmpeg.exe</code> et <code>ffprobe.exe</code> copiés à côté de <code>gyroflow-export.exe</code>. Ils sont encodés par le processeur (x265).</li>
+          </ol>
+          <p class="platform-note">Les autres plugins n’ont besoin que de mpv. L’app pour Windows sur ARM contient tout cela, compilé pour lui : ici, c’est le plus simple.</p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">mpv-plugins-&lt;version&gt;-windows-arm64.zip</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="platform" id="plugins-linux" data-os="linux">
+        <div class="platform-head">
+          <h3>Linux</h3>
+          <span class="pill ok yours" hidden>Votre système</span>
+        </div>
+        <p class="platform-req">x86-64, glibc 2.35 ou ultérieure, mpv compilé avec VapourSynth</p>
+        <a class="btn dl-btn" data-asset="plugins-linux" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> les plugins</span> <small data-fill="size">.zip</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="plugins-linux-steps">Étapes d’installation</button>
+        <div class="install-pop" id="plugins-linux-steps" popover>
+          <div class="pop-head">
+            <h4>Les plugins sous Linux</h4>
+            <button type="button" class="pop-close" popovertarget="plugins-linux-steps" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Décompressez-le dans le dossier scripts de mpv : <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code></li>
+            <li>Pour la stabilisation : un mpv compilé avec VapourSynth (<code>mpv --vf=help</code> affiche <code>vapoursynth</code>), VapourSynth lui-même avec son Python, et une carte graphique avec un pilote Vulkan.</li>
+            <li>Pour les exports : ffmpeg dans le <code>PATH</code>.</li>
+          </ol>
+          <h5 class="compat-title">La stabilisation, distribution par distribution</h5>
+          <ul class="compat">
+            <li><span class="compat-name">Fedora 44 et ultérieures</span> <span class="pill ok">oui</span><span class="compat-note">Pour le HEVC et le H.264, le ffmpeg de RPM Fusion : <code>sudo dnf swap ffmpeg-free ffmpeg --allowerasing</code></span></li>
+            <li><span class="compat-name">Fedora 43</span> <span class="pill ok">oui</span><span class="compat-note">mpv 0.40 : pas de menu du clic droit. ffmpeg comme ci-dessus</span></li>
+            <li><span class="compat-name">openSUSE Tumbleweed</span> <span class="pill ok">oui</span><span class="compat-note">Pour le HEVC et le H.264, le ffmpeg de Packman</span></li>
+            <li><span class="compat-name">Le mpv de Flathub</span> <span class="pill exp">pas essayé</span><span class="compat-note">Il inclut VapourSynth, mais son bac à sable cache le ffmpeg du système, et les exports ne peuvent aller que dans Vidéos, Images et /tmp</span></li>
+            <li><span class="compat-name">Arch Linux, EndeavourOS</span> <span class="pill part">non</span><span class="compat-note">Son mpv 0.41.0 est compilé sans : le correctif de mpv pour le VapourSynth actuel n’est pas encore publié. Un mpv compilé depuis git l’a</span></li>
+            <li><span class="compat-name">Debian, Ubuntu, Linux Mint, Pop!_OS</span> <span class="pill part">non</span><span class="compat-note">Ni VapourSynth ni un mpv qui l’inclut dans leurs dépôts. Les compiler soi-même (mpv depuis git) peut marcher, mais c’est une soirée de travail, pas encore essayée ici. Les autres plugins fonctionnent</span></li>
+            <li><span class="compat-name">Le mpv de Snap</span> <span class="pill part">non</span><span class="compat-note">Compilé sans VapourSynth</span></li>
+            <li><span class="compat-name">ARM (aarch64)</span> <span class="pill part">non</span><span class="compat-note">La stabilisation n’est compilée que pour x86-64</span></li>
+          </ul>
+          <p class="platform-note">Vérifié le 3 novembre 2026. Partout, <code>mpv --vf=help | grep vapoursynth</code> indique si votre mpv l’a. Les autres plugins n’ont besoin que de mpv, le menu du clic droit de mpv 0.41 ou ultérieur.</p>
+          <p class="platform-note">Compilés à chaque version, mais pas encore essayés à la main sous Linux. Depuis une copie du code source, <code>./install.sh</code> compile et installe aussi les plugins, avec la LUT de DJI ; <code>--apps</code> ajoute aussi ActionFootagePlayer au menu des applications.</p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">mpv-plugins-&lt;version&gt;-linux-x86_64.zip</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
       </div>
-      <div class="help dl-notes">
-        <div class="help-card">
-          <h3>La stabilisation sous Linux et Windows</h3>
-          <p>Il lui faut un mpv compilé avec VapourSynth (<code>mpv --vf=help</code> affiche <code>vapoursynth</code> ; sous Windows, les builds de shinchiro l’incluent, le mpv de Debian et d’Ubuntu non), VapourSynth lui-même avec son Python, un GPU compatible Vulkan (ou DirectX 12 sous Windows), et ffmpeg pour les exports. Ajoutez <code>mpv-dlogm</code> à côté pour le D-Log M.</p>
-          <a href="https://github.com/anton-belkin/ActionFootagePlayer#linux-and-windows">Linux et Windows, en détail</a>
-        </div>
-        <div class="help-card">
-          <h3>La stabilisation sous macOS</h3>
-          <p>Téléchargés avec un navigateur, ses binaires portent l’attribut de quarantaine, et macOS refuse de les lancer. Une fois l’archive décompressée : <code>xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow</code></p>
-          <a href="https://github.com/anton-belkin/ActionFootagePlayer#plugins-in-your-own-mpv">Les plugins dans votre propre mpv</a>
-        </div>
-        <div class="help-card">
-          <h3>Depuis le code source</h3>
-          <p>Sur Mac, <code data-fill="name">ActionFootagePlayer-&lt;version&gt;-macos-arm64.tar.gz</code> contient le code source avec les binaires déjà compilés : <code>./install.sh --apps</code> n’a donc pas besoin de Rust. Depuis une simple copie du dépôt, il les compile (Rust, 5 à 10 minutes la première fois).</p>
-          <a data-asset="source" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Le code source précompilé <span class="size" data-fill="size"></span></a>
-        </div>
-      </div>
+      <p class="note">Chaque plugin existe aussi dans un zip à part, parmi <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">les fichiers de la version</a>. Sur Mac, <a class="text-link" data-asset="source" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">le code source avec les binaires précompilés</a> <span class="size" data-fill="size"></span> s’installe avec <code>./install.sh --apps</code>, sans Rust.</p>
     </div>
   </section>
 

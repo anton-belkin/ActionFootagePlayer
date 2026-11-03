@@ -23,14 +23,10 @@
     "windows-app": /^ActionFootagePlayer-.+-windows-x86_64-setup\.exe$/,
     "windows-arm-app": /^ActionFootagePlayer-.+-windows-arm64-setup\.exe$/,
     "source": /^ActionFootagePlayer-.+-macos-arm64\.tar\.gz$/,
-    "dlogm": /^mpv-dlogm-.+\.zip$/,
-    "telemetry": /^mpv-dji-telemetry-.+\.zip$/,
-    "highlights": /^mpv-highlights-.+\.zip$/,
-    "menu": /^mpv-footage-menu-.+\.zip$/,
-    "gyroflow-mac": /^mpv-gyroflow-.+-macos-arm64\.zip$/,
-    "gyroflow-linux": /^mpv-gyroflow-.+-linux-x86_64\.zip$/,
-    "gyroflow-windows": /^mpv-gyroflow-.+-windows-x86_64\.zip$/,
-    "gyroflow-windows-arm": /^mpv-gyroflow-.+-windows-arm64\.zip$/,
+    "plugins-mac": /^mpv-plugins-.+-macos-arm64\.zip$/,
+    "plugins-windows": /^mpv-plugins-.+-windows-x86_64\.zip$/,
+    "plugins-windows-arm": /^mpv-plugins-.+-windows-arm64\.zip$/,
+    "plugins-linux": /^mpv-plugins-.+-linux-x86_64\.zip$/,
     "sums": /^SHA256SUMS$/
   };
 
@@ -45,30 +41,35 @@
     return "";
   }
 
+  // The visitor's system: its cards marked, and its app's download (Linux's: the way to the plugins) the one
+  // orange button. Without knowing the system, none is
+  function mark(os, on) {
+    document.querySelectorAll('[data-os="' + os + '"]').forEach(function (el) {
+      el.classList.toggle("is-yours", on);
+      var pill = el.querySelector(".platform-head > .yours");
+      if (pill) pill.hidden = !on;
+      var btn = el.closest("#apps") && el.querySelector(".dl-btn");
+      if (btn) btn.classList.toggle("primary", on);
+    });
+  }
+
   function markSystem() {
     var os = system();
     if (os === "mobile") { document.getElementById("mobile-note").hidden = false; return; }
     if (!os) return;
-    document.querySelectorAll('[data-os="' + os + '"]').forEach(function (el) {
-      el.classList.add("is-yours");
-      var pill = el.querySelector(".platform-head > .yours");
-      if (pill) pill.hidden = false;
-    });
+    mark(os, true);
     if (os === "windows") markArm();
   }
 
   // A Windows PC with an ARM processor: only Chromium browsers tell (the user agent says x86-64 everywhere). Its
-  // installer becomes the primary button
+  // cards become the visitor's
   function markArm() {
     var ua = navigator.userAgentData;
-    var alt = document.getElementById("windows-arm");
-    if (!alt || !ua || !ua.getHighEntropyValues) return;
+    if (!ua || !ua.getHighEntropyValues) return;
     ua.getHighEntropyValues(["architecture"]).then(function (v) {
       if (v.architecture !== "arm") return;
-      alt.classList.add("is-yours");
-      alt.querySelector(".yours").hidden = false;
-      document.querySelector('[data-asset="windows-app"]').classList.remove("primary");
-      alt.querySelector('[data-asset="windows-arm-app"]').classList.add("primary");
+      mark("windows", false);
+      mark("windows-arm", true);
     }).catch(function () { /* stays as it is */ });
   }
 
@@ -122,8 +123,8 @@
       var asset = pattern && assets.filter(function (a) { return pattern.test(a.name); })[0];
       if (!asset || !/^https:\/\/github\.com\//.test(asset.browser_download_url)) return;
       link.href = asset.browser_download_url;
-      // The file's own block: the ARM installer's, inside the Windows card, is filled by its own link
-      var blocks = ".dl-alt, .platform, tr, .help-card";
+      // The file's own block: its card (with the install steps), or the note it's in
+      var blocks = ".platform, .note";
       var scope = link.closest(blocks) || link;
       function put(what, text) {
         scope.querySelectorAll('[data-fill="' + what + '"]').forEach(function (el) {
