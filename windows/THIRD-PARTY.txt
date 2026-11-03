@@ -17,7 +17,7 @@ Python (python\)
 
 VapourSynth (python\Lib\site-packages\vapoursynth\)
     LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth (for arm64, built from
-    it)
+    it, with one change: its AviSynth layer includes x86's SSE header on x86 only; tools/make_windows_app.sh)
 
 Vulkan loader (vulkan\vulkan-1.dll, used only when the system has none)
     Apache 2.0 (licenses\Vulkan loader.txt). Source: https://github.com/KhronosGroup/Vulkan-Loader; the build:

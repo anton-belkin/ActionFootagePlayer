@@ -160,15 +160,21 @@ if [ $arch = arm64 ]; then
     # finds Visual Studio (--vsenv) and builds for the Python's arm64. With Visual Studio's compiler, not clang-cl
     # (as VapourSynth's x86-64 wheels are): zimg's NEON code takes clang-cl for it, and doesn't compile. Without
     # VapourSynth's own NEON kernels, which test for the CPU's features with clang's options (its filters that
-    # have them aren't used here). Its AviSynth layer includes x86's SSE header, which Visual Studio has for arm64
-    # with its emulation of it (USE_SOFT_INTRINSICS, softintrin.lib); -D, as Git Bash would take /D for a path
+    # have them aren't used here). Its AviSynth layer includes x86's SSE header for a check it makes on x86 only:
+    # the include is made x86-only too, as Visual Studio has no such header for arm64
     name=$(basename "$archive" .tar.gz)
     if ! ls "$deps/$name"-*-win_arm64.whl >/dev/null 2>&1; then
         echo "== Building $name for arm64"
         unzip_to "$(fetch "$VAPOURSYNTH_PYTHON_URL" "$VAPOURSYNTH_PYTHON_SHA256")" "$tmp/build-python"
+        mkdir -p "$tmp/vapoursynth-src"
+        tar -xzf "$archive" -C "$tmp/vapoursynth-src"
+        src="$tmp/vapoursynth-src/$name"
+        perl -pi -e 's|^#include "../core/x86utils.h"$|#ifdef VS_TARGET_CPU_X86\n#include "../core/x86utils.h"\n#endif|' \
+            "$src/src/avisynth/avisynth_compat.cpp"
+        grep -B1 -x '#include "../core/x86utils.h"' "$src/src/avisynth/avisynth_compat.cpp" | grep -qx '#ifdef VS_TARGET_CPU_X86' \
+            || { echo "$name: its AviSynth layer has changed; the arm64 patch no longer applies" >&2; exit 1; }
         "$tmp/build-python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
-            -Csetup-args=--vsenv -Csetup-args=-Denable_arm_asm=false \
-            -Csetup-args=-Dcpp_args=-DUSE_SOFT_INTRINSICS -Csetup-args=-Dcpp_link_args=softintrin.lib "$archive"
+            -Csetup-args=--vsenv -Csetup-args=-Denable_arm_asm=false "$src"
     fi
     archive=$(ls "$deps/$name"-*-win_arm64.whl | head -1)
 fi
