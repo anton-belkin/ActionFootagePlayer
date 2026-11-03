@@ -295,7 +295,7 @@
       <div class="section-head">
         <p class="eyebrow">Cameras</p>
         <h2>What works today.</h2>
-        <p class="lede">Action Footage Player is developed against real footage from one camera. Everything else is supported in code and waits for someone to try it on their own clips.</p>
+        <p class="lede">Action Footage Player is developed against real footage from the DJI Osmo Action 6 and checked on a GoPro HERO12 Black. Everything else is supported in code and waits for someone to try it on their own clips.</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
@@ -303,7 +303,7 @@
           <tbody>
             <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">Verified</span><br><span class="cam-sub">EIS off</span></td><td>Depth telemetry and HDR export too, used daily.</td></tr>
             <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>Single-lens MP4.</td></tr>
-            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Expected</span></td><td>GP-Log on HERO12 Black from firmware 1.20.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">Verified</span></td><td>Verified on a HERO12 Black; the HERO13 Black records GP-Log the same way. GP-Log on HERO12 Black from firmware 1.20.</td></tr>
             <tr><th scope="row">GoPro MISSION 1, MISSION 1 PRO</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">Expected</span></td><td>GP-Log2 is recognized from the clip.</td></tr>
             <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">Not yet</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Expected</span></td><td>Its GP-Log is exposed two stops brighter than the HERO's and needs a conversion of its own; meanwhile <kbd>Ctrl</kbd>+<kbd>l</kbd> applies GP-Log by hand, too bright.</td></tr>
             <tr><th scope="row">Older GoPro<br><span class="cam-sub">HERO5 Black to HERO11</span></th><td><span class="pill part">No log</span></td><td><span class="pill exp">Expected</span></td><td>No log on these models. Gyroflow's engine reads their motion data (HERO5 Black and newer): HyperSmooth has to be off on HERO5 to HERO7 Black, and may stay on from HERO8.</td></tr>
@@ -357,7 +357,7 @@
         </details>
         <details>
           <summary>Who needs the stabilization in the player?</summary>
-          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes; GoPro footage in the player is still waiting to be verified.)</p></div>
+          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes. GoPro footage in the player is verified on a HERO12 Black.)</p></div>
         </details>
         <details>
           <summary>Which computers does it run on?</summary>
