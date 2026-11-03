@@ -30,6 +30,9 @@ local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log
 local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }
+-- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
+local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
+local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
@@ -177,6 +180,17 @@ local function stabilization_menu(g, key)
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
     end
+    local quality = {}
+    for _, r in ipairs(FRAME_RATES) do
+        table.insert(quality, item(r[2], "script-message-to gyroflow quality fps_limit " .. r[1], { checked = tostring(g.fps_limit or 0) == r[1] }))
+    end
+    table.insert(quality, SEPARATOR)
+    for _, r in ipairs(RESOLUTIONS) do
+        table.insert(quality, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
+    end
+    table.insert(quality, SEPARATOR)
+    table.insert(quality, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
+                               { checked = g.ask_when_slow ~= false }))
     return {
         item(g.kind == "project" and "On (Gyroflow project)" or "On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
         item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
@@ -205,6 +219,7 @@ local function stabilization_menu(g, key)
         }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
+        submenu("Quality", quality),
         item("Clean still frame on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),

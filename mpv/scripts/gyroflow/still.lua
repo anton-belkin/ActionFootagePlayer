@@ -25,6 +25,7 @@ M.CONTROL = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.
 
 local o = nil
 local stabilizing = nil
+local step = nil
 local enabled = true
 local timer = nil
 -- A frame is on screen and no seek is under way: the time to start from is the one shown
@@ -61,6 +62,8 @@ local function start()
     local fps = mp.get_property_number("container-fps") or mp.get_property_number("estimated-vf-fps")
     local duration = mp.get_property_number("duration")
     if not t or not fps or fps <= 0 then return end
+    -- The frames that play: with fps_limit, every step-th (main.lua)
+    fps = fps / step()
     local r = o.still_radius
     if duration and t + (r + 2) / fps > duration then return end
     local f = io.open(M.CONTROL, "w")
@@ -110,9 +113,10 @@ mp.register_event("end-file", function()
 end)
 mp.register_event("shutdown", function() os.remove(M.CONTROL) end)
 
--- options: main.lua's (still, still_radius, still_delay, still_grain); stabilizing(): the stabilization is on
-function M.init(options, is_stabilizing)
-    o, stabilizing = options, is_stabilizing
+-- options: main.lua's (still, still_radius, still_delay, still_grain); stabilizing(): the stabilization is on;
+-- frame_step(): every how many frames one plays (fps_limit)
+function M.init(options, is_stabilizing, frame_step)
+    o, stabilizing, step = options, is_stabilizing, frame_step
     enabled = o.still
     publish()
 end
