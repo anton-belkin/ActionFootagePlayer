@@ -91,5 +91,10 @@ Cloudflare Pages, project `actionfootageplayer`: <https://actionfootageplayer.pa
 (with `www.`) once the domain's nameservers point to Cloudflare. `.github/workflows/website.yml` publishes `site/` on
 every push that changes it, to the `website` branch or `main`; it can also be run by hand from the Actions tab.
 
+Before publishing, the workflow adds each file's content hash to the pages' links to `styles.css`, `scene.js` and
+`download.js` (`styles.css?v=7a7a2bf0`), in the deployed copy only. A changed stylesheet or script gets a new URL, so a
+browser can't pair a new page with an old copy from its cache: Safari did, showing the language switcher unstyled
+after it landed. Nothing to do by hand; the HTML in the repository keeps the plain names.
+
 The release workflow runs on every pull request, so a site-only pull request also triggers a full build; a
 `paths-ignore: ['website/**']` on its `pull_request` trigger would avoid that.
