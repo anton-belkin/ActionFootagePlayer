@@ -299,7 +299,7 @@ footer a { color: var(--ink); }
 .dl-hero h1 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 3.8rem); }
 .dl-mobile { color: var(--ink); }
 .platforms { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); align-items: start; }
-.platform { scroll-margin-top: 80px; display: grid; gap: 16px; align-content: start; padding: 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.platform { scroll-margin-top: 80px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; padding: 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
 .platform.is-yours { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .platform-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .platform h2 { font-size: var(--step-2); }
@@ -307,7 +307,8 @@ footer a { color: var(--ink); }
 .platform p { color: var(--muted); }
 .platform .platform-req { color: var(--ink); font-weight: 500; }
 .platform .platform-note { font-size: 0.88rem; }
-.dl-btn { justify-self: start; white-space: nowrap; font-size: 1.05rem; padding: 0.95em 1.3em; }
+.dl-btn { justify-self: start; font-size: 1.05rem; padding: 0.95em 1.3em; }
+.dl-btn small { white-space: nowrap; }
 .file-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 0.85rem; }
 .file-meta dt { color: var(--muted); }
 .file-meta dd { margin: 0; overflow-wrap: anywhere; }

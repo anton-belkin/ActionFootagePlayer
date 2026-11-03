@@ -63,11 +63,11 @@
         <h1>Ваши погружения — ровные и такие, какими вы их видели.</h1>
         <p class="lede">Синева, которую вы помните, свет с поверхности, риф в тени. Снимайте в log с выключенным EIS, и Action Footage Player покажет ваше погружение в HDR, со стабилизацией для воды и глубиной на экране. На вашем Mac или PC, с автоматическим преобразованием.</p>
         <div class="btns">
-          <a class="btn primary" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn primary" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             Скачать для Mac <small>Apple Silicon</small>
           </a>
-          <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn" href="download.html#windows">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             Скачать для Windows <small>10 / 11</small>
           </a>
@@ -137,16 +137,16 @@
         <div class="feature">
           <h3>HDR из log</h3>
           <p>Под водой log в HDR заметно лучше стандартного режима камеры, особенно на свежих моделях. На HDR-экране разница — как день и ночь. Никакой стилизации: экспозиция остаётся такой, какой была записана, тени на рифе сохраняют детали, и погружение остаётся таким же спокойным, каким было. Для цвета на глубине по-прежнему важен подводный свет, но даже без него ваше видео теперь выглядит лучше, чем раньше.</p>
-          <span class="meta">D-Log M · GP-Log · I-Log (10 бит)</span>
+          <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log (10 бит)</span>
         </div>
         <div class="feature">
           <h3>Стабилизация, созданная для воды</h3>
-          <p>Action Footage Player стабилизирует видео по данным о движении, которые записывает камера, с поправкой на то, как вода преломляет свет в объективе. Всё это — во время воспроизведения. Многие дайверы возят громоздкий риг под две руки только ради того, чтобы держать камеру ровно; если дело лишь в стабильности, он вам больше не нужен.</p>
+          <p>Action Footage Player стабилизирует видео по данным о движении, которые записывает камера, с поправкой на то, как вода преломляет свет в объективе, и убирает цветную кайму, которую вода добавляет к краям кадра. Всё это — во время воспроизведения. Многие дайверы возят громоздкий риг под две руки только ради того, чтобы держать камеру ровно; если дело лишь в стабильности, он вам больше не нужен.</p>
           <span class="meta">коэффициент преломления 1.33 по умолчанию</span>
         </div>
         <div class="feature">
           <h3>Глубина на экране</h3>
-          <p>Если камера записывает глубину и статус погружения, плеер показывает их поверх видео. Поля, которых в клипе нет, не показываются.</p>
+          <p>Если камера записывает глубину и статус погружения, плеер показывает их поверх видео. Поля, которых в клипе нет, не показываются. В подводном боксе камера не может измерить глубину: её барометр чувствует только воздух внутри бокса. Статус погружения при этом всё равно показывается.</p>
           <span class="meta">глубина · статус погружения · давление</span>
         </div>
         <div class="feature">
@@ -157,7 +157,7 @@
         <div class="feature">
           <h3>Поделитесь лучшей минутой</h3>
           <p>Дважды нажмите <kbd>l</kbd>, чтобы отметить фрагмент, затем <kbd>Shift</kbd>+<kbd>E</kbd>. Вы получите HDR-файл, который правильно показывают iPhone, Mac и YouTube.</p>
-          <span class="meta">HEVC Main10, HLG · или ProRes 422 HQ</span>
+          <span class="meta">HEVC Main10, HLG · ProRes 422 HQ из командной строки</span>
         </div>
         <div class="feature">
           <h3>Яркие моменты погружения</h3>
@@ -175,7 +175,7 @@
         <p class="eyebrow">Измерено, а не обещано</p>
         <h2>От дрожания к стабильности.</h2>
         <p class="lede">На тестовом клипе, снятом с выключенным EIS, дрожание между кадрами уменьшилось в восемь раз. Пресет по умолчанию настроен для воды, так что после погружения ничего настраивать не нужно.</p>
-        <p>Над водой встроенный EIS работает хорошо, а для клипов, снятых на воздухе с выключенным EIS, есть пресет без преломления.</p>
+        <p>На Osmo Action 6 поправка следует собственному датчику воды камеры, так что в клипе, где камера то уходит под воду, то выныривает, исправляются только подводные фрагменты. Над водой встроенный EIS работает хорошо; для клипов, снятых на воздухе с выключенным EIS, клавиши <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>u</kbd></span> отключают поправку на воду.</p>
       </div>
       <div class="stack">
         <div class="stat">
@@ -211,7 +211,7 @@
         </li>
         <li>
           <h3>После погружения дважды щёлкните клип</h3>
-          <p>Он воспроизводится в HDR, со стабилизацией и глубиной на экране. Режим стабилизации — с кадрированием, с дорисованными краями или без неё — переключается клавишами <kbd>Ctrl</kbd>+<kbd>g</kbd>.</p>
+          <p>Он воспроизводится в HDR, со стабилизацией и глубиной на экране. Режим стабилизации — с кадрированием, с дорисованными краями или без неё — переключается клавишами <kbd>Ctrl</kbd>+<kbd>g</kbd>. Поставьте на паузу на черепахе, и <kbd>Ctrl</kbd>+<kbd>p</kbd> очистит стоп-кадр от шума и взвеси в воде.</p>
         </li>
       </ol>
     </div>
@@ -223,21 +223,26 @@
       <div class="section-head">
         <p class="eyebrow">Камеры, с которыми ныряют</p>
         <h2>Что работает уже сейчас.</h2>
-        <p class="lede">Action Footage Player разрабатывается на настоящих подводных записях с одной камеры. Всё остальное поддерживается в коде и ждёт, когда кто-нибудь проверит это на своих клипах.</p>
+        <p class="lede">Action Footage Player разрабатывается на настоящих подводных записях с DJI Osmo Action 6 и проверен на GoPro HERO12 Black. Всё остальное поддерживается в коде и ждёт, когда кто-нибудь проверит это на своих клипах.</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">Камера</th><th scope="col">Статус</th><th scope="col">Под водой</th></tr></thead>
+          <thead><tr><th scope="col">Камера</th><th scope="col">Log</th><th scope="col">Стабилизация</th><th scope="col">Под водой</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Проверена</span></td><td>Log, стабилизация, глубина и статус погружения, экспорт в HDR. Проверено на настоящих подводных записях.</td></tr>
-            <tr><th scope="row">GoPro HERO12, HERO13</th><td><span class="pill exp">Ожидается</span></td><td>GP-Log и стабилизация реализованы; HyperSmooth можно не выключать. На настоящих записях ещё не проверены.</td></tr>
-            <tr><th scope="row">Старые GoPro<br><span class="cam-sub">от HERO5 Black до HERO11</span></th><td><span class="pill part">Не проверена</span></td><td>На этих моделях нет log. Движок Gyroflow читает их данные о движении (HERO5 Black и новее); поддержка в плеере ещё не проверялась.</td></tr>
-            <tr><th scope="row">Другие DJI<br><span class="cam-sub">Action 4, Action 5 Pro</span></th><td><span class="pill part">Частично</span></td><td>Стабилизация, скорее всего, работает; их log пока не поддерживается.</td></tr>
-            <tr><th scope="row">Insta360 с одним объективом</th><td><span class="pill part">Частично</span></td><td>I-Log 10 бит, выбирается вручную. I-Log 8 бит не поддерживается.</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Проверена</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">Проверена</span><br><span class="cam-sub">EIS выкл.</span></td><td>Глубина и статус погружения, экспорт в HDR. Проверено на настоящих подводных записях.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">EIS выкл.</span></td><td>MP4 с одного объектива.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill ok">Проверена</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">Проверена</span></td><td>HyperSmooth можно не выключать. Проверено на HERO12 Black. GP-Log — начиная с прошивки 1.20.</td></tr>
+            <tr><th scope="row">GoPro MISSION 1, MISSION 1 PRO</th><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">Ожидается</span></td><td></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">Пока нет</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Ожидается</span></td><td>Её GP-Log экспонирован на две ступени ярче, чем у HERO, и требует собственного преобразования; пока что <kbd>Ctrl</kbd>+<kbd>l</kbd> применяет GP-Log вручную, но картинка получается слишком светлой.</td></tr>
+            <tr><th scope="row">GoPro от HERO8 Black до HERO11 Black</th><td><span class="pill part">Без log</span></td><td><span class="pill exp">Ожидается</span></td><td>HyperSmooth можно не выключать.</td></tr>
+            <tr><th scope="row">GoPro от HERO5 Black до HERO7 Black</th><td><span class="pill part">Без log</span></td><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">HyperSmooth выкл.</span></td><td></td></tr>
+            <tr><th scope="row">DJI Osmo Action 4, Action 5 Pro</th><td><span class="pill exp">Ожидается*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">EIS выкл.</span></td><td>* D-Log M включается вручную, клавишами <kbd>Ctrl</kbd>+<kbd>l</kbd>.</td></tr>
+            <tr><th scope="row">Insta360 с одним объективом</th><td><span class="pill exp">Ожидается*</span><br><span class="cam-sub">I-Log 10 бит</span></td><td><span class="pill exp">Ожидается</span><br><span class="cam-sub">FlowState выкл.</span></td><td>* I-Log включается вручную, клавишами <kbd>Ctrl</kbd>+<kbd>l</kbd>. I-Log 8 бит не поддерживается.</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">Ныряете с камерой с пометкой «Ожидается», «Частично» или «Не проверена»? Короткий пример клипа в <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">issue на GitHub</a> — самый быстрый способ её проверить.</p>
+      <p class="note"><span class="pill ok">Проверена</span> воспроизводится в плеере на настоящих записях. <span class="pill exp">Ожидается</span> поддержка сделана по опубликованным производителем метаданным или образцам клипов, но на настоящих записях ещё не проверена. <span class="pill exp">Ожидается*</span> то же самое, но с одним шагом вручную, описанным в строке камеры. <span class="pill part">Пока нет</span> пока не работает.</p>
+      <p class="note">Ныряете с камерой с пометкой «Ожидается»? Короткий пример клипа в <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">issue на GitHub</a> — самый быстрый способ её проверить.</p>
     </div>
   </section>
 
@@ -271,11 +276,11 @@
         </details>
         <details>
           <summary>Он изменяет мои исходные файлы?</summary>
-          <div class="a"><p>Нет. Action Footage Player только читает их. Экспорт сохраняется в отдельную папку <code>stabilized/</code> рядом с клипом.</p></div>
+          <div class="a"><p>Нет. Action Footage Player только читает их. Экспорт сохраняется в отдельную папку <code>stabilized/</code> рядом с клипом; в сам видеофайл никогда ничего не записывается.</p></div>
         </details>
         <details>
           <summary>Он бесплатный?</summary>
-          <div class="a"><p>Да, это открытое ПО под лицензией GPL-3.0. Время от времени Action Footage Player будет предлагать вам сделать добровольное пожертвование. Можно пропустить или попросить больше никогда не напоминать. В любом случае ничего не блокируется.</p></div>
+          <div class="a"><p>Да, это открытое ПО под лицензией GPL-3.0. Ничего не заблокировано, и заводить учётную запись не нужно.</p></div>
         </details>
       </div>
     </div>
@@ -311,9 +316,9 @@
       <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · Сделано дайвером из Женевы, Швейцария</span>
       <a href="index.html">Главная</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
-      <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Загрузки</a>
+      <a href="download.html">Загрузки</a>
     </div>
-    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M, построенным на shaper LUT от Zeb Gardner (используется с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
+    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M и GP-Log, построенными на shaper LUT от Zeb Gardner (используются с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
     <p class="mt-foot">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../divers.html" hreflang="en">Читать оригинал на английском</a></p>
   </div>
 </footer>

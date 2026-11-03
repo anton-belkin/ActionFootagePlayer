@@ -47,8 +47,8 @@ unless an asset's name changes: then its pattern in `download.js` too.
 ## Translations
 
 French, Russian and Simplified Chinese live in `site/fr/`, `site/ru/` and `site/zh/`, under the same file names as the
-English pages at the root, and use the shared `styles.css`, `scene.js` and icons through `../`. They are served at
-`/fr/`, `/ru/`, `/zh/` (and `/fr/divers` …). English is the original; the translations are **machine translations**
+English pages at the root, and use the shared `styles.css`, `scene.js`, `download.js` and icons through `../`. They are
+served at `/fr/`, `/ru/`, `/zh/` (and `/fr/divers`, `/fr/download` …). English is the original; the translations are **machine translations**
 (made with Claude, 2026-11-03) and each translated page says so in its own language, in a slim banner under the header
 and again in the footer, with a link to the English page.
 
@@ -68,12 +68,16 @@ ones (PingFang SC, Hiragino Sans GB, Noto Sans SC, Microsoft YaHei); nothing CJK
 Kept in English everywhere: product, camera and format names (D-Log M, GP-Log, I-Log, HDR, EIS, Gyroflow, …), keyboard
 shortcuts, file names, and the player's on-screen telemetry in the illustration.
 
+`download.js` writes a few words of its own (the release's title, file sizes, dates): it takes them from its `LANGS`
+table by the page's `<html lang>`, and dates come from the browser in that language. The first paragraph of the
+release notes it puts in stays in English, marked `lang="en"`.
+
 **After editing the English text**, bring the translations along in the same pull request, or the languages drift
 apart:
 
 1. See what changed since the translations were last synced:
    `git log -1 --format=%h -- website/site/fr/` gives the last sync, then
-   `git diff <that commit> -- website/site/index.html website/site/divers.html`.
+   `git diff <that commit> -- website/site/index.html website/site/divers.html website/site/download.html`.
 2. Apply the same change to `fr/`, `ru/` and `zh/` with the text translated, keeping the markup identical to the
    English page (asset paths with `../`, the switcher, the notices). Asking Claude to "re-sync the translations
    with this diff" works well.

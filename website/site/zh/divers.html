@@ -63,11 +63,11 @@
         <h1>你的潜水视频：画面稳定，色彩如你亲眼所见。</h1>
         <p class="lede">你记忆中的那片蓝，水面透下来的光，阴影里的珊瑚礁。用 Log 拍摄并关闭 EIS，Action Footage Player 就能以 HDR 呈现你的潜水，针对水下做好防抖，并在屏幕上显示深度。在你的 Mac 或 PC 上就能看，转换自动完成。</p>
         <div class="btns">
-          <a class="btn primary" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn primary" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             下载 Mac 版 <small>Apple Silicon</small>
           </a>
-          <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn" href="download.html#windows">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             下载 Windows 版 <small>10 / 11</small>
           </a>
@@ -137,16 +137,16 @@
         <div class="feature">
           <h3>从 Log 到 HDR</h3>
           <p>在水下，以 HDR 播放的 Log 明显优于相机的默认模式，在较新的相机上尤其如此。在 HDR 屏幕上，差别堪称天壤之别。不添加任何风格：曝光保持拍摄时的样子，珊瑚礁上的阴影保留着细节，潜水时的宁静也原样留存。在深处，补光灯对色彩依然重要，但即使没有补光，你的视频也比以前好看了。</p>
-          <span class="meta">D-Log M · GP-Log · I-Log（10-bit）</span>
+          <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log（10-bit）</span>
         </div>
         <div class="feature">
           <h3>专为水下打造的防抖</h3>
-          <p>Action Footage Player 根据相机记录的运动数据防抖，同时校正光线穿过镜头时被水折射造成的偏差。这一切都在片段播放时完成。很多潜水员带着笨重的双手稳定支架，只为把相机拿稳；如果只是为了稳定，现在已经用不着了。</p>
+          <p>Action Footage Player 根据相机记录的运动数据防抖，同时校正光线穿过镜头时被水折射造成的偏差，并去除水在画面边缘附近带来的色边。这一切都在片段播放时完成。很多潜水员带着笨重的双手稳定支架，只为把相机拿稳；如果只是为了稳定，现在已经用不着了。</p>
           <span class="meta">默认折射率 1.33</span>
         </div>
         <div class="feature">
           <h3>屏幕上的深度</h3>
-          <p>当相机记录了深度和入水状态时，播放器会把它们叠加在视频上。片段中没有的字段不会显示。</p>
+          <p>当相机记录了深度和入水状态时，播放器会把它们叠加在视频上。片段中没有的字段不会显示。装在潜水壳里时，相机无法测量深度，因为它的气压计只能感受到壳内的空气；入水状态仍会显示。</p>
           <span class="meta">深度 · 入水状态 · 水压</span>
         </div>
         <div class="feature">
@@ -157,7 +157,7 @@
         <div class="feature">
           <h3>分享最精彩的一分钟</h3>
           <p>按两次 <kbd>l</kbd> 标记一段，再按 <kbd>Shift</kbd>+<kbd>E</kbd>。你会得到一个 iPhone、Mac 和 YouTube 都能正确显示的 HDR 文件。</p>
-          <span class="meta">HEVC Main10，HLG · 或 ProRes 422 HQ</span>
+          <span class="meta">HEVC Main10，HLG · 命令行可导出 ProRes 422 HQ</span>
         </div>
         <div class="feature">
           <h3>潜水中的精彩时刻</h3>
@@ -175,7 +175,7 @@
         <p class="eyebrow">实测数据，不是空口承诺</p>
         <h2>从抖动到稳定。</h2>
         <p class="lede">在一段关闭 EIS 拍摄的测试片段上，帧间抖动降到了原来的八分之一。默认预设已经为水下调校好，潜水之后什么都不用设置。</p>
-        <p>在水面以上，相机内置 EIS 效果很好；对于在空气中关闭 EIS 拍摄的片段，也有一个不含折射校正的预设可用。</p>
+        <p>在 Osmo Action 6 上，校正会跟随相机自身的入水标记，所以一段时而入水、时而出水的片段，只有在水中的部分才会被校正。在水面以上，相机内置 EIS 效果很好；对于在空气中关闭 EIS 拍摄的片段，按 <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>u</kbd></span> 就能让镜头“出水”，不再做水下校正。</p>
       </div>
       <div class="stack">
         <div class="stat">
@@ -211,7 +211,7 @@
         </li>
         <li>
           <h3>潜水结束后，双击片段</h3>
-          <p>片段会以 HDR 播放，已经防抖，屏幕上还显示着你的深度。用 <kbd>Ctrl</kbd>+<kbd>g</kbd> 在裁切、填充边缘和关闭之间切换防抖模式。</p>
+          <p>片段会以 HDR 播放，已经防抖，屏幕上还显示着你的深度。用 <kbd>Ctrl</kbd>+<kbd>g</kbd> 在裁切、填充边缘和关闭之间切换防抖模式。在海龟出现时暂停，按 <kbd>Ctrl</kbd>+<kbd>p</kbd> 就能清除静帧上的噪点和水中的悬浮颗粒。</p>
         </li>
       </ol>
     </div>
@@ -223,21 +223,26 @@
       <div class="section-head">
         <p class="eyebrow">潜水员常用的相机</p>
         <h2>目前的支持情况。</h2>
-        <p class="lede">Action Footage Player 是基于一台相机的真实潜水素材开发的。其他相机已在代码层面支持，正等着有人用自己的片段来试一试。</p>
+        <p class="lede">Action Footage Player 基于 DJI Osmo Action 6 的真实潜水素材开发，并在 GoPro HERO12 Black 上做过验证。其他相机已在代码层面支持，正等着有人用自己的片段来试一试。</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">相机</th><th scope="col">状态</th><th scope="col">水下表现</th></tr></thead>
+          <thead><tr><th scope="col">相机</th><th scope="col">Log</th><th scope="col">防抖</th><th scope="col">水下表现</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">已验证</span></td><td>Log、防抖、深度和入水状态、HDR 导出。已用真实潜水素材测试。</td></tr>
-            <tr><th scope="row">GoPro HERO12、HERO13</th><td><span class="pill exp">预计可用</span></td><td>GP-Log 和防抖均已就绪；HyperSmooth 可以保持开启。尚未用真实素材验证。</td></tr>
-            <tr><th scope="row">较早的 GoPro<br><span class="cam-sub">HERO5 Black 至 HERO11</span></th><td><span class="pill part">未验证</span></td><td>这些机型没有 Log。Gyroflow 引擎可以读取它们的运动数据（HERO5 Black 及更新机型）；播放器对它们的支持尚未验证。</td></tr>
-            <tr><th scope="row">其他 DJI 相机<br><span class="cam-sub">Action 4、Action 5 Pro</span></th><td><span class="pill part">部分支持</span></td><td>防抖预计可用；它们的 Log 暂不支持。</td></tr>
-            <tr><th scope="row">Insta360 单镜头相机</th><td><span class="pill part">部分支持</span></td><td>支持 10-bit I-Log，需手动选择。不支持 8-bit I-Log。</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">已验证</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">已验证</span><br><span class="cam-sub">关闭 EIS</span></td><td>深度和入水状态、HDR 导出。已用真实潜水素材测试。</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">预计可用</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 EIS</span></td><td>单镜头 MP4。</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black、HERO13 Black</th><td><span class="pill ok">已验证</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">已验证</span></td><td>HyperSmooth 可以保持开启。已在 HERO12 Black 上验证。GP-Log 需固件 1.20 或更高版本。</td></tr>
+            <tr><th scope="row">GoPro MISSION 1、MISSION 1 PRO</th><td><span class="pill exp">预计可用</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">预计可用</span></td><td></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">尚不支持</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">预计可用</span></td><td>它的 GP-Log 曝光比 HERO 系列亮两档，需要单独的转换；在此之前，可用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动套用 GP-Log，但画面会偏亮。</td></tr>
+            <tr><th scope="row">GoPro HERO8 Black 至 HERO11 Black</th><td><span class="pill part">无 Log</span></td><td><span class="pill exp">预计可用</span></td><td>HyperSmooth 可以保持开启。</td></tr>
+            <tr><th scope="row">GoPro HERO5 Black 至 HERO7 Black</th><td><span class="pill part">无 Log</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 HyperSmooth</span></td><td></td></tr>
+            <tr><th scope="row">DJI Osmo Action 4、Action 5 Pro</th><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 EIS</span></td><td>* 用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动选择 D-Log M。</td></tr>
+            <tr><th scope="row">Insta360 单镜头相机</th><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">10-bit I-Log</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 FlowState</span></td><td>* 用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动选择 I-Log。不支持 8-bit I-Log。</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">你潜水用的相机被标为「预计可用」「部分支持」或「未验证」？在 <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> 里附上一段简短的示例片段，就是让它通过验证的最快方式。</p>
+      <p class="note"><span class="pill ok">已验证</span> 已在播放器中用真实素材播放过。<span class="pill exp">预计可用</span> 已根据厂商公开的元数据或示例片段做了适配，但尚未用真实素材验证。<span class="pill exp">预计可用*</span> 同上，但需要一步手动操作，具体见该行说明。<span class="pill part">尚不支持</span> 目前还不能用。</p>
+      <p class="note">你潜水用的相机被标为「预计可用」？在 <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> 里附上一段简短的示例片段，就是让它通过验证的最快方式。</p>
     </div>
   </section>
 
@@ -271,11 +276,11 @@
         </details>
         <details>
           <summary>它会修改我的原始文件吗？</summary>
-          <div class="a"><p>不会。Action Footage Player 只读取它们。导出的文件存放在片段旁边单独的 <code>stabilized/</code> 文件夹中。</p></div>
+          <div class="a"><p>不会。Action Footage Player 只读取它们。导出的文件存放在片段旁边单独的 <code>stabilized/</code> 文件夹中，视频文件本身永远不会被写入。</p></div>
         </details>
         <details>
           <summary>免费吗？</summary>
-          <div class="a"><p>是的，以 GPL-3.0 协议开源。Action Footage Player 偶尔会邀请你自愿捐赠。你可以跳过，也可以让它不再提醒。无论选哪样，都不会锁定任何功能。</p></div>
+          <div class="a"><p>是的，以 GPL-3.0 协议开源。不会锁定任何功能，也无需注册账号。</p></div>
         </details>
       </div>
     </div>
@@ -311,9 +316,9 @@
       <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · 由瑞士日内瓦的一位潜水爱好者开发</span>
       <a href="index.html">首页</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
-      <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">下载</a>
+      <a href="download.html">下载</a>
     </div>
-    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
     <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../divers.html" hreflang="en">阅读英文原文</a></p>
   </div>
 </footer>

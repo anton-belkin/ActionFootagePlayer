@@ -64,11 +64,11 @@
         <h1>重新掌控你的运动相机视频。</h1>
         <p class="lede">喜欢你的相机，却不喜欢它的 App？设置和固件更新照旧交给 App，视频就交给 Action Footage Player。在电脑上打开文件夹，在大屏幕上尽情观看，光线和色彩都和你当时亲眼所见一样。无需账号，没有信息流，也不会被套上你没选过的风格。</p>
         <div class="btns">
-          <a class="btn primary" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn primary" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             下载 Mac 版 <small>Apple Silicon</small>
           </a>
-          <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <a class="btn" href="download.html#windows">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             下载 Windows 版 <small>10 / 11</small>
           </a>
@@ -186,7 +186,7 @@
       <ol class="steps">
         <li>
           <h3>用 Log 拍摄</h3>
-          <p>如果你在 HDR 屏幕上观看，请把相机设为 D-Log M（或 GP-Log、I-Log）。在水下，还要关闭 EIS，让相机保持记录运动数据。</p>
+          <p>如果你在 HDR 屏幕上观看，请把相机设为 D-Log M（或 GP-Log、I-Log）。在水下，还要关闭 EIS：只有这样，相机才会记录运动数据。</p>
         </li>
         <li>
           <h3>双击片段</h3>
@@ -210,8 +210,8 @@
       <div class="features">
         <div class="feature">
           <h3>以真 HDR 播放 Log</h3>
-          <p>D-Log M、GP-Log 和 I-Log 均按厂商自己的曲线解码，并以 HDR 显示，不添加任何风格：场景中的明暗关系保持原样。专为 HDR 屏幕打造：正是在 HDR 屏幕上，Log 才胜过相机的默认模式。</p>
-          <span class="meta">D-Log M · GP-Log · I-Log（10-bit）</span>
+          <p>D-Log M、D-Log、GP-Log、GP-Log2 和 10-bit I-Log 的转换，所用曲线要么由调色社区在相机上实测得出，要么采用厂商公开发布的公式，并以 HDR 显示，不添加任何风格：场景中的明暗关系保持原样。专为 HDR 屏幕打造：正是在 HDR 屏幕上，Log 才胜过相机的默认模式。</p>
+          <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log（10-bit）</span>
         </div>
         <div class="feature">
           <h3>播放时防抖</h3>
@@ -220,13 +220,13 @@
         </div>
         <div class="feature">
           <h3>屏幕上的遥测数据</h3>
-          <p>只要相机有记录，深度、GPS、速度、海拔和曝光信息就会显示出来。片段中没有的字段不会显示。</p>
+          <p>只要相机有记录，深度、相机是否在水中、GPS 和速度就会显示出来；海拔、气压和曝光信息可在菜单中打开。片段中没有的字段不会显示。</p>
           <span class="meta">深度 · GPS · 速度 · ISO · 快门</span>
         </div>
         <div class="feature">
           <h3>一键导出</h3>
-          <p>你正在看的片段会按你看到的样子一次性导出，防抖效果也包含在内。你会得到一个自然的 HDR 文件，可直接分享，也可按自己的喜好调整。播放时导出会暂停，停止播放后自动继续。</p>
-          <span class="meta">HEVC Main10，HLG · 或 ProRes 422 HQ</span>
+          <p>你正在看的片段会按你看到的样子一次性导出，防抖效果也包含在内。你会得到一个自然的 HDR 文件，可直接分享，也可按自己的喜好调整。播放时导出会放慢，暂停后全速进行。</p>
+          <span class="meta">HEVC Main10，HLG · 命令行可导出 ProRes 422 HQ</span>
         </div>
         <div class="feature">
           <h3>进度条上的精彩时刻</h3>
@@ -277,11 +277,15 @@
         <div class="dive-points">
           <div>
             <h3>默认就为水下调校</h3>
-            <p>默认预设已考虑球面罩处的折射。在水面以上，DJI 自带的 EIS 效果很好；对于在空气中关闭 EIS 拍摄的片段，也有一个不含折射校正的预设可用。</p>
+            <p>默认预设已考虑相机平面镜头保护盖处的折射。在 Osmo Action 6 上，它会跟随相机自身的入水标记，所以一段时而入水、时而出水的片段，只有在水中的部分才会被校正。在水面以上，DJI 自带的 EIS 效果很好；对于在空气中关闭 EIS 拍摄的片段，按 <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>u</kbd></span> 就能让镜头“出水”，不再做水下校正。</p>
           </div>
           <div>
             <h3>相机记录了深度，就能显示深度</h3>
-            <p>Osmo Action 6 会记录深度和入水状态。用 <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>t</kbd></span> 打开或关闭读数显示。</p>
+            <p>Osmo Action 6 会记录深度和入水状态（装在潜水壳里时，只记录入水状态）。用 <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>t</kbd></span> 打开或关闭读数显示。</p>
+          </div>
+          <div>
+            <h3>消除水造成的色边</h3>
+            <p>水对蓝光的折射比红光更强，所以越靠近画面边缘，红色和蓝色就错开得越明显。只要镜头在水下，每种颜色都会被放回它该在的位置。按 <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>a</kbd></span> 则保留录制时的色边。</p>
           </div>
           <p><a class="inline-link" href="divers.html">潜水相关的一切，尽在一页 →</a></p>
         </div>
@@ -308,22 +312,27 @@
       <div class="section-head">
         <p class="eyebrow">相机</p>
         <h2>目前的支持情况。</h2>
-        <p class="lede">Action Footage Player 是基于一台相机的真实素材开发的。其他相机已在代码层面支持，正等着有人用自己的片段来试一试。</p>
+        <p class="lede">Action Footage Player 基于 DJI Osmo Action 6 的真实素材开发，并在 GoPro HERO12 Black 上做过验证。其他相机已在代码层面支持，正等着有人用自己的片段来试一试。</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">相机</th><th scope="col">状态</th><th scope="col">说明</th></tr></thead>
+          <thead><tr><th scope="col">相机</th><th scope="col">Log</th><th scope="col">防抖</th><th scope="col">说明</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">已验证</span></td><td>Log、防抖、深度遥测和 HDR 导出，每天都在用。</td></tr>
-            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">预计可用</span></td><td>应该可以用；尚未用真实素材验证。</td></tr>
-            <tr><th scope="row">GoPro HERO12、HERO13、MAX2</th><td><span class="pill exp">预计可用</span></td><td>GP-Log 和防抖均已就绪；尚未用真实素材验证。</td></tr>
-            <tr><th scope="row">其他 DJI 相机<br><span style="font-weight:400;color:var(--muted)">Action 4、Action 5 Pro、Pocket 3…</span></th><td><span class="pill part">部分支持</span></td><td>防抖预计可用；它们的 Log 暂不支持。</td></tr>
-            <tr><th scope="row">Insta360 单镜头相机</th><td><span class="pill part">部分支持</span></td><td>支持 10-bit I-Log，需手动选择。不支持 8-bit I-Log。</td></tr>
-            <tr><th scope="row">DJI 无人机</th><td><span class="pill part">部分支持</span></td><td>手动选择曲线即可使用 Log；防抖需要 Gyroflow 项目文件。</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">已验证</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">已验证</span><br><span class="cam-sub">关闭 EIS</span></td><td>作者每天在 macOS 上使用。</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">预计可用</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 EIS</span></td><td>单镜头 MP4。</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black、HERO13 Black</th><td><span class="pill ok">已验证</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">已验证</span></td><td>已在 HERO12 Black 上验证。GP-Log 需固件 1.20 或更高版本。</td></tr>
+            <tr><th scope="row">GoPro MISSION 1、MISSION 1 PRO</th><td><span class="pill exp">预计可用</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">预计可用</span></td><td></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">尚不支持</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">预计可用</span></td><td>它的 GP-Log 曝光比 HERO 系列亮两档，需要单独的转换；在此之前，可用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动套用 GP-Log，但画面会偏亮。</td></tr>
+            <tr><th scope="row">GoPro HERO8 Black 至 HERO11 Black</th><td><span class="pill part">无 Log</span></td><td><span class="pill exp">预计可用</span></td><td></td></tr>
+            <tr><th scope="row">GoPro HERO5 Black 至 HERO7 Black</th><td><span class="pill part">无 Log</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 HyperSmooth</span></td><td></td></tr>
+            <tr><th scope="row">DJI Osmo Action 4、Action 5 Pro、Pocket 3、Osmo 360 II…</th><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 EIS</span></td><td>* 用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动选择 D-Log M。</td></tr>
+            <tr><th scope="row">Insta360 单镜头相机</th><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">10-bit I-Log</span></td><td><span class="pill exp">预计可用</span><br><span class="cam-sub">关闭 FlowState</span></td><td>* 用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动选择 I-Log。不支持 8-bit I-Log。</td></tr>
+            <tr><th scope="row">DJI 无人机</th><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">D-Log M、D-Log</span></td><td><span class="pill exp">预计可用*</span><br><span class="cam-sub">Gyroflow 项目文件</span></td><td>* 用 <kbd>Ctrl</kbd>+<kbd>l</kbd> 手动选择曲线；防抖则来自为该片段制作的 Gyroflow 项目文件。</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">你的相机被标为「预计可用」或「部分支持」？在 GitHub issue 里附上一段简短的示例片段，就是让它变成「已验证」的最快方式。</p>
+      <p class="note"><span class="pill ok">已验证</span> 已在播放器中用真实素材播放过。<span class="pill exp">预计可用</span> 已根据厂商公开的元数据或示例片段做了适配，但尚未用真实素材验证。<span class="pill exp">预计可用*</span> 同上，但需要一步手动操作，具体见该行说明。<span class="pill part">尚不支持</span> 目前还不能用。</p>
+      <p class="note">你的相机被标为「预计可用」？在 GitHub issue 里附上一段简短的示例片段，就是让它变成「已验证」的最快方式。</p>
     </div>
   </section>
 
@@ -336,13 +345,14 @@
       </div>
       <div class="keys">
         <div class="key"><span>标记要导出的片段</span><span>按两次 <kbd>l</kbd></span></div>
-        <div class="key"><span>导出（再按一次取消）</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>导出（导出过程中再按两次：取消）</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
         <div class="key"><span>防抖：裁切、填充边缘、关闭</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
         <div class="key"><span>打开或关闭遥测数据</span><span><kbd>Ctrl</kbd>+<kbd>t</kbd></span></div>
-        <div class="key"><span>切换到厂商官方 SDR 效果，再切回来</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd> / <kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>为 D-Log M 切换到 DJI 的 SDR 效果，再切回来</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd> / <kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
         <div class="key"><span>下一个或上一个精彩时刻</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
         <div class="key"><span>打开或关闭降噪</span><span><kbd>Ctrl</kbd>+<kbd>n</kbd></span></div>
         <div class="key"><span>在 Gyroflow 中打开此片段</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
+        <div class="key"><span>打开或关闭暂停时的静帧净化</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
       </div>
     </div>
   </section>
@@ -357,7 +367,7 @@
       <div class="faq">
         <details>
           <summary>我需要 HDR 屏幕吗？</summary>
-          <div class="a"><p>如果你想享受到它的好处，那么需要。只有当你自己，以及大多数和你一起看视频的人，都在 HDR 屏幕上观看时（较新的 iPhone、MacBook Pro、HDR 电视和显示器），Log 才物有所值。</p><p>在标准屏幕上，Log 片段看起来会比用相机默认模式拍摄的同一场景更差。无论是由 macOS 自动做色调映射，还是你用 <kbd>Ctrl</kbd>+<kbd>s</kbd> 切换到相机厂商的官方 SDR 转换（其 Rec.709 LUT），都是如此。相机厂商自己的处理会针对每个场景做调整，让画面中最可能重要的部分保持明亮。要从 Log 得到同样的效果，得靠专业调色软件和一位调色师。</p><p>所以，如果你主要在标准屏幕上观看和分享，就用默认模式拍摄。如果你和你的观众都有 HDR 屏幕，就用 Log 拍摄。</p><p>对于主要分享到标准屏幕上的片段，你仍然可以用相机厂商的 App。Action Footage Player 已将能识别场景的 SDR 转换列入开发计划：压缩动态范围总要做取舍，目标是让结果尽可能接近完整动态范围的版本，而不是另加一种风格。这项功能上线后，你已经拍好的 Log 素材也会随之变得更好看。</p></div>
+          <div class="a"><p>如果你想享受到它的好处，那么需要。只有当你自己，以及大多数和你一起看视频的人，都在 HDR 屏幕上观看时（较新的 iPhone、MacBook Pro、HDR 电视和显示器），Log 才物有所值。</p><p>在标准屏幕上，Log 片段看起来会比用相机默认模式拍摄的同一场景更差。无论是由 macOS 自动做色调映射，还是对 D-Log M 素材用 <kbd>Ctrl</kbd>+<kbd>s</kbd> 切换到 DJI 的官方 SDR 转换（其 Rec.709 LUT），都是如此。相机厂商自己的处理会针对每个场景做调整，让画面中最可能重要的部分保持明亮。要从 Log 得到同样的效果，得靠专业调色软件和一位调色师。</p><p>所以，如果你主要在标准屏幕上观看和分享，就用默认模式拍摄。如果你和你的观众都有 HDR 屏幕，就用 Log 拍摄。</p><p>对于主要分享到标准屏幕上的片段，你仍然可以用相机厂商的 App。Action Footage Player 已将能识别场景的 SDR 转换列入开发计划：压缩动态范围总要做取舍，目标是让结果尽可能接近完整动态范围的版本，而不是另加一种风格。这项功能上线后，你已经拍好的 Log 素材也会随之变得更好看。</p></div>
         </details>
         <details>
           <summary>我潜水、浮潜，用得上它吗？</summary>
@@ -365,19 +375,19 @@
         </details>
         <details>
           <summary>谁需要播放器里的防抖？</summary>
-          <div class="a"><p>如果你在水面以上拍摄，并开着相机防抖（EIS），那多半用不上：相机内置的 EIS 在空气中效果很好。</p><p>它是为关闭 EIS 拍摄的片段准备的。在水下，相机内置 EIS 会失灵，关闭 EIS 才是正确的拍法。它同样适用于你为了获得最广视角而关闭 EIS 拍摄的片段，以及满是这类素材的存档。相机仍会记录运动数据，Action Footage Player 会在片段播放时利用这些数据，可选裁切防抖、填充边缘防抖或关闭。</p><p>有一个例外：在 GoPro HERO8 及更新机型上，你可以在水下保持 HyperSmooth 开启。它的效果不会完美，播放器会利用同一份运动数据进一步防抖。在 HERO5、HERO6 和 HERO7 Black 上，HyperSmooth 必须关闭。（这一点参照了 Gyroflow 的相机说明；GoPro 素材在播放器中的表现仍有待验证。）</p></div>
+          <div class="a"><p>如果你在水面以上拍摄，并开着相机防抖（EIS），那多半用不上：相机内置的 EIS 在空气中效果很好。</p><p>它是为关闭 EIS 拍摄的片段准备的。在水下，相机内置 EIS 会失灵，关闭 EIS 才是正确的拍法。它同样适用于你为了获得最广视角而关闭 EIS 拍摄的片段，以及满是这类素材的存档。相机仍会记录运动数据，Action Footage Player 会在片段播放时利用这些数据，可选裁切防抖、填充边缘防抖或关闭。</p><p>有一个例外：在 GoPro HERO8 及更新机型上，你可以在水下保持 HyperSmooth 开启。它的效果不会完美，播放器会利用同一份运动数据进一步防抖。在 HERO5、HERO6 和 HERO7 Black 上，HyperSmooth 必须关闭。（这一点参照了 Gyroflow 的相机说明。GoPro 素材在播放器中已在 HERO12 Black 上验证。）</p></div>
         </details>
         <details>
           <summary>支持哪些电脑？</summary>
-          <div class="a"><p>Mac：Apple Silicon 机型，macOS 15 或更高版本。Windows：Windows 10 或 11，64 位，Intel 或 AMD 处理器。</p><p>两个版本目前都还没有签名。在 Mac 上，需在「系统设置」的「隐私与安全性」中点按「仍要打开」，允许一次即可。在 Windows 上，首次启动时 SmartScreen 会弹出警告。</p></div>
+          <div class="a"><p>Mac：Apple Silicon 机型，macOS 15 或更高版本。Windows：Windows 10 或 11，64 位，Intel 或 AMD 处理器。Mac 版是作者每天在用的版本；Windows 版带有同样的插件，但还没有在真正的 PC 上试过。</p><p>两个版本目前都还没有用开发者账号签名。在 Mac 上，需在「系统设置」的「隐私与安全性」中点按「仍要打开」，允许一次即可。在 Windows 上，首次启动时 SmartScreen 会弹出警告：点按「更多信息」，再点按「仍要运行」。</p></div>
         </details>
         <details>
           <summary>它会修改我的原始文件吗？</summary>
-          <div class="a"><p>不会。Action Footage Player 只读取它们。导出的文件会写入片段旁边的 <code>stabilized/</code> 文件夹。</p></div>
+          <div class="a"><p>不会。Action Footage Player 只读取它们。导出的文件会写入片段旁边的 <code>stabilized/</code> 文件夹；在 Gyroflow 中打开过的片段，旁边会多一个保存其项目的 <code>.gyroflow</code> 文件。视频文件本身永远不会被写入。</p></div>
         </details>
         <details>
           <summary>导出的文件是什么样的？</summary>
-          <div class="a"><p>一个标记为 HLG 的 HEVC Main10 文件，iPhone、Mac、大多数 HDR 电视以及 YouTube 都会将其显示为 HDR。如果之后还要剪辑，也可以选择 ProRes 422 HQ。</p><p>文件没有添加任何风格，因此是一个自然的起点：你可以在支持 HDR 的剪辑软件（例如 iMovie）中按自己的喜好调整。烙进文件的风格是去不掉的：被压成纯黑的阴影，就永远是黑的。</p></div>
+          <div class="a"><p>一个标记为 HLG 的 HEVC Main10 文件，iPhone、Mac、大多数 HDR 电视以及 YouTube 都会将其显示为 HDR。如果之后还要剪辑，可以用命令行导出，改为输出 ProRes 422 HQ。</p><p>文件没有添加任何风格，因此是一个自然的起点：你可以在支持 HDR 的剪辑软件（例如 iMovie）中按自己的喜好调整。烙进文件的风格是去不掉的：被压成纯黑的阴影，就永远是黑的。</p></div>
         </details>
         <details>
           <summary>为什么不直接用相机厂商的 App？</summary>
@@ -385,7 +395,7 @@
         </details>
         <details>
           <summary>真的免费吗？</summary>
-          <div class="a"><p>是的。它以 GPL-3.0 协议开源，代码就在 GitHub 上。</p><p>Action Footage Player 偶尔会邀请你自愿捐赠。你可以跳过，也可以让它不再提醒。无论选哪样，都不会锁定任何功能。</p></div>
+          <div class="a"><p>是的。它以 GPL-3.0 协议开源，代码就在 GitHub 上。</p><p>不会锁定任何功能，也无需注册账号。</p></div>
         </details>
       </div>
     </div>
@@ -424,9 +434,9 @@
     <div class="row">
       <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · 由瑞士日内瓦的一位潜水爱好者开发</span>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
-      <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">下载</a>
+      <a href="download.html">下载</a>
     </div>
-    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本应用内置 mpv 和 ffmpeg，二者遵循各自的许可证。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本应用内置 mpv 和 ffmpeg，二者遵循各自的许可证。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
     <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../index.html" hreflang="en">阅读英文原文</a></p>
   </div>
 </footer>
