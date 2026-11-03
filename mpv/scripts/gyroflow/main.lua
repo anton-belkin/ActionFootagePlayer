@@ -108,7 +108,8 @@
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   still=yes    the paused frame cleaned of its noise (Ctrl+p), from it and still_radius=5 frames on each side,
 --                still_delay=0.4 s after it pauses; still_grain=0.25 of the brightness's grain stays, so it doesn't
---                look smeared (0: none)
+--                look smeared (0: none). Paused, the frame is rendered at full size, every frame, whatever
+--                resolution and fps_limit are, from still_delay after it pauses too (still.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -230,15 +231,16 @@ end
 
 -- The sizes to stabilize at: { input = { w, h } the video is scaled down to on the way (nil: as it is), output =
 -- { w, h } the plugin renders (nil: the project's, or the input's), key: both, to tell a change }. The output fits the
--- display; the input keeps zoom_margin more, so the part of the frame that shows isn't enlarged
-local function render_sizes(source)
+-- display; the input keeps zoom_margin more, so the part of the frame that shows isn't enlarged. full: the sizes for
+-- the paused frame, as resolution=video has them whatever it is
+local function render_sizes(source, full)
     local w, h = source.width, source.height
     if not w or not h or w <= 0 or h <= 0 then return { key = "" } end
     local ow, oh = source.out_width or w, source.out_height or h
     local scale = 1
     local dw, dh = display_size()
-    if o.resolution ~= "video" and dw then scale = math.min(1, dw / ow, dh / oh) end
-    local short_side = tonumber(o.resolution)
+    if o.resolution ~= "video" and dw and not full then scale = math.min(1, dw / ow, dh / oh) end
+    local short_side = not full and tonumber(o.resolution)
     if short_side then scale = math.min(scale, short_side / math.min(ow, oh)) end
     local input = math.min(1, scale * o.zoom_margin * math.max(ow / w, oh / h))
     -- Scaling the input costs a pass of its own on the GPU: not for less than a fifth of the pixels
@@ -272,6 +274,11 @@ local edge_blur = o.edges_blur
 
 -- What the clip plays stabilized with (find_source), nil: not stabilized
 local current_source = nil
+-- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
+-- at the project's or the video's own size
+local full_size = false
+-- mpv's auto-window-resize while the chain is at full size (place_filters)
+local window_resize = nil
 
 -- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov); off is per clip. The view clips
 -- without a project start in sticks (sticky_view); a clip with a project starts in it as Gyroflow has it (normal), the
@@ -337,10 +344,11 @@ local function fast(source)
     return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1
 end
 
--- Every how many frames one is stabilized for fps_limit: the fewest skipped that bring the clip's rate down to it
+-- Every how many frames one is stabilized for fps_limit: the fewest skipped that bring the clip's rate down to it.
+-- Every one paused at full size
 local function frame_step(source)
     local fps = tonumber(source.fps)
-    if o.fps_limit <= 0 or not fps or fps <= o.fps_limit + 1 then return 1 end
+    if full_size or o.fps_limit <= 0 or not fps or fps <= o.fps_limit + 1 then return 1 end
     return math.ceil(fps / o.fps_limit - 0.05)
 end
 
@@ -352,7 +360,7 @@ local function step_filter(source, enabled)
 end
 
 local function gyroflow_filter(source, enabled)
-    local output = render_sizes(source).output
+    local output = render_sizes(source, full_size).output
     return {
         name = "vapoursynth",
         label = LABEL,
@@ -360,7 +368,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers,
-                                                fast = frame_step(source) == 1 and fast(source),
+                                                fast = not full_size and frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
@@ -434,7 +442,11 @@ local function input_scaling(sizes, enabled)
 end
 
 local function add_filter(source)
-    current_source = source
+    current_source, full_size = source, false
+    if window_resize then
+        mp.set_property("auto-window-resize", window_resize)
+        window_resize = nil
+    end
     view = has_project(source) and "normal" or sticky_view
     write_edge_control()
 
@@ -540,10 +552,30 @@ end)
 mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 
 -- The input scaling and the stabilization set up again in the filter chain where they are, for the sizes as they are
--- now (the display's); the decoding with them, when the input scaling comes or goes (the Mac's: on the GPU or not)
-local function place_filters(enabled)
-    local sizes = render_sizes(current_source)
-    current_source.sizes = sizes.key
+-- now (the display's); the decoding with them, when the input scaling comes or goes (the Mac's: on the GPU or not).
+-- full: at full size, for the paused frame (still.lua)
+local function place_filters(enabled, full)
+    full_size = full or false
+    -- The window stays as it is at full size, which mpv would grow it to (up to autofit-larger) while paused; mpv's own
+    -- setting back once the frame is at the playback size again
+    if full_size and not window_resize then
+        window_resize = mp.get_property("auto-window-resize")
+        mp.set_property("auto-window-resize", "no")
+    elseif not full_size and window_resize then
+        local function restore()
+            mp.unregister_event(restore)
+            if window_resize and not full_size then mp.set_property("auto-window-resize", window_resize) end
+            if not full_size then window_resize = nil end
+        end
+        mp.register_event("playback-restart", restore)
+    end
+    local sizes = render_sizes(current_source, full_size)
+    current_source.sizes = render_sizes(current_source).key
+    -- On the Mac, the input at its own size through the GPU scaler when playing scales it there: the decoding stays as
+    -- it is, not set up again for the pause and again to play on
+    if full_size and platform.macos and not sizes.input and render_sizes(current_source).input then
+        sizes.input = { current_source.width, current_source.height }
+    end
     local hwdec, scale = input_scaling(sizes, enabled)
     local vf, at = {}, nil
     for _, f in ipairs(mp.get_property_native("vf") or {}) do
@@ -582,6 +614,27 @@ local function with_pause(message, change)
     mp.register_event("playback-restart", resume)
     timer = mp.add_timeout(5, resume)
 end
+
+-- Paused, the frame at full size (still.lua): the chain set up for it while paused, and for playing again as it plays on
+still.full_size({
+    -- Playing renders it smaller, or skips frames
+    needed = function()
+        if not current_source or stab_off or full_size then return false end
+        return render_sizes(current_source).key ~= render_sizes(current_source, true).key or frame_step(current_source) > 1 or fast(current_source)
+    end,
+    active = function() return full_size end,
+    set = function(on)
+        if on then
+            local out = render_sizes(current_source, true).output
+            mp.msg.info(string.format("paused: stabilizing at full size, %dx%d", out and out[1] or current_source.out_width or current_source.width,
+                                      out and out[2] or current_source.out_height or current_source.height))
+            place_filters(true, true)
+        else
+            mp.msg.info("playing: stabilizing at " .. render_sizes(current_source).key)
+            with_pause("", function() place_filters(true) end)
+        end
+    end,
+})
 
 -- The display the window is on, kept for the next start, and the stabilization set up for its size when that changes
 -- (the window moved to another display, or the first clip loaded before the window was up), once the window settles
