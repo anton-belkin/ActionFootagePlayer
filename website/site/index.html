@@ -299,14 +299,14 @@
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+          <thead><tr><th scope="col">Camera</th><th scope="col">Log</th><th scope="col">Stabilization</th><th scope="col">Notes</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth telemetry and HDR export, used daily.</td></tr>
-            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span></td><td>Should work; not yet checked on real footage.</td></tr>
-            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span></td><td>GP-Log (HERO12 Black on firmware 1.20 or later) and stabilization are in place; not yet checked on real footage. MAX2's GP-Log is not supported yet.</td></tr>
-            <tr><th scope="row">Other DJI cameras<br><span style="font-weight:400;color:var(--muted)">Action 4, Action 5 Pro, Pocket 3…</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
-            <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-bit I-Log is not supported.</td></tr>
-            <tr><th scope="row">DJI drones</th><td><span class="pill part">Partial</span></td><td>Log by choosing the curve by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>; stabilization needs a Gyroflow project.</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">Verified</span><br><span class="cam-sub">EIS off</span></td><td>Depth telemetry and HDR export too, used daily.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>Single-lens MP4. Not yet checked on real footage.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Expected</span></td><td>GP-Log on HERO12 Black from firmware 1.20. Not yet checked on real footage. MAX2's GP-Log is not supported yet.</td></tr>
+            <tr><th scope="row">Other DJI cameras<br><span class="cam-sub">Action 4, Action 5 Pro, Pocket 3…</span></th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>* D-Log M is chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>: these clips don't say yet that they're log, and the Action 6's curve is assumed.</td></tr>
+            <tr><th scope="row">Insta360, single lens</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">10-bit I-Log</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">FlowState off</span></td><td>* I-Log is chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>: the clip doesn't say it's log. 8-bit I-Log is not supported.</td></tr>
+            <tr><th scope="row">DJI drones</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">D-Log M, D-Log</span></td><td><span class="pill part">Partial</span><br><span class="cam-sub">Gyroflow project</span></td><td>* The curve is chosen by hand with <kbd>Ctrl</kbd>+<kbd>l</kbd>. Stabilization needs a Gyroflow project.</td></tr>
           </tbody>
         </table>
       </div>
