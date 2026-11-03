@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Download Action Footage Player</title>
+<meta name="description" content="Download Action Footage Player, free and open source: the app for macOS on Apple Silicon and for Windows 10 and 11, and the plugins alone for your own mpv on macOS, Linux and Windows.">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, home">
+      <img class="brand-mark" src="icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#mac" class="opt">macOS</a>
+      <a href="#windows" class="opt">Windows</a>
+      <a href="#plugins" class="opt">Plugins</a>
+      <a href="index.html">Home</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero band dl-hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Download · <span data-release="version">the latest release</span><span data-release="date-line" hidden></span></p>
+        <h1>Download Action Footage Player</h1>
+        <p class="lede">Free and open source. The app for your Mac or PC carries everything it needs: nothing else to install, no account.</p>
+        <div class="status">
+          <span><i class="dot" aria-hidden="true"></i>Early alpha</span>
+          <span>Files served from GitHub</span>
+          <span>GPL-3.0</span>
+        </div>
+        <p class="honest dl-mobile" id="mobile-note" hidden>Action Footage Player is a desktop app. Open this page on your Mac or PC to download it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band tight-top" aria-label="The app">
+    <div class="wrap platforms">
+
+      <article class="platform" id="mac" data-os="mac">
+        <div class="platform-head">
+          <h2>macOS</h2>
+          <span class="pill ok yours" hidden>Your system</span>
+        </div>
+        <p class="platform-req">A Mac with Apple Silicon (M1 or later), macOS 15 Sequoia or later</p>
+        <a class="btn primary dl-btn" data-asset="mac-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Download for Mac <small data-fill="size">.zip</small>
+        </a>
+        <dl class="file-meta">
+          <dt>File</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-macos-arm64.zip</code></dd>
+          <dt>Version</dt><dd data-release="version">latest</dd>
+          <dt>Released</dt><dd data-release="date">see the release</dd>
+          <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">in SHA256SUMS</code></dd>
+        </dl>
+        <h3>Install</h3>
+        <ol class="install">
+          <li>Unzip the download and move <b>ActionFootagePlayer</b> to Applications.</li>
+          <li>Open it. The first time, macOS won't: the app is signed ad hoc, not by an Apple developer account. Open <b>System Settings → Privacy &amp; Security</b>, scroll down to Security, click <b>Open Anyway</b> next to ActionFootagePlayer and confirm.</li>
+          <li>Accept its setup: it becomes the player for MP4 videos (macOS asks you to confirm), Finder gets the Quick Actions <i>Play Stabilized</i> and <i>Stabilize + LUT</i>, and DJI's Rec.709 LUT is downloaded from DJI.</li>
+        </ol>
+        <p class="platform-note">It carries its own mpv and ffmpeg. To update, replace it in Applications with the new version. No build for Intel Macs.</p>
+      </article>
+
+      <article class="platform" id="windows" data-os="windows">
+        <div class="platform-head">
+          <h2>Windows</h2>
+          <span class="pill ok yours" hidden>Your system</span>
+        </div>
+        <p class="platform-req">Windows 10 or 11, 64-bit (x86-64), a graphics card with DirectX 12 or Vulkan</p>
+        <a class="btn primary dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Download for Windows <small data-fill="size">.exe</small>
+        </a>
+        <dl class="file-meta">
+          <dt>File</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-x86_64-setup.exe</code></dd>
+          <dt>Version</dt><dd data-release="version">latest</dd>
+          <dt>Released</dt><dd data-release="date">see the release</dd>
+          <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">in SHA256SUMS</code></dd>
+        </dl>
+        <h3>Install</h3>
+        <ol class="install">
+          <li>Run the installer. It needs no admin rights: it installs for you alone, in <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. If your browser says the file isn't commonly downloaded, choose <b>Keep</b>.</li>
+          <li>The installer isn't signed, so the first time Windows SmartScreen warns about it: click <b>More info</b>, then <b>Run anyway</b>.</li>
+          <li>It puts ActionFootagePlayer in Open With for MP4 and MOV videos, with <i>Play in ActionFootagePlayer</i> and <i>Stabilize + LUT</i> in Explorer's menu (on Windows 11 under Show more options). It downloads DJI's Rec.709 LUT and, if you leave it ticked, opens Settings to make it the default app for MP4 videos.</li>
+        </ol>
+        <p class="platform-note">It carries its own mpv, VapourSynth with its Python, and ffmpeg. Uninstall it from Settings → Apps. No build for Windows on ARM.</p>
+      </article>
+
+      <article class="platform" id="linux" data-os="linux">
+        <div class="platform-head">
+          <h2>Linux</h2>
+          <span class="pill ok yours" hidden>Your system</span>
+        </div>
+        <p class="platform-req">x86-64, with an mpv of your own</p>
+        <a class="btn dl-btn" href="#plugins">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+          The plugins for your mpv
+        </a>
+        <p>No app for Linux yet: the plugins go into the mpv you already have. Or, from a checkout of the source, <code>./install.sh</code> builds and installs them all, with DJI's LUT; <code>./install.sh --apps</code> also puts ActionFootagePlayer in the applications menu as the default app for MP4 videos.</p>
+        <p class="platform-note">Built by every release, not yet tried on Linux by hand.</p>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="section band tight-top" id="plugins">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Already use mpv?</p>
+        <h2>The plugins alone</h2>
+        <p class="lede">The same plugins the app carries, for your own mpv. Unzip them into mpv's <code>scripts</code> folder: <code>~/.config/mpv/scripts/</code>, or <code>%APPDATA%\mpv\scripts\</code> on Windows. Nothing goes in <code>mpv.conf</code> or <code>input.conf</code>.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="dl-table">
+          <thead><tr><th scope="col">Plugin</th><th scope="col">For</th><th scope="col">Download</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">D-Log M and other log curves, in HDR</th>
+              <td>any mpv, any system. HDR only: DJI's Rec.709 LUT isn't redistributed</td>
+              <td><a class="text-link" data-asset="dlogm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-dlogm</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr>
+              <th scope="row">DJI telemetry on screen</th>
+              <td>any mpv, any system</td>
+              <td><a class="text-link" data-asset="telemetry" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-dji-telemetry</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr>
+              <th scope="row">Highlights the camera marked</th>
+              <td>any mpv, any system</td>
+              <td><a class="text-link" data-asset="highlights" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-highlights</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr>
+              <th scope="row">The right-click menu</th>
+              <td>mpv 0.41 or later, any system</td>
+              <td><a class="text-link" data-asset="menu" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-footage-menu</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="mac">
+              <th scope="row">Stabilization and export · macOS</th>
+              <td>Homebrew's mpv on Apple Silicon (<code>brew install mpv ffmpeg</code>)</td>
+              <td><a class="text-link" data-asset="gyroflow-mac" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, macOS</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="linux">
+              <th scope="row">Stabilization and export · Linux</th>
+              <td>x86-64, mpv built with VapourSynth</td>
+              <td><a class="text-link" data-asset="gyroflow-linux" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Linux</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="windows">
+              <th scope="row">Stabilization and export · Windows</th>
+              <td>x86-64, mpv built with VapourSynth</td>
+              <td><a class="text-link" data-asset="gyroflow-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="help dl-notes">
+        <div class="help-card">
+          <h3>Stabilization on Linux and Windows</h3>
+          <p>It needs an mpv built with VapourSynth (<code>mpv --vf=help</code> lists <code>vapoursynth</code>; on Windows, shinchiro's builds have it, Debian's and Ubuntu's mpv doesn't), VapourSynth itself with its Python, a GPU with Vulkan (or DirectX 12 on Windows), and ffmpeg for exports. Put <code>mpv-dlogm</code> next to it for D-Log M.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer#linux-and-windows">Linux and Windows, in detail</a>
+        </div>
+        <div class="help-card">
+          <h3>Stabilization on macOS</h3>
+          <p>Downloaded with a browser, its binaries carry the quarantine flag and macOS refuses them. Once it's unzipped: <code>xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow</code></p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer#plugins-in-your-own-mpv">Plugins in your own mpv</a>
+        </div>
+        <div class="help-card">
+          <h3>From source</h3>
+          <p>On a Mac, <code data-fill="name">ActionFootagePlayer-&lt;version&gt;-macos-arm64.tar.gz</code> is the source with the binaries prebuilt, so <code>./install.sh --apps</code> needs no Rust. From a plain checkout it builds them (Rust, 5–10 minutes the first time).</p>
+          <a data-asset="source" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">The prebuilt source <span class="size" data-fill="size"></span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band tight-top" id="release">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">This release</p>
+        <h2 data-release="title">The latest release</h2>
+        <p class="lede" data-release="summary">What's new, how to upgrade and what's known not to work yet are in the release notes on GitHub.</p>
+      </div>
+      <div class="btns">
+        <a class="btn" data-release="notes" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Release notes</a>
+        <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer/releases">All releases</a>
+        <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer">Source on GitHub</a>
+        <a class="btn" data-asset="sums" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">SHA256SUMS</a>
+      </div>
+      <p class="note">Check a download against it: <code>shasum -a 256 -c SHA256SUMS --ignore-missing</code> in the folder with both. The files are the release's assets on GitHub, built by its workflow from the tagged source.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · Made by a diver in Geneva, Switzerland</span>
+      <a href="index.html">Home</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases">All releases</a>
+    </div>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M HDR LUT derived from Zeb Gardner's shaper LUT (used with permission), and the log curves published by DJI, GoPro and Insta360. The app bundles mpv and ffmpeg under their own licenses. Not affiliated with DJI, GoPro or Insta360.</p>
+  </div>
+</footer>
+
+<script src="download.js"></script>
+</body>
+</html>
