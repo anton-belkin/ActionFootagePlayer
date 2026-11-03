@@ -103,7 +103,7 @@
           <h2>Windows</h2>
           <span class="pill ok yours" hidden>Ваша система</span>
         </div>
-        <p class="platform-req">Windows 10 или 11, 64-разрядная (x86-64), видеокарта с поддержкой DirectX 12 или Vulkan</p>
+        <p class="platform-req">Windows 10 или 11, 64-разрядная (x86-64 или ARM), видеокарта с поддержкой DirectX 12 или Vulkan</p>
         <a class="btn primary dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
           Скачать для Windows <small data-fill="size">.exe</small>
@@ -114,13 +114,27 @@
           <dt>Дата выхода</dt><dd data-release="date">см. страницу выпуска</dd>
           <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">в SHA256SUMS</code></dd>
         </dl>
+        <div class="dl-alt" id="windows-arm">
+          <div class="platform-head">
+            <p><b>Компьютер с процессором ARM</b> (Snapdragon): приложение, собранное для него. Версия выше на нём тоже работает, но в эмуляции и медленнее.</p>
+            <span class="pill ok yours" hidden>Ваш компьютер</span>
+          </div>
+          <a class="btn dl-btn" data-asset="windows-arm-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Скачать для Windows на ARM <small data-fill="size">.exe</small>
+          </a>
+          <dl class="file-meta">
+            <dt>Файл</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-arm64-setup.exe</code></dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">в SHA256SUMS</code></dd>
+          </dl>
+        </div>
         <h3>Установка</h3>
         <ol class="install">
           <li>Запустите установщик. Права администратора ему не нужны: он устанавливает приложение только для вас, в <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. Если браузер предупредит, что такой файл скачивают редко, выберите <b>Сохранить</b>.</li>
           <li>Установщик не подписан, поэтому в первый раз Windows SmartScreen предупредит о нём: нажмите <b>Подробнее</b>, затем <b>Выполнить в любом случае</b>.</li>
           <li>Он добавляет ActionFootagePlayer в «Открыть с помощью» для видео MP4 и MOV, а в меню Проводника — пункты <i>Play in ActionFootagePlayer</i> и <i>Stabilize + LUT</i> (в Windows 11 — в разделе «Показать дополнительные параметры»). Он скачивает LUT Rec.709 от DJI и, если не снимать галочку, открывает «Параметры», чтобы вы назначили приложение используемым по умолчанию для видео MP4.</li>
         </ol>
-        <p class="platform-note">В приложение входят собственные mpv, VapourSynth со своим Python и ffmpeg. Удалить его можно в разделе «Параметры» → «Приложения». Сборки для Windows на ARM нет.</p>
+        <p class="platform-note">В приложение входят собственные mpv, VapourSynth со своим Python и ffmpeg. Удалить его можно в разделе «Параметры» → «Приложения». На ARM экспорт кодирует процессор (x265): аппаратные кодировщики, которые использует приложение, — от NVIDIA, Intel и AMD.</p>
       </article>
 
       <article class="platform" id="linux" data-os="linux">
@@ -185,6 +199,11 @@
               <th scope="row">Стабилизация и экспорт · Windows</th>
               <td>x86-64, mpv, собранный с VapourSynth</td>
               <td><a class="text-link" data-asset="gyroflow-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="windows">
+              <th scope="row">Стабилизация и экспорт · Windows на ARM</th>
+              <td>arm64, mpv и VapourSynth, собранные для него (своей такой сборки у VapourSynth нет)</td>
+              <td><a class="text-link" data-asset="gyroflow-windows-arm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows на ARM</a> <span class="size" data-fill="size"></span></td>
             </tr>
           </tbody>
         </table>

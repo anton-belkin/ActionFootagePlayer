@@ -21,6 +21,7 @@
   var ASSETS = {
     "mac-app": /^ActionFootagePlayer-.+-macos-arm64\.zip$/,
     "windows-app": /^ActionFootagePlayer-.+-windows-x86_64-setup\.exe$/,
+    "windows-arm-app": /^ActionFootagePlayer-.+-windows-arm64-setup\.exe$/,
     "source": /^ActionFootagePlayer-.+-macos-arm64\.tar\.gz$/,
     "dlogm": /^mpv-dlogm-.+\.zip$/,
     "telemetry": /^mpv-dji-telemetry-.+\.zip$/,
@@ -29,6 +30,7 @@
     "gyroflow-mac": /^mpv-gyroflow-.+-macos-arm64\.zip$/,
     "gyroflow-linux": /^mpv-gyroflow-.+-linux-x86_64\.zip$/,
     "gyroflow-windows": /^mpv-gyroflow-.+-windows-x86_64\.zip$/,
+    "gyroflow-windows-arm": /^mpv-gyroflow-.+-windows-arm64\.zip$/,
     "sums": /^SHA256SUMS$/
   };
 
@@ -49,9 +51,25 @@
     if (!os) return;
     document.querySelectorAll('[data-os="' + os + '"]').forEach(function (el) {
       el.classList.add("is-yours");
-      var pill = el.querySelector(".yours");
+      var pill = el.querySelector(".platform-head > .yours");
       if (pill) pill.hidden = false;
     });
+    if (os === "windows") markArm();
+  }
+
+  // A Windows PC with an ARM processor: only Chromium browsers tell (the user agent says x86-64 everywhere). Its
+  // installer becomes the primary button
+  function markArm() {
+    var ua = navigator.userAgentData;
+    var alt = document.getElementById("windows-arm");
+    if (!alt || !ua || !ua.getHighEntropyValues) return;
+    ua.getHighEntropyValues(["architecture"]).then(function (v) {
+      if (v.architecture !== "arm") return;
+      alt.classList.add("is-yours");
+      alt.querySelector(".yours").hidden = false;
+      document.querySelector('[data-asset="windows-app"]').classList.remove("primary");
+      alt.querySelector('[data-asset="windows-arm-app"]').classList.add("primary");
+    }).catch(function () { /* stays as it is */ });
   }
 
   function size(bytes) {
@@ -104,11 +122,18 @@
       var asset = pattern && assets.filter(function (a) { return pattern.test(a.name); })[0];
       if (!asset || !/^https:\/\/github\.com\//.test(asset.browser_download_url)) return;
       link.href = asset.browser_download_url;
-      var scope = link.closest(".platform, tr, .help-card") || link;
-      setText('[data-fill="name"]', asset.name, scope);
-      setText('[data-fill="size"]', size(asset.size), scope);
+      // The file's own block: the ARM installer's, inside the Windows card, is filled by its own link
+      var blocks = ".dl-alt, .platform, tr, .help-card";
+      var scope = link.closest(blocks) || link;
+      function put(what, text) {
+        scope.querySelectorAll('[data-fill="' + what + '"]').forEach(function (el) {
+          if (el.closest(blocks) === scope || scope === link) { el.textContent = text; el.hidden = false; }
+        });
+      }
+      put("name", asset.name);
+      put("size", size(asset.size));
       var sha = /^sha256:([0-9a-f]{64})$/.exec(asset.digest || "");
-      if (sha) setText('[data-fill="sha256"]', sha[1], scope);
+      if (sha) put("sha256", sha[1]);
     });
   }
 
