@@ -629,21 +629,28 @@ LUTs into shaders and installs everything; existing files it replaces are kept a
 ### The app from a checkout, as the release builds it
 
 To try a branch or a fix in the app without waiting for a release, from a checkout on a Mac with
-[Homebrew](https://brew.sh) (`brew install mpv ffmpeg rustup`):
+[Homebrew](https://brew.sh) and Xcode (`brew install ffmpeg rustup`):
+
+```bash
+tools/build_mpv.sh
+```
 
 ```bash
 tools/dev_app.sh
 ```
 
-It builds ActionFootagePlayer the way the release does: the plugins, and Homebrew's mpv, ffmpeg, Python and
-VapourSynth in the app (so it needs no Homebrew to run). Then it puts it in `~/Applications` in place of the one
+`tools/build_mpv.sh` builds the app's mpv once (a few minutes): the commit in `tools/mpv.lock`, with libplacebo
+linked in, the other libraries Homebrew's (it installs mpv's dependencies with Homebrew first; `--no-deps` skips
+that). `tools/dev_app.sh` then builds ActionFootagePlayer the way the release does: the plugins, that mpv, and
+Homebrew's ffmpeg, Python and VapourSynth in the app (so it needs no Homebrew to run). Without `tools/build_mpv.sh`'s
+mpv it takes Homebrew's (`brew install mpv`); `MPV_BIN` names another. Then it puts it in `~/Applications` in place of the one
 there, which it keeps as `build/ActionFootagePlayer-previous.app`, and runs the setup (the default app for MP4, the
 Quick Actions, DJI's LUT).
 - **What it builds:** uncommitted changes too, and `~/.config/mpv` isn't touched. The version says what it is: `0.6.2`
   on a release's tag, else e.g. `0.6.2-dev.3+1a2b3c4` (`.dirty` with uncommitted changes).
 - **How long:** a few minutes, most of it the first cargo build.
-- **How it differs from the release:** the mpv and ffmpeg in it are this Mac's Homebrew ones, where the release's
-  build gets the latest (`brew upgrade mpv ffmpeg` first). Each build is signed anew (ad hoc), so macOS may ask
+- **How it differs from the release:** ffmpeg and the libraries mpv links are this Mac's Homebrew ones, where the
+  release's build gets the latest (`brew upgrade ffmpeg`, then `tools/build_mpv.sh` again, first). Each build is signed anew (ad hoc), so macOS may ask
   again for access to a folder like Downloads.
 - `--no-install` only builds `build/ActionFootagePlayer.app`.
 
@@ -979,6 +986,7 @@ macos/                        ActionFootagePlayer: player.sh (the app's executab
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
 tools/dev_app.sh              builds it from the checkout as the release does, and puts it in ~/Applications
+tools/build_mpv.sh            builds the app's mpv (tools/mpv.lock: mpv's commit and libplacebo's, linked in)
 windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
                               gives mpv.exe the app's icon (Rust, no dependencies)
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
@@ -997,9 +1005,10 @@ tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for L
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
 
-ActionFootagePlayer.app also carries mpv, ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as
-Homebrew builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
-`Contents/Resources/ThirdParty/` has each one's license files and the Homebrew formula it was built by, and
+ActionFootagePlayer.app also carries mpv (GPL; built by `tools/build_mpv.sh` from the commit in `tools/mpv.lock`,
+with libplacebo, LGPL, linked in) and ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as Homebrew
+builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
+`Contents/Resources/ThirdParty/` has each one's license files (and for Homebrew's, the formula it was built by), and
 `SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them
 at build). The sources are also available from this project on request.
 

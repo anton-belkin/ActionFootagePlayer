@@ -21,7 +21,8 @@
 #
 # With BUNDLE_RUNTIME set to Homebrew's prefix (`brew --prefix`), the app also gets Homebrew's mpv and ffmpeg and
 # what they load, Python and VapourSynth among it, with their licenses (tools/bundle_runtime.py): it then needs no
-# Homebrew, and the macOS the bottles were built for. Without it, the app runs Homebrew's mpv.
+# Homebrew, and the macOS the bottles were built for. Its mpv is MPV_BIN's when that's set (tools/build_mpv.sh's).
+# Without BUNDLE_RUNTIME, the app runs Homebrew's mpv.
 #
 # Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/ActionFootagePlayer).
 set -euo pipefail

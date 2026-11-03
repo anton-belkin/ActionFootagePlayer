@@ -35,19 +35,34 @@ jobs:
           key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vs-gyroflow/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
 
-      # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew. The bottles are built for the
-      # runner's macOS, and the app needs that one or later: the oldest runner that Homebrew has bottles for. Updated
-      # first: the runner's Homebrew is as old as its image, and doesn't update itself there
-      - name: mpv and ffmpeg
+      # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew: ffmpeg, and what mpv links (mpv
+      # itself is built below). The bottles are built for the runner's macOS, and the app needs that one or later: the
+      # oldest runner that Homebrew has bottles for. Updated first: the runner's Homebrew is as old as its image, and
+      # doesn't update itself there
+      - name: Homebrew (ffmpeg, mpv's dependencies, mpv's build tools)
         env:
           HOMEBREW_NO_INSTALL_CLEANUP: 1
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-        run: brew update && brew install mpv ffmpeg
+        run: |
+          brew update && tools/build_mpv.sh --deps-only && brew install ffmpeg
+          mkdir -p build && tools/build_mpv.sh --print-deps | tee build/mpv-deps.txt
+
+      # The app's mpv (tools/build_mpv.sh: tools/mpv.lock's commit, with libplacebo in it), built again when the lock,
+      # the script, or a Homebrew library it links (or the compiler) changes: it links them by their version
+      - uses: actions/cache@v4
+        id: mpv
+        with:
+          path: build/mpv-afp/out
+          key: mpv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/mpv.lock', 'tools/build_mpv.sh', 'build/mpv-deps.txt') }}
+
+      - name: mpv
+        if: steps.mpv.outputs.cache-hit != 'true'
+        run: tools/build_mpv.sh --no-deps
 
       - name: Build
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
-          BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
+          MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
 
       - uses: actions/upload-artifact@v4
         with:
