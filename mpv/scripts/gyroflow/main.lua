@@ -38,8 +38,8 @@
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     what was seen in that direction of the world, the rest the colors around spread in, or only
 --                     the frame's own colors spread out from its edge (both blurred)
---   Ctrl+u   lens     the lens above water, and back to under water or as the camera says (what it was); it
---                     sticks for the next clips
+--   Ctrl+u   lens     the lens above water, and back to what it was (under water, as the camera says, or as the
+--                     project says); it sticks for the next clips without a project
 --   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
 --                     sticks (still.lua)
 --   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
@@ -55,16 +55,20 @@
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
 --   level weak|medium|strong  the level (Ctrl+k)
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
---   underwater yes|auto|no  the lens under water, as the camera says, or above water
+--   underwater yes|auto|project|no  the lens under water, as the camera says, as the project says, or above water
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
---                           in gyroflow.conf
+--                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), view (normal, wide, off), level, still (Ctrl+p),
--- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
+-- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, waiting (for a project from Gyroflow), exporting, last_export.
+--
+-- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
+-- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
+-- clip only. The edge fill, the color fringes and the clean still frame aren't Gyroflow's: they stick for every clip
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -81,12 +85,14 @@
 --   lookahead=4  a clip without a project plays once the first 4 + this many seconds of its motion data are read, and
 --                the rest is read as it plays: what's this far behind the newest is as it'd be with all of it
 --                (vs-gyroflow/src/motion.rs). From a NAS, ~1 s instead of 5-10. 0: all of it first, as a project's
---   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
---                as the project or preset says
---   underwater=auto  the lens under water (Gyroflow's "Lens is underwater": the light bends where it enters the
---                lens), yes, or above water, no. auto: as the camera says over the clip, its In water / Out of water
---                (the dji-telemetry plugin's `water`; the Osmo Action 6 records it), and for clips from other
---                cameras as the project or preset says (the default preset: under water). vs-gyroflow/src/water.rs
+--   horizon_lock=project  clips without a project: yes, the horizon locked level (Gyroflow's horizon lock at 100 %),
+--                no: not locked, project: as the preset says. A clip with a project plays with the project's
+--   underwater=auto  clips without a project: the lens under water (Gyroflow's "Lens is underwater": the light bends
+--                where it enters the lens), yes, or above water, no. auto: as the camera says over the clip, its In
+--                water / Out of water (the dji-telemetry plugin's `water`; the Osmo Action 6 records it), and for
+--                clips from other cameras as the preset says (under water); project: as the preset says.
+--                vs-gyroflow/src/water.rs. A clip with a project plays with the project's (Ctrl+e writes the camera's
+--                In water / Out of water into the one it makes)
 --   chromatic=yes  the water's color fringes taken out where the lens is under water (Ctrl+a), or no: as recorded
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction, the rest the colors around
 --                spread in), smooth (the frame's colors spread out), off (the project's background color)
@@ -290,13 +296,30 @@ local function view_label(v)
     if v == "normal" then return has_project(current_source) and "on (Gyroflow project)" or "on" end
     return "off"
 end
--- true or false: locked or not, whatever the project says; nil: the project's
+-- true or false: locked or not, whatever the project says; nil: the project's. Like the view, what clips without a
+-- project start with sticks (sticky_horizon); a clip with a project starts with the project's, a change for that clip only
 local HORIZON = { yes = true, no = false }
-local horizon = HORIZON[o.horizon_lock]
--- The lens under water (yes), above water (no), or as the camera says (auto); sticks for the next clips like the
--- horizon lock. A clip's camera that doesn't record it (source.water) leaves auto to the project or preset
-local UNDERWATER_LABELS = { yes = "lens under water", no = "lens above water", auto = "lens under water as the camera says" }
-local underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "auto"
+local sticky_horizon = HORIZON[o.horizon_lock]
+local horizon = sticky_horizon
+-- The lens under water (yes), above water (no), as the camera says (auto), or as the project or preset says
+-- (project); sticks for the next clips without a project like the horizon lock, and a clip with a project starts
+-- with the project's. A clip's camera that doesn't record it (source.water) leaves auto to the project or preset
+local UNDERWATER_LABELS = { yes = "lens under water", no = "lens above water", auto = "lens under water as the camera says",
+                            project = "lens under water or not as the project says" }
+local sticky_underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "auto"
+local underwater = sticky_underwater
+-- Under water, auto or the project's, before Ctrl+u took the lens out of the water
+local underwater_back = underwater ~= "no" and underwater or "auto"
+
+-- The horizon lock and the lens a clip starts with: a project's own, or what sticks
+local function clip_settings(source)
+    if has_project(source) then
+        horizon, underwater = nil, "project"
+    else
+        horizon, underwater = sticky_horizon, sticky_underwater
+    end
+    underwater_back = underwater ~= "no" and underwater or (has_project(source) and "project" or "auto")
+end
 
 -- The water's color fringes, taken out wherever the stabilization has the lens under water (its refraction, frame by
 -- frame: vs-gyroflow/src/dispersion.rs), unless Ctrl+a leaves them as recorded (the control file's chromatic=). The
@@ -331,7 +354,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
+                                                wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -405,6 +428,7 @@ end
 local function add_filter(source)
     current_source = source
     view = has_project(source) and "normal" or sticky_view
+    clip_settings(source)
     write_edge_control()
 
     local sizes = render_sizes(source)
@@ -446,6 +470,7 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
+    clip_settings(nil)
     local path = mp.get_property("path")
     if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
@@ -637,32 +662,34 @@ mp.register_script_message("horizon-lock", function(value)
     else
         return
     end
+    if not has_project(current_source) then sticky_horizon = horizon end
     rebuild_filter()
     publish()
-    mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the project says" or (horizon and "locked" or "not locked")), 1.5)
+    local says = current_source and current_source.kind == "default" and "preset" or "project"
+    mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the " .. says .. " says" or (horizon and "locked" or "not locked")), 1.5)
 end)
-
--- Under water or auto, before Ctrl+u took the lens out of the water
-local underwater_back = underwater ~= "no" and underwater or "auto"
 
 local function set_underwater(value)
     underwater = value
     if value ~= "no" then underwater_back = value end
+    if not has_project(current_source) then sticky_underwater = value end
     rebuild_filter()
     publish()
+    local says = current_source and current_source.kind == "default" and "preset" or "project"
+    local label = UNDERWATER_LABELS[value]:gsub("project", says)
     local note = ""
     if value == "auto" and current_source and not current_source.water then
-        note = ": this camera doesn't record it, so as the " .. (current_source.kind == "default" and "preset" or "project") .. " says"
+        note = ": this camera doesn't record it, so as the " .. says .. " says"
     end
-    mp.msg.info(UNDERWATER_LABELS[value] .. note)
-    mp.osd_message("Gyroflow: " .. UNDERWATER_LABELS[value] .. note, 2)
+    mp.msg.info(label .. note)
+    mp.osd_message("Gyroflow: " .. label .. note, 2)
 end
 
 mp.register_script_message("underwater", function(value)
     if UNDERWATER_LABELS[value] then set_underwater(value) end
 end)
 
--- Above water <-> what it was (under water, or as the camera says)
+-- Above water <-> what it was (under water, as the camera says, or as the project says)
 mp.add_key_binding("Ctrl+u", "lens", function()
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
@@ -705,8 +732,8 @@ mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
         { "view", sticky_view },
         { "level", level },
-        { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
-        { "underwater", underwater },
+        { "horizon_lock", sticky_horizon == nil and "project" or (sticky_horizon and "yes" or "no") },
+        { "underwater", sticky_underwater },
         { "chromatic", chromatic and "yes" or "no" },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
         { "still", still.enabled() and "yes" or "no" },
@@ -746,8 +773,10 @@ local function reload_project(project, version)
     -- The same video: its camera records the water or not as it did
     local source = { project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh,
                      water = current_source and current_source.water, sizes = current_source and current_source.sizes }
-    -- The project as Gyroflow has it: written from the wider view, it has that view's FOV itself
+    -- The project as Gyroflow has it: written from the wider view, it has that view's FOV itself, and the horizon lock
+    -- and the lens it played with here
     view = "normal"
+    clip_settings(source)
     write_edge_control()
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do

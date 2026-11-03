@@ -13,7 +13,8 @@ use gyroflow_core::{ StabilizationManager, telemetry_parser, keyframes::{ Easing
 
 use crate::{ prefetch::Prefetched, probe::{ dji_schema, pb_bytes, pb_varint } };
 
-/// Under water, not, or as the camera says (where it says; elsewhere as the project or preset says)
+/// Under water, not, as the camera says (where it says; elsewhere as the project or preset says), or as the project
+/// or preset says
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Underwater {
     Yes,
@@ -21,6 +22,9 @@ pub enum Underwater {
     /// The camera's In water / Out of water over the clip (`spans`), where it records it; elsewhere the project's or
     /// preset's. A project that keyframes the refraction itself keeps its keyframes
     Auto,
+    /// The project's or preset's refraction, fixed or keyframed, whatever the camera says: what a clip with a project
+    /// plays with in mpv (the project made in Gyroflow is the one to follow)
+    Project,
 }
 
 impl Underwater {
@@ -29,6 +33,7 @@ impl Underwater {
             "yes" => Some(Self::Yes),
             "no" => Some(Self::No),
             "auto" => Some(Self::Auto),
+            "project" => Some(Self::Project),
             _ => None,
         }
     }
@@ -155,6 +160,7 @@ pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str, m
     match underwater {
         Underwater::Yes => fixed(water),
         Underwater::No => fixed(1.0),
+        Underwater::Project => {}
         Underwater::Auto => {
             if stab.is_keyframed(&typ) {
                 return log::info!("{video}: the project keyframes the lens's refraction, kept");
@@ -194,6 +200,13 @@ pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str, m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse() {
+        assert_eq!(Underwater::parse("project"), Some(Underwater::Project));
+        assert_eq!(Underwater::parse("auto"), Some(Underwater::Auto));
+        assert_eq!(Underwater::parse("maybe"), None);
+    }
 
     #[test]
     fn stretches() {

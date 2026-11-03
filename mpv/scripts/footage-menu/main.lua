@@ -173,6 +173,7 @@ local function stabilization_menu(g, key)
                 or item("Stabilize in Gyroflow (optical flow)…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         }
     end
+    local says = g.kind == "default" and "preset" or "project"
     local edges = {}
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
@@ -189,13 +190,19 @@ local function stabilization_menu(g, key)
             item("Strong: 30 % crop, smoothness 100 %", "script-message-to gyroflow level strong", { checked = g.level == "strong", shortcut = level }),
         }, { shortcut = level, disabled = g.kind == "project" }),
         SEPARATOR,
-        item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
+        -- A clip with a project starts with the project's horizon lock and lens; one without, with what sticks
+        submenu("Horizon", {
+            item("Locked level", "script-message-to gyroflow horizon-lock yes", { checked = g.horizon_lock == "yes" }),
+            item("Not locked", "script-message-to gyroflow horizon-lock no", { checked = g.horizon_lock == "no" }),
+            item("As the " .. says .. " says", "script-message-to gyroflow horizon-lock project", { checked = g.horizon_lock == "project" }),
+        }),
         submenu("Lens", {
             item("Under water", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
             -- Only a camera that records when it's in the water has it; elsewhere auto is the project's or preset's
             item(g.water and "Auto: as the camera says (In water / Out of water)" or "Auto: this camera doesn't say, so as the "
-                 .. (g.kind == "default" and "preset" or "project") .. " says",
+                 .. says .. " says",
                  "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
+            item("As the " .. says .. " says", "script-message-to gyroflow underwater project", { checked = g.underwater == "project", shortcut = lens }),
             item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
             SEPARATOR,
             -- Only under water: above water no color moves either way

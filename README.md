@@ -198,7 +198,7 @@ Right-click the video for the menu: everything the keys do, with the keys beside
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the level, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the level, the horizon locked or not, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
@@ -219,7 +219,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
+| `Ctrl+u` | The lens above water (no refraction), and back to under water, as the camera says or as the project says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips without a project | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
@@ -256,8 +256,8 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
-| `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
-| `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
+| `gyroflow.conf`: `horizon_lock=project` | clips without a project: `yes`, the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the preset says. A clip with a `.gyroflow` plays with the project's |
+| `gyroflow.conf`: `underwater=auto` | the lens of clips without a project: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says), `project` as the preset says. A clip with a `.gyroflow` plays with the project's. See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
@@ -300,8 +300,17 @@ stabilized from the picture: `Ctrl+e` (or the menu's Stabilize in Gyroflow) open
 where its motion is found by optical flow. Save the project next to the clip there, and the clip loads again where
 it was, stabilized with it. On Linux and Windows this needs `gyroflow_app` (Options).
 
-The menu's Lock horizon keeps the horizon level, whatever the project says (Gyroflow's horizon lock at 100 %, its
-roll and pitch as the project has them); unticked, it isn't locked. It needs more zoom, so the edges show more.
+**A clip with a project plays as the project says.** It was made in Gyroflow on purpose, so the clip starts with
+its own horizon lock and lens (under water or not, keyframed or not), whatever the menu had for the clip before
+and whatever `gyroflow.conf` says: those are for clips without a project, which play with the default preset.
+Set from the menu or the keys while a clip with a project plays, they're for that clip only; the next one starts
+with its project's again. The edge fill (`Ctrl+b`), the color fringes (`Ctrl+a`) and the clean still frame
+(`Ctrl+p`) aren't Gyroflow's, so they're the player's for every clip.
+
+The menu's Stabilization → Horizon: *Locked level* keeps the horizon level, whatever the project says (Gyroflow's
+horizon lock at 100 %, its roll and pitch as the project has them); *Not locked*; or *As the project says* (as
+the preset says, for a clip without one), what a clip with a project starts with. Locked needs more zoom, so the
+edges show more.
 
 The project is always the `.gyroflow` next to the clip: the video file itself is never written to, so a backup
 of it stays as it is.
@@ -350,15 +359,17 @@ the NAS), and the correction comes in over half a second. While it's paused, the
 (`vs-gyroflow/src/motion.rs`). A project's clip, whose motion data the project has, reads only a tenth of its
 samples for *In water* / *Out of water* (25 s for a 5-minute clip from the NAS before).
 
-**Lens under water, above it, or as the camera says.** The menu's Stabilization → Lens sets the refraction for
-any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above water* (none), or
-*Auto*, the default: as the camera says over the clip, its *In water* / *Out of water* (the telemetry's `water`:
-the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
+**Lens under water, above it, as the camera says, or as the project says.** The menu's Stabilization → Lens sets
+the refraction for any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above
+water* (none), *As the project says* (as the preset says, for a clip without one), what a clip with a project
+starts with, or *Auto*, the default for clips without one: as the camera says over the clip, its *In water* /
+*Out of water* (the telemetry's `water`: the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
 the refraction where it's in and none where it's out, changing over the one frame between. Only a camera that
 records it has Auto (the Osmo Action 6); for clips from other cameras it's greyed, and the clip plays as its
 project or preset says (the default preset: under water). A project that keyframes the refraction itself keeps
-its keyframes in Auto. It sticks for the next clips, like the horizon lock, and goes into exports and into the
-project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline).
+its keyframes in Auto. It sticks for the next clips without a project, like the horizon lock, and goes into exports
+and into the project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline: so a project made
+that way keeps the camera's *In water* / *Out of water*).
 
 For clips from a camera without Auto shot with EIS off in air, pick Above water, or use a preset without the
 refraction (save one from Gyroflow: Export → Create settings preset, as `default.gyroflow` in one of the places
@@ -454,8 +465,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
   edges as playback does (`--edges-blur <%>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
-- `--underwater yes|no|auto`: the lens under water, above it, or (the default) as the camera says over the clip, as
-  the menu's Lens has it (see Stabilization).
+- `--underwater yes|no|auto|project`: the lens under water, above it, (the default) as the camera says over the
+  clip, or as the project or preset says, as the menu's Lens has it (see Stabilization).
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,

@@ -8,7 +8,7 @@
 -- standard look (Ctrl+s) with DJI's LUT (--sdr), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
 -- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
--- under water, above it or as the camera says, as the menu has it (--underwater). A log
+-- under water, above it, as the camera says or as the project says, as the menu has it (--underwater). A log
 -- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
 -- right-click menu:
 --   export [sdr]         the same as Shift+E, or in the standard look whatever plays

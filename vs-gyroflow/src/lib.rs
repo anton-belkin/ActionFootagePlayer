@@ -1006,7 +1006,7 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
     let underwater = match unsafe { map_get_str(api, input, c"underwater") } {
         None => Underwater::Auto,
-        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
+        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto, project)"))?,
     };
     let level = unsafe { level_arg(api, input) }?;
     let lookahead = unsafe { map_get_f64(api, input, c"lookahead") }.unwrap_or(4.0).clamp(0.0, 60.0);
