@@ -261,6 +261,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
 | `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; at full size while paused (`Ctrl+f`, `paused_full_size=auto`) every frame is there again (stepping through them, the clean still frame). Right click > Quality sets it |
+| `gyroflow.conf`: `edge_fill_rate=auto` | the edge fill rate: how often the sphere trail (`edges=sphere`) is written while playing. `auto`: whenever a GPU worker is free; `50` or `25`: from that % of the frames that play (with `fps_limit=30`, 25 % is ~7.5 a second), for a laptop whose CPU and GPU share their power, where the writes take what the frames need even while a worker is free. Changes without setting the chain up again. Right click > Quality > Edge fill rate sets it |
 | `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a lower frame rate, resolution or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
@@ -417,7 +418,9 @@ stabilized picture covers. A clip without one plays before the rest of its motio
 edges wherever they show. A clip with edges anywhere gets the sphere written as it plays,
 edges showing or not, so it has what to fill them with when they show. That's on a thread of its own, and only while
 the GPU has room: the frames come first, and where they need all of it the sphere is written less often, what it has
-fades into the trail by place, and every frame still plays. A clip without any has no sphere to write. The wider view of
+fades into the trail by place, and every frame still plays. Where the GPU shares its power with the CPU (a 15 W
+laptop), a free worker doesn't mean free power: Quality > Edge fill rate has the sphere written from only 50 % or
+25 % of the frames that play (`edge_fill_rate`, Options). A clip without any has no sphere to write. The wider view of
 `Ctrl+g` shows more of the picture and has edges throughout: it turns the zoom off and picks Gyroflow's FOV for the
 clip so the stabilized picture covers about as much area as the frame, what falls outside the frame and the edges
 inside it taken together. That's the area of the frame's outline after the lens correction (the one Gyroflow's zoom

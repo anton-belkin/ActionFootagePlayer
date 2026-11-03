@@ -103,6 +103,15 @@ vec2 project(vec3 d, int proj) {
     return d.xy / s * ray_radius(acos(clamp(d.z / length(d), -1.0, 1.0)), proj);
 }
 
+// Where a color whose index is k times green's is taken from, for a pixel whose ray is at angle theta from the axis
+// (sin_t, towards side): green's ray at the angle whose sine is k sin(theta). Never the marker's row
+vec2 taken_from(float k, float sin_t, vec3 axis, vec3 side, vec2 center, vec2 focal, int proj, vec2 size) {
+    float s = min(k * sin_t, 1.0);
+    vec2 p = center + focal * project(sqrt(1.0 - s * s) * axis + s * side, proj);
+    p.y = min(p.y, size.y - 1.5);
+    return p;
+}
+
 vec4 hook() {
     vec2 size = HOOKED_size;
     vec2 px = HOOKED_pos * size;
@@ -159,14 +168,13 @@ vec4 hook() {
     if (sin_t < 1e-7)
         return color;
     side /= sin_t;
-    for (int c = 0; c < 3; c++) {
-        if (kc[c] == 1.0)
-            continue;
-        float s = min(kc[c] * sin_t, 1.0);
-        vec2 p = center + focal * project(sqrt(1.0 - s * s) * axis + s * side, proj);
-        // Never the marker's row
-        p.y = min(p.y, size.y - 1.5);
-        color[c] = HOOKED_tex(p / size)[c];
-    }
+    // Each channel by itself: Direct3D's shader compiler can't write a vector's component chosen at run time (mpv's
+    // d3d11 on Windows)
+    if (kc.r != 1.0)
+        color.r = HOOKED_tex(taken_from(kc.r, sin_t, axis, side, center, focal, proj, size) / size).r;
+    if (kc.g != 1.0)
+        color.g = HOOKED_tex(taken_from(kc.g, sin_t, axis, side, center, focal, proj, size) / size).g;
+    if (kc.b != 1.0)
+        color.b = HOOKED_tex(taken_from(kc.b, sin_t, axis, side, center, focal, proj, size) / size).b;
     return color;
 }

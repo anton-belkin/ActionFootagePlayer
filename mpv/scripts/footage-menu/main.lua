@@ -33,6 +33,7 @@ local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge sp
 -- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
 local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
 local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
+local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
 local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
@@ -233,7 +234,7 @@ local function stabilization_menu(g, key)
 end
 
 -- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, the paused frame's,
--- and whether it asks
+-- how often the sphere trail is written, the color fringes (as in Lens), and whether it asks
 local function quality_menu(g)
     local items = {}
     for _, r in ipairs(FRAME_RATES) do
@@ -248,6 +249,15 @@ local function quality_menu(g)
         table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
     end
     table.insert(items, submenu("Paused frame", paused))
+    table.insert(items, SEPARATOR)
+    local fill = {}
+    for _, r in ipairs(FILL_RATES) do
+        table.insert(fill, item(r[2], "script-message-to gyroflow quality edge_fill_rate " .. r[1], { checked = tostring(g.edge_fill_rate or "auto") == r[1] }))
+    end
+    -- Only the sphere trail is written apart from the frames
+    table.insert(items, submenu("Edge fill rate", fill, { disabled = g.edges ~= "sphere" }))
+    table.insert(items, item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
+                             { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no" }))
     table.insert(items, SEPARATOR)
     table.insert(items, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
                              { checked = g.ask_when_slow ~= false }))

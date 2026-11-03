@@ -61,15 +61,16 @@
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
---                           edges <mode> or ask_when_slow yes|no, kept in gyroflow.conf at once (quality.lua)
+--                           edge_fill_rate auto|50|25, edges <mode>, chromatic yes|no or ask_when_slow yes|no, kept in
+--                           gyroflow.conf at once (quality.lua)
 --   remember               the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
--- edges, edges_blur, fps_limit, resolution, paused_full_size, ask_when_slow, waiting (for a project from Gyroflow),
--- exporting, last_export.
+-- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
+-- Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -87,6 +88,10 @@
 --                first in the chain (lavfi framestep), before the input's scaling and VapourSynth, which asks mpv for
 --                frames only a few ahead; the clean still frame is made from the frames that play. The quality menu
 --                (quality.lua) sets it
+--   edge_fill_rate=auto  the sphere trail (edges=sphere) is written whenever a GPU worker is free. 50 or 25: from
+--                that % of the frames that play (with fps_limit=30, 25 % is ~7.5 a second), for a laptop whose CPU and
+--                GPU share their power: the writes take what the frames need even while a worker is free. Through
+--                the edges control file, so it changes without setting the chain up again. The quality menu sets it
 --   ask_when_slow=yes  when the stabilization keeps dropping frames, playback pauses and offers a lighter frame
 --                rate, resolution or edge fill (quality.lua); no: it plays on as it can
 --   view=normal  the view clips without a project start in: normal, or wide (the wider view)
@@ -124,8 +129,13 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
+-- A whole % of the frames, as the plugin takes it, or auto
+do
+    local rate = tostring(o.edge_fill_rate):match("^%d+$") and tonumber(o.edge_fill_rate)
+    if not (rate and rate >= 1 and rate <= 100) then o.edge_fill_rate = "auto" end
+end
 
 local platform = require 'platform'
 local still = require 'still'
@@ -302,13 +312,13 @@ local level = LEVEL_LABELS[o.level] and o.level or "medium"
 -- The water's color fringes taken out (Ctrl+a), or left as recorded; sticks for the next clips
 local chromatic = o.chromatic
 
--- The mode, then the blur, the view, the level and the color fringes: "sphere blur=2 view=wide level=medium
--- chromatic=yes". The plugin renders both views from one engine, and switches between them (and levels, smoothing the
--- clip again for one) on the next frame it reads this (vs-gyroflow's Views)
+-- The mode, then the blur, the view, the level, the color fringes and the edge fill rate: "sphere blur=2 view=wide
+-- level=medium chromatic=yes fill_rate=auto". The plugin renders both views from one engine, and switches between
+-- them (and levels, smoothing the clip again for one) on the next frame it reads this (vs-gyroflow's Views)
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no"))
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate))
     f:close()
 end
 local function has_project(source)
@@ -408,7 +418,8 @@ local function publish()
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
-        fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, ask_when_slow = o.ask_when_slow,
+        fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
+        ask_when_slow = o.ask_when_slow,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -803,6 +814,8 @@ end)
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
     resolution = { display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
+    edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
+    chromatic = { yes = "color fringes under water taken out", no = "color fringes under water left as recorded" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
     paused_full_size = { off = "paused, the frame as it played (Ctrl+f: at full size)", auto = "paused, the frame at full size" },
     edges = EDGE_LABELS,
@@ -816,6 +829,11 @@ local function set_quality(key, value)
         o.fps_limit = tonumber(value)
     elseif key == "resolution" then
         o.resolution = value
+    elseif key == "edge_fill_rate" then
+        o.edge_fill_rate = value
+        write_edge_control()
+    elseif key == "chromatic" then
+        set_chromatic(value == "yes")
     elseif key == "paused_full_size" then
         o.paused_full_size = value
     else
@@ -828,7 +846,7 @@ local function set_quality(key, value)
     local message = "Gyroflow: " .. (key == "edges" and "edges: " or "") .. QUALITY[key][value]
     if (key == "fps_limit" or key == "resolution") and current_source and not stab_off then
         with_pause(message .. "…", function() place_filters(true) end)
-    elseif key ~= "edges" then
+    elseif key ~= "edges" and key ~= "chromatic" then
         mp.osd_message(message, 2)
     end
 end
@@ -845,6 +863,8 @@ quality.init(o, {
         return w and h and math.min(w, h) or nil
     end,
     edges = function() return edge_mode end,
+    -- The color fringes being taken out where it can: the shader there, the lens not set above water
+    chromatic = function() return chromatic and chromatic_shader and underwater ~= "no" end,
     set = set_quality,
 })
 
