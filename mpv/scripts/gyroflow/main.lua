@@ -58,13 +58,15 @@
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
+--   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, edges <mode> or ask_when_slow
+--                           yes|no, kept in gyroflow.conf at once (quality.lua)
+--   remember               the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
--- edges, edges_blur, waiting (for a project from Gyroflow), exporting, last_export.
+-- edges, edges_blur, fps_limit, resolution, ask_when_slow, waiting (for a project from Gyroflow), exporting, last_export.
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -76,6 +78,14 @@
 --                stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and
 --                view (the wider view does), and they're filled (Ctrl+b not off), for a computer where the fill
 --                doesn't keep up
+--   fps_limit=0  every frame is stabilized. 30 or 15: a faster clip plays at this rate or the nearest below it that
+--                skips the same number of frames each time (60 fps at 30 or 15, 50 at 25 or 12.5), for a computer
+--                whose GPU doesn't keep up (a laptop's, once it runs at its sustained power). The frames are skipped
+--                first in the chain (lavfi framestep), before the input's scaling and VapourSynth, which asks mpv for
+--                frames only a few ahead; the clean still frame is made from the frames that play. The quality menu
+--                (quality.lua) sets it
+--   ask_when_slow=yes  when the stabilization keeps dropping frames, playback pauses and offers a lighter frame
+--                rate, resolution or edge fill (quality.lua); no: it plays on as it can
 --   view=normal  the view clips without a project start in: normal, or wide (the wider view)
 --   level=medium  the level clips without a project start in: weak, medium or strong (Ctrl+k)
 --   lookahead=4  a clip without a project plays once the first 4 + this many seconds of its motion data are read, and
@@ -92,7 +102,8 @@
 --                spread in), smooth (the frame's colors spread out), off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
 --   resolution=display  the stabilized frame no bigger than the display shows it (above), or video: at the video's own
---                size (up to 4K's pixels), whatever the display
+--                size (up to 4K's pixels), whatever the display. A number, 1080 or 720: no bigger than the display
+--                and its short side no longer than that, for a GPU that doesn't keep up at the display's size
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   still=yes    the paused frame cleaned of its noise (Ctrl+p), from it and still_radius=5 frames on each side,
@@ -105,14 +116,16 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
 local still = require 'still'
+local quality = require 'quality'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
+local STEP_LABEL = "gyroflow-step"
 local DIR = mp.get_script_directory()
 local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
@@ -224,7 +237,9 @@ local function render_sizes(source)
     local ow, oh = source.out_width or w, source.out_height or h
     local scale = 1
     local dw, dh = display_size()
-    if o.resolution == "display" and dw then scale = math.min(1, dw / ow, dh / oh) end
+    if o.resolution ~= "video" and dw then scale = math.min(1, dw / ow, dh / oh) end
+    local short_side = tonumber(o.resolution)
+    if short_side then scale = math.min(scale, short_side / math.min(ow, oh)) end
     local input = math.min(1, scale * o.zoom_margin * math.max(ow / w, oh / h))
     -- Scaling the input costs a pass of its own on the GPU: not for less than a fifth of the pixels
     if input > 0.9 then input = 1 end
@@ -322,6 +337,20 @@ local function fast(source)
     return o.max_fps > 0 and fps ~= nil and fps > o.max_fps + 1
 end
 
+-- Every how many frames one is stabilized for fps_limit: the fewest skipped that bring the clip's rate down to it
+local function frame_step(source)
+    local fps = tonumber(source.fps)
+    if o.fps_limit <= 0 or not fps or fps <= o.fps_limit + 1 then return 1 end
+    return math.ceil(fps / o.fps_limit - 0.05)
+end
+
+-- The frames skipped for it, first in the chain (nil: none)
+local function step_filter(source, enabled)
+    local step = frame_step(source)
+    if step == 1 then return nil end
+    return { name = "lavfi", label = STEP_LABEL, enabled = enabled, params = { graph = "framestep=" .. step } }
+end
+
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source).output
     return {
@@ -330,7 +359,8 @@ local function gyroflow_filter(source, enabled)
         enabled = enabled,
         params = {
             file = SCRIPT,
-            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
+            ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers,
+                                                fast = frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
@@ -352,7 +382,7 @@ still.init(o, function()
         if f.label == LABEL and f.enabled ~= false then return true end
     end
     return false
-end)
+end, function() return current_source and not stab_off and frame_step(current_source) or 1 end)
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
@@ -363,6 +393,7 @@ local function publish()
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
+        fps_limit = o.fps_limit, resolution = o.resolution, ask_when_slow = o.ask_when_slow,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -420,6 +451,8 @@ local function add_filter(source)
         end
     end
     local vf = mp.get_property_native("vf") or {}
+    local step = step_filter(source, true)
+    if step then table.insert(vf, step) end
     if scale then table.insert(vf, scale) end
     table.insert(vf, gyroflow_filter(source, true))
     mp.set_property_native("file-local-options/vf", vf)
@@ -517,12 +550,14 @@ local function place_filters(enabled)
         if f.label == LABEL then
             at = #vf + 1
             table.insert(vf, gyroflow_filter(current_source, enabled))
-        elseif f.label ~= SCALE_LABEL then
+        elseif f.label ~= SCALE_LABEL and f.label ~= STEP_LABEL then
             table.insert(vf, f)
         end
     end
     if not at then return end
     if scale then table.insert(vf, at, scale) end
+    local step = step_filter(current_source, enabled)
+    if step then table.insert(vf, at, step) end
     if hwdec and hwdec ~= mp.get_property("file-local-options/hwdec") then mp.set_property("file-local-options/hwdec", hwdec) end
     mp.set_property_native("vf", vf)
 end
@@ -562,7 +597,7 @@ local function display_changed()
     if display_timer then display_timer:kill() end
     display_timer = mp.add_timeout(0.5, function()
         display_timer = nil
-        if not current_source or stab_off or o.resolution ~= "display" then return end
+        if not current_source or stab_off or o.resolution == "video" then return end
         local sizes = render_sizes(current_source)
         if sizes.key == current_source.sizes then return end
         mp.msg.info(string.format("display %dx%d: stabilizing at %s", w, h, sizes.key))
@@ -700,6 +735,53 @@ mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) 
 mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
+
+-- The quality (quality.lua, the menu's Quality): what's picked is kept in gyroflow.conf at once, as a
+-- setting of this computer's, and the chain set up again for a new rate or size
+local QUALITY = {
+    fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
+    resolution = { display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
+    ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
+    edges = EDGE_LABELS,
+}
+
+local function set_quality(key, value)
+    if not (QUALITY[key] and QUALITY[key][value]) then return end
+    if key == "edges" then
+        set_edges(value)
+    elseif key == "fps_limit" then
+        o.fps_limit = tonumber(value)
+    elseif key == "resolution" then
+        o.resolution = value
+    else
+        o.ask_when_slow = value == "yes"
+    end
+    if not platform.save_options("gyroflow", { { key, value } }) then mp.msg.warn("couldn't write gyroflow.conf") end
+    quality.changed()
+    publish()
+    mp.msg.info("quality: " .. key .. " " .. value)
+    local message = "Gyroflow: " .. (key == "edges" and "edges: " or "") .. QUALITY[key][value]
+    if (key == "fps_limit" or key == "resolution") and current_source and not stab_off then
+        with_pause(message .. "…", function() place_filters(true) end)
+    elseif key ~= "edges" then
+        mp.osd_message(message, 2)
+    end
+end
+
+mp.register_script_message("quality", set_quality)
+
+quality.init(o, {
+    stabilizing = function() return current_source ~= nil and not stab_off end,
+    short_side = function()
+        if not current_source then return nil end
+        local out = render_sizes(current_source).output
+        local w, h = current_source.out_width or current_source.width, current_source.out_height or current_source.height
+        if out then w, h = out[1], out[2] end
+        return w and h and math.min(w, h) or nil
+    end,
+    edges = function() return edge_mode end,
+    set = set_quality,
+})
 
 mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {

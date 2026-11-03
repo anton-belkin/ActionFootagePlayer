@@ -224,6 +224,7 @@ put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
 put mpv/scripts/gyroflow/export.lua  "$GYROFLOW/export.lua" 644
 put mpv/scripts/gyroflow/platform.lua "$GYROFLOW/platform.lua" 644
 put mpv/scripts/gyroflow/still.lua   "$GYROFLOW/still.lua" 644
+put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
