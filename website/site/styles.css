@@ -307,6 +307,10 @@ footer a { color: var(--ink); }
 .platform p { color: var(--muted); }
 .platform .platform-req { color: var(--ink); font-weight: 500; }
 .platform .platform-note { font-size: 0.88rem; }
+.dl-alt { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+.dl-alt .platform-head { align-items: start; }
+.dl-alt .platform-head p { margin: 0; }
+.dl-alt.is-yours .platform-head p { color: var(--ink); }
 .dl-btn { justify-self: start; font-size: 1.05rem; padding: 0.95em 1.3em; }
 .dl-btn small { white-space: nowrap; }
 .file-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 0.85rem; }

@@ -103,7 +103,7 @@
           <h2>Windows</h2>
           <span class="pill ok yours" hidden>你的系统</span>
         </div>
-        <p class="platform-req">Windows 10 或 11，64 位（x86-64），显卡需支持 DirectX 12 或 Vulkan</p>
+        <p class="platform-req">Windows 10 或 11，64 位（x86-64 或 ARM），显卡需支持 DirectX 12 或 Vulkan</p>
         <a class="btn primary dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
           下载 Windows 版 <small data-fill="size">.exe</small>
@@ -114,13 +114,27 @@
           <dt>发布日期</dt><dd data-release="date">见发布页面</dd>
           <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">见 SHA256SUMS</code></dd>
         </dl>
+        <div class="dl-alt" id="windows-arm">
+          <div class="platform-head">
+            <p><b>ARM 处理器的电脑</b>（骁龙）：专为其构建的版本。上面的版本也能在其上运行，但经过模拟，速度较慢。</p>
+            <span class="pill ok yours" hidden>你的电脑</span>
+          </div>
+          <a class="btn dl-btn" data-asset="windows-arm-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            下载 Windows ARM 版 <small data-fill="size">.exe</small>
+          </a>
+          <dl class="file-meta">
+            <dt>文件</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-arm64-setup.exe</code></dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">见 SHA256SUMS</code></dd>
+          </dl>
+        </div>
         <h3>安装</h3>
         <ol class="install">
           <li>运行安装程序。它不需要管理员权限：只为你一个人安装，位置是 <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>。如果浏览器提示该文件不常被下载，请选择<b>保留</b>。</li>
           <li>安装程序没有签名，所以第一次运行时 Windows SmartScreen 会发出警告：点击<b>更多信息</b>，再点击<b>仍要运行</b>。</li>
           <li>它会把 ActionFootagePlayer 加入 MP4 和 MOV 视频的「打开方式」，并在文件资源管理器的右键菜单中加入 <i>Play in ActionFootagePlayer</i> 和 <i>Stabilize + LUT</i>（Windows 11 上位于「显示更多选项」之下）。它会下载 DJI 的 Rec.709 LUT；如果你保留勾选，还会打开「设置」，让你把它设为 MP4 视频的默认应用。</li>
         </ol>
-        <p class="platform-note">它自带 mpv、VapourSynth（连同其所需的 Python）和 ffmpeg。可在「设置 → 应用」中卸载。没有适用于 ARM 版 Windows 的版本。</p>
+        <p class="platform-note">它自带 mpv、VapourSynth（连同其所需的 Python）和 ffmpeg。可在「设置 → 应用」中卸载。在 ARM 上，导出由处理器编码（x265）：它使用的硬件编码器来自 NVIDIA、Intel 和 AMD。</p>
       </article>
 
       <article class="platform" id="linux" data-os="linux">
@@ -185,6 +199,11 @@
               <th scope="row">防抖和导出 · Windows</th>
               <td>x86-64，启用 VapourSynth 构建的 mpv</td>
               <td><a class="text-link" data-asset="gyroflow-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="windows">
+              <th scope="row">防抖和导出 · ARM 版 Windows</th>
+              <td>arm64，为其构建的 mpv 和 VapourSynth（VapourSynth 官方没有此版本）</td>
+              <td><a class="text-link" data-asset="gyroflow-windows-arm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows ARM</a> <span class="size" data-fill="size"></span></td>
             </tr>
           </tbody>
         </table>

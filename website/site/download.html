@@ -100,7 +100,7 @@
           <h2>Windows</h2>
           <span class="pill ok yours" hidden>Your system</span>
         </div>
-        <p class="platform-req">Windows 10 or 11, 64-bit (x86-64), a graphics card with DirectX 12 or Vulkan</p>
+        <p class="platform-req">Windows 10 or 11, 64-bit (x86-64 or ARM), a graphics card with DirectX 12 or Vulkan</p>
         <a class="btn primary dl-btn" data-asset="windows-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
           Download for Windows <small data-fill="size">.exe</small>
@@ -111,13 +111,27 @@
           <dt>Released</dt><dd data-release="date">see the release</dd>
           <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">in SHA256SUMS</code></dd>
         </dl>
+        <div class="dl-alt" id="windows-arm">
+          <div class="platform-head">
+            <p><b>A PC with an ARM processor</b> (Snapdragon): the app built for it. The one above runs there too, emulated and slower.</p>
+            <span class="pill ok yours" hidden>Your PC</span>
+          </div>
+          <a class="btn dl-btn" data-asset="windows-arm-app" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Download for Windows on ARM <small data-fill="size">.exe</small>
+          </a>
+          <dl class="file-meta">
+            <dt>File</dt><dd><code data-fill="name">ActionFootagePlayer-&lt;version&gt;-windows-arm64-setup.exe</code></dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">in SHA256SUMS</code></dd>
+          </dl>
+        </div>
         <h3>Install</h3>
         <ol class="install">
           <li>Run the installer. It needs no admin rights: it installs for you alone, in <code>%LOCALAPPDATA%\Programs\ActionFootagePlayer</code>. If your browser says the file isn't commonly downloaded, choose <b>Keep</b>.</li>
           <li>The installer isn't signed, so the first time Windows SmartScreen warns about it: click <b>More info</b>, then <b>Run anyway</b>.</li>
           <li>It puts ActionFootagePlayer in Open With for MP4 and MOV videos, with <i>Play in ActionFootagePlayer</i> and <i>Stabilize + LUT</i> in Explorer's menu (on Windows 11 under Show more options). It downloads DJI's Rec.709 LUT and, if you leave it ticked, opens Settings to make it the default app for MP4 videos.</li>
         </ol>
-        <p class="platform-note">It carries its own mpv, VapourSynth with its Python, and ffmpeg. Uninstall it from Settings → Apps. No build for Windows on ARM.</p>
+        <p class="platform-note">It carries its own mpv, VapourSynth with its Python, and ffmpeg. Uninstall it from Settings → Apps. On ARM, exports encode on the processor (x265): the graphics cards' encoders it uses are NVIDIA's, Intel's and AMD's.</p>
       </article>
 
       <article class="platform" id="linux" data-os="linux">
@@ -182,6 +196,11 @@
               <th scope="row">Stabilization and export · Windows</th>
               <td>x86-64, mpv built with VapourSynth</td>
               <td><a class="text-link" data-asset="gyroflow-windows" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows</a> <span class="size" data-fill="size"></span></td>
+            </tr>
+            <tr data-os="windows">
+              <th scope="row">Stabilization and export · Windows on ARM</th>
+              <td>arm64, mpv and VapourSynth built for it (VapourSynth has no such build of its own)</td>
+              <td><a class="text-link" data-asset="gyroflow-windows-arm" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">mpv-gyroflow, Windows on ARM</a> <span class="size" data-fill="size"></span></td>
             </tr>
           </tbody>
         </table>
