@@ -1,6 +1,6 @@
 # Website
 
-The product website for Action Footage Player: a static site (plain HTML, CSS and one script, no build step),
+The product website for Action Footage Player: a static site (plain HTML, CSS and two scripts, no build step),
 kept here so it can move to its own repository later without changes (`git subtree split --prefix=website`).
 
 Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 2026-10-29 and moved here on 2026-11-02.
@@ -18,6 +18,8 @@ Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 202
 site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
+  download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
+  download.js    fills download.html in from GitHub's API: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
@@ -34,6 +36,12 @@ python3 -m http.server -d website/site 8000
 
 Opening `site/index.html` straight from disk works too. The fonts come from Google Fonts; everything else is
 local.
+
+`download.html` links to GitHub's latest release, and works like that without JavaScript. `download.js` reads
+that release from <https://api.github.com/repos/anton-belkin/ActionFootagePlayer/releases/latest> (one request an
+hour per visitor, kept in `localStorage`; the API allows 60 an hour per address) and points each link at its file,
+found by its name's pattern (`ActionFootagePlayer-*-macos-arm64.zip`, …). A new release needs no change here,
+unless an asset's name changes: then its pattern in `download.js` too.
 
 ## Deployment
 

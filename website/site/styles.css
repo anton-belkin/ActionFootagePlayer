@@ -256,3 +256,40 @@ footer a { color: var(--ink); }
 .honest { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; color: var(--muted); max-width: 70ch; }
 
 .gap-grid.pairs { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+
+/* Download page: a card per system, the visitor's marked */
+.dl-hero { padding-block: 56px 36px; }
+.dl-hero .wrap { grid-template-columns: minmax(0, 1fr); }
+.dl-hero h1 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 3.8rem); }
+.dl-mobile { color: var(--ink); }
+.platforms { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); align-items: start; }
+.platform { scroll-margin-top: 80px; display: grid; gap: 16px; align-content: start; padding: 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.platform.is-yours { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.platform-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.platform h2 { font-size: var(--step-2); }
+.platform h3 { font-size: 1.05rem; margin-top: 4px; }
+.platform p { color: var(--muted); }
+.platform .platform-req { color: var(--ink); font-weight: 500; }
+.platform .platform-note { font-size: 0.88rem; }
+.dl-btn { justify-self: start; white-space: nowrap; font-size: 1.05rem; padding: 0.95em 1.3em; }
+.file-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 0.85rem; }
+.file-meta dt { color: var(--muted); }
+.file-meta dd { margin: 0; overflow-wrap: anywhere; }
+.file-meta .hash { font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+.install { margin: 0; padding-left: 1.3em; display: grid; gap: 10px; color: var(--muted); }
+.install li::marker { font-family: var(--f-mono); color: var(--accent-ink); }
+.install b, .install i { color: var(--ink); }
+.platform code, .help-card code, .dl-table code { overflow-wrap: anywhere; }
+.dl-table td:last-child { white-space: nowrap; }
+.dl-table .size { font-family: var(--f-mono); font-size: 0.78rem; color: var(--muted); margin-left: 6px; }
+.dl-table tr.is-yours { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.dl-notes { margin-top: 28px; }
+.help-card .size { font-family: var(--f-mono); font-weight: 400; font-size: 0.78rem; color: var(--muted); }
+@media (max-width: 640px) {
+  .dl-table { min-width: 0; }
+  .dl-table thead { display: none; }
+  .dl-table tr { display: grid; gap: 4px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .dl-table tr:last-child { border-bottom: 0; }
+  .dl-table th, .dl-table td { padding: 0; border: 0; width: auto; }
+  .dl-table td:last-child { white-space: normal; }
+}
