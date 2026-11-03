@@ -1,5 +1,6 @@
 ; ActionFootagePlayer's installer for Windows (Inno Setup 6), made by tools/make_windows_app.sh:
-;   ISCC /DAppVersion=<version> /DSourceDir=<the app's folder, build\windows-app> /O<out> windows\installer.iss
+;   ISCC /DAppVersion=<version> /DAppArch=<x86_64 or arm64> /DSourceDir=<the app's folder, build\windows-app>
+;        /O<out> windows\installer.iss
 ;
 ; For the user alone, without admin rights: into %LOCALAPPDATA%\Programs\ActionFootagePlayer, the settings in HKCU.
 ; ActionFootagePlayer is in Open With for MP4 and MOV videos and in Windows' Default apps; Explorer's menu for them
@@ -9,6 +10,15 @@
 
 #ifndef AppVersion
   #define AppVersion "dev"
+#endif
+#ifndef AppArch
+  #define AppArch "x86_64"
+#endif
+; arm64 PCs run the x86-64 app too (emulated), the arm64 app only they
+#if AppArch == "arm64"
+  #define Architectures "arm64"
+#else
+  #define Architectures "x64compatible"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\windows-app"
@@ -27,10 +37,10 @@ DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#Architectures}
+ArchitecturesInstallIn64BitMode={#Architectures}
 MinVersion=10.0
-OutputBaseFilename={#AppName}-{#AppVersion}-windows-x86_64-setup
+OutputBaseFilename={#AppName}-{#AppVersion}-windows-{#AppArch}-setup
 SetupIconFile=AppIcon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}

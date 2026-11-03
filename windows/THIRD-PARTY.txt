@@ -4,17 +4,20 @@ https://github.com/anton-belkin/ActionFootagePlayer has the exact versions and w
 mpv (mpv\mpv.exe)
     GPL 2 or later (this build includes GPL parts). Source: https://github.com/mpv-player/mpv
     The Windows build: https://github.com/shinchiro/mpv-winbuild-cmake (its libraries and their sources are listed
-    there), downloaded from https://sourceforge.net/projects/mpv-player-windows/
+    there), downloaded from https://sourceforge.net/projects/mpv-player-windows/ (for arm64, from its GitHub
+    releases)
 
 ffmpeg (plugins\gyroflow\ffmpeg.exe, ffprobe.exe)
     GPL 3 (licenses\ffmpeg.txt). Source: https://ffmpeg.org. The build: https://www.gyan.dev/ffmpeg/builds/
-    (https://github.com/GyanD/codexffmpeg), which lists its libraries and their sources
+    (https://github.com/GyanD/codexffmpeg), which lists its libraries and their sources; for arm64,
+    https://github.com/BtbN/FFmpeg-Builds
 
 Python (python\)
     PSF License (licenses\Python.txt). https://www.python.org
 
 VapourSynth (python\Lib\site-packages\vapoursynth\)
-    LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth
+    LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth (for arm64, built from
+    it)
 
 Vulkan loader (vulkan\vulkan-1.dll, used only when the system has none)
     Apache 2.0 (licenses\Vulkan loader.txt). Source: https://github.com/KhronosGroup/Vulkan-Loader; the build:
