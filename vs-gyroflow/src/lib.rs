@@ -1114,8 +1114,28 @@ unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *
     }
 }
 
+/// Windows: the plugin stays loaded until mpv quits. VapourSynth unloads it with the core that loaded it, which mpv
+/// frees each time it sets the filter up again (the next clip of the playlist), while what it started runs on: the
+/// engines' GPU workers, their motion and sphere threads, the cached engines themselves. mpv then crashed in the
+/// unloaded DLL. On macOS dlclose leaves a Rust dylib loaded anyway
+#[cfg(windows)]
+fn pin_module() {
+    const GET_MODULE_HANDLE_EX_FLAG_PIN: u32 = 0x1;
+    const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x4;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleExW(flags: u32, module_name: *const u16, module: *mut *mut c_void) -> i32;
+    }
+    let mut module = null_mut();
+    unsafe {
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, pin_module as *const u16, &mut module);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugin, vspapi: *const VSPLUGINAPI) {
+    #[cfg(windows)]
+    pin_module();
     let api = unsafe { &*vspapi };
     unsafe {
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
