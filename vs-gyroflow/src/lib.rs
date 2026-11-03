@@ -26,6 +26,10 @@ pub mod dispersion;
 pub mod water;
 pub mod prefetch;
 pub mod still;
+pub mod levels;
+pub mod smoothing;
+pub mod motion;
+pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
 pub use gyroflow_core::stabilization::Interpolation;
@@ -48,12 +52,34 @@ pub fn init_logging() {
                 .add_filter_ignore_str("wgpu")
                 .add_filter_ignore_str("naga")
                 .build();
-            let _ = simplelog::WriteLogger::init(level, config, file);
+            if log::set_boxed_logger(Box::new(Quiet(simplelog::WriteLogger::new(level, config, file)))).is_ok() {
+                log::set_max_level(level);
+            }
         }
     });
 }
 
 /// macOS: ~/Library/Logs; Windows: %LOCALAPPDATA%; elsewhere $XDG_STATE_HOME (~/.local/state)
+/// The log without the warnings a clip that plays as its motion data comes in gets each time it's parsed again (every
+/// few seconds): telemetry-parser's for each metadata sample it can't decode (the ones not read yet read as zeros,
+/// prefetch.rs: thousands), and gyroflow-core's that the motion data ends before the video
+struct Quiet(Box<simplelog::WriteLogger<std::fs::File>>);
+
+impl log::Log for Quiet {
+    fn enabled(&self, m: &log::Metadata) -> bool { log::Log::enabled(&*self.0, m) }
+    fn log(&self, r: &log::Record) {
+        if r.level() == log::Level::Warn {
+            let text = r.args().to_string();
+            if (r.target().starts_with("telemetry_parser") && text.starts_with("Failed to parse protobuf"))
+                || (r.target().starts_with("gyroflow_core") && text.starts_with("IMU duration")) {
+                return;
+            }
+        }
+        log::Log::log(&*self.0, r)
+    }
+    fn flush(&self) { log::Log::flush(&*self.0) }
+}
+
 pub fn log_path() -> std::path::PathBuf {
     use std::path::PathBuf;
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -125,15 +151,29 @@ pub enum Fov {
     Wide,
 }
 
-/// The two views an engine renders, switched between while playing (the edge fill's control file, `view=`): the
+/// The views an engine renders, switched between while playing (the edge fill's control file, `view=`, `level=`): the
 /// project's, with its zoom (VIEW_NORMAL), and the wider one (VIEW_WIDE), the same smoothing with no zoom, at the FOV
 /// `wide_fov` finds. As in Gyroflow, a FOV doesn't recompute the stabilization: switching is new parameters for the
-/// next frame, not another engine or another filter chain
+/// next frame, not another engine or another filter chain. A clip without a project has a normal view per level
+/// (levels.rs), the wider one after them; a level smooths the clip again too (motion.rs)
 pub struct Views {
-    pub params: [ComputeParams; 2],
-    /// Per view, `leaves_edges`
-    pub uncovered: [(usize, usize); 2],
+    pub params: Vec<ComputeParams>,
+    /// Per set of parameters, `leaves_edges`; for the levels, the frames measured before playback (the motion data read
+    /// by then)
+    pub uncovered: Vec<(usize, usize)>,
     pub wide_fov: f64,
+    pub levels: bool,
+}
+
+impl Views {
+    /// The parameters for `view` (edges::VIEW_*) at `level`
+    pub fn index(&self, view: u8, level: Level) -> usize {
+        match (self.levels, view == edges::VIEW_WIDE) {
+            (false, wide) => wide as usize,
+            (true, false) => level.index(),
+            (true, true) => Level::ALL.len(),
+        }
+    }
 }
 
 /// The project's parameters seen through the wider view: every frame's zoom 1, the FOV `fov`
@@ -159,6 +199,9 @@ pub struct Engine {
     /// The wider view's FOV, as `wide_fov` found it for the clip, when it started in that view
     pub wide_fov: Option<f64>,
     pub views: Arc<Views>,
+    /// A clip without a project: its motion data as it comes in, and the level it was loaded in
+    motion: Option<Arc<motion::Motion>>,
+    pub level: Option<Level>,
     /// Frames done since when, for the rate in the log
     throughput: Mutex<(u32, std::time::Instant)>,
 }
@@ -166,25 +209,40 @@ pub struct Engine {
 /// A project loaded as the plugin plays it, before the output size and the smoothing: `project` a .gyroflow project,
 /// or the video itself: its own motion data with Gyroflow's default preset and then `preset`; the horizon lock and the lens as the player has them (see `Engine::load`). Also the project's JSON, nil
 /// for a video's own motion data. project.rs writes a project from it, so Gyroflow opens the clip as it plays
-pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater) -> Result<(StabilizationManager, Option<serde_json::Value>), String> {
+/// `lookahead`: for the video's own motion data, how much of it is read before it plays, past its first START_S
+/// seconds (motion.rs); 0 reads all of it. The motion data as it comes in is returned with it
+pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
     let stab = StabilizationManager::default();
     let url = filesystem::path_to_url(project);
+    let mut motion = None;
     let project_json = if is_project_file(project) {
-        stab.import_gyroflow_file(&url, true, |_| (), Arc::new(AtomicBool::new(false)), true)
+        let data = std::fs::read(project).map_err(|e| format!("Can't read {project}: {e}"))?;
+        let mut json: serde_json::Value = serde_json::from_slice(&data).map_err(|e| format!("Can't load {project}: {e}"))?;
+        // The import computes the zoom, and Engine::load again once it has the output size and the player's settings:
+        // the zoom limit's iterations, smoothed again each (0.35 s each over a 5-minute clip, 10 of them), run there alone
+        let iterations = json.pointer("/stabilization/max_zoom_iterations").and_then(|v| v.as_i64());
+        if let Some(v) = json.pointer_mut("/stabilization/max_zoom_iterations") { *v = 0.into(); }
+        add_motion_data(&mut json, project);
+        let mut is_preset = false;
+        stab.import_gyroflow_data(json.to_string().as_bytes(), true, Some(&url), |_| (), Arc::new(AtomicBool::new(false)), &mut is_preset, true)
             .map_err(|e| format!("Can't load {project}: {e:?}"))?;
-        serde_json::from_slice(&std::fs::read(project).map_err(|e| e.to_string())?).ok()
+        if let Some(v) = iterations { stab.params.write().max_zoom_iterations = v as usize; }
+        if let Some(v) = json.pointer_mut("/stabilization/max_zoom_iterations") { *v = iterations.into(); }
+        Some(json)
     } else {
-        // The camera's file, its motion data read ahead (prefetch.rs)
-        let (mut content, size) = prefetch::Prefetched::open(project).map_err(|e| format!("Can't open {project}: {e}"))?;
-        stab.load_video_file(&mut content, size, &url, None, true).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays
+        let (m, size) = motion::Motion::open(project, &url, lookahead).map_err(|e| format!("Can't open {project}: {e}"))?;
+        m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
         if !stab.gyro.read().has_motion() {
             return Err(format!("{project} has no project and no motion data"));
         }
         if let Some(preset) = preset {
-            stab.import_gyroflow_file(&filesystem::path_to_url(preset), true, |_| (), Arc::new(AtomicBool::new(false)), true)
+            // Not computed here: the levels have their own smoothing and zoom (Engine::load)
+            stab.import_gyroflow_file(&filesystem::path_to_url(preset), false, |_| (), Arc::new(AtomicBool::new(false)), true)
                 .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
         }
         log::info!("{project}: own motion data, default preset");
+        motion = Some(m);
         None
     };
     // Project gyro transforms (including LPF) are restored after the video's motion data is loaded,
@@ -197,8 +255,9 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     }
     // The camera's In water / Out of water is in the video: a project's, or the one being played
     let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
-    water::apply(&stab, underwater, &video);
-    Ok((stab, project_json))
+    water::apply(&stab, underwater, &video, motion.as_deref());
+    if let Some(m) = &motion { m.set_underwater(underwater, &video); }
+    Ok((stab, project_json, motion))
 }
 
 impl Engine {
@@ -208,9 +267,11 @@ impl Engine {
     /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
     /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
     /// `underwater`: the lens under water, not, or as the camera says (water.rs)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
+    /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
         let t = std::time::Instant::now();
-        let (stab, project_json) = load_manager(project, preset, horizon_lock, underwater)?;
+        let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead)?;
         // The wider view is the project's zoom taken away afterwards (Views)
         if let Fov::Set(fov) = fov { stab.set_fov(fov); }
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
@@ -228,20 +289,54 @@ impl Engine {
         if let Some((w, h)) = render_size {
             stab.set_output_size(w, h);
         }
-        stab.invalidate_smoothing();
-        stab.recompute_blocking();
+        let fps = stab.params.read().fps;
+        // A clip without a project: the levels' zoom, none of Gyroflow's (levels.rs), and their smoothing
+        let level_geometry = motion.as_ref().map(|_| {
+            stab.set_adaptive_zoom(0.0);
+            {
+                let mut p = stab.params.write();
+                let frames = p.frame_count;
+                p.set_fovs(vec![1.0; frames], 1.0);
+                p.minimal_fovs.clear();
+            }
+            let still = levels::still_fov(&stab);
+            let geometry = motion::Geometry::of(&stab, still);
+            motion::restabilize(&stab, &geometry, level);
+            stab.recompute_undistortion();
+            log::info!("{project}: the frame covers FOV {still:.3} held still; {} at FOV {:.3}, margin {:.1}°", level.name(), level.fov(still),
+                geometry.smoothing(level).margin.to_degrees());
+            geometry
+        });
+        if level_geometry.is_none() {
+            stab.invalidate_smoothing();
+            stab.recompute_blocking();
+        }
         let views = {
-            let fps = stab.params.read().fps;
+            // A FOV of its own (gyroflow-export --fov) in place of the levels'
+            let set_fov = if let Fov::Set(f) = fov { Some(f) } else { None };
             let base = ComputeParams::from_manager(&stab);
             let fov = wide_fov(&base, fps);
-            let mut covered = base.minimal_fovs.clone();
-            covered.sort_by(|a, b| a.total_cmp(b));
-            log::info!("{project}: wider view at FOV {fov:.3}; the frame is covered up to FOV {:.3} (median)", covered.get(covered.len() / 2).copied().unwrap_or(0.0));
             let wide = wide_view(&base, fov);
-            Arc::new(Views { uncovered: [leaves_edges(&base, fps), leaves_edges(&wide, fps)], params: [base, wide], wide_fov: fov })
+            match level_geometry {
+                None => {
+                    let mut covered = base.minimal_fovs.clone();
+                    covered.sort_by(|a, b| a.total_cmp(b));
+                    log::info!("{project}: wider view at FOV {fov:.3}; the frame is covered up to FOV {:.3} (median)", covered.get(covered.len() / 2).copied().unwrap_or(0.0));
+                    Arc::new(Views { uncovered: vec![leaves_edges(&base, fps), leaves_edges(&wide, fps)], params: vec![base, wide], wide_fov: fov, levels: false })
+                }
+                Some(g) => {
+                    log::info!("{project}: wider view at FOV {fov:.3}");
+                    let mut params: Vec<ComputeParams> = Level::ALL.iter().map(|l| wide_view(&base, set_fov.unwrap_or(l.fov(g.still_fov)))).collect();
+                    params.push(wide);
+                    // Measured as it plays: with what's ahead unknown, the edge fill is ready wherever it shows
+                    let frames = base.frame_count.max(1);
+                    Arc::new(Views { uncovered: vec![(frames, frames); params.len()], params, wide_fov: fov, levels: true })
+                }
+            }
         };
         let view = if fov == Fov::Wide { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
-        let uncovered_frames = views.uncovered[view as usize];
+        let view_index = views.index(view, level);
+        let uncovered_frames = views.uncovered[view_index];
         let wide_fov = (fov == Fov::Wide).then_some(views.wide_fov);
 
         let (size, output_size, frame_offset_us) = {
@@ -272,6 +367,7 @@ impl Engine {
         let workers = workers.max(1);
         for i in 0..workers {
             let (stab, rx, geometry, ready_tx, edges, views) = (stab.clone(), rx.clone(), geometry.clone(), ready_tx.clone(), edges.clone(), views.clone());
+            let view = view_index as u8;
             std::thread::Builder::new().name(format!("gyroflow-vs-{i}")).spawn(move || {
                 worker(&stab, &views, view, &rx, config, &geometry, &edges, ready_tx);
             }).map_err(|e| e.to_string())?;
@@ -284,15 +380,25 @@ impl Engine {
             std::thread::Builder::new().name("gyroflow-sphere".into()).spawn(move || edges::sphere_writer(edges, stab, base, config)).map_err(|e| e.to_string())?;
         }
 
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, throughput: Mutex::new((0, std::time::Instant::now())) })
+        // The rest of the motion data as it plays, and the level as the control file switches it
+        if let (Some(m), Some(g)) = (motion.clone(), level_geometry) {
+            let (stab, edges) = (stab.clone(), edges.clone());
+            std::thread::Builder::new().name("gyroflow-motion".into())
+                .spawn(move || m.run(stab, g, level, move || edges.level().unwrap_or(level))).map_err(|e| e.to_string())?;
+        }
+        let level = motion.is_some().then_some(level);
+        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
     /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool, marker: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
         // The view the frame is rendered in, as the control file has it now; the edges it leaves are that view's
+        if let Some(m) = &self.motion { m.asked(timestamp_us); }
         let view = self.edges.view();
-        self.edges.set_expected(self.views.uncovered[view as usize].0 > 0);
+        let view = self.views.index(view, self.edges.level().or(self.level).unwrap_or(Level::Medium));
+        self.edges.set_expected(self.views.uncovered[view].0 > 0);
+        let view = view as u8;
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
             // No frame of the clip leaves edges (uncovered_frames): nothing to fill, nor the source scaled down and the
@@ -319,6 +425,7 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         self.edges.stop();
+        if let Some(m) = &self.motion { m.stop(); }
     }
 }
 
@@ -396,6 +503,37 @@ pub fn wide_fov(p: &ComputeParams, fps: f64) -> f64 {
     if fovs.is_empty() { return 1.0; }
     fovs.sort_by(|a, b| a.total_cmp(b));
     fovs[fovs.len() / 2].clamp(0.5, 4.0)
+}
+
+/// A project saved without the video's motion data (Gyroflow's Simple; the player's own before it wrote them in): the
+/// video's put into it, read ahead in parallel as for a clip without a project (motion.rs, which keeps it for the next
+/// engine of the clip), so Gyroflow doesn't read it from the video a sample at a time, from a NAS seconds each time the
+/// clip loads. A project whose motion data is from another file than the video keeps that
+fn add_motion_data(json: &mut serde_json::Value, project: &str) {
+    let Some(gyro) = json.get("gyro_source") else { return };
+    // A full project's is compressed, a Simple one's the file's description only; older ones have raw_imu
+    if gyro.get("file_metadata").is_some_and(|m| m.is_string()) || gyro.get("raw_imu").is_some() { return; }
+    let as_path = |v: &str| if v.contains("://") { filesystem::url_to_path(v) } else { v.to_string() };
+    let Some(mut video) = json.get("videofile").and_then(|v| v.as_str()).map(as_path) else { return };
+    let gyro_file = gyro.get("filepath").and_then(|v| v.as_str()).map(as_path).unwrap_or_default();
+    if !gyro_file.is_empty() && gyro_file != video { return; }
+    // Moved with the video: next to the project, as Gyroflow finds it then
+    if !std::path::Path::new(&video).exists() {
+        let name = std::path::Path::new(&video).file_name().map(|n| n.to_owned());
+        match (std::path::Path::new(project).parent(), name) {
+            (Some(dir), Some(name)) if dir.join(&name).exists() => video = dir.join(name).to_string_lossy().into_owned(),
+            _ => return,
+        }
+    }
+    let t = std::time::Instant::now();
+    let url = filesystem::path_to_url(&video);
+    let Ok((m, size)) = motion::Motion::open(&video, &url, 0.0) else { return };
+    let stab = StabilizationManager::default();
+    if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() || !stab.gyro.read().has_motion() { return; }
+    let Some(data) = gyroflow_core::util::compress_to_base91_cbor(&*stab.gyro.read().file_metadata.read()) else { return };
+    json["gyro_source"]["file_metadata"] = data.into();
+    json["videofile"] = url.into();
+    log::info!("{project}: the video's motion data read ahead for it in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
 }
 
 fn is_project_file(path: &str) -> bool {
@@ -870,13 +1008,24 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
         None => Underwater::Auto,
         Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
     };
+    let level = unsafe { level_arg(api, input) }?;
+    let lookahead = unsafe { map_get_f64(api, input, c"lookahead") }.unwrap_or(4.0).clamp(0.0, 60.0);
     // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
     // One engine for both views (Views): the view it starts in isn't part of what it is
     let fov_key = match fov { Fov::Set(v) => format!("{v}"), Fov::Project | Fov::Wide => String::new() };
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+    // The level isn't either: the control file switches it
+    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+}
+
+/// The `level` argument (levels.rs), medium without it
+unsafe fn level_arg(api: &VSAPI, input: *const VSMap) -> Result<Level, String> {
+    match unsafe { map_get_str(api, input, c"level") } {
+        None => Ok(Level::Medium),
+        Some(v) => Level::parse(&v).ok_or_else(|| format!("unknown level {v} (weak, medium, strong)")),
+    }
 }
 
 /// Chroma planes need the size to be a multiple of the subsampling
@@ -924,7 +1073,8 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     // The view the filter is made in; the control file has the one switched to since, which wins (mpv makes the
     // filter again on every seek with the arguments it was first given)
     let view = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
-    engine.edges.configure(edge_mode, edge_settings, view, edge_control);
+    let level = match unsafe { level_arg(api, input) } { Ok(l) => l, Err(e) => return fail(node, e) };
+    engine.edges.configure(edge_mode, edge_settings, view, level, edge_control);
     engine.edges.set_realtime(true);
 
     let mut out_vi = vi.clone();
@@ -956,7 +1106,8 @@ unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *
         Ok(engine) => unsafe {
             // In the view asked for: an engine from the cache may have started in the other
             let view = if map_get_i64(api, input, c"wide").unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
-            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.views.uncovered[view as usize].0 as i64, VSMapAppendMode::Replace);
+            let index = engine.views.index(view, level_arg(api, input).unwrap_or(Level::Medium));
+            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.views.uncovered[index].0 as i64, VSMapAppendMode::Replace);
             (api.freeNode)(node);
         },
         Err(e) => unsafe { set_error(api, out, node, "LeavesEdges", e) },
@@ -970,10 +1121,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),

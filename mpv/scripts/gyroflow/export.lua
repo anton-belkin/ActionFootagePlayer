@@ -6,7 +6,7 @@
 -- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
 -- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
 -- standard look (Ctrl+s) with DJI's LUT (--sdr), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
--- only), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
+-- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
 -- under water, above it or as the camera says, as the menu has it (--underwater). A log
 -- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
@@ -226,6 +226,7 @@ local function start(path, sdr)
     local view = gyroflow("view")
     if view == "off" then table.insert(args, "--no-stabilize") end
     if view == "wide" then table.insert(args, "--wide") end
+    if gyroflow("level") then table.insert(args, "--level"); table.insert(args, gyroflow("level")) end
     if gyroflow("edges") then
         table.insert(args, "--edges"); table.insert(args, gyroflow("edges"))
         if gyroflow("edges_blur") then table.insert(args, "--edges-blur"); table.insert(args, string.format("%g", gyroflow("edges_blur"))) end

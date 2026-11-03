@@ -198,7 +198,7 @@ Right-click the video for the menu: everything the keys do, with the keys beside
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the level, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
@@ -217,6 +217,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | Key | | `script-binding` |
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
+| `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
@@ -234,7 +235,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
-e.g. `Ctrl+k script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-message-to gyroflow view wide`.
+e.g. `Ctrl+j script-message-to gyroflow horizon-lock toggle` or `Ctrl+2 script-message-to gyroflow view wide`.
 
 ## In detail
 
@@ -253,6 +254,8 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
+| `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
+| `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
 | `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
 | `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
@@ -287,7 +290,10 @@ what you saw. The view and the horizon lock go into it as they are: from the wid
 Gyroflow's zoom off at that view's FOV, so it looks the same there, and here once it's saved (a clip with a
 project starts in it as it is: On (Gyroflow project)). A `.gyroflow` that's already there is opened as it is, never overwritten. Each time you save in
 Gyroflow (`Cmd+S` overwrites the project it opened), mpv reloads the stabilization with it, at the same spot
-in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on.
+in the clip. The project then stays next to the clip, and mpv plays the clip with it from then on. The project
+`Ctrl+e` writes has the level as Gyroflow's Smoothness and FOV with its zoom off (Gyroflow's Default second pass
+measures against the clip's largest drift, not the crop, so it smooths a little differently there), and the motion
+data in it, as Gyroflow's own Save writes it: Gyroflow opens it without reading the motion data from the video again.
 
 A clip without motion data (shot with the camera's stabilization on, or by a camera that records none) can be
 stabilized from the picture: `Ctrl+e` (or the menu's Stabilize in Gyroflow) opens the video itself in Gyroflow,
@@ -319,7 +325,30 @@ you've changed in `~/.config/mpv/scripts/gyroflow/`):
 - **lens underwater:** light refraction 1.33 (Gyroflow: Lens profile → Advanced → "Lens is underwater"). Without
   it the rotation is corrected by the wrong amount and part of the shake stays: on a test clip, jitter between
   frames went from 0.16 px to 0.02 px with it.
-- smoothing 0.5, zoom limit 140 %, horizon lock off.
+- smoothing 0.5, zoom limit 140 %, horizon lock off: what Gyroflow opens it with. Here, the level's smoothing and
+  crop take their place (below).
+
+**How strongly: the level.** A clip without a project plays at one of three levels (`Ctrl+k`, the menu's
+Stabilization → Level), each a crop and a smoothness, all known when the clip opens: *weak* crops 10 % of the distance
+from the frame's center to its edge and smooths at 50 % (Gyroflow's Smoothness), *medium* (the default) 20 % at 75 %,
+*strong* 30 % at 100 %. The crop is taken from the widest view the frame covers while the camera holds still (from the
+lens alone; the log has it), with Gyroflow's zoom off. The smoothing is Gyroflow's Default, with its second pass held
+to the crop: where the camera turns further than the crop has room for, the picture follows it sooner, so the
+edges show only when it turns that far, filled as `Ctrl+b` says. The wider view of `Ctrl+g` smooths as the level does.
+Switching levels smooths the clip again in a few milliseconds, while it plays (`vs-gyroflow/src/levels.rs`,
+`smoothing.rs`).
+
+Because nothing in it depends on the whole clip, each moment only on the few seconds around it, a clip without a
+project plays from its first seconds of motion data: from a NAS in about a second, where reading all of it first took
+5-10 s. The rest comes in as it plays: not read from the file in between the video's reads (on a NAS that breaks the
+read-ahead macOS does for the video: its reads slowed from under a millisecond to 34-45 ms), but taken from the file
+cache, where the video's own reads put it, the motion data of a moment sitting next to its video. What's played is as
+it would be with all of the motion data once 4 s more are known (`lookahead`; measured on clips from the NAS: p99
+0.02-0.9 px at the frame's center, the most in the first seconds, and the video's reads as fast as without it). After
+a seek past what's read, the seconds there are read from the file: the frames play uncorrected meanwhile (about 2 s from
+the NAS), and the correction comes in over half a second. While it's paused, the rest is read
+(`vs-gyroflow/src/motion.rs`). A project's clip, whose motion data the project has, reads only a tenth of its
+samples for *In water* / *Out of water* (25 s for a 5-minute clip from the NAS before).
 
 **Lens under water, above it, or as the camera says.** The menu's Stabilization → Lens sets the refraction for
 any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above water* (none), or
@@ -372,9 +401,10 @@ them while playing, and `edges_blur` (Options) sets how blurred:
 Where nothing is known, the colors around rather than a copy of the frame (scaled up, or unstabilized): its content
 moves at another scale than the world, and the eye catches that at the side even blurred.
 
-With the default preset's zoom limit, Gyroflow lowers the smoothing rather than show edges, so these clips rarely
-have any. Whether a clip does is Gyroflow's own measurement when it loads, for any project: where the frame it renders
-is wider than the part the stabilized picture covers. A clip with edges anywhere gets the sphere written as it plays,
+A project's zoom limit can lower its smoothing rather than show edges, so such a clip may have none. Whether a clip
+with a project does is Gyroflow's own measurement when it loads: where the frame it renders is wider than the part the
+stabilized picture covers. A clip without one plays before the rest of its motion data is read, so it's ready to fill
+edges wherever they show. A clip with edges anywhere gets the sphere written as it plays,
 edges showing or not, so it has what to fill them with when they show. That's on a thread of its own, and only while
 the GPU has room: the frames come first, and where they need all of it the sphere is written less often, what it has
 fades into the trail by place, and every frame still plays. A clip without any has no sphere to write. The wider view of
@@ -420,6 +450,7 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead.
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
+- `--level weak|medium|strong`: a clip without a project at that level (`Ctrl+k`; default medium).
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
   edges as playback does (`--edges-blur <%>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.

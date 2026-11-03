@@ -7,6 +7,10 @@
 // macOS does behind it, 6-10 ms, so 14-34 s. Here they're read in parallel straight from the sample table, and the
 // parser's own reads come from memory. Its big reads (parse_mp4 reads the first and last 15 MB, more than once) are
 // kept too, so they cross the network once.
+//
+// Or only the samples of the clip's first seconds (`open_until`): the ones not read yet read as zeros, which
+// telemetry-parser can't decode and skips, so Gyroflow gets the motion data of those seconds alone. The rest is read
+// as the clip plays (motion.rs), and the parser goes over it all again from memory.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -30,25 +34,79 @@ pub struct Prefetched {
     chunks: BTreeMap<u64, Vec<u8>>,
     /// The parser's big reads, by offset: apart, as one can start before a sample and end after it
     kept: BTreeMap<u64, Vec<u8>>,
+    /// The metadata track's samples, by offset, and whether each is read
+    samples: Vec<Sample>,
+    read: Vec<bool>,
+    /// The samples not read yet read as zeros (`open_until`), not from the file
+    blank_unread: bool,
+    /// Reads the parser made from the file, and their bytes: what wasn't read ahead
+    pub from_file: (usize, u64),
 }
+
+/// A metadata sample: its bytes in the file, and its time in the clip, s
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sample { pub start: u64, pub end: u64, pub time: f64 }
 
 impl Prefetched {
     /// The file and its size, with the metadata track's samples read
     pub fn open(path: impl AsRef<Path>) -> Result<(Self, usize)> {
+        Self::open_until(path, None)
+    }
+
+    /// The file and its size, with the metadata track's samples up to `until` s into the clip read, all without it.
+    /// With it, the others read as zeros until they're read (`fetch`, `copy_from`)
+    pub fn open_until(path: impl AsRef<Path>, until: Option<f64>) -> Result<(Self, usize)> {
         let file = File::open(path)?;
         let size = file.metadata()?.len() as usize;
         let len = size as u64;
-        let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new() };
+        let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new(), samples: Vec::new(), read: Vec::new(), blank_unread: false, from_file: (0, 0) };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
         if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len as usize) {
-            this.fetch(merged(metadata_samples(&ctx)));
+            this.samples = metadata_samples(&ctx);
+            this.read = vec![false; this.samples.len()];
+            let wanted: Vec<usize> = (0..this.samples.len()).filter(|&i| until.is_none_or(|u| this.samples[i].time <= u)).collect();
+            this.fetch(&wanted);
+            this.blank_unread = until.is_some();
         }
         this.pos = 0;
         Ok((this, len as usize))
     }
 
+    /// The metadata samples, by offset
+    pub fn samples(&self) -> &[Sample] { &self.samples }
+
+    pub fn is_read(&self, i: usize) -> bool { self.read[i] }
+
+    /// Every sample is read
+    pub fn complete(&self) -> bool { self.read.iter().all(|r| *r) }
+
+    pub fn file(&self) -> &File { &self.file }
+
+    pub fn len(&self) -> usize { self.len as usize }
+
+    /// For the parser to read from the start again
+    pub fn rewind(&mut self) { self.pos = 0; }
+
+    /// Reads the samples `wanted` (indices into `samples`) in parallel, the ones close together as one
+    pub fn fetch(&mut self, wanted: &[usize]) {
+        let ranges = merged(wanted.iter().map(|&i| (self.samples[i].start, self.samples[i].end)).collect());
+        self.fetch_ranges(ranges);
+    }
+
+    /// The samples `wanted` copied from `mapped`, the file as mapped into memory (motion.rs: its pages that are in the
+    /// file cache already, which the video's reads put there)
+    pub fn copy_from(&mut self, wanted: &[usize], mapped: &[u8]) {
+        for &i in wanted {
+            let s = self.samples[i];
+            if let Some(bytes) = mapped.get(s.start as usize..s.end as usize) {
+                self.chunks.insert(s.start, bytes.to_vec());
+            }
+        }
+        self.mark_read();
+    }
+
     /// Reads the ranges in parallel. One that fails is left to the parser, which reads it again and reports the error
-    fn fetch(&mut self, ranges: Vec<(u64, u64)>) {
+    fn fetch_ranges(&mut self, ranges: Vec<(u64, u64)>) {
         let next = AtomicUsize::new(0);
         let (file, ranges) = (&self.file, &ranges);
         let chunks: Vec<(u64, Vec<u8>)> = std::thread::scope(|s| {
@@ -63,6 +121,24 @@ impl Prefetched {
             workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
         });
         self.chunks.extend(chunks);
+        self.mark_read();
+    }
+
+    /// The samples the chunks have all of
+    fn mark_read(&mut self) {
+        for i in 0..self.samples.len() {
+            if self.read[i] { continue; }
+            let s = self.samples[i];
+            self.read[i] = self.chunks.range(..=s.start).next_back().is_some_and(|(&at, data)| at + data.len() as u64 >= s.end);
+        }
+    }
+
+    /// The unread sample `pos` is in, as zeros: its end
+    fn blank_at(&self, pos: u64) -> Option<u64> {
+        if !self.blank_unread { return None; }
+        let i = self.samples.partition_point(|s| s.start <= pos).checked_sub(1)?;
+        let s = self.samples[i];
+        (pos < s.end && !self.read[i]).then_some(s.end)
     }
 }
 
@@ -91,8 +167,15 @@ impl Read for Prefetched {
                 n += k;
                 continue;
             }
+            if let Some(end) = self.blank_at(pos) {
+                let k = ((end - pos) as usize).min(max - n);
+                buf[n..n + k].fill(0);
+                n += k;
+                continue;
+            }
             // Not read ahead: a box header, or something read once
             let k = read_full_at(&self.file, &mut buf[n..max], pos)?;
+            self.from_file = (self.from_file.0 + 1, self.from_file.1 + k as u64);
             if k >= KEEP { self.kept.insert(pos, buf[n..n + k].to_vec()); }
             n += k;
             break;
@@ -114,18 +197,23 @@ impl Seek for Prefetched {
     }
 }
 
-/// The byte ranges of the samples telemetry-parser reads for the metadata (get_track_samples): the metadata track's,
-/// or the unknown tracks' when there's none
-fn metadata_samples(ctx: &mp4parse::MediaContext) -> Vec<(u64, u64)> {
+/// The samples telemetry-parser reads for the metadata (get_track_samples): the metadata track's, or the unknown
+/// tracks' when there's none; by offset
+fn metadata_samples(ctx: &mp4parse::MediaContext) -> Vec<Sample> {
     use mp4parse::TrackType;
     let has = |t| ctx.tracks.iter().any(|x| x.track_type == t);
     let typ = if !has(TrackType::Metadata) && has(TrackType::Unknown) { TrackType::Unknown } else { TrackType::Metadata };
-    ctx.tracks.iter().filter(|x| x.track_type == typ && x.timescale.is_some())
-        .filter_map(|x| mp4parse::unstable::create_sample_table(x, 0.into()))
+    let mut samples: Vec<Sample> = ctx.tracks.iter().filter(|x| x.track_type == typ && x.timescale.is_some())
+        .filter_map(|x| {
+            let scale = x.timescale?.0.max(1) as f64;
+            Some(mp4parse::unstable::create_sample_table(x, 0.into())?.into_iter()
+                .map(move |s| Sample { start: s.start_offset.0 as u64, end: s.end_offset.0 as u64, time: s.start_composition.0 as f64 / scale }))
+        })
         .flatten()
-        .map(|s| (s.start_offset.0 as u64, s.end_offset.0 as u64))
-        .filter(|&(start, end)| end > start + 4)
-        .collect()
+        .filter(|s| s.end > s.start + 4)
+        .collect();
+    samples.sort_by_key(|s| s.start);
+    samples
 }
 
 /// The ranges in order, with the ones less than GAP apart joined
@@ -194,6 +282,34 @@ mod tests {
         let mut tail = Vec::new();
         f.read_to_end(&mut tail).unwrap();
         assert_eq!(tail, data[data.len() - 10..]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn samples_not_read_yet_read_as_zeros() {
+        // open_until: telemetry-parser gets the seconds read so far, and zeros it skips for the rest
+        let path = std::env::temp_dir().join(format!("vs-gyroflow-prefetch-blank-{}.bin", std::process::id()));
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8 + 1).collect();
+        std::fs::write(&path, &data).unwrap();
+        let (mut f, _) = Prefetched::open(&path).unwrap();
+        f.samples = vec![Sample { start: 100_000, end: 100_600, time: 0.0 }, Sample { start: 200_000, end: 200_600, time: 8.0 }];
+        f.read = vec![false; 2];
+        f.blank_unread = true;
+        f.fetch(&[0]);
+        assert!(f.is_read(0) && !f.is_read(1) && !f.complete());
+        let mut buf = vec![0u8; 600];
+        f.seek(SeekFrom::Start(100_000)).unwrap();
+        f.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data[100_000..100_600]);
+        f.seek(SeekFrom::Start(200_000)).unwrap();
+        f.read_exact(&mut buf).unwrap();
+        assert!(buf.iter().all(|b| *b == 0));
+        // Read later, as from the file cache: then it's the file's
+        f.copy_from(&[1], &data);
+        assert!(f.complete());
+        f.seek(SeekFrom::Start(200_000)).unwrap();
+        f.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data[200_000..200_600]);
         std::fs::remove_file(&path).unwrap();
     }
 

@@ -20,7 +20,9 @@ core.gyroflow.Stabilize(clip, project="/path/clip.gyroflow")
 | `fov` | project's | Gyroflow's FOV (Advanced) in place of the project's; above 1 the view is wider than the zoom covers |
 | `wide` | 0 | 1: start in the wider view, no zoom, at the FOV where the stabilized picture covers about as much area as the frame (the area of the frame's outline after the lens correction, `FOV = √(area / frame's area)`, the clip's median). The engine renders both views with the same smoothing, as a FOV change in Gyroflow doesn't recompute it, and the control file's `view=` switches between them on the next frame |
 | `horizon_lock` | project's | the horizon lock's amount, 0-100 % (0: off), in place of the project's; its roll, pitch and turn settings stay |
-| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, `view=normal\|wide` and `chromatic=yes\|no`, read while playing (at most every 50 ms) |
+| `level` | `medium` | a video without a project: `weak`, `medium`, `strong`, 10/20/30 % of the distance from the frame's center to its edge cropped from the widest view the frame covers held still, Gyroflow's zoom off, smoothness 0.5/0.75/1, the second pass held to that crop (`src/levels.rs`, `src/smoothing.rs`). The control file's `level=` switches it while playing; the clip is smoothed again for it |
+| `lookahead` | 4 | a video without a project: seconds of motion data past the first 4 read before it plays; the rest is taken from the file cache as mpv reads the file, read from the file only where the look-ahead needs it and isn't there, and all of it while nothing plays (`src/motion.rs`). 0: all of it first |
+| `edges_control` | — | file with the mode in it, optionally followed by `blur=<%>`, `view=normal\|wide`, `level=weak\|medium\|strong` and `chromatic=yes\|no`, read while playing (at most every 50 ms) |
 | `chromatic` | 0 | 1: each frame's lens geometry written into the start of its last row of luma, for mpv's `chromatic.glsl`, which takes out a flat port's color fringes under water and paints the row over (`src/dispersion.rs`); with `edges` off it carries the project's background color too, which the shader leaves as it is. Red and blue move only where the refraction says under water, frame by frame, and while the control file (`edges_control`) doesn't say `chromatic=no` |
 | `skip_before` | — | seconds: frames before this come out blank and unprocessed, marked `_GyroflowSkipped` (mpv seeks to a paused frame again from the keyframe before it, and `Still` needs only the frames just before it) |
 | `still_warm_up` | — | seconds: `Still`'s GPU set up that long from now, in the background at low priority, once per process |
@@ -38,8 +40,10 @@ The project is rendered the way the Gyroflow app renders it (smoothing, zoom, le
 master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
 uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
 settings need the PR. Stock Gyroflow works for making projects: `gyroflow-project` writes out the project a clip
-without one plays with (the default preset's, in the view and with the horizon lock the player has, made by
-`src/project.rs` with gyroflow-core's own project writer) next to it, to open it in Gyroflow.
+without one plays with (the default preset's, at the level, in the view and with the horizon lock the player has, with
+the motion data in it, made by `src/project.rs` with gyroflow-core's own project writer) next to it, to open it in
+Gyroflow. A project saved without the motion data gets the video's read ahead into it before Gyroflow loads it, and
+the zoom limit's iterations of a project run once, not also inside the import.
 
 ## How it works
 

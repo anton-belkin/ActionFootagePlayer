@@ -30,6 +30,11 @@
 --                     as much area as the frame, for each clip's lens: the edges show at times, filled as Ctrl+b
 --                     says), off for the current file. On or wide sticks for the next clips without a project; a
 --                     clip with one starts in it as Gyroflow has it
+--   Ctrl+k   level    a clip without a project: how strongly it's stabilized, weak -> medium -> strong. 10, 20 or
+--                     30 % of the distance from the frame's center to its edge cropped, smoothness 50, 75 or 100 %;
+--                     the camera's path kept inside that crop as best it can (vs-gyroflow/src/levels.rs). The wider
+--                     view smooths as the level does. It sticks for the next clips; a clip with a project has the
+--                     project's own smoothing and zoom
 --   Ctrl+b   edges    what fills the edges the stabilized frame doesn't cover: the project's background,
 --                     what was seen in that direction of the world, the rest the colors around spread in, or only
 --                     the frame's own colors spread out from its edge (both blurred)
@@ -48,14 +53,15 @@
 --
 -- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; mpv/menu.conf):
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
+--   level weak|medium|strong  the level (Ctrl+k)
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   underwater yes|auto|no  the lens under water, as the camera says, or above water
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   remember                the view, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
+--   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
--- preset), view (normal, wide, off), still (Ctrl+p),
+-- preset), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, waiting (for a project from Gyroflow), exporting, last_export.
@@ -71,6 +77,10 @@
 --                view (the wider view does), and they're filled (Ctrl+b not off), for a computer where the fill
 --                doesn't keep up
 --   view=normal  the view clips without a project start in: normal, or wide (the wider view)
+--   level=medium  the level clips without a project start in: weak, medium or strong (Ctrl+k)
+--   lookahead=4  a clip without a project plays once the first 4 + this many seconds of its motion data are read, and
+--                the rest is read as it plays: what's this far behind the newest is as it'd be with all of it
+--                (vs-gyroflow/src/motion.rs). From a NAS, ~1 s instead of 5-10. 0: all of it first, as a project's
 --   horizon_lock=project  yes: the horizon locked level (Gyroflow's horizon lock at 100 %), no: not locked, project:
 --                as the project or preset says
 --   underwater=auto  the lens under water (Gyroflow's "Lens is underwater": the light bends where it enters the
@@ -95,7 +105,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, resolution = "display", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 
 local platform = require 'platform'
@@ -254,15 +264,22 @@ local current_source = nil
 local sticky_view = o.view == "wide" and "wide" or "normal"
 local view = sticky_view
 
+-- The level of a clip without a project (Ctrl+k); sticks for the next clips
+local LEVELS = { "weak", "medium", "strong" }
+local LEVEL_LABELS = { weak = "weak (10 % crop, smoothness 50 %)", medium = "medium (20 % crop, smoothness 75 %)",
+                       strong = "strong (30 % crop, smoothness 100 %)" }
+local level = LEVEL_LABELS[o.level] and o.level or "medium"
+
 -- The water's color fringes taken out (Ctrl+a), or left as recorded; sticks for the next clips
 local chromatic = o.chromatic
 
--- The mode, then the blur, the view and the color fringes: "sphere blur=2 view=wide chromatic=yes". The plugin renders
--- both views from one engine, and switches between them on the next frame it reads this (vs-gyroflow's Views)
+-- The mode, then the blur, the view, the level and the color fringes: "sphere blur=2 view=wide level=medium
+-- chromatic=yes". The plugin renders both views from one engine, and switches between them (and levels, smoothing the
+-- clip again for one) on the next frame it reads this (vs-gyroflow's Views)
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s chromatic=%s", edge_mode, edge_blur, view, chromatic and "yes" or "no"))
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no"))
     f:close()
 end
 local function has_project(source)
@@ -314,7 +331,7 @@ local function gyroflow_filter(source, enabled)
         params = {
             file = SCRIPT,
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers, fast = fast(source),
-                                                wide = view == "wide" or nil, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
+                                                wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon == nil and nil or (horizon and 100 or 0), underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -341,7 +358,7 @@ end)
 local function publish()
     local state = {
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
-        view = stab_off and "off" or view,
+        view = stab_off and "off" or view, level = level,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
@@ -394,6 +411,14 @@ local function add_filter(source)
     source.sizes = sizes.key
     local hwdec, scale = input_scaling(sizes, true)
     if hwdec then mp.set_property("file-local-options/hwdec", hwdec) end
+    -- The rest of its motion data comes from what mpv reads ahead (vs-gyroflow/src/motion.rs): further than the
+    -- look-ahead, with room. From a NAS mpv's cache reads further anyway (mpv treats it as a network stream)
+    if not has_project(source) and o.lookahead > 0 then
+        local ahead = o.lookahead + 8
+        if (mp.get_property_number("demuxer-readahead-secs") or 0) < ahead then
+            mp.set_property_number("file-local-options/demuxer-readahead-secs", ahead)
+        end
+    end
     local vf = mp.get_property_native("vf") or {}
     if scale then table.insert(vf, scale) end
     table.insert(vf, gyroflow_filter(source, true))
@@ -401,6 +426,7 @@ local function add_filter(source)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
+                .. (has_project(source) and "" or ", " .. level)
                 .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
@@ -453,7 +479,10 @@ local function play_again()
 end
 
 mp.register_event("file-loaded", function()
-    if current_source then mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (view == "wide" and ", wider view" or ""), 1.5) end
+    if current_source then
+        mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+                       .. (view == "wide" and ", wider view" or ""), 1.5)
+    end
 end)
 
 -- Sticks for the next clips, like the dlogm plugin's modes
@@ -574,6 +603,30 @@ mp.register_script_message("view", function(v)
     if v == "normal" or v == "wide" or v == "off" then show(v) end
 end)
 
+-- The plugin smooths the clip again for it, on the next frame it reads the control file: the chain stays as it is
+local function set_level(l)
+    if not current_source then return no_source() end
+    if has_project(current_source) then
+        return mp.osd_message("Gyroflow: the project's own smoothing and zoom (edit them in Gyroflow, Ctrl+e)", 2)
+    end
+    level = l
+    write_edge_control()
+    publish()
+    mp.msg.info("level " .. level)
+    mp.osd_message("Gyroflow: " .. LEVEL_LABELS[level], 1.5)
+end
+
+-- weak -> medium -> strong -> weak
+mp.add_key_binding("Ctrl+k", "level", function()
+    for i, l in ipairs(LEVELS) do
+        if l == level then return set_level(LEVELS[i % #LEVELS + 1]) end
+    end
+end)
+
+mp.register_script_message("level", function(l)
+    if LEVEL_LABELS[l] then set_level(l) end
+end)
+
 mp.register_script_message("horizon-lock", function(value)
     if value == "toggle" then
         horizon = not horizon
@@ -651,6 +704,7 @@ end)
 mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
         { "view", sticky_view },
+        { "level", level },
         { "horizon_lock", horizon == nil and "project" or (horizon and "yes" or "no") },
         { "underwater", underwater },
         { "chromatic", chromatic and "yes" or "no" },
@@ -800,8 +854,8 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         return
     end
     project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
-    -- As it plays here: the view (off: the preset's), the horizon lock, the lens
-    local args = { PROJECT_WRITER, "--underwater", underwater }
+    -- As it plays here: the level, the view (off: the preset's), the horizon lock, the lens
+    local args = { PROJECT_WRITER, "--underwater", underwater, "--level", level }
     if view == "wide" and not stab_off then table.insert(args, "--wide") end
     if horizon ~= nil then
         table.insert(args, "--horizon-lock"); table.insert(args, horizon and "100" or "0")

@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, wide, horizon_lock, underwater, width, height, edges*, chromatic, still_control). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, level, lookahead, horizon_lock, underwater, width, height, edges*, chromatic, still_control). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -20,6 +20,12 @@ if args.get('preset'):
     stab['preset'] = args['preset']
 if args.get('wide'):
     stab['wide'] = 1
+# A clip without a project: its level (vs-gyroflow/src/levels.rs; the control file switches it), and how much of its
+# motion data it waits for (motion.rs)
+if args.get('level'):
+    stab['level'] = args['level']
+if args.get('lookahead') is not None:
+    stab['lookahead'] = float(args['lookahead'])
 if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 if args.get('underwater'):
