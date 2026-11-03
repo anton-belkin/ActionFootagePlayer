@@ -18,7 +18,8 @@
 //
 // Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only,
 // _color instead of _stab), 10-bit
-//   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT)
+//   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
+//                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
 // Audio is copied as it is; the file gets the source's dates.
@@ -54,6 +55,7 @@ video with nothing to stabilize it with is color-converted only.
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
+  --nbcu           to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve)
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
   --underwater <yes|no|auto>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the camera says
@@ -87,6 +89,7 @@ struct Options {
     // None: from the metadata; Some(None): none
     curve: Option<Option<&'static str>>,
     sdr: bool,
+    nbcu: bool,
     no_stabilize: bool,
     horizon_lock: Option<f64>,
     underwater: Underwater,
@@ -108,7 +111,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
+    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
@@ -122,6 +125,7 @@ fn main() {
                     .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, none)")))),
             }),
             "--sdr" => opts.sdr = true,
+            "--nbcu" => opts.nbcu = true,
             "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
@@ -446,6 +450,16 @@ fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
     }
 }
 
+// NBCUniversal's HLG -> SDR conversion (Type III), in the dlogm plugin's luts/
+const NBCU_HLG: &str = "3-NBCU_HLG2SDR_DL_v1.2.cube";
+
+// A file removed when it goes out of scope, however the export ends
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
 fn lut(name: &str) -> Result<PathBuf, String> {
     let p = plugin_file("dlogm", &format!("luts/{name}"));
     if p.is_file() { Ok(p) } else { Err(format!("{} is missing (install the dlogm plugin: install.sh)", p.display())) }
@@ -496,15 +510,22 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
 
     // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
     // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
-    // output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed. Only D-Log M has a Rec.709 LUT:
-    // the others are HLG whatever --sdr says, as they play
+    // output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed. Only D-Log M has a maker's
+    // Rec.709 LUT: the others are HLG whatever --sdr says, as they play. --nbcu: the curve's LUT to HLG and NBCU's to
+    // SDR as one, made for this export next to its output and removed with it
     let in_range = if info.full_range { "pc" } else { "tv" };
     let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
+    let mut _temp_lut = None; // kept until the export ends
     let (graph, tags, color_label) = if let Some(curve) = curve {
         let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
-        let (cube, matrix, primaries, transfer, label) = if opts.sdr && curve == "dlogm" {
-            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709"))
+        let (cube, matrix, primaries, transfer, label) = if opts.nbcu {
+            let composed = out_dir.join(format!(".{stem}.nbcu.cube"));
+            gpu_lut::compose_nbcu(&lut(&format!("{curve}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+            _temp_lut = Some(TempFile(composed.clone()));
+            (composed, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (NBCU)"))
+        } else if opts.sdr && curve == "dlogm" {
+            (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (DJI's LUT)"))
         } else {
             let no_sdr = if opts.sdr { " (no Rec.709 LUT for it)" } else { "" };
             (lut(&format!("{curve}_hlg.cube"))?, "bt2020", "bt2020", "arib-std-b67", format!("{name} -> HLG{no_sdr}"))

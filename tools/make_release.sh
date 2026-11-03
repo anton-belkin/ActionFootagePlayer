@@ -85,6 +85,13 @@ done
 git show HEAD:luts/gplog_hlg.cube > dist/gplog_hlg.cube
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in dist/gplog_hlg.cube "dist/$dlogm/dlogm/shaders/gplog_hlg.glsl" >/dev/null
 rm dist/gplog_hlg.cube
+# NBCUniversal's HLG and PQ -> SDR, the NBCU look, and the HLG one for gyroflow-export
+for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sdr; do
+    git show "HEAD:luts/${nbcu%%:*}.cube" > "dist/${nbcu%%:*}.cube"
+    python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in "dist/${nbcu%%:*}.cube" "dist/$dlogm/dlogm/shaders/${nbcu#*:}.glsl" >/dev/null
+done
+mv dist/3-NBCU_HLG2SDR_DL_v1.2.cube "dist/$dlogm/dlogm/luts/"
+rm dist/5-NBCU_PQ2SDR_DL_v1.2.cube
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 

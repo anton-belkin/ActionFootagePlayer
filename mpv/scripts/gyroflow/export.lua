@@ -5,13 +5,14 @@
 --
 -- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
 -- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
--- standard look (Ctrl+s) with DJI's LUT (--sdr), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
+-- look (Ctrl+s): HDR, SDR by the maker's LUT (--sdr, DJI's) or by NBCU's conversion (--nbcu), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
 -- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
 -- under water, above it or as the camera says, as the menu has it (--underwater). A log
 -- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
 -- right-click menu:
---   export [sdr]         the same as Shift+E, or in the standard look whatever plays
+--   export [sdr]         the same as Shift+E, or in SDR whatever plays: the SDR look it plays in, else the one
+--                        the dlogm plugin would choose (its sdr_look)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --
@@ -202,7 +203,7 @@ local function local_path()
     return path
 end
 
--- `sdr`: in the standard look whatever plays
+-- `sdr`: in SDR whatever plays
 local function start(path, sdr)
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then
@@ -221,7 +222,9 @@ local function start(path, sdr)
     elseif curve then
         table.insert(args, "--curve"); table.insert(args, curve)
     end
-    if sdr or look == "sdr" then table.insert(args, "--sdr") end
+    local sdr_look = sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
+    if sdr_look == "maker" then table.insert(args, "--sdr") end
+    if sdr_look == "nbcu" then table.insert(args, "--nbcu") end
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
     local view = gyroflow("view")
     if view == "off" then table.insert(args, "--no-stabilize") end
