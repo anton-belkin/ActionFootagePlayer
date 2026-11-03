@@ -482,6 +482,8 @@ local function scale()
     return mp.get_property_number("display-hidpi-scale", 1) or 1
 end
 
+local place_osc
+
 local function render()
     local d = mp.get_property_native("osd-dimensions")
     if not d or d.w <= 0 then return end
@@ -495,6 +497,7 @@ local function render()
     overlay:update()
     -- The video beside it, not under it
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
+    place_osc()
 end
 
 local function hit_at(x, y)
@@ -506,35 +509,29 @@ end
 
 -- mpv's on-screen controller: the box one, over the video, while the panel shows. Its own settings come back as
 -- they were when it hides
-local osc_before, osc_align = nil, nil
-local function place_osc()
+local osc_before = nil
+function place_osc()
     local w = width(scale())
     local opts = mp.get_property_native("script-opts") or {}
     if w > 0 and dims.w > 0 then
-        if not osc_before then osc_before = { layout = opts["osc-layout"], halign = opts["osc-halign"] } end
         -- The box (550 wide at a height of 720) centered over the video: osc.lua's get_align
         local playresx = 720 * dims.w / dims.h
         local room = playresx / 2 - 10 - 275
         local align = string.format("%.3f", room > 0 and math.max(-1, -(w / dims.w) * playresx / 2 / room) or -1)
-        -- Each change sets the controller up again
-        if align == osc_align then return end
-        osc_align = align
-        mp.commandv("change-list", "script-opts", "append", "osc-layout=box")
-        mp.commandv("change-list", "script-opts", "append", "osc-halign=" .. align)
+        -- Each change sets the controller up again. Compared with what's there: script-opts may be set anew by others
+        if opts["osc-layout"] == "box" and opts["osc-halign"] == align then return end
+        if not osc_before then osc_before = { layout = opts["osc-layout"] or false, halign = opts["osc-halign"] or false } end
+        opts["osc-layout"], opts["osc-halign"] = "box", align
+        mp.set_property_native("script-opts", opts)
     elseif osc_before then
-        for k, v in pairs({ layout = osc_before.layout, halign = osc_before.halign }) do
-            mp.commandv("change-list", "script-opts", "remove", "osc-" .. k)
-        end
-        if osc_before.layout then mp.commandv("change-list", "script-opts", "append", "osc-layout=" .. osc_before.layout) end
-        if osc_before.halign then mp.commandv("change-list", "script-opts", "append", "osc-halign=" .. osc_before.halign) end
-        osc_before, osc_align = nil, nil
+        opts["osc-layout"] = osc_before.layout or nil
+        opts["osc-halign"] = osc_before.halign or nil
+        osc_before = nil
+        mp.set_property_native("script-opts", opts)
     end
 end
 
-local function update()
-    render()
-    place_osc()
-end
+local update = render
 
 -- The mouse: clicks and the wheel are the panel's while it's over it, the player's elsewhere
 local captured = false
@@ -613,8 +610,8 @@ mp.register_script_message("dump", function(path, w, h, s)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights",
-                        "osd-dimensions", "display-hidpi-scale", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "osd-dimensions",
+                        "display-hidpi-scale", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
