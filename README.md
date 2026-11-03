@@ -69,7 +69,7 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
 
-`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` switches to the standard look instead of HDR, `Ctrl+g` goes
+`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` goes through HDR and the SDR looks, `Ctrl+g` goes
 through the stabilization, a wider view of it, and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
 
 ## Example: back from the dive
@@ -89,8 +89,10 @@ colorist to decide what to keep and what to leave out of SDR's narrow range: a c
 for all of it, so the conversion becomes a technical one, the same for every clip, and can be automatic. That turns
 the "pro" mode into the one to use for everyday footage.
 
-On a Mac without an HDR screen (MacBook Air, most external monitors), macOS tones the picture down, or `Ctrl+s`
-shows DJI's standard Rec.709 look. Exports still play in HDR on an iPhone.
+On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in SDR instead: through the
+camera maker's own Rec.709 LUT (DJI's, for D-Log M) or, for a camera without one, NBCUniversal's neutral HDR → SDR
+conversion. `Ctrl+s` goes through them and HDR as macOS tones it down for that screen; on an HDR screen, the same
+`Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
 
 ## Help it work with your camera
 
@@ -147,8 +149,9 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 |---|---|
 | a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
+| a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
-| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
+| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 
 **The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
@@ -162,8 +165,8 @@ it opens, it offers its setup:
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
   it applies once you do;
 - Finder gets the Quick Actions *Play Stabilized* and *Stabilize + LUT* (see [Opening files](#opening-files));
-- DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for `Ctrl+s` and Rec.709
-  exports. HDR works without it.
+- DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for DJI's SDR look and its
+  Rec.709 exports. HDR and NBCU's SDR work without it.
 
 Coming from Steady Player, as the app was called up to 0.3.0: see [Upgrading](#upgrading).
 
@@ -197,9 +200,9 @@ exported after the others, in the same window).
 Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
-**Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
+**Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
 the wider view, the level, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
-the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
+the units, which fields); **Export** (in SDR, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
 issue on GitHub with what the plugins found in the clip. In the app, that last submenu has the version beside its
@@ -221,7 +224,8 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
+| `Ctrl+s` | The clip's next look: HDR, then SDR through the maker's LUT (DJI's, for D-Log M), then SDR through NBCUniversal's HLG → SDR conversion, the same for every camera. Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
+| `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
@@ -425,8 +429,8 @@ every frame still plays and the sphere is written ~25 times a second, where it u
 plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
 of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
-or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
-whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
+Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -450,7 +454,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
   reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
-  DJI's LUT instead.
+  DJI's LUT instead, `--nbcu` any curve Rec.709 through NBCU's HLG → SDR conversion (the curve's LUT and NBCU's,
+  made into one for the export).
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--level weak|medium|strong`: a clip without a project at that level (`Ctrl+k`; default medium).
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
@@ -470,8 +475,9 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
-for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it tone-mapped
-to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
+for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it in SDR
+through NBCU's HLG or PQ → SDR conversion (one in Display P3 by mpv's tone mapping, NBCU's being for BT.2020); on a
+screen without HDR it starts that way, as log clips do.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses), without edges to fill. Filling them costs more: the export writes the sphere with every frame, where
@@ -573,7 +579,7 @@ default), and `script-message-to agent say <text> [<seconds>]` shows a line over
 
 Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) and works without the others:
 
-- `mpv-dlogm-<version>.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shader; the
+- `mpv-dlogm-<version>.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shaders and NBCU's SDR ones; DJI's
   Rec.709 one (`Ctrl+s`) is made from DJI's LUT: download it from DJI (Osmo Action 6 downloads page) and bake it in
   from a checkout of this repo:
 
@@ -646,7 +652,7 @@ None of it has been tried there by hand yet (the release builds it on Linux and 
 - **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
   `gyroflow-export.exe`.
 
-Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip`
+Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip` (`-arm64.zip`)
 into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
 next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all the plugins (with
 DJI's LUT, as on a Mac). With `--apps` it also puts ActionFootagePlayer in the applications menu: the same mpv, by
@@ -814,11 +820,26 @@ shaders of your own, so mpv undoes them when a playlist moves on to a clip that 
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
   (Up to 0.5.0 the LUT was at `HOOK OUTPUT`, re-sampling the source through `BIND MAIN`: libplacebo redraws a
   paused frame from its cache, where `MAIN` can't be bound, and skipped it, so paused video went grey.)
-- `sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
-  BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged.
+- `maker`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. The `format` filter tags the video
+  BT.709/BT.1886, so mpv's color pipeline runs a BT.709 → BT.709 identity and the LUT's output reaches the display
+  unchanged.
+- `nbcu`, on `Ctrl+s` again: the `hdr` shader, then NBCUniversal's 33³ HLG → SDR (BT.709) display-light
+  conversion (`luts/3-NBCU_HLG2SDR_DL_v1.2.cube`, `shaders/nbcu_sdr.glsl.in`), tagged as `maker`. NBCU's are Type III
+  LUTs (full range processing of narrow range signals: the signal's 0..1 is 64..940 of 1023 of the LUT's domain,
+  in and out) and their highlight knee needs tetrahedral interpolation, so the shader does it from the texels.
+  HLG's 75 % maps to 95 % SDR, highlights roll off to 109 %, clipped at 100 % here. It's a standard for single-master
+  HDR/SDR broadcasting rather than a look: next to DJI's, the same clip is brighter in the mid-tones (18 % grey at
+  ~0.40 in Rec.709 against DJI's ~0.32) and more saturated. On a file tagged HDR: NBCU's HLG or PQ → SDR alone,
+  with its Dolby Vision metadata set aside (`format=dolbyvision=no`): VideoToolbox writes HLG as Dolby Vision 8.4,
+  which mpv would otherwise reshape into PQ before the shader sees it; the HLG underneath is what NBCU's LUT takes.
+
+Which one a clip starts in depends on the screen its window is on: macOS's EDR headroom (`NSScreen`'s
+`maximumPotentialExtendedDynamicRangeColorComponentValue`, asked once with `osascript`), above 1 on a screen that
+shows HDR. A clip not yet switched by hand follows its window to a screen of the other kind. On Windows and Linux
+every screen counts as HDR, as before.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in
-`shaders/`), so the GPU does the trilinear interpolation in one tap.
+`shaders/`), so the GPU does the trilinear interpolation in one tap (NBCU's: four texel reads, tetrahedral).
 
 ### Other log curves
 
@@ -993,6 +1014,14 @@ DaVinci Wide Gamut/Intermediate shaper LUT (`GP_LOG to DWG_I ZRG V1`, from his
 
 His site states no license for his LUTs; Zeb Gardner has agreed to their use here, with this credit. The HDR
 rendering of the other log curves is fitted to `dlogm_hlg.cube`, so it builds on his work too.
+
+The NBCU LUTs (`luts/3-NBCU_HLG2SDR_DL_v1.2.cube`, `luts/5-NBCU_PQ2SDR_DL_v1.2.cube`, and the shaders made from
+them, `nbcu_hlg2sdr.glsl` and `nbcu_pq2sdr.glsl`) were developed by NBCUniversal Media, LLC, with Cromorama and Nick
+Shaw, and are from NBCU's
+[UHD HDR-SDR Single-Master Production Workflow Recommendation](https://github.com/digitaltvguy/NBCUniversal-UHD-HDR-SDR-Single-Master-Production-Workflow-Recommendation-LUTs).
+NBCU distributes them publicly and freely, without warranty, on an "as is" basis, to encourage UHD single-master
+HDR-SDR production with consistent media exchange; as NBCU asks, their names keep "NBCU" and their headers are
+unaltered.
 
 The other log curves are decoded from their makers' own publications (`tools/make_hdr_lut.py`, which says the
 same in every LUT it writes):

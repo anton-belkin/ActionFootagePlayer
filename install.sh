@@ -103,6 +103,9 @@ for curve in $HDR_CURVES; do
 done
 # GP-Log's, from Zeb Gardner's LUT (luts/gplog_hlg.cube)
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$BUILD/gplog_hlg.glsl"
+# NBCUniversal's HLG and PQ -> SDR (luts/3-NBCU_*, luts/5-NBCU_*), the NBCU look
+python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$BUILD/nbcu_hlg2sdr.glsl"
+python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$BUILD/nbcu_pq2sdr.glsl"
 
 if [ "$BIN" != bin ]; then
     echo "== Gyroflow plugin"
@@ -204,6 +207,8 @@ for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
 done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
+put "$BUILD/nbcu_hlg2sdr.glsl"      "$DLOGM/shaders/nbcu_hlg2sdr.glsl" 644
+put "$BUILD/nbcu_pq2sdr.glsl"       "$DLOGM/shaders/nbcu_pq2sdr.glsl" 644
 put shaders/denoise.glsl            "$DLOGM/shaders/denoise.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
@@ -212,6 +217,7 @@ for curve in $HDR_CURVES; do
     put "$BUILD/${curve}_hlg.cube"  "$DLOGM/luts/${curve}_hlg.cube" 644
 done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
+put luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$DLOGM/luts/3-NBCU_HLG2SDR_DL_v1.2.cube" 644
 
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644

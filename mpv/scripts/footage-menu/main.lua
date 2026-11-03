@@ -38,6 +38,7 @@ local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pre
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }
+local SDR_NAMES = { maker = "maker's LUT", nbcu = "NBCU" }
 local KIND_LABELS = { project = "Gyroflow project", default = "gyro" }
 -- What the keys do, for Keys…: the plugins' and the player's that the menu has
 local KEY_LABELS = {
@@ -46,8 +47,8 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
+    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR" },
     { "script-binding dlogm/hdr", "Log in HDR" },
-    { "script-binding dlogm/sdr", "Log in the standard look (DJI's LUT)" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
     { "script-binding dlogm/denoise", "Noise reduction on / off" },
@@ -134,21 +135,34 @@ local function passport(d, g, t, h)
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
+-- The looks' names in the menu, by the dlogm plugin's (its looks)
+local function look_title(d, look)
+    if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
+    if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
+    if look == "nbcu" then return "SDR, NBCU (neutral)" end
+    if look == "tonemap" then return "SDR, tone-mapped by mpv" end
+    return look
+end
+
 local function look_menu(d, key)
     local items = {}
-    if not d.log and d.hdr and d.hdr ~= "" then
-        -- A file tagged HDR: as it is, or tone-mapped to SDR as without the plugin
-        table.insert(items, item("HDR (" .. d.hdr:upper() .. "), as it is", "script-binding dlogm/hdr", { checked = d.look == "hdr", shortcut = key["script-binding dlogm/hdr"] }))
-        table.insert(items, item("Tone-mapped to SDR", "script-binding dlogm/sdr", { checked = d.look == "sdr", shortcut = key["script-binding dlogm/sdr"] }))
-    elseif not d.log then
+    if not d.log and (d.hdr or "") == "" then
         table.insert(items, info("Not log, as the camera says"))
     else
-        local name = CURVE_NAMES[d.curve] or d.curve
-        table.insert(items, item("HDR", "script-binding dlogm/hdr", { checked = d.look == "hdr", shortcut = key["script-binding dlogm/hdr"] }))
-        local sdr_title = "Standard look (DJI's LUT)"
-        if not d.sdr then sdr_title = d.curve == "dlogm" and "Standard look (DJI's LUT isn't downloaded)" or ("Standard look (none for " .. name .. ")") end
-        table.insert(items, item(sdr_title, "script-binding dlogm/sdr", { checked = d.look == "sdr", disabled = not d.sdr, shortcut = key["script-binding dlogm/sdr"] }))
-        table.insert(items, item("As recorded (log off)", "script-binding dlogm/off", { checked = d.look == "off", shortcut = key["script-binding dlogm/off"] }))
+        -- In Ctrl+s's order; what's chosen here is what clips start in on this kind of screen
+        if d.screen == "sdr" then table.insert(items, info("SDR screen: HDR shows as macOS tone-maps it"))
+        elseif d.screen == "hdr" then table.insert(items, info("HDR screen: SDR shows as an SDR screen would")) end
+        for _, look in ipairs(d.looks or {}) do
+            local shortcut = look == "hdr" and key["script-binding dlogm/hdr"] or nil
+            table.insert(items, item(look_title(d, look), "script-message-to dlogm look " .. look, { checked = d.look == look, shortcut = shortcut }))
+        end
+        if d.log and d.maker == "" then
+            local name = CURVE_NAMES[d.curve] or d.curve
+            table.insert(items, info(d.curve == "dlogm" and "SDR, DJI's LUT (isn't downloaded)" or ("SDR, maker's LUT (none for " .. name .. " yet)")))
+        end
+        if d.log then
+            table.insert(items, item("As recorded (log off)", "script-binding dlogm/off", { checked = d.look == "off", shortcut = key["script-binding dlogm/off"] }))
+        end
     end
     table.insert(items, SEPARATOR)
     local curves = {
@@ -163,7 +177,7 @@ local function look_menu(d, key)
     table.insert(items, SEPARATOR)
     table.insert(items, item("Noise reduction", "script-binding dlogm/denoise", { checked = d.denoise, shortcut = key["script-binding dlogm/denoise"] }))
     table.insert(items, SEPARATOR)
-    table.insert(items, item("Remember as default", "script-message-to dlogm remember"))
+    table.insert(items, item("Remember as default (looks on HDR and SDR screens)", "script-message-to dlogm remember"))
     return items
 end
 
@@ -256,8 +270,8 @@ local function export_menu(d, g)
     local reveal = platform == "darwin" and "Show last export in Finder" or platform == "windows" and "Show last export in Explorer"
                    or "Open the folder of the last export"
     return {
-        item("Export in standard look (Rec.709)", "script-message-to gyroflow export sdr",
-             { disabled = g.exporting or not (d and d.log and d.sdr) }),
+        item("Export in SDR (" .. (SDR_NAMES[d and d.sdr_look or ""] or "Rec.709") .. ")", "script-message-to gyroflow export sdr",
+             { disabled = g.exporting or not (d and d.log and (d.sdr_look or "") ~= "") }),
         SEPARATOR,
         item(reveal, "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" }),
     }

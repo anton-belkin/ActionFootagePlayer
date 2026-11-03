@@ -62,6 +62,24 @@ Of all of these, only the Action 6 has been tried in the player; everything else
 pages. How the camera marks its log profile in the file is known for DJI's Action 6 (and guessed from the `_D`
 file name for other DJI cameras) and for GoPro (`PTCL`, not yet seen on a GP-Log clip); for Insta360 it isn't.
 
+## SDR without a maker's LUT: NBCU
+
+For a camera without a Rec.709 LUT of its maker's, and as a neutral alternative for those with one, the player has
+NBCUniversal's HDR -> SDR conversion: the curve's own HLG (ours, above) through NBCU's HLG -> SDR LUT. NBCU's LUTs
+are a broadcast standard for single-master HDR/SDR production, not a look, and public and free ("as is", NBCU's name
+kept in each LUT's): [digitaltvguy/NBCUniversal-UHD-HDR-SDR-Single-Master-Production-Workflow-Recommendation-LUTs](https://github.com/digitaltvguy/NBCUniversal-UHD-HDR-SDR-Single-Master-Production-Workflow-Recommendation-LUTs),
+fetched 2026-11-03, v1.2, the Type III ones for hardware devices:
+
+| File | SHA-256 |
+|---|---|
+| `3-NBCU_HLG2SDR_DL_v1.2.cube` (HLG -> SDR, display light, 33³) | `6aea334b9173d5dec4f232d5aff9221557b20f6af060923e249d0ecf988840df` |
+| `5-NBCU_PQ2SDR_DL_v1.2.cube` (PQ -> SDR, display light, 33³) | `a3f13ac07572921d78c93b851e3904819ce0e0687eb0df58bef9856ad00eff3d` |
+
+Measured on D-Log M against DJI's own Rec.709 LUT (DJI's LUT on D-Log M, NBCU's on our D-Log M -> HLG): NBCU puts
+18 % grey at about 0.40 in Rec.709 where DJI puts it at 0.32, keeps more in the shadows (0.04 against DJI's 0.01
+six stops below grey), and is about a quarter more saturated; the median difference over the cube is ΔE 10. Its
+highlights roll off to 109 % (clipped to 100 % here).
+
 ## HDR beyond the makers' LUTs
 
 An HDR path doesn't need a LUT that ends in HLG. It needs the log footage turned into scene light in a known

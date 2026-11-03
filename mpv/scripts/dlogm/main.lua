@@ -13,43 +13,63 @@
 -- SDR. The tag is read from the MP4/MOV before the file plays (video_color.lua); in other containers from the
 -- decoder once it starts, so there the first frames are in SDR.
 --
--- Modes, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh):
---   hdr  <curve>_hlg.glsl, a HOOK MAIN shader: log -> Rec.2100 HLG 1000-nit. The video is tagged as HLG (vf=format,
---        labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded result through as it
---        is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR display macOS
---        tone-maps the HLG output down, which looks better than an explicit SDR fallback. D-Log M's LUT is
---        luts/dlogm_hlg.cube and GP-Log's luts/gplog_hlg.cube, both from Zeb Gardner's LUTs; the others are made
---        by tools/make_hdr_lut.py from their makers' published formulas (docs/luts.md).
---   sdr  dlogm_lut3d.glsl, a HOOK MAIN shader: DJI's own D-Log M -> Rec.709 LUT, in SDR. D-Log M only, so far.
---   off  the file as it is, flat as the camera recorded it
+-- Looks, from the GPU shaders in shaders/ (baked from .cube LUTs by install.sh). The log curve (Ctrl+l) is one
+-- choice, the look another: which looks a file has depends on its curve.
+--   hdr    <curve>_hlg.glsl, a HOOK MAIN shader: log -> Rec.2100 HLG 1000-nit, nothing after it. The video is tagged
+--          as HLG (vf=format, labelled dlogm) and so is the target, so mpv's color pipeline passes the HLG-encoded
+--          result through as it is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR
+--          display macOS tone-maps the HLG output down. D-Log M's LUT is luts/dlogm_hlg.cube and GP-Log's
+--          luts/gplog_hlg.cube, both from Zeb Gardner's LUTs; the others are made by tools/make_hdr_lut.py from
+--          their makers' published formulas (docs/luts.md).
+--   maker  the camera maker's own LUT to Rec.709, in SDR: dlogm_lut3d.glsl, DJI's D-Log M -> Rec.709. D-Log M only,
+--          so far.
+--   nbcu   the hdr look's HLG, then NBCUniversal's HLG -> SDR conversion (nbcu_hlg2sdr.glsl, from
+--          luts/3-NBCU_HLG2SDR_DL_v1.2.cube): Rec.709 without a maker's look, the same for every curve.
+--   off    the file as it is, flat as the camera recorded it (L; not one of Ctrl+s's)
+-- The SDR looks tag the video as BT.709 for mpv, and leave the target as it was: on an HDR screen they show as an
+-- SDR screen shows them.
+-- A file tagged HDR has its own: as it is, in HDR (hdr; L too), or in SDR by NBCU's conversion for its transfer
+-- (nbcu: nbcu_hlg2sdr.glsl, nbcu_pq2sdr.glsl), or by mpv's tone mapping when it isn't in BT.2020, which NBCU's are
+-- for (tonemap). Ctrl+l still grades one with a log curve by hand.
 -- Noise reduction, with any of them and on any YUV video, log or not: shaders/denoise.glsl, on the video's planes
 -- before mpv turns them into RGB (so before the LUT lifts log's shadows, and their noise with them): the color noise
 -- mostly goes, the brightness keeps its detail. Off by default; playback only, exports are as before.
--- An HDR file has two of its own, for that file only (the mode log files start in stays as it was): as it is, in
--- HDR (Ctrl+h, and L: the file as it is), or tone-mapped to SDR by mpv, as without the plugin (Ctrl+s). Ctrl+l still
--- grades one with a log curve by hand.
+--
+-- What a file starts in depends on the screen the window is on, HDR or SDR (macOS's EDR headroom, read once with
+-- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
+-- SDR look last chosen (the maker's at first, NBCU's for a curve without one). Choosing a look (Ctrl+s, Ctrl+h, the
+-- menu) makes it what files start in on that kind of screen, for the rest of the session; an SDR look chosen on
+-- either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file not yet switched by hand follows its
+-- window to a screen of the other kind.
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
---   Ctrl+h  hdr    this file, and log files after it
---   Ctrl+s  sdr    this file, and log files after it
---   L       off    this file
+--   Ctrl+s  sdr    the next look this file has: hdr, then the maker's and NBCU's SDR, in turn
+--   Ctrl+h  hdr    the hdr look, as Ctrl+s chooses one
+--   L       off    this file only
 --   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
 --   Ctrl+n  denoise  noise reduction on / off, for this file and the ones after it
 --
 -- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
+--   look <look>       this file's look: hdr, maker, nbcu or tonemap, as Ctrl+s would
 --   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
---   remember          the mode (hdr or sdr) and the noise reduction as the default, in dlogm.conf
+--   remember          the looks files start in on each kind of screen, and the noise reduction, as the default, in
+--                     dlogm.conf
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
--- ""), curve (the one applied, or ""), look (hdr, sdr, off, or "" when untouched), mode, sdr (DJI's LUT is there for
--- the curve), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on).
+-- ""), curve (the one applied, or ""), look (hdr, maker, nbcu, tonemap, off, or "" when untouched), looks (the ones
+-- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), sdr_look (the SDR look an export in SDR
+-- takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when unknown), hdr (the file is tagged HDR: hlg or pq, or
+-- ""), denoise (the noise reduction is on).
 --
 -- Options (~~/script-opts/dlogm.conf):
---   mode=hdr     what log files start in: hdr or sdr
+--   hdr_screen=hdr    what log files start in on an HDR screen: hdr, maker or nbcu
+--   sdr_screen=maker  and on an SDR screen
+--   (mode=sdr, as before these: maker on both)
 --   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
 --                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
 --
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
--- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the sdr shader made from it, under the same names.
+-- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the maker shader made from it, under the same
+-- names.
 --
 -- Everything is set as file-local options, added to the user's own glsl-shaders and vf: mpv restores them when the
 -- file ends. Source files are never modified.
@@ -61,7 +81,7 @@ local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
 local video_color = require 'video_color'
 
-local o = { mode = "hdr", denoise = false }
+local o = { mode = "", hdr_screen = "", sdr_screen = "", denoise = false }
 options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
@@ -70,14 +90,16 @@ local DATA = os.getenv("DLOGM_DATA")
 local DIRS = {}
 if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
 table.insert(DIRS, DIR)
--- The log curves, in Ctrl+l's order, with their shaders by mode
+-- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr)
 local CURVES = {
-    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl" },
+    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl", maker = "DJI" },
     { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
     { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
     { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
     { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
 }
+-- NBCU's HDR -> SDR, by the transfer it takes
+local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl" }
 -- The noise reduction's shader
 local DENOISE = "shaders/denoise.glsl"
 local CURVE = {}
@@ -91,16 +113,33 @@ local GPLOG_FIRMWARE = { ["HERO12 Black"] = 1.20, ["HERO13 Black"] = 0 }
 local PROBED_EXTENSIONS = { mp4 = true, mov = true }
 -- The options this sets, as they are for the file before it does
 local TARGET_OPTIONS = { "target-trc", "target-prim", "target-peak", "target-colorspace-hint" }
--- The filter that tags the video as what the hdr shader turns it into, at the end of the chain (after the
--- stabilization); enabled in hdr mode only
+-- The filter that tags the video as what the look's shaders turn it into, at the end of the chain (after the
+-- stabilization); disabled when the file's own tags are right
 local TAG_LABEL = "dlogm"
 local HLG_TAGS = { gamma = "hlg", primaries = "bt.2020" }
 local WINDOWS = package.config:sub(1, 1) == "\\"
+local SDR_TAGS = { gamma = "bt.1886", primaries = "bt.709" }
+-- For NBCU's on a file tagged HDR: its base layer, without Dolby Vision's reshaping, which would make it PQ (Dolby
+-- Vision 8.4, as VideoToolbox writes HLG, the player's own exports among them, is HLG underneath)
+local SDR_TAGS_NO_DOVI = { gamma = "bt.1886", primaries = "bt.709", dolbyvision = "no", colormatrix = "bt.2020-ncl" }
+local SDR_LOOKS = { maker = true, nbcu = true, tonemap = true }
+-- What a kind of screen's choice can be
+local CHOICES = { hdr = true, maker = true, nbcu = true }
 -- The HDR transfers, by mpv's names for them (target-trc, video-dec-params/gamma)
 local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 
-local mode = o.mode == "sdr" and "sdr" or "hdr"
+local function choice(v, default)
+    return CHOICES[v] and v or default
+end
+-- What log files start in on each kind of screen: dlogm.conf's, then the session's choices
+local old = o.mode == "sdr" and "maker" or nil
+local chosen = { hdr = choice(o.hdr_screen, old or "hdr"), sdr = choice(o.sdr_screen, old or "maker") }
 local denoise = o.denoise
+local platform = mp.get_property("platform") or ""
+-- The screens' HDR headroom by name (macOS's EDR: above 1 where it shows HDR; false: one it didn't know), and the
+-- menu bar's screen, where a window opens; nil until known, {} when it can't be
+local screens, main_screen = nil, nil
+local waiting = {}
 -- For the current file: the user's own values of what this changes, its log curve, and the mode it's in (nil:
 -- untouched)
 local base = nil
@@ -113,17 +152,62 @@ local recorded = nil
 -- how the file shows
 local hdr = nil
 local touched = false
+-- The kind of screen the file's look was chosen for
+local shown_for = nil
+
+-- The name of the screen the window is on, as macOS has it: mpv's display-names add a number, "Built-in Retina
+-- Display (4251086178)"
+local function window_screen()
+    local name = (mp.get_property_native("display-names") or {})[1]
+    return name and name:gsub("%s*%(%d+%)$", "")
+end
+
+-- The kind of screen the window is on (before there's a window, the one it opens on): "hdr", "sdr", or nil when it
+-- can't tell
+local function screen_kind()
+    if not screens then return nil end
+    local name = window_screen()
+    if not name or name == "" then
+        local wanted = mp.get_property("screen-name") or ""
+        name = wanted ~= "" and wanted or main_screen
+    end
+    local headroom = name and screens[name]
+    if not headroom then return nil end
+    return headroom > 1 and "hdr" or "sdr"
+end
+
+-- The same, an unknown one counting as HDR: the display is asked for HDR and the system tone-maps it when it isn't
+local function screen()
+    return screen_kind() or "hdr"
+end
 
 local function label(m)
+    local text
     if hdr and not curve then
-        local name = "HDR video (" .. HDR_NAMES[hdr.trc] .. ")"
-        if m == "sdr" then return name .. " tone-mapped to SDR" end
-        return name .. ", as it is"
+        text = "HDR video (" .. HDR_NAMES[hdr.trc] .. ")"
+        if m == "nbcu" then
+            text = text .. " -> SDR (NBCU)"
+        elseif m == "tonemap" then
+            text = text .. " tone-mapped to SDR by mpv"
+        else
+            text = text .. ", as it is"
+        end
+    else
+        local c = curve or CURVE.dlogm
+        if m == "hdr" then
+            text = c.name .. " -> HDR"
+        elseif m == "maker" then
+            text = c.name .. " -> SDR (" .. (c.maker or "the maker") .. "'s LUT)"
+        elseif m == "nbcu" then
+            text = c.name .. " -> SDR (NBCU)"
+        else
+            return c.name .. " handling off: the file as it is"
+        end
     end
-    local name = (curve or CURVE.dlogm).name
-    if m == "hdr" then return name .. " -> HDR" end
-    if m == "sdr" then return name .. " -> Rec.709" end
-    return name .. " handling off: the file as it is"
+    local kind = screen_kind()
+    if kind == "sdr" and (m == "hdr" or m == "off") then return text .. ", tone-mapped by macOS for this SDR screen" end
+    if kind == "hdr" and SDR_LOOKS[m] then return text .. ", as an SDR screen shows it" end
+    return text
 end
 
 local function file_exists(path)
@@ -140,13 +224,46 @@ local function plugin_file(name)
     return nil
 end
 
+-- The looks this file has, in Ctrl+s's order: hdr, then the SDR ones whose shaders are there
+local function looks()
+    if not base then return {} end
+    if hdr and not curve then
+        if hdr.prim == "bt.2020" and not hdr.dovi and plugin_file(NBCU[hdr.trc]) then return { "hdr", "nbcu" } end
+        return { "hdr", "tonemap" }
+    end
+    if not curve then return {} end
+    local list = { "hdr" }
+    if curve.sdr and plugin_file(curve.sdr) then table.insert(list, "maker") end
+    if plugin_file(NBCU.hlg) then table.insert(list, "nbcu") end
+    return list
+end
+
+-- The look for a choice: itself when the file has it, else for an SDR one another SDR look (NBCU's first: the
+-- neutral one), else hdr
+local function resolve(want)
+    local has = {}
+    for _, l in ipairs(looks()) do has[l] = true end
+    if has[want] then return want end
+    if SDR_LOOKS[want] then
+        for _, l in ipairs({ "nbcu", "maker", "tonemap" }) do
+            if has[l] then return l end
+        end
+    end
+    return "hdr"
+end
+
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local c = curve or CURVE.dlogm
+    local sdr_look = ""
+    if curve then
+        sdr_look = (current == "maker" or current == "nbcu") and current or resolve(chosen.sdr ~= "hdr" and chosen.sdr or "maker")
+        if sdr_look == "hdr" then sdr_look = "" end
+    end
     local state = {
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
-        look = current or "", mode = mode, sdr = c.sdr ~= nil and plugin_file(c.sdr) ~= nil, hdr = hdr and hdr.trc or "",
-        denoise = denoise,
+        look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
+        sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -175,22 +292,26 @@ local function recorded_curve(path)
     return nil
 end
 
--- The video tagged as HLG (on) or as the file says (off). The filter stays in the chain once added, disabled when
--- off. Switching it rebuilds the chain: Gyroflow's filter restarts, as with Ctrl+g
-local function tag_hlg(on)
+-- The video tagged as `tags` (HLG_TAGS, SDR_TAGS), or as the file says (nil). The filter stays in the chain once
+-- added, disabled when not needed. Changing it rebuilds the chain: Gyroflow's filter restarts, as with Ctrl+g
+local function tag_video(tags)
     local vf = mp.get_property_native("vf") or {}
     local tag = nil
     for _, f in ipairs(vf) do
         if f.label == TAG_LABEL then tag = f end
     end
     if not tag then
-        if not on then return end
-        tag = { name = "format", label = TAG_LABEL, params = HLG_TAGS }
+        if not tags then return end
+        tag = { name = "format", label = TAG_LABEL }
         table.insert(vf, tag)
-    elseif tag.enabled == on then
+    elseif not tags then
+        if tag.enabled == false then return end
+    elseif tag.enabled ~= false and tag.params and tag.params.gamma == tags.gamma and tag.params.primaries == tags.primaries
+           and tag.params.dolbyvision == tags.dolbyvision then
         return
     end
-    tag.enabled = on
+    if tags then tag.params = tags end
+    tag.enabled = tags ~= nil
     mp.set_property_native("file-local-options/vf", vf)
 end
 
@@ -207,7 +328,7 @@ local function hdr_target(target, trc, prim)
     target["target-peak"] = "1000"
 end
 
--- The file's shaders: the user's own, the noise reduction's when it's on, and the look's (a path, or nil)
+-- The file's shaders: the user's own, the noise reduction's when it's on, and the look's (paths, in order)
 local function shader_list(look)
     local shaders = {}
     for _, s in ipairs(base.shaders) do table.insert(shaders, s) end
@@ -219,7 +340,7 @@ local function shader_list(look)
             mp.msg.warn("missing " .. DENOISE .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
         end
     end
-    if look then table.insert(shaders, look) end
+    for _, s in ipairs(look or {}) do table.insert(shaders, s) end
     return shaders
 end
 
@@ -229,15 +350,39 @@ local function set_target(target)
     end
 end
 
--- An HDR file, without a log curve: as it is, in HDR (hdr, off), or tone-mapped to SDR by mpv (sdr)
+-- The plugin's shaders by name, as paths; nil (and why, on screen) when one isn't installed
+local function shader_paths(names, m)
+    local paths = {}
+    for _, name in ipairs(names) do
+        local path = plugin_file(name)
+        if not path then
+            mp.msg.warn("missing " .. name .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
+            mp.osd_message(label(m) .. ": its shader isn't installed", 3)
+            return nil
+        end
+        table.insert(paths, path)
+    end
+    return paths
+end
+
+-- An HDR file, without a log curve: as it is, in HDR (hdr, off), or in SDR by NBCU's conversion (nbcu) or mpv's
+-- tone mapping (tonemap)
 local function apply_hdr_file(m)
     local target = {}
     for k, v in pairs(base.target) do target[k] = v end
-    if m ~= "sdr" then hdr_target(target, hdr.trc, hdr.prim) end
-    tag_hlg(false)
-    mp.set_property_native("file-local-options/glsl-shaders", shader_list())
+    local shaders = {}
+    if m == "nbcu" then
+        shaders = shader_paths({ NBCU[hdr.trc] }, m)
+        if not shaders then return false end
+    elseif m ~= "tonemap" then
+        m = "hdr"
+        hdr_target(target, hdr.trc, hdr.prim)
+    end
+    tag_video(m == "nbcu" and SDR_TAGS_NO_DOVI or nil)
+    mp.set_property_native("file-local-options/glsl-shaders", shader_list(shaders))
     set_target(target)
-    current = m == "sdr" and "sdr" or "hdr"
+    current = m
+    shown_for = screen()
     publish()
     return true
 end
@@ -246,17 +391,13 @@ local function apply(m)
     if not base then return false end
     if hdr and not curve then return apply_hdr_file(m) end
     local c = curve or CURVE.dlogm
-    if m == "sdr" and not c.sdr then
-        mp.osd_message(c.name .. ": no Rec.709 LUT for it yet", 3)
+    if m == "maker" and not c.sdr then
+        mp.osd_message(c.name .. ": no maker's Rec.709 LUT for it yet", 3)
         return false
     end
-    local name = c[m]
-    local shader = name and plugin_file(name)
-    if name and not shader then
-        mp.msg.warn("missing " .. name .. " in " .. table.concat(DIRS, " and ") .. " (run install.sh)")
-        mp.osd_message(label(m) .. ": its shader isn't installed", 3)
-        return false
-    end
+    local names = { hdr = { c.hdr }, maker = { c.sdr }, nbcu = { c.hdr, NBCU.hlg } }
+    local shaders = shader_paths(names[m] or {}, m)
+    if not shaders then return false end
     local target = {}
     for k, v in pairs(base.target) do target[k] = v end
     if m == "hdr" then
@@ -265,17 +406,67 @@ local function apply(m)
         -- off on an HDR file graded by hand: as it is, in HDR
         hdr_target(target, hdr.trc, hdr.prim)
     end
-    tag_hlg(m == "hdr")
-    mp.set_property_native("file-local-options/glsl-shaders", shader_list(shader))
+    tag_video(m == "hdr" and HLG_TAGS or (m == "maker" or m == "nbcu") and SDR_TAGS or nil)
+    mp.set_property_native("file-local-options/glsl-shaders", shader_list(shaders))
     set_target(target)
     current = m
+    shown_for = screen()
     publish()
     return true
 end
 
+-- The screens' headroom, asked of macOS once (and again for a screen it didn't know), then `done`
+local SCREENS_JS = [[ObjC.import("AppKit"); var s = $.NSScreen.screens, o = [];
+for (var i = 0; i < s.count; i++) { var x = s.objectAtIndex(i);
+    o.push(x.localizedName.js + "\t" + x.maximumPotentialExtendedDynamicRangeColorComponentValue) }
+o.join("\n")]]
+local asking = false
+local function ask_screens(done)
+    if done then table.insert(waiting, done) end
+    if asking then return end
+    local function finish(found, main)
+        asking = false
+        -- A screen it still doesn't know stays unknown, not asked about again
+        for name, headroom in pairs(screens or {}) do
+            if headroom == false and found[name] == nil then found[name] = false end
+        end
+        screens, main_screen = found, main
+        local w = waiting
+        waiting = {}
+        for _, f in ipairs(w) do f() end
+    end
+    if platform ~= "darwin" then return finish({}, nil) end
+    asking = true
+    -- osascript answers in a few tenths of a second; a file waits for it at most this long
+    local timer = mp.add_timeout(1.5, function()
+        if asking then
+            mp.msg.warn("couldn't tell the screens' HDR: they count as HDR")
+            finish(screens or {}, main_screen)
+        end
+    end)
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true,
+                              args = { "osascript", "-l", "JavaScript", "-e", SCREENS_JS } }, function(ok, r)
+        if not asking then return end
+        timer:kill()
+        local found, main = {}, nil
+        if ok and r.status == 0 then
+            for line in (r.stdout or ""):gmatch("[^\n]+") do
+                local name, headroom = line:match("^(.-)\t([%d.]+)%s*$")
+                if name then
+                    found[name] = tonumber(headroom)
+                    main = main or name
+                    mp.msg.verbose("screen " .. name .. ": EDR headroom " .. headroom)
+                end
+            end
+        end
+        finish(found, main)
+    end)
+end
+ask_screens()
+
 -- After the file is opened (its metadata is known), before the video output is set up for it
-mp.add_hook("on_preloaded", 50, function()
-    base, curve, current, announce, recorded, hdr, touched = nil, nil, nil, false, nil, nil, false
+mp.add_hook("on_preloaded", 50, function(hook)
+    base, curve, current, announce, recorded, hdr, touched, shown_for = nil, nil, nil, false, nil, nil, false, nil
     local path = mp.get_property("path")
     if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
@@ -284,32 +475,46 @@ mp.add_hook("on_preloaded", 50, function()
     if not path:find("://", 1, true) then trc, prim = video_color.read(path) end
     if trc then
         -- Log is recorded tagged as SDR: what an HDR file's camera metadata says (an export's) isn't read
-        hdr = { trc = trc, prim = prim or "bt.2020" }
-        announce = apply("hdr")
-        mp.msg.info(label(current))
-        return
+        hdr = { trc = trc, prim = prim or "bt.2020", tagged = true }
+    else
+        recorded = recorded_curve(path)
+        curve = recorded
+        if not curve then
+            mp.msg.verbose("not log footage it knows")
+            if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
+            return publish()
+        end
     end
-    recorded = recorded_curve(path)
-    curve = recorded
-    if not curve then
-        mp.msg.verbose("not log footage it knows")
-        if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
-        return publish()
+    -- In the look chosen for the screen, once it's known which kind that is
+    local function start()
+        announce = apply(resolve(chosen[screen()]))
+        if announce then mp.msg.info(label(current)) end
     end
-    -- A curve without a Rec.709 LUT starts in HDR whatever the mode
-    announce = apply(curve.sdr and mode or "hdr")
-    if announce then mp.msg.info(label(current)) end
+    if screens then return start() end
+    hook:defer()
+    ask_screens(function()
+        if base then start() end
+        hook:cont()
+    end)
 end)
 
 -- An HDR file whose container didn't say (not MP4/MOV, or no colr box), from the decoder once it starts: in HDR as
 -- it is from then on, unless the user has chosen otherwise. The decoder's, not video-params: the hdr mode's filter
 -- tags the video as HLG after it
 mp.observe_property("video-dec-params", "native", function(_, p)
-    if not base or hdr or touched or not p or not HDR_NAMES[p.gamma] then return end
-    hdr = { trc = p.gamma, prim = p.primaries or "bt.2020" }
+    if not base or not p or not HDR_NAMES[p.gamma] then return end
+    -- Dolby Vision without a base layer in the container's transfer (profile 5: no colr box) is only seen here, and
+    -- only mpv's tone mapping takes it
+    if hdr and not curve and p.colormatrix == "dolbyvision" and not hdr.tagged and not hdr.dovi then
+        hdr.dovi = true
+        if current == "nbcu" then apply("tonemap") end
+        return publish()
+    end
+    if hdr or touched then return end
+    hdr = { trc = p.gamma, prim = p.primaries or "bt.2020", dovi = p.colormatrix == "dolbyvision" }
     if curve then mp.msg.info(curve.name .. " in the metadata, but the video is tagged " .. HDR_NAMES[hdr.trc] .. ": not log") end
     recorded, curve = nil, nil
-    if apply("hdr") then
+    if apply(resolve(chosen[screen()])) then
         mp.msg.info(label(current))
         mp.osd_message(label(current), 1.5)
     end
@@ -325,27 +530,49 @@ mp.register_event("end-file", function()
     publish()
 end)
 
-local function choose(wanted, sticky)
-    return function()
-        if not base then return end
-        touched = true
-        local hdr_file = hdr and not curve
-        -- An HDR file as it is is in HDR
-        local m = hdr_file and wanted == "off" and "hdr" or wanted
-        if current == m then
-            mp.osd_message(label(m), 1.5)
-            return
-        end
-        if apply(m) then
-            -- An HDR file's look is its own: log files start as they did
-            if sticky and not hdr_file then mode = m end
-            publish()
-            mp.osd_message(label(m), 2)
-        end
+-- A look for this file, `sticky`: the one files start in on this kind of screen from now on (an SDR one, on an SDR
+-- screen too, unless that's set to hdr)
+local function choose(m, sticky)
+    if not base then return end
+    touched = true
+    if hdr and not curve and m == "off" then m = "hdr" end
+    if current == m then
+        mp.osd_message(label(m), 1.5)
+        return
     end
+    if not apply(m) then return end
+    if sticky then
+        local c = m == "tonemap" and "nbcu" or m
+        if CHOICES[c] then
+            chosen[screen()] = c
+            if c ~= "hdr" and chosen.sdr ~= "hdr" then chosen.sdr = c end
+        end
+        publish()
+    end
+    mp.osd_message(label(m), 2)
 end
 
--- The next curve for this file, shown the way the file is shown now (HDR when it was off or untouched)
+-- Ctrl+s: the file's next look
+local function next_look()
+    if not base then return end
+    local list = looks()
+    if #list == 0 then
+        mp.osd_message("Not log, as the camera says: the file as it is (Ctrl+l picks a curve)", 2)
+        return
+    end
+    local i = 0
+    for k, l in ipairs(list) do
+        if l == current then i = k end
+    end
+    choose(list[i % #list + 1], true)
+end
+
+-- The look to keep when the curve changes: the one the file is in, else what this screen starts in
+local function kept_look()
+    return resolve(current and current ~= "off" and current or chosen[screen()])
+end
+
+-- The next curve for this file, in the look it's in (or the screen's, when it was off or untouched)
 local function next_curve()
     if not base then return end
     touched = true
@@ -354,9 +581,29 @@ local function next_curve()
         if c == curve then i = k end
     end
     curve = CURVES[i % #CURVES + 1]
-    local m = current == "sdr" and curve.sdr and "sdr" or "hdr"
+    local m = kept_look()
     if apply(m) then mp.osd_message(label(m), 2) end
 end
+
+-- A file not switched by hand follows its window to a screen of the other kind; a screen macOS hasn't been asked
+-- about yet (just connected) is asked about first
+local function follow_screen()
+    if not screens then return end
+    local name = window_screen()
+    if platform == "darwin" and name and name ~= "" and screens[name] == nil and not asking then
+        screens[name] = false
+        return ask_screens(follow_screen)
+    end
+    if not base or not current or touched or screen() == shown_for then return end
+    local m = resolve(chosen[screen()])
+    if m ~= current and apply(m) then
+        mp.osd_message(label(m), 2)
+    else
+        shown_for = screen()
+        publish()
+    end
+end
+mp.observe_property("display-names", "native", follow_screen)
 
 -- The noise reduction on or off: the file's look applied again with it, or without one (not log), the shader alone
 local function toggle_denoise()
@@ -371,9 +618,9 @@ local function toggle_denoise()
     mp.osd_message(denoise and "Noise reduction on" or "Noise reduction off", 1.5)
 end
 
-mp.add_key_binding("Ctrl+h", "hdr", choose("hdr", true))
-mp.add_key_binding("Ctrl+s", "sdr", choose("sdr", true))
-mp.add_key_binding("L", "off", choose("off", false))
+mp.add_key_binding("Ctrl+s", "sdr", next_look)
+mp.add_key_binding("Ctrl+h", "hdr", function() choose("hdr", true) end)
+mp.add_key_binding("L", "off", function() choose("off", false) end)
 mp.add_key_binding("Ctrl+l", "curve", next_curve)
 mp.add_key_binding("Ctrl+n", "denoise", toggle_denoise)
 
@@ -385,7 +632,7 @@ mp.register_script_message("curve", function(id)
     if id == "auto" and not recorded then
         if hdr then
             curve = nil
-            if apply("hdr") then mp.osd_message(label(current), 2) end
+            if apply(resolve(chosen[screen()])) then mp.osd_message(label(current), 2) end
             return
         end
         if current then apply("off") end
@@ -398,8 +645,15 @@ mp.register_script_message("curve", function(id)
     if not c then return end
     local before = curve
     curve = c
-    local m = current == "sdr" and curve.sdr and "sdr" or "hdr"
+    local m = kept_look()
     if apply(m) then mp.osd_message(label(m), 2) else curve = before end
+end)
+
+-- This file's look by name, as Ctrl+s would choose it
+mp.register_script_message("look", function(m)
+    for _, l in ipairs(looks()) do
+        if l == m then return choose(m, true) end
+    end
 end)
 
 -- Sets options in ~~/script-opts/dlogm.conf, the rest of the file as it was; false when it can't be written
@@ -435,7 +689,9 @@ local function save_options(values)
 end
 
 mp.register_script_message("remember", function()
-    local saved = save_options({ mode = mode, denoise = denoise and "yes" or "no" })
-    mp.osd_message(saved and ("Log clips start in " .. (mode == "sdr" and "the standard look" or "HDR") .. ", noise reduction "
-                              .. (denoise and "on" or "off") .. " (dlogm.conf)") or "Couldn't write dlogm.conf", 2)
+    local saved = save_options({ hdr_screen = chosen.hdr, sdr_screen = chosen.sdr, denoise = denoise and "yes" or "no" })
+    local NAMES = { hdr = "HDR", maker = "the maker's SDR", nbcu = "NBCU's SDR" }
+    mp.osd_message(saved and ("Log clips start in " .. NAMES[chosen.hdr] .. " on HDR screens, in " .. NAMES[chosen.sdr]
+                              .. " on SDR screens, noise reduction " .. (denoise and "on" or "off") .. " (dlogm.conf)")
+                   or "Couldn't write dlogm.conf", 3)
 end)
