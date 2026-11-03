@@ -148,6 +148,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
 | a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
+| all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 
@@ -569,6 +570,10 @@ default), and `script-message-to agent say <text> [<seconds>]` shows a line over
 ## Installing, in detail
 
 ### Plugins in your own mpv
+
+`mpv-plugins-<version>-<os>-<arch>.zip` has them all, as the folders below: unzipped into mpv's `scripts/` folder
+(`unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts`; on Windows `%APPDATA%\mpv\scripts\`), with what each one
+needs as below. Or one at a time:
 
 Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) and works without the others:
 
