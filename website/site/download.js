@@ -8,6 +8,16 @@
   var CACHE = "afp-latest-release";
   var MAX_AGE = 60 * 60 * 1000;
 
+  // The few words this script writes, in the page's language (fr/, ru/ and zh/ use this same file)
+  var LANGS = {
+    "en": { title: "Version {v}", titleDate: "Version {v}, {d}", mb: "MB", kb: "KB" },
+    "fr": { title: "Version {v}", titleDate: "Version {v}, {d}", mb: "Mo", kb: "ko" },
+    "ru": { title: "Версия {v}", titleDate: "Версия {v}, {d}", mb: "МБ", kb: "КБ" },
+    "zh-Hans": { title: "{v} 版", titleDate: "{v} 版，{d}", mb: "MB", kb: "KB" }
+  };
+  var LANG = LANGS[document.documentElement.lang] ? document.documentElement.lang : "en";
+  var WORDS = LANGS[LANG];
+
   var ASSETS = {
     "mac-app": /^ActionFootagePlayer-.+-macos-arm64\.zip$/,
     "windows-app": /^ActionFootagePlayer-.+-windows-x86_64-setup\.exe$/,
@@ -45,15 +55,17 @@
   }
 
   function size(bytes) {
-    if (bytes >= 1e6) return (bytes / 1e6).toFixed(bytes >= 1e8 ? 0 : 1) + " MB";
-    return Math.max(1, Math.round(bytes / 1e3)) + " KB";
+    var digits = bytes >= 1e6 && bytes < 1e8 ? 1 : 0;
+    var n = bytes >= 1e6 ? bytes / 1e6 : Math.max(1, Math.round(bytes / 1e3));
+    return n.toLocaleString(LANG, { minimumFractionDigits: digits, maximumFractionDigits: digits }) + "\u00A0" + (bytes >= 1e6 ? WORDS.mb : WORDS.kb);
   }
 
   function day(iso) {
     var d = new Date(iso);
     if (isNaN(d)) return "";
-    var lang = document.documentElement.lang || "en";
-    return d.toLocaleDateString(lang === "en" ? "en-GB" : lang, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+    // The last two words stay on one line: "2026 г." in Russian
+    return d.toLocaleDateString(LANG === "en" ? "en-GB" : LANG, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+      .replace(/ (\S+)$/, "\u00A0$1");
   }
 
   // The notes' first paragraph, as plain text: no Markdown is rendered, so nothing from them becomes markup
@@ -75,9 +87,13 @@
       setText('[data-release="date"]', date);
       setText('[data-release="date-line"]', " · " + date);
     }
-    setText('[data-release="title"]', "Version " + version + (date ? ", " + date : ""));
+    setText('[data-release="title"]', (date ? WORDS.titleDate : WORDS.title).replace("{v}", version).replace("{d}", date));
     var text = summary(release.body);
-    if (text) setText('[data-release="summary"]', text);
+    if (text) {
+      setText('[data-release="summary"]', text);
+      // The release notes are in English, also on the translated pages
+      if (LANG !== "en") document.querySelectorAll('[data-release="summary"]').forEach(function (el) { el.lang = "en"; });
+    }
     if (/^https:\/\/github\.com\//.test(release.html_url)) {
       document.querySelectorAll('[data-release="notes"]').forEach(function (a) { a.href = release.html_url; });
     }

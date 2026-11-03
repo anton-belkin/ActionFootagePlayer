@@ -25,6 +25,7 @@ site/            what is served, as is
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
   favicon.ico, apple-touch-icon.png
                  rendered from icon.svg (the touch icon with square corners: iOS rounds them)
+  fr/ ru/ zh/    the same pages, machine-translated (see Translations)
 ```
 
 ## Preview
@@ -42,6 +43,47 @@ that release from <https://api.github.com/repos/anton-belkin/ActionFootagePlayer
 hour per visitor, kept in `localStorage`; the API allows 60 an hour per address) and points each link at its file,
 found by its name's pattern (`ActionFootagePlayer-*-macos-arm64.zip`, …). A new release needs no change here,
 unless an asset's name changes: then its pattern in `download.js` too.
+
+## Translations
+
+French, Russian and Simplified Chinese live in `site/fr/`, `site/ru/` and `site/zh/`, under the same file names as the
+English pages at the root, and use the shared `styles.css`, `scene.js`, `download.js` and icons through `../`. They are
+served at `/fr/`, `/ru/`, `/zh/` (and `/fr/divers`, `/fr/download` …). English is the original; the translations are **machine translations**
+(made with Claude, 2026-11-03) and each translated page says so in its own language, in a slim banner under the header
+and again in the footer, with a link to the English page.
+
+Every page, English included, carries:
+
+- `<html lang>`: `en`, `fr`, `ru`, `zh-Hans`;
+- `<link rel="alternate" hreflang>` for all four languages and `x-default` (English), with absolute
+  `https://actionfootageplayer.ch/…` URLs;
+- the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
+  page in each language.
+
+Fonts: Archivo, the display face, covers Latin only. Russian pages load Roboto Flex (Cyrillic, with a width axis like
+Archivo's) for headings; IBM Plex Sans and Mono cover Cyrillic. Chinese uses the system's CJK face after the Latin
+ones (PingFang SC, Hiragino Sans GB, Noto Sans SC, Microsoft YaHei); nothing CJK is downloaded. Both are set in
+`styles.css` with `:lang()` rules.
+
+Kept in English everywhere: product, camera and format names (D-Log M, GP-Log, I-Log, HDR, EIS, Gyroflow, …), keyboard
+shortcuts, file names, and the player's on-screen telemetry in the illustration.
+
+`download.js` writes a few words of its own (the release's title, file sizes, dates): it takes them from its `LANGS`
+table by the page's `<html lang>`, and dates come from the browser in that language. The first paragraph of the
+release notes it puts in stays in English, marked `lang="en"`.
+
+**After editing the English text**, bring the translations along in the same pull request, or the languages drift
+apart:
+
+1. See what changed since the translations were last synced:
+   `git log -1 --format=%h -- website/site/fr/` gives the last sync, then
+   `git diff <that commit> -- website/site/index.html website/site/divers.html website/site/download.html`.
+2. Apply the same change to `fr/`, `ru/` and `zh/` with the text translated, keeping the markup identical to the
+   English page (asset paths with `../`, the switcher, the notices). Asking Claude to "re-sync the translations
+   with this diff" works well.
+3. A new page: copy the hreflang links and the switcher from an existing page and change the file name in them; then
+   put a translated copy in each language folder, with `../` asset paths, its own `lang`, the current language
+   marked in the switcher (`aria-current="page"`) and the two notices, as on the other translated pages.
 
 ## Deployment
 
