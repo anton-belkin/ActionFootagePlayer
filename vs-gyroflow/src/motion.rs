@@ -348,9 +348,10 @@ impl Mapped {
         if start >= end { return false; }
         let first = start / self.page * self.page;
         let pages = (end - first).div_ceil(self.page);
-        let mut vec = vec![0 as libc::c_char; pages];
-        let r = unsafe { libc::mincore((self.ptr as *mut u8).add(first) as *mut libc::c_void, end - first, vec.as_mut_ptr()) };
-        r == 0 && vec.iter().all(|v| (*v as i32) & 1 != 0)
+        // Bytes signed on macOS, unsigned on Linux
+        let mut vec = vec![0u8; pages];
+        let r = unsafe { libc::mincore((self.ptr as *mut u8).add(first) as *mut libc::c_void, end - first, vec.as_mut_ptr() as *mut _) };
+        r == 0 && vec.iter().all(|v| v & 1 != 0)
     }
 }
 
