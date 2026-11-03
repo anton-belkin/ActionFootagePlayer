@@ -200,7 +200,10 @@ td.them { color: var(--muted); }
 .pill.ok { color: var(--ok); background: var(--ok-bg); }
 .pill.exp { color: var(--warn); background: var(--warn-bg); }
 .pill.part { color: var(--na); background: var(--na-bg); }
-.cams td:nth-child(2) { width: 150px; }
+.cams { min-width: 680px; }
+.cams tbody th { width: 24%; }
+.cams td:nth-child(2), .cams td:nth-child(3) { width: 130px; }
+.cams td .cam-sub { font-size: 0.85rem; }
 
 /* Keys */
 .keys { display: grid; gap: 10px 32px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }

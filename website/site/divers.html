@@ -120,16 +120,16 @@
         <div class="feature">
           <h3>HDR from log</h3>
           <p>Under water, log played in HDR is clearly better than the camera's default mode, especially on recent cameras. The difference is night and day on an HDR screen. No look is added: the exposure stays as recorded and the shadows on the reef keep their detail, so the dive stays as calm as it was. Lights still matter for color at depth, but even without them your footage now looks better than it used to.</p>
-          <span class="meta">D-Log M · GP-Log · I-Log (10-bit)</span>
+          <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log (10-bit)</span>
         </div>
         <div class="feature">
           <h3>Stabilization made for water</h3>
-          <p>Action Footage Player stabilizes from the motion data the camera records, with a correction for how water bends light through the lens. It happens while the clip plays. Many divers carry a bulky two-handed rig just to hold the camera steady; for steadiness alone, you no longer need one.</p>
+          <p>Action Footage Player stabilizes from the motion data the camera records, with a correction for how water bends light through the lens, and takes out the color fringes water adds towards the frame's edges. It happens while the clip plays. Many divers carry a bulky two-handed rig just to hold the camera steady; for steadiness alone, you no longer need one.</p>
           <span class="meta">refraction index 1.33 by default</span>
         </div>
         <div class="feature">
           <h3>Depth on screen</h3>
-          <p>When the camera logs depth and water status, the player shows them over the video. Fields the clip doesn't have stay hidden.</p>
+          <p>When the camera logs depth and water status, the player shows them over the video. Fields the clip doesn't have stay hidden. In a dive housing the camera can't measure depth, as its barometer feels only the air inside; the water status still shows.</p>
           <span class="meta">depth · water status · pressure</span>
         </div>
         <div class="feature">
@@ -140,7 +140,7 @@
         <div class="feature">
           <h3>Share the best minute</h3>
           <p>Press <kbd>l</kbd> twice to mark a part, then <kbd>Shift</kbd>+<kbd>E</kbd>. You get an HDR file that iPhones, Macs and YouTube show correctly.</p>
-          <span class="meta">HEVC Main10, HLG · or ProRes 422 HQ</span>
+          <span class="meta">HEVC Main10, HLG · ProRes 422 HQ from the command line</span>
         </div>
         <div class="feature">
           <h3>Highlights from the dive</h3>
@@ -158,7 +158,7 @@
         <p class="eyebrow">Measured, not promised</p>
         <h2>From jitter to steady.</h2>
         <p class="lede">On a test clip shot with EIS off, frame-to-frame jitter dropped by a factor of eight. The default preset is tuned for water, so there is nothing to set up after the dive.</p>
-        <p>Above water, in-camera EIS works well, and a preset without refraction is there for EIS-off clips shot in air.</p>
+        <p>On the Osmo Action 6 the correction follows the camera's own in-water flag, so a clip that goes in and out of the water is corrected only where it's in. Above water, in-camera EIS works well; for EIS-off clips shot in air, <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>u</kbd></span> takes the lens out of the water.</p>
       </div>
       <div class="stack">
         <div class="stat">
@@ -194,7 +194,7 @@
         </li>
         <li>
           <h3>After the dive, double-click a clip</h3>
-          <p>It plays in HDR, stabilized, with your depth on screen. Switch stabilization between crop, filled edges and off with <kbd>Ctrl</kbd>+<kbd>g</kbd>.</p>
+          <p>It plays in HDR, stabilized, with your depth on screen. Switch stabilization between crop, filled edges and off with <kbd>Ctrl</kbd>+<kbd>g</kbd>. Pause on the turtle, and <kbd>Ctrl</kbd>+<kbd>p</kbd> cleans the still frame of noise and particles in the water.</p>
         </li>
       </ol>
     </div>
@@ -206,21 +206,26 @@
       <div class="section-head">
         <p class="eyebrow">Cameras divers use</p>
         <h2>What works today.</h2>
-        <p class="lede">Action Footage Player is developed against real dive footage from one camera. Everything else is supported in code and waits for someone to try it on their own clips.</p>
+        <p class="lede">Action Footage Player is developed against real dive footage from the DJI Osmo Action 6 and checked on a GoPro HERO12 Black. Everything else is supported in code and waits for someone to try it on their own clips.</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Under water</th></tr></thead>
+          <thead><tr><th scope="col">Camera</th><th scope="col">Log</th><th scope="col">Stabilization</th><th scope="col">Under water</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth and water status, HDR export. Tested on real dive footage.</td></tr>
-            <tr><th scope="row">GoPro HERO12, HERO13</th><td><span class="pill exp">Expected</span></td><td>GP-Log and stabilization are in place; HyperSmooth may stay on. Not yet checked on real footage.</td></tr>
-            <tr><th scope="row">Older GoPro<br><span class="cam-sub">HERO5 Black to HERO11</span></th><td><span class="pill part">Not verified</span></td><td>No log on these models. Gyroflow's engine reads their motion data (HERO5 Black and newer); support in the player has not been checked yet.</td></tr>
-            <tr><th scope="row">Other DJI<br><span class="cam-sub">Action 4, Action 5 Pro</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
-            <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand. 8-bit I-Log is not supported.</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">Verified</span><br><span class="cam-sub">EIS off</span></td><td>Depth and water status, HDR export. Tested on real dive footage.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>Single-lens MP4.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">Verified</span></td><td>HyperSmooth may stay on. Checked on a HERO12 Black. GP-Log from firmware 1.20.</td></tr>
+            <tr><th scope="row">GoPro MISSION 1, MISSION 1 PRO</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">Expected</span></td><td></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">Not yet</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Expected</span></td><td>Its GP-Log is exposed two stops brighter than the HERO's and needs a conversion of its own; meanwhile <kbd>Ctrl</kbd>+<kbd>l</kbd> applies GP-Log by hand, too bright.</td></tr>
+            <tr><th scope="row">GoPro HERO8 Black to HERO11 Black</th><td><span class="pill part">No log</span></td><td><span class="pill exp">Expected</span></td><td>HyperSmooth may stay on.</td></tr>
+            <tr><th scope="row">GoPro HERO5 Black to HERO7 Black</th><td><span class="pill part">No log</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">HyperSmooth off</span></td><td></td></tr>
+            <tr><th scope="row">DJI Osmo Action 4, Action 5 Pro</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>* D-Log M by hand, with <kbd>Ctrl</kbd>+<kbd>l</kbd>.</td></tr>
+            <tr><th scope="row">Insta360, single lens</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">10-bit I-Log</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">FlowState off</span></td><td>* I-Log by hand, with <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-bit I-Log is not supported.</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">Dive with one of the cameras marked Expected, Partial or Not verified? A short sample clip in a <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> is the fastest way to get it verified.</p>
+      <p class="note"><span class="pill ok">Verified</span> played in the player on real footage. <span class="pill exp">Expected</span> built for it from the maker's published metadata or sample clips, but not yet checked on real footage. <span class="pill exp">Expected*</span> the same, with a step by hand, explained in its row. <span class="pill part">Not yet</span> doesn't work yet.</p>
+      <p class="note">Dive with one of the cameras marked Expected? A short sample clip in a <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> is the fastest way to get it verified.</p>
     </div>
   </section>
 
@@ -254,11 +259,11 @@
         </details>
         <details>
           <summary>Does it change my original files?</summary>
-          <div class="a"><p>No. Action Footage Player only reads them. Exports go to a separate <code>stabilized/</code> folder next to the clip.</p></div>
+          <div class="a"><p>No. Action Footage Player only reads them. Exports go to a separate <code>stabilized/</code> folder next to the clip; the video file itself is never written to.</p></div>
         </details>
         <details>
           <summary>Is it free?</summary>
-          <div class="a"><p>Yes, open source under GPL-3.0. Once in a while Action Footage Player will offer you to make a voluntary donation. You can skip it, or ask it never to remind you again. Nothing is locked either way.</p></div>
+          <div class="a"><p>Yes, open source under GPL-3.0. Nothing is locked, and there is no account to make.</p></div>
         </details>
       </div>
     </div>
@@ -296,7 +301,7 @@
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="download.html">Downloads</a>
     </div>
-    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M HDR LUT derived from Zeb Gardner's shaper LUT (used with permission), and the log curves published by DJI, GoPro and Insta360. Not affiliated with DJI, GoPro or Insta360.</p>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M and GP-Log HDR LUTs derived from Zeb Gardner's shaper LUTs (used with permission), and the log curves published by DJI, GoPro and Insta360. Not affiliated with DJI, GoPro or Insta360.</p>
   </div>
 </footer>
 

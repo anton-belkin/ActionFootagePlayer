@@ -169,7 +169,7 @@
       <ol class="steps">
         <li>
           <h3>Shoot in log</h3>
-          <p>If you watch on HDR screens, set the camera to D-Log M (or GP-Log, I-Log). Under water, also turn EIS off so the camera keeps recording motion data.</p>
+          <p>If you watch on HDR screens, set the camera to D-Log M (or GP-Log, I-Log). Under water, also turn EIS off: only then does the camera record the motion data.</p>
         </li>
         <li>
           <h3>Double-click a clip</h3>
@@ -193,8 +193,8 @@
       <div class="features">
         <div class="feature">
           <h3>Log in true HDR</h3>
-          <p>D-Log M, GP-Log and I-Log are decoded with the makers' own curves and shown as HDR, with no look added: the scene's brightness relationships stay as they were. Made for HDR screens: that is where log beats the camera's default mode.</p>
-          <span class="meta">D-Log M · GP-Log · I-Log (10-bit)</span>
+          <p>D-Log M, D-Log, GP-Log, GP-Log2 and 10-bit I-Log are converted with curves the color community measured on the cameras themselves, or with the makers' own formulas where they publish them, and shown as HDR, with no look added: the scene's brightness relationships stay as they were. Made for HDR screens: that is where log beats the camera's default mode.</p>
+          <span class="meta">D-Log M · D-Log · GP-Log · GP-Log2 · I-Log (10-bit)</span>
         </div>
         <div class="feature">
           <h3>Stabilized during playback</h3>
@@ -203,13 +203,13 @@
         </div>
         <div class="feature">
           <h3>Telemetry on screen</h3>
-          <p>Depth, GPS, speed, altitude and exposure appear when the camera recorded them. Fields the clip doesn't have stay hidden.</p>
+          <p>Depth, whether the camera is in the water, GPS and speed appear when the camera recorded them; altitude, pressure and exposure are there in the menu. Fields the clip doesn't have stay hidden.</p>
           <span class="meta">depth · GPS · speed · ISO · shutter</span>
         </div>
         <div class="feature">
           <h3>One-key export</h3>
-          <p>The part you're watching is exported as you see it, stabilization included, in one pass. You get a natural HDR file to share or to adjust to your taste. Exports pause while you play and resume when you stop.</p>
-          <span class="meta">HEVC Main10, HLG · or ProRes 422 HQ</span>
+          <p>The part you're watching is exported as you see it, stabilization included, in one pass. You get a natural HDR file to share or to adjust to your taste. Exports slow down while you play and run at full speed when you pause.</p>
+          <span class="meta">HEVC Main10, HLG · ProRes 422 HQ from the command line</span>
         </div>
         <div class="feature">
           <h3>Highlights on the seek bar</h3>
@@ -260,11 +260,15 @@
         <div class="dive-points">
           <div>
             <h3>Tuned for water by default</h3>
-            <p>The default preset accounts for refraction at the dome port. Above water, DJI's own EIS works well, and a preset without refraction is there for EIS-off clips shot in air.</p>
+            <p>The default preset accounts for refraction at the camera's flat lens cover. On the Osmo Action 6 it follows the camera's own in-water flag, so a clip that goes in and out of the water is corrected only where it's in. Above water, DJI's own EIS works well; for EIS-off clips shot in air, <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>u</kbd></span> takes the lens out of the water.</p>
           </div>
           <div>
             <h3>Depth where the camera records it</h3>
-            <p>The Osmo Action 6 logs depth and water status. Turn the readout on and off with <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>t</kbd></span>.</p>
+            <p>The Osmo Action 6 logs depth and water status (in a dive housing, only the water status). Turn the readout on and off with <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>t</kbd></span>.</p>
+          </div>
+          <div>
+            <h3>No color fringes from the water</h3>
+            <p>Water bends blue more than red, so red and blue land apart towards the frame's edges. Wherever the lens is under water, each color is put back where it belongs. <span class="kbd-dark"><kbd>Ctrl</kbd>+<kbd>a</kbd></span> leaves the fringes as recorded.</p>
           </div>
           <p><a class="inline-link" href="divers.html">Everything for divers on one page →</a></p>
         </div>
@@ -291,22 +295,27 @@
       <div class="section-head">
         <p class="eyebrow">Cameras</p>
         <h2>What works today.</h2>
-        <p class="lede">Action Footage Player is developed against real footage from one camera. Everything else is supported in code and waits for someone to try it on their own clips.</p>
+        <p class="lede">Action Footage Player is developed against real footage from the DJI Osmo Action 6 and checked on a GoPro HERO12 Black. Everything else is supported in code and waits for someone to try it on their own clips.</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+          <thead><tr><th scope="col">Camera</th><th scope="col">Log</th><th scope="col">Stabilization</th><th scope="col">Notes</th></tr></thead>
           <tbody>
-            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span></td><td>Log, stabilization, depth telemetry and HDR export, used daily.</td></tr>
-            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span></td><td>Should work; not yet checked on real footage.</td></tr>
-            <tr><th scope="row">GoPro HERO12, HERO13, MAX2</th><td><span class="pill exp">Expected</span></td><td>GP-Log and stabilization are in place; not yet checked on real footage.</td></tr>
-            <tr><th scope="row">Other DJI cameras<br><span style="font-weight:400;color:var(--muted)">Action 4, Action 5 Pro, Pocket 3…</span></th><td><span class="pill part">Partial</span></td><td>Stabilization expected; their log is not supported yet.</td></tr>
-            <tr><th scope="row">Insta360, single lens</th><td><span class="pill part">Partial</span></td><td>10-bit I-Log, chosen by hand. 8-bit I-Log is not supported.</td></tr>
-            <tr><th scope="row">DJI drones</th><td><span class="pill part">Partial</span></td><td>Log by choosing the curve by hand; stabilization needs a Gyroflow project.</td></tr>
+            <tr><th scope="row">DJI Osmo Action 6</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill ok">Verified</span><br><span class="cam-sub">EIS off</span></td><td>Used daily on macOS by the author.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>Single-lens MP4.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black, HERO13 Black</th><td><span class="pill ok">Verified</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill ok">Verified</span></td><td>Checked on a HERO12 Black. GP-Log from firmware 1.20.</td></tr>
+            <tr><th scope="row">GoPro MISSION 1, MISSION 1 PRO</th><td><span class="pill exp">Expected</span><br><span class="cam-sub">GP-Log2</span></td><td><span class="pill exp">Expected</span></td><td></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td><span class="pill part">Not yet</span><br><span class="cam-sub">GP-Log</span></td><td><span class="pill exp">Expected</span></td><td>Its GP-Log is exposed two stops brighter than the HERO's and needs a conversion of its own; meanwhile <kbd>Ctrl</kbd>+<kbd>l</kbd> applies GP-Log by hand, too bright.</td></tr>
+            <tr><th scope="row">GoPro HERO8 Black to HERO11 Black</th><td><span class="pill part">No log</span></td><td><span class="pill exp">Expected</span></td><td></td></tr>
+            <tr><th scope="row">GoPro HERO5 Black to HERO7 Black</th><td><span class="pill part">No log</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">HyperSmooth off</span></td><td></td></tr>
+            <tr><th scope="row">DJI Osmo Action 4, Action 5 Pro, Pocket 3, Osmo 360 II…</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">D-Log M</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">EIS off</span></td><td>* D-Log M by hand, with <kbd>Ctrl</kbd>+<kbd>l</kbd>.</td></tr>
+            <tr><th scope="row">Insta360, single lens</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">10-bit I-Log</span></td><td><span class="pill exp">Expected</span><br><span class="cam-sub">FlowState off</span></td><td>* I-Log by hand, with <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-bit I-Log is not supported.</td></tr>
+            <tr><th scope="row">DJI drones</th><td><span class="pill exp">Expected*</span><br><span class="cam-sub">D-Log M, D-Log</span></td><td><span class="pill exp">Expected*</span><br><span class="cam-sub">Gyroflow project</span></td><td>* The curve by hand, with <kbd>Ctrl</kbd>+<kbd>l</kbd>; the stabilization from a Gyroflow project made for the clip.</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">Have one of the cameras marked Expected or Partial? A short sample clip in a GitHub issue is the fastest way to move it to Verified.</p>
+      <p class="note"><span class="pill ok">Verified</span> played in the player on real footage. <span class="pill exp">Expected</span> built for it from the maker's published metadata or sample clips, but not yet checked on real footage. <span class="pill exp">Expected*</span> the same, with a step by hand, explained in its row. <span class="pill part">Not yet</span> doesn't work yet.</p>
+      <p class="note">Have one of the cameras marked Expected? A short sample clip in a GitHub issue is the fastest way to move it to Verified.</p>
     </div>
   </section>
 
@@ -319,13 +328,14 @@
       </div>
       <div class="keys">
         <div class="key"><span>Mark a part to export</span><span><kbd>l</kbd> twice</span></div>
-        <div class="key"><span>Export it (press again to cancel)</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>Export it (twice while it exports: cancel)</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
         <div class="key"><span>Stabilization: cropped, filled edges, off</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
         <div class="key"><span>Telemetry on or off</span><span><kbd>Ctrl</kbd>+<kbd>t</kbd></span></div>
-        <div class="key"><span>Maker's official SDR look, and back</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd> / <kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>DJI's SDR look for D-Log M, and back</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd> / <kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
         <div class="key"><span>Next or previous highlight</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
         <div class="key"><span>Noise reduction on or off</span><span><kbd>Ctrl</kbd>+<kbd>n</kbd></span></div>
         <div class="key"><span>Open this clip in Gyroflow</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
+        <div class="key"><span>Clean still frame when paused, on or off</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
       </div>
     </div>
   </section>
@@ -340,7 +350,7 @@
       <div class="faq">
         <details>
           <summary>Do I need an HDR screen?</summary>
-          <div class="a"><p>Yes, if you want the benefit. Log pays off when you, and most of the people you share with, watch on HDR screens: recent iPhones, MacBook Pros, HDR TVs and monitors.</p><p>On a standard screen, a log clip looks worse than the same scene recorded in the camera's default mode. That is true whether macOS tone-maps it automatically or you switch to the camera maker's official SDR conversion (its Rec.709 LUT) with <kbd>Ctrl</kbd>+<kbd>s</kbd>. The camera makers' own processing adapts to each scene and keeps bright what most likely matters in it. Getting the same result from log takes professional grading software and a colorist.</p><p>So if you mostly watch and share on standard screens, record in the default mode. If you and your audience have HDR screens, record in log.</p><p>For clips you mainly share to standard screens, you can still use the camera maker's app. A scene-aware SDR conversion in Action Footage Player is on the roadmap: squeezing the range always takes decisions, and the aim is to keep the result as close as possible to the full-range version rather than add a look of its own. When it lands, the log footage you have already shot gets better too.</p></div>
+          <div class="a"><p>Yes, if you want the benefit. Log pays off when you, and most of the people you share with, watch on HDR screens: recent iPhones, MacBook Pros, HDR TVs and monitors.</p><p>On a standard screen, a log clip looks worse than the same scene recorded in the camera's default mode. That is true whether macOS tone-maps it automatically or, for D-Log M, you switch to DJI's official SDR conversion (its Rec.709 LUT) with <kbd>Ctrl</kbd>+<kbd>s</kbd>. The camera makers' own processing adapts to each scene and keeps bright what most likely matters in it. Getting the same result from log takes professional grading software and a colorist.</p><p>So if you mostly watch and share on standard screens, record in the default mode. If you and your audience have HDR screens, record in log.</p><p>For clips you mainly share to standard screens, you can still use the camera maker's app. A scene-aware SDR conversion in Action Footage Player is on the roadmap: squeezing the range always takes decisions, and the aim is to keep the result as close as possible to the full-range version rather than add a look of its own. When it lands, the log footage you have already shot gets better too.</p></div>
         </details>
         <details>
           <summary>I dive and snorkel. Do I need this?</summary>
@@ -348,19 +358,19 @@
         </details>
         <details>
           <summary>Who needs the stabilization in the player?</summary>
-          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes; GoPro footage in the player is still waiting to be verified.)</p></div>
+          <div class="a"><p>If you shoot above water with the camera's stabilization (EIS) on, you probably don't: in-camera EIS does a good job in air.</p><p>It's for clips shot with EIS off. Under water, where in-camera EIS fails, that is the way to shoot. It also covers clips where you turned EIS off for the widest view, and archives full of such footage. The camera still records its motion data, and Action Footage Player uses it while the clip plays, with a choice of stabilization with crop, stabilization with filled edges, or off.</p><p>One exception: on GoPro HERO8 and newer, you can leave HyperSmooth on under water. Its result won't be perfect, and the player stabilizes it further from the same motion data. On HERO5, HERO6 and HERO7 Black, HyperSmooth has to be off. (This follows Gyroflow's camera notes. GoPro footage in the player is verified on a HERO12 Black.)</p></div>
         </details>
         <details>
           <summary>Which computers does it run on?</summary>
-          <div class="a"><p>Mac: Apple Silicon with macOS 15 or later. Windows: 10 or 11 on 64-bit Intel or AMD.</p><p>Both apps are not signed yet. On a Mac, allow it once in System Settings, Privacy &amp; Security, Open Anyway. On Windows, SmartScreen shows a warning on first launch.</p></div>
+          <div class="a"><p>Mac: Apple Silicon with macOS 15 or later. Windows: 10 or 11 on 64-bit Intel or AMD. The Mac app is the one in daily use; the Windows app carries the same plugins but hasn't been tried on a real PC yet.</p><p>Neither app is signed by a developer account yet. On a Mac, allow it once in System Settings, Privacy &amp; Security, Open Anyway. On Windows, SmartScreen shows a warning on first launch: More info, Run anyway.</p></div>
         </details>
         <details>
           <summary>Does it change my original files?</summary>
-          <div class="a"><p>No. Action Footage Player only reads them. Exports are written to a <code>stabilized/</code> folder next to the clip.</p></div>
+          <div class="a"><p>No. Action Footage Player only reads them. Exports are written to a <code>stabilized/</code> folder next to the clip, and a clip you open in Gyroflow gets its project as a <code>.gyroflow</code> file beside it; the video file itself is never written to.</p></div>
         </details>
         <details>
           <summary>What does an exported file look like?</summary>
-          <div class="a"><p>An HEVC Main10 file tagged as HLG, which iPhones, Macs, most HDR TVs and YouTube display as HDR. If you edit afterwards, ProRes 422 HQ is available as an option.</p><p>The file has no look added, so it is a natural starting point: adjust it to your taste in an HDR-capable editor such as iMovie. A look that is baked into a file can't be taken out again: shadows pushed to black stay black.</p></div>
+          <div class="a"><p>An HEVC Main10 file tagged as HLG, which iPhones, Macs, most HDR TVs and YouTube display as HDR. If you edit afterwards, the command-line export can write ProRes 422 HQ instead.</p><p>The file has no look added, so it is a natural starting point: adjust it to your taste in an HDR-capable editor such as iMovie. A look that is baked into a file can't be taken out again: shadows pushed to black stay black.</p></div>
         </details>
         <details>
           <summary>Why not just use the camera maker's app?</summary>
@@ -368,7 +378,7 @@
         </details>
         <details>
           <summary>Is it really free?</summary>
-          <div class="a"><p>Yes. It's open source under GPL-3.0, and the code is on GitHub.</p><p>Once in a while Action Footage Player will offer you to make a voluntary donation. You can skip it, or ask it never to remind you again. Nothing is locked either way.</p></div>
+          <div class="a"><p>Yes. It's open source under GPL-3.0, and the code is on GitHub.</p><p>Nothing is locked, and there is no account to make.</p></div>
         </details>
       </div>
     </div>
@@ -409,7 +419,7 @@
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="download.html">Downloads</a>
     </div>
-    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M HDR LUT derived from Zeb Gardner's shaper LUT (used with permission), and the log curves published by DJI, GoPro and Insta360. The app bundles mpv and ffmpeg under their own licenses. Not affiliated with DJI, GoPro or Insta360.</p>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M and GP-Log HDR LUTs derived from Zeb Gardner's shaper LUTs (used with permission), and the log curves published by DJI, GoPro and Insta360. The app bundles mpv and ffmpeg under their own licenses. Not affiliated with DJI, GoPro or Insta360.</p>
   </div>
 </footer>
 
