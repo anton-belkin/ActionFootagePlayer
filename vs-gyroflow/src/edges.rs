@@ -151,6 +151,8 @@ pub struct Edges {
     expected: AtomicBool,
     /// The view the frames are rendered in (VIEW_NORMAL, VIEW_WIDE: lib.rs's Views), as the control file says
     view: AtomicU8,
+    /// The level of a clip without a project (levels.rs), as the control file says: Level::index
+    level: AtomicU8,
     /// The water's color fringes taken out (Ctrl+a), as the control file says: off, the frame's marker moves no color
     /// (lib.rs's worker)
     chromatic: AtomicBool,
@@ -179,7 +181,7 @@ impl Edges {
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None),
-            expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), chromatic: AtomicBool::new(true),
+            expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
             in_flight: AtomicUsize::new(0), workers: workers.max(1), stats: Mutex::new((0.0, 0.0, 0.0, 0)),
@@ -312,11 +314,12 @@ impl Edges {
         sphere.write_fill(frame.view, frame.grid, &planes, blend);
     }
 
-    /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, the view and
-    /// the color fringes, if it has them)
-    pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, view: u8, control: Option<PathBuf>) {
+    /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, the view, the
+    /// level and the color fringes, if it has them)
+    pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, view: u8, level: crate::Level, control: Option<PathBuf>) {
         self.mode.store(mode as u8, Ordering::Relaxed);
         self.view.store(view, Ordering::Relaxed);
+        self.level.store(level as u8, Ordering::Relaxed);
         self.chromatic.store(true, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
@@ -339,6 +342,12 @@ impl Edges {
         self.view.store(view, Ordering::Relaxed);
     }
 
+    /// The level of a clip without a project, as the control file has it now
+    pub fn level(&self) -> Option<crate::Level> {
+        self.check_control(false);
+        crate::Level::ALL.get(self.level.load(Ordering::Relaxed) as usize).copied()
+    }
+
     /// Whether the water's color fringes are taken out (where the lens is under water: elsewhere nothing moves anyway)
     pub fn chromatic(&self) -> bool {
         self.check_control(false);
@@ -355,7 +364,7 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let (mode, blur, view, chromatic) = parse_control(&text);
+        let ControlText { mode, blur, view, level, chromatic } = parse_control(&text);
         match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
@@ -367,6 +376,11 @@ impl Edges {
         if let Some(view) = view {
             if self.view.swap(view, Ordering::Relaxed) != view {
                 log::info!("View: {}", if view == VIEW_WIDE { "wide" } else { "normal" });
+            }
+        }
+        if let Some(level) = level {
+            if self.level.swap(level as u8, Ordering::Relaxed) != level as u8 {
+                log::info!("Level: {}", level.name());
             }
         }
         if let Some(chromatic) = chromatic {
@@ -402,13 +416,18 @@ impl Edges {
 pub const VIEW_NORMAL: u8 = 0;
 pub const VIEW_WIDE: u8 = 1;
 
+/// What the control file says (`parse_control`)
+#[derive(Debug, PartialEq, Default)]
+struct ControlText { mode: Option<EdgeMode>, blur: Option<f32>, view: Option<u8>, level: Option<crate::Level>, chromatic: Option<bool> }
+
 /// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
-/// filter's `edges_blur`; `view`, normal or wide; `chromatic`, yes or no: the water's color fringes taken out). A file
-/// with only the mode in it leaves the settings as the filter was given them
-fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>, Option<u8>, Option<bool>) {
+/// filter's `edges_blur`; `view`, normal or wide; `level`, weak, medium or strong (levels.rs); `chromatic`, yes or
+/// no: the water's color fringes taken out). A file with only the mode in it leaves the settings as the filter was
+/// given them
+fn parse_control(text: &str) -> ControlText {
     let mut words = text.split_whitespace();
     let mode = EdgeMode::parse(words.next().unwrap_or(""));
-    let (mut blur, mut view, mut chromatic) = (None, None, None);
+    let (mut blur, mut view, mut level, mut chromatic) = (None, None, None, None);
     for w in words {
         match w.split_once('=') {
             Some(("blur", v)) => match v.parse::<f32>() {
@@ -417,12 +436,13 @@ fn parse_control(text: &str) -> (Option<EdgeMode>, Option<f32>, Option<u8>, Opti
             },
             Some(("view", "normal")) => view = Some(VIEW_NORMAL),
             Some(("view", "wide")) => view = Some(VIEW_WIDE),
+            Some(("level", v)) if crate::Level::parse(v).is_some() => level = crate::Level::parse(v),
             Some(("chromatic", "yes")) => chromatic = Some(true),
             Some(("chromatic", "no")) => chromatic = Some(false),
             _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
         }
     }
-    (mode, blur, view, chromatic)
+    ControlText { mode, blur, view, level, chromatic }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -984,21 +1004,24 @@ mod tests {
 
     #[test]
     fn control_file() {
-        assert_eq!(parse_control("sphere"), (Some(EdgeMode::Sphere), None, None, None));
-        assert_eq!(parse_control("smooth\n"), (Some(EdgeMode::Smooth), None, None, None));
-        assert_eq!(parse_control("sphere blur=3.5"), (Some(EdgeMode::Sphere), Some(3.5 / 100.0), None, None));
-        assert_eq!(parse_control("smooth blur=50"), (Some(EdgeMode::Smooth), Some(0.2), None, None));
-        assert_eq!(parse_control("smooth blur=x"), (Some(EdgeMode::Smooth), None, None, None));
+        let c = |mode, blur, view, level, chromatic| ControlText { mode, blur, view, level, chromatic };
+        assert_eq!(parse_control("sphere"), c(Some(EdgeMode::Sphere), None, None, None, None));
+        assert_eq!(parse_control("smooth\n"), c(Some(EdgeMode::Smooth), None, None, None, None));
+        assert_eq!(parse_control("sphere blur=3.5"), c(Some(EdgeMode::Sphere), Some(3.5 / 100.0), None, None, None));
+        assert_eq!(parse_control("smooth blur=50"), c(Some(EdgeMode::Smooth), Some(0.2), None, None, None));
+        assert_eq!(parse_control("smooth blur=x"), c(Some(EdgeMode::Smooth), None, None, None, None));
         // The modes there were before
-        assert_eq!(parse_control("trail").0, None);
-        assert_eq!(parse_control("zoom").0, None);
-        assert_eq!(parse_control(""), (Some(EdgeMode::Off), None, None, None));
-        assert_eq!(parse_control("nope blur=1"), (None, Some(1.0 / 100.0), None, None));
-        assert_eq!(parse_control("sphere blur=2 view=wide"), (Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_WIDE), None));
-        assert_eq!(parse_control("off view=normal"), (Some(EdgeMode::Off), None, Some(VIEW_NORMAL), None));
-        assert_eq!(parse_control("off view=sideways"), (Some(EdgeMode::Off), None, None, None));
-        assert_eq!(parse_control("sphere blur=2 view=normal chromatic=no"), (Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_NORMAL), Some(false)));
-        assert_eq!(parse_control("off chromatic=yes"), (Some(EdgeMode::Off), None, None, Some(true)));
-        assert_eq!(parse_control("off chromatic=maybe"), (Some(EdgeMode::Off), None, None, None));
+        assert_eq!(parse_control("trail").mode, None);
+        assert_eq!(parse_control("zoom").mode, None);
+        assert_eq!(parse_control(""), c(Some(EdgeMode::Off), None, None, None, None));
+        assert_eq!(parse_control("nope blur=1"), c(None, Some(1.0 / 100.0), None, None, None));
+        assert_eq!(parse_control("sphere blur=2 view=wide"), c(Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_WIDE), None, None));
+        assert_eq!(parse_control("off view=normal"), c(Some(EdgeMode::Off), None, Some(VIEW_NORMAL), None, None));
+        assert_eq!(parse_control("off view=sideways"), c(Some(EdgeMode::Off), None, None, None, None));
+        assert_eq!(parse_control("sphere blur=2 view=normal chromatic=no"), c(Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_NORMAL), None, Some(false)));
+        assert_eq!(parse_control("sphere view=normal level=strong"), c(Some(EdgeMode::Sphere), None, Some(VIEW_NORMAL), Some(crate::Level::Strong), None));
+        assert_eq!(parse_control("sphere level=extreme"), c(Some(EdgeMode::Sphere), None, None, None, None));
+        assert_eq!(parse_control("off chromatic=yes"), c(Some(EdgeMode::Off), None, None, None, Some(true)));
+        assert_eq!(parse_control("off chromatic=maybe"), c(Some(EdgeMode::Off), None, None, None, None));
     }
 }

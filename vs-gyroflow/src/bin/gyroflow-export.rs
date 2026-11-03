@@ -44,7 +44,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vs_gyroflow::{ Engine, Fov, Interpolation, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
+use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
@@ -61,6 +61,8 @@ video with nothing to stabilize it with is color-converted only.
                    preset's
   --wide           the gyroflow plugin's wider view (Ctrl+g): no zoom, at the FOV where the stabilized picture
                    covers about as much area as the frame
+  --level <level>  for a video without a project, the stabilization's level: weak, medium (the default) or strong:
+                   10, 20 or 30 % of the frame cropped, smoothness 50, 75 or 100 % (Ctrl+s)
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
   --edges <mode>   what fills the edges the stabilized frame leaves: sphere, smooth, or off (the project's
                    background color, the default)
@@ -89,6 +91,7 @@ struct Options {
     horizon_lock: Option<f64>,
     underwater: Underwater,
     fov: Fov,
+    level: Level,
     edges: EdgeMode,
     edge_settings: EdgeSettings,
     prores: bool,
@@ -105,7 +108,7 @@ struct Options {
 fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project,
+    let mut opts = Options { curve: None, sdr: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
     let mut files = Vec::new();
@@ -125,6 +128,7 @@ fn main() {
             "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no or auto")),
             // The ranges the VapourSynth filter takes them in (lib.rs)
             "--wide" => opts.fov = Fov::Wide,
+            "--level" => { let v = value("--level"); opts.level = Level::parse(&v).unwrap_or_else(|| fail(&format!("unknown level {v} (weak, medium, strong)"))); }
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
                 .unwrap_or_else(|| fail("--fov takes a number above 0")).clamp(0.1, 4.0)),
             "--edges" => { let v = value("--edges"); opts.edges = EdgeMode::parse(&v)
@@ -533,7 +537,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let workers = 3;
     let key = format!("export|{}", path.display());
     let engine = match &source {
-        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, (w, h), 3, (1, 1), None,
+        // All of the motion data before it starts (look-ahead 0): an export has the time
+        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
         None => None,
     };
@@ -545,7 +550,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
     if let Some(e) = &engine {
         let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
-        e.edges.configure(edges, opts.edge_settings, view, None);
+        e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
     }
     let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
 

@@ -11,8 +11,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # Gyroflow master, which has the Static zoom modes (gyroflow/gyroflow#1264) the plugin renders. The plugin itself
 # uses nothing beyond what upstream exports.
-# No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon
-gyroflow-core = { git = "https://github.com/gyroflow/gyroflow.git", rev = "3d9f610", default-features = false, features = ["bundle-lens-profiles", "cache-gyro-metadata"] }
+# No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon. No cache-gyro-metadata: it
+# would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
+gyroflow-core = { git = "https://github.com/gyroflow/gyroflow.git", rev = "3d9f610", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.1", features = ["unstable-api"] }
 url = "2"

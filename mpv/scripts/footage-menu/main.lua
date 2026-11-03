@@ -165,7 +165,7 @@ local function look_menu(d, key)
 end
 
 local function stabilization_menu(g, key)
-    local toggle, lens = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"]
+    local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"], key["script-binding gyroflow/level"]
     if not g.available then
         return {
             info("No motion data in this clip"),
@@ -181,6 +181,13 @@ local function stabilization_menu(g, key)
         item(g.kind == "project" and "On (Gyroflow project)" or "On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
         item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
         item("Off", "script-message-to gyroflow view off", { checked = g.view == "off", shortcut = toggle }),
+        SEPARATOR,
+        -- A clip with a project has the project's own smoothing and zoom
+        submenu("Level", {
+            item("Weak: 10 % crop, smoothness 50 %", "script-message-to gyroflow level weak", { checked = g.level == "weak", shortcut = level }),
+            item("Medium: 20 % crop, smoothness 75 %", "script-message-to gyroflow level medium", { checked = g.level == "medium", shortcut = level }),
+            item("Strong: 30 % crop, smoothness 100 %", "script-message-to gyroflow level strong", { checked = g.level == "strong", shortcut = level }),
+        }, { shortcut = level, disabled = g.kind == "project" }),
         SEPARATOR,
         item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
         submenu("Lens", {

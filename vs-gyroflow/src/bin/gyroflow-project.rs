@@ -3,20 +3,21 @@
 // Writes the Gyroflow project the plugin plays a video with when it has none next to it (its own motion data,
 // Gyroflow's default preset, then --preset), so the video opens in Gyroflow as it plays: Ctrl+e in mpv runs it.
 //
-//   gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--wide]
-//                    <video> [project.gyroflow]
+//   gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>]
+//                    [--level weak|medium|strong] [--wide] <video> [project.gyroflow]
 //
 // The project goes next to the video by default, and an existing one is never overwritten. With the lens under water
 // as --underwater says (default auto: as the camera says, where it records it), the horizon lock's amount (0-100,
-// 0 off) instead of the preset's, and with --wide in the plugin's wider view: no zoom, at its FOV.
+// 0 off) instead of the preset's, at the level it plays in (--level, default medium: its crop and smoothness), and
+// with --wide in the plugin's wider view: no zoom, at its FOV. The motion data goes into the project.
 
 use std::path::{ Path, PathBuf };
-use vs_gyroflow::{ project as motion_project, Underwater };
+use vs_gyroflow::{ project as motion_project, Level, Underwater };
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--wide] <video> [project.gyroflow]");
+        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--level weak|medium|strong] [--wide] <video> [project.gyroflow]");
         std::process::exit(2);
     };
     let mut value = |name: &str| -> Option<String> {
@@ -34,6 +35,10 @@ fn main() {
         eprintln!("--horizon-lock takes 0-100");
         std::process::exit(2);
     }));
+    let level = value("--level").map(|v| Level::parse(&v).unwrap_or_else(|| {
+        eprintln!("--level takes weak, medium or strong");
+        std::process::exit(2);
+    })).unwrap_or(Level::Medium);
     let wide = match args.iter().position(|a| a == "--wide") {
         Some(i) => { args.remove(i); true },
         None => false,
@@ -43,20 +48,20 @@ fn main() {
     }
     let video = PathBuf::from(&args[0]);
     let project = args.get(1).map(PathBuf::from).unwrap_or_else(|| video.with_extension("gyroflow"));
-    if let Err(e) = run(&video, &project, preset.as_deref(), underwater, horizon_lock, wide) {
+    if let Err(e) = run(&video, &project, preset.as_deref(), underwater, horizon_lock, level, wide) {
         eprintln!("gyroflow-project: {e}");
         std::process::exit(1);
     }
 }
 
-fn run(video: &Path, project: &Path, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, wide: bool) -> Result<(), String> {
+fn run(video: &Path, project: &Path, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool) -> Result<(), String> {
     if project.exists() {
         return Err(format!("{} already exists", project.display()));
     }
     let video = vs_gyroflow::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
     let project_path = std::path::absolute(project).map_err(|e| format!("{}: {e}", project.display()))?;
     let preset = preset.map(|p| vs_gyroflow::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
-    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, horizon_lock, wide, &project_path.to_string_lossy());
+    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, horizon_lock, level, wide, &project_path.to_string_lossy());
     // On macOS the core makes the project file, empty, to bookmark the video relative to it
     if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {
         let _ = std::fs::remove_file(project);

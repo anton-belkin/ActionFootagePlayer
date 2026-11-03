@@ -68,11 +68,44 @@ pub fn recorded(path: &str) -> bool {
 /// The clip in stretches in and out of the water, in order; None when its camera doesn't record it
 pub fn spans(path: &str) -> Option<Vec<Span>> {
     let (mut file, size) = Prefetched::open(path).ok()?;
+    spans_in(&mut file, size)
+}
+
+/// Read one sample in this many, then all of them between two that differ: in and out of the water changes over
+/// seconds, not frames
+const SPARSE: usize = 10;
+
+/// The same from a few of the samples: every SPARSE-th, then those around each change, so the change lands on its own
+/// sample as with all of them. A project's clip, whose motion data the project has: from a NAS its samples take
+/// ~1.3 ms each to read (25 s for a 5-minute 4K60 clip's 19 000), this way a tenth of that, missing only a stretch shorter than 10 frames
+pub fn spans_sparse(path: &str) -> Option<Vec<Span>> {
+    let (mut file, size) = Prefetched::open_until(path, Some(f64::NEG_INFINITY)).ok()?;
+    let mut by_time: Vec<usize> = (0..file.samples().len()).collect();
+    by_time.sort_by(|&a, &b| file.samples()[a].time.total_cmp(&file.samples()[b].time));
+    let mut every: Vec<usize> = by_time.iter().copied().step_by(SPARSE).collect();
+    every.extend(by_time.last());
+    file.fetch(&every);
+    let rough = spans_in(&mut file, size)?;
+    // Between the last sample of one stretch and the first of the next
+    let times: Vec<f64> = file.samples().iter().map(|s| s.time).collect();
+    let between: Vec<usize> = rough.windows(2).flat_map(|w| {
+        let (from, to) = (w[0].end_ms / 1000.0, w[1].start_ms / 1000.0);
+        by_time.iter().copied().filter(|&i| times[i] > from && times[i] < to).collect::<Vec<_>>()
+    }).collect();
+    if between.is_empty() { return Some(rough); }
+    file.fetch(&between);
+    spans_in(&mut file, size)
+}
+
+/// The same from the samples `file` has read: of a clip that plays as its motion data comes in (motion.rs), the
+/// stretches as far as it's read (the samples not read yet read as zeros, which say nothing)
+pub fn spans_in(file: &mut Prefetched, size: usize) -> Option<Vec<Span>> {
+    file.rewind();
     let mut layout = None;
     let mut samples = Vec::new();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
-    let _ = telemetry_parser::util::get_metadata_track_samples(&mut file, size, false, |info, data: &[u8], _pos, _md| {
+    let _ = telemetry_parser::util::get_metadata_track_samples(file, size, false, |info, data: &[u8], _pos, _md| {
         if cancel2.load(Ordering::Relaxed) { return; }
         // The model, from the first sample: another camera's are left unread
         if layout.is_none() {
@@ -107,8 +140,9 @@ fn spans_of(samples: &[(f64, bool)]) -> Vec<Span> {
 }
 
 /// Sets the refraction of the loaded project for `underwater`. `video`: the clip, where Auto reads the camera's In
-/// water / Out of water. Before the smoothing and zoom are computed: the zoom depends on it
-pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str) {
+/// water / Out of water; from `motion`, what's read of it, when it plays as it comes in (and again as more does).
+/// Before the smoothing and zoom are computed: the zoom depends on it
+pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str, motion: Option<&crate::motion::Motion>) {
     let typ = KeyframeType::LightRefractionCoeff;
     // A project's own refraction under water (salt water's 1.34, say) is the one it keeps
     let project = stab.params.read().light_refraction_coefficient;
@@ -126,7 +160,13 @@ pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str) {
                 return log::info!("{video}: the project keyframes the lens's refraction, kept");
             }
             let t = std::time::Instant::now();
-            let Some(spans) = spans(video) else { return };
+            // A project's clip: a few of its samples (its motion data is the project's)
+            let found = match motion {
+                Some(m) => m.with_file(|file| { let size = file.len(); spans_in(file, size) }),
+                None => spans_sparse(video),
+            };
+            let Some(spans) = found else { return };
+            if motion.is_some() { stab.clear_keyframes_type(&typ); }
             match spans.as_slice() {
                 [] => return,
                 [only] => fixed(refraction(only.in_water)),
@@ -144,7 +184,9 @@ pub fn apply(stab: &StabilizationManager, underwater: Underwater, video: &str) {
                 }
             }
             let stretches: Vec<String> = spans.iter().map(|s| format!("{} {:.1}-{:.1} s", if s.in_water { "in" } else { "out" }, s.start_ms / 1000.0, s.end_ms / 1000.0)).collect();
-            log::info!("{video}: lens under water as the camera says, read in {:.0} ms: {}", t.elapsed().as_secs_f64() * 1000.0, stretches.join(", "));
+            // Again each time more of a playing clip's motion data is read: those quieter
+            let again = motion.is_some_and(|m| m.water_known());
+            log::log!(if again { log::Level::Debug } else { log::Level::Info }, "{video}: lens under water as the camera says, read in {:.0} ms: {}", t.elapsed().as_secs_f64() * 1000.0, stretches.join(", "));
         }
     }
 }
