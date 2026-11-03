@@ -217,6 +217,26 @@ flow)…** instead: see Stabilization.
 The menu is mpv's own, so it needs mpv 0.41 or later (Homebrew's is); with an older mpv, right click pauses as it
 always did. It's the footage-menu plugin, which shows only the plugins that are there.
 
+### The panel
+
+The same settings as the menu are also in a panel at the right of the window, beside the video (the video moves over
+for it, nothing is covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of
+the one chosen, with switches and buttons, scrolled with the wheel:
+
+- **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
+- **Look**: HDR or an SDR look, the log curve by hand, noise reduction, the clean still frame.
+- **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
+- **Quality**: the frame rate and size it's stabilized at, what fills the edges and how often the trail is written,
+  whether it asks when the GPU can't keep up.
+- **Telemetry**: whether it shows, the corner, the units, the fields.
+- **Player**: speed, looping, fullscreen, always on top, the sound track.
+
+The keys are beside what they do. Look, Stabilization, Quality and Telemetry have **Make these the defaults** at the
+bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
+chosen icon, or the arrow at the top of the panel, leaves only the rail. While the panel shows, mpv's own controls
+(play, the seek bar) are a small box at the bottom of the video. It's the side-panel plugin (`side_panel.conf`:
+`shown=`, `open=`, `tab=`); its Clip buttons and the Keys and Help icons are the menu's.
+
 ### Keys
 
 | Key | | `script-binding` |
@@ -238,6 +258,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The menu | `footage_menu/menu` |
+| `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
@@ -604,6 +625,9 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 - `mpv-footage-menu-<version>.zip`, on any system with mpv 0.41 or later: the right-click menu (plain Lua). It
   shows the plugins that are there.
 
+- `mpv-side-panel-<version>.zip`, on any system: the settings in a panel beside the video (plain Lua), with
+  footage-menu for its Clip buttons.
+
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
@@ -960,6 +984,8 @@ mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/
                               markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
+mpv/scripts/side-panel/       the plugins' settings in a panel beside the video (ui.lua draws it)  →
+                              ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf

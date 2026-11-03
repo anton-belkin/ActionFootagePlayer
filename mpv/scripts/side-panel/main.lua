@@ -215,7 +215,8 @@ end
 local function look_part(u, x, w, y)
     local s = u.s
     local d = state("dlogm")
-    if not d or not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
+    if not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
+    if not d then return u:caption(x, w, y, "Needs the dlogm plugin") end
     y = u:heading(x, w, y, "Look", keys["script-binding dlogm/sdr"])
     if not d.log and (d.hdr or "") == "" then
         y = u:caption(x, w, y, "Not log, as the camera says")
@@ -257,7 +258,8 @@ local LEVEL_NOTES = { weak = "10 % cropped, smoothness 50 %", medium = "20 % cro
 local function stabilization_part(u, x, w, y)
     local s = u.s
     local g = state("gyroflow")
-    if not g or not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to stabilize") end
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to stabilize") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
     local edit = keys["script-binding gyroflow/edit"]
 
     -- What it's stabilized with
@@ -322,27 +324,22 @@ local function stabilization_part(u, x, w, y)
         { "Above", "script-message-to gyroflow underwater no" },
     }, lenses[g.underwater])
     y = u:caption(x, w, y, g.water and "Auto: as the camera says it was in the water" or ("Auto: this camera doesn't say, so as the " .. (project and "project" or "preset")))
-    y = u:switch(x, w, y, "fringes", "Take out color fringes", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
+    y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
                  keys["script-binding gyroflow/fringes"], not g.chromatic_available or g.underwater == "no")
-
-    y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
-    for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
-        y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])
-    end
-    y = u:switch(x, w, y + 4 * s, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
+    y = u:switch(x, w, y, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
 
     return y
 end
 
--- For a GPU that doesn't keep up: what the right-click menu's Quality has. Kept in gyroflow.conf as it's picked, a
--- setting of this computer's
+-- What the right-click menu's Quality has, for a GPU that doesn't keep up (kept in gyroflow.conf as it's picked, a
+-- setting of this computer's), and what fills the edges
 local function quality_part(u, x, w, y)
     local s = u.s
     local g = state("gyroflow")
     if not g or not g.available or not local_file(mp.get_property("path")) then
         return u:caption(x, w, y, "Only for a clip that's stabilized")
     end
-    y = u:caption(x, w, y, "Lighter settings for a GPU that doesn't keep up. Kept for this computer as you pick them")
+    y = u:caption(x, w, y, "Lighter settings for a GPU that doesn't keep up. Frame rate and size are kept for this computer as you pick them")
     y = u:heading(x, w, y + 6 * s, "Frame rate")
     local rates = { ["0"] = 1, ["30"] = 2, ["15"] = 3 }
     y = u:segmented(x, w, y, "fps", {
@@ -360,9 +357,13 @@ local function quality_part(u, x, w, y)
         { "720p", "script-message-to gyroflow quality resolution 720" },
     }, sizes[tostring(g.resolution)])
     y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
+    for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
+        y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])
+    end
     -- Only the sphere trail is written apart from the frames
     local sphere = g.edges == "sphere"
-    y = u:heading(x, w, y + 8 * s, "Edge fill rate")
+    y = u:caption(x, w, y + 6 * s, "Edge fill rate")
     local fills = { auto = 1, ["50"] = 2, ["25"] = 3 }
     y = u:segmented(x, w, y, "fill", {
         { "Auto", "script-message-to gyroflow quality edge_fill_rate auto" },
@@ -370,9 +371,9 @@ local function quality_part(u, x, w, y)
         { "25 %", "script-message-to gyroflow quality edge_fill_rate 25" },
     }, fills[tostring(g.edge_fill_rate or "auto")], not sphere)
     y = u:caption(x, w, y, sphere and "How many frames the edges' trail is written from; Auto: as the GPU has room"
-                               or "Only for edges filled by the trail (Stabilization, Edges)")
+                               or "Only for edges filled by the trail")
     y = u:heading(x, w, y + 8 * s, "More")
-    y = u:switch(x, w, y, "fringes", "Take out color fringes", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
+    y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
                  keys["script-binding gyroflow/fringes"], not g.chromatic_available or g.underwater == "no")
     y = u:switch(x, w, y, "ask", "Pause and ask when slow", g.ask_when_slow ~= false,
                  "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"))
@@ -382,7 +383,8 @@ end
 local function telemetry_part(u, x, w, y)
     local s = u.s
     local t = state("dji_telemetry")
-    if not t or not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
+    if not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
+    if not t then return u:caption(x, w, y, "Needs the dji-telemetry plugin") end
     if not t.available then return u:caption(x, w, y, "No telemetry in this clip") end
     y = u:switch(x, w, y, "show", "Show over the video", t.visible, "script-binding dji_telemetry/toggle", keys["script-binding dji_telemetry/toggle"])
     y = u:heading(x, w, y + 8 * s, "Corner")
@@ -435,6 +437,7 @@ local PARTS = { clip = clip_part, look = look_part, stabilization = stabilizatio
                 telemetry = telemetry_part, player = player_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
+                   quality = "script-message-to gyroflow remember",
                    telemetry = "script-message-to dji_telemetry remember" }
 
 -- How wide it is, in pixels, at scale s

@@ -11,6 +11,8 @@
 #   mpv-highlights-<version>.zip                        the highlights plugin alone, the same way (plain Lua)
 #   mpv-footage-menu-<version>.zip                      the right-click menu for the plugins, the same way (plain
 #                                                       Lua, mpv 0.41 and later)
+#   mpv-side-panel-<version>.zip                        the plugins' settings in a panel beside the video, the same
+#                                                       way (plain Lua; its Clip and Keys buttons use footage-menu)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
 #                                                       tools/make_plugin_zip.sh's)
@@ -118,6 +120,13 @@ git archive HEAD mpv/scripts/footage-menu | tar -x --strip-components 2 -C "dist
 (cd "dist/$menu" && zip -qr "../$menu.zip" footage-menu)
 rm -rf "dist/$menu"
 
-(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+panel="mpv-side-panel-$version"
+rm -rf "dist/$panel" "dist/$panel.zip"
+mkdir -p "dist/$panel"
+git archive HEAD mpv/scripts/side-panel | tar -x --strip-components 2 -C "dist/$panel"
+(cd "dist/$panel" && zip -qr "../$panel.zip" side-panel)
+rm -rf "dist/$panel"
+
+(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS
