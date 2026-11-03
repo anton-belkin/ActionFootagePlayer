@@ -5,7 +5,7 @@
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
 -- than SLOW_SECONDS seconds in a row, playing at normal speed with no seek or set-up in the GRACE seconds before,
 -- playback pauses and the choices come up (mp.input's list; with an mpv without it, a word on screen pointing to the
--- menu's Stabilization > Quality). Picking one sets it up and plays on; it asks again if that isn't enough. Closed
+-- menu's Quality). Picking one sets it up and plays on; it asks again if that isn't enough. Closed
 -- without a pick, it asks again on the next clip; "Keep playing as it is" not until the player starts again;
 -- ask_when_slow=no never.
 --
@@ -75,7 +75,7 @@ local function ask()
     mp.set_property_native("pause", true)
     if not input then
         mp.osd_message("Stabilization can't keep up: frames are being dropped.\n"
-            .. "Right click > Stabilization > Quality for a lower frame rate or resolution", 8)
+            .. "Right click > Quality for a lower frame rate or resolution", 8)
         return
     end
     local labels = {}

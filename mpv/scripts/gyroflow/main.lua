@@ -736,7 +736,7 @@ mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
 
--- The quality (quality.lua, the menu's Stabilization > Quality): what's picked is kept in gyroflow.conf at once, as a
+-- The quality (quality.lua, the menu's Quality): what's picked is kept in gyroflow.conf at once, as a
 -- setting of this computer's, and the chain set up again for a new rate or size
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },

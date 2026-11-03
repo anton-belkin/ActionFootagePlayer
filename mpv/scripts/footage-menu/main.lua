@@ -180,17 +180,6 @@ local function stabilization_menu(g, key)
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
     end
-    local quality = {}
-    for _, r in ipairs(FRAME_RATES) do
-        table.insert(quality, item(r[2], "script-message-to gyroflow quality fps_limit " .. r[1], { checked = tostring(g.fps_limit or 0) == r[1] }))
-    end
-    table.insert(quality, SEPARATOR)
-    for _, r in ipairs(RESOLUTIONS) do
-        table.insert(quality, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
-    end
-    table.insert(quality, SEPARATOR)
-    table.insert(quality, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
-                               { checked = g.ask_when_slow ~= false }))
     return {
         item(g.kind == "project" and "On (Gyroflow project)" or "On", "script-message-to gyroflow view normal", { checked = g.view == "normal", shortcut = toggle }),
         item("Wider view", "script-message-to gyroflow view wide", { checked = g.view == "wide", shortcut = toggle }),
@@ -219,12 +208,27 @@ local function stabilization_menu(g, key)
         }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
-        submenu("Quality", quality),
         item("Clean still frame on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         item("Remember as default", "script-message-to gyroflow remember"),
     }
+end
+
+-- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, and whether it asks
+local function quality_menu(g)
+    local items = {}
+    for _, r in ipairs(FRAME_RATES) do
+        table.insert(items, item(r[2], "script-message-to gyroflow quality fps_limit " .. r[1], { checked = tostring(g.fps_limit or 0) == r[1] }))
+    end
+    table.insert(items, SEPARATOR)
+    for _, r in ipairs(RESOLUTIONS) do
+        table.insert(items, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
+    end
+    table.insert(items, SEPARATOR)
+    table.insert(items, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
+                             { checked = g.ask_when_slow ~= false }))
+    return items
 end
 
 local function telemetry_menu(t, key)
@@ -357,6 +361,7 @@ local function build()
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end
         if g and local_file(path) then add(submenu("Stabilization", stabilization_menu(g, key))) end
+        if g and g.available and local_file(path) then add(submenu("Quality", quality_menu(g))) end
         if t then
             if t.available then add(submenu("Telemetry", telemetry_menu(t, key))) else add(info("Telemetry: none in this clip")) end
         end

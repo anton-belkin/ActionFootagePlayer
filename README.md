@@ -253,7 +253,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
-| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; the clean still frame is made from the frames that play. Right click > Stabilization > Quality sets it |
+| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; the clean still frame is made from the frames that play. Right click > Quality sets it |
 | `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a lower frame rate, resolution or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
