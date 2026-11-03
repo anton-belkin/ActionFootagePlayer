@@ -1,6 +1,6 @@
 -- side-panel: the plugins' settings in a panel at the right of the window, beside the video (it's moved over for it,
--- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, the telemetry,
--- the player), and the panel of the one chosen, scrolled with the wheel. What the right-click menu has, as
+-- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, its quality,
+-- the telemetry, the player), and the panel of the one chosen, scrolled with the wheel. What the right-click menu has, as
 -- controls: it reads the same state the plugins keep in user-data/<plugin>/ and runs the same commands. An mpv
 -- plugin: this folder goes into ~~/scripts/.
 --
@@ -8,12 +8,13 @@
 --   TAB    toggle   the panel and its rail shown or hidden
 -- Clicking the chosen icon again, or the arrow in the panel's header, leaves only the rail.
 --
--- While it shows, mpv's on-screen controller is the box one, over the video (the bottom bar would go under the panel).
+-- While it shows, mpv's on-screen controller is the box one at half its size, at the bottom of the video (the bottom bar
+-- would go under the panel).
 --
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
 --   open=yes         and the panel beside it
---   tab=stabilization  the part it opens on: clip, look, stabilization, telemetry, player
+--   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, player
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
@@ -93,6 +94,16 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 10 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:box(cx + 5 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx, cy, 1.8 * s), color)
+    elseif name == "quality" then
+        -- A gauge: an arc, and its needle
+        local R, r = 8, 6.4
+        local k1, k2 = R * 0.5523, r * 0.5523
+        u:shape("m " .. at(-R, 3) .. " l " .. at(-R, 0) .. " b " .. at(-R, -k1) .. " " .. at(-k1, -R) .. " " .. at(0, -R)
+                .. " b " .. at(k1, -R) .. " " .. at(R, -k1) .. " " .. at(R, 0) .. " l " .. at(R, 3) .. " " .. at(r, 3) .. " " .. at(r, 0)
+                .. " b " .. at(r, -k2) .. " " .. at(k2, -r) .. " " .. at(0, -r) .. " b " .. at(-k2, -r) .. " " .. at(-r, -k2) .. " " .. at(-r, 0)
+                .. " l " .. at(-r, 3), color)
+        u:shape("m " .. at(-0.9, 1.6) .. " l " .. at(3.6, -4.6) .. " " .. at(4.6, -3.8) .. " " .. at(0.9, 2.6), color)
+        u:shape(ui.circle_path(cx, cy + 2.1 * s, 2 * s), color)
     elseif name == "telemetry" then
         for i, bar in ipairs({ { -7.5, 6 }, { -1.75, 13 }, { 4, 9 } }) do
             u:box(cx + bar[1] * s, cy + (7 - bar[2]) * s, 3.5 * s, bar[2] * s, 1, color)
@@ -113,8 +124,8 @@ local function icon(u, name, cx, cy, color)
 end
 
 local TABS = {
-    { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "telemetry", "Telemetry" },
-    { "player", "Player" },
+    { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Quality" },
+    { "telemetry", "Telemetry" }, { "player", "Player" },
 }
 local TAB_TITLES = {}
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
@@ -320,16 +331,27 @@ local function stabilization_part(u, x, w, y)
     end
     y = u:switch(x, w, y + 4 * s, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
 
-    -- For a GPU that doesn't keep up
-    y = u:heading(x, w, y + 8 * s, "Quality")
-    y = u:caption(x, w, y, "Frame rate")
+    return y
+end
+
+-- For a GPU that doesn't keep up: what the right-click menu's Quality has. Kept in gyroflow.conf as it's picked, a
+-- setting of this computer's
+local function quality_part(u, x, w, y)
+    local s = u.s
+    local g = state("gyroflow")
+    if not g or not g.available or not local_file(mp.get_property("path")) then
+        return u:caption(x, w, y, "Only for a clip that's stabilized")
+    end
+    y = u:caption(x, w, y, "Lighter settings for a GPU that doesn't keep up. Kept for this computer as you pick them")
+    y = u:heading(x, w, y + 6 * s, "Frame rate")
     local rates = { ["0"] = 1, ["30"] = 2, ["15"] = 3 }
     y = u:segmented(x, w, y, "fps", {
         { "Every frame", "script-message-to gyroflow quality fps_limit 0" },
         { "30 fps", "script-message-to gyroflow quality fps_limit 30" },
         { "15 fps", "script-message-to gyroflow quality fps_limit 15" },
     }, rates[tostring(g.fps_limit or 0)])
-    y = u:caption(x, w, y, "Size")
+    y = u:caption(x, w, y, "How often the stabilized frame is rendered")
+    y = u:heading(x, w, y + 8 * s, "Size")
     local sizes = { video = 1, display = 2, ["1080"] = 3, ["720"] = 4 }
     y = u:segmented(x, w, y, "size", {
         { "Video", "script-message-to gyroflow quality resolution video" },
@@ -337,6 +359,21 @@ local function stabilization_part(u, x, w, y)
         { "1080p", "script-message-to gyroflow quality resolution 1080" },
         { "720p", "script-message-to gyroflow quality resolution 720" },
     }, sizes[tostring(g.resolution)])
+    y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    -- Only the sphere trail is written apart from the frames
+    local sphere = g.edges == "sphere"
+    y = u:heading(x, w, y + 8 * s, "Edge fill rate")
+    local fills = { auto = 1, ["50"] = 2, ["25"] = 3 }
+    y = u:segmented(x, w, y, "fill", {
+        { "Auto", "script-message-to gyroflow quality edge_fill_rate auto" },
+        { "50 %", "script-message-to gyroflow quality edge_fill_rate 50" },
+        { "25 %", "script-message-to gyroflow quality edge_fill_rate 25" },
+    }, fills[tostring(g.edge_fill_rate or "auto")], not sphere)
+    y = u:caption(x, w, y, sphere and "How many frames the edges' trail is written from; Auto: as the GPU has room"
+                               or "Only for edges filled by the trail (Stabilization, Edges)")
+    y = u:heading(x, w, y + 8 * s, "More")
+    y = u:switch(x, w, y, "fringes", "Take out color fringes", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
+                 keys["script-binding gyroflow/fringes"], not g.chromatic_available or g.underwater == "no")
     y = u:switch(x, w, y, "ask", "Pause and ask when slow", g.ask_when_slow ~= false,
                  "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"))
     return y
@@ -394,7 +431,8 @@ local function player_part(u, x, w, y)
     return y
 end
 
-local PARTS = { clip = clip_part, look = look_part, stabilization = stabilization_part, telemetry = telemetry_part, player = player_part }
+local PARTS = { clip = clip_part, look = look_part, stabilization = stabilization_part, quality = quality_part,
+                telemetry = telemetry_part, player = player_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
                    telemetry = "script-message-to dji_telemetry remember" }
@@ -405,29 +443,34 @@ local function width(s)
     return (open and RAIL + PANEL or RAIL) * s
 end
 
+-- macOS shows the window's title bar over the video's top when the mouse moves there: the panel starts below it
+local TITLE_BAR = 28
+
 local function draw(w, h, s, hovered)
     local u = ui.new(s)
     u.hover = hovered
     if not shown then return u end
     local rx = w - RAIL * s
+    local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false)
+               and TITLE_BAR * s or 0
 
     if open then
         local px = w - (RAIL + PANEL) * s
         u:box(px, 0, PANEL * s, h, 0, C.panel)
         local x, cw = px + PAD * s, (PANEL - 2 * PAD) * s
         -- The header: the part's name, and the arrow that leaves the rail
-        u:text(x, HEADER / 2 * s, TAB_TITLES[tab] or tab, { size = 15, bold = true })
+        u:text(x, t0 + HEADER / 2 * s, TAB_TITLES[tab] or tab, { size = 15, bold = true })
         local ax = px + (PANEL - 22) * s
-        if u:hovered("collapse") then u:box(ax - 12 * s, 10 * s, 24 * s, 24 * s, 6, C.field) end
-        local cy = HEADER / 2 * s
+        if u:hovered("collapse") then u:box(ax - 12 * s, t0 + 10 * s, 24 * s, 24 * s, 6, C.field) end
+        local cy = t0 + HEADER / 2 * s
         local function at(x, y) return string.format("%.1f %.1f", ax + x * s, cy + y * s) end
         u:shape("m " .. at(-3, -4.6) .. " l " .. at(-1.9, -5.7) .. " " .. at(3.4, 0) .. " " .. at(-1.9, 5.7) .. " " .. at(-3, 4.6)
                 .. " " .. at(1.2, 0), u:hovered("collapse") and C.text or C.dim)
-        u:hit(ax - 12 * s, 10 * s, 24 * s, 24 * s, "collapse", function() open = false end)
-        u:divider(px, PANEL * s, HEADER * s)
+        u:hit(ax - 12 * s, t0 + 10 * s, 24 * s, 24 * s, "collapse", function() open = false end)
+        u:divider(px, PANEL * s, t0 + HEADER * s)
 
         local footer = REMEMBER[tab] and mp.get_property("path") and FOOTER * s or 0
-        local top, bottom = HEADER * s + 1, h - footer
+        local top, bottom = t0 + HEADER * s + 1, h - footer
         local before = #u.events
         u.clip = { px, top, px + PANEL * s, bottom }
         local y0 = top + 14 * s
@@ -468,7 +511,7 @@ local function draw(w, h, s, hovered)
         u:hit(bx, by, bs, bs, "rail:" .. name, cmd)
     end
     for i, t in ipairs(TABS) do
-        rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], (8 + (i - 1) * 44) * s)
+        rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], t0 + (8 + (i - 1) * 44) * s)
     end
     rail_button(0, "keys", "Keys", "script-message-to footage_menu keys", false, h - (8 + 36 + 44) * s)
     rail_button(0, "help", "Help", "script-message-to footage_menu help", false, h - (8 + 36) * s)
@@ -507,25 +550,38 @@ local function hit_at(x, y)
     end
 end
 
--- mpv's on-screen controller: the box one, over the video, while the panel shows. Its own settings come back as
--- they were when it hides
+-- mpv's on-screen controller: while the panel shows, the box one at half its size, at the bottom, centered over the
+-- video (the bottom bar would go under the panel). Its own settings come back as they were when it hides
+local OSC_SCALE = 0.5
+local OSC_KEYS = { "osc-layout", "osc-halign", "osc-valign", "osc-scalewindowed", "osc-scalefullscreen" }
 local osc_before = nil
 function place_osc()
     local w = width(scale())
     local opts = mp.get_property_native("script-opts") or {}
     if w > 0 and dims.w > 0 then
-        -- The box (550 wide at a height of 720) centered over the video: osc.lua's get_align
-        local playresx = 720 * dims.w / dims.h
-        local room = playresx / 2 - 10 - 275
-        local align = string.format("%.3f", room > 0 and math.max(-1, -(w / dims.w) * playresx / 2 / room) or -1)
+        -- osc.lua's box: 550 x 138 at a height of 720 / its scale, placed by get_align with no margin
+        local playresy = 720 / OSC_SCALE
+        local playresx = playresy * dims.w / dims.h
+        local room = playresx / 2 - 275
+        local want = {
+            ["osc-layout"] = "box",
+            ["osc-halign"] = string.format("%.3f", room > 0 and math.max(-1, -(w / dims.w) * playresx / 2 / room) or -1),
+            -- 12 px above the window's bottom
+            ["osc-valign"] = string.format("%.3f", math.min(1, (playresy / 2 - 69 - 12 * playresy / dims.h) / (playresy / 2 - 69))),
+            ["osc-scalewindowed"] = tostring(OSC_SCALE), ["osc-scalefullscreen"] = tostring(OSC_SCALE),
+        }
         -- Each change sets the controller up again. Compared with what's there: script-opts may be set anew by others
-        if opts["osc-layout"] == "box" and opts["osc-halign"] == align then return end
-        if not osc_before then osc_before = { layout = opts["osc-layout"] or false, halign = opts["osc-halign"] or false } end
-        opts["osc-layout"], opts["osc-halign"] = "box", align
+        local same = true
+        for _, k in ipairs(OSC_KEYS) do same = same and opts[k] == want[k] end
+        if same then return end
+        if not osc_before then
+            osc_before = {}
+            for _, k in ipairs(OSC_KEYS) do osc_before[k] = opts[k] or false end
+        end
+        for k, v in pairs(want) do opts[k] = v end
         mp.set_property_native("script-opts", opts)
     elseif osc_before then
-        opts["osc-layout"] = osc_before.layout or nil
-        opts["osc-halign"] = osc_before.halign or nil
+        for _, k in ipairs(OSC_KEYS) do opts[k] = osc_before[k] or nil end
         osc_before = nil
         mp.set_property_native("script-opts", opts)
     end
@@ -611,7 +667,7 @@ end)
 
 -- What it shows comes from the plugins' state and the player's
 for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "osd-dimensions",
-                        "display-hidpi-scale", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
+                        "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
