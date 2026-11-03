@@ -24,6 +24,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The pages' links to the shared stylesheet and scripts get the file's content hash (styles.css?v=1a2b3c4d), so a
+      # browser never pairs a new page with a copy it cached earlier: Safari showed the new language switcher unstyled
+      # with the old styles.css. Only the deployed copy changes; the HTML in the repository stays as is.
+      - name: Version the shared stylesheet and scripts
+        working-directory: website/site
+        run: |
+          for f in styles.css scene.js download.js; do
+            v=$(sha256sum "$f" | cut -c1-8)
+            find . -name '*.html' -exec perl -pi -e "s{((?:href|src)=\"(?:\.\./)?\Q$f\E)\"}{\$1?v=$v\"}g" {} +
+          done
+          grep -rhoE '(href|src)="[^"]*\.(css|js)[^"]*"' --include='*.html' . | sort | uniq -c
+
       # Both branches publish to production: the project's production branch is main
       - name: Deploy to Cloudflare Pages
         env:
