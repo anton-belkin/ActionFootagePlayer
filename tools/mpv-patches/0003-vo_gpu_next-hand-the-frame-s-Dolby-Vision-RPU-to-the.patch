@@ -1,0 +1,72 @@
+From 58b09c14ddde21c50371d7cb0816633f438a597f Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 09:50:12 +0100
+Subject: [PATCH 3/4] vo_gpu_next: hand the frame's Dolby Vision RPU to the
+ platform's presentation
+
+When libplacebo doesn't apply the frame's Dolby Vision metadata itself
+(--vf=format:dolbyvision=no keeps the base layer and the RPU), the RPU the
+decoder exported goes along with the frame to ext_submit_frame, for a
+platform that does its own Dolby Vision display management.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/vo_gpu_next.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 680a22f67..b76f4511a 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -20,6 +20,8 @@
+ #include <sys/stat.h>
+ #include <time.h>
+ 
++#include <libavutil/buffer.h>
++#include <libavutil/frame.h>
+ #include <libplacebo/colorspace.h>
+ #include <libplacebo/options.h>
+ #include <libplacebo/renderer.h>
+@@ -1817,11 +1819,21 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     mp_mutex_unlock(&vo->params_mutex);
+ 
+     if (p->ext) {
++        struct mp_image *cur = frame->current;
++        av_buffer_unref(&p->ext_info.dovi_rpu);
+         p->ext_info = (struct ra_ext_submit) {
+             .color = target.color,
+-            .pts = frame->current ? frame->current->pts : MP_NOPTS_VALUE,
+-            .nominal_fps = frame->current ? frame->current->nominal_fps : 0,
++            .pts = cur ? cur->pts : MP_NOPTS_VALUE,
++            .nominal_fps = cur ? cur->nominal_fps : 0,
+         };
++        // The frame's own Dolby Vision RPU, for the platform's display management: only when libplacebo hasn't
++        // applied it already (--vf=format:dolbyvision=no keeps the base layer and the RPU)
++        if (cur && cur->params.repr.sys != PL_COLOR_SYSTEM_DOLBYVISION) {
++            for (int n = 0; n < cur->num_ff_side_data; n++) {
++                if (cur->ff_side_data[n].type == AV_FRAME_DATA_DOVI_RPU_BUFFER)
++                    p->ext_info.dovi_rpu = av_buffer_ref(cur->ff_side_data[n].buf);
++            }
++        }
+     }
+ 
+     p->is_interpolated = pts_offset != 0 && mix.num_frames > 1;
+@@ -1846,6 +1858,7 @@ static void flip_page(struct vo *vo)
+     if (p->frame_pending) {
+         if (p->ext_pending) {
+             sw->fns->ext_submit_frame(sw, &p->ext_frame, &p->ext_info);
++            av_buffer_unref(&p->ext_info.dovi_rpu);
+         } else if (!pl_swapchain_submit_frame(p->sw)) {
+             MP_ERR(vo, "Failed presenting frame!\n");
+         }
+@@ -2516,6 +2529,7 @@ static void uninit(struct vo *vo)
+         pl_gpu_finish(p->gpu);
+ 
+     pl_queue_destroy(&p->queue); // destroy this first
++    av_buffer_unref(&p->ext_info.dovi_rpu);
+     for (int i = 0; i < MP_ARRAY_SIZE(p->osd_state.entries); i++)
+         pl_tex_destroy(p->gpu, &p->osd_state.entries[i].tex);
+     for (int i = 0; i < p->num_sub_tex; i++)
+-- 
+2.42.0
+

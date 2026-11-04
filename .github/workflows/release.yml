@@ -53,7 +53,7 @@ jobs:
         id: mpv
         with:
           path: build/mpv-afp/out
-          key: mpv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/mpv.lock', 'tools/build_mpv.sh', 'build/mpv-deps.txt') }}
+          key: mpv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/mpv.lock', 'tools/build_mpv.sh', 'tools/mpv-patches/*.patch', 'build/mpv-deps.txt') }}
 
       - name: mpv
         if: steps.mpv.outputs.cache-hit != 'true'

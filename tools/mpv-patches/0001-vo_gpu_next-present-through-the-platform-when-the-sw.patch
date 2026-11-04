@@ -1,0 +1,250 @@
+From 4567bef589edce7381477f9830284e77347ee598 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 09:47:31 +0100
+Subject: [PATCH 1/4] vo_gpu_next: present through the platform when the
+ swapchain asks for it
+
+Three optional swapchain functions, ext_active, ext_start_frame and
+ext_submit_frame, let a context present frames itself instead of through
+pl_swapchain: vo_gpu_next renders into the pl_frame target the context
+hands it, chosen for the colorspace hint, and submits it with the final
+target color space, the frame's pts and nominal frame rate. swap_buffers is
+still called for the context's timing. While the platform presents, no
+colorspace hint goes to the swapchain.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/gpu/context.h    | 38 ++++++++++++++++++++++++++++++++
+ video/out/vo_gpu_next.c    | 45 ++++++++++++++++++++++++++++++++------
+ video/out/vulkan/context.c | 24 ++++++++++++++++++++
+ 3 files changed, 100 insertions(+), 7 deletions(-)
+
+diff --git a/video/out/gpu/context.h b/video/out/gpu/context.h
+index 68a3621c0..b546e0073 100644
+--- a/video/out/gpu/context.h
++++ b/video/out/gpu/context.h
+@@ -61,6 +61,23 @@ struct ra_ctx_fns {
+ 
+ typedef struct pl_color_space pl_color_space_t;
+ 
++#include <libplacebo/renderer.h>
++
++// A frame vo_gpu_next renders into a target the platform provides, and the platform presents, in place of the
++// swapchain (macOS: an AVSampleBufferDisplayLayer). See ra_ctx_params.ext_active.
++struct ra_ext_frame {
++    struct pl_frame target; // where to render; its color is what the platform tags the frame as by default
++    int w, h;               // the target's size in pixels
++    void *priv;             // the platform's
++};
++
++struct ra_ext_submit {
++    struct pl_color_space color;  // what was rendered: the final target color space
++    double pts;                   // of the frame shown, in seconds (MP_NOPTS_VALUE if none)
++    double nominal_fps;           // its nominal frame rate (0 if unknown)
++    struct AVBufferRef *dovi_rpu; // its Dolby Vision RPU (the NAL payload, as libavcodec exports it), or NULL
++};
++
+ // These are a set of helpers for ra_ctx providers based on ra_gl.
+ // The init function also initializes ctx->ra and ctx->swapchain, so the user
+ // doesn't have to do this manually. (Similarly, the uninit function will
+@@ -86,6 +103,13 @@ struct ra_ctx_params {
+     // See ra_swapchain_fns.get_vsync.
+     void (*get_vsync)(struct ra_ctx *ctx, struct vo_vsync_info *info);
+ 
++    // See ra_swapchain_fns.ext_active/ext_start_frame/ext_submit_frame. Optional; all three or none.
++    bool (*ext_active)(struct ra_ctx *ctx);
++    bool (*ext_start_frame)(struct ra_ctx *ctx, int w, int h, const struct pl_color_space *hint,
++                            struct ra_ext_frame *out);
++    void (*ext_submit_frame)(struct ra_ctx *ctx, struct ra_ext_frame *frame,
++                             const struct ra_ext_submit *info);
++
+     // Set to the platform-specific function to swap buffers, like
+     // glXSwapBuffers, eglSwapBuffers etc. This will be called by
+     // ra_gl_ctx_swap_buffers. Required unless you either never call that
+@@ -143,6 +167,20 @@ struct ra_swapchain_fns {
+ 
+     // See vo. Usually called after swap_buffers().
+     void (*get_vsync)(struct ra_swapchain *sw, struct vo_vsync_info *info);
++
++    // Whether frames go to the platform's own presentation (ext_start_frame/ext_submit_frame) instead of the
++    // swapchain, for this frame. vo_gpu_next only; checked before each frame. Optional.
++    bool (*ext_active)(struct ra_swapchain *sw);
++
++    // In place of start_frame/pl_swapchain_start_frame: a target of w x h pixels to render into, chosen for the
++    // color space hint (may be NULL). Returns false on failure; the frame is then skipped.
++    bool (*ext_start_frame)(struct ra_swapchain *sw, int w, int h, const struct pl_color_space *hint,
++                            struct ra_ext_frame *out);
++
++    // In place of submit_frame: present what was rendered into frame->target. swap_buffers is still called after
++    // it, for the platform's timing.
++    void (*ext_submit_frame)(struct ra_swapchain *sw, struct ra_ext_frame *frame,
++                             const struct ra_ext_submit *info);
+ };
+ 
+ // Create and destroy a ra_ctx. This also takes care of creating and destroying
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index b6d69308d..680a22f67 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -154,6 +154,11 @@ struct priv {
+     bool want_seek_reset;
+     bool flush_cache;
+     bool frame_pending;
++
++    // Presenting through the platform (ra_swapchain_fns.ext_active) instead of the swapchain
++    bool ext, ext_pending;
++    struct ra_ext_frame ext_frame;
++    struct ra_ext_submit ext_info;
+     bool paused;
+     int last_ref_white;
+     int last_srgb_power22;
+@@ -1322,6 +1327,9 @@ static bool set_colorspace_hint(struct priv *p, struct pl_color_space *hint)
+         },
+     };
+ 
++    if (p->ext)
++        return false;
++
+     if (sw->fns->set_color && sw->fns->set_color(sw, hint ? &params : NULL)) {
+         if (hint) {
+             *hint = params.color;
+@@ -1451,6 +1459,7 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     }
+ 
+     struct ra_swapchain *sw = p->ra_ctx->swapchain;
++    p->ext = sw->fns->ext_active && sw->fns->ext_active(sw);
+ 
+     struct pl_color_space target_csp = {0};
+     // TODO: Implement this for all backends
+@@ -1592,7 +1601,9 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ 
+     struct pl_swapchain_frame swframe;
+     bool should_draw = sw->fns->start_frame(sw, NULL); // for wayland logic
+-    if (!should_draw || !pl_swapchain_start_frame(p->sw, &swframe)) {
++    if (should_draw && p->ext)
++        should_draw = sw->fns->ext_start_frame(sw, vo->dwidth, vo->dheight, &hint, &p->ext_frame);
++    if (!should_draw || (!p->ext && !pl_swapchain_start_frame(p->sw, &swframe))) {
+         if (frame->current) {
+             // Advance the queue state to the current PTS to discard unused frames
+             struct pl_queue_params qparams = *pl_queue_params(
+@@ -1611,7 +1622,14 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ 
+     // Calculate target
+     struct pl_frame target;
+-    pl_frame_from_swapchain(&target, &swframe);
++    pl_tex fbo;
++    if (p->ext) {
++        target = p->ext_frame.target;
++        fbo = target.planes[0].texture;
++    } else {
++        pl_frame_from_swapchain(&target, &swframe);
++        fbo = swframe.fbo;
++    }
+     if (external_params)
+         target.color = hint;
+     bool strict_sw_params = target_hint && p->next_opts->target_hint_strict;
+@@ -1669,7 +1687,7 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+                     PL_OVERLAY_COORDS_DST_FRAME, &p->osd_state, &target, frame->current,
+                     frame->current ? frame->current->params.stereo3d : 0, get_ref_luma(p));
+     stats_time_end(p->stats, "osd-update");
+-    apply_crop(&target, p->dst, swframe.fbo->params.w, swframe.fbo->params.h);
++    apply_crop(&target, p->dst, fbo->params.w, fbo->params.h);
+     update_tm_viz(&pars->color_map_params, &target);
+ 
+     struct pl_frame_mix mix = {0};
+@@ -1782,8 +1800,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ 
+     mp_mutex_lock(&vo->params_mutex);
+     p->target_params = (struct mp_image_params){
+-        .imgfmt_name = swframe.fbo->params.format
+-                        ? swframe.fbo->params.format->name : NULL,
++        .imgfmt_name = fbo->params.format
++                        ? fbo->params.format->name : NULL,
+         .w = mp_rect_w(p->dst),
+         .h = mp_rect_h(p->dst),
+         .color = target.color,
+@@ -1798,16 +1816,25 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     }
+     mp_mutex_unlock(&vo->params_mutex);
+ 
++    if (p->ext) {
++        p->ext_info = (struct ra_ext_submit) {
++            .color = target.color,
++            .pts = frame->current ? frame->current->pts : MP_NOPTS_VALUE,
++            .nominal_fps = frame->current ? frame->current->nominal_fps : 0,
++        };
++    }
++
+     p->is_interpolated = pts_offset != 0 && mix.num_frames > 1;
+     valid = true;
+     // fall through
+ 
+ done:
+     if (!valid) // clear with purple to indicate error
+-        pl_tex_clear(gpu, swframe.fbo, (float[4]){ 0.5, 0.0, 1.0, 1.0 });
++        pl_frame_clear_rgba(gpu, &target, (float[4]){ 0.5, 0.0, 1.0, 1.0 });
+ 
+     pl_gpu_flush(gpu);
+     p->frame_pending = true;
++    p->ext_pending = p->ext;
+     return VO_TRUE;
+ }
+ 
+@@ -1817,9 +1844,13 @@ static void flip_page(struct vo *vo)
+     struct ra_swapchain *sw = p->ra_ctx->swapchain;
+ 
+     if (p->frame_pending) {
+-        if (!pl_swapchain_submit_frame(p->sw))
++        if (p->ext_pending) {
++            sw->fns->ext_submit_frame(sw, &p->ext_frame, &p->ext_info);
++        } else if (!pl_swapchain_submit_frame(p->sw)) {
+             MP_ERR(vo, "Failed presenting frame!\n");
++        }
+         p->frame_pending = false;
++        p->ext_pending = false;
+     }
+ 
+     sw->fns->swap_buffers(sw);
+diff --git a/video/out/vulkan/context.c b/video/out/vulkan/context.c
+index 892396f7d..988d51932 100644
+--- a/video/out/vulkan/context.c
++++ b/video/out/vulkan/context.c
+@@ -670,6 +670,27 @@ static float target_ref_luma(struct ra_swapchain *sw)
+     return 0;
+ }
+ 
++static bool ext_active(struct ra_swapchain *sw)
++{
++    struct priv *p = sw->priv;
++    return p->params.ext_active && p->params.ext_active(sw->ctx);
++}
++
++static bool ext_start_frame(struct ra_swapchain *sw, int w, int h, const struct pl_color_space *hint,
++                            struct ra_ext_frame *out)
++{
++    struct priv *p = sw->priv;
++    return p->params.ext_start_frame && p->params.ext_start_frame(sw->ctx, w, h, hint, out);
++}
++
++static void ext_submit_frame(struct ra_swapchain *sw, struct ra_ext_frame *frame,
++                             const struct ra_ext_submit *info)
++{
++    struct priv *p = sw->priv;
++    if (p->params.ext_submit_frame)
++        p->params.ext_submit_frame(sw->ctx, frame, info);
++}
++
+ static const struct ra_swapchain_fns vulkan_swapchain = {
+     .color_depth   = color_depth,
+     .set_color     = set_color,
+@@ -679,4 +700,7 @@ static const struct ra_swapchain_fns vulkan_swapchain = {
+     .submit_frame  = submit_frame,
+     .swap_buffers  = swap_buffers,
+     .get_vsync     = get_vsync,
++    .ext_active    = ext_active,
++    .ext_start_frame  = ext_start_frame,
++    .ext_submit_frame = ext_submit_frame,
+ };
+-- 
+2.42.0
+

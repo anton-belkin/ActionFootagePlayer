@@ -299,6 +299,9 @@ if mpv_bin:
     for name, version, license_name, repo, commit in builds:
         shutil.copytree(os.path.join(licenses, name), os.path.join(third, f"{name}-{version}"))
         own.append(f"{name} {version}\n  license: {license_name}\n  source:  {repo}\n  commit:  {commit}\n")
+    if mpv_lock.get("MPV_PATCHES", "").strip():
+        own.append("mpv's patches, applied on that commit: " + mpv_lock["MPV_PATCHES"].strip() + " (tools/mpv-patches/ "
+                   "in the ActionFootagePlayer project)\n")
     own.append("mpv's build: tools/build_mpv.sh and tools/mpv.lock in the ActionFootagePlayer project, at this "
                "app's version\n")
 with open(os.path.join(third, "SOURCES.txt"), "w") as f:

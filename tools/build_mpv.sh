@@ -78,6 +78,15 @@ if [ -n "$(git -C "$mpv_src" status --porcelain)" ]; then
     echo "$mpv_src has changes; the build wouldn't be $MPV_COMMIT" >&2
     exit 1
 fi
+# The app's patches on top, committed (tools/mpv-patches/: `git format-patch` of the branch they're written on), so
+# `git describe` names the build and SOURCES.txt can list them
+patches=()
+for f in tools/mpv-patches/*.patch; do [ -f "$f" ] && patches+=("$PWD/$f"); done
+if [ ${#patches[@]} -gt 0 ]; then
+    echo "== mpv: ${#patches[@]} patches from tools/mpv-patches"
+    git -C "$mpv_src" -c user.name="ActionFootagePlayer build" -c user.email=build@localhost \
+        am -q --committer-date-is-author-date "${patches[@]}"
+fi
 
 echo "== libplacebo $LIBPLACEBO_TAG"
 pl_src="$mpv_src/subprojects/libplacebo"
@@ -161,7 +170,11 @@ out="$OUT/out"
 rm -rf "$out"
 mkdir -p "$out/licenses/mpv" "$out/licenses/libplacebo"
 install -m 755 "$build/mpv" "$out/mpv"
-{ cat tools/mpv.lock; echo "MPV_DESCRIBE=$(git -C "$mpv_src" describe --tags --match "v[0-9]*" --always)"; } > "$out/mpv.lock"
+{
+    cat tools/mpv.lock
+    echo "MPV_DESCRIBE=$(git -C "$mpv_src" describe --tags --match "v[0-9]*" --always)"
+    echo "MPV_PATCHES=$(cd tools/mpv-patches 2>/dev/null && ls *.patch 2>/dev/null | tr '\n' ' ')"
+} > "$out/mpv.lock"
 cp "$mpv_src/LICENSE.GPL" "$mpv_src/LICENSE.LGPL" "$mpv_src/Copyright" "$out/licenses/mpv/"
 cp "$pl_src/LICENSE" "$out/licenses/libplacebo/"
 # What libplacebo builds in from its submodules: fast_float's licenses (glad's generated loader is the Khronos
