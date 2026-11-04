@@ -9,7 +9,11 @@
 -- Keys (rebind with `<key> script-binding footage_menu/<name>` in input.conf):
 --   right click, MENU   menu   the menu
 --
+-- With the side panel loaded (it has all of this as controls, and runs this plugin's commands: keys, report, setup,
+-- reveal, copy-path), right click is left to mpv's own menu (menu=auto).
+--
 -- Options (~~/script-opts/footage_menu.conf):
+--   menu=auto  the right-click menu: auto (not while the side panel is loaded), yes or no
 --   setup=   a setup script the menu offers to run again (ActionFootagePlayer's setup.sh, run with `all`)
 --   version= the app's version, for the menu to show beside its name (ActionFootagePlayer sets its own)
 
@@ -17,7 +21,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { setup = "", version = "" }
+local o = { setup = "", version = "", menu = "auto" }
 options.read_options(o, "footage_menu")
 
 local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
@@ -49,14 +53,14 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
-    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR, mpv's tone mapping, Dolby Vision" },
+    { "script-binding dlogm/sdr", "The next video output: HDR, HLG+DV in HDR and in SDR, mpv's tone mapping, NBCU's SDR, the maker's SDR" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
     { "script-binding dlogm/denoise", "Noise reduction on / off" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
-    { "script-binding gyroflow/still", "Clean still frame on / off" },
+    { "script-binding gyroflow/still", "Temporal denoise of the paused frame on / off" },
     { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
@@ -141,11 +145,12 @@ end
 
 -- The looks' names in the menu, by the dlogm plugin's (its looks)
 local function look_title(d, look)
-    if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
+    if look == "hdr" then return (d.log or d.hdr == "") and "HDR, HLG" or ("HDR, " .. d.hdr:upper() .. ", as it is") end
     if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
     if look == "nbcu" then return "SDR, NBCU (neutral)" end
     if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
-    if look == "dv" then return d.log and "HDR + Dolby Vision (DJI fit), as macOS shows it" or "With its Dolby Vision, as macOS shows it" end
+    if look == "dv" then return d.log and "HDR, HLG+DV (NBCU fit)" or "HDR, with its Dolby Vision" end
+    if look == "dvsdr" then return d.log and "SDR, HLG+DV (NBCU fit)" or "SDR, with its Dolby Vision" end
     return look
 end
 
@@ -234,7 +239,7 @@ local function stabilization_menu(g, key)
         }, { shortcut = lens }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
-        item("Clean still frame on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
+        item("Temporal denoise on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         item("Remember as default", "script-message-to gyroflow remember"),
@@ -428,11 +433,6 @@ local function use_menu_script()
         or (mp.get_property("current-gpu-context") == "d3d11" and mp.get_property_native("fullscreen") and mp.get_property_native("d3d11-exclusive-fs"))
 end
 
-if mp.get_property("load-context-menu") == nil and platform ~= "windows" then
-    mp.msg.verbose("this mpv has no context menu (0.41 and later have): right click stays as it was")
-    return
-end
-
 local function open(info_)
     if info_.event == "repeat" then return end
     if info_.event == "down" or info_.event == "press" then mp.set_property_native("menu-data", build()) end
@@ -446,8 +446,30 @@ local function open(info_)
         mp.command("context-menu")
     end
 end
-mp.add_key_binding("MBTN_RIGHT", "menu", open, { complex = true })
-mp.add_key_binding("MENU", "menu-key", open, { complex = true })
+
+-- The menu needs mpv's context menu (0.41 and later); with the side panel (auto), right click is mpv's own. The
+-- panel says it's there once it has loaded: looked at once the scripts have all started
+local menu_bound = false
+local function bind_menu()
+    local wanted = o.menu == "yes" or (o.menu == "auto" and not mp.get_property_native("user-data/side_panel/loaded"))
+    if mp.get_property("load-context-menu") == nil and platform ~= "windows" then
+        if wanted then mp.msg.verbose("this mpv has no context menu (0.41 and later have): right click stays as it was") end
+        wanted = false
+    end
+    if wanted == menu_bound then return end
+    menu_bound = wanted
+    if wanted then
+        mp.add_key_binding("MBTN_RIGHT", "menu", open, { complex = true })
+        mp.add_key_binding("MENU", "menu-key", open, { complex = true })
+    else
+        mp.remove_key_binding("menu")
+        mp.remove_key_binding("menu-key")
+    end
+end
+bind_menu()
+mp.add_timeout(0.5, bind_menu)
+mp.observe_property("user-data/side_panel/loaded", "native", function() bind_menu() end)
+mp.set_property_native("user-data/footage_menu/loaded", true)
 
 -- What the menu runs that's no plugin's
 
@@ -485,7 +507,7 @@ mp.register_script_message("keys", function()
     for _, k in ipairs(KEY_LABELS) do
         if key[k[1]] then table.insert(lines, key[k[1]] .. "    " .. k[2]) end
     end
-    table.insert(lines, "Right click    This menu")
+    table.insert(lines, menu_bound and "Right click    This menu" or "Tab    The side panel")
     mp.osd_message(table.concat(lines, "\n"), 10)
 end)
 

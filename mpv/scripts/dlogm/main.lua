@@ -28,9 +28,12 @@
 --   tonemap  the hdr look's HLG tone-mapped to SDR by mpv itself (libplacebo, reference white at SDR white as
 --          BT.2408 has it), not by macOS: as the hdr look shows on an SDR screen on Windows.
 --   dv     the hdr look's HLG shown by macOS's own video layer (--macos-sample-buffer-layer, the app's mpv) with a
---          Dolby Vision RPU on each frame (dv/dji_fit.rpu: trims fitted to DJI's LUT), so macOS's Dolby Vision display
---          management maps it for the screen, as QuickTime and Apple devices show an export carrying that RPU. Only
---          where mpv has the option (macOS, the app's mpv).
+--          Dolby Vision RPU on each frame (dv/nbcu_fit.rpu: trims fitted to NBCU's conversion), so macOS's Dolby Vision display
+--          management maps it for the screen, as QuickTime and Apple devices show an export carrying that RPU: on an
+--          HDR screen in HDR (EDR), on an SDR one by the RPU's trims for SDR. Only where mpv has the option (macOS, the
+--          app's mpv).
+--   dvsdr  the same, always toned down to SDR by the RPU's trims (--macos-sample-buffer-edr=no), on an HDR screen too:
+--          what an SDR screen shows of dv
 --   off    the file as it is, flat as the camera recorded it (L; not one of Ctrl+s's)
 -- The SDR looks tag the video as BT.709 for mpv, and leave the target as it was: on an HDR screen they show as an
 -- SDR screen shows them.
@@ -45,34 +48,35 @@
 -- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
 -- SDR look last chosen (at first Dolby Vision as macOS shows it with the app's mpv, mpv's tone mapping without it).
 -- Choosing a look (Ctrl+s, Ctrl+h, the menu) makes it what files start in on that kind of screen, for the rest of the
--- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file not yet
--- switched by hand follows its window to a screen of the other kind.
+-- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file keeps
+-- its look when its window goes to a screen of the other kind.
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
---   Ctrl+s  sdr    the next look this file has: hdr, then the maker's and NBCU's SDR, mpv's tone mapping, Dolby Vision
+--   Ctrl+s  sdr    the next look this file has: hdr, Dolby Vision in HDR and in SDR, mpv's tone mapping, NBCU's and the
+--                  maker's SDR
 --   Ctrl+h  hdr    the hdr look, as Ctrl+s chooses one
 --   L       off    this file only
 --   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
 --   Ctrl+n  denoise  noise reduction on / off, for this file and the ones after it
 --
 -- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
---   look <look>       this file's look: hdr, maker, nbcu, tonemap or dv, as Ctrl+s would
+--   look <look>       this file's look: hdr, dv, dvsdr, tonemap, nbcu or maker, as Ctrl+s would
 --   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
 --   remember          the looks files start in on each kind of screen, and the noise reduction, as the default, in
 --                     dlogm.conf
 --   dv-trim <name> <0..4095>  one of the dv look's trims (slope, offset, power, midContrast, clipTrim, saturation,
 --                     chromaWeight, l3Min, l3Avg, l3Max; 2048 neutral): the look is kept in $DLOGM_DATA/dv (else
 --                     ~~/dlogm-dv) and its RPU made by afp-rpu; the dv look and its exports use it
---   dv-reset          back to the shipped trims (DJI fit)
+--   dv-reset          back to the shipped trims (NBCU fit)
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
--- ""), curve (the one applied, or ""), look (hdr, maker, nbcu, tonemap, dv, off, or "" when untouched), looks (the ones
+-- ""), curve (the one applied, or ""), look (hdr, dv, dvsdr, tonemap, nbcu, maker, off, or "" when untouched), looks (the ones
 -- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), maker_lut (which LUT that is and where it's
 -- from), sdr_look (the SDR look an export in SDR takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when
 -- unknown), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on), dv_trims (the dv
 -- look's), dv_custom (they're the user's), dv_own (the dv look is the file's own Dolby Vision).
 --
 -- Options (~~/script-opts/dlogm.conf):
---   hdr_screen=hdr    what log files start in on an HDR screen: hdr, maker, nbcu, tonemap or dv
+--   hdr_screen=hdr    what log files start in on an HDR screen: hdr, dv, dvsdr, tonemap, nbcu or maker
 --   sdr_screen=dv     and on an SDR screen (tonemap where mpv can't do dv)
 --   (mode=sdr, as before these: maker on both)
 --   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
@@ -114,10 +118,10 @@ local CURVES = {
 local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl" }
 -- The noise reduction's shader
 local DENOISE = "shaders/denoise.glsl"
--- The dv look's Dolby Vision RPU (made by afp-rpu from dv/dji_fit.json, tools/make_dv_rpu.sh) and its name
-local DV_RPU = "dv/dji_fit.rpu"
-local DV_LOOK = "dv/dji_fit.json"
-local DV_NAME = "DJI fit"
+-- The dv look's Dolby Vision RPU (made by afp-rpu from dv/nbcu_fit.json, tools/make_dv_rpu.sh) and its name
+local DV_RPU = "dv/nbcu_fit.rpu"
+local DV_LOOK = "dv/nbcu_fit.json"
+local DV_NAME = "NBCU fit"
 -- The user's own trims, when changed (dv-trim): the look as JSON and its RPU, made by afp-rpu (the gyroflow plugin's,
 -- beside this one), in two files taken in turn so mpv sees a new one each time
 local DV_USER = (DATA and DATA ~= "") and utils.join_path(DATA, "dv") or mp.command_native({ "expand-path", "~~/dlogm-dv" })
@@ -141,6 +145,9 @@ if DV_OK then
     table.insert(TARGET_OPTIONS, "macos-sample-buffer-layer")
     table.insert(TARGET_OPTIONS, "macos-dovi-rpu-file")
 end
+-- And whether the layer shows HDR with the display's headroom or toned down to SDR (dvsdr)
+local DV_EDR = DV_OK and mp.get_property("option-info/macos-sample-buffer-edr/name") ~= nil
+if DV_EDR then table.insert(TARGET_OPTIONS, "macos-sample-buffer-edr") end
 -- The filter that tags the video as what the look's shaders turn it into, at the end of the chain (after the
 -- stabilization); disabled when the file's own tags are right
 local TAG_LABEL = "dlogm"
@@ -150,9 +157,11 @@ local SDR_TAGS = { gamma = "bt.1886", primaries = "bt.709" }
 -- For NBCU's on a file tagged HDR: its base layer, without Dolby Vision's reshaping, which would make it PQ (Dolby
 -- Vision 8.4, as VideoToolbox writes HLG, the player's own exports among them, is HLG underneath)
 local SDR_TAGS_NO_DOVI = { gamma = "bt.1886", primaries = "bt.709", dolbyvision = "no", colormatrix = "bt.2020-ncl" }
-local SDR_LOOKS = { maker = true, nbcu = true, tonemap = true }
+local SDR_LOOKS = { maker = true, nbcu = true, tonemap = true, dvsdr = true }
+-- The looks macOS's video layer shows, with a Dolby Vision RPU
+local DV_LOOKS = { dv = true, dvsdr = true }
 -- What a kind of screen's choice can be
-local CHOICES = { hdr = true, maker = true, nbcu = true, tonemap = true, dv = true }
+local CHOICES = { hdr = true, maker = true, nbcu = true, tonemap = true, dv = true, dvsdr = true }
 -- The HDR transfers, by mpv's names for them (target-trc, video-dec-params/gamma)
 local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 
@@ -221,6 +230,8 @@ local function label(m)
             text = text .. " tone-mapped to SDR by mpv"
         elseif m == "dv" then
             text = text .. " with its Dolby Vision, as macOS shows it"
+        elseif m == "dvsdr" then
+            text = text .. " with its Dolby Vision, toned down to SDR by macOS"
         else
             text = text .. ", as it is"
         end
@@ -235,7 +246,9 @@ local function label(m)
         elseif m == "tonemap" then
             text = c.name .. " -> HDR, tone-mapped to SDR by mpv"
         elseif m == "dv" then
-            text = c.name .. " -> HDR + Dolby Vision (" .. DV_NAME .. "), as macOS shows it"
+            text = c.name .. " -> HLG + Dolby Vision (" .. DV_NAME .. "), as macOS shows it"
+        elseif m == "dvsdr" then
+            text = c.name .. " -> HLG + Dolby Vision (" .. DV_NAME .. "), toned down to SDR by macOS"
         else
             return c.name .. " handling off: the file as it is"
         end
@@ -267,7 +280,10 @@ local function looks()
     if not base then return {} end
     if hdr and not curve then
         local list = { "hdr" }
-        if DV_OK and hdr.dv_signaled and hdr.trc == "hlg" then table.insert(list, "dv") end
+        if DV_OK and hdr.dv_signaled and hdr.trc == "hlg" then
+            table.insert(list, "dv")
+            if DV_EDR then table.insert(list, "dvsdr") end
+        end
         table.insert(list, "tonemap")
         if hdr.prim == "bt.2020" and not hdr.dovi and plugin_file(NBCU[hdr.trc]) then
             table.insert(list, "nbcu")
@@ -276,7 +292,10 @@ local function looks()
     end
     if not curve then return {} end
     local list = { "hdr" }
-    if DV_OK and plugin_file(DV_RPU) then table.insert(list, "dv") end
+    if DV_OK and plugin_file(DV_RPU) then
+        table.insert(list, "dv")
+        if DV_EDR then table.insert(list, "dvsdr") end
+    end
     table.insert(list, "tonemap")
     if plugin_file(NBCU.hlg) then table.insert(list, "nbcu") end
     if curve.sdr and plugin_file(curve.sdr) then table.insert(list, "maker") end
@@ -289,7 +308,7 @@ local function resolve(want)
     local has = {}
     for _, l in ipairs(looks()) do has[l] = true end
     if has[want] then return want end
-    if SDR_LOOKS[want] or want == "dv" then
+    if SDR_LOOKS[want] or DV_LOOKS[want] then
         for _, l in ipairs({ "nbcu", "maker", "tonemap" }) do
             if has[l] then return l end
         end
@@ -297,7 +316,7 @@ local function resolve(want)
     return "hdr"
 end
 
--- The dv look's trims: the shipped look (DJI fit), or the user's, read once
+-- The dv look's trims: the shipped look (NBCU fit), or the user's, read once
 local dv_look, dv_user_rpu = nil, nil
 local function read_json(path)
     local f = path and io.open(path, "r")
@@ -402,10 +421,12 @@ local function hdr_target(target, trc, prim)
     target["target-peak"] = "1000"
 end
 
--- The dv look: macOS's video layer presents, with `rpu` on the frames (nil: the file's own)
-local function dv_target(target, rpu)
+-- The dv looks: macOS's video layer presents, with `rpu` on the frames (nil: the file's own), in HDR where the screen
+-- has it (dv) or toned down to SDR (dvsdr)
+local function dv_target(target, rpu, m)
     target["macos-sample-buffer-layer"] = "yes"
     target["macos-dovi-rpu-file"] = rpu or ""
+    if DV_EDR then target["macos-sample-buffer-edr"] = m == "dvsdr" and "no" or "yes" end
 end
 
 -- tonemap: SDR as mpv makes it, the display left in SDR
@@ -463,10 +484,10 @@ local function apply_hdr_file(m)
         tags = SDR_TAGS_NO_DOVI
     elseif m == "tonemap" then
         sdr_target(target)
-    elseif m == "dv" then
+    elseif DV_LOOKS[m] then
         -- the base layer as it is, its RPU for macOS (mpv would reshape it into PQ itself otherwise)
         hdr_target(target, hdr.trc, hdr.prim)
-        dv_target(target, nil)
+        dv_target(target, nil, m)
         tags = { gamma = hdr.trc, primaries = hdr.prim, dolbyvision = "no", colormatrix = "bt.2020-ncl" }
     else
         m = "hdr"
@@ -489,9 +510,10 @@ local function apply(m)
         mp.osd_message(c.name .. ": no maker's Rec.709 LUT for it yet", 3)
         return false
     end
-    local names = { hdr = { c.hdr }, maker = { c.sdr }, nbcu = { c.hdr, NBCU.hlg }, tonemap = { c.hdr }, dv = { c.hdr } }
+    local names = { hdr = { c.hdr }, maker = { c.sdr }, nbcu = { c.hdr, NBCU.hlg }, tonemap = { c.hdr }, dv = { c.hdr },
+                    dvsdr = { c.hdr } }
     local rpu = nil
-    if m == "dv" then
+    if DV_LOOKS[m] then
         rpu = dv_user_rpu or plugin_file(DV_RPU)
         if not (DV_OK and rpu) then
             mp.osd_message(label(m) .. ": not with this mpv", 3)
@@ -502,16 +524,16 @@ local function apply(m)
     if not shaders then return false end
     local target = {}
     for k, v in pairs(base.target) do target[k] = v end
-    if m == "hdr" or m == "dv" then
+    if m == "hdr" or DV_LOOKS[m] then
         hdr_target(target, "hlg", "bt.2020")
-        if m == "dv" then dv_target(target, rpu) end
+        if DV_LOOKS[m] then dv_target(target, rpu, m) end
     elseif m == "tonemap" then
         sdr_target(target)
     elseif m == "off" and hdr then
         -- off on an HDR file graded by hand: as it is, in HDR
         hdr_target(target, hdr.trc, hdr.prim)
     end
-    local hlg = m == "hdr" or m == "tonemap" or m == "dv"
+    local hlg = m == "hdr" or m == "tonemap" or DV_LOOKS[m]
     tag_video(hlg and HLG_TAGS or (m == "maker" or m == "nbcu") and SDR_TAGS or nil)
     mp.set_property_native("file-local-options/glsl-shaders", shader_list(shaders))
     set_target(target)
@@ -695,8 +717,8 @@ local function next_curve()
     if apply(m) then mp.osd_message(label(m), 2) end
 end
 
--- A file not switched by hand follows its window to a screen of the other kind; a screen macOS hasn't been asked
--- about yet (just connected) is asked about first
+-- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
+-- screen macOS hasn't been asked about yet (just connected) is asked about first
 local function follow_screen()
     if not screens then return end
     local name = window_screen()
@@ -704,14 +726,9 @@ local function follow_screen()
         screens[name] = false
         return ask_screens(follow_screen)
     end
-    if not base or not current or touched or screen() == shown_for then return end
-    local m = resolve(chosen[screen()])
-    if m ~= current and apply(m) then
-        mp.osd_message(label(m), 2)
-    else
-        shown_for = screen()
-        publish()
-    end
+    if not base or screen() == shown_for then return end
+    shown_for = screen()
+    publish()
 end
 mp.observe_property("display-names", "native", follow_screen)
 
@@ -825,7 +842,7 @@ local function make_dv_rpu()
             local lf = io.open(utils.join_path(DV_USER, "look.json"), "w")
             if lf then lf:write(utils.format_json(look)); lf:close() end
             dv_user_rpu = out
-            if current == "dv" then apply("dv") else publish() end
+            if DV_LOOKS[current] then apply(current) else publish() end
         else
             mp.msg.warn("afp-rpu: " .. ((r and r.stderr) or "failed"))
         end
@@ -844,19 +861,19 @@ mp.register_script_message("dv-trim", function(key, value)
     dv_timer = mp.add_timeout(0.12, make_dv_rpu)
 end)
 
--- Back to the shipped trims (DJI fit)
+-- Back to the shipped trims (NBCU fit)
 mp.register_script_message("dv-reset", function()
     for _, n in ipairs({ "look.json", "look.a.rpu", "look.b.rpu", "look.tmp.json" }) do
         os.remove(utils.join_path(DV_USER, n))
     end
     dv_look, dv_user_rpu = nil, nil
-    if current == "dv" then apply("dv") else publish() end
+    if DV_LOOKS[current] then apply(current) else publish() end
 end)
 
 mp.register_script_message("remember", function()
     local saved = save_options({ hdr_screen = chosen.hdr, sdr_screen = chosen.sdr, denoise = denoise and "yes" or "no" })
-    local NAMES = { hdr = "HDR", maker = "the maker's SDR", nbcu = "NBCU's SDR", tonemap = "mpv's tone mapping to SDR",
-                    dv = "HDR + Dolby Vision" }
+    local NAMES = { hdr = "HDR, HLG", maker = "the maker's SDR", nbcu = "NBCU's SDR", tonemap = "mpv's tone mapping to SDR",
+                    dv = "HDR, HLG+DV", dvsdr = "SDR, HLG+DV" }
     mp.osd_message(saved and ("Log clips start in " .. NAMES[chosen.hdr] .. " on HDR screens, in " .. NAMES[chosen.sdr]
                               .. " on SDR screens, noise reduction " .. (denoise and "on" or "off") .. " (dlogm.conf)")
                    or "Couldn't write dlogm.conf", 3)

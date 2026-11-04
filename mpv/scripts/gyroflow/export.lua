@@ -228,7 +228,7 @@ local function start(path, sdr)
     if sdr_look == "nbcu" then table.insert(args, "--nbcu") end
     -- The dv look: the RPU file the player attaches, on every frame of the export too
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
-    if not sdr and look == "dv" and curve and curve ~= "" and rpu ~= "" then
+    if not sdr and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
         table.insert(args, "--dv-rpu"); table.insert(args, rpu)
     end
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end

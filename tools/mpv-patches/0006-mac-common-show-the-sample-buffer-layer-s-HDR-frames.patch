@@ -1,0 +1,127 @@
+From cf780b1ec12857cc813bdd0ffc9bcb3e0d05dbd7 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 17:56:08 +0100
+Subject: [PATCH] mac/common: show the sample buffer layer's HDR frames with
+ EDR, or as SDR
+
+Since macOS 26 a layer's preferredDynamicRange defaults to standard, so
+macOS tone mapped the layer's HLG and PQ frames to SDR on HDR displays
+too. Ask for high (wantsExtendedDynamicRangeContent before macOS 26),
+and add --macos-sample-buffer-edr=no for SDR on any display: with a
+Dolby Vision RPU, its trims for SDR.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../macos-sample-buffer-layer.txt             |  1 +
+ DOCS/man/options.rst                          |  5 +++++
+ osdep/mac/app_bridge.h                        |  1 +
+ osdep/mac/app_bridge.m                        |  2 ++
+ video/out/mac/common.swift                    |  2 ++
+ video/out/mac_common.swift                    | 19 +++++++++++++++++++
+ 6 files changed, 30 insertions(+)
+
+diff --git a/DOCS/interface-changes/macos-sample-buffer-layer.txt b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+index 03ff1e349..2cd77e6cb 100644
+--- a/DOCS/interface-changes/macos-sample-buffer-layer.txt
++++ b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+@@ -1 +1,2 @@
+ add `--macos-sample-buffer-layer` and `--macos-dovi-rpu-file`
++add `--macos-sample-buffer-edr` option
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 25082a2bc..b9df28a97 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7264,6 +7264,11 @@ them.
+     counts from the first), the last one with every frame after it; a file with one RPU applies to all.
+     Can be changed while playing.
+ 
++``--macos-sample-buffer-edr=<yes|no>``
++    Whether ``--macos-sample-buffer-layer`` shows HDR frames with the display's extended dynamic range
++    (default: yes), or has macOS tone them down to SDR, as on an SDR display (with a Dolby Vision RPU,
++    by its trims for SDR). Can be changed while playing.
++
+ ``--macos-menu-shortcuts=<yes|no>``
+     Enables the default menu bar shortcuts (default: yes). The menu bar shortcuts always take
+     precedence over any other shortcuts, they are not propagated to the mpv core and they can't be
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index e857617f7..f92aa6954 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -97,6 +97,7 @@ struct macos_opts {
+     int macos_render_timer;
+     int macos_sample_buffer_layer;
+     char *macos_dovi_rpu_file;
++    bool macos_sample_buffer_edr;
+     bool macos_menu_shortcuts;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index 684061832..0223207b6 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -70,6 +70,7 @@ const struct m_sub_options macos_conf = {
+         {"macos-sample-buffer-layer", OPT_CHOICE(macos_sample_buffer_layer,
+             {"no", 0}, {"yes", 1})},
+         {"macos-dovi-rpu-file", OPT_STRING(macos_dovi_rpu_file), .flags = M_OPT_FILE},
++        {"macos-sample-buffer-edr", OPT_BOOL(macos_sample_buffer_edr)},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+@@ -99,6 +100,7 @@ const struct m_sub_options macos_conf = {
+         .macos_fs_animation_duration = -1,
+         .macos_render_timer = RENDER_TIMER_CALLBACK,
+         .macos_menu_shortcuts = true,
++        .macos_sample_buffer_edr = true,
+         .macos_bundle_path = (char *[]){
+             "/usr/local/bin", "/usr/local/sbin", "/opt/local/bin", "/opt/local/sbin",
+             "/opt/homebrew/bin", "/opt/homebrew/sbin", NULL
+diff --git a/video/out/mac/common.swift b/video/out/mac/common.swift
+index e35a50a63..dd7e7fac0 100644
+--- a/video/out/mac/common.swift
++++ b/video/out/mac/common.swift
+@@ -684,6 +684,8 @@ class Common: NSObject {
+                  TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file):
+                 // read by the Vulkan context on the VO thread; redrawn so a paused frame changes too
+                 flagEvents(VO_EVENT_EXPOSE)
++            case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_edr):
++                (self as? MacCommon)?.updateSampleBufferRange()
+             default:
+                 break
+             }
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index b2b8c99d8..e8600a252 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -46,6 +46,7 @@ class MacCommon: Common {
+             sampleLayer.frame = layer?.bounds ?? .zero
+             layer?.addSublayer(sampleLayer)
+             sampleBufferLayer = sampleLayer
++            updateSampleBufferRange()
+             initMisc(vo)
+         }
+     }
+@@ -119,6 +120,24 @@ class MacCommon: Common {
+         info.pointee.last_queue_display_time = next?.time ?? -1
+     }
+ 
++    // HDR frames shown with the display's headroom (EDR), as macOS's own players do, or toned down to
++    // SDR as on an SDR display (--macos-sample-buffer-edr). Since macOS 26 a layer is tone mapped to
++    // SDR unless it asks for more. On the main thread
++    func updateSampleBufferRange() {
++        guard let sampleLayer = sampleBufferLayer else { return }
++        let edr = option.mac.macos_sample_buffer_edr
++        // preferredDynamicRange is in the macOS 26 SDK (Swift 6.2) and later
++#if compiler(>=6.2)
++        if #available(macOS 26.0, *) {
++            sampleLayer.preferredDynamicRange = edr ? .high : .standard
++            return
++        }
++#endif
++        if #available(macOS 14.0, *) {
++            sampleLayer.wantsExtendedDynamicRangeContent = edr
++        }
++    }
++
+     @objc func setSampleBufferVisible(_ visible: Bool) {
+         DispatchQueue.main.async {
+             CATransaction.begin()

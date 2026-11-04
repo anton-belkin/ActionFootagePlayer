@@ -90,11 +90,12 @@ colorist to decide what to keep and what to leave out of SDR's narrow range: a c
 for all of it, so the conversion becomes a technical one, the same for every clip, and can be automatic. That turns
 the "pro" mode into the one to use for everyday footage.
 
-On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in HDR with Dolby Vision as macOS
-shows it: macOS tones the HDR down for that screen with trims fitted to DJI's Rec.709 LUT, the way QuickTime and
-Apple's devices show the export. `Ctrl+s` goes through it, HDR as macOS tones it down, mpv's tone mapping,
-NBCUniversal's neutral HDR → SDR conversion and the camera maker's own Rec.709 LUT (DJI's, for D-Log M); on an HDR
-screen, the same `Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
+On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in HLG with Dolby Vision as macOS
+shows it (*HDR, HLG+DV*): macOS tones the HDR down for that screen with trims fitted to NBCUniversal's HLG → SDR conversion (no scene-level offsets, so an HDR screen still gets HDR), the way
+QuickTime and Apple's devices show the export, and shows it in HDR on an HDR screen. `Ctrl+s` goes through the video
+outputs: *HDR, HLG* (macOS tones it down on an SDR screen), *HDR, HLG+DV*, *SDR, HLG+DV* (toned down by the trims on
+an HDR screen too: what an SDR screen shows), mpv's tone mapping, NBCUniversal's neutral HDR → SDR conversion and
+the camera maker's own Rec.709 LUT (DJI's, for D-Log M); on an HDR screen the SDR ones show as an SDR screen would. Exports still play in HDR on an iPhone.
 The Dolby Vision trims are the author's, to taste; the side panel's Dolby Vision has them as sliders,
 and exports take what's set there.
 
@@ -207,7 +208,9 @@ On Windows, the same two are in Explorer's menu for MP4 and MOV videos: *Play in
 exported after the others, in the same window).
 ### The menu
 
-Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
+With the side panel there (the app, and the plugins' zip), right click is mpv's own menu and the settings are in the
+panel. Without it (`footage_menu.conf`: `menu=yes` for it in any case), right-click the video for the plugins' menu:
+everything the keys do, with the keys beside it, and what has no key. At the
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
@@ -227,23 +230,26 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 
 ### The panel
 
-The same settings as the menu are also in a panel at the right of the window, beside the video (the video moves over
-for it, nothing is covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of
-the one chosen, with switches and buttons, scrolled with the wheel:
+The settings are in a panel at the right of the window, beside the video (the video moves over for it, nothing is
+covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of the one chosen, with
+switches and buttons, scrolled with the wheel:
 
 - **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
-- **Look**: HDR or an SDR look, the log curve by hand, noise reduction, the clean still frame.
+- **Look**: the video output (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping; NBCU's and the maker's SDR),
+  the log curve by hand, noise reduction.
 - **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
-- **Quality**: the frame rate and size it's stabilized at, what fills the edges and how often the trail is written,
-  whether it asks when the GPU can't keep up.
+- **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame (full size, temporal
+  denoise), what fills the edges and how often the trail is written, whether it asks when the GPU can't keep up.
 - **Telemetry**: whether it shows, the corner, the units, the fields.
-- **Player**: speed, looping, fullscreen, always on top, the sound track.
+- **Dolby Vision** (Mac, the app): the trims, as sliders.
+- **Support**, at the bottom: the version, Keys…, Note for the agent…, Report this camera…, Set up again…, and links
+  to the website and GitHub.
 
 The keys are beside what they do. Look, Stabilization, Quality and Telemetry have **Make these the defaults** at the
 bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
 chosen icon, or the arrow at the top of the panel, leaves only the rail. While the panel shows, mpv's own controls
 (play, the seek bar) are a small box at the bottom of the video. It's the side-panel plugin (`side_panel.conf`:
-`shown=`, `open=`, `tab=`); its Clip buttons and the Keys and Help icons are the menu's.
+`shown=`, `open=`, `tab=`); its Clip and Support buttons run footage-menu's commands.
 
 ### Keys
 
@@ -254,19 +260,19 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water, as the camera says or as the project says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips without a project | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
-| `Ctrl+s` | The clip's next look: HDR, HDR with Dolby Vision (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
+| `Ctrl+s` | The clip's next video output: HDR (HLG), HLG with Dolby Vision in HDR and in SDR (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
-| `Ctrl+p` | Clean still frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
+| `Ctrl+p` | Temporal denoise of the paused frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
-| right click | The menu | `footage_menu/menu` |
+| right click | The plugins' menu, when there's no side panel (mpv's own menu with it) | `footage_menu/menu` |
 | `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
@@ -896,7 +902,7 @@ shaders of your own, so mpv undoes them when a playlist moves on to a clip that 
 
 Which one a clip starts in depends on the screen its window is on: macOS's EDR headroom (`NSScreen`'s
 `maximumPotentialExtendedDynamicRangeColorComponentValue`, asked once with `osascript`), above 1 on a screen that
-shows HDR. A clip not yet switched by hand follows its window to a screen of the other kind. On Windows and Linux
+shows HDR. A clip keeps its look when its window goes to a screen of the other kind. On Windows and Linux
 every screen counts as HDR, as before.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in

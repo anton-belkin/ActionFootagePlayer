@@ -177,8 +177,8 @@ mod tests {
     use super::*;
     use dolby_vision::rpu::dovi_rpu::DoviRpu;
 
-    fn dji_fit() -> Look {
-        serde_json::from_str(include_str!("../../mpv/scripts/dlogm/dv/dji_fit.json")).unwrap()
+    fn nbcu_fit() -> Look {
+        serde_json::from_str(include_str!("../../mpv/scripts/dlogm/dv/nbcu_fit.json")).unwrap()
     }
 
     // The RPUs back from the bytes, with each frame's L1 and scene cut flag
@@ -198,16 +198,16 @@ mod tests {
 
     #[test]
     fn look_from_dv_lab() {
-        let l = dji_fit();
-        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2640, 2816, 2368, 0, 2304));
-        assert_eq!((l.l3_min, l.l3_avg, l.l3_max), (2048, 2192, 2816));
+        let l = nbcu_fit();
+        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2560, 2352, 2080, 544, 2928));
+        assert_eq!((l.l3_min, l.l3_avg, l.l3_max), (2048, 2048, 2048));
         assert!(l.use_l8);
         assert_eq!(serde_json::from_str::<Look>("{}").unwrap(), Look::default());
     }
 
     #[test]
     fn constant_l1() {
-        let c = generator_config(&dji_fit(), &[DEFAULT_L1], 3).unwrap();
+        let c = generator_config(&nbcu_fit(), &[DEFAULT_L1], 3).unwrap();
         assert_eq!(c.shots.len(), 1);
         let frames = parse(&rpu_bytes(&c).unwrap());
         assert_eq!(frames.len(), 3);
@@ -216,13 +216,13 @@ mod tests {
             assert_eq!(rpu.dovi_profile, 8);
             let dm = rpu.vdr_dm_data.as_ref().unwrap();
             let Some(ExtMetadataBlock::Level8(l8)) = dm.get_block(8) else { panic!("no L8") };
-            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2640, 2304));
+            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2560, 2928));
             let Some(ExtMetadataBlock::Level3(l3)) = dm.get_block(3) else { panic!("no L3") };
-            assert_eq!(l3.avg_pq_offset, 2192);
+            assert_eq!(l3.avg_pq_offset, 2048);
         }
         // The shipped file is this, for one frame
-        let one = rpu_bytes(&generator_config(&dji_fit(), &[DEFAULT_L1], 1).unwrap()).unwrap();
-        assert_eq!(one, include_bytes!("../../mpv/scripts/dlogm/dv/dji_fit.rpu"));
+        let one = rpu_bytes(&generator_config(&nbcu_fit(), &[DEFAULT_L1], 1).unwrap()).unwrap();
+        assert_eq!(one, include_bytes!("../../mpv/scripts/dlogm/dv/nbcu_fit.rpu"));
     }
 
     #[test]
@@ -230,7 +230,7 @@ mod tests {
         let f = |avg| L1::new(12, avg, 2700);
         // Without scene cuts: a shot wherever L1 changes
         let l1 = [f(1700), f(1700), f(1800), f(1900), f(1900)];
-        let c = generator_config(&dji_fit(), &l1, 5).unwrap();
+        let c = generator_config(&nbcu_fit(), &l1, 5).unwrap();
         assert_eq!(c.shots.iter().map(|s| (s.start, s.duration)).collect::<Vec<_>>(), [(0, 2), (2, 1), (3, 2)]);
         let got: Vec<(u16, bool)> = parse(&rpu_bytes(&c).unwrap()).iter().map(|f| (f.2, f.4)).collect();
         assert_eq!(got, [(1700, true), (1700, false), (1800, true), (1900, true), (1900, false)]);
@@ -238,7 +238,7 @@ mod tests {
         // With them: shots from the cuts, L1 changing inside a shot
         let mut l1 = l1;
         l1[3].scene_cut = Some(true);
-        let c = generator_config(&dji_fit(), &l1, 5).unwrap();
+        let c = generator_config(&nbcu_fit(), &l1, 5).unwrap();
         assert_eq!(c.shots.iter().map(|s| (s.start, s.duration)).collect::<Vec<_>>(), [(0, 3), (3, 2)]);
         let got: Vec<(u16, bool)> = parse(&rpu_bytes(&c).unwrap()).iter().map(|f| (f.2, f.4)).collect();
         assert_eq!(got, [(1700, true), (1700, false), (1800, false), (1900, true), (1900, false)]);
@@ -246,10 +246,10 @@ mod tests {
         // A change held for several frames inside a shot
         let mut l1 = [f(1700), f(1800), f(1800), f(1800), f(1700)];
         l1[0].scene_cut = Some(true);
-        let got: Vec<u16> = parse(&rpu_bytes(&generator_config(&dji_fit(), &l1, 5).unwrap()).unwrap()).iter().map(|f| f.2).collect();
+        let got: Vec<u16> = parse(&rpu_bytes(&generator_config(&nbcu_fit(), &l1, 5).unwrap()).unwrap()).iter().map(|f| f.2).collect();
         assert_eq!(got, [1700, 1800, 1800, 1800, 1700]);
 
-        assert!(generator_config(&dji_fit(), &l1, 4).is_err());
+        assert!(generator_config(&nbcu_fit(), &l1, 4).is_err());
     }
 
     #[test]
