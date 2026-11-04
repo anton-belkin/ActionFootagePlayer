@@ -43,10 +43,10 @@
 --
 -- What a file starts in depends on the screen the window is on, HDR or SDR (macOS's EDR headroom, read once with
 -- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
--- SDR look last chosen (the maker's at first, NBCU's for a curve without one). Choosing a look (Ctrl+s, Ctrl+h, the
--- menu) makes it what files start in on that kind of screen, for the rest of the session; an SDR look chosen on
--- either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file not yet switched by hand follows its
--- window to a screen of the other kind.
+-- SDR look last chosen (at first Dolby Vision as macOS shows it with the app's mpv, mpv's tone mapping without it).
+-- Choosing a look (Ctrl+s, Ctrl+h, the menu) makes it what files start in on that kind of screen, for the rest of the
+-- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file not yet
+-- switched by hand follows its window to a screen of the other kind.
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
 --   Ctrl+s  sdr    the next look this file has: hdr, then the maker's and NBCU's SDR, mpv's tone mapping, Dolby Vision
@@ -68,7 +68,7 @@
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   hdr_screen=hdr    what log files start in on an HDR screen: hdr, maker, nbcu, tonemap or dv
---   sdr_screen=maker  and on an SDR screen
+--   sdr_screen=dv     and on an SDR screen (tonemap where mpv can't do dv)
 --   (mode=sdr, as before these: maker on both)
 --   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
 --                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
@@ -148,7 +148,9 @@ local function choice(v, default)
 end
 -- What log files start in on each kind of screen: dlogm.conf's, then the session's choices
 local old = o.mode == "sdr" and "maker" or nil
-local chosen = { hdr = choice(o.hdr_screen, old or "hdr"), sdr = choice(o.sdr_screen, old or "maker") }
+-- On an SDR screen at first: Dolby Vision as macOS shows it where mpv can present through macOS (the app's mpv), else
+-- mpv's tone mapping (Homebrew's mpv; on Windows the hdr look is that too, the screen's kind unknown there)
+local chosen = { hdr = choice(o.hdr_screen, old or "hdr"), sdr = choice(o.sdr_screen, old or (DV_OK and "dv" or "tonemap")) }
 local denoise = o.denoise
 local platform = mp.get_property("platform") or ""
 -- The screens' HDR headroom by name (macOS's EDR: above 1 where it shows HDR; false: one it didn't know), and the

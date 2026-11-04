@@ -90,10 +90,18 @@ colorist to decide what to keep and what to leave out of SDR's narrow range: a c
 for all of it, so the conversion becomes a technical one, the same for every clip, and can be automatic. That turns
 the "pro" mode into the one to use for everyday footage.
 
-On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in SDR instead: through the
-camera maker's own Rec.709 LUT (DJI's, for D-Log M) or, for a camera without one, NBCUniversal's neutral HDR → SDR
-conversion. `Ctrl+s` goes through them and HDR as macOS tones it down for that screen; on an HDR screen, the same
-`Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
+On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in HDR with Dolby Vision as macOS
+shows it: macOS tones the HDR down for that screen with trims fitted to DJI's Rec.709 LUT, the way QuickTime and
+Apple's devices show the export. `Ctrl+s` goes through it, the camera maker's own Rec.709 LUT (DJI's, for D-Log M),
+NBCUniversal's neutral HDR → SDR conversion and mpv's tone mapping; on an HDR screen, the same `Ctrl+s` shows how the
+SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
+
+macOS takes an external SDR monitor for 200 nits bright, and shows HDR on it about a stop darker than the standards'
+conversion to SDR (on the first one it's plugged in, that is; the second gets no value and shows lighter). The side
+panel's **SDR on macOS** sets how bright it takes them to be: for a lit room (HDR as NBCU's conversion shows it), by
+the MacBook's light sensor, or by hand. It's for every app, QuickTime and Safari too, and set again whenever a monitor
+is plugged in; the built-in display and HDR screens are left alone. The first time HDR plays on such a monitor, the
+player offers it.
 
 ## Help it work with your camera
 
