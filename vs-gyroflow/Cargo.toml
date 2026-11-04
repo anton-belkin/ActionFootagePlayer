@@ -33,6 +33,10 @@ bytemuck = { version = "1", features = ["derive"] }
 libc = "0.2"
 # The trail on a sphere (src/sphere.rs); the same nalgebra as gyroflow-core
 nalgebra = "0.34"
+# afp-rpu: Dolby Vision RPUs for a look (src/dovi.rs), the library dovi_tool is built on (MIT). Pinned: the version
+# dovi_tool 2.3.4 has, whose output tools/make_dv_rpu.sh compares with. Only afp-rpu uses it, the others don't link it
+dolby_vision = { version = "=3.4.0", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 debug = 1

@@ -1,0 +1,12 @@
+# The mpv the macOS app carries, built by tools/build_mpv.sh (sourced by it, read by tools/bundle_runtime.py for the
+# app's ThirdParty/SOURCES.txt, and hashed into the release workflow's cache key). KEY=value lines only.
+#
+# mpv: upstream master at a pinned commit, with the app's patches in tools/mpv-patches/ on top (presentation through
+# AVSampleBufferDisplayLayer with Dolby Vision RPUs: --macos-sample-buffer-layer, --macos-dovi-rpu-file), written on
+# the branch offered to mpv as a pull request. libplacebo: mpv master needs 7.387 or later, newer than Homebrew's was, so it's
+# built with mpv as a meson subproject and linked in statically.
+MPV_REPO=https://github.com/mpv-player/mpv
+MPV_COMMIT=fba63421a8de9454788d64adaa1fd0ae79795112
+LIBPLACEBO_REPO=https://code.videolan.org/videolan/libplacebo.git
+LIBPLACEBO_TAG=v7.387.0
+LIBPLACEBO_COMMIT=275f7dea27924cdd34ab2e6c20e448b6bc4fab65

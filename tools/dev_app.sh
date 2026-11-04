@@ -1,13 +1,14 @@
 #!/bin/bash
 # tools/dev_app.sh [--no-install]: ActionFootagePlayer.app built from this folder the way the release builds it
-# (tools/make_release.sh with BUNDLE_RUNTIME: with its own mpv, ffmpeg, Python and VapourSynth, Homebrew's), and put
-# in ~/Applications in place of the one there, which is kept as build/ActionFootagePlayer-previous.app. For trying a
+# (tools/make_release.sh with BUNDLE_RUNTIME: with its own mpv, tools/build_mpv.sh's, and ffmpeg, Python and
+# VapourSynth, Homebrew's), and put in ~/Applications in place of the one there, which is kept as build/ActionFootagePlayer-previous.app. For trying a
 # branch or a fix without waiting for GitHub: a few minutes, most of it the first cargo build. Uncommitted changes
 # are built too. mpv's own config (~/.config/mpv) isn't touched: the app doesn't read it.
 #
 # The version is the tag's when HEAD is one (0.6.2), else <the last tag>-dev.<commits since>+<commit>, with .dirty
-# for uncommitted changes. The mpv, ffmpeg and VapourSynth in it are this Mac's Homebrew ones: `brew upgrade mpv
-# ffmpeg` first to have what the release would (its build gets the latest).
+# for uncommitted changes. Its mpv is tools/build_mpv.sh's (build/mpv-afp/out/mpv), as the release's, when it's been
+# built, else this Mac's Homebrew one; MPV_BIN names another. ffmpeg, VapourSynth and what mpv links are this Mac's
+# Homebrew ones: `brew upgrade ffmpeg` first to have what the release would (its build gets the latest).
 #
 #   --no-install   only build/ActionFootagePlayer.app
 # APPS_DIR and SERVICES_DIR override where it installs (default ~/Applications and ~/Library/Services); elsewhere
@@ -34,9 +35,17 @@ INSTALL_NAME_TOOL=$(xcrun -f install_name_tool 2>/dev/null || echo /usr/bin/inst
 [ "$(uname -s)" = Darwin ] || { echo "tools/dev_app.sh builds the Mac app; elsewhere, see install.sh" >&2; exit 1; }
 command -v brew >/dev/null || { echo "Missing Homebrew (https://brew.sh): the app carries its mpv and ffmpeg" >&2; exit 1; }
 prefix=$(brew --prefix)
-for formula in mpv ffmpeg; do
-    [ -x "$prefix/bin/$formula" ] || { echo "Missing $formula: brew install mpv ffmpeg" >&2; exit 1; }
-done
+[ -x "$prefix/bin/ffmpeg" ] || { echo "Missing ffmpeg: brew install ffmpeg" >&2; exit 1; }
+# The release's mpv (tools/build_mpv.sh) when it's built, else Homebrew's
+if [ -z "${MPV_BIN:-}" ] && [ -x build/mpv-afp/out/mpv ]; then
+    MPV_BIN=build/mpv-afp/out/mpv
+fi
+if [ -n "${MPV_BIN:-}" ]; then
+    export MPV_BIN
+else
+    [ -x "$prefix/bin/mpv" ] || { echo "Missing mpv: tools/build_mpv.sh (the release's), or brew install mpv" >&2; exit 1; }
+    echo "Note: Homebrew's mpv, not the release's (tools/build_mpv.sh builds it)" >&2
+fi
 # Homebrew's rustup is keg-only: its cargo isn't in PATH by itself
 command -v cargo >/dev/null || [ ! -x "$prefix/opt/rustup/bin/cargo" ] || PATH="$prefix/opt/rustup/bin:$PATH"
 command -v cargo >/dev/null || { echo "Missing cargo (https://rustup.rs, or brew install rustup)" >&2; exit 1; }
@@ -56,7 +65,7 @@ echo "== Gyroflow plugin"
 bin="$BUILD/dev-bin"
 rm -rf "$bin"
 mkdir -p "$bin"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "vs-gyroflow/target/release/$f" "$bin/$f"
     "$STRIP" -x "$bin/$f"
 done
@@ -65,7 +74,9 @@ for f in "$bin/"*; do
     /usr/bin/codesign --force -s - "$f"
 done
 
-echo "== The app, with Homebrew's mpv and ffmpeg in it"
+mpv_from="Homebrew's mpv"
+[ -z "${MPV_BIN:-}" ] || mpv_from="$MPV_BIN"
+echo "== The app, with $mpv_from and Homebrew's ffmpeg in it"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$BUILD/dlogm_hlg.glsl"
 app="$BUILD/ActionFootagePlayer.app"
 rm -rf "$app"

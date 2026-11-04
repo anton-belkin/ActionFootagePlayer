@@ -33,6 +33,8 @@ local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge sp
 -- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
 local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
 local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
+local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
+local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
@@ -47,13 +49,15 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
-    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR" },
+    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR, mpv's tone mapping, Dolby Vision" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
     { "script-binding dlogm/denoise", "Noise reduction on / off" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
+    { "script-binding gyroflow/still", "Clean still frame on / off" },
+    { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
@@ -140,7 +144,8 @@ local function look_title(d, look)
     if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
     if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
     if look == "nbcu" then return "SDR, NBCU (neutral)" end
-    if look == "tonemap" then return "SDR, tone-mapped by mpv" end
+    if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
+    if look == "dv" then return d.log and "HDR + Dolby Vision (DJI fit), as macOS shows it" or "With its Dolby Vision, as macOS shows it" end
     return look
 end
 
@@ -229,7 +234,8 @@ local function stabilization_menu(g, key)
     }
 end
 
--- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, and whether it asks
+-- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, the paused frame's,
+-- how often the sphere trail is written, the color fringes (as in Lens), and whether it asks
 local function quality_menu(g)
     local items = {}
     for _, r in ipairs(FRAME_RATES) do
@@ -239,6 +245,20 @@ local function quality_menu(g)
     for _, r in ipairs(RESOLUTIONS) do
         table.insert(items, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
     end
+    local paused = {}
+    for _, r in ipairs(PAUSED_SIZES) do
+        table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
+    end
+    table.insert(items, submenu("Paused frame", paused))
+    table.insert(items, SEPARATOR)
+    local fill = {}
+    for _, r in ipairs(FILL_RATES) do
+        table.insert(fill, item(r[2], "script-message-to gyroflow quality edge_fill_rate " .. r[1], { checked = tostring(g.edge_fill_rate or "auto") == r[1] }))
+    end
+    -- Only the sphere trail is written apart from the frames
+    table.insert(items, submenu("Edge fill rate", fill, { disabled = g.edges ~= "sphere" }))
+    table.insert(items, item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
+                             { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no" }))
     table.insert(items, SEPARATOR)
     table.insert(items, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
                              { checked = g.ask_when_slow ~= false }))
