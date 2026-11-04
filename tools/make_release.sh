@@ -1,10 +1,11 @@
 #!/bin/bash
 # tools/make_release.sh <version>: into dist/
-#   ActionFootagePlayer-<version>-macos-arm64.zip             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh):
-#                                                       unzipped into Applications, its setup downloads DJI's LUT.
-#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too:
-#                                                       MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
+#   ActionFootagePlayer-<version>-macos-arm64.dmg             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh),
+#                                                       next to a link to Applications to drag it onto; its setup
+#                                                       downloads DJI's LUT. With BUNDLE_RUNTIME, with mpv and ffmpeg
+#                                                       in it too: MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
 #                                                       tools/build_mpv.sh, when it's there), else Homebrew's
+#   ActionFootagePlayer-<version>-macos-arm64.zip             the same app, zipped: unzipped into Applications
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
@@ -59,13 +60,21 @@ tar -C dist -czf "dist/$name.tar.gz" "$name"
 
 # Built from the tarball's tree, which is HEAD's
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "dist/dlogm_hlg.glsl"
-# The zip has the tarball's name: the app is built in a folder of its own, not in dist/$name
+# The zip and the disk image have the tarball's name: the app is built in a folder of its own, not in dist/$name
 app="ActionFootagePlayer-$version-macos-arm64"
 stage="dist/app-$version"
-rm -rf "$stage" "dist/$app.zip"
+rm -rf "$stage" "dist/$app.zip" "dist/$app.dmg"
 mkdir -p "$stage"
 tools/make_app.sh "$stage/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
 ditto -c -k --keepParent "$stage/ActionFootagePlayer.app" "dist/$app.zip"
+# The disk image: the app and a link to Applications, compressed with LZFSE. hdiutil sometimes finds its device
+# still busy on GitHub's runners: tried again then
+ln -s /Applications "$stage/Applications"
+for try in 1 2 3; do
+    hdiutil create -quiet -volname "ActionFootagePlayer $version" -srcfolder "$stage" -format ULFO -ov "dist/$app.dmg" && break
+    [ "$try" = 3 ] && exit 1
+    sleep 5
+done
 rm -rf "$stage"
 
 gyroflow="mpv-gyroflow-$version-macos-arm64"
@@ -134,6 +143,6 @@ git archive HEAD mpv/scripts/side-panel | tar -x --strip-components 2 -C "dist/$
 (cd "dist/$panel" && zip -qr "../$panel.zip" side-panel)
 rm -rf "dist/$panel"
 
-(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+(cd dist && shasum -a 256 "$app.dmg" "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.dmg" "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS

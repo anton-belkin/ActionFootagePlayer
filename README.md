@@ -63,9 +63,9 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
 
 1. **On the camera:** set the color mode to **D-Log M**. Under water, turn **EIS off**: the camera then records the
    motion data the stabilization uses.
-2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.zip` from the
-   [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move it to
-   Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
+2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.dmg` from the
+   [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), open it and drag the app
+   onto Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
@@ -148,7 +148,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.dmg`: the app, with all the plugins and their menu, mpv and ffmpeg in it (or the same app as `-macos-arm64.zip`) |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
 | a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
@@ -159,7 +159,8 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
 oldest macOS those builds are made for.
 
-Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
+Open the disk image, drag ActionFootagePlayer onto Applications and open it from there (from the zip: unzip it and
+move it to Applications). It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
 it opens, it offers its setup:
 
