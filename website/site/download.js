@@ -1,12 +1,15 @@
 /* The download page: the links in the HTML go to the latest release on GitHub, which works without this script.
-   With it, the latest release is read from GitHub's API (kept for an hour, so a visitor makes one request), and
-   each link goes straight to its file, with the file's name, size and SHA-256, the version and the date filled in.
-   The files are found by their names' pattern, which has the version in it. Also marks the visitor's system. */
+   With it, the latest release is read from latest.json, which the website's deploy writes from GitHub's API and
+   every release deploys again (where there's none, as in a local preview: from GitHub's API itself, kept for 5
+   minutes), and each link goes straight to its file, with the file's name, size and SHA-256, the version and the date
+   filled in. The files are found by their names' pattern, which has the version in it. Also marks the visitor's
+   system. */
 (function () {
   "use strict";
+  var LATEST = "/latest.json";
   var API = "https://api.github.com/repos/anton-belkin/ActionFootagePlayer/releases/latest";
   var CACHE = "afp-latest-release";
-  var MAX_AGE = 60 * 60 * 1000;
+  var MAX_AGE = 5 * 60 * 1000;
 
   // The few words this script writes, in the page's language (fr/, ru/ and zh/ use this same file)
   var LANGS = {
@@ -18,8 +21,9 @@
   var LANG = LANGS[document.documentElement.lang] ? document.documentElement.lang : "en";
   var WORDS = LANGS[LANG];
 
+  // A list is tried in its order: the Mac's disk image, or the zip of a release from before it
   var ASSETS = {
-    "mac-app": /^ActionFootagePlayer-.+-macos-arm64\.zip$/,
+    "mac-app": [/^ActionFootagePlayer-.+-macos-arm64\.dmg$/, /^ActionFootagePlayer-.+-macos-arm64\.zip$/],
     "windows-app": /^ActionFootagePlayer-.+-windows-x86_64-setup\.exe$/,
     "windows-arm-app": /^ActionFootagePlayer-.+-windows-arm64-setup\.exe$/,
     "source": /^ActionFootagePlayer-.+-macos-arm64\.tar\.gz$/,
@@ -119,8 +123,11 @@
 
     var assets = release.assets || [];
     document.querySelectorAll("[data-asset]").forEach(function (link) {
-      var pattern = ASSETS[link.getAttribute("data-asset")];
-      var asset = pattern && assets.filter(function (a) { return pattern.test(a.name); })[0];
+      var asset = null;
+      [].concat(ASSETS[link.getAttribute("data-asset")] || []).some(function (pattern) {
+        asset = assets.filter(function (a) { return pattern.test(a.name); })[0];
+        return asset;
+      });
       if (!asset || !/^https:\/\/github\.com\//.test(asset.browser_download_url)) return;
       link.href = asset.browser_download_url;
       // The file's own block: its card (with the install steps), or the note it's in
@@ -138,10 +145,11 @@
     });
   }
 
+  // The release kept from the last visit, and whether it's recent enough not to ask GitHub again
   function cached() {
     try {
       var c = JSON.parse(localStorage.getItem(CACHE));
-      if (c && Date.now() - c.at < MAX_AGE) return c.release;
+      if (c && c.release) return { release: c.release, fresh: Date.now() - c.at < MAX_AGE };
     } catch (e) { /* no storage: fetched each time */ }
     return null;
   }
@@ -158,12 +166,23 @@
     };
   }
 
+  // From GitHub's API: an older kept release fills the page at once, and stays if GitHub doesn't answer (60 requests
+  // an hour per address)
+  function fromGitHub() {
+    var kept = cached();
+    if (kept) fill(kept.release);
+    if (kept && kept.fresh) return;
+    fetch(API, { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (r) { r = slim(r); keep(r); fill(r); })
+      .catch(function () { /* what's kept, or the links to the latest release, stay */ });
+  }
+
   markSystem();
-  var release = cached();
-  if (release) { fill(release); return; }
   if (!window.fetch) return;
-  fetch(API, { headers: { Accept: "application/vnd.github+json" } })
+  // Asked again each time (the site's files are revalidated anyway): it changes with each release
+  fetch(LATEST, { cache: "no-cache" })
     .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(function (r) { r = slim(r); keep(r); fill(r); })
-    .catch(function () { /* the links to the latest release stay */ });
+    .then(function (r) { if (!r.tag_name) throw new Error("no release"); fill(slim(r)); })
+    .catch(fromGitHub);
 })();
