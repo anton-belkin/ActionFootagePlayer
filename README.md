@@ -91,7 +91,7 @@ for all of it, so the conversion becomes a technical one, the same for every cli
 the "pro" mode into the one to use for everyday footage.
 
 On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in HLG with Dolby Vision as macOS
-shows it (*HDR, HLG+DV*): macOS tones the HDR down for that screen with trims fitted to DJI's Rec.709 LUT, the way
+shows it (*HDR, HLG+DV*): macOS tones the HDR down for that screen with trims fitted to NBCUniversal's HLG → SDR conversion (no scene-level offsets, so an HDR screen still gets HDR), the way
 QuickTime and Apple's devices show the export, and shows it in HDR on an HDR screen. `Ctrl+s` goes through the video
 outputs: *HDR, HLG* (macOS tones it down on an SDR screen), *HDR, HLG+DV*, *SDR, HLG+DV* (toned down by the trims on
 an HDR screen too: what an SDR screen shows), mpv's tone mapping, NBCUniversal's neutral HDR → SDR conversion and
@@ -902,7 +902,7 @@ shaders of your own, so mpv undoes them when a playlist moves on to a clip that 
 
 Which one a clip starts in depends on the screen its window is on: macOS's EDR headroom (`NSScreen`'s
 `maximumPotentialExtendedDynamicRangeColorComponentValue`, asked once with `osascript`), above 1 on a screen that
-shows HDR. A clip not yet switched by hand follows its window to a screen of the other kind. On Windows and Linux
+shows HDR. A clip keeps its look when its window goes to a screen of the other kind. On Windows and Linux
 every screen counts as HDR, as before.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in

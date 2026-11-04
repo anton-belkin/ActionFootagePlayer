@@ -3,7 +3,7 @@
 // `afp-rpu --look <look.json> [--l1 <min,avg,max | l1.json>] [--frames N] -o <out.rpu>`: Dolby Vision profile 8.4
 // RPUs for a look (src/dovi.rs), one per frame, in the .rpu file the player (--macos-dovi-rpu-file) and
 // gyroflow-export (--dv-rpu) read. What `dovi_tool generate -p 8.4` writes for DV Lab's config, without dovi_tool.
-//   --look     a look as DV Lab saves it (mpv/scripts/dlogm/dv/dji_fit.json)
+//   --look     a look as DV Lab saves it (mpv/scripts/dlogm/dv/nbcu_fit.json)
 //   --l1       the frames' L1 in 12-bit PQ codes: one for all of them (default 12,1750,2700, dovi.rs's DEFAULT_L1), or
 //              a JSON array with one {"min_pq", "avg_pq", "max_pq"} per frame, "scene_cut": true where a shot starts
 //   --frames   how many RPUs: default 1 with a constant L1 (one RPU stands for every frame), the file's length with

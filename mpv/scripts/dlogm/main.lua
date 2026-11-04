@@ -28,7 +28,7 @@
 --   tonemap  the hdr look's HLG tone-mapped to SDR by mpv itself (libplacebo, reference white at SDR white as
 --          BT.2408 has it), not by macOS: as the hdr look shows on an SDR screen on Windows.
 --   dv     the hdr look's HLG shown by macOS's own video layer (--macos-sample-buffer-layer, the app's mpv) with a
---          Dolby Vision RPU on each frame (dv/dji_fit.rpu: trims fitted to DJI's LUT), so macOS's Dolby Vision display
+--          Dolby Vision RPU on each frame (dv/nbcu_fit.rpu: trims fitted to NBCU's conversion), so macOS's Dolby Vision display
 --          management maps it for the screen, as QuickTime and Apple devices show an export carrying that RPU: on an
 --          HDR screen in HDR (EDR), on an SDR one by the RPU's trims for SDR. Only where mpv has the option (macOS, the
 --          app's mpv).
@@ -48,8 +48,8 @@
 -- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
 -- SDR look last chosen (at first Dolby Vision as macOS shows it with the app's mpv, mpv's tone mapping without it).
 -- Choosing a look (Ctrl+s, Ctrl+h, the menu) makes it what files start in on that kind of screen, for the rest of the
--- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file not yet
--- switched by hand follows its window to a screen of the other kind.
+-- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file keeps
+-- its look when its window goes to a screen of the other kind.
 --
 -- Keys (rebind with `<key> script-binding dlogm/<name>` in input.conf):
 --   Ctrl+s  sdr    the next look this file has: hdr, Dolby Vision in HDR and in SDR, mpv's tone mapping, NBCU's and the
@@ -67,7 +67,7 @@
 --   dv-trim <name> <0..4095>  one of the dv look's trims (slope, offset, power, midContrast, clipTrim, saturation,
 --                     chromaWeight, l3Min, l3Avg, l3Max; 2048 neutral): the look is kept in $DLOGM_DATA/dv (else
 --                     ~~/dlogm-dv) and its RPU made by afp-rpu; the dv look and its exports use it
---   dv-reset          back to the shipped trims (DJI fit)
+--   dv-reset          back to the shipped trims (NBCU fit)
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
 -- ""), curve (the one applied, or ""), look (hdr, dv, dvsdr, tonemap, nbcu, maker, off, or "" when untouched), looks (the ones
 -- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), maker_lut (which LUT that is and where it's
@@ -118,10 +118,10 @@ local CURVES = {
 local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl" }
 -- The noise reduction's shader
 local DENOISE = "shaders/denoise.glsl"
--- The dv look's Dolby Vision RPU (made by afp-rpu from dv/dji_fit.json, tools/make_dv_rpu.sh) and its name
-local DV_RPU = "dv/dji_fit.rpu"
-local DV_LOOK = "dv/dji_fit.json"
-local DV_NAME = "DJI fit"
+-- The dv look's Dolby Vision RPU (made by afp-rpu from dv/nbcu_fit.json, tools/make_dv_rpu.sh) and its name
+local DV_RPU = "dv/nbcu_fit.rpu"
+local DV_LOOK = "dv/nbcu_fit.json"
+local DV_NAME = "NBCU fit"
 -- The user's own trims, when changed (dv-trim): the look as JSON and its RPU, made by afp-rpu (the gyroflow plugin's,
 -- beside this one), in two files taken in turn so mpv sees a new one each time
 local DV_USER = (DATA and DATA ~= "") and utils.join_path(DATA, "dv") or mp.command_native({ "expand-path", "~~/dlogm-dv" })
@@ -316,7 +316,7 @@ local function resolve(want)
     return "hdr"
 end
 
--- The dv look's trims: the shipped look (DJI fit), or the user's, read once
+-- The dv look's trims: the shipped look (NBCU fit), or the user's, read once
 local dv_look, dv_user_rpu = nil, nil
 local function read_json(path)
     local f = path and io.open(path, "r")
@@ -717,8 +717,8 @@ local function next_curve()
     if apply(m) then mp.osd_message(label(m), 2) end
 end
 
--- A file not switched by hand follows its window to a screen of the other kind; a screen macOS hasn't been asked
--- about yet (just connected) is asked about first
+-- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
+-- screen macOS hasn't been asked about yet (just connected) is asked about first
 local function follow_screen()
     if not screens then return end
     local name = window_screen()
@@ -726,14 +726,9 @@ local function follow_screen()
         screens[name] = false
         return ask_screens(follow_screen)
     end
-    if not base or not current or touched or screen() == shown_for then return end
-    local m = resolve(chosen[screen()])
-    if m ~= current and apply(m) then
-        mp.osd_message(label(m), 2)
-    else
-        shown_for = screen()
-        publish()
-    end
+    if not base or screen() == shown_for then return end
+    shown_for = screen()
+    publish()
 end
 mp.observe_property("display-names", "native", follow_screen)
 
@@ -866,7 +861,7 @@ mp.register_script_message("dv-trim", function(key, value)
     dv_timer = mp.add_timeout(0.12, make_dv_rpu)
 end)
 
--- Back to the shipped trims (DJI fit)
+-- Back to the shipped trims (NBCU fit)
 mp.register_script_message("dv-reset", function()
     for _, n in ipairs({ "look.json", "look.a.rpu", "look.b.rpu", "look.tmp.json" }) do
         os.remove(utils.join_path(DV_USER, n))

@@ -149,8 +149,8 @@ local function look_title(d, look)
     if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
     if look == "nbcu" then return "SDR, NBCU (neutral)" end
     if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
-    if look == "dv" then return d.log and "HDR, HLG+DV (DJI fit)" or "HDR, with its Dolby Vision" end
-    if look == "dvsdr" then return d.log and "SDR, HLG+DV (DJI fit)" or "SDR, with its Dolby Vision" end
+    if look == "dv" then return d.log and "HDR, HLG+DV (NBCU fit)" or "HDR, with its Dolby Vision" end
+    if look == "dvsdr" then return d.log and "SDR, HLG+DV (NBCU fit)" or "SDR, with its Dolby Vision" end
     return look
 end
 

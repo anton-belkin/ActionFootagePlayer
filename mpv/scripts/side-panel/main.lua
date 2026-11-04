@@ -262,13 +262,13 @@ local function look_note(d, look)
         if d.dv_own then return "HDR with the file's own Dolby Vision metadata: macOS tones it down by them, as Apple's devices do" end
         return "HLG with Dolby Vision metadata, shown by macOS: in HDR on an HDR screen, toned down by the metadata's trims "
             .. "on an SDR one, as QuickTime and Apple's devices show the export. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
-            or "They're picked by Action Footage Player's author to taste, fitted to DJI's LUT, and can be changed in Dolby Vision.")
+            or "They're picked by Action Footage Player's author, fitted to NBCU's HLG to SDR conversion, and can be changed in Dolby Vision.")
     end
     if look == "dvsdr" then
         if d.dv_own then return "The file's own Dolby Vision, toned down to SDR by macOS on any screen, as an SDR screen shows it" end
         return "The same HLG + Dolby Vision, always toned down to SDR by macOS with the trims, on an HDR screen too: "
             .. "what an SDR screen shows. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
-            or "The trims are the author's, fitted to DJI's LUT, and can be changed in Dolby Vision.")
+            or "The trims are the author's, fitted to NBCU's conversion, and can be changed in Dolby Vision.")
     end
     if look == "tonemap" then return "mpv tones the HDR down to SDR itself, its reference white at SDR white (BT.2408): the same on every system and screen" end
     if look == "nbcu" then return "NBCUniversal's HLG to SDR conversion (LUT v1.2): neutral, the same for every camera" end
@@ -299,7 +299,8 @@ local function dv_part(u, x, w, y)
     if not d or not d.dv_trims then return u:caption(x, w, y, "Needs the dlogm plugin and the app's mpv") end
     if d.dv_own then return u:caption(x, w, y, "This file has its own Dolby Vision: the trims here are for log clips") end
     y = u:caption(x, w, y, "The metadata macOS tones HLG+DV down to SDR by. The author's are picked to taste, "
-                  .. "fitted to DJI's LUT; exports take what's set here", { color = C.label })
+                  .. "fitted to NBCU's conversion; exports take what's set here", { color = C.label })
+    y = u:caption(x, w, y + 4 * s, "Extreme values of some, the scene levels most, change the picture on an HDR screen too")
     if d.look ~= "dv" and d.look ~= "dvsdr" then
         local has = {}
         for _, l in ipairs(d.looks or {}) do has[l] = true end

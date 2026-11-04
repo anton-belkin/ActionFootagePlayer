@@ -82,7 +82,7 @@ install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
 mkdir -p "$dlogm/dv"
-install -m 644 mpv/scripts/dlogm/dv/dji_fit.json mpv/scripts/dlogm/dv/dji_fit.rpu "$dlogm/dv/"
+install -m 644 mpv/scripts/dlogm/dv/nbcu_fit.json mpv/scripts/dlogm/dv/nbcu_fit.rpu "$dlogm/dv/"
 # The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
 # for gyroflow-export
 for curve in dlog gplog2 ilog; do
