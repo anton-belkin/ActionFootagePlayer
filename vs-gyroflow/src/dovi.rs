@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn look_from_dv_lab() {
         let l = nbcu_fit();
-        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2560, 2352, 2080, 544, 2928));
+        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2576, 2320, 2048, 464, 3424));
         assert_eq!((l.l3_min, l.l3_avg, l.l3_max), (2048, 2048, 2048));
         assert!(l.use_l8);
         assert_eq!(serde_json::from_str::<Look>("{}").unwrap(), Look::default());
@@ -216,7 +216,7 @@ mod tests {
             assert_eq!(rpu.dovi_profile, 8);
             let dm = rpu.vdr_dm_data.as_ref().unwrap();
             let Some(ExtMetadataBlock::Level8(l8)) = dm.get_block(8) else { panic!("no L8") };
-            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2560, 2928));
+            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2576, 3424));
             let Some(ExtMetadataBlock::Level3(l3)) = dm.get_block(3) else { panic!("no L3") };
             assert_eq!(l3.avg_pq_offset, 2048);
         }

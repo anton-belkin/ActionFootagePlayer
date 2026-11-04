@@ -79,6 +79,8 @@
 --   hdr_screen=hdr    what log files start in on an HDR screen: hdr, dv, dvsdr, tonemap, nbcu or maker
 --   sdr_screen=dv     and on an SDR screen (tonemap where mpv can't do dv)
 --   (mode=sdr, as before these: maker on both)
+--   dv_live_l1=yes   the dv looks write each frame's own L1 into the RPU (--macos-dovi-live-l1: measured as it's shown),
+--                    instead of the RPU file's fixed one; no for the fixed one
 --   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
 --                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
 --
@@ -96,7 +98,7 @@ local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
 local video_color = require 'video_color'
 
-local o = { mode = "", hdr_screen = "", sdr_screen = "", denoise = false }
+local o = { mode = "", hdr_screen = "", sdr_screen = "", denoise = false, dv_live_l1 = true }
 options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
@@ -148,6 +150,9 @@ end
 -- And whether the layer shows HDR with the display's headroom or toned down to SDR (dvsdr)
 local DV_EDR = DV_OK and mp.get_property("option-info/macos-sample-buffer-edr/name") ~= nil
 if DV_EDR then table.insert(TARGET_OPTIONS, "macos-sample-buffer-edr") end
+-- And whether each frame's L1 is measured and written into the RPU file's (the app's mpv, tools/mpv-patches/0007)
+local DV_LIVE = DV_OK and mp.get_property("option-info/macos-dovi-live-l1/name") ~= nil
+if DV_LIVE then table.insert(TARGET_OPTIONS, "macos-dovi-live-l1") end
 -- The filter that tags the video as what the look's shaders turn it into, at the end of the chain (after the
 -- stabilization); disabled when the file's own tags are right
 local TAG_LABEL = "dlogm"
@@ -422,11 +427,12 @@ local function hdr_target(target, trc, prim)
 end
 
 -- The dv looks: macOS's video layer presents, with `rpu` on the frames (nil: the file's own), in HDR where the screen
--- has it (dv) or toned down to SDR (dvsdr)
+-- has it (dv) or toned down to SDR (dvsdr); our RPU with each frame's own L1 (dv_live_l1), a file's own as it is
 local function dv_target(target, rpu, m)
     target["macos-sample-buffer-layer"] = "yes"
     target["macos-dovi-rpu-file"] = rpu or ""
     if DV_EDR then target["macos-sample-buffer-edr"] = m == "dvsdr" and "no" or "yes" end
+    if DV_LIVE then target["macos-dovi-live-l1"] = (rpu and o.dv_live_l1) and "yes" or "no" end
 end
 
 -- tonemap: SDR as mpv makes it, the display left in SDR
