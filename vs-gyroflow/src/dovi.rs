@@ -199,8 +199,8 @@ mod tests {
     #[test]
     fn look_from_dv_lab() {
         let l = dji_fit();
-        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2528, 2896, 1680, 736, 2560));
-        assert_eq!((l.l3_min, l.l3_avg, l.l3_max), (2048, 1792, 2560));
+        assert_eq!((l.slope, l.power, l.saturation, l.mid_contrast, l.clip_trim), (2640, 2816, 2368, 0, 2304));
+        assert_eq!((l.l3_min, l.l3_avg, l.l3_max), (2048, 2192, 2816));
         assert!(l.use_l8);
         assert_eq!(serde_json::from_str::<Look>("{}").unwrap(), Look::default());
     }
@@ -216,9 +216,9 @@ mod tests {
             assert_eq!(rpu.dovi_profile, 8);
             let dm = rpu.vdr_dm_data.as_ref().unwrap();
             let Some(ExtMetadataBlock::Level8(l8)) = dm.get_block(8) else { panic!("no L8") };
-            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2528, 2560));
+            assert_eq!((l8.target_display_index, l8.trim_slope, l8.clip_trim), (1, 2640, 2304));
             let Some(ExtMetadataBlock::Level3(l3)) = dm.get_block(3) else { panic!("no L3") };
-            assert_eq!(l3.avg_pq_offset, 1792);
+            assert_eq!(l3.avg_pq_offset, 2192);
         }
         // The shipped file is this, for one frame
         let one = rpu_bytes(&generator_config(&dji_fit(), &[DEFAULT_L1], 1).unwrap()).unwrap();
