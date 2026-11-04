@@ -1,0 +1,602 @@
+From 6d9bcacae6e1cc0fdcc9fd8ad95f0e98666fc6b5 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 19:29:16 +0100
+Subject: [PATCH] mac/vulkan: measure each frame for its Dolby Vision L1
+
+With --macos-dovi-live-l1, each frame the sample buffer layer presents
+is measured on the GPU (a Metal kernel over the buffer macOS gets,
+inside the video's rectangle): the lowest, average and highest
+max(R,G,B) in PQ, HLG taken to PQ for a 1000-nit display as a profile
+8.4 RPU maps it. That goes into the L1 of the RPU --macos-dovi-rpu-file
+gives the frame (clamped as dovi_tool's generator clamps L1, the CRC
+written anew), so macOS's display management maps each frame for what
+is in it instead of for the file's fixed values.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../macos-sample-buffer-layer.txt             |   2 +-
+ DOCS/man/options.rst                          |   8 +
+ meson.build                                   |   3 +-
+ osdep/mac/app_bridge.h                        |   1 +
+ osdep/mac/app_bridge.m                        |   1 +
+ video/out/gpu/context.h                       |   1 +
+ video/out/mac/common.swift                    |   3 +-
+ video/out/mac/dovi_l1.c                       | 137 ++++++++++++
+ video/out/mac/dovi_l1.h                       |  31 +++
+ video/out/mac/sample_buffer.h                 |   5 +
+ video/out/mac/sample_buffer.m                 | 199 +++++++++++++++++-
+ video/out/vo_gpu_next.c                       |   1 +
+ video/out/vulkan/context_mac.m                |   2 +
+ 13 files changed, 390 insertions(+), 4 deletions(-)
+ create mode 100644 video/out/mac/dovi_l1.c
+ create mode 100644 video/out/mac/dovi_l1.h
+
+diff --git a/DOCS/interface-changes/macos-sample-buffer-layer.txt b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+index 2cd77e6cb..d9852cb2b 100644
+--- a/DOCS/interface-changes/macos-sample-buffer-layer.txt
++++ b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+@@ -1,2 +1,2 @@
+-add `--macos-sample-buffer-layer` and `--macos-dovi-rpu-file`
++add `--macos-sample-buffer-layer`, `--macos-dovi-rpu-file` and `--macos-dovi-live-l1`
+ add `--macos-sample-buffer-edr` option
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index b9df28a97..7e0cce1c2 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7264,6 +7264,14 @@ them.
+     counts from the first), the last one with every frame after it; a file with one RPU applies to all.
+     Can be changed while playing.
+ 
++``--macos-dovi-live-l1=<yes|no>``
++    Measure each frame ``--macos-sample-buffer-layer`` presents and write what it found into the L1 of
++    the RPU from ``--macos-dovi-rpu-file`` (default: no): the lowest, average and highest max(R,G,B) of
++    the video's pixels in PQ (HLG taken to PQ for a 1000-nit display, as a profile 8.4 RPU maps it),
++    clamped as ``dovi_tool generate`` clamps L1. macOS's Dolby Vision display management then maps each
++    frame for what's in it instead of for the file's fixed values. Measured on the GPU, on the buffer
++    macOS gets; frames with their own RPU keep it. Can be changed while playing.
++
+ ``--macos-sample-buffer-edr=<yes|no>``
+     Whether ``--macos-sample-buffer-layer`` shows HDR frames with the display's extended dynamic range
+     (default: yes), or has macOS tone them down to SDR, as on an SDR display (with a Dolby Vision RPU,
+diff --git a/meson.build b/meson.build
+index 069aac575..285f19623 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1692,7 +1692,8 @@ if features['cocoa'] and features['vulkan'] and features['swift']
+     swift_sources += files('video/out/mac_common.swift',
+                            'video/out/mac/metal_layer.swift')
+     sources += files('video/out/vulkan/context_mac.m',
+-                     'video/out/mac/sample_buffer.m')
++                     'video/out/mac/sample_buffer.m',
++                     'video/out/mac/dovi_l1.c')
+     dependencies += dependency('appleframeworks', modules: ['AVFoundation', 'CoreMedia', 'CoreVideo', 'Metal'])
+ endif
+ 
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index f92aa6954..d91b1481b 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -97,6 +97,7 @@ struct macos_opts {
+     int macos_render_timer;
+     int macos_sample_buffer_layer;
+     char *macos_dovi_rpu_file;
++    bool macos_dovi_live_l1;
+     bool macos_sample_buffer_edr;
+     bool macos_menu_shortcuts;
+     char **macos_bundle_path;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index 0223207b6..30e388ae6 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -70,6 +70,7 @@ const struct m_sub_options macos_conf = {
+         {"macos-sample-buffer-layer", OPT_CHOICE(macos_sample_buffer_layer,
+             {"no", 0}, {"yes", 1})},
+         {"macos-dovi-rpu-file", OPT_STRING(macos_dovi_rpu_file), .flags = M_OPT_FILE},
++        {"macos-dovi-live-l1", OPT_BOOL(macos_dovi_live_l1)},
+         {"macos-sample-buffer-edr", OPT_BOOL(macos_sample_buffer_edr)},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+diff --git a/video/out/gpu/context.h b/video/out/gpu/context.h
+index b546e0073..bc812daac 100644
+--- a/video/out/gpu/context.h
++++ b/video/out/gpu/context.h
+@@ -76,6 +76,7 @@ struct ra_ext_submit {
+     double pts;                   // of the frame shown, in seconds (MP_NOPTS_VALUE if none)
+     double nominal_fps;           // its nominal frame rate (0 if unknown)
+     struct AVBufferRef *dovi_rpu; // its Dolby Vision RPU (the NAL payload, as libavcodec exports it), or NULL
++    struct pl_rect2d video;       // where the video is in the frame, in pixels (without borders and margins)
+ };
+ 
+ // These are a set of helpers for ra_ctx providers based on ra_gl.
+diff --git a/video/out/mac/common.swift b/video/out/mac/common.swift
+index dd7e7fac0..319934d47 100644
+--- a/video/out/mac/common.swift
++++ b/video/out/mac/common.swift
+@@ -681,7 +681,8 @@ class Common: NSObject {
+             case TypeHelper.toPointer(&option.macPtr.pointee.cocoa_cb_output_csp):
+                 updateICCProfile()
+             case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_layer),
+-                 TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file):
++                 TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file),
++                 TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_live_l1):
+                 // read by the Vulkan context on the VO thread; redrawn so a paused frame changes too
+                 flagEvents(VO_EVENT_EXPOSE)
+             case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_edr):
+diff --git a/video/out/mac/dovi_l1.c b/video/out/mac/dovi_l1.c
+new file mode 100644
+index 000000000..46e2ce4fa
+--- /dev/null
++++ b/video/out/mac/dovi_l1.c
+@@ -0,0 +1,137 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "dovi_l1.h"
++
++// An extension block starts byte-aligned with ext_block_length ue(v) and ext_block_level u(8): L1's length 5 is
++// ue "00110" and its level "00000001", 13 bits; then min_pq, max_pq, avg_pq (12 bits each) and 4 reserved zero bits.
++#define L1_HEADER      0x0601u
++#define L1_HEADER_BITS 13
++
++static unsigned get_bits(const uint8_t *b, size_t bit, int n)
++{
++    unsigned v = 0;
++    for (int i = 0; i < n; i++, bit++)
++        v = (v << 1) | ((b[bit >> 3] >> (7 - (bit & 7))) & 1);
++    return v;
++}
++
++static void put_bits(uint8_t *b, size_t bit, int n, unsigned v)
++{
++    for (int i = n - 1; i >= 0; i--, bit++) {
++        uint8_t mask = 1 << (7 - (bit & 7));
++        b[bit >> 3] = ((v >> i) & 1) ? (b[bit >> 3] | mask) : (b[bit >> 3] & ~mask);
++    }
++}
++
++// CRC-32/MPEG-2, as the RPU's rpu_data_crc32
++static uint32_t crc32_mpeg2(const uint8_t *b, size_t n)
++{
++    uint32_t crc = 0xffffffff;
++    for (size_t i = 0; i < n; i++) {
++        crc ^= (uint32_t)b[i] << 24;
++        for (int k = 0; k < 8; k++)
++            crc = (crc & 0x80000000) ? (crc << 1) ^ 0x04c11db7 : crc << 1;
++    }
++    return crc;
++}
++
++static int clamp(int v, int lo, int hi)
++{
++    return v < lo ? lo : v > hi ? hi : v;
++}
++
++size_t mp_dovi_rpu_set_l1(const uint8_t *rpu, size_t size, int min_pq, int avg_pq, int max_pq,
++                          uint8_t *out, size_t out_size)
++{
++    // prefix, at least an L1 block, CRC32, the 0x80 end
++    if (size < 12 || rpu[0] != 0x19 || out_size < size + size / 2 + 8)
++        return 0;
++
++    // Without the emulation prevention bytes (a 3 after two zeros)
++    uint8_t *raw = malloc(size);
++    if (!raw)
++        return 0;
++    size_t n = 0;
++    int zeros = 0;
++    for (size_t i = 0; i < size; i++) {
++        if (zeros >= 2 && rpu[i] == 3) {
++            zeros = 0;
++            continue;
++        }
++        raw[n++] = rpu[i];
++        zeros = rpu[i] ? 0 : zeros + 1;
++    }
++    if (n < 12 || raw[n - 1] != 0x80) {
++        free(raw);
++        return 0;
++    }
++    size_t crc_at = n - 5;
++    if (crc32_mpeg2(raw + 1, crc_at - 1) != ((uint32_t)raw[crc_at] << 24 | raw[crc_at + 1] << 16 |
++                                             raw[crc_at + 2] << 8 | raw[crc_at + 3]))
++    {
++        free(raw);
++        return 0;
++    }
++
++    // The L1 block: byte-aligned, its header and reserved bits as they must be and its values valid; the last such
++    // place before the CRC (the display management data comes after the reshaping curves, whose bits could look
++    // like one by chance)
++    size_t at = 0;
++    for (size_t byte = 1; (byte * 8) + L1_HEADER_BITS + 40 <= crc_at * 8; byte++) {
++        size_t bit = byte * 8;
++        if (get_bits(raw, bit, L1_HEADER_BITS) != L1_HEADER)
++            continue;
++        size_t p = bit + L1_HEADER_BITS;
++        unsigned mn = get_bits(raw, p, 12), mx = get_bits(raw, p + 12, 12), avg = get_bits(raw, p + 24, 12);
++        if (get_bits(raw, p + 36, 4) || mn > mx || avg > mx)
++            continue;
++        at = p;
++    }
++    if (!at) {
++        free(raw);
++        return 0;
++    }
++
++    max_pq = clamp(max_pq, 2081, 4095);
++    put_bits(raw, at, 12, clamp(min_pq, 0, 12));
++    put_bits(raw, at + 12, 12, max_pq);
++    put_bits(raw, at + 24, 12, clamp(avg_pq, 1229, max_pq - 1));
++    uint32_t crc = crc32_mpeg2(raw + 1, crc_at - 1);
++    raw[crc_at] = crc >> 24;
++    raw[crc_at + 1] = crc >> 16;
++    raw[crc_at + 2] = crc >> 8;
++    raw[crc_at + 3] = crc;
++
++    // Emulation prevention again: a 3 before any byte up to 3 that follows two zeros
++    size_t o = 0;
++    zeros = 0;
++    for (size_t i = 0; i < n; i++) {
++        if (zeros >= 2 && raw[i] <= 3) {
++            out[o++] = 3;
++            zeros = 0;
++        }
++        out[o++] = raw[i];
++        zeros = raw[i] ? 0 : zeros + 1;
++    }
++    free(raw);
++    return o;
++}
+diff --git a/video/out/mac/dovi_l1.h b/video/out/mac/dovi_l1.h
+new file mode 100644
+index 000000000..4e571f7a0
+--- /dev/null
++++ b/video/out/mac/dovi_l1.h
+@@ -0,0 +1,31 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include <stddef.h>
++#include <stdint.h>
++
++// A Dolby Vision RPU (the NAL payload from its 0x19 prefix on, emulation prevention bytes in it, as dovi_tool
++// writes them and libavcodec exports them) with its L1 replaced: the frame's min, average and max of max(R,G,B) in
++// 12-bit PQ codes, clamped as dovi_tool's generator clamps them (min at most 12, max at least 2081, the average from
++// 1229 to max - 1), and its CRC32 written anew.
++//
++// Writes the new RPU to `out` (`out_size` bytes, at least size + size / 2 + 8) and returns its length, or 0 when the
++// RPU has no L1 block (the first CM v2.9 extension block, where dovi_tool's generator puts it) or doesn't parse.
++size_t mp_dovi_rpu_set_l1(const uint8_t *rpu, size_t size, int min_pq, int avg_pq, int max_pq,
++                          uint8_t *out, size_t out_size);
+diff --git a/video/out/mac/sample_buffer.h b/video/out/mac/sample_buffer.h
+index ee0f788c5..4fa713e68 100644
+--- a/video/out/mac/sample_buffer.h
++++ b/video/out/mac/sample_buffer.h
+@@ -42,6 +42,11 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+ // Read again when the path changes.
+ void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *path);
+ 
++// Measure each frame (min, average and max of max(R,G,B) in PQ, inside the video) and write that as the L1 of the
++// RPU --macos-dovi-rpu-file gives it: the system's display management then maps each frame for what's in it. Frames
++// with their own RPU keep it as it is.
++void mac_sample_buffer_set_live_l1(struct mac_sample_buffer *sb, bool live);
++
+ // Whether creating or importing the buffers failed: the swapchain should take over
+ bool mac_sample_buffer_failed(struct mac_sample_buffer *sb);
+ 
+diff --git a/video/out/mac/sample_buffer.m b/video/out/mac/sample_buffer.m
+index eacb4109b..2f9bd113f 100644
+--- a/video/out/mac/sample_buffer.m
++++ b/video/out/mac/sample_buffer.m
+@@ -31,8 +31,78 @@
+ #include "mpv_talloc.h"
+ #include "video/out/gpu/context.h"
+ 
++#include "dovi_l1.h"
+ #include "sample_buffer.h"
+ 
++// --macos-dovi-live-l1: each frame's min, average and max of max(R,G,B) in 12-bit PQ codes, measured on the buffer
++// the layer gets (what macOS's display management sees), inside the video's rectangle. HLG is taken to display light
++// for 1000 nits by BT.2100's OOTF (system gamma 1.2), as the profile 8.4 RPU maps it to PQ; PQ is measured as it is.
++// Each 16x16 threadgroup writes its part; the CPU adds them up.
++static const char *const l1_kernel =
++    "#include <metal_stdlib>\n"
++    "using namespace metal;\n"
++    "struct l1_params { uint x0, y0, x1, y1, hlg; };\n"
++    "struct l1_part { float sum; uint count; float lo; float hi; };\n"
++    "static float hlg_scene(float e) {\n"
++    "    e = clamp(e, 0.0f, 1.0f);\n"
++    "    return e <= 0.5f ? e * e / 3.0f : (exp((e - 0.55991073f) / 0.17883277f) + 0.28466892f) / 12.0f;\n"
++    "}\n"
++    "static float pq(float nits) {\n"
++    "    float y = pow(clamp(nits / 10000.0f, 0.0f, 1.0f), 0.1593017578125f);\n"
++    "    return pow((0.8359375f + 18.8515625f * y) / (1.0f + 18.6875f * y), 78.84375f);\n"
++    "}\n"
++    "kernel void l1(texture2d<float, access::read> luma [[texture(0)]],\n"
++    "               texture2d<float, access::read> chroma [[texture(1)]],\n"
++    "               constant l1_params &p [[buffer(0)]],\n"
++    "               device l1_part *out [[buffer(1)]],\n"
++    "               uint2 gid [[thread_position_in_grid]],\n"
++    "               uint2 group [[threadgroup_position_in_grid]],\n"
++    "               uint2 groups [[threadgroups_per_grid]],\n"
++    "               uint tid [[thread_index_in_threadgroup]],\n"
++    "               uint sg [[simdgroup_index_in_threadgroup]],\n"
++    "               uint lane [[thread_index_in_simdgroup]],\n"
++    "               uint sgs [[simdgroups_per_threadgroup]])\n"
++    "{\n"
++    "    threadgroup float t_sum[32], t_lo[32], t_hi[32];\n"
++    "    threadgroup uint t_count[32];\n"
++    "    uint2 pos = gid + uint2(p.x0, p.y0);\n"
++    "    bool in = pos.x < p.x1 && pos.y < p.y1;\n"
++    "    float v = 0.0f;\n"
++    "    if (in) {\n"
++    "        // 10-bit limited range BT.2020, MSB-aligned in 16 bits\n"
++    "        float y = luma.read(pos).r * (65535.0f / 64.0f);\n"
++    "        float2 c = chroma.read(pos / 2).rg * (65535.0f / 64.0f);\n"
++    "        float Y = (y - 64.0f) / 876.0f, cb = (c.x - 512.0f) / 896.0f, cr = (c.y - 512.0f) / 896.0f;\n"
++    "        float R = Y + 1.4746f * cr, B = Y + 1.8814f * cb;\n"
++    "        float3 e = clamp(float3(R, (Y - 0.2627f * R - 0.0593f * B) / 0.6780f, B), 0.0f, 1.0f);\n"
++    "        if (p.hlg) {\n"
++    "            float3 s = float3(hlg_scene(e.r), hlg_scene(e.g), hlg_scene(e.b));\n"
++    "            float ys = dot(s, float3(0.2627f, 0.6780f, 0.0593f));\n"
++    "            float nits = ys > 0.0f ? 1000.0f * pow(ys, 0.2f) * max(s.r, max(s.g, s.b)) : 0.0f;\n"
++    "            v = pq(nits) * 4095.0f;\n"
++    "        } else {\n"
++    "            v = max(e.r, max(e.g, e.b)) * 4095.0f;\n"
++    "        }\n"
++    "    }\n"
++    "    float sum = simd_sum(in ? v : 0.0f);\n"
++    "    uint count = simd_sum(in ? 1u : 0u);\n"
++    "    float lo = simd_min(in ? v : 4096.0f);\n"
++    "    float hi = simd_max(in ? v : 0.0f);\n"
++    "    if (lane == 0) { t_sum[sg] = sum; t_count[sg] = count; t_lo[sg] = lo; t_hi[sg] = hi; }\n"
++    "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
++    "    if (tid == 0) {\n"
++    "        l1_part r = { 0.0f, 0u, 4096.0f, 0.0f };\n"
++    "        for (uint i = 0; i < sgs; i++) {\n"
++    "            r.sum += t_sum[i]; r.count += t_count[i];\n"
++    "            r.lo = min(r.lo, t_lo[i]); r.hi = max(r.hi, t_hi[i]);\n"
++    "        }\n"
++    "        out[group.y * groups.x + group.x] = r;\n"
++    "    }\n"
++    "}\n";
++
++struct l1_params { uint32_t x0, y0, x1, y1, hlg; };
++struct l1_part { float sum; uint32_t count; float lo, hi; };
++
+ // Frames in flight: the layer shows one, a few wait to be shown, one is being rendered. A buffer comes back into use
+ // this many frames after it was enqueued (IOSurfaceIsInUse can't tell: it reports the layer's buffers as in use
+ // all the time).
+@@ -60,6 +130,14 @@ struct mac_sample_buffer {
+     char *rpu_path;
+     NSMutableArray<NSData *> *file_rpus;
+     int64_t last_index;
++    // --macos-dovi-live-l1
++    bool live_l1;
++    bool l1_failed;
++    id<MTLCommandQueue> l1_queue;
++    id<MTLComputePipelineState> l1_pipeline;
++    id<MTLBuffer> l1_parts;
++    uint8_t *l1_rpu;
++    size_t l1_rpu_size;
+ };
+ 
+ struct mac_sample_buffer *mac_sample_buffer_create(struct mp_log *log, void *layer)
+@@ -101,6 +179,9 @@ void mac_sample_buffer_destroy(struct mac_sample_buffer **sbp, pl_gpu gpu)
+         CFRelease(sb->rpu);
+     av_buffer_unref(&sb->rpu_src);
+     [sb->file_rpus release];
++    [sb->l1_parts release];
++    [sb->l1_pipeline release];
++    [sb->l1_queue release];
+     [sb->device release];
+     [sb->layer release];
+     talloc_free(sb);
+@@ -152,6 +233,14 @@ void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *pa
+     MP_VERBOSE(sb, "%d Dolby Vision RPUs from %s.\n", (int)rpus.count, path);
+ }
+ 
++void mac_sample_buffer_set_live_l1(struct mac_sample_buffer *sb, bool live)
++{
++    if (sb && sb->live_l1 != live) {
++        sb->live_l1 = live;
++        sb->last_index = -1;
++    }
++}
++
+ bool mac_sample_buffer_failed(struct mac_sample_buffer *sb)
+ {
+     return sb && sb->failed;
+@@ -403,6 +492,93 @@ static void tag(CVPixelBufferRef buf, enum pl_color_system sys, const struct pl_
+         CFRelease(cll);
+ }
+ 
++static bool l1_init(struct mac_sample_buffer *sb)
++{
++    NSError *err = nil;
++    id<MTLLibrary> lib = [sb->device newLibraryWithSource:@(l1_kernel) options:nil error:&err];
++    id<MTLFunction> fn = [lib newFunctionWithName:@"l1"];
++    if (fn)
++        sb->l1_pipeline = [sb->device newComputePipelineStateWithFunction:fn error:&err];
++    [fn release];
++    [lib release];
++    sb->l1_queue = [sb->device newCommandQueue];
++    if (!sb->l1_pipeline || !sb->l1_queue) {
++        MP_ERR(sb, "Can't measure frames for their Dolby Vision L1: %s\n",
++               err ? err.localizedDescription.UTF8String : "no command queue");
++        return false;
++    }
++    return true;
++}
++
++// The frame's L1 (min, avg, max in 12-bit PQ codes), measured inside `video` on the GPU; false if it can't be
++static bool l1_measure(struct mac_sample_buffer *sb, struct slot *s, const struct pl_color_space *c,
++                       struct pl_rect2d video, int out[3])
++{
++    if (sb->l1_failed)
++        return false;
++    if (c->transfer != PL_COLOR_TRC_HLG && c->transfer != PL_COLOR_TRC_PQ)
++        return false;
++    if (!sb->l1_pipeline && !l1_init(sb)) {
++        sb->l1_failed = true;
++        return false;
++    }
++    // The video's rectangle in the buffer, or all of it
++    pl_rect2d_normalize(&video);
++    struct l1_params par = {
++        .x0 = MPCLAMP(video.x0, 0, sb->w), .y0 = MPCLAMP(video.y0, 0, sb->h),
++        .x1 = MPCLAMP(video.x1, 0, sb->w), .y1 = MPCLAMP(video.y1, 0, sb->h),
++        .hlg = c->transfer == PL_COLOR_TRC_HLG,
++    };
++    if (par.x1 - par.x0 < 2 || par.y1 - par.y0 < 2) {
++        par.x0 = par.y0 = 0;
++        par.x1 = sb->w;
++        par.y1 = sb->h;
++    }
++    MTLSize group = MTLSizeMake(16, 16, 1);
++    MTLSize groups = MTLSizeMake((par.x1 - par.x0 + 15) / 16, (par.y1 - par.y0 + 15) / 16, 1);
++    size_t size = groups.width * groups.height * sizeof(struct l1_part);
++    if (sb->l1_parts.length < size) {
++        [sb->l1_parts release];
++        sb->l1_parts = [sb->device newBufferWithLength:size options:MTLResourceStorageModeShared];
++        if (!sb->l1_parts)
++            return false;
++    }
++    id<MTLCommandBuffer> cmd = [sb->l1_queue commandBuffer];
++    id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
++    [enc setComputePipelineState:sb->l1_pipeline];
++    [enc setTexture:CVMetalTextureGetTexture(s->mtl[0]) atIndex:0];
++    [enc setTexture:CVMetalTextureGetTexture(s->mtl[1]) atIndex:1];
++    [enc setBytes:&par length:sizeof(par) atIndex:0];
++    [enc setBuffer:sb->l1_parts offset:0 atIndex:1];
++    [enc dispatchThreadgroups:groups threadsPerThreadgroup:group];
++    [enc endEncoding];
++    [cmd commit];
++    [cmd waitUntilCompleted];
++    if (cmd.status != MTLCommandBufferStatusCompleted) {
++        MP_ERR(sb, "Measuring the frame's L1 failed: %s\n",
++               cmd.error ? cmd.error.localizedDescription.UTF8String : "?");
++        sb->l1_failed = true;
++        return false;
++    }
++
++    const struct l1_part *parts = sb->l1_parts.contents;
++    double sum = 0, count = 0, lo = 4096, hi = 0;
++    for (size_t i = 0; i < groups.width * groups.height; i++) {
++        if (!parts[i].count)
++            continue;
++        sum += parts[i].sum;
++        count += parts[i].count;
++        lo = MPMIN(lo, parts[i].lo);
++        hi = MPMAX(hi, parts[i].hi);
++    }
++    if (!count)
++        return false;
++    out[0] = lrint(lo);
++    out[1] = lrint(sum / count);
++    out[2] = lrint(hi);
++    return true;
++}
++
+ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct ra_ext_frame *frame,
+                               const struct ra_ext_submit *info)
+ {
+@@ -449,7 +625,28 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+             sb->rpu = CFDataCreate(NULL, info->dovi_rpu->data, info->dovi_rpu->size);
+         }
+     }
+-    set(s->buf, CFSTR("DolbyVisionRPUData"), sb->rpu);
++    // --macos-dovi-live-l1: the file's RPU with this frame's own L1 (the frame's own RPU keeps its own)
++    CFDataRef rpu = sb->rpu;
++    int l1[3];
++    bool live = sb->live_l1 && sb->file_rpus && sb->rpu && l1_measure(sb, s, &info->color, info->video, l1);
++    if (live) {
++        size_t n = CFDataGetLength(sb->rpu), cap = n + n / 2 + 8;
++        if (sb->l1_rpu_size < cap) {
++            sb->l1_rpu = talloc_realloc_size(sb, sb->l1_rpu, cap);
++            sb->l1_rpu_size = cap;
++        }
++        size_t len = mp_dovi_rpu_set_l1(CFDataGetBytePtr(sb->rpu), n, l1[0], l1[1], l1[2], sb->l1_rpu, cap);
++        if (len) {
++            rpu = CFDataCreate(NULL, sb->l1_rpu, len);
++            MP_DBG(sb, "L1 %d %d %d for pts %f.\n", l1[0], l1[1], l1[2], info->pts);
++        } else if (!sb->l1_failed) {
++            MP_WARN(sb, "The Dolby Vision RPU has no L1 block to write the frame's into.\n");
++            sb->l1_failed = true;
++        }
++    }
++    set(s->buf, CFSTR("DolbyVisionRPUData"), rpu);
++    if (rpu != sb->rpu)
++        CFRelease(rpu);
+ 
+     CMVideoFormatDescriptionRef desc = NULL;
+     if (CMVideoFormatDescriptionCreateForImageBuffer(NULL, s->buf, &desc) != noErr) {
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index b76f4511a..f0194946d 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -1823,6 +1823,7 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+         av_buffer_unref(&p->ext_info.dovi_rpu);
+         p->ext_info = (struct ra_ext_submit) {
+             .color = target.color,
++            .video = { p->dst.x0, p->dst.y0, p->dst.x1, p->dst.y1 },
+             .pts = cur ? cur->pts : MP_NOPTS_VALUE,
+             .nominal_fps = cur ? cur->nominal_fps : 0,
+         };
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index 3a6bdb629..71f662fda 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -76,6 +76,7 @@ static bool mac_vk_ext_active(struct ra_ctx *ctx)
+         @autoreleasepool {
+             mac_sample_buffer_set_rpu_file(p->sb, path);
+         }
++        mac_sample_buffer_set_live_l1(p->sb, p->opts->macos_dovi_live_l1);
+         talloc_free(path);
+     }
+     if (!p->sb_failed && mac_sample_buffer_failed(p->sb)) {
+@@ -110,6 +111,7 @@ static bool mac_vk_ext_start_frame(struct ra_ctx *ctx, int w, int h,
+                                              (__bridge void *)p->vo_mac.sampleBufferLayer);
+             char *path = mp_get_user_path(NULL, ctx->global, p->opts->macos_dovi_rpu_file);
+             mac_sample_buffer_set_rpu_file(p->sb, path);
++            mac_sample_buffer_set_live_l1(p->sb, p->opts->macos_dovi_live_l1);
+             talloc_free(path);
+         }
+         return mac_sample_buffer_start_frame(p->sb, p->vk.gpu, w, h, hint, out);
+-- 
+2.42.0
+

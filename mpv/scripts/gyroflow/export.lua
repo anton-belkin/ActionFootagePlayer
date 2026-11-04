@@ -6,7 +6,8 @@
 -- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
 -- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
 -- look (Ctrl+s): HDR, SDR by the maker's LUT (--sdr, DJI's) or by NBCU's conversion (--nbcu), HDR + Dolby Vision with the RPU
--- the look plays (--dv-rpu: Apple's devices then show the export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
+-- the look plays (--dv-rpu, with each frame's L1 as the player measures it, --dv-live-l1: Apple's devices then show the
+-- export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
 -- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater). A log
@@ -226,10 +227,12 @@ local function start(path, sdr)
     local sdr_look = sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
     if sdr_look == "maker" then table.insert(args, "--sdr") end
     if sdr_look == "nbcu" then table.insert(args, "--nbcu") end
-    -- The dv look: the RPU file the player attaches, on every frame of the export too
+    -- The dv look: the RPU file the player attaches, on every frame of the export too, with each frame's own L1 when
+    -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way)
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
     if not sdr and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
         table.insert(args, "--dv-rpu"); table.insert(args, rpu)
+        if mp.get_property_native("macos-dovi-live-l1") == true then table.insert(args, "--dv-live-l1") end
     end
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
     local view = gyroflow("view")

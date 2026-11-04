@@ -277,7 +277,8 @@ local function look_note(d, look)
     return nil
 end
 
--- The dv look's trims (12-bit codes, 2048 neutral), as DV Lab has them
+-- The dv look's trims (12-bit codes, 2048 neutral), as DV Lab has them; `scene`: the scene levels' offsets from L1,
+-- not offered while L1 is each frame's own
 local DV_TRIMS = {
     { "slope", "Slope", "Gain after the tone curve: lighter, the highlights clip sooner" },
     { "offset", "Offset", "Lifts everything, the shadows most" },
@@ -286,9 +287,9 @@ local DV_TRIMS = {
     { "clipTrim", "Highlight roll-off", "Right: highlights roll off to white; left: they clip" },
     { "saturation", "Saturation", nil },
     { "chromaWeight", "Chroma weight", "How much saturated colors are kept as brightness is compressed" },
-    { "l3Avg", "Scene average", "The scene's average brightness Dolby Vision exposes by" },
-    { "l3Max", "Scene highlights", "Right: highlights taken as brighter, given more room" },
-    { "l3Min", "Scene blacks", nil },
+    { "l3Avg", "Scene average", "The scene's average brightness Dolby Vision exposes by", scene = true },
+    { "l3Max", "Scene highlights", "Right: highlights taken as brighter, given more room", scene = true },
+    { "l3Min", "Scene blacks", nil, scene = true },
 }
 
 -- The dv look's trims (not for a file with its own Dolby Vision): as sliders, kept by dlogm as they change
@@ -300,7 +301,13 @@ local function dv_part(u, x, w, y)
     if d.dv_own then return u:caption(x, w, y, "This file has its own Dolby Vision: the trims here are for log clips") end
     y = u:caption(x, w, y, "The metadata macOS tones HLG+DV down to SDR by. The author's are picked to taste, "
                   .. "fitted to NBCU's conversion; exports take what's set here", { color = C.label })
-    y = u:caption(x, w, y + 4 * s, "Extreme values of some, the scene levels most, change the picture on an HDR screen too")
+    if d.dv_live then
+        y = u:caption(x, w, y + 4 * s, "The scene's levels (Dolby Vision's L1) are measured from every frame as it plays, "
+                      .. "so macOS maps each scene for what's in it; the trims here go on top")
+        y = u:caption(x, w, y + 4 * s, "Extreme values of some change the picture on an HDR screen too")
+    else
+        y = u:caption(x, w, y + 4 * s, "Extreme values of some, the scene levels most, change the picture on an HDR screen too")
+    end
     if d.look ~= "dv" and d.look ~= "dvsdr" then
         local has = {}
         for _, l in ipairs(d.looks or {}) do has[l] = true end
@@ -310,16 +317,20 @@ local function dv_part(u, x, w, y)
     end
     y = y + 6 * s
     for _, t in ipairs(DV_TRIMS) do
-        local v = d.dv_trims[t[1]] or 2048
-        u:text(x, y + 8 * s, t[2], { size = 12, color = C.label })
-        y = u:slider(x, w, y + 14 * s, "dv:" .. t[1], v / 4095, function(p)
-            mp.commandv("script-message-to", "dlogm", "dv-trim", t[1], tostring(math.floor(p * 4095 + 0.5)))
-        end, "", "")
-        if t[3] then y = u:caption(x, w, y, t[3]) end
-        y = y + 8 * s
+        if not (t.scene and d.dv_live) then
+            local v = d.dv_trims[t[1]] or 2048
+            u:text(x, y + 8 * s, t[2], { size = 12, color = C.label })
+            y = u:slider(x, w, y + 14 * s, "dv:" .. t[1], v / 4095, function(p)
+                mp.commandv("script-message-to", "dlogm", "dv-trim", t[1], tostring(math.floor(p * 4095 + 0.5)))
+            end, "", "")
+            if t[3] then y = u:caption(x, w, y, t[3]) end
+            y = y + 8 * s
+        end
     end
-    return u:button(x, w, y + 4 * s, "dv-reset", d.dv_custom and "Back to the author's trims" or "These are the author's trims",
-                    "script-message-to dlogm dv-reset", { disabled = not d.dv_custom })
+    y = u:button(x, w, y + 4 * s, "dv-reset", d.dv_custom and "Back to the author's trims" or "These are the author's trims",
+                 "script-message-to dlogm dv-reset", { disabled = not d.dv_custom })
+    return u:button(x, w, y + 4 * s, "dv-neutral", d.dv_neutral and "These are neutral trims" or "Neutral trims: none added",
+                    "script-message-to dlogm dv-neutral", { disabled = d.dv_neutral })
 end
 
 local function look_part(u, x, w, y)

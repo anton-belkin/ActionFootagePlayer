@@ -68,17 +68,21 @@
 --                     chromaWeight, l3Min, l3Avg, l3Max; 2048 neutral): the look is kept in $DLOGM_DATA/dv (else
 --                     ~~/dlogm-dv) and its RPU made by afp-rpu; the dv look and its exports use it
 --   dv-reset          back to the shipped trims (NBCU fit)
+--   dv-neutral        neutral trims: every one at 2048, Dolby Vision's own mapping with nothing added (the user's)
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
 -- ""), curve (the one applied, or ""), look (hdr, dv, dvsdr, tonemap, nbcu, maker, off, or "" when untouched), looks (the ones
 -- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), maker_lut (which LUT that is and where it's
 -- from), sdr_look (the SDR look an export in SDR takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when
 -- unknown), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on), dv_trims (the dv
--- look's), dv_custom (they're the user's), dv_own (the dv look is the file's own Dolby Vision).
+-- look's), dv_custom (they're the user's), dv_neutral (they're all neutral), dv_live (each frame's L1 is measured and
+-- written into the RPU: the scene levels, l3*, are left neutral), dv_own (the dv look is the file's own Dolby Vision).
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   hdr_screen=hdr    what log files start in on an HDR screen: hdr, dv, dvsdr, tonemap, nbcu or maker
 --   sdr_screen=dv     and on an SDR screen (tonemap where mpv can't do dv)
 --   (mode=sdr, as before these: maker on both)
+--   dv_live_l1=yes   the dv looks write each frame's own L1 into the RPU (--macos-dovi-live-l1: measured as it's shown),
+--                    instead of the RPU file's fixed one; no for the fixed one
 --   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
 --                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
 --
@@ -96,7 +100,7 @@ local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
 local video_color = require 'video_color'
 
-local o = { mode = "", hdr_screen = "", sdr_screen = "", denoise = false }
+local o = { mode = "", hdr_screen = "", sdr_screen = "", denoise = false, dv_live_l1 = true }
 options.read_options(o, "dlogm")
 
 local DIR = mp.get_script_directory()
@@ -128,6 +132,8 @@ local DV_USER = (DATA and DATA ~= "") and utils.join_path(DATA, "dv") or mp.comm
 local AFP_RPU = utils.join_path(utils.join_path(DIR, ".."), "gyroflow/afp-rpu")
 -- The trims the panel offers, as DV Lab has them (12-bit, 2048 neutral)
 local DV_TRIMS = { "slope", "offset", "power", "midContrast", "clipTrim", "saturation", "chromaWeight", "l3Min", "l3Avg", "l3Max" }
+-- The scene levels' offsets from L1: neutral while L1 is each frame's own (DV_LIVE and dv_live_l1)
+local DV_L3 = { l3Min = true, l3Avg = true, l3Max = true }
 local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- What the cameras' metadata says, as a curve
@@ -148,6 +154,9 @@ end
 -- And whether the layer shows HDR with the display's headroom or toned down to SDR (dvsdr)
 local DV_EDR = DV_OK and mp.get_property("option-info/macos-sample-buffer-edr/name") ~= nil
 if DV_EDR then table.insert(TARGET_OPTIONS, "macos-sample-buffer-edr") end
+-- And whether each frame's L1 is measured and written into the RPU file's (the app's mpv, tools/mpv-patches/0007)
+local DV_LIVE = DV_OK and mp.get_property("option-info/macos-dovi-live-l1/name") ~= nil
+if DV_LIVE then table.insert(TARGET_OPTIONS, "macos-dovi-live-l1") end
 -- The filter that tags the video as what the look's shaders turn it into, at the end of the chain (after the
 -- stabilization); disabled when the file's own tags are right
 local TAG_LABEL = "dlogm"
@@ -341,6 +350,12 @@ local function dv_trims()
     for _, k in ipairs(DV_TRIMS) do t[k] = look[k] or 2048 end
     return t
 end
+local function dv_neutral()
+    for _, v in pairs(dv_trims()) do if v ~= 2048 then return false end end
+    return DV_OK and load_dv_look().useL8 ~= false
+end
+-- Whether the dv looks write each frame's own L1 (the app's mpv has it, and dlogm.conf doesn't turn it off)
+local function dv_live() return DV_LIVE and o.dv_live_l1 or false end
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
@@ -355,7 +370,7 @@ local function publish()
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
         look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
         sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise, dv = DV_OK,
-        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil,
+        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
         dv_own = hdr ~= nil and not curve,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
@@ -422,11 +437,12 @@ local function hdr_target(target, trc, prim)
 end
 
 -- The dv looks: macOS's video layer presents, with `rpu` on the frames (nil: the file's own), in HDR where the screen
--- has it (dv) or toned down to SDR (dvsdr)
+-- has it (dv) or toned down to SDR (dvsdr); our RPU with each frame's own L1 (dv_live_l1), a file's own as it is
 local function dv_target(target, rpu, m)
     target["macos-sample-buffer-layer"] = "yes"
     target["macos-dovi-rpu-file"] = rpu or ""
     if DV_EDR then target["macos-sample-buffer-edr"] = m == "dvsdr" and "no" or "yes" end
+    if DV_LIVE then target["macos-dovi-live-l1"] = (rpu and o.dv_live_l1) and "yes" or "no" end
 end
 
 -- tonemap: SDR as mpv makes it, the display left in SDR
@@ -850,15 +866,36 @@ local function make_dv_rpu()
     end)
 end
 
+-- The user's look changed: saved and its RPU made shortly (sliders send many). With each frame's own L1, the scene
+-- levels' offsets go back to neutral: the panel no longer offers them, and they'd shift every frame's L1
+local function dv_changed()
+    if dv_live() then
+        local look = load_dv_look()
+        for k in pairs(DV_L3) do look[k] = 2048 end
+    end
+    publish()
+    if dv_timer then dv_timer:kill() end
+    dv_timer = mp.add_timeout(0.12, make_dv_rpu)
+end
+
 mp.register_script_message("dv-trim", function(key, value)
     local v = tonumber(value)
     local ok = false
     for _, k in ipairs(DV_TRIMS) do ok = ok or k == key end
-    if not (DV_OK and ok and v) then return end
+    if not (DV_OK and ok and v) or (DV_L3[key] and dv_live()) then return end
     load_dv_look()[key] = math.floor(math.min(4095, math.max(0, v)) + 0.5)
-    publish()
-    if dv_timer then dv_timer:kill() end
-    dv_timer = mp.add_timeout(0.12, make_dv_rpu)
+    dv_changed()
+end)
+
+-- Neutral trims: all of them at 2048, as the user's own look (Dolby Vision's own mapping for the screen, by each
+-- frame's L1, nothing added)
+mp.register_script_message("dv-neutral", function()
+    if not DV_OK then return end
+    local look = load_dv_look()
+    for _, k in ipairs(DV_TRIMS) do look[k] = 2048 end
+    look.useL8 = true
+    look.satVec, look.hueVec, look.msWeight = { 128, 128, 128, 128, 128, 128 }, { 128, 128, 128, 128, 128, 128 }, 2048
+    dv_changed()
 end)
 
 -- Back to the shipped trims (NBCU fit)
