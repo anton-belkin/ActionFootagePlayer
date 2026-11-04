@@ -75,6 +75,9 @@ video with nothing to stabilize it with is color-converted only.
   --dv-rpu <file>  HLG as Dolby Vision 8.4, with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
                    video gets RPU N, the last the frames after it) in place of VideoToolbox's, and the dvvC box Apple
                    needs to use them; the player's HDR + Dolby Vision look plays the same file (macOS, HLG only)
+  --dv-live-l1     with --dv-rpu: each frame's own L1 in its RPU, measured on the GPU as the player's mpv measures
+                   what it shows (--macos-dovi-live-l1): the lowest, average and highest max(R,G,B) of the frame
+                   written, in PQ
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
   --out <folder>   write here instead of <video's folder>/stabilized
@@ -112,6 +115,7 @@ struct Options {
     progress: Progress,
     control: Option<PathBuf>,
     dv_rpu: Option<PathBuf>,
+    dv_live_l1: bool,
 }
 
 fn main() {
@@ -120,7 +124,7 @@ fn main() {
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
-                             dv_rpu: None };
+                             dv_rpu: None, dv_live_l1: false };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -148,6 +152,7 @@ fn main() {
                 .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
             "--prores" => opts.prores = true,
             "--dv-rpu" => opts.dv_rpu = Some(PathBuf::from(value("--dv-rpu"))),
+            "--dv-live-l1" => opts.dv_live_l1 = true,
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
@@ -600,7 +605,9 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         None => None,
         Some((cube, matrix, cpu_graph)) => {
             let out_matrix = gpu_lut::matrix_coefficients(matrix).unwrap();
-            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix) {
+            // Each frame's L1: a Dolby Vision export's HLG, measured in the same pass
+            let measure = opts.dv_live_l1 && dv_rpus.is_some() && tags[1] == "arib-std-b67";
+            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix, measure) {
                 Ok(l) => Some(l),
                 Err(e) => {
                     eprintln!("  LUT on the CPU (slower): {e}");
@@ -684,6 +691,13 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     // metadata (muxer); -moov_size puts the moov first with room after it, which the dvvC box then takes in place
     let mut muxer = None;
     let mut rewriter = None;
+    // --dv-live-l1: each frame's L1, from the GPU workers through the writer (in frame order) to the RPU rewriter
+    let live_l1 = opts.dv_live_l1 && dv_rpus.is_some() && gpu_lut.is_some();
+    if opts.dv_live_l1 && dv_rpus.is_some() && !live_l1 {
+        eprintln!("  Dolby Vision: the RPU file's L1 (each frame's is measured with the LUT on the GPU)");
+    }
+    let (l1_tx, l1_rx) = mpsc::channel::<Option<[i32; 3]>>();
+    let mut l1_tx = live_l1.then_some(l1_tx);
     if let Some(rpus) = dv_rpus {
         let moov_size = 256 * 1024 + total_frames * 48;
         let mut mux_cmd = ffmpeg_command("ffmpeg");
@@ -700,6 +714,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         let mut enc_out = encoder.stdout.take().unwrap();
         rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
             let mut injector = RpuInjector::new(rpus, first_frame);
+            if live_l1 { injector = injector.live_l1(l1_rx); }
             let mut buf = vec![0u8; 1 << 20];
             loop {
                 let n = enc_out.read(&mut buf).map_err(|e| format!("reading the encoder: {e}"))?;
@@ -719,7 +734,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     // Reader -> GPU workers -> writer, in order. A few frames in flight keep the GPU and both ffmpegs busy
     let in_flight = workers + 2;
     let (frame_tx, frame_rx) = mpsc::sync_channel::<(u64, Vec<u8>)>(in_flight);
-    let (done_tx, done_rx) = mpsc::sync_channel::<(u64, Result<Vec<u8>, String>)>(in_flight);
+    let (done_tx, done_rx) = mpsc::sync_channel::<(u64, Result<(Vec<u8>, Option<[f64; 3]>), String>)>(in_flight);
     let mut dec_out = decoder.stdout.take().unwrap();
     let reader = std::thread::spawn(move || -> Result<u64, String> {
         let mut n = 0;
@@ -761,7 +776,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                         engine.process(timestamp_us, planes, !full_range, false).map(|_| dst)
                     }
                 };
-                let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|_| f), None => Ok(f) });
+                let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|l1| (f, l1)), None => Ok((f, None)) });
                 if done_tx.send((n, result)).is_err() { break; }
             }
         })
@@ -794,7 +809,9 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
             Ok(buf) => { pending.insert(n, buf); }
             Err(e) => { error = Some(format!("frame {n}: {e}")); break; }
         }
-        while let Some(buf) = pending.remove(&next) {
+        while let Some((buf, l1)) = pending.remove(&next) {
+            // The frame's L1 before the frame: the rewriter waits for it when the encoder hands the frame back
+            if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
             if let Err(e) = enc_in.write_all(&buf) { error = Some(format!("encoder stopped: {e}")); break; }
             next += 1;
         }
@@ -816,6 +833,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
     }
     drop(enc_in);
+    drop(l1_tx.take()); // the rewriter's last frames, if any are left, keep the file's L1
     if error.is_some() || stopped() {
         let _ = decoder.kill();
     }

@@ -100,9 +100,8 @@ Each frame's light levels go along with it (Dolby Vision's L1: its darkest, aver
 as it plays, on the picture macOS gets), so macOS maps every scene for what's in it rather than for a typical one: a
 dark dive and a sunlit beach each get their own room. The Dolby Vision trims go on top of that; they're the author's,
 to taste, fitted to NBCUniversal's conversion with each frame's levels. The side panel's Dolby Vision has them as
-sliders, with a way back to the author's and to neutral ones (Dolby Vision's own mapping, nothing added), and exports
-take what's set there. Exports carry fixed scene levels for now, not each frame's: on an Apple device they can look a
-little different from the player.
+sliders, with a way back to the author's and to neutral ones (Dolby Vision's own mapping, nothing added). Exports
+take what's set there and measure each of their frames the same way, so an Apple device shows them as the player does.
 
 After an HDR display (an HDR TV, say) has been connected to the Mac, macOS can keep its settings for the SDR monitor
 plugged in where it was, until the Mac restarts, and shows HDR on it about a stop darker. The player tells when it

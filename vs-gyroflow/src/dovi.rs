@@ -253,6 +253,22 @@ mod tests {
     }
 
     #[test]
+    fn set_l1_as_the_generator_writes_it() {
+        // The shipped look's RPU with another L1 is what the generator writes for that L1 (the player's and the
+        // export's live L1, dv_mux::set_l1), clamped the same way
+        let base = rpu_bytes(&generator_config(&nbcu_fit(), &[DEFAULT_L1], 1).unwrap()).unwrap();
+        let mut seed = 12345u32;
+        let mut next = || { seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345); (seed >> 8) as i32 };
+        for _ in 0..200 {
+            let (mn, avg, mx) = (next() % 1200, next() % 4096, 1500 + next() % 2596);
+            let want = rpu_bytes(&generator_config(&nbcu_fit(), &[L1::new(mn as u16, avg as u16, mx as u16)], 1).unwrap()).unwrap();
+            let got = crate::dv_mux::set_l1(&base[4..], mn, avg, mx).expect("an L1 block");
+            assert_eq!(&want[4..], &got[..], "L1 {mn} {avg} {mx}");
+        }
+        assert!(crate::dv_mux::set_l1(b"\x19not an rpu at all", 1, 2, 3).is_none());
+    }
+
+    #[test]
     fn l1_clamped_like_dovi_tool() {
         // CM 4.0's lowest avg_pq
         let c = generator_config(&Look::default(), &[L1::new(0, 100, 2000)], 1).unwrap();
