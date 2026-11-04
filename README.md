@@ -95,7 +95,7 @@ shows it: macOS tones the HDR down for that screen with trims fitted to DJI's Re
 Apple's devices show the export. `Ctrl+s` goes through it, HDR as macOS tones it down, mpv's tone mapping,
 NBCUniversal's neutral HDR → SDR conversion and the camera maker's own Rec.709 LUT (DJI's, for D-Log M); on an HDR
 screen, the same `Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
-The Dolby Vision trims are the author's, to taste; the side panel's Look has them as sliders while that look shows,
+The Dolby Vision trims are the author's, to taste; the side panel's Dolby Vision has them as sliders,
 and exports take what's set there.
 
 After an HDR display (an HDR TV, say) has been connected to the Mac, macOS can keep its settings for the SDR monitor
