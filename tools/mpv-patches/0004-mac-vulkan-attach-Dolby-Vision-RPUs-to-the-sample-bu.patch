@@ -1,7 +1,7 @@
-From 80b5b63343b09178b6b9ae91315955373b58bd4b Mon Sep 17 00:00:00 2001
+From f3e5571ec9ece209990ca7365d9056d498173ec6 Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Wed, 4 Nov 2026 09:50:12 +0100
-Subject: [PATCH 4/4] mac/vulkan: attach Dolby Vision RPUs to the sample buffer
+Subject: [PATCH 4/5] mac/vulkan: attach Dolby Vision RPUs to the sample buffer
  layer's frames
 
 With --macos-sample-buffer-layer, each frame's RPU is attached to its
@@ -239,6 +239,3 @@ index e41dd6ac1..f5332ac56 100644
      mac_sample_buffer_submit(p->sb, p->vk.gpu, frame, info);
      // shown once it has a frame, so the switch from the swapchain doesn't flash
      if (!p->sb_shown) {
--- 
-2.42.0
-

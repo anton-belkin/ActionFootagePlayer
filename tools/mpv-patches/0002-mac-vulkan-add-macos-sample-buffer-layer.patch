@@ -1,7 +1,7 @@
-From 19099cc0323187613563b10d2cd0409112344c25 Mon Sep 17 00:00:00 2001
+From 42d5a303c767ab3fa4ede4cdec04d45bb3974d4b Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Wed, 4 Nov 2026 09:47:31 +0100
-Subject: [PATCH 2/4] mac/vulkan: add --macos-sample-buffer-layer
+Subject: [PATCH 2/5] mac/vulkan: add --macos-sample-buffer-layer
 
 Presents vo_gpu_next's frames through an AVSampleBufferDisplayLayer over
 the Metal layer: rendered into a ring of IOSurface-backed 10-bit 4:2:0
@@ -714,6 +714,3 @@ index 559e361e8..e41dd6ac1 100644
      };
  
      VkInstance inst = vk->vkinst->instance;
--- 
-2.42.0
-

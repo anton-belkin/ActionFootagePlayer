@@ -1,7 +1,7 @@
-From 4567bef589edce7381477f9830284e77347ee598 Mon Sep 17 00:00:00 2001
+From 04e49cd4c4a31e368c6b1fd660203b08e11a874c Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Wed, 4 Nov 2026 09:47:31 +0100
-Subject: [PATCH 1/4] vo_gpu_next: present through the platform when the
+Subject: [PATCH 1/5] vo_gpu_next: present through the platform when the
  swapchain asks for it
 
 Three optional swapchain functions, ext_active, ext_start_frame and
@@ -245,6 +245,3 @@ index 892396f7d..988d51932 100644
 +    .ext_start_frame  = ext_start_frame,
 +    .ext_submit_frame = ext_submit_frame,
  };
--- 
-2.42.0
-

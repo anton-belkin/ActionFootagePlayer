@@ -1,7 +1,7 @@
-From 58b09c14ddde21c50371d7cb0816633f438a597f Mon Sep 17 00:00:00 2001
+From 78e7d7fc539feabf72e2466184644fe573e17569 Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Wed, 4 Nov 2026 09:50:12 +0100
-Subject: [PATCH 3/4] vo_gpu_next: hand the frame's Dolby Vision RPU to the
+Subject: [PATCH 3/5] vo_gpu_next: hand the frame's Dolby Vision RPU to the
  platform's presentation
 
 When libplacebo doesn't apply the frame's Dolby Vision metadata itself
@@ -67,6 +67,3 @@ index 680a22f67..b76f4511a 100644
      for (int i = 0; i < MP_ARRAY_SIZE(p->osd_state.entries); i++)
          pl_tex_destroy(p->gpu, &p->osd_state.entries[i].tex);
      for (int i = 0; i < p->num_sub_tex; i++)
--- 
-2.42.0
-

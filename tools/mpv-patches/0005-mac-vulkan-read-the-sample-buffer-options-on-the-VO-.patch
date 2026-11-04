@@ -1,0 +1,225 @@
+From 1b47449ad3ddeaa6246017698db9d7cce1c72790 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 14:41:29 +0100
+Subject: [PATCH 5/5] mac/vulkan: read the sample buffer options on the VO
+ thread, fall back to the swapchain
+
+The options are read from their own cache instead of MacCommon's properties,
+which the main thread set while the VO thread read them. The swapchain takes
+over when creating or importing the buffers fails, the callbacks run in
+autorelease pools, ~ is expanded in the RPU file path, and the renderer is
+flushed when it stalls.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/mac/common.swift     |  8 ++---
+ video/out/mac/sample_buffer.h  |  3 ++
+ video/out/mac/sample_buffer.m  | 17 +++++++++-
+ video/out/mac_common.swift     |  5 ---
+ video/out/vulkan/context_mac.m | 58 +++++++++++++++++++++++++++-------
+ 5 files changed, 68 insertions(+), 23 deletions(-)
+
+diff --git a/video/out/mac/common.swift b/video/out/mac/common.swift
+index e69d65a4c..e35a50a63 100644
+--- a/video/out/mac/common.swift
++++ b/video/out/mac/common.swift
+@@ -680,11 +680,9 @@ class Common: NSObject {
+                 titleBar?.set(color: option.mac.macos_title_bar_color)
+             case TypeHelper.toPointer(&option.macPtr.pointee.cocoa_cb_output_csp):
+                 updateICCProfile()
+-            case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_layer):
+-                (self as? MacCommon)?.sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
+-                flagEvents(VO_EVENT_EXPOSE)
+-            case TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file):
+-                (self as? MacCommon)?.doviRpuFile = option.mac.macos_dovi_rpu_file.map { String(cString: $0) } ?? ""
++            case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_layer),
++                 TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file):
++                // read by the Vulkan context on the VO thread; redrawn so a paused frame changes too
+                 flagEvents(VO_EVENT_EXPOSE)
+             default:
+                 break
+diff --git a/video/out/mac/sample_buffer.h b/video/out/mac/sample_buffer.h
+index 79527580b..ee0f788c5 100644
+--- a/video/out/mac/sample_buffer.h
++++ b/video/out/mac/sample_buffer.h
+@@ -42,5 +42,8 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+ // Read again when the path changes.
+ void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *path);
+ 
++// Whether creating or importing the buffers failed: the swapchain should take over
++bool mac_sample_buffer_failed(struct mac_sample_buffer *sb);
++
+ // Drops the frame the layer shows, when the swapchain takes over again
+ void mac_sample_buffer_flush(struct mac_sample_buffer *sb);
+diff --git a/video/out/mac/sample_buffer.m b/video/out/mac/sample_buffer.m
+index 31f01ddf5..eacb4109b 100644
+--- a/video/out/mac/sample_buffer.m
++++ b/video/out/mac/sample_buffer.m
+@@ -152,6 +152,11 @@ void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *pa
+     MP_VERBOSE(sb, "%d Dolby Vision RPUs from %s.\n", (int)rpus.count, path);
+ }
+ 
++bool mac_sample_buffer_failed(struct mac_sample_buffer *sb)
++{
++    return sb && sb->failed;
++}
++
+ void mac_sample_buffer_flush(struct mac_sample_buffer *sb)
+ {
+     if (sb)
+@@ -467,6 +472,16 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+     CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, true);
+     CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0),
+                          kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
+-    [sb->layer.sampleBufferRenderer enqueueSampleBuffer:sample];
++    // the renderer stops after some interruptions (a failed frame, the display
++    // reconfigured) until it is flushed
++    AVSampleBufferVideoRenderer *renderer = sb->layer.sampleBufferRenderer;
++    if (renderer.status == AVQueuedSampleBufferRenderingStatusFailed ||
++        renderer.requiresFlushToResumeDecoding)
++    {
++        MP_VERBOSE(sb, "Flushing the sample buffer layer (%s).\n",
++                   renderer.error ? renderer.error.localizedDescription.UTF8String : "asked to");
++        [renderer flush];
++    }
++    [renderer enqueueSampleBuffer:sample];
+     CFRelease(sample);
+ }
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index d2f04cd7f..b2b8c99d8 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -22,9 +22,6 @@ class MacCommon: Common {
+     @objc var layer: MetalLayer?
+     // Over the Metal layer, shown while vo_gpu_next presents through it (--macos-sample-buffer-layer)
+     @objc var sampleBufferLayer: AVSampleBufferDisplayLayer?
+-    @objc var sampleBufferRequested: Bool = false
+-    // --macos-dovi-rpu-file, read by the sample buffer presenter when it changes
+-    @objc var doviRpuFile: String = ""
+ 
+     var presentation: Presentation?
+     var timer: PreciseTimer?
+@@ -49,8 +46,6 @@ class MacCommon: Common {
+             sampleLayer.frame = layer?.bounds ?? .zero
+             layer?.addSublayer(sampleLayer)
+             sampleBufferLayer = sampleLayer
+-            sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
+-            doviRpuFile = option.mac.macos_dovi_rpu_file.map { String(cString: $0) } ?? ""
+             initMisc(vo)
+         }
+     }
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index f5332ac56..3a6bdb629 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -18,9 +18,12 @@
+ #import <AVFoundation/AVFoundation.h>
+ #import <QuartzCore/QuartzCore.h>
+ 
++#include "options/m_config.h"
++#include "options/path.h"
++#include "osdep/mac/app_bridge.h"
++#include "osdep/mac/swift.h"
+ #include "video/out/gpu/context.h"
+ #include "video/out/mac/sample_buffer.h"
+-#include "osdep/mac/swift.h"
+ 
+ #include "common.h"
+ #include "context.h"
+@@ -29,8 +32,10 @@
+ struct priv {
+     struct mpvk_ctx vk;
+     MacCommon *vo_mac;
++    struct m_config_cache *opts_cache;
++    struct macos_opts *opts;
+     struct mac_sample_buffer *sb;
+-    bool sb_active, sb_shown;
++    bool sb_active, sb_shown, sb_failed;
+ };
+ 
+ static void mac_vk_uninit(struct ra_ctx *ctx)
+@@ -60,38 +65,64 @@ static int mac_vk_color_depth(struct ra_ctx *ctx)
+     return 0;
+ }
+ 
+-// --macos-sample-buffer-layer: vo_gpu_next renders into the sample buffer layer's buffers instead of the swapchain
++// --macos-sample-buffer-layer: vo_gpu_next renders into the sample buffer layer's
++// buffers instead of the swapchain. Called on the VO thread, so the options are
++// read here from their own cache, not from MacCommon (set on the main thread).
+ static bool mac_vk_ext_active(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+-    bool active = p->vo_mac.sampleBufferRequested && p->vo_mac.sampleBufferLayer;
++    if (m_config_cache_update(p->opts_cache) && p->sb) {
++        char *path = mp_get_user_path(NULL, ctx->global, p->opts->macos_dovi_rpu_file);
++        @autoreleasepool {
++            mac_sample_buffer_set_rpu_file(p->sb, path);
++        }
++        talloc_free(path);
++    }
++    if (!p->sb_failed && mac_sample_buffer_failed(p->sb)) {
++        MP_WARN(ctx, "Presenting through the sample buffer layer failed, "
++                "using the swapchain.\n");
++        p->sb_failed = true;
++    }
++    bool active = p->opts->macos_sample_buffer_layer && !p->sb_failed;
+     if (active != p->sb_active) {
+         p->sb_active = active;
+-        MP_VERBOSE(ctx, "Presenting through the %s.\n", active ? "sample buffer layer" : "swapchain");
++        MP_VERBOSE(ctx, "Presenting through the %s.\n",
++                   active ? "sample buffer layer" : "swapchain");
+         if (!active) {
+             [p->vo_mac setSampleBufferVisible:NO];
+             p->sb_shown = false;
+-            mac_sample_buffer_flush(p->sb);
++            @autoreleasepool {
++                mac_sample_buffer_flush(p->sb);
++            }
+         }
+     }
+     return active;
+ }
+ 
+-static bool mac_vk_ext_start_frame(struct ra_ctx *ctx, int w, int h, const struct pl_color_space *hint,
++static bool mac_vk_ext_start_frame(struct ra_ctx *ctx, int w, int h,
++                                   const struct pl_color_space *hint,
+                                    struct ra_ext_frame *out)
+ {
+     struct priv *p = ctx->priv;
+-    if (!p->sb)
+-        p->sb = mac_sample_buffer_create(ctx->log, (__bridge void *)p->vo_mac.sampleBufferLayer);
+-    return mac_sample_buffer_start_frame(p->sb, p->vk.gpu, w, h, hint, out);
++    @autoreleasepool {
++        if (!p->sb) {
++            p->sb = mac_sample_buffer_create(ctx->log,
++                                             (__bridge void *)p->vo_mac.sampleBufferLayer);
++            char *path = mp_get_user_path(NULL, ctx->global, p->opts->macos_dovi_rpu_file);
++            mac_sample_buffer_set_rpu_file(p->sb, path);
++            talloc_free(path);
++        }
++        return mac_sample_buffer_start_frame(p->sb, p->vk.gpu, w, h, hint, out);
++    }
+ }
+ 
+ static void mac_vk_ext_submit_frame(struct ra_ctx *ctx, struct ra_ext_frame *frame,
+                                     const struct ra_ext_submit *info)
+ {
+     struct priv *p = ctx->priv;
+-    mac_sample_buffer_set_rpu_file(p->sb, p->vo_mac.doviRpuFile.UTF8String);
+-    mac_sample_buffer_submit(p->sb, p->vk.gpu, frame, info);
++    @autoreleasepool {
++        mac_sample_buffer_submit(p->sb, p->vk.gpu, frame, info);
++    }
+     // shown once it has a frame, so the switch from the swapchain doesn't flash
+     if (!p->sb_shown) {
+         [p->vo_mac setSampleBufferVisible:YES];
+@@ -119,6 +150,9 @@ static bool mac_vk_init(struct ra_ctx *ctx)
+     if (!mpvk_init(vk, ctx, VK_EXT_METAL_SURFACE_EXTENSION_NAME))
+         goto error;
+ 
++    p->opts_cache = m_config_cache_alloc(p, ctx->global, &macos_conf);
++    p->opts = p->opts_cache->opts;
++
+     p->vo_mac = [[MacCommon alloc] init:ctx->vo];
+     if (!p->vo_mac)
+         goto error;
