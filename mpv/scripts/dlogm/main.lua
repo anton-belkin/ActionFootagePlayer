@@ -98,7 +98,8 @@ if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
 table.insert(DIRS, DIR)
 -- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr)
 local CURVES = {
-    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl", maker = "DJI" },
+    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl", maker = "DJI",
+      lut = "DJI's D-Log M to Rec.709 LUT 11.17, for the Osmo Action 6, downloaded from DJI's site at setup" },
     { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
     { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
     { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
@@ -110,7 +111,14 @@ local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl
 local DENOISE = "shaders/denoise.glsl"
 -- The dv look's Dolby Vision RPU (made by afp-rpu from dv/dji_fit.json, tools/make_dv_rpu.sh) and its name
 local DV_RPU = "dv/dji_fit.rpu"
+local DV_LOOK = "dv/dji_fit.json"
 local DV_NAME = "DJI fit"
+-- The user's own trims, when changed (dv-trim): the look as JSON and its RPU, made by afp-rpu (the gyroflow plugin's,
+-- beside this one), in two files taken in turn so mpv sees a new one each time
+local DV_USER = (DATA and DATA ~= "") and utils.join_path(DATA, "dv") or mp.command_native({ "expand-path", "~~/dlogm-dv" })
+local AFP_RPU = utils.join_path(utils.join_path(DIR, ".."), "gyroflow/afp-rpu")
+-- The trims the panel offers, as DV Lab has them (12-bit, 2048 neutral)
+local DV_TRIMS = { "slope", "offset", "power", "midContrast", "clipTrim", "saturation", "chromaWeight", "l3Min", "l3Avg", "l3Max" }
 local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- What the cameras' metadata says, as a curve
@@ -248,24 +256,25 @@ local function plugin_file(name)
     return nil
 end
 
--- The looks this file has, in Ctrl+s's order: hdr, then the SDR ones whose shaders are there
+-- The looks this file has, in Ctrl+s's order: hdr and dv (the system tones them down), mpv's tone mapping, then
+-- the SDR ones whose shaders are there
 local function looks()
     if not base then return {} end
     if hdr and not curve then
         local list = { "hdr" }
+        if DV_OK and hdr.dv_signaled and hdr.trc == "hlg" then table.insert(list, "dv") end
+        table.insert(list, "tonemap")
         if hdr.prim == "bt.2020" and not hdr.dovi and plugin_file(NBCU[hdr.trc]) then
             table.insert(list, "nbcu")
         end
-        table.insert(list, "tonemap")
-        if DV_OK and hdr.dv_signaled and hdr.trc == "hlg" then table.insert(list, "dv") end
         return list
     end
     if not curve then return {} end
     local list = { "hdr" }
-    if curve.sdr and plugin_file(curve.sdr) then table.insert(list, "maker") end
-    if plugin_file(NBCU.hlg) then table.insert(list, "nbcu") end
-    table.insert(list, "tonemap")
     if DV_OK and plugin_file(DV_RPU) then table.insert(list, "dv") end
+    table.insert(list, "tonemap")
+    if plugin_file(NBCU.hlg) then table.insert(list, "nbcu") end
+    if curve.sdr and plugin_file(curve.sdr) then table.insert(list, "maker") end
     return list
 end
 
@@ -283,6 +292,32 @@ local function resolve(want)
     return "hdr"
 end
 
+-- The dv look's trims: the shipped look (DJI fit), or the user's, read once
+local dv_look, dv_user_rpu = nil, nil
+local function read_json(path)
+    local f = path and io.open(path, "r")
+    if not f then return nil end
+    local j = utils.parse_json(f:read("*a") or "")
+    f:close()
+    return j
+end
+local function load_dv_look()
+    if dv_look then return dv_look end
+    local user = read_json(utils.join_path(DV_USER, "look.json"))
+    dv_look = user or read_json(plugin_file(DV_LOOK)) or {}
+    if user and user.rpu then
+        local rpu = utils.join_path(DV_USER, "look." .. user.rpu .. ".rpu")
+        if file_exists(rpu) then dv_user_rpu = rpu end
+    end
+    return dv_look
+end
+local function dv_trims()
+    if not DV_OK then return {} end
+    local look, t = load_dv_look(), {}
+    for _, k in ipairs(DV_TRIMS) do t[k] = look[k] or 2048 end
+    return t
+end
+
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local c = curve or CURVE.dlogm
@@ -296,6 +331,8 @@ local function publish()
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
         look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
         sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise, dv = DV_OK,
+        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil,
+        dv_own = hdr ~= nil and not curve,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -450,7 +487,7 @@ local function apply(m)
     local names = { hdr = { c.hdr }, maker = { c.sdr }, nbcu = { c.hdr, NBCU.hlg }, tonemap = { c.hdr }, dv = { c.hdr } }
     local rpu = nil
     if m == "dv" then
-        rpu = plugin_file(DV_RPU)
+        rpu = dv_user_rpu or plugin_file(DV_RPU)
         if not (DV_OK and rpu) then
             mp.osd_message(label(m) .. ": not with this mpv", 3)
             return false
@@ -755,6 +792,75 @@ local function save_options(values)
     f:close()
     return true
 end
+
+-- The dv look's trims changed (from the side panel): the look written with them, its RPU made again by afp-rpu,
+-- and the dv look shown with it. Coalesced: while afp-rpu runs, later changes wait, only the last is made
+local dv_busy, dv_again, dv_timer = false, false, nil
+local function make_dv_rpu()
+    if dv_busy then dv_again = true; return end
+    if not file_exists(AFP_RPU) then return mp.msg.warn("no afp-rpu at " .. AFP_RPU) end
+    dv_busy = true
+    local look = load_dv_look()
+    local next = look.rpu == "a" and "b" or "a"
+    local out = utils.join_path(DV_USER, "look." .. next .. ".rpu")
+    local saved = {}
+    for k, v in pairs(look) do saved[k] = v end
+    saved.rpu = nil
+    local tmp = utils.join_path(DV_USER, "look.tmp.json")
+    mp.command_native({ name = "subprocess", playback_only = false, args = { "mkdir", "-p", DV_USER } })
+    local f = io.open(tmp, "w")
+    if not f then dv_busy = false; return mp.msg.warn("can't write " .. tmp) end
+    f:write(utils.format_json(saved))
+    f:close()
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                              args = { AFP_RPU, "--look", tmp, "-o", out } }, function(_, r)
+        dv_busy = false
+        if r and r.status == 0 then
+            look.rpu = next
+            local lf = io.open(utils.join_path(DV_USER, "look.json"), "w")
+            if lf then lf:write(utils.format_json(look)); lf:close() end
+            dv_user_rpu = out
+            if current == "dv" then apply("dv") else publish() end
+        else
+            mp.msg.warn("afp-rpu: " .. ((r and r.stderr) or "failed"))
+        end
+        if dv_again then dv_again = false; make_dv_rpu() end
+    end)
+end
+
+mp.register_script_message("dv-trim", function(key, value)
+    local v = tonumber(value)
+    local ok = false
+    for _, k in ipairs(DV_TRIMS) do ok = ok or k == key end
+    if not (DV_OK and ok and v) then return end
+    load_dv_look()[key] = math.floor(math.min(4095, math.max(0, v)) + 0.5)
+    publish()
+    if dv_timer then dv_timer:kill() end
+    dv_timer = mp.add_timeout(0.12, make_dv_rpu)
+end)
+
+-- Back to the shipped trims (DJI fit)
+mp.register_script_message("dv-reset", function()
+    for _, n in ipairs({ "look.json", "look.a.rpu", "look.b.rpu", "look.tmp.json" }) do
+        os.remove(utils.join_path(DV_USER, n))
+    end
+    dv_look, dv_user_rpu = nil, nil
+    if current == "dv" then apply("dv") else publish() end
+end)
+
+-- The system's tone mapping read again (sdr-white changed how bright macOS takes a screen to be): macOS works it
+-- out when a window comes to a screen, so the looks it tones down are shown anew, through the other path for a moment
+mp.register_script_message("refresh", function()
+    if current == "dv" then
+        mp.set_property("file-local-options/macos-sample-buffer-layer", "no")
+    elseif current == "hdr" or (current == "off" and hdr) then
+        mp.set_property("file-local-options/target-colorspace-hint", "no")
+    else
+        return
+    end
+    local m = current
+    mp.add_timeout(0.1, function() if current == m then apply(m) end end)
+end)
 
 mp.register_script_message("remember", function()
     local saved = save_options({ hdr_screen = chosen.hdr, sdr_screen = chosen.sdr, denoise = denoise and "yes" or "no" })

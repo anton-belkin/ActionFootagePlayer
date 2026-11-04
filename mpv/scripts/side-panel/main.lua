@@ -219,13 +219,47 @@ local function clip_part(u, x, w, y)
 end
 
 local function look_title(d, look)
-    if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
-    if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
-    if look == "nbcu" then return "SDR, NBCU (neutral)" end
-    if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
-    if look == "dv" then return d.log and "HDR + Dolby Vision (DJI fit), as macOS shows it" or "With its Dolby Vision, as macOS shows it" end
+    if look == "hdr" then return platform == "windows" and "HDR" or "HDR (OS tone mapping)" end
+    if look == "dv" then return "HDR + DV (OS tone mapping)" end
+    if look == "tonemap" then return "SDR tone mapped from HDR by mpv" end
+    if look == "nbcu" then return "SDR, NBCU" end
+    if look == "maker" then return "SDR, camera maker's LUT" end
     return look
 end
+
+-- What the look chosen is, in a few words
+local function look_note(d, look)
+    if look == "hdr" then
+        if platform == "windows" then return "The HDR picture as it is: an HDR display shows it, for an SDR one mpv tones it down" end
+        return (d.hdr ~= "" and not d.log and ("The file's HDR (" .. d.hdr:upper() .. ") as it is. ") or "The HDR picture as it is. ")
+            .. "An SDR screen gets it toned down by macOS, by how bright it takes the screen to be (SDR on macOS)"
+    end
+    if look == "dv" then
+        if d.dv_own then return "HDR with the file's own Dolby Vision metadata: macOS tones it down by them, as Apple's devices do" end
+        return "HDR with Dolby Vision metadata: macOS tones it down by them for an SDR screen, as QuickTime and Apple's "
+            .. "devices show the export. " .. (d.dv_custom and "These are your own trims (below)."
+            or "They're picked by Action Footage Player's author to taste, fitted to DJI's LUT, and can be changed below.")
+    end
+    if look == "tonemap" then return "mpv tones the HDR down to SDR itself, its reference white at SDR white (BT.2408): the same on every system and screen" end
+    if look == "nbcu" then return "NBCUniversal's HLG to SDR conversion (LUT v1.2): neutral, the same for every camera" end
+    if look == "maker" then return (d.maker_lut or "") ~= "" and d.maker_lut or ((d.maker ~= "" and d.maker or "The maker") .. "'s own LUT to Rec.709") end
+    if look == "off" then return "The log signal as the camera recorded it, without a look" end
+    return nil
+end
+
+-- The dv look's trims (12-bit codes, 2048 neutral), as DV Lab has them
+local DV_TRIMS = {
+    { "slope", "Slope", "Gain after the tone curve: lighter, the highlights clip sooner" },
+    { "offset", "Offset", "Lifts everything, the shadows most" },
+    { "power", "Power", "Mid-tones darker (right) or lighter (left)" },
+    { "midContrast", "Mid contrast", "Contrast around the mid-tones" },
+    { "clipTrim", "Highlight roll-off", "Right: highlights roll off to white; left: they clip" },
+    { "saturation", "Saturation", nil },
+    { "chromaWeight", "Chroma weight", "How much saturated colors are kept as brightness is compressed" },
+    { "l3Avg", "Scene average", "The scene's average brightness Dolby Vision exposes by" },
+    { "l3Max", "Scene highlights", "Right: highlights taken as brighter, given more room" },
+    { "l3Min", "Scene blacks", nil },
+}
 
 local function look_part(u, x, w, y)
     local s = u.s
@@ -236,8 +270,7 @@ local function look_part(u, x, w, y)
     if not d.log and (d.hdr or "") == "" then
         y = u:caption(x, w, y, "Not log, as the camera says")
     else
-        if d.screen == "sdr" then y = u:caption(x, w, y, "SDR screen: HDR shows as macOS tone-maps it")
-        elseif d.screen == "hdr" then y = u:caption(x, w, y, "HDR screen: SDR shows as an SDR screen would") end
+        if d.screen == "hdr" then y = u:caption(x, w, y, "HDR screen: SDR shows as an SDR screen would") end
         for _, look in ipairs(d.looks or {}) do
             y = u:radio(x, w, y, "look:" .. look, look_title(d, look), d.look == look, "script-message-to dlogm look " .. look,
                         { key = look == "hdr" and keys["script-binding dlogm/hdr"] or nil })
@@ -248,6 +281,24 @@ local function look_part(u, x, w, y)
         if d.log and d.maker == "" then
             y = u:caption(x, w, y + 2 * s, d.curve == "dlogm" and "DJI's LUT isn't downloaded" or ("No maker's LUT for " .. (CURVE_NAMES[d.curve] or d.curve) .. " yet"))
         end
+        local note = look_note(d, d.look)
+        if note then y = u:caption(x, w, y + 6 * s, note, { color = C.label }) end
+    end
+
+    -- The dv look's trims, while it shows (not for a file with its own Dolby Vision)
+    if d.look == "dv" and not d.dv_own and d.dv_trims then
+        y = u:heading(x, w, y + 10 * s, "Dolby Vision trims")
+        for _, t in ipairs(DV_TRIMS) do
+            local v = d.dv_trims[t[1]] or 2048
+            u:text(x, y + 8 * s, t[2], { size = 12, color = C.label })
+            y = u:slider(x, w, y + 14 * s, "dv:" .. t[1], v / 4095, function(p)
+                mp.commandv("script-message-to", "dlogm", "dv-trim", t[1], tostring(math.floor(p * 4095 + 0.5)))
+            end, "", "")
+            if t[3] then y = u:caption(x, w, y, t[3]) end
+            y = y + 8 * s
+        end
+        y = u:button(x, w, y + 4 * s, "dv-reset", d.dv_custom and "Back to the author's trims" or "These are the author's trims",
+                     "script-message-to dlogm dv-reset", { disabled = not d.dv_custom })
     end
 
     y = u:heading(x, w, y + 10 * s, "Log curve", keys["script-binding dlogm/curve"])
@@ -467,7 +518,7 @@ local function sdr_part(u, x, w, y)
         elseif m[1] == "auto" then note = d.lux and string.format("%d lux", d.lux) or "no sensor" end
         y = u:radio(x, w, y, "sdr:" .. m[1], m[2], mode == m[1], "script-message-to sdr_white mode " .. m[1], { note = note })
     end
-    y = u:slider(x, w, y + 4 * s, "sdr:slider", d.manual or 0.64, function(v)
+    y = u:slider(x, w, y + 4 * s, "sdr:slider", d.manual or 0.43, function(v)
         mp.commandv("script-message-to", "sdr_white", "manual", string.format("%.3f", v))
     end, "Darker", "Lighter", mode ~= "manual")
     y = u:caption(x, w, y, mode == "auto" and "Lighter in a lit room, darker in the dark. A MacBook's sensor, by its open lid"

@@ -13,7 +13,7 @@
 --   macos    as macOS has it (what was set here is put back)
 --   light    100 nits: HDR as NBCU's conversion shows it, for a lit room
 --   auto     by the MacBook's light sensor: 100 at 250 lux and more, up to 150 in the dark (lid closed: light)
---   manual   `manual`, 0 (darker) to 1 (lighter), from 250 down to 60 nits
+--   manual   `manual`, 0 (darker) to 1 (lighter), from 250 down to 30 nits (0.43: 100)
 --
 -- Script messages (`script-message-to sdr_white <message>`):
 --   mode <mode>       as above, kept in sdr_white.conf
@@ -26,7 +26,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { mode = "ask", manual = 0.64 }
+local o = { mode = "ask", manual = 0.43 }
 options.read_options(o, "sdr_white")
 
 if (mp.get_property("platform") or "") ~= "darwin" then return end
@@ -35,9 +35,9 @@ local helper = dir and dir .. "/sdr-white"
 if not helper or not utils.file_info(helper) then return end
 
 local MODES = { ask = true, macos = true, light = true, auto = true, manual = true }
-local LIGHT, DARK, LIGHTEST, DARKEST = 100, 150, 60, 250
+local LIGHT, DARK, LIGHTEST, DARKEST = 100, 150, 30, 250
 local mode = MODES[o.mode] and o.mode or "ask"
-local manual = math.min(1, math.max(0, tonumber(o.manual) or 0.64))
+local manual = math.min(1, math.max(0, tonumber(o.manual) or 0.43))
 local screens, lux, white = {}, nil, 0
 local asked = false
 -- Whether the helper runs here (Apple Silicon; not on an Intel Mac): the side panel shows the part once it has
@@ -76,6 +76,11 @@ local function run(args, done)
         end)
 end
 
+-- macOS reads the value when a window comes to a screen: the player's picture is shown anew (dlogm's refresh)
+local function refresh(j)
+    if j then mp.commandv("script-message-to", "dlogm", "refresh") end
+end
+
 -- The SDR screens' white as the mode wants it: set when it's off by more than 3 % (the sensor moves all the time;
 -- each write changes how HDR shows), or put back to macOS's
 local function apply()
@@ -85,14 +90,14 @@ local function apply()
         if not want then
             white = 0
             for _, s in ipairs(screens) do
-                if s.original then return run({ helper, "restore" }) end
+                if s.original then return run({ helper, "restore" }, refresh) end
             end
             return
         end
         white = want
         for _, s in ipairs(screens) do
             if s.sdr and math.abs(s.white - want) / want > 0.03 then
-                return run({ helper, "set", string.format("%.1f", want) })
+                return run({ helper, "set", string.format("%.1f", want) }, refresh)
             end
         end
         publish()

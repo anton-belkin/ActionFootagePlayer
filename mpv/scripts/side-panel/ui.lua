@@ -256,6 +256,7 @@ function Ui:slider(x, w, y, id, value, set, left, right, disabled)
         self:hit(x, y, w, h, id, { drag = function(mx) set(math.min(1, math.max(0, (mx - tx) / tw))) end })
     end
     y = y + h
+    if (left or "") == "" and (right or "") == "" then return y + 2 * s end
     self:text(x, y + 6 * s, left, { size = 11, color = M.C.dim, alpha = dim_alpha(disabled) })
     self:text(x + w, y + 6 * s, right, { size = 11, color = M.C.dim, align = 6, alpha = dim_alpha(disabled) })
     return y + 18 * s
