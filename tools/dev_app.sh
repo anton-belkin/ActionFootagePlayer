@@ -65,7 +65,7 @@ echo "== Gyroflow plugin"
 bin="$BUILD/dev-bin"
 rm -rf "$bin"
 mkdir -p "$bin"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "vs-gyroflow/target/release/$f" "$bin/$f"
     "$STRIP" -x "$bin/$f"
 done
