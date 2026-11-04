@@ -135,6 +135,8 @@ struct Control {
 struct Feed {
     frame: Mutex<Option<(i64, Arc<Vec<Vec<f32>>>)>>,
     posted: AtomicU64,
+    /// The seeks before that frame (Edges::seeks), set with it
+    seeks: AtomicU32,
     ready: Condvar,
     stop: AtomicBool,
 }
@@ -147,8 +149,14 @@ pub struct Edges {
     settings: Mutex<EdgeSettings>,
     /// Made on the first frame written, as fine as the grid is then; read without a lock (sphere.rs)
     sphere: OnceLock<Sphere>,
-    /// The time of the frame last written to the sphere; held while writing, so writers take turns
-    sphere_written: Mutex<Option<i64>>,
+    /// The time of the frame last written to the sphere, and the seeks before it; held while writing, so writers take
+    /// turns
+    sphere_written: Mutex<Option<(i64, u32)>>,
+    /// Seeks so far (`seeked`): a frame from after one may be anywhere in the clip, the others go on from the last
+    seeks: AtomicU32,
+    /// The filter was made for a seek back to the frame on screen (`seeked`): frames up to the one last written are
+    /// ones the sphere has, however far back
+    rejoin: AtomicBool,
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
@@ -178,6 +186,8 @@ pub struct EdgeJob {
     settings: EdgeSettings,
     /// The source planes on the coarse grid; shared with the sphere writer
     src_lo: Arc<Vec<Vec<f32>>>,
+    /// The seeks before the frame (Edges::seeks)
+    seeks: u32,
 }
 
 impl Edges {
@@ -186,11 +196,11 @@ impl Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()),
-            sphere: OnceLock::new(), sphere_written: Mutex::new(None),
+            sphere: OnceLock::new(), sphere_written: Mutex::new(None), seeks: AtomicU32::new(0), rejoin: AtomicBool::new(false),
             expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
             fill_rate: AtomicU32::new(0),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
-            feed: Feed { frame: Mutex::new(None), posted: AtomicU64::new(0), ready: Condvar::new(), stop: AtomicBool::new(false) },
+            feed: Feed { frame: Mutex::new(None), posted: AtomicU64::new(0), seeks: AtomicU32::new(0), ready: Condvar::new(), stop: AtomicBool::new(false) },
             in_flight: AtomicUsize::new(0), workers: workers.max(1), stats: Mutex::new((0.0, 0.0, 0.0, 0)),
         }
     }
@@ -210,6 +220,17 @@ impl Edges {
         self.realtime.store(realtime, Ordering::Relaxed);
     }
 
+    /// mpv made the filter again (playback): a seek. After one, the first frame written starts the sphere over if it's
+    /// more than MAX_GAP_US from the one last written; between seeks a gap is only the sphere writer having had no room
+    /// for a while, and the sphere goes on. `rejoin`: a seek back to the frame on screen, with the chain set up again
+    /// (still.lua: the clean still frame, the paused frame at full size, playing on from it), which isn't one: mpv
+    /// decodes from the keyframe before it, and the frames up to it and its neighbours after, which the sphere had while
+    /// it played, come again
+    pub fn seeked(&self, rejoin: bool) {
+        self.rejoin.store(rejoin, Ordering::Relaxed);
+        if !rejoin { self.seeks.fetch_add(1, Ordering::Relaxed); }
+    }
+
     /// Ends the sphere writer (Engine's drop)
     pub(crate) fn stop(&self) {
         let _frame = self.feed.frame.lock();
@@ -219,18 +240,20 @@ impl Edges {
 
     /// The frame for the sphere writer, in place of one it hasn't taken yet: only the newest counts. Not an older one
     /// finished after it, unless it's a seek back
-    fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>) {
+    fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>, seeks: u32) {
         let mut frame = self.feed.frame.lock();
         self.feed.posted.fetch_add(1, Ordering::Relaxed);
-        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < MAX_GAP_US) { return; }
+        let rejoin = self.rejoin.load(Ordering::Relaxed);
+        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && (rejoin || *t - timestamp_us < MAX_GAP_US)) { return; }
         *frame = Some((timestamp_us, src_lo.clone()));
+        self.feed.seeks.store(seeks, Ordering::Relaxed);
         self.feed.ready.notify_one();
     }
 
     /// The wide view's frame onto the sphere; starts it over at a seek, or where it no longer matches the frame (a cut,
     /// or a jump the gyro didn't see). What's past the frame's edge and doesn't match it is taken away first, and what's
     /// made up is brought up to date after
-    fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64) {
+    fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64, seeks: u32) {
         let mut last = self.sphere_written.lock();
         let sphere = self.sphere.get_or_init(|| {
             let s = Sphere::new(frame.view.cells_per_radian(frame.grid.0), frame.planes.len(), SPHERE_HALF_LIFE_S);
@@ -241,13 +264,23 @@ impl Edges {
         // The time since the last frame written; 0 when it starts over
         let mut dt = 0.0;
         match *last {
-            None => sphere.reset(now),
-            Some(l) if (timestamp_us - l).abs() > MAX_GAP_US => sphere.reset(now),
-            // Another worker already wrote a newer frame
-            Some(l) if timestamp_us <= l => return,
-            Some(l) => {
+            None => {
+                log::info!("Edges: the sphere starts at {timestamp_us} us");
+                sphere.reset(now);
+            }
+            // From before the seek the frame last written came after, finished late
+            Some((_, s)) if seeks < s => return,
+            // The first after a seek (Edges::seeked) that jumped
+            Some((l, s)) if seeks != s && (timestamp_us - l).abs() > MAX_GAP_US => {
+                log::info!("Edges: a seek from {l} to {timestamp_us} us, the sphere starts over");
+                sphere.reset(now);
+            }
+            // Another worker already wrote a newer frame, or one the sphere had, seen again after a seek back to the
+            // frame on screen
+            Some((l, _)) if timestamp_us <= l => return,
+            Some((l, _)) => {
                 if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * self.geometry.max_value) {
-                    log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
+                    log::info!("Edges: the sphere doesn't match the frame at {timestamp_us} us (a cut), it starts over");
                     sphere.reset(now);
                 } else {
                     dt = (timestamp_us - l) as f32 / 1e6;
@@ -258,7 +291,7 @@ impl Edges {
         let checked = if dt > 0.0 { self.erode_stale(sphere, frame, now, dt) } else { None };
         sphere.write(frame, now);
         self.update_fill(sphere, frame, now, dt);
-        *last = Some(timestamp_us);
+        *last = Some((timestamp_us, seeks));
 
         let mut stats = self.stats.lock();
         let (diff, eroding) = checked.unwrap_or((0.0, 0.0));
@@ -332,7 +365,9 @@ impl Edges {
         self.fill_rate.store(0, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
-        *self.sphere_written.lock() = None;
+        // The sphere stays: mpv makes the filter again on every seek, the clean still frame's back to the paused frame
+        // and the chain set up at another size (full size while paused) among them. A seek that jumps (MAX_GAP_US)
+        // starts it over as it's written
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
     }
@@ -429,7 +464,7 @@ impl Edges {
             }
         }).collect());
         log::trace!("Edges: source scaled down in {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
-        EdgeJob { mode, settings: *self.settings.lock(), src_lo }
+        EdgeJob { mode, settings: *self.settings.lock(), src_lo, seeks: self.seeks.load(Ordering::Relaxed) }
     }
 }
 
@@ -688,9 +723,9 @@ impl WideView {
         Ok((planes, coverage))
     }
 
-    fn write(&self, edges: &Edges, planes: &[Vec<f32>], coverage: &[f32], timestamp_us: i64) {
+    fn write(&self, edges: &Edges, planes: &[Vec<f32>], coverage: &[f32], timestamp_us: i64, seeks: u32) {
         let view = View::at(&self.params, timestamp_us);
-        edges.write_sphere(&GridFrame { view: &view, grid: edges.geometry.wide, planes, coverage }, timestamp_us);
+        edges.write_sphere(&GridFrame { view: &view, grid: edges.geometry.wide, planes, coverage }, timestamp_us, seeks);
     }
 }
 
@@ -766,12 +801,12 @@ impl EdgeWorker {
         // In playback the sphere writer does it, as the GPU has room
         if job.mode == EdgeMode::Sphere && edges.expected.load(Ordering::Relaxed) {
             if edges.realtime.load(Ordering::Relaxed) && edges.writer.load(Ordering::Relaxed) {
-                edges.post(timestamp_us, &job.src_lo);
+                edges.post(timestamp_us, &job.src_lo, job.seeks);
             } else {
                 let wide = self.wide.get_or_insert_with(|| self.wide_setup.view(g));
                 let (planes, coverage) = wide.render::<T, P>(&job.src_lo, timestamp_us, cfg.max_value)?;
                 lap(1, &mut self.timing);
-                wide.write(edges, &planes, &coverage, timestamp_us);
+                wide.write(edges, &planes, &coverage, timestamp_us, job.seeks);
                 lap(2, &mut self.timing);
             }
         }
@@ -851,8 +886,9 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
     }
     let (mut written, mut waited, mut since) = (0u32, Duration::ZERO, Instant::now());
     // With a fill rate: the frames posted as last counted, what they're worth (each one the rate, a write 100), and the
-    // frame last written. What's owed is kept below two writes, so a writer that fell behind doesn't catch up in a burst
-    let (mut counted, mut credit, mut last) = (0u64, 0u64, None::<i64>);
+    // frame last written with the seeks before it. What's owed is kept below two writes, so a writer that fell behind
+    // doesn't catch up in a burst
+    let (mut counted, mut credit, mut last) = (0u64, 0u64, None::<(i64, u32)>);
     loop {
         let rate = edges.fill_rate() as u64;
         {
@@ -861,7 +897,9 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
             let posted = edges.feed.posted.load(Ordering::Relaxed);
             if rate > 0 {
                 credit = (credit + (posted - counted) * rate).min(199);
-                if let (Some((ts, _)), Some(l)) = (frame.as_ref(), last) {
+                // Not the first frame after a seek, which is written whatever its time (write_sphere decides on it)
+                let same_seek = last.is_some_and(|(_, s)| s == edges.feed.seeks.load(Ordering::Relaxed));
+                if let (Some((ts, _)), Some((l, _)), true) = (frame.as_ref(), last, same_seek) {
                     if (*ts - l).abs() <= MAX_GAP_US && (*ts <= l || credit < 100) {
                         *frame = None;
                         counted = posted;
@@ -879,16 +917,16 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
         if stop() { break; }
         waited += t.elapsed();
         // The newest by now
-        let Some((timestamp_us, src_lo)) = edges.feed.frame.lock().take() else { continue };
+        let Some(((timestamp_us, src_lo), seeks)) = ({ let mut f = edges.feed.frame.lock(); f.take().map(|x| (x, edges.feed.seeks.load(Ordering::Relaxed))) }) else { continue };
         let rendered = match cfg.kind {
             SampleKind::U8  => wide.render::<u8, Luma8>(&src_lo, timestamp_us, cfg.max_value),
             SampleKind::U16 => wide.render::<u16, Luma16>(&src_lo, timestamp_us, cfg.max_value),
         };
         match rendered {
-            Ok((planes, coverage)) => wide.write(&edges, &planes, &coverage, timestamp_us),
+            Ok((planes, coverage)) => wide.write(&edges, &planes, &coverage, timestamp_us, seeks),
             Err(e) => log::error!("Sphere writer: {e}"),
         }
-        last = Some(timestamp_us);
+        last = Some((timestamp_us, seeks));
         written += 1;
         let elapsed = since.elapsed();
         if elapsed >= Duration::from_secs(5) {

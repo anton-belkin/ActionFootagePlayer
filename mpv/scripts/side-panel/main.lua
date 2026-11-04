@@ -358,6 +358,13 @@ local function quality_part(u, x, w, y)
         { "720p", "script-message-to gyroflow quality resolution 720" },
     }, sizes[tostring(g.resolution)])
     y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    y = u:heading(x, w, y + 8 * s, "Paused frame", keys["script-binding gyroflow/full"])
+    local paused = { off = 1, auto = 2 }
+    y = u:segmented(x, w, y, "paused", {
+        { "As it played", "script-message-to gyroflow quality paused_full_size off" },
+        { "Full size", "script-message-to gyroflow quality paused_full_size auto" },
+    }, paused[tostring(g.paused_full_size or "off")])
+    y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
     y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
     for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
         y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])
