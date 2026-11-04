@@ -3,6 +3,7 @@
 #   mpv-gyroflow-<version>-linux-x86_64.zip     the gyroflow plugin alone, with its binaries built for this system:
 #   mpv-gyroflow-<version>-windows-x86_64.zip   unzipped into mpv's scripts/ folder (~/.config/mpv/scripts/,
 #                                               %APPDATA%\mpv\scripts\)
+#   mpv-gyroflow-<version>-windows-arm64.zip    the same, with the Rust target aarch64-pc-windows-msvc
 #
 # The Linux and Windows counterpart of the macOS plugin zip in tools/make_release.sh (which makes the rest of the
 # release). Runs on Linux, and on Windows in Git Bash (.github/workflows/release.yml runs it on both). A Rust target
@@ -25,6 +26,8 @@ case "${target:-$(uname -s)}" in
 esac
 arch=$(case "$target" in "") uname -m ;; *) echo "${target%%-*}" ;; esac)
 [ "$arch" = amd64 ] && arch=x86_64
+# Windows calls it arm64
+[ $os = windows ] && [ "$arch" = aarch64 ] && arch=arm64
 if [ $os = windows ]; then
     files="vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe"
 else

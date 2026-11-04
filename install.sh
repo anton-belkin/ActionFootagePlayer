@@ -5,8 +5,9 @@
 #                          DJI's LUT downloaded from DJI), scripts/gyroflow (stabilization, with the binaries built
 #                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video),
 #                          scripts/highlights (the moments the camera marked, on the seek bar),
-#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later) and scripts/agent (notes
-#                          for an AI agent: areas of the frame and a comment); and mpv.conf when
+#                          scripts/footage-menu (their right-click menu, mpv 0.41 and later), scripts/side-panel
+#                          (their settings in a panel beside the video, Tab) and scripts/agent (notes for an AI
+#                          agent: areas of the frame and a comment); and mpv.conf when
 #                          there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
@@ -103,6 +104,9 @@ for curve in $HDR_CURVES; do
 done
 # GP-Log's, from Zeb Gardner's LUT (luts/gplog_hlg.cube)
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$BUILD/gplog_hlg.glsl"
+# NBCUniversal's HLG and PQ -> SDR (luts/3-NBCU_*, luts/5-NBCU_*), the NBCU look
+python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$BUILD/nbcu_hlg2sdr.glsl"
+python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$BUILD/nbcu_pq2sdr.glsl"
 
 if [ "$BIN" != bin ]; then
     echo "== Gyroflow plugin"
@@ -115,6 +119,7 @@ GYROFLOW="$MPV_DIR/scripts/gyroflow"
 TELEMETRY="$MPV_DIR/scripts/dji-telemetry"
 HIGHLIGHTS="$MPV_DIR/scripts/highlights"
 MENU="$MPV_DIR/scripts/footage-menu"
+PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -204,6 +209,8 @@ for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
 done
 put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
+put "$BUILD/nbcu_hlg2sdr.glsl"      "$DLOGM/shaders/nbcu_hlg2sdr.glsl" 644
+put "$BUILD/nbcu_pq2sdr.glsl"       "$DLOGM/shaders/nbcu_pq2sdr.glsl" 644
 put shaders/denoise.glsl            "$DLOGM/shaders/denoise.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
@@ -212,12 +219,14 @@ for curve in $HDR_CURVES; do
     put "$BUILD/${curve}_hlg.cube"  "$DLOGM/luts/${curve}_hlg.cube" 644
 done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
+put luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$DLOGM/luts/3-NBCU_HLG2SDR_DL_v1.2.cube" 644
 
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
 put mpv/scripts/gyroflow/export.lua  "$GYROFLOW/export.lua" 644
 put mpv/scripts/gyroflow/platform.lua "$GYROFLOW/platform.lua" 644
 put mpv/scripts/gyroflow/still.lua   "$GYROFLOW/still.lua" 644
+put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
@@ -241,6 +250,10 @@ put mpv/scripts/highlights/markers.lua "$HIGHLIGHTS/markers.lua" 644
 
 # The right-click menu
 put mpv/scripts/footage-menu/main.lua "$MENU/main.lua" 644
+
+# The settings beside the video
+put mpv/scripts/side-panel/main.lua "$PANEL/main.lua" 644
+put mpv/scripts/side-panel/ui.lua   "$PANEL/ui.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644

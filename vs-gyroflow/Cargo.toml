@@ -13,7 +13,10 @@ crate-type = ["cdylib", "rlib"]
 # uses nothing beyond what upstream exports.
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon. No cache-gyro-metadata: it
 # would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
-gyroflow-core = { git = "https://github.com/gyroflow/gyroflow.git", rev = "3d9f610", default-features = false, features = ["bundle-lens-profiles"] }
+# From the fork until upstream has it: 3d9f610 with MemoryHints::MemoryUsage on integrated GPUs (branch
+# integrated-gpu-memory-usage-3d9f610), without which 3 workers on an Intel iGPU took 9 GB of RAM and the next clip ran
+# the GPU out of memory. Back to gyroflow/gyroflow once the pull request with it is merged
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "1e7f531", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.1", features = ["unstable-api"] }
 url = "2"
@@ -30,6 +33,10 @@ bytemuck = { version = "1", features = ["derive"] }
 libc = "0.2"
 # The trail on a sphere (src/sphere.rs); the same nalgebra as gyroflow-core
 nalgebra = "0.34"
+# afp-rpu: Dolby Vision RPUs for a look (src/dovi.rs), the library dovi_tool is built on (MIT). Pinned: the version
+# dovi_tool 2.3.4 has, whose output tools/make_dv_rpu.sh compares with. Only afp-rpu uses it, the others don't link it
+dolby_vision = { version = "=3.4.0", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 debug = 1

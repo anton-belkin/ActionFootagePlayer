@@ -2,7 +2,9 @@
 # tools/make_release.sh <version>: into dist/
 #   ActionFootagePlayer-<version>-macos-arm64.zip             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh):
 #                                                       unzipped into Applications, its setup downloads DJI's LUT.
-#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too
+#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too:
+#                                                       MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
+#                                                       tools/build_mpv.sh, when it's there), else Homebrew's
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
@@ -11,6 +13,8 @@
 #   mpv-highlights-<version>.zip                        the highlights plugin alone, the same way (plain Lua)
 #   mpv-footage-menu-<version>.zip                      the right-click menu for the plugins, the same way (plain
 #                                                       Lua, mpv 0.41 and later)
+#   mpv-side-panel-<version>.zip                        the plugins' settings in a panel beside the video, the same
+#                                                       way (plain Lua; its Clip and Keys buttons use footage-menu)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
 #                                                       tools/make_plugin_zip.sh's)
@@ -24,6 +28,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version=${1:?usage: tools/make_release.sh <version>}
+# For tools/bundle_runtime.py (through tools/make_app.sh): the mpv tools/build_mpv.sh built
+if [ -n "${BUNDLE_RUNTIME:-}" ] && [ -z "${MPV_BIN:-}" ] && [ -x build/mpv-afp/out/mpv ]; then
+    MPV_BIN=build/mpv-afp/out/mpv
+fi
+[ -z "${MPV_BIN:-}" ] || export MPV_BIN
 name="ActionFootagePlayer-$version-macos-arm64"
 if ! git diff --quiet HEAD -- vs-gyroflow; then
     echo "vs-gyroflow has uncommitted changes; the binaries would not match the tree" >&2
@@ -36,7 +45,7 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
@@ -85,6 +94,13 @@ done
 git show HEAD:luts/gplog_hlg.cube > dist/gplog_hlg.cube
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in dist/gplog_hlg.cube "dist/$dlogm/dlogm/shaders/gplog_hlg.glsl" >/dev/null
 rm dist/gplog_hlg.cube
+# NBCUniversal's HLG and PQ -> SDR, the NBCU look, and the HLG one for gyroflow-export
+for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sdr; do
+    git show "HEAD:luts/${nbcu%%:*}.cube" > "dist/${nbcu%%:*}.cube"
+    python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in "dist/${nbcu%%:*}.cube" "dist/$dlogm/dlogm/shaders/${nbcu#*:}.glsl" >/dev/null
+done
+mv dist/3-NBCU_HLG2SDR_DL_v1.2.cube "dist/$dlogm/dlogm/luts/"
+rm dist/5-NBCU_PQ2SDR_DL_v1.2.cube
 (cd "dist/$dlogm" && zip -qr "../$dlogm.zip" dlogm)
 rm -rf "dist/$dlogm"
 
@@ -111,6 +127,13 @@ git archive HEAD mpv/scripts/footage-menu | tar -x --strip-components 2 -C "dist
 (cd "dist/$menu" && zip -qr "../$menu.zip" footage-menu)
 rm -rf "dist/$menu"
 
-(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+panel="mpv-side-panel-$version"
+rm -rf "dist/$panel" "dist/$panel.zip"
+mkdir -p "dist/$panel"
+git archive HEAD mpv/scripts/side-panel | tar -x --strip-components 2 -C "dist/$panel"
+(cd "dist/$panel" && zip -qr "../$panel.zip" side-panel)
+rm -rf "dist/$panel"
+
+(cd dist && shasum -a 256 "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS

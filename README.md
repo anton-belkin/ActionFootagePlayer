@@ -12,8 +12,9 @@ ready for your phone.
      1. one frame side by side: as the camera recorded it (flat, grey) | as it plays here
      2. a 5-second GIF: an underwater clip, shaky | stabilized, with the depth in the corner -->
 
-> **Status: early (alpha).** In daily use with the **DJI Osmo Action 6** on **Macs with Apple Silicon**. Other DJI
-> cameras, GoPro and Insta360 are built for but not yet tried on real footage. Windows has an app of its own and Linux
+> **Status: early (alpha).** In daily use with the **DJI Osmo Action 6** on **Macs with Apple Silicon**, and tried on
+> a **GoPro HERO12 Black**. Other DJI cameras, other GoPros and Insta360 are built for but not yet tried on real
+> footage. Windows has an app of its own and Linux
 > the plugins, neither tried yet. [What works with your camera](#what-works-camera-by-camera) ·
 > [Help it work with yours](#help-it-work-with-your-camera)
 
@@ -69,7 +70,7 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
 
-`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` switches to the standard look instead of HDR, `Ctrl+g` goes
+`l` twice marks a part, `Shift+E` exports it, `Ctrl+s` goes through HDR and the SDR looks, `Ctrl+g` goes
 through the stabilization, a wider view of it, and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
 
 ## Example: back from the dive
@@ -89,15 +90,17 @@ colorist to decide what to keep and what to leave out of SDR's narrow range: a c
 for all of it, so the conversion becomes a technical one, the same for every clip, and can be automatic. That turns
 the "pro" mode into the one to use for everyday footage.
 
-On a Mac without an HDR screen (MacBook Air, most external monitors), macOS tones the picture down, or `Ctrl+s`
-shows DJI's standard Rec.709 look. Exports still play in HDR on an iPhone.
+On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in SDR instead: through the
+camera maker's own Rec.709 LUT (DJI's, for D-Log M) or, for a camera without one, NBCUniversal's neutral HDR → SDR
+conversion. `Ctrl+s` goes through them and HDR as macOS tones it down for that screen; on an HDR screen, the same
+`Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
 
 ## Help it work with your camera
 
 Everything was worked out on one camera, and each maker, often each model, records its metadata differently. Most
 useful right now:
 
-- **A few seconds of footage** from a GoPro, an Insta360, another DJI camera or a DJI drone, straight from the card.
+- **A few seconds of footage** from a GoPro other than the HERO12 Black, an Insta360, another DJI camera or a DJI drone, straight from the card.
   [What to shoot and how to share it](#other-cameras-and-how-to-help); if you can't share the video, its metadata
   alone helps.
 - **Trying it on Linux or Windows**, and telling how it went.
@@ -118,7 +121,7 @@ this reads):
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | none: the camera doesn't mark them | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work: Action 4, Action 5 Pro | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | | should work, with a project |
-| GoPro | should work: HDR from GP-Log (HERO12 Black on firmware 1.20+, HERO13 Black) and GP-Log2 (MISSION 1) ⁴ | should work (HyperSmooth off) | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
+| GoPro | **verified**: HDR from GP-Log (HERO12 Black on firmware 1.20+). Should work: HERO13 Black, and GP-Log2 (MISSION 1) ⁴ | **verified**: HERO12 Black (HyperSmooth off). Should work: the others | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | | should work, with a project |
 
@@ -136,7 +139,7 @@ carries the same plugins, and on Linux they're in an mpv of your own:
    Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
 4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
-   checked against the makers' own LUTs, not yet on footage from these cameras. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
+   checked against the makers' own LUTs; on footage, so far only GP-Log, on a HERO12 Black. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
    picks the curve for a clip whose metadata doesn't say it.
 
 ## Install
@@ -147,8 +150,10 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 |---|---|
 | a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
+| a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
+| all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
-| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip` |
+| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 
 **The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
@@ -162,8 +167,8 @@ it opens, it offers its setup:
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
   it applies once you do;
 - Finder gets the Quick Actions *Play Stabilized* and *Stabilize + LUT* (see [Opening files](#opening-files));
-- DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for `Ctrl+s` and Rec.709
-  exports. HDR works without it.
+- DJI's Rec.709 LUT is downloaded from DJI (it isn't redistributed here) and checked, for DJI's SDR look and its
+  Rec.709 exports. HDR and NBCU's SDR work without it.
 
 Coming from Steady Player, as the app was called up to 0.3.0: see [Upgrading](#upgrading).
 
@@ -197,9 +202,9 @@ exported after the others, in the same window).
 Right-click the video for the menu: everything the keys do, with the keys beside it, and what has no key. At the
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
-**Look** (HDR, the standard look, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
+**Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
 the wider view, the level, the horizon locked or not, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
-the units, which fields); **Export** (in the standard look, the last export in Finder); **Clip** (the next and
+the units, which fields); **Export** (in SDR, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
 issue on GitHub with what the plugins found in the clip. In the app, that last submenu has the version beside its
@@ -212,6 +217,26 @@ flow)…** instead: see Stabilization.
 The menu is mpv's own, so it needs mpv 0.41 or later (Homebrew's is); with an older mpv, right click pauses as it
 always did. It's the footage-menu plugin, which shows only the plugins that are there.
 
+### The panel
+
+The same settings as the menu are also in a panel at the right of the window, beside the video (the video moves over
+for it, nothing is covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of
+the one chosen, with switches and buttons, scrolled with the wheel:
+
+- **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
+- **Look**: HDR or an SDR look, the log curve by hand, noise reduction, the clean still frame.
+- **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
+- **Quality**: the frame rate and size it's stabilized at, what fills the edges and how often the trail is written,
+  whether it asks when the GPU can't keep up.
+- **Telemetry**: whether it shows, the corner, the units, the fields.
+- **Player**: speed, looping, fullscreen, always on top, the sound track.
+
+The keys are beside what they do. Look, Stabilization, Quality and Telemetry have **Make these the defaults** at the
+bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
+chosen icon, or the arrow at the top of the panel, leaves only the rail. While the panel shows, mpv's own controls
+(play, the seek bar) are a small box at the bottom of the video. It's the side-panel plugin (`side_panel.conf`:
+`shown=`, `open=`, `tab=`); its Clip buttons and the Keys and Help icons are the menu's.
+
 ### Keys
 
 | Key | | `script-binding` |
@@ -221,17 +246,20 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water, as the camera says or as the project says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips without a project | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
-| `Ctrl+s` / `Ctrl+h` | D-Log M through DJI's own Rec.709 LUT instead of HDR, and back; it sticks for the next log clips. On an HDR clip (an export): tone-mapped to SDR, and back to HDR, for that clip | `dlogm/sdr`, `dlogm/hdr` |
+| `Ctrl+s` | The clip's next look: HDR, then SDR through the maker's LUT (DJI's, for D-Log M), then SDR through NBCUniversal's HLG → SDR conversion, the same for every camera. Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
+| `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
 | `Ctrl+p` | Clean still frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
+| `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The menu | `footage_menu/menu` |
+| `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
@@ -253,6 +281,9 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
+| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; at full size while paused (`Ctrl+f`, `paused_full_size=auto`) every frame is there again (stepping through them, the clean still frame). Right click > Quality sets it |
+| `gyroflow.conf`: `edge_fill_rate=auto` | the edge fill rate: how often the sphere trail (`edges=sphere`) is written while playing. `auto`: whenever a GPU worker is free; `50` or `25`: from that % of the frames that play (with `fps_limit=30`, 25 % is ~7.5 a second), for a laptop whose CPU and GPU share their power, where the writes take what the frames need even while a worker is free. Changes without setting the chain up again. Right click > Quality > Edge fill rate sets it |
+| `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a lower frame rate, resolution or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
@@ -261,8 +292,9 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
-| `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K) |
+| `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
 | `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
@@ -316,8 +348,8 @@ The project is always the `.gyroflow` next to the clip: the video file itself is
 of it stays as it is.
 
 Clips with gyro data of their own, recorded with the camera's stabilization off, play stabilized even without a
-project: DJI with EIS off, and (not yet tried on a real clip, see Other cameras) GoPro with HyperSmooth off and
-Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
+project: DJI with EIS off, GoPro with HyperSmooth off (tried on a HERO12 Black), and (not yet tried on a real clip, see
+Other cameras) Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
 that it was off: footage the camera stabilized already gets worse stabilized again, so a clip that doesn't say
 plays as it is. These clips get Gyroflow's default preset
 and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFootagePlayer/gyroflow/` if you put one
@@ -418,7 +450,9 @@ stabilized picture covers. A clip without one plays before the rest of its motio
 edges wherever they show. A clip with edges anywhere gets the sphere written as it plays,
 edges showing or not, so it has what to fill them with when they show. That's on a thread of its own, and only while
 the GPU has room: the frames come first, and where they need all of it the sphere is written less often, what it has
-fades into the trail by place, and every frame still plays. A clip without any has no sphere to write. The wider view of
+fades into the trail by place, and every frame still plays. Where the GPU shares its power with the CPU (a 15 W
+laptop), a free worker doesn't mean free power: Quality > Edge fill rate has the sphere written from only 50 % or
+25 % of the frames that play (`edge_fill_rate`, Options). A clip without any has no sphere to write. The wider view of
 `Ctrl+g` shows more of the picture and has edges throughout: it turns the zoom off and picks Gyroflow's FOV for the
 clip so the stabilized picture covers about as much area as the frame, what falls outside the frame and the edges
 inside it taken together. That's the area of the frame's outline after the lens correction (the one Gyroflow's zoom
@@ -434,8 +468,8 @@ every frame still plays and the sphere is written ~25 times a second, where it u
 plays without stabilization: after `Ctrl+g` turned it off, or with nothing to stabilize it with), the wider view
 of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
-or for D-Log M DJI's Rec.709 one in the standard look (`Ctrl+s`; the menu's Export in standard look does that
-whatever plays). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
+Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -459,7 +493,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
   reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
-  DJI's LUT instead.
+  DJI's LUT instead, `--nbcu` any curve Rec.709 through NBCU's HLG → SDR conversion (the curve's LUT and NBCU's,
+  made into one for the export).
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--level weak|medium|strong`: a clip without a project at that level (`Ctrl+k`; default medium).
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
@@ -479,8 +514,9 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
-for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it tone-mapped
-to SDR instead, for that clip only. On a screen without HDR, macOS tones it down, as it does log clips.
+for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it in SDR
+through NBCU's HLG or PQ → SDR conversion (one in Display P3 by mpv's tone mapping, NBCU's being for BT.2020); on a
+screen without HDR it starts that way, as log clips do.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses), without edges to fill. Filling them costs more: the export writes the sphere with every frame, where
@@ -580,9 +616,13 @@ default), and `script-message-to agent say <text> [<seconds>]` shows a line over
 
 ### Plugins in your own mpv
 
+`mpv-plugins-<version>-<os>-<arch>.zip` has them all, as the folders below: unzipped into mpv's `scripts/` folder
+(`unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts`; on Windows `%APPDATA%\mpv\scripts\`), with what each one
+needs as below. Or one at a time:
+
 Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) and works without the others:
 
-- `mpv-dlogm-<version>.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shader; the
+- `mpv-dlogm-<version>.zip`, on any system (`%APPDATA%\mpv\scripts\` on Windows). It has the HDR shaders and NBCU's SDR ones; DJI's
   Rec.709 one (`Ctrl+s`) is made from DJI's LUT: download it from DJI (Osmo Action 6 downloads page) and bake it in
   from a checkout of this repo:
 
@@ -597,6 +637,9 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 
 - `mpv-footage-menu-<version>.zip`, on any system with mpv 0.41 or later: the right-click menu (plain Lua). It
   shows the plugins that are there.
+
+- `mpv-side-panel-<version>.zip`, on any system: the settings in a panel beside the video (plain Lua), with
+  footage-menu for its Clip buttons.
 
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
@@ -623,21 +666,28 @@ LUTs into shaders and installs everything; existing files it replaces are kept a
 ### The app from a checkout, as the release builds it
 
 To try a branch or a fix in the app without waiting for a release, from a checkout on a Mac with
-[Homebrew](https://brew.sh) (`brew install mpv ffmpeg rustup`):
+[Homebrew](https://brew.sh) and Xcode (`brew install ffmpeg rustup`):
+
+```bash
+tools/build_mpv.sh
+```
 
 ```bash
 tools/dev_app.sh
 ```
 
-It builds ActionFootagePlayer the way the release does: the plugins, and Homebrew's mpv, ffmpeg, Python and
-VapourSynth in the app (so it needs no Homebrew to run). Then it puts it in `~/Applications` in place of the one
+`tools/build_mpv.sh` builds the app's mpv once (a few minutes): the commit in `tools/mpv.lock`, with libplacebo
+linked in, the other libraries Homebrew's (it installs mpv's dependencies with Homebrew first; `--no-deps` skips
+that). `tools/dev_app.sh` then builds ActionFootagePlayer the way the release does: the plugins, that mpv, and
+Homebrew's ffmpeg, Python and VapourSynth in the app (so it needs no Homebrew to run). Without `tools/build_mpv.sh`'s
+mpv it takes Homebrew's (`brew install mpv`); `MPV_BIN` names another. Then it puts it in `~/Applications` in place of the one
 there, which it keeps as `build/ActionFootagePlayer-previous.app`, and runs the setup (the default app for MP4, the
 Quick Actions, DJI's LUT).
 - **What it builds:** uncommitted changes too, and `~/.config/mpv` isn't touched. The version says what it is: `0.6.2`
   on a release's tag, else e.g. `0.6.2-dev.3+1a2b3c4` (`.dirty` with uncommitted changes).
 - **How long:** a few minutes, most of it the first cargo build.
-- **How it differs from the release:** the mpv and ffmpeg in it are this Mac's Homebrew ones, where the release's
-  build gets the latest (`brew upgrade mpv ffmpeg` first). Each build is signed anew (ad hoc), so macOS may ask
+- **How it differs from the release:** ffmpeg and the libraries mpv links are this Mac's Homebrew ones, where the
+  release's build gets the latest (`brew upgrade ffmpeg`, then `tools/build_mpv.sh` again, first). Each build is signed anew (ad hoc), so macOS may ask
   again for access to a folder like Downloads.
 - `--no-install` only builds `build/ActionFootagePlayer.app`.
 
@@ -655,7 +705,7 @@ None of it has been tried there by hand yet (the release builds it on Linux and 
 - **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
   `gyroflow-export.exe`.
 
-Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip`
+Unzip `mpv-gyroflow-<version>-linux-x86_64.zip` or `mpv-gyroflow-<version>-windows-x86_64.zip` (`-arm64.zip`)
 into mpv's `scripts/` folder (`~/.config/mpv/scripts/`, `%APPDATA%\mpv\scripts\`), with `mpv-dlogm-<version>.zip`
 next to it for D-Log M. On Linux, `./install.sh` from a checkout also builds and installs all the plugins (with
 DJI's LUT, as on a Mac). With `--apps` it also puts ActionFootagePlayer in the applications menu: the same mpv, by
@@ -755,7 +805,7 @@ camera's metadata is read from (what has been tried: [What works, camera by came
 | DJI Osmo Action 6 | yes | D-Log M | yes | the `hglg` box, as ExifTool reads it from an Action 4, not seen |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen | none |
 | Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no | Action 4, Action 5 Pro: as the Action 6, not seen |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; checked only on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; played in the app on HERO12 Black clips, checked on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip; GP-Log played in the app on a HERO12 Black clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no | not yet (telemetry-parser reads them) |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
@@ -823,11 +873,26 @@ shaders of your own, so mpv undoes them when a playlist moves on to a clip that 
   `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
   (Up to 0.5.0 the LUT was at `HOOK OUTPUT`, re-sampling the source through `BIND MAIN`: libplacebo redraws a
   paused frame from its cache, where `MAIN` can't be bound, and skipped it, so paused video went grey.)
-- `sdr`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. mpv's color pipeline then runs a
-  BT.709 → BT.709 identity, so the LUT's output reaches the display unchanged.
+- `maker`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. The `format` filter tags the video
+  BT.709/BT.1886, so mpv's color pipeline runs a BT.709 → BT.709 identity and the LUT's output reaches the display
+  unchanged.
+- `nbcu`, on `Ctrl+s` again: the `hdr` shader, then NBCUniversal's 33³ HLG → SDR (BT.709) display-light
+  conversion (`luts/3-NBCU_HLG2SDR_DL_v1.2.cube`, `shaders/nbcu_sdr.glsl.in`), tagged as `maker`. NBCU's are Type III
+  LUTs (full range processing of narrow range signals: the signal's 0..1 is 64..940 of 1023 of the LUT's domain,
+  in and out) and their highlight knee needs tetrahedral interpolation, so the shader does it from the texels.
+  HLG's 75 % maps to 95 % SDR, highlights roll off to 109 %, clipped at 100 % here. It's a standard for single-master
+  HDR/SDR broadcasting rather than a look: next to DJI's, the same clip is brighter in the mid-tones (18 % grey at
+  ~0.40 in Rec.709 against DJI's ~0.32) and more saturated. On a file tagged HDR: NBCU's HLG or PQ → SDR alone,
+  with its Dolby Vision metadata set aside (`format=dolbyvision=no`): VideoToolbox writes HLG as Dolby Vision 8.4,
+  which mpv would otherwise reshape into PQ before the shader sees it; the HLG underneath is what NBCU's LUT takes.
+
+Which one a clip starts in depends on the screen its window is on: macOS's EDR headroom (`NSScreen`'s
+`maximumPotentialExtendedDynamicRangeColorComponentValue`, asked once with `osascript`), above 1 on a screen that
+shows HDR. A clip not yet switched by hand follows its window to a screen of the other kind. On Windows and Linux
+every screen counts as HDR, as before.
 
 The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in
-`shaders/`), so the GPU does the trilinear interpolation in one tap.
+`shaders/`), so the GPU does the trilinear interpolation in one tap (NBCU's: four texel reads, tetrahedral).
 
 ### Other log curves
 
@@ -929,6 +994,8 @@ mpv/scripts/dlogm/            the log plugin  →  ~/.config/mpv/scripts/dlogm (
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               ActionFootagePlayer
 mpv/scripts/gyroflow/still.lua  the clean still frame (Ctrl+p): the paused frame again, through vs-gyroflow's Still
+mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses and offers a lower frame rate, resolution
+                              or edge fill
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
@@ -937,6 +1004,8 @@ mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/
                               markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
+mpv/scripts/side-panel/       the plugins' settings in a panel beside the video (ui.lua draws it)  →
+                              ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
@@ -956,6 +1025,7 @@ macos/                        ActionFootagePlayer: player.sh (the app's executab
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
 tools/dev_app.sh              builds it from the checkout as the release does, and puts it in ~/Applications
+tools/build_mpv.sh            builds the app's mpv (tools/mpv.lock: mpv's commit and libplacebo's, linked in)
 windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
                               gives mpv.exe the app's icon (Rust, no dependencies)
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
@@ -974,9 +1044,10 @@ tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for L
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
 
-ActionFootagePlayer.app also carries mpv, ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as
-Homebrew builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
-`Contents/Resources/ThirdParty/` has each one's license files and the Homebrew formula it was built by, and
+ActionFootagePlayer.app also carries mpv (GPL; built by `tools/build_mpv.sh` from the commit in `tools/mpv.lock`,
+with libplacebo, LGPL, linked in) and ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as Homebrew
+builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
+`Contents/Resources/ThirdParty/` has each one's license files (and for Homebrew's, the formula it was built by), and
 `SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them
 at build). The sources are also available from this project on request.
 
@@ -1000,6 +1071,14 @@ DaVinci Wide Gamut/Intermediate shaper LUT (`GP_LOG to DWG_I ZRG V1`, from his
 
 His site states no license for his LUTs; Zeb Gardner has agreed to their use here, with this credit. The HDR
 rendering of the other log curves is fitted to `dlogm_hlg.cube`, so it builds on his work too.
+
+The NBCU LUTs (`luts/3-NBCU_HLG2SDR_DL_v1.2.cube`, `luts/5-NBCU_PQ2SDR_DL_v1.2.cube`, and the shaders made from
+them, `nbcu_hlg2sdr.glsl` and `nbcu_pq2sdr.glsl`) were developed by NBCUniversal Media, LLC, with Cromorama and Nick
+Shaw, and are from NBCU's
+[UHD HDR-SDR Single-Master Production Workflow Recommendation](https://github.com/digitaltvguy/NBCUniversal-UHD-HDR-SDR-Single-Master-Production-Workflow-Recommendation-LUTs).
+NBCU distributes them publicly and freely, without warranty, on an "as is" basis, to encourage UHD single-master
+HDR-SDR production with consistent media exchange; as NBCU asks, their names keep "NBCU" and their headers are
+unaltered.
 
 The other log curves are decoded from their makers' own publications (`tools/make_hdr_lut.py`, which says the
 same in every LUT it writes):

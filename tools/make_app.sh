@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -9,8 +9,8 @@
 #   Contents/Resources/AppIcon.icns      the icon (macos/icon/, made by tools/make_icon.sh)
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
-#                                        dji-telemetry, highlights, footage-menu (the right-click menu), and
-#                                        agent (notes for an AI agent)
+#                                        dji-telemetry, highlights, footage-menu (the right-click menu),
+#                                        side-panel (the settings beside the video) and agent (notes for an AI agent)
 #   Contents/Resources/app.conf          the app's mpv settings (mpv/app.conf)
 #   Contents/Resources/VERSION           its version, which the menu shows
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
@@ -21,7 +21,8 @@
 #
 # With BUNDLE_RUNTIME set to Homebrew's prefix (`brew --prefix`), the app also gets Homebrew's mpv and ffmpeg and
 # what they load, Python and VapourSynth among it, with their licenses (tools/bundle_runtime.py): it then needs no
-# Homebrew, and the macOS the bottles were built for. Without it, the app runs Homebrew's mpv.
+# Homebrew, and the macOS the bottles were built for. Its mpv is MPV_BIN's when that's set (tools/build_mpv.sh's).
+# Without BUNDLE_RUNTIME, the app runs Homebrew's mpv.
 #
 # Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/ActionFootagePlayer).
 set -euo pipefail
@@ -71,12 +72,16 @@ gyroflow="$res/plugins/gyroflow"
 telemetry="$res/plugins/dji-telemetry"
 highlights="$res/plugins/highlights"
 menu="$res/plugins/footage-menu"
+panel="$res/plugins/side-panel"
 agent="$res/plugins/agent"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$agent"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
+# The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
+mkdir -p "$dlogm/dv"
+install -m 644 mpv/scripts/dlogm/dv/dji_fit.json mpv/scripts/dlogm/dv/dji_fit.rpu "$dlogm/dv/"
 # The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
 # for gyroflow-export
 for curve in dlog gplog2 ilog; do
@@ -84,15 +89,22 @@ for curve in dlog gplog2 ilog; do
     python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in "$dlogm/luts/${curve}_hlg.cube" "$dlogm/shaders/${curve}_hlg.glsl" >/dev/null
 done
 python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$dlogm/shaders/gplog_hlg.glsl" >/dev/null
+# NBCUniversal's HLG and PQ -> SDR, the NBCU look (its terms allow shipping them), and the HLG one for gyroflow-export
+for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sdr; do
+    python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in "luts/${nbcu%%:*}.cube" "$dlogm/shaders/${nbcu#*:}.glsl" >/dev/null
+done
+install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
+    mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
@@ -110,7 +122,7 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu"; do
     sign "$f"
 done
 sign "$app"

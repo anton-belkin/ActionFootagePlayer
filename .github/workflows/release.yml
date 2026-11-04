@@ -1,5 +1,6 @@
 # The release: built on macOS (Apple Silicon) by tools/make_release.sh, the gyroflow plugin for Linux and Windows
-# by tools/make_plugin_zip.sh, and the Windows app's installer by tools/make_windows_app.sh. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
+# by tools/make_plugin_zip.sh, the Windows app's installer by tools/make_windows_app.sh, and all the plugins in one zip
+# per system by tools/make_plugin_bundles.py. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
 # release notes:
 #
 #   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
@@ -34,19 +35,34 @@ jobs:
           key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vs-gyroflow/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
 
-      # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew. The bottles are built for the
-      # runner's macOS, and the app needs that one or later: the oldest runner that Homebrew has bottles for. Updated
-      # first: the runner's Homebrew is as old as its image, and doesn't update itself there
-      - name: mpv and ffmpeg
+      # Carried in the app (tools/bundle_runtime.py), which then needs no Homebrew: ffmpeg, and what mpv links (mpv
+      # itself is built below). The bottles are built for the runner's macOS, and the app needs that one or later: the
+      # oldest runner that Homebrew has bottles for. Updated first: the runner's Homebrew is as old as its image, and
+      # doesn't update itself there
+      - name: Homebrew (ffmpeg, mpv's dependencies, mpv's build tools)
         env:
           HOMEBREW_NO_INSTALL_CLEANUP: 1
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-        run: brew update && brew install mpv ffmpeg
+        run: |
+          brew update && tools/build_mpv.sh --deps-only && brew install ffmpeg
+          mkdir -p build && tools/build_mpv.sh --print-deps | tee build/mpv-deps.txt
+
+      # The app's mpv (tools/build_mpv.sh: tools/mpv.lock's commit, with libplacebo in it), built again when the lock,
+      # the script, or a Homebrew library it links (or the compiler) changes: it links them by their version
+      - uses: actions/cache@v4
+        id: mpv
+        with:
+          path: build/mpv-afp/out
+          key: mpv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/mpv.lock', 'tools/build_mpv.sh', 'tools/mpv-patches/*.patch', 'build/mpv-deps.txt') }}
+
+      - name: mpv
+        if: steps.mpv.outputs.cache-hit != 'true'
+        run: tools/build_mpv.sh --no-deps
 
       - name: Build
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
-          BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
+          MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,18 +70,24 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-x86_64.zip, and on Windows the app with its installer,
-  # ActionFootagePlayer-<version>-windows-x86_64-setup.exe. Linux on the oldest Ubuntu runner, so the binaries run
-  # with older glibc too
+  # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-<arch>.zip, and on Windows the app with its installer,
+  # ActionFootagePlayer-<version>-windows-<arch>-setup.exe, for x86_64 and arm64 (on GitHub's arm64 runner, built
+  # for it as everything there is). Linux on the oldest Ubuntu runner, so the binaries run with older glibc too
   plugin:
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: linux
+            arch: x86_64
             runner: ubuntu-22.04
           - os: windows
+            arch: x86_64
             runner: windows-2022
+          - os: windows
+            arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -74,7 +96,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust
-        run: rustup toolchain install stable --profile minimal && rustup default stable
+        run: |
+          rustup toolchain install stable --profile minimal && rustup default stable
+          if [ -n "${{ matrix.target }}" ]; then rustup target add "${{ matrix.target }}"; fi
 
       - uses: actions/cache@v4
         with:
@@ -89,14 +113,15 @@ jobs:
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          bash tools/make_plugin_zip.sh "$version"
+          bash tools/make_plugin_zip.sh "$version" ${{ matrix.target }}
 
-      # What the Windows app carries from elsewhere (mpv, Python, VapourSynth, ffmpeg), pinned in the script
+      # What the Windows app carries from elsewhere (mpv, Python, VapourSynth, ffmpeg), pinned in the script; on arm64
+      # with the VapourSynth built from its source
       - uses: actions/cache@v4
         if: matrix.os == 'windows'
         with:
           path: build/windows-deps
-          key: windows-deps-${{ hashFiles('tools/make_windows_app.sh') }}
+          key: windows-deps-${{ matrix.arch }}-${{ hashFiles('tools/make_windows_app.sh') }}
 
       - name: Windows app
         if: matrix.os == 'windows'
@@ -104,8 +129,11 @@ jobs:
           if ! command -v ISCC >/dev/null && ! ls "/c/Program Files (x86)/Inno Setup "*/ISCC.exe >/dev/null 2>&1; then
               choco install innosetup -y --no-progress
           fi
-          bash tools/make_windows_app.sh "$VERSION"
-          test -f "dist/ActionFootagePlayer-$VERSION-windows-x86_64-setup.exe"
+          if ! command -v 7z >/dev/null && [ ! -x "/c/Program Files/7-Zip/7z.exe" ]; then
+              choco install 7zip -y --no-progress
+          fi
+          bash tools/make_windows_app.sh "$VERSION" ${{ matrix.target }}
+          test -f "dist/ActionFootagePlayer-$VERSION-windows-${{ matrix.arch }}-setup.exe"
 
       # The installer installs, and the mpv in it plays through VapourSynth, with the Python in it and the gyroflow
       # plugin loaded, the way ActionFootagePlayer.exe starts it (no GPU here: the stabilization itself isn't run)
@@ -124,7 +152,7 @@ jobs:
               if (-not $done) { $p.Kill($true); throw "$file didn't finish in 3 minutes" }
               return $p.ExitCode
           }
-          $setup = "dist\ActionFootagePlayer-$env:VERSION-windows-x86_64-setup.exe"
+          $setup = "dist\ActionFootagePlayer-$env:VERSION-windows-${{ matrix.arch }}-setup.exe"
           $code = Run $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=', "/LOG=$PWD\install.log") "$PWD\install.log"
           if ($code -ne 0) { throw "the installer failed: $code" }
           $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
@@ -154,13 +182,37 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.os }}
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/
+          if-no-files-found: error
+
+  # All the plugins in one zip per system, mpv-plugins-<version>-<os>-<arch>.zip, from the zips the builds made
+  plugins:
+    needs: [macos, plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Bundle
+        run: |
+          python3 -I tools/make_plugin_bundles.py dist
+          mkdir bundles && mv dist/mpv-plugins-*.zip bundles/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-plugins
+          path: bundles/
           if-no-files-found: error
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, plugin]
+    needs: [macos, plugin, plugins]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

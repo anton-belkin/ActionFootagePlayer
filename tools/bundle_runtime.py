@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/bundle_runtime.py <app> <prefix>: copies Homebrew's mpv, ffmpeg and what they load into ActionFootagePlayer.app,
 # so the app runs without Homebrew. tools/make_app.sh runs it when BUNDLE_RUNTIME is set (to <prefix>,
-# `brew --prefix`).
+# `brew --prefix`). With MPV_BIN set (build/mpv-afp/out/mpv, tools/build_mpv.sh's), that mpv is the app's instead of
+# Homebrew's, with the libraries it links from <prefix>.
 #
 #   Contents/Helpers/            mpv, ffmpeg, ffprobe. macos/player.sh (Contents/MacOS/) runs this mpv when it's there
 #   Contents/Frameworks/         every library they link from <prefix>, and libMoltenVK.dylib, with
@@ -12,7 +13,8 @@
 #                                Python (player.sh puts it in PATH). A script: in Helpers/, codesign would
 #                                take it for code
 #   Contents/Resources/ThirdParty/ for each Homebrew formula all this comes from, its license files and formula, and
-#                                SOURCES.txt: each one's version and source (the GPL's and LGPL's terms)
+#                                SOURCES.txt: each one's version and source (the GPL's and LGPL's terms). With MPV_BIN,
+#                                mpv's and libplacebo's (linked into it) license files, and their commits in SOURCES.txt
 #
 # Each binary refers to the libraries it links by their place relative to it (@loader_path/...). Everything is
 # signed ad hoc, as the rest of the app. Prints the highest macOS version the binaries need: the Homebrew
@@ -25,6 +27,7 @@ import subprocess
 import sys
 
 app, prefix = sys.argv[1], os.path.realpath(sys.argv[2])
+mpv_bin = os.environ.get("MPV_BIN") and os.path.realpath(os.environ["MPV_BIN"])
 contents = os.path.join(app, "Contents")
 helpers = os.path.join(contents, "Helpers")
 frameworks = os.path.join(contents, "Frameworks")
@@ -113,7 +116,18 @@ def keg_version(v):
     return tuple(int(x) for x in re.findall(r"\d+", version)), int(revision or 0)
 
 
+# tools/build_mpv.sh's output beside MPV_BIN: the lock it was built from, and its license files
+mpv_lock = {}
+if mpv_bin:
+    lock = os.path.join(os.path.dirname(mpv_bin), "mpv.lock")
+    if not os.path.isfile(mpv_bin) or not os.path.isfile(lock):
+        raise SystemExit(f"MPV_BIN={mpv_bin}: not tools/build_mpv.sh's mpv (no mpv.lock beside it)")
+    mpv_lock = dict(line.strip().split("=", 1) for line in open(lock)
+                    if "=" in line and not line.lstrip().startswith("#"))
+
 for name, least in MIN_KEGS.items():
+    if name == "mpv" and mpv_bin:
+        continue
     m = re.search(rf"/Cellar/{re.escape(name)}/([^/]+)/", os.path.realpath(os.path.join(prefix, "bin", name)))
     if not m or keg_version(m.group(1)) < keg_version(least):
         raise SystemExit(f"Homebrew's {name} is {m and m.group(1)}: the app needs {least} or later "
@@ -158,7 +172,7 @@ for name in ("Python", "Resources"):
 origin = {}
 for exe in EXECUTABLES:
     dst = os.path.join(helpers, exe)
-    src = os.path.realpath(os.path.join(prefix, "bin", exe))
+    src = mpv_bin if exe == "mpv" and mpv_bin else os.path.realpath(os.path.join(prefix, "bin", exe))
     shutil.copy2(src, dst)
     origin[dst] = src
 molten = os.path.join(prefix, "opt/molten-vk/lib/libMoltenVK.dylib")
@@ -274,7 +288,28 @@ for name, version in sorted(kegs.items()):
     lines.append(f"{name} {version}\n  license: {info.get(name, {}).get('license')}\n"
                  f"  source:  {url}\n  sha256:  {sha}\n"
                  f"  home:    {info.get(name, {}).get('homepage')}\n")
+# mpv built by tools/build_mpv.sh: its source is a commit, and libplacebo's a tag, in place of a Homebrew formula
+own = []
+if mpv_bin:
+    licenses = os.path.join(os.path.dirname(mpv_bin), "licenses")
+    builds = [("mpv", mpv_lock["MPV_DESCRIBE"], "GPL-2.0-or-later (built with -Dgpl=true; its parts are LGPL-2.1-or-later "
+               "or GPL)", mpv_lock["MPV_REPO"], mpv_lock["MPV_COMMIT"]),
+              ("libplacebo", mpv_lock["LIBPLACEBO_TAG"], "LGPL-2.1-or-later (linked statically into mpv)",
+               mpv_lock["LIBPLACEBO_REPO"], mpv_lock["LIBPLACEBO_COMMIT"])]
+    for name, version, license_name, repo, commit in builds:
+        shutil.copytree(os.path.join(licenses, name), os.path.join(third, f"{name}-{version}"))
+        own.append(f"{name} {version}\n  license: {license_name}\n  source:  {repo}\n  commit:  {commit}\n")
+    if mpv_lock.get("MPV_PATCHES", "").strip():
+        own.append("mpv's patches, applied on that commit: " + mpv_lock["MPV_PATCHES"].strip() + " (tools/mpv-patches/ "
+                   "in the ActionFootagePlayer project)\n")
+    own.append("mpv's build: tools/build_mpv.sh and tools/mpv.lock in the ActionFootagePlayer project, at this "
+               "app's version\n")
 with open(os.path.join(third, "SOURCES.txt"), "w") as f:
+    if own:
+        f.write("ActionFootagePlayer carries mpv, built by the ActionFootagePlayer project from the sources below,\n"
+                "with libplacebo linked into it, each under its own license (its folder here has the license files). On\n"
+                "request, these sources are also available from the ActionFootagePlayer project.\n\n"
+                + "\n".join(own) + "\n")
     f.write("ActionFootagePlayer carries these programs and libraries, as Homebrew (https://brew.sh) builds them,\n"
             "each under its own license (its folder here has the license files and the Homebrew formula it was\n"
             "built by: the source, its checksum, the patches and the build's options). The sources of these exact\n"

@@ -1,0 +1,30 @@
+{
+ "chromaWeight": 2240,
+ "clipTrim": 2304,
+ "hueVec": [
+  128,
+  128,
+  128,
+  128,
+  128,
+  128
+ ],
+ "l3Avg": 2192,
+ "l3Max": 2816,
+ "l3Min": 2048,
+ "midContrast": 0,
+ "msWeight": 2048,
+ "offset": 2048,
+ "power": 2816,
+ "satVec": [
+  128,
+  128,
+  128,
+  128,
+  128,
+  128
+ ],
+ "saturation": 2368,
+ "slope": 2640,
+ "useL8": true
+}

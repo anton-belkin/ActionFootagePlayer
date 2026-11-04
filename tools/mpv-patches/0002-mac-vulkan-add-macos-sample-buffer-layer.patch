@@ -1,0 +1,716 @@
+From 42d5a303c767ab3fa4ede4cdec04d45bb3974d4b Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 09:47:31 +0100
+Subject: [PATCH 2/5] mac/vulkan: add --macos-sample-buffer-layer
+
+Presents vo_gpu_next's frames through an AVSampleBufferDisplayLayer over
+the Metal layer: rendered into a ring of IOSurface-backed 10-bit 4:2:0
+CVPixelBuffers, imported into libplacebo as render targets, tagged with
+the target color space (PQ with its mastering display and light levels;
+SDR targets as sRGB, as macOS takes the swapchain's) and enqueued to be
+shown at once. macOS then shows them as its own video players do, with its
+HDR to SDR mapping and EDR handling. Can be switched while playing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../macos-sample-buffer-layer.txt             |   1 +
+ DOCS/man/options.rst                          |   8 +
+ meson.build                                   |   4 +-
+ osdep/mac/app_bridge.h                        |   1 +
+ osdep/mac/app_bridge.m                        |   2 +
+ video/out/mac/common.swift                    |   3 +
+ video/out/mac/sample_buffer.h                 |  41 ++
+ video/out/mac/sample_buffer.m                 | 408 ++++++++++++++++++
+ video/out/mac_common.swift                    |  22 +
+ video/out/vulkan/context_mac.m                |  46 ++
+ 10 files changed, 535 insertions(+), 1 deletion(-)
+ create mode 100644 DOCS/interface-changes/macos-sample-buffer-layer.txt
+ create mode 100644 video/out/mac/sample_buffer.h
+ create mode 100644 video/out/mac/sample_buffer.m
+
+diff --git a/DOCS/interface-changes/macos-sample-buffer-layer.txt b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+new file mode 100644
+index 000000000..faad3cc7b
+--- /dev/null
++++ b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+@@ -0,0 +1 @@
++add `--macos-sample-buffer-layer`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index dddff27f6..a3b3f2d89 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7243,6 +7243,14 @@ them.
+     :system:   No manual syncing, depend on the layer mechanic and the next drawable
+     :feedback: Same as precise but uses the presentation feedback core mechanism
+ 
++``--macos-sample-buffer-layer=<yes|no>``
++    Present frames through an ``AVSampleBufferDisplayLayer``, macOS's own video layer, instead of the
++    Vulkan swapchain (default: no). Frames are rendered as usual, into 10-bit 4:2:0 buffers tagged with
++    the target color space (``--target-trc``, ``--target-prim``, and the colorspace hint), and macOS shows
++    them as its own video players do: its HDR to SDR mapping and EDR handling instead of mpv's swapchain
++    color management. Can be changed while playing.
++    ``--vo=gpu-next`` with macOS and Vulkan (macvk) only.
++
+ ``--macos-menu-shortcuts=<yes|no>``
+     Enables the default menu bar shortcuts (default: yes). The menu bar shortcuts always take
+     precedence over any other shortcuts, they are not propagated to the mpv core and they can't be
+diff --git a/meson.build b/meson.build
+index b15f31030..069aac575 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1691,7 +1691,9 @@ endif
+ if features['cocoa'] and features['vulkan'] and features['swift']
+     swift_sources += files('video/out/mac_common.swift',
+                            'video/out/mac/metal_layer.swift')
+-    sources += files('video/out/vulkan/context_mac.m')
++    sources += files('video/out/vulkan/context_mac.m',
++                     'video/out/mac/sample_buffer.m')
++    dependencies += dependency('appleframeworks', modules: ['AVFoundation', 'CoreMedia', 'CoreVideo', 'Metal'])
+ endif
+ 
+ macos_media_player = get_option('macos-media-player').require(
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index 961b01ca8..bb55d07e9 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -95,6 +95,7 @@ struct macos_opts {
+     int macos_app_activation_policy;
+     int macos_geometry_calculation;
+     int macos_render_timer;
++    int macos_sample_buffer_layer;
+     bool macos_menu_shortcuts;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index 58e10cb40..dd79d900f 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -67,6 +67,8 @@ const struct m_sub_options macos_conf = {
+         {"macos-render-timer", OPT_CHOICE(macos_render_timer,
+             {"callback", RENDER_TIMER_CALLBACK}, {"precise", RENDER_TIMER_PRECISE},
+             {"system", RENDER_TIMER_SYSTEM}, {"feedback", RENDER_TIMER_PRESENTATION_FEEDBACK})},
++        {"macos-sample-buffer-layer", OPT_CHOICE(macos_sample_buffer_layer,
++            {"no", 0}, {"yes", 1})},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+diff --git a/video/out/mac/common.swift b/video/out/mac/common.swift
+index 07b9f8314..7cf9864b6 100644
+--- a/video/out/mac/common.swift
++++ b/video/out/mac/common.swift
+@@ -680,6 +680,9 @@ class Common: NSObject {
+                 titleBar?.set(color: option.mac.macos_title_bar_color)
+             case TypeHelper.toPointer(&option.macPtr.pointee.cocoa_cb_output_csp):
+                 updateICCProfile()
++            case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_layer):
++                (self as? MacCommon)?.sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
++                flagEvents(VO_EVENT_EXPOSE)
+             default:
+                 break
+             }
+diff --git a/video/out/mac/sample_buffer.h b/video/out/mac/sample_buffer.h
+new file mode 100644
+index 000000000..93b57c2d3
+--- /dev/null
++++ b/video/out/mac/sample_buffer.h
+@@ -0,0 +1,41 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include <stdbool.h>
++
++#include <libplacebo/gpu.h>
++
++struct mp_log;
++struct ra_ext_frame;
++struct ra_ext_submit;
++struct mac_sample_buffer;
++
++// Presents vo_gpu_next's frames through an AVSampleBufferDisplayLayer: rendered into IOSurface-backed CVPixelBuffers
++// (10-bit 4:2:0, the format macOS's video path takes, Dolby Vision display management included) and enqueued with
++// their color tags, so macOS shows them as its own video player would.
++struct mac_sample_buffer *mac_sample_buffer_create(struct mp_log *log, void *layer);
++void mac_sample_buffer_destroy(struct mac_sample_buffer **sb, pl_gpu gpu);
++
++bool mac_sample_buffer_start_frame(struct mac_sample_buffer *sb, pl_gpu gpu, int w, int h,
++                                   const struct pl_color_space *hint, struct ra_ext_frame *out);
++void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct ra_ext_frame *frame,
++                              const struct ra_ext_submit *info);
++
++// Drops the frame the layer shows, when the swapchain takes over again
++void mac_sample_buffer_flush(struct mac_sample_buffer *sb);
+diff --git a/video/out/mac/sample_buffer.m b/video/out/mac/sample_buffer.m
+new file mode 100644
+index 000000000..503b8fda5
+--- /dev/null
++++ b/video/out/mac/sample_buffer.m
+@@ -0,0 +1,408 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#import <AVFoundation/AVFoundation.h>
++#import <CoreMedia/CoreMedia.h>
++#import <CoreVideo/CoreVideo.h>
++#import <Metal/Metal.h>
++
++#define VK_USE_PLATFORM_METAL_EXT
++#include <vulkan/vulkan.h>
++#include <libplacebo/vulkan.h>
++
++#include <libavutil/buffer.h>
++
++#include "common/common.h"
++#include "common/msg.h"
++#include "mpv_talloc.h"
++#include "video/out/gpu/context.h"
++
++#include "sample_buffer.h"
++
++// Frames in flight: the layer shows one, a few wait to be shown, one is being rendered. A buffer comes back into use
++// this many frames after it was enqueued (IOSurfaceIsInUse can't tell: it reports the layer's buffers as in use
++// all the time).
++#define NUM_SLOTS 6
++
++struct slot {
++    CVPixelBufferRef buf;
++    CVMetalTextureRef mtl[2];
++    pl_tex tex[2];
++    enum pl_color_system sys;
++};
++
++struct mac_sample_buffer {
++    struct mp_log *log;
++    AVSampleBufferDisplayLayer *layer;
++    bool failed;
++    id<MTLDevice> device;
++    CVMetalTextureCacheRef cache;
++    struct slot slots[NUM_SLOTS];
++    int w, h, next;
++    CFDataRef rpu;
++    AVBufferRef *rpu_src;
++    struct pl_color_space tagged;
++};
++
++struct mac_sample_buffer *mac_sample_buffer_create(struct mp_log *log, void *layer)
++{
++    struct mac_sample_buffer *sb = talloc_zero(NULL, struct mac_sample_buffer);
++    sb->log = log;
++    sb->layer = [(__bridge AVSampleBufferDisplayLayer *)layer retain];
++    return sb;
++}
++
++static void free_slots(struct mac_sample_buffer *sb, pl_gpu gpu)
++{
++    for (int i = 0; i < NUM_SLOTS; i++) {
++        struct slot *s = &sb->slots[i];
++        for (int n = 0; n < 2; n++) {
++            pl_tex_destroy(gpu, &s->tex[n]);
++            if (s->mtl[n])
++                CFRelease(s->mtl[n]);
++            s->mtl[n] = NULL;
++        }
++        if (s->buf)
++            CVPixelBufferRelease(s->buf);
++        s->buf = NULL;
++    }
++}
++
++void mac_sample_buffer_destroy(struct mac_sample_buffer **sbp, pl_gpu gpu)
++{
++    struct mac_sample_buffer *sb = *sbp;
++    if (!sb)
++        return;
++    if (gpu) {
++        pl_gpu_finish(gpu);
++        free_slots(sb, gpu);
++    }
++    if (sb->cache)
++        CFRelease(sb->cache);
++    if (sb->rpu)
++        CFRelease(sb->rpu);
++    av_buffer_unref(&sb->rpu_src);
++    [sb->device release];
++    [sb->layer release];
++    talloc_free(sb);
++    *sbp = NULL;
++}
++
++void mac_sample_buffer_flush(struct mac_sample_buffer *sb)
++{
++    if (sb)
++        [sb->layer.sampleBufferRenderer flushWithRemovalOfDisplayedImage:YES completionHandler:nil];
++}
++
++// The Metal device behind libplacebo's Vulkan one (MoltenVK), to make textures of the buffers on
++static id<MTLDevice> metal_device(pl_gpu gpu)
++{
++    pl_vulkan vk = pl_vulkan_get(gpu);
++    if (!vk || !vk->get_proc_addr)
++        return nil;
++    PFN_vkExportMetalObjectsEXT export_objects =
++        (PFN_vkExportMetalObjectsEXT)vk->get_proc_addr(vk->instance, "vkExportMetalObjectsEXT");
++    if (!export_objects)
++        return nil;
++    VkExportMetalDeviceInfoEXT device_info = {
++        .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT,
++    };
++    VkExportMetalObjectsInfoEXT objects_info = {
++        .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
++        .pNext = &device_info,
++    };
++    export_objects(vk->device, &objects_info);
++    return [device_info.mtlDevice retain];
++}
++
++static bool init(struct mac_sample_buffer *sb, pl_gpu gpu)
++{
++    if (!(gpu->import_caps.tex & PL_HANDLE_MTL_TEX)) {
++        MP_ERR(sb, "Presenting through a sample buffer layer needs PL_HANDLE_MTL_TEX import.\n");
++        return false;
++    }
++    sb->device = metal_device(gpu);
++    if (!sb->device) {
++        MP_ERR(sb, "Can't get the Metal device of the Vulkan one.\n");
++        return false;
++    }
++    if (CVMetalTextureCacheCreate(NULL, NULL, sb->device, NULL, &sb->cache) != kCVReturnSuccess) {
++        MP_ERR(sb, "CVMetalTextureCacheCreate failed.\n");
++        return false;
++    }
++    return true;
++}
++
++// A 10-bit 4:2:0 biplanar buffer, its planes imported into libplacebo as render targets (r16, rg16; the samples are
++// MSB-aligned, as P010)
++static bool make_slot(struct mac_sample_buffer *sb, pl_gpu gpu, struct slot *s, int w, int h)
++{
++    NSDictionary *attrs = @{
++        (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
++        (id)kCVPixelBufferMetalCompatibilityKey: @YES,
++    };
++    if (CVPixelBufferCreate(NULL, w, h, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
++                            (__bridge CFDictionaryRef)attrs, &s->buf) != kCVReturnSuccess)
++    {
++        MP_ERR(sb, "CVPixelBufferCreate failed for %dx%d.\n", w, h);
++        return false;
++    }
++
++    static const MTLPixelFormat mtl_fmts[2] = { MTLPixelFormatR16Unorm, MTLPixelFormatRG16Unorm };
++    static const char *pl_fmts[2] = { "r16", "rg16" };
++    NSDictionary *tex_attrs = @{
++        (id)kCVMetalTextureUsage: @(MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite |
++                                    MTLTextureUsageRenderTarget),
++    };
++    for (int n = 0; n < 2; n++) {
++        int pw = (int)CVPixelBufferGetWidthOfPlane(s->buf, n);
++        int ph = (int)CVPixelBufferGetHeightOfPlane(s->buf, n);
++        CVReturn err = CVMetalTextureCacheCreateTextureFromImage(NULL, sb->cache, s->buf,
++                            (__bridge CFDictionaryRef)tex_attrs, mtl_fmts[n], pw, ph, n, &s->mtl[n]);
++        if (err != kCVReturnSuccess) {
++            MP_ERR(sb, "No Metal texture for plane %d (%d).\n", n, err);
++            return false;
++        }
++        pl_fmt fmt = pl_find_named_fmt(gpu, pl_fmts[n]);
++        if (!fmt || !(fmt->caps & PL_FMT_CAP_RENDERABLE)) {
++            MP_ERR(sb, "Format %s isn't renderable.\n", pl_fmts[n]);
++            return false;
++        }
++        s->tex[n] = pl_tex_create(gpu, pl_tex_params(
++            .w = pw,
++            .h = ph,
++            .format = fmt,
++            .sampleable = true,
++            .renderable = true,
++            .storable = !!(fmt->caps & PL_FMT_CAP_STORABLE),
++            .blit_dst = !!(fmt->caps & PL_FMT_CAP_BLITTABLE),
++            .import_handle = PL_HANDLE_MTL_TEX,
++            .shared_mem = (struct pl_shared_mem) {
++                .handle = { .handle = CVMetalTextureGetTexture(s->mtl[n]) },
++            },
++        ));
++        if (!s->tex[n]) {
++            MP_ERR(sb, "Importing plane %d as a render target failed.\n", n);
++            return false;
++        }
++    }
++    return true;
++}
++
++bool mac_sample_buffer_start_frame(struct mac_sample_buffer *sb, pl_gpu gpu, int w, int h,
++                                   const struct pl_color_space *hint, struct ra_ext_frame *out)
++{
++    if (sb->failed)
++        return false;
++    if (!sb->device && !init(sb, gpu)) {
++        sb->failed = true;
++        return false;
++    }
++
++    // 4:2:0 needs even sizes
++    w &= ~1;
++    h &= ~1;
++    if (w < 2 || h < 2)
++        return false;
++    if (w != sb->w || h != sb->h) {
++        pl_gpu_finish(gpu);
++        free_slots(sb, gpu);
++        sb->w = w;
++        sb->h = h;
++        MP_VERBOSE(sb, "Sample buffers of %dx%d.\n", w, h);
++    }
++
++    struct slot *s = &sb->slots[sb->next];
++    if (!s->buf && !make_slot(sb, gpu, s, w, h)) {
++        free_slots(sb, gpu);
++        sb->failed = true;
++        return false;
++    }
++
++    // What the frame is tagged as: the hint, or sRGB when there's none, as the swapchain's default (tagged BT.709,
++    // macOS would show it with its own video gamma, darker than mpv's swapchain output)
++    struct pl_color_space color = pl_color_space_srgb;
++    if (hint && hint->transfer)
++        color = *hint;
++    if (!color.primaries)
++        color.primaries = PL_COLOR_PRIM_BT_709;
++    s->sys = color.primaries == PL_COLOR_PRIM_BT_2020 ? PL_COLOR_SYSTEM_BT_2020_NC : PL_COLOR_SYSTEM_BT_709;
++
++    *out = (struct ra_ext_frame) {
++        .w = w,
++        .h = h,
++        .priv = s,
++        .target = {
++            .num_planes = 2,
++            .planes = {
++                { .texture = s->tex[0], .components = 1, .component_mapping = {0} },
++                { .texture = s->tex[1], .components = 2, .component_mapping = {1, 2} },
++            },
++            .repr = {
++                .sys = s->sys,
++                .levels = PL_COLOR_LEVELS_LIMITED,
++                .alpha = PL_ALPHA_NONE,
++                .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 },
++            },
++            .color = color,
++        },
++    };
++    pl_frame_set_chroma_location(&out->target, PL_CHROMA_LEFT);
++    sb->next = (sb->next + 1) % NUM_SLOTS;
++    return true;
++}
++
++static void set(CVPixelBufferRef buf, CFStringRef key, CFTypeRef value)
++{
++    if (value) {
++        CVBufferSetAttachment(buf, key, value, kCVAttachmentMode_ShouldPropagate);
++    } else {
++        CVBufferRemoveAttachment(buf, key);
++    }
++}
++
++static void put_be16(uint8_t *p, unsigned v)
++{
++    p[0] = v >> 8;
++    p[1] = v;
++}
++
++static void put_be32(uint8_t *p, uint32_t v)
++{
++    p[0] = v >> 24;
++    p[1] = v >> 16;
++    p[2] = v >> 8;
++    p[3] = v;
++}
++
++// The color tags macOS shows the buffer by
++static void tag(CVPixelBufferRef buf, enum pl_color_system sys, const struct pl_color_space *c)
++{
++    CFStringRef prim = kCVImageBufferColorPrimaries_ITU_R_709_2;
++    switch (c->primaries) {
++    case PL_COLOR_PRIM_BT_2020:   prim = kCVImageBufferColorPrimaries_ITU_R_2020; break;
++    case PL_COLOR_PRIM_DISPLAY_P3: prim = kCVImageBufferColorPrimaries_P3_D65; break;
++    case PL_COLOR_PRIM_DCI_P3:    prim = kCVImageBufferColorPrimaries_DCI_P3; break;
++    default: break;
++    }
++    // mpv's SDR targets are what the display shows (BT.1886: the display's own response, as on the swapchain, which
++    // macOS takes as sRGB): tagged BT.709 instead, macOS would apply its video gamma and show it darker
++    CFStringRef trc = kCVImageBufferTransferFunction_sRGB;
++    switch (c->transfer) {
++    case PL_COLOR_TRC_HLG:     trc = kCVImageBufferTransferFunction_ITU_R_2100_HLG; break;
++    case PL_COLOR_TRC_PQ:      trc = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ; break;
++    case PL_COLOR_TRC_LINEAR:  trc = kCVImageBufferTransferFunction_Linear; break;
++    case PL_COLOR_TRC_GAMMA22: trc = kCVImageBufferTransferFunction_UseGamma; break;
++    default: break;
++    }
++    set(buf, kCVImageBufferColorPrimariesKey, prim);
++    set(buf, kCVImageBufferTransferFunctionKey, trc);
++    set(buf, kCVImageBufferGammaLevelKey, c->transfer == PL_COLOR_TRC_GAMMA22 ? (__bridge CFTypeRef)@2.2 : NULL);
++    set(buf, kCVImageBufferYCbCrMatrixKey, sys == PL_COLOR_SYSTEM_BT_2020_NC ?
++        kCVImageBufferYCbCrMatrix_ITU_R_2020 : kCVImageBufferYCbCrMatrix_ITU_R_709_2);
++    set(buf, kCVImageBufferChromaLocationTopFieldKey, kCVImageBufferChromaLocation_Left);
++    set(buf, kCVImageBufferChromaLocationBottomFieldKey, kCVImageBufferChromaLocation_Left);
++
++    // PQ's static metadata, in the SEI layouts CoreVideo takes (big-endian; mastering display: G, B, R primaries
++    // and the white point in 0.00002 units, luminance in 0.0001 cd/m²)
++    CFDataRef mdcv = NULL, cll = NULL;
++    if (c->transfer == PL_COLOR_TRC_PQ) {
++        const struct pl_hdr_metadata *hdr = &c->hdr;
++        if (hdr->max_luma > 0 && pl_primaries_valid(&hdr->prim)) {
++            uint8_t d[24];
++            const struct pl_cie_xy *xy[4] = { &hdr->prim.green, &hdr->prim.blue, &hdr->prim.red, &hdr->prim.white };
++            for (int i = 0; i < 4; i++) {
++                put_be16(d + 4 * i, MPCLAMP(lrintf(xy[i]->x * 50000), 0, 50000));
++                put_be16(d + 4 * i + 2, MPCLAMP(lrintf(xy[i]->y * 50000), 0, 50000));
++            }
++            put_be32(d + 16, lrintf(hdr->max_luma * 10000));
++            put_be32(d + 20, lrintf(hdr->min_luma * 10000));
++            mdcv = CFDataCreate(NULL, d, sizeof(d));
++        }
++        if (hdr->max_cll > 0) {
++            uint8_t d[4];
++            put_be16(d, MPCLAMP(lrintf(hdr->max_cll), 0, 65535));
++            put_be16(d + 2, MPCLAMP(lrintf(hdr->max_fall), 0, 65535));
++            cll = CFDataCreate(NULL, d, sizeof(d));
++        }
++    }
++    set(buf, kCVImageBufferMasteringDisplayColorVolumeKey, mdcv);
++    set(buf, kCVImageBufferContentLightLevelInfoKey, cll);
++    if (mdcv)
++        CFRelease(mdcv);
++    if (cll)
++        CFRelease(cll);
++}
++
++void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct ra_ext_frame *frame,
++                              const struct ra_ext_submit *info)
++{
++    struct slot *s = frame->priv;
++    if (!s || !s->buf)
++        return;
++
++    // The layer must never get a half-rendered frame
++    for (int n = 0; n < 2; n++) {
++        while (pl_tex_poll(gpu, s->tex[n], UINT64_MAX))
++            ;
++    }
++
++    if (!pl_color_space_equal(&info->color, &sb->tagged)) {
++        sb->tagged = info->color;
++        MP_VERBOSE(sb, "Frames tagged %s/%s, %s matrix, peak %.0f nits.\n",
++                   pl_color_primaries_name(info->color.primaries), pl_color_transfer_name(info->color.transfer),
++                   pl_color_system_name(s->sys), info->color.hdr.max_luma);
++    }
++    tag(s->buf, s->sys, &info->color);
++
++    // The frame's Dolby Vision RPU, for the system's display management; kept as long as it's the same buffer
++    if (!info->dovi_rpu || !sb->rpu_src || info->dovi_rpu->buffer != sb->rpu_src->buffer) {
++        if (sb->rpu)
++            CFRelease(sb->rpu);
++        sb->rpu = NULL;
++        av_buffer_unref(&sb->rpu_src);
++        if (info->dovi_rpu) {
++            sb->rpu_src = av_buffer_ref(info->dovi_rpu);
++            sb->rpu = CFDataCreate(NULL, info->dovi_rpu->data, info->dovi_rpu->size);
++        }
++    }
++    set(s->buf, CFSTR("DolbyVisionRPUData"), sb->rpu);
++
++    CMVideoFormatDescriptionRef desc = NULL;
++    if (CMVideoFormatDescriptionCreateForImageBuffer(NULL, s->buf, &desc) != noErr) {
++        MP_ERR(sb, "CMVideoFormatDescriptionCreateForImageBuffer failed.\n");
++        return;
++    }
++    CMSampleTimingInfo timing = {
++        .duration = kCMTimeInvalid,
++        .presentationTimeStamp = kCMTimeZero,
++        .decodeTimeStamp = kCMTimeInvalid,
++    };
++    CMSampleBufferRef sample = NULL;
++    OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(NULL, s->buf, desc, &timing, &sample);
++    CFRelease(desc);
++    if (err != noErr) {
++        MP_ERR(sb, "CMSampleBufferCreateReadyWithImageBuffer failed (%d).\n", (int)err);
++        return;
++    }
++    // mpv times the frames itself (swap_buffers): the layer shows each one as it comes
++    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, true);
++    CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0),
++                         kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
++    [sb->layer.sampleBufferRenderer enqueueSampleBuffer:sample];
++    CFRelease(sample);
++}
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index e2e9dd128..ada29ee59 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -15,10 +15,14 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++import AVFoundation
+ import Cocoa
+ 
+ class MacCommon: Common {
+     @objc var layer: MetalLayer?
++    // Over the Metal layer, shown while vo_gpu_next presents through it (--macos-sample-buffer-layer)
++    @objc var sampleBufferLayer: AVSampleBufferDisplayLayer?
++    @objc var sampleBufferRequested: Bool = false
+ 
+     var presentation: Presentation?
+     var timer: PreciseTimer?
+@@ -36,6 +40,14 @@ class MacCommon: Common {
+ 
+         DispatchQueue.main.sync {
+             layer = MetalLayer(common: self)
++            let sampleLayer = AVSampleBufferDisplayLayer()
++            sampleLayer.videoGravity = .resize
++            sampleLayer.isHidden = true
++            sampleLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
++            sampleLayer.frame = layer?.bounds ?? .zero
++            layer?.addSublayer(sampleLayer)
++            sampleBufferLayer = sampleLayer
++            sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
+             initMisc(vo)
+         }
+     }
+@@ -109,6 +121,15 @@ class MacCommon: Common {
+         info.pointee.last_queue_display_time = next?.time ?? -1
+     }
+ 
++    @objc func setSampleBufferVisible(_ visible: Bool) {
++        DispatchQueue.main.async {
++            CATransaction.begin()
++            CATransaction.setDisableActions(true)
++            self.sampleBufferLayer?.isHidden = !visible
++            CATransaction.commit()
++        }
++    }
++
+     @objc func isVisible() -> Bool {
+         return window?.occlusionState.contains(.visible) ?? false ||
+                option.vo.force_render ||
+@@ -176,6 +197,7 @@ class MacCommon: Common {
+ 
+     override func windowDidChangeBackingProperties() {
+         layer?.contentsScale = window?.backingScaleFactor ?? 1
++        sampleBufferLayer?.contentsScale = window?.backingScaleFactor ?? 1
+         windowDidResize()
+     }
+ 
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index 559e361e8..e41dd6ac1 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -15,9 +15,11 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#import <AVFoundation/AVFoundation.h>
+ #import <QuartzCore/QuartzCore.h>
+ 
+ #include "video/out/gpu/context.h"
++#include "video/out/mac/sample_buffer.h"
+ #include "osdep/mac/swift.h"
+ 
+ #include "common.h"
+@@ -27,12 +29,15 @@
+ struct priv {
+     struct mpvk_ctx vk;
+     MacCommon *vo_mac;
++    struct mac_sample_buffer *sb;
++    bool sb_active, sb_shown;
+ };
+ 
+ static void mac_vk_uninit(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+ 
++    mac_sample_buffer_destroy(&p->sb, p->vk.gpu);
+     ra_vk_ctx_uninit(ctx);
+     mpvk_uninit(&p->vk);
+     [p->vo_mac uninit:ctx->vo];
+@@ -55,6 +60,44 @@ static int mac_vk_color_depth(struct ra_ctx *ctx)
+     return 0;
+ }
+ 
++// --macos-sample-buffer-layer: vo_gpu_next renders into the sample buffer layer's buffers instead of the swapchain
++static bool mac_vk_ext_active(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv;
++    bool active = p->vo_mac.sampleBufferRequested && p->vo_mac.sampleBufferLayer;
++    if (active != p->sb_active) {
++        p->sb_active = active;
++        MP_VERBOSE(ctx, "Presenting through the %s.\n", active ? "sample buffer layer" : "swapchain");
++        if (!active) {
++            [p->vo_mac setSampleBufferVisible:NO];
++            p->sb_shown = false;
++            mac_sample_buffer_flush(p->sb);
++        }
++    }
++    return active;
++}
++
++static bool mac_vk_ext_start_frame(struct ra_ctx *ctx, int w, int h, const struct pl_color_space *hint,
++                                   struct ra_ext_frame *out)
++{
++    struct priv *p = ctx->priv;
++    if (!p->sb)
++        p->sb = mac_sample_buffer_create(ctx->log, (__bridge void *)p->vo_mac.sampleBufferLayer);
++    return mac_sample_buffer_start_frame(p->sb, p->vk.gpu, w, h, hint, out);
++}
++
++static void mac_vk_ext_submit_frame(struct ra_ctx *ctx, struct ra_ext_frame *frame,
++                                    const struct ra_ext_submit *info)
++{
++    struct priv *p = ctx->priv;
++    mac_sample_buffer_submit(p->sb, p->vk.gpu, frame, info);
++    // shown once it has a frame, so the switch from the swapchain doesn't flash
++    if (!p->sb_shown) {
++        [p->vo_mac setSampleBufferVisible:YES];
++        p->sb_shown = true;
++    }
++}
++
+ static bool mac_vk_check_visible(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+@@ -91,6 +134,9 @@ static bool mac_vk_init(struct ra_ctx *ctx)
+         .get_vsync = mac_vk_get_vsync,
+         .color_depth = mac_vk_color_depth,
+         .check_visible = mac_vk_check_visible,
++        .ext_active = mac_vk_ext_active,
++        .ext_start_frame = mac_vk_ext_start_frame,
++        .ext_submit_frame = mac_vk_ext_submit_frame,
+     };
+ 
+     VkInstance inst = vk->vkinst->instance;

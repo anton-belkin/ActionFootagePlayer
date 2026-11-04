@@ -54,7 +54,9 @@ if args.get('fast') and options.get('edges', 'off') != 'off':
         clip = core.std.SelectEvery(clip, cycle=2, offsets=0)
 
 # The paused frame cleaned of its noise (still.lua): while mpv seeks to it again, the control file says which frame. The
-# frames before its neighbours aren't stabilized (mpv drops them), and Still rebuilds it from them; the others pass
+# frames before its neighbours aren't stabilized (mpv drops them), and Still rebuilds it from them; the others pass.
+# Without a time it's a seek to the frame on screen with the chain set up anew (paused at full size, and playing on from
+# it): only the frames before it are left out
 still = None
 if args.get('still_control'):
     try:
@@ -69,6 +71,6 @@ elif args.get('still_control'):
     options['still_warm_up'] = 5.0
 
 out = core.gyroflow.Stabilize(clip, **stab, **options)
-if still:
+if still and still.get('time') is not None:
     out = core.gyroflow.Still(out, time=float(still['time']), radius=int(still['radius']), luma_keep=float(still.get('luma_keep', 0.25)))
 out.set_output()

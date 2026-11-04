@@ -30,11 +30,17 @@ local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log
 local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }
+-- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
+local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
+local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
+local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
+local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }
+local SDR_NAMES = { maker = "maker's LUT", nbcu = "NBCU" }
 local KIND_LABELS = { project = "Gyroflow project", default = "gyro" }
 -- What the keys do, for Keys…: the plugins' and the player's that the menu has
 local KEY_LABELS = {
@@ -43,13 +49,15 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
+    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR, mpv's tone mapping, Dolby Vision" },
     { "script-binding dlogm/hdr", "Log in HDR" },
-    { "script-binding dlogm/sdr", "Log in the standard look (DJI's LUT)" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
     { "script-binding dlogm/denoise", "Noise reduction on / off" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
+    { "script-binding gyroflow/still", "Clean still frame on / off" },
+    { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
@@ -131,21 +139,35 @@ local function passport(d, g, t, h)
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
+-- The looks' names in the menu, by the dlogm plugin's (its looks)
+local function look_title(d, look)
+    if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
+    if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
+    if look == "nbcu" then return "SDR, NBCU (neutral)" end
+    if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
+    if look == "dv" then return d.log and "HDR + Dolby Vision (DJI fit), as macOS shows it" or "With its Dolby Vision, as macOS shows it" end
+    return look
+end
+
 local function look_menu(d, key)
     local items = {}
-    if not d.log and d.hdr and d.hdr ~= "" then
-        -- A file tagged HDR: as it is, or tone-mapped to SDR as without the plugin
-        table.insert(items, item("HDR (" .. d.hdr:upper() .. "), as it is", "script-binding dlogm/hdr", { checked = d.look == "hdr", shortcut = key["script-binding dlogm/hdr"] }))
-        table.insert(items, item("Tone-mapped to SDR", "script-binding dlogm/sdr", { checked = d.look == "sdr", shortcut = key["script-binding dlogm/sdr"] }))
-    elseif not d.log then
+    if not d.log and (d.hdr or "") == "" then
         table.insert(items, info("Not log, as the camera says"))
     else
-        local name = CURVE_NAMES[d.curve] or d.curve
-        table.insert(items, item("HDR", "script-binding dlogm/hdr", { checked = d.look == "hdr", shortcut = key["script-binding dlogm/hdr"] }))
-        local sdr_title = "Standard look (DJI's LUT)"
-        if not d.sdr then sdr_title = d.curve == "dlogm" and "Standard look (DJI's LUT isn't downloaded)" or ("Standard look (none for " .. name .. ")") end
-        table.insert(items, item(sdr_title, "script-binding dlogm/sdr", { checked = d.look == "sdr", disabled = not d.sdr, shortcut = key["script-binding dlogm/sdr"] }))
-        table.insert(items, item("As recorded (log off)", "script-binding dlogm/off", { checked = d.look == "off", shortcut = key["script-binding dlogm/off"] }))
+        -- In Ctrl+s's order; what's chosen here is what clips start in on this kind of screen
+        if d.screen == "sdr" then table.insert(items, info("SDR screen: HDR shows as macOS tone-maps it"))
+        elseif d.screen == "hdr" then table.insert(items, info("HDR screen: SDR shows as an SDR screen would")) end
+        for _, look in ipairs(d.looks or {}) do
+            local shortcut = look == "hdr" and key["script-binding dlogm/hdr"] or nil
+            table.insert(items, item(look_title(d, look), "script-message-to dlogm look " .. look, { checked = d.look == look, shortcut = shortcut }))
+        end
+        if d.log and d.maker == "" then
+            local name = CURVE_NAMES[d.curve] or d.curve
+            table.insert(items, info(d.curve == "dlogm" and "SDR, DJI's LUT (isn't downloaded)" or ("SDR, maker's LUT (none for " .. name .. " yet)")))
+        end
+        if d.log then
+            table.insert(items, item("As recorded (log off)", "script-binding dlogm/off", { checked = d.look == "off", shortcut = key["script-binding dlogm/off"] }))
+        end
     end
     table.insert(items, SEPARATOR)
     local curves = {
@@ -160,7 +182,7 @@ local function look_menu(d, key)
     table.insert(items, SEPARATOR)
     table.insert(items, item("Noise reduction", "script-binding dlogm/denoise", { checked = d.denoise, shortcut = key["script-binding dlogm/denoise"] }))
     table.insert(items, SEPARATOR)
-    table.insert(items, item("Remember as default", "script-message-to dlogm remember"))
+    table.insert(items, item("Remember as default (looks on HDR and SDR screens)", "script-message-to dlogm remember"))
     return items
 end
 
@@ -219,6 +241,37 @@ local function stabilization_menu(g, key)
     }
 end
 
+-- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, the paused frame's,
+-- how often the sphere trail is written, the color fringes (as in Lens), and whether it asks
+local function quality_menu(g)
+    local items = {}
+    for _, r in ipairs(FRAME_RATES) do
+        table.insert(items, item(r[2], "script-message-to gyroflow quality fps_limit " .. r[1], { checked = tostring(g.fps_limit or 0) == r[1] }))
+    end
+    table.insert(items, SEPARATOR)
+    for _, r in ipairs(RESOLUTIONS) do
+        table.insert(items, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
+    end
+    local paused = {}
+    for _, r in ipairs(PAUSED_SIZES) do
+        table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
+    end
+    table.insert(items, submenu("Paused frame", paused))
+    table.insert(items, SEPARATOR)
+    local fill = {}
+    for _, r in ipairs(FILL_RATES) do
+        table.insert(fill, item(r[2], "script-message-to gyroflow quality edge_fill_rate " .. r[1], { checked = tostring(g.edge_fill_rate or "auto") == r[1] }))
+    end
+    -- Only the sphere trail is written apart from the frames
+    table.insert(items, submenu("Edge fill rate", fill, { disabled = g.edges ~= "sphere" }))
+    table.insert(items, item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
+                             { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no" }))
+    table.insert(items, SEPARATOR)
+    table.insert(items, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
+                             { checked = g.ask_when_slow ~= false }))
+    return items
+end
+
 local function telemetry_menu(t, key)
     local corners, fields = {}, {}
     for _, c in ipairs(CORNERS) do
@@ -244,8 +297,8 @@ local function export_menu(d, g)
     local reveal = platform == "darwin" and "Show last export in Finder" or platform == "windows" and "Show last export in Explorer"
                    or "Open the folder of the last export"
     return {
-        item("Export in standard look (Rec.709)", "script-message-to gyroflow export sdr",
-             { disabled = g.exporting or not (d and d.log and d.sdr) }),
+        item("Export in SDR (" .. (SDR_NAMES[d and d.sdr_look or ""] or "Rec.709") .. ")", "script-message-to gyroflow export sdr",
+             { disabled = g.exporting or not (d and d.log and (d.sdr_look or "") ~= "") }),
         SEPARATOR,
         item(reveal, "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" }),
     }
@@ -349,6 +402,7 @@ local function build()
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end
         if g and local_file(path) then add(submenu("Stabilization", stabilization_menu(g, key))) end
+        if g and g.available and local_file(path) then add(submenu("Quality", quality_menu(g))) end
         if t then
             if t.available then add(submenu("Telemetry", telemetry_menu(t, key))) else add(info("Telemetry: none in this clip")) end
         end

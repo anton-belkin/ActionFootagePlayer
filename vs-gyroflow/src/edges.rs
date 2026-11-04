@@ -26,6 +26,8 @@
 // only while a GPU worker is free: the frames come first, and if they take all of the GPU the sphere is written less
 // often, or not at all, and what it has fades into what's made up. The frames read it every frame, by their own
 // directions, so the fill stays where it belongs however old what's in it is. An export writes it with each frame.
+// The control file's fill_rate can have it written from only a share of the frames that play: where the GPU shares its
+// power with the CPU (a 15 W laptop), the writes take what the frames need even while a worker is free.
 //
 // What's made up is made on the sphere, not on the screen: in the wide view, after each frame written (update_fill),
 // from all the sphere has, and kept on it, following what it has by half every FILL_HALF_LIFE_S. So it stays where
@@ -36,7 +38,7 @@
 
 use std::path::PathBuf;
 use std::sync::{ Arc, OnceLock };
-use std::sync::atomic::{ AtomicBool, AtomicU8, AtomicUsize, Ordering };
+use std::sync::atomic::{ AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering };
 use std::time::{ Duration, Instant, SystemTime };
 
 use parking_lot::{ Condvar, Mutex };
@@ -129,9 +131,12 @@ struct Control {
     checked: Option<Instant>,
 }
 
-/// The newest frame for the sphere writer, and whether it should stop
+/// The newest frame for the sphere writer, how many were posted (each one, kept or not), and whether it should stop
 struct Feed {
     frame: Mutex<Option<(i64, Arc<Vec<Vec<f32>>>)>>,
+    posted: AtomicU64,
+    /// The seeks before that frame (Edges::seeks), set with it
+    seeks: AtomicU32,
     ready: Condvar,
     stop: AtomicBool,
 }
@@ -144,8 +149,14 @@ pub struct Edges {
     settings: Mutex<EdgeSettings>,
     /// Made on the first frame written, as fine as the grid is then; read without a lock (sphere.rs)
     sphere: OnceLock<Sphere>,
-    /// The time of the frame last written to the sphere; held while writing, so writers take turns
-    sphere_written: Mutex<Option<i64>>,
+    /// The time of the frame last written to the sphere, and the seeks before it; held while writing, so writers take
+    /// turns
+    sphere_written: Mutex<Option<(i64, u32)>>,
+    /// Seeks so far (`seeked`): a frame from after one may be anywhere in the clip, the others go on from the last
+    seeks: AtomicU32,
+    /// The filter was made for a seek back to the frame on screen (`seeked`): frames up to the one last written are
+    /// ones the sphere has, however far back
+    rejoin: AtomicBool,
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
@@ -156,6 +167,9 @@ pub struct Edges {
     /// The water's color fringes taken out (Ctrl+a), as the control file says: off, the frame's marker moves no color
     /// (lib.rs's worker)
     chromatic: AtomicBool,
+    /// The share of the frames that play the sphere is written from in playback, %, as the control file says: 0, as
+    /// often as a GPU worker is free (sphere_writer)
+    fill_rate: AtomicU32,
     /// Playback: the sphere is written by sphere_writer, when the GPU workers leave room for it
     realtime: AtomicBool,
     writer: AtomicBool,
@@ -172,6 +186,8 @@ pub struct EdgeJob {
     settings: EdgeSettings,
     /// The source planes on the coarse grid; shared with the sphere writer
     src_lo: Arc<Vec<Vec<f32>>>,
+    /// The seeks before the frame (Edges::seeks)
+    seeks: u32,
 }
 
 impl Edges {
@@ -180,10 +196,11 @@ impl Edges {
             geometry, mode: AtomicU8::new(EdgeMode::Off as u8),
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()),
-            sphere: OnceLock::new(), sphere_written: Mutex::new(None),
+            sphere: OnceLock::new(), sphere_written: Mutex::new(None), seeks: AtomicU32::new(0), rejoin: AtomicBool::new(false),
             expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
+            fill_rate: AtomicU32::new(0),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
-            feed: Feed { frame: Mutex::new(None), ready: Condvar::new(), stop: AtomicBool::new(false) },
+            feed: Feed { frame: Mutex::new(None), posted: AtomicU64::new(0), seeks: AtomicU32::new(0), ready: Condvar::new(), stop: AtomicBool::new(false) },
             in_flight: AtomicUsize::new(0), workers: workers.max(1), stats: Mutex::new((0.0, 0.0, 0.0, 0)),
         }
     }
@@ -203,6 +220,17 @@ impl Edges {
         self.realtime.store(realtime, Ordering::Relaxed);
     }
 
+    /// mpv made the filter again (playback): a seek. After one, the first frame written starts the sphere over if it's
+    /// more than MAX_GAP_US from the one last written; between seeks a gap is only the sphere writer having had no room
+    /// for a while, and the sphere goes on. `rejoin`: a seek back to the frame on screen, with the chain set up again
+    /// (still.lua: the clean still frame, the paused frame at full size, playing on from it), which isn't one: mpv
+    /// decodes from the keyframe before it, and the frames up to it and its neighbours after, which the sphere had while
+    /// it played, come again
+    pub fn seeked(&self, rejoin: bool) {
+        self.rejoin.store(rejoin, Ordering::Relaxed);
+        if !rejoin { self.seeks.fetch_add(1, Ordering::Relaxed); }
+    }
+
     /// Ends the sphere writer (Engine's drop)
     pub(crate) fn stop(&self) {
         let _frame = self.feed.frame.lock();
@@ -212,17 +240,20 @@ impl Edges {
 
     /// The frame for the sphere writer, in place of one it hasn't taken yet: only the newest counts. Not an older one
     /// finished after it, unless it's a seek back
-    fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>) {
+    fn post(&self, timestamp_us: i64, src_lo: &Arc<Vec<Vec<f32>>>, seeks: u32) {
         let mut frame = self.feed.frame.lock();
-        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && *t - timestamp_us < MAX_GAP_US) { return; }
+        self.feed.posted.fetch_add(1, Ordering::Relaxed);
+        let rejoin = self.rejoin.load(Ordering::Relaxed);
+        if frame.as_ref().is_some_and(|(t, _)| timestamp_us < *t && (rejoin || *t - timestamp_us < MAX_GAP_US)) { return; }
         *frame = Some((timestamp_us, src_lo.clone()));
+        self.feed.seeks.store(seeks, Ordering::Relaxed);
         self.feed.ready.notify_one();
     }
 
     /// The wide view's frame onto the sphere; starts it over at a seek, or where it no longer matches the frame (a cut,
     /// or a jump the gyro didn't see). What's past the frame's edge and doesn't match it is taken away first, and what's
     /// made up is brought up to date after
-    fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64) {
+    fn write_sphere(&self, frame: &GridFrame, timestamp_us: i64, seeks: u32) {
         let mut last = self.sphere_written.lock();
         let sphere = self.sphere.get_or_init(|| {
             let s = Sphere::new(frame.view.cells_per_radian(frame.grid.0), frame.planes.len(), SPHERE_HALF_LIFE_S);
@@ -233,13 +264,23 @@ impl Edges {
         // The time since the last frame written; 0 when it starts over
         let mut dt = 0.0;
         match *last {
-            None => sphere.reset(now),
-            Some(l) if (timestamp_us - l).abs() > MAX_GAP_US => sphere.reset(now),
-            // Another worker already wrote a newer frame
-            Some(l) if timestamp_us <= l => return,
-            Some(l) => {
+            None => {
+                log::info!("Edges: the sphere starts at {timestamp_us} us");
+                sphere.reset(now);
+            }
+            // From before the seek the frame last written came after, finished late
+            Some((_, s)) if seeks < s => return,
+            // The first after a seek (Edges::seeked) that jumped
+            Some((l, s)) if seeks != s && (timestamp_us - l).abs() > MAX_GAP_US => {
+                log::info!("Edges: a seek from {l} to {timestamp_us} us, the sphere starts over");
+                sphere.reset(now);
+            }
+            // Another worker already wrote a newer frame, or one the sphere had, seen again after a seek back to the
+            // frame on screen
+            Some((l, _)) if timestamp_us <= l => return,
+            Some((l, _)) => {
                 if sphere.mismatch(frame, now).is_some_and(|d| d > SCENE_CUT * self.geometry.max_value) {
-                    log::debug!("Edges: the sphere doesn't match the frame at {timestamp_us} us, reset");
+                    log::info!("Edges: the sphere doesn't match the frame at {timestamp_us} us (a cut), it starts over");
                     sphere.reset(now);
                 } else {
                     dt = (timestamp_us - l) as f32 / 1e6;
@@ -250,7 +291,7 @@ impl Edges {
         let checked = if dt > 0.0 { self.erode_stale(sphere, frame, now, dt) } else { None };
         sphere.write(frame, now);
         self.update_fill(sphere, frame, now, dt);
-        *last = Some(timestamp_us);
+        *last = Some((timestamp_us, seeks));
 
         let mut stats = self.stats.lock();
         let (diff, eroding) = checked.unwrap_or((0.0, 0.0));
@@ -315,15 +356,18 @@ impl Edges {
     }
 
     /// From the filter's arguments; the control file, when there is one, overrides `mode` (and the blur, the view, the
-    /// level and the color fringes, if it has them)
+    /// level, the color fringes and the fill rate, if it has them)
     pub fn configure(&self, mode: EdgeMode, settings: EdgeSettings, view: u8, level: crate::Level, control: Option<PathBuf>) {
         self.mode.store(mode as u8, Ordering::Relaxed);
         self.view.store(view, Ordering::Relaxed);
         self.level.store(level as u8, Ordering::Relaxed);
         self.chromatic.store(true, Ordering::Relaxed);
+        self.fill_rate.store(0, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
-        *self.sphere_written.lock() = None;
+        // The sphere stays: mpv makes the filter again on every seek, the clean still frame's back to the paused frame
+        // and the chain set up at another size (full size while paused) among them. A seek that jumps (MAX_GAP_US)
+        // starts it over as it's written
         self.check_control(true);
         log::debug!("Edges: {:?}, {settings:?}", self.mode());
     }
@@ -354,6 +398,12 @@ impl Edges {
         self.chromatic.load(Ordering::Relaxed)
     }
 
+    /// The share of the frames that play the sphere is written from, %; 0: as the GPU has room
+    fn fill_rate(&self) -> u32 {
+        self.check_control(false);
+        self.fill_rate.load(Ordering::Relaxed)
+    }
+
     fn check_control(&self, now: bool) {
         // Another worker is already looking
         let Some(mut c) = self.control.try_lock() else { return };
@@ -364,7 +414,7 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let ControlText { mode, blur, view, level, chromatic } = parse_control(&text);
+        let ControlText { mode, blur, view, level, chromatic, fill_rate } = parse_control(&text);
         match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
@@ -388,6 +438,12 @@ impl Edges {
                 log::info!("Color fringes under water: {}", if chromatic { "taken out" } else { "as recorded" });
             }
         }
+        if let Some(rate) = fill_rate {
+            if self.fill_rate.swap(rate, Ordering::Relaxed) != rate {
+                if rate == 0 { log::info!("Edge fill rate: auto, as the GPU has room"); }
+                else { log::info!("Edge fill rate: {rate} % of the frames"); }
+            }
+        }
         if let Some(blur) = blur {
             let mut s = self.settings.lock();
             if s.blur != blur {
@@ -408,7 +464,7 @@ impl Edges {
             }
         }).collect());
         log::trace!("Edges: source scaled down in {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
-        EdgeJob { mode, settings: *self.settings.lock(), src_lo }
+        EdgeJob { mode, settings: *self.settings.lock(), src_lo, seeks: self.seeks.load(Ordering::Relaxed) }
     }
 }
 
@@ -418,16 +474,16 @@ pub const VIEW_WIDE: u8 = 1;
 
 /// What the control file says (`parse_control`)
 #[derive(Debug, PartialEq, Default)]
-struct ControlText { mode: Option<EdgeMode>, blur: Option<f32>, view: Option<u8>, level: Option<crate::Level>, chromatic: Option<bool> }
+struct ControlText { mode: Option<EdgeMode>, blur: Option<f32>, view: Option<u8>, level: Option<crate::Level>, chromatic: Option<bool>, fill_rate: Option<u32> }
 
 /// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
 /// filter's `edges_blur`; `view`, normal or wide; `level`, weak, medium or strong (levels.rs); `chromatic`, yes or
-/// no: the water's color fringes taken out). A file with only the mode in it leaves the settings as the filter was
-/// given them
+/// no: the water's color fringes taken out; `fill_rate`, auto or the % of the frames that play the sphere is written
+/// from). A file with only the mode in it leaves the settings as the filter was given them
 fn parse_control(text: &str) -> ControlText {
     let mut words = text.split_whitespace();
     let mode = EdgeMode::parse(words.next().unwrap_or(""));
-    let (mut blur, mut view, mut level, mut chromatic) = (None, None, None, None);
+    let (mut blur, mut view, mut level, mut chromatic, mut fill_rate) = (None, None, None, None, None);
     for w in words {
         match w.split_once('=') {
             Some(("blur", v)) => match v.parse::<f32>() {
@@ -439,10 +495,15 @@ fn parse_control(text: &str) -> ControlText {
             Some(("level", v)) if crate::Level::parse(v).is_some() => level = crate::Level::parse(v),
             Some(("chromatic", "yes")) => chromatic = Some(true),
             Some(("chromatic", "no")) => chromatic = Some(false),
+            Some(("fill_rate", "auto")) => fill_rate = Some(0),
+            Some(("fill_rate", v)) => match v.parse::<u32>() {
+                Ok(v) if (1..=100).contains(&v) => fill_rate = Some(v),
+                _ => log::warn!("Edges: bad fill_rate {v:?} in the control file"),
+            },
             _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
         }
     }
-    ControlText { mode, blur, view, level, chromatic }
+    ControlText { mode, blur, view, level, chromatic, fill_rate }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -662,9 +723,9 @@ impl WideView {
         Ok((planes, coverage))
     }
 
-    fn write(&self, edges: &Edges, planes: &[Vec<f32>], coverage: &[f32], timestamp_us: i64) {
+    fn write(&self, edges: &Edges, planes: &[Vec<f32>], coverage: &[f32], timestamp_us: i64, seeks: u32) {
         let view = View::at(&self.params, timestamp_us);
-        edges.write_sphere(&GridFrame { view: &view, grid: edges.geometry.wide, planes, coverage }, timestamp_us);
+        edges.write_sphere(&GridFrame { view: &view, grid: edges.geometry.wide, planes, coverage }, timestamp_us, seeks);
     }
 }
 
@@ -740,12 +801,12 @@ impl EdgeWorker {
         // In playback the sphere writer does it, as the GPU has room
         if job.mode == EdgeMode::Sphere && edges.expected.load(Ordering::Relaxed) {
             if edges.realtime.load(Ordering::Relaxed) && edges.writer.load(Ordering::Relaxed) {
-                edges.post(timestamp_us, &job.src_lo);
+                edges.post(timestamp_us, &job.src_lo, job.seeks);
             } else {
                 let wide = self.wide.get_or_insert_with(|| self.wide_setup.view(g));
                 let (planes, coverage) = wide.render::<T, P>(&job.src_lo, timestamp_us, cfg.max_value)?;
                 lap(1, &mut self.timing);
-                wide.write(edges, &planes, &coverage, timestamp_us);
+                wide.write(edges, &planes, &coverage, timestamp_us, job.seeks);
                 lap(2, &mut self.timing);
             }
         }
@@ -803,7 +864,9 @@ impl EdgeWorker {
 
 /// Playback's sphere writer, on a thread of its own: the newest frame posted, through the wide view, onto the sphere.
 /// Only while some GPU worker has no frame: the frames come first, and when they keep all the workers busy the sphere
-/// waits, written less often or not at all. Its GPU stabilizers are made on the first frame
+/// waits, written less often or not at all. With a fill rate, only from that share of the frames posted: the others are
+/// let go before they're waited on, as is one older than the frame last written (write_sphere would). After a seek, the
+/// first one is. Its GPU stabilizers are made on the first frame
 pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, base: ComputeParams, cfg: WorkerConfig) {
     let setup = WideSetup::new(&mgr, &base, cfg, &edges.geometry, cfg.is_yuv);
     drop(mgr);
@@ -822,10 +885,30 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
         if let Err(e) = warmed { log::error!("Sphere writer warm-up: {e}"); }
     }
     let (mut written, mut waited, mut since) = (0u32, Duration::ZERO, Instant::now());
+    // With a fill rate: the frames posted as last counted, what they're worth (each one the rate, a write 100), and the
+    // frame last written with the seeks before it. What's owed is kept below two writes, so a writer that fell behind
+    // doesn't catch up in a burst
+    let (mut counted, mut credit, mut last) = (0u64, 0u64, None::<(i64, u32)>);
     loop {
+        let rate = edges.fill_rate() as u64;
         {
             let mut frame = edges.feed.frame.lock();
             while frame.is_none() && !stop() { edges.feed.ready.wait(&mut frame); }
+            let posted = edges.feed.posted.load(Ordering::Relaxed);
+            if rate > 0 {
+                credit = (credit + (posted - counted) * rate).min(199);
+                // Not the first frame after a seek, which is written whatever its time (write_sphere decides on it)
+                let same_seek = last.is_some_and(|(_, s)| s == edges.feed.seeks.load(Ordering::Relaxed));
+                if let (Some((ts, _)), Some((l, _)), true) = (frame.as_ref(), last, same_seek) {
+                    if (*ts - l).abs() <= MAX_GAP_US && (*ts <= l || credit < 100) {
+                        *frame = None;
+                        counted = posted;
+                        continue;
+                    }
+                }
+                credit = credit.saturating_sub(100);
+            }
+            counted = posted;
         }
         let t = Instant::now();
         while edges.in_flight.load(Ordering::Relaxed) >= edges.workers && !stop() {
@@ -834,19 +917,21 @@ pub(crate) fn sphere_writer(edges: Arc<Edges>, mgr: Arc<StabilizationManager>, b
         if stop() { break; }
         waited += t.elapsed();
         // The newest by now
-        let Some((timestamp_us, src_lo)) = edges.feed.frame.lock().take() else { continue };
+        let Some(((timestamp_us, src_lo), seeks)) = ({ let mut f = edges.feed.frame.lock(); f.take().map(|x| (x, edges.feed.seeks.load(Ordering::Relaxed))) }) else { continue };
         let rendered = match cfg.kind {
             SampleKind::U8  => wide.render::<u8, Luma8>(&src_lo, timestamp_us, cfg.max_value),
             SampleKind::U16 => wide.render::<u16, Luma16>(&src_lo, timestamp_us, cfg.max_value),
         };
         match rendered {
-            Ok((planes, coverage)) => wide.write(&edges, &planes, &coverage, timestamp_us),
+            Ok((planes, coverage)) => wide.write(&edges, &planes, &coverage, timestamp_us, seeks),
             Err(e) => log::error!("Sphere writer: {e}"),
         }
+        last = Some((timestamp_us, seeks));
         written += 1;
         let elapsed = since.elapsed();
         if elapsed >= Duration::from_secs(5) {
-            log::debug!("Sphere written {:.1} times a second, waiting for a free GPU worker {:.0} % of the time", written as f64 / elapsed.as_secs_f64(), waited.as_secs_f64() / elapsed.as_secs_f64() * 100.0);
+            log::debug!("Sphere written {:.1} times a second (fill rate {}), waiting for a free GPU worker {:.0} % of the time", written as f64 / elapsed.as_secs_f64(),
+                        if rate == 0 { "auto".to_string() } else { format!("{rate} %") }, waited.as_secs_f64() / elapsed.as_secs_f64() * 100.0);
             (written, waited, since) = (0, Duration::ZERO, Instant::now());
         }
     }
@@ -1004,7 +1089,7 @@ mod tests {
 
     #[test]
     fn control_file() {
-        let c = |mode, blur, view, level, chromatic| ControlText { mode, blur, view, level, chromatic };
+        let c = |mode, blur, view, level, chromatic| ControlText { mode, blur, view, level, chromatic, fill_rate: None };
         assert_eq!(parse_control("sphere"), c(Some(EdgeMode::Sphere), None, None, None, None));
         assert_eq!(parse_control("smooth\n"), c(Some(EdgeMode::Smooth), None, None, None, None));
         assert_eq!(parse_control("sphere blur=3.5"), c(Some(EdgeMode::Sphere), Some(3.5 / 100.0), None, None, None));
@@ -1023,5 +1108,10 @@ mod tests {
         assert_eq!(parse_control("sphere level=extreme"), c(Some(EdgeMode::Sphere), None, None, None, None));
         assert_eq!(parse_control("off chromatic=yes"), c(Some(EdgeMode::Off), None, None, None, Some(true)));
         assert_eq!(parse_control("off chromatic=maybe"), c(Some(EdgeMode::Off), None, None, None, None));
+        assert_eq!(parse_control("sphere fill_rate=auto").fill_rate, Some(0));
+        assert_eq!(parse_control("sphere chromatic=yes fill_rate=25").fill_rate, Some(25));
+        assert_eq!(parse_control("sphere fill_rate=0").fill_rate, None);
+        assert_eq!(parse_control("sphere fill_rate=150").fill_rate, None);
+        assert_eq!(parse_control("sphere fill_rate=half").fill_rate, None);
     }
 }
