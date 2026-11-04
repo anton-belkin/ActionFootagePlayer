@@ -241,6 +241,27 @@ function Ui:button(x, w, y, id, label, cmd, opts)
     return y + h + 6 * s
 end
 
+-- A slider, value 0..1, with words at its ends: set(v) is called with where it's clicked or dragged to
+function Ui:slider(x, w, y, id, value, set, left, right, disabled)
+    local s = self.s
+    local h = 30 * s
+    local cy = y + h / 2
+    local kr = 8 * s
+    local tx, tw = x + kr, w - 2 * kr
+    local a = disabled and "80" or "00"
+    self:box(tx, cy - 2 * s, tw, 4 * s, 2, M.C.line, { alpha = a })
+    if not disabled then self:box(tx, cy - 2 * s, tw * value, 4 * s, 2, M.C.accent) end
+    self:shape(circle_path(tx + tw * value, cy, kr), M.C.knob, { alpha = a })
+    if not disabled then
+        self:hit(x, y, w, h, id, { drag = function(mx) set(math.min(1, math.max(0, (mx - tx) / tw))) end })
+    end
+    y = y + h
+    if (left or "") == "" and (right or "") == "" then return y + 2 * s end
+    self:text(x, y + 6 * s, left, { size = 11, color = M.C.dim, alpha = dim_alpha(disabled) })
+    self:text(x + w, y + 6 * s, right, { size = 11, color = M.C.dim, align = 6, alpha = dim_alpha(disabled) })
+    return y + 18 * s
+end
+
 function Ui:divider(x, w, y)
     self:box(x, y, w, math.max(1, self.s), 0, M.C.divider)
     return y + math.max(1, self.s)
