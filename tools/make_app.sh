@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -21,7 +21,8 @@
 #
 # With BUNDLE_RUNTIME set to Homebrew's prefix (`brew --prefix`), the app also gets Homebrew's mpv and ffmpeg and
 # what they load, Python and VapourSynth among it, with their licenses (tools/bundle_runtime.py): it then needs no
-# Homebrew, and the macOS the bottles were built for. Without it, the app runs Homebrew's mpv.
+# Homebrew, and the macOS the bottles were built for. Its mpv is MPV_BIN's when that's set (tools/build_mpv.sh's).
+# Without BUNDLE_RUNTIME, the app runs Homebrew's mpv.
 #
 # Signed ad hoc; the app is read-only once signed (what's yours lives in ~/Library/Application Support/ActionFootagePlayer).
 set -euo pipefail
@@ -78,6 +79,9 @@ install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/sc
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
+# The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
+mkdir -p "$dlogm/dv"
+install -m 644 mpv/scripts/dlogm/dv/dji_fit.json mpv/scripts/dlogm/dv/dji_fit.rpu "$dlogm/dv/"
 # The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
 # for gyroflow-export
 for curve in dlog gplog2 ilog; do
@@ -94,7 +98,7 @@ install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
     mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
@@ -118,7 +122,7 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu"; do
     sign "$f"
 done
 sign "$app"

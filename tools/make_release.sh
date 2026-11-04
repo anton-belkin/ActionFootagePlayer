@@ -2,7 +2,9 @@
 # tools/make_release.sh <version>: into dist/
 #   ActionFootagePlayer-<version>-macos-arm64.zip             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh):
 #                                                       unzipped into Applications, its setup downloads DJI's LUT.
-#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too
+#                                                       With BUNDLE_RUNTIME, with mpv and ffmpeg in it too:
+#                                                       MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
+#                                                       tools/build_mpv.sh, when it's there), else Homebrew's
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
@@ -26,6 +28,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version=${1:?usage: tools/make_release.sh <version>}
+# For tools/bundle_runtime.py (through tools/make_app.sh): the mpv tools/build_mpv.sh built
+if [ -n "${BUNDLE_RUNTIME:-}" ] && [ -z "${MPV_BIN:-}" ] && [ -x build/mpv-afp/out/mpv ]; then
+    MPV_BIN=build/mpv-afp/out/mpv
+fi
+[ -z "${MPV_BIN:-}" ] || export MPV_BIN
 name="ActionFootagePlayer-$version-macos-arm64"
 if ! git diff --quiet HEAD -- vs-gyroflow; then
     echo "vs-gyroflow has uncommitted changes; the binaries would not match the tree" >&2
@@ -38,7 +45,7 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done

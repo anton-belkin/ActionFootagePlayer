@@ -1,0 +1,241 @@
+From f3e5571ec9ece209990ca7365d9056d498173ec6 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Wed, 4 Nov 2026 09:50:12 +0100
+Subject: [PATCH 4/5] mac/vulkan: attach Dolby Vision RPUs to the sample buffer
+ layer's frames
+
+With --macos-sample-buffer-layer, each frame's RPU is attached to its
+CVPixelBuffer, so macOS applies its Dolby Vision display management (the
+trims for the display it's on) as QuickTime does: the frame's own, or the
+one --macos-dovi-rpu-file gives for its frame number, from a file as
+dovi_tool writes RPUs (Annex B, one per frame).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../macos-sample-buffer-layer.txt             |  2 +-
+ DOCS/man/options.rst                          | 13 ++++
+ osdep/mac/app_bridge.h                        |  1 +
+ osdep/mac/app_bridge.m                        |  1 +
+ video/out/mac/common.swift                    |  3 +
+ video/out/mac/sample_buffer.h                 |  5 ++
+ video/out/mac/sample_buffer.m                 | 68 ++++++++++++++++++-
+ video/out/mac_common.swift                    |  3 +
+ video/out/vulkan/context_mac.m                |  1 +
+ 9 files changed, 94 insertions(+), 3 deletions(-)
+
+diff --git a/DOCS/interface-changes/macos-sample-buffer-layer.txt b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+index faad3cc7b..03ff1e349 100644
+--- a/DOCS/interface-changes/macos-sample-buffer-layer.txt
++++ b/DOCS/interface-changes/macos-sample-buffer-layer.txt
+@@ -1 +1 @@
+-add `--macos-sample-buffer-layer`
++add `--macos-sample-buffer-layer` and `--macos-dovi-rpu-file`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index a3b3f2d89..25082a2bc 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7251,6 +7251,19 @@ them.
+     color management. Can be changed while playing.
+     ``--vo=gpu-next`` with macOS and Vulkan (macvk) only.
+ 
++    A Dolby Vision RPU goes along with each frame, for macOS's Dolby Vision display management (the
++    trims for the display it's on, as QuickTime applies them): the one ``--macos-dovi-rpu-file`` gives,
++    or else the frame's own when libplacebo doesn't apply it itself, with
++    ``--vf=format:dolbyvision=no`` (the base layer then plays as it is, e.g. HLG for profile 8.4; set
++    the target to match, e.g. ``--target-trc=hlg --target-prim=bt.2020``).
++
++``--macos-dovi-rpu-file=<file>``
++    Dolby Vision RPUs for ``--macos-sample-buffer-layer`` to attach in place of the frames' own: a
++    file as ``dovi_tool`` writes them (``dovi_tool extract-rpu``, ``dovi_tool generate``: Annex B, one
++    RPU per frame). Frame N of the file goes with the frame at N / fps seconds (``--rebase-start-time``
++    counts from the first), the last one with every frame after it; a file with one RPU applies to all.
++    Can be changed while playing.
++
+ ``--macos-menu-shortcuts=<yes|no>``
+     Enables the default menu bar shortcuts (default: yes). The menu bar shortcuts always take
+     precedence over any other shortcuts, they are not propagated to the mpv core and they can't be
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index bb55d07e9..e857617f7 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -96,6 +96,7 @@ struct macos_opts {
+     int macos_geometry_calculation;
+     int macos_render_timer;
+     int macos_sample_buffer_layer;
++    char *macos_dovi_rpu_file;
+     bool macos_menu_shortcuts;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index dd79d900f..684061832 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -69,6 +69,7 @@ const struct m_sub_options macos_conf = {
+             {"system", RENDER_TIMER_SYSTEM}, {"feedback", RENDER_TIMER_PRESENTATION_FEEDBACK})},
+         {"macos-sample-buffer-layer", OPT_CHOICE(macos_sample_buffer_layer,
+             {"no", 0}, {"yes", 1})},
++        {"macos-dovi-rpu-file", OPT_STRING(macos_dovi_rpu_file), .flags = M_OPT_FILE},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+diff --git a/video/out/mac/common.swift b/video/out/mac/common.swift
+index 7cf9864b6..e69d65a4c 100644
+--- a/video/out/mac/common.swift
++++ b/video/out/mac/common.swift
+@@ -683,6 +683,9 @@ class Common: NSObject {
+             case TypeHelper.toPointer(&option.macPtr.pointee.macos_sample_buffer_layer):
+                 (self as? MacCommon)?.sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
+                 flagEvents(VO_EVENT_EXPOSE)
++            case TypeHelper.toPointer(&option.macPtr.pointee.macos_dovi_rpu_file):
++                (self as? MacCommon)?.doviRpuFile = option.mac.macos_dovi_rpu_file.map { String(cString: $0) } ?? ""
++                flagEvents(VO_EVENT_EXPOSE)
+             default:
+                 break
+             }
+diff --git a/video/out/mac/sample_buffer.h b/video/out/mac/sample_buffer.h
+index 93b57c2d3..79527580b 100644
+--- a/video/out/mac/sample_buffer.h
++++ b/video/out/mac/sample_buffer.h
+@@ -37,5 +37,10 @@ bool mac_sample_buffer_start_frame(struct mac_sample_buffer *sb, pl_gpu gpu, int
+ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct ra_ext_frame *frame,
+                               const struct ra_ext_submit *info);
+ 
++// Dolby Vision RPUs to attach in place of the frame's own: a file as dovi_tool writes them (Annex B, one RPU per
++// frame), the frame's by its pts times its nominal frame rate; one RPU goes on every frame. NULL or "" for none.
++// Read again when the path changes.
++void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *path);
++
+ // Drops the frame the layer shows, when the swapchain takes over again
+ void mac_sample_buffer_flush(struct mac_sample_buffer *sb);
+diff --git a/video/out/mac/sample_buffer.m b/video/out/mac/sample_buffer.m
+index 503b8fda5..31f01ddf5 100644
+--- a/video/out/mac/sample_buffer.m
++++ b/video/out/mac/sample_buffer.m
+@@ -56,6 +56,10 @@ struct mac_sample_buffer {
+     CFDataRef rpu;
+     AVBufferRef *rpu_src;
+     struct pl_color_space tagged;
++    // --macos-dovi-rpu-file
++    char *rpu_path;
++    NSMutableArray<NSData *> *file_rpus;
++    int64_t last_index;
+ };
+ 
+ struct mac_sample_buffer *mac_sample_buffer_create(struct mp_log *log, void *layer)
+@@ -96,12 +100,58 @@ void mac_sample_buffer_destroy(struct mac_sample_buffer **sbp, pl_gpu gpu)
+     if (sb->rpu)
+         CFRelease(sb->rpu);
+     av_buffer_unref(&sb->rpu_src);
++    [sb->file_rpus release];
+     [sb->device release];
+     [sb->layer release];
+     talloc_free(sb);
+     *sbp = NULL;
+ }
+ 
++void mac_sample_buffer_set_rpu_file(struct mac_sample_buffer *sb, const char *path)
++{
++    if (!sb)
++        return;
++    if (!path)
++        path = "";
++    if (sb->rpu_path && !strcmp(sb->rpu_path, path))
++        return;
++    talloc_free(sb->rpu_path);
++    sb->rpu_path = talloc_strdup(sb, path);
++    [sb->file_rpus release];
++    sb->file_rpus = nil;
++    sb->last_index = -1;
++    if (!path[0])
++        return;
++
++    NSData *data = [NSData dataWithContentsOfFile:@(path)];
++    if (!data) {
++        MP_ERR(sb, "Can't read the Dolby Vision RPU file %s.\n", path);
++        return;
++    }
++    // Annex B: each RPU after a 00 00 00 01 start code, as dovi_tool writes them (the NAL payload, emulation
++    // prevention bytes kept: what libavcodec exports and macOS's decoder attaches)
++    const uint8_t *b = data.bytes;
++    size_t n = data.length, start = SIZE_MAX;
++    NSMutableArray<NSData *> *rpus = [NSMutableArray new];
++    for (size_t i = 0; i + 4 <= n; i++) {
++        if (b[i] || b[i + 1] || b[i + 2] || b[i + 3] != 1)
++            continue;
++        if (start != SIZE_MAX && i > start)
++            [rpus addObject:[data subdataWithRange:NSMakeRange(start, i - start)]];
++        start = i + 4;
++        i += 3;
++    }
++    if (start != SIZE_MAX && start < n)
++        [rpus addObject:[data subdataWithRange:NSMakeRange(start, n - start)]];
++    if (!rpus.count) {
++        MP_ERR(sb, "No RPUs in %s.\n", path);
++        [rpus release];
++        return;
++    }
++    sb->file_rpus = rpus;
++    MP_VERBOSE(sb, "%d Dolby Vision RPUs from %s.\n", (int)rpus.count, path);
++}
++
+ void mac_sample_buffer_flush(struct mac_sample_buffer *sb)
+ {
+     if (sb)
+@@ -369,8 +419,22 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+     }
+     tag(s->buf, s->sys, &info->color);
+ 
+-    // The frame's Dolby Vision RPU, for the system's display management; kept as long as it's the same buffer
+-    if (!info->dovi_rpu || !sb->rpu_src || info->dovi_rpu->buffer != sb->rpu_src->buffer) {
++    // The frame's Dolby Vision RPU, for the system's display management: from --macos-dovi-rpu-file, by the frame's
++    // number, or its own (kept as long as it's the same buffer)
++    if (sb->file_rpus) {
++        int64_t count = sb->file_rpus.count, index = 0;
++        if (info->pts != MP_NOPTS_VALUE && info->nominal_fps > 0)
++            index = MPCLAMP(llrint(info->pts * info->nominal_fps), 0, count - 1);
++        if (index != sb->last_index) {
++            if (sb->rpu)
++                CFRelease(sb->rpu);
++            sb->rpu = (CFDataRef)CFRetain((__bridge CFDataRef)sb->file_rpus[index]);
++            av_buffer_unref(&sb->rpu_src);
++            sb->last_index = index;
++            MP_TRACE(sb, "RPU %lld of %lld for pts %f.\n", (long long)index, (long long)count, info->pts);
++        }
++    } else if (!info->dovi_rpu || !sb->rpu_src || info->dovi_rpu->buffer != sb->rpu_src->buffer) {
++        sb->last_index = -1;
+         if (sb->rpu)
+             CFRelease(sb->rpu);
+         sb->rpu = NULL;
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index ada29ee59..d2f04cd7f 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -23,6 +23,8 @@ class MacCommon: Common {
+     // Over the Metal layer, shown while vo_gpu_next presents through it (--macos-sample-buffer-layer)
+     @objc var sampleBufferLayer: AVSampleBufferDisplayLayer?
+     @objc var sampleBufferRequested: Bool = false
++    // --macos-dovi-rpu-file, read by the sample buffer presenter when it changes
++    @objc var doviRpuFile: String = ""
+ 
+     var presentation: Presentation?
+     var timer: PreciseTimer?
+@@ -48,6 +50,7 @@ class MacCommon: Common {
+             layer?.addSublayer(sampleLayer)
+             sampleBufferLayer = sampleLayer
+             sampleBufferRequested = option.mac.macos_sample_buffer_layer == 1
++            doviRpuFile = option.mac.macos_dovi_rpu_file.map { String(cString: $0) } ?? ""
+             initMisc(vo)
+         }
+     }
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index e41dd6ac1..f5332ac56 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -90,6 +90,7 @@ static void mac_vk_ext_submit_frame(struct ra_ctx *ctx, struct ra_ext_frame *fra
+                                     const struct ra_ext_submit *info)
+ {
+     struct priv *p = ctx->priv;
++    mac_sample_buffer_set_rpu_file(p->sb, p->vo_mac.doviRpuFile.UTF8String);
+     mac_sample_buffer_submit(p->sb, p->vk.gpu, frame, info);
+     // shown once it has a frame, so the switch from the swapchain doesn't flash
+     if (!p->sb_shown) {
