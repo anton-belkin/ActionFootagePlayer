@@ -92,16 +92,15 @@ the "pro" mode into the one to use for everyday footage.
 
 On a Mac without an HDR screen (MacBook Air, most external monitors), clips start in HDR with Dolby Vision as macOS
 shows it: macOS tones the HDR down for that screen with trims fitted to DJI's Rec.709 LUT, the way QuickTime and
-Apple's devices show the export. `Ctrl+s` goes through it, the camera maker's own Rec.709 LUT (DJI's, for D-Log M),
-NBCUniversal's neutral HDR → SDR conversion and mpv's tone mapping; on an HDR screen, the same `Ctrl+s` shows how the
-SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
+Apple's devices show the export. `Ctrl+s` goes through it, HDR as macOS tones it down, mpv's tone mapping,
+NBCUniversal's neutral HDR → SDR conversion and the camera maker's own Rec.709 LUT (DJI's, for D-Log M); on an HDR
+screen, the same `Ctrl+s` shows how the SDR looks will look on an SDR one. Exports still play in HDR on an iPhone.
+The Dolby Vision trims are the author's, to taste; the side panel's Look has them as sliders while that look shows,
+and exports take what's set there.
 
-macOS takes an external SDR monitor for 200 nits bright, and shows HDR on it about a stop darker than the standards'
-conversion to SDR (on the first one it's plugged in, that is; the second gets no value and shows lighter). The side
-panel's **SDR on macOS** sets how bright it takes them to be: for a lit room (HDR as NBCU's conversion shows it), by
-the MacBook's light sensor, or by hand. It's for every app, QuickTime and Safari too, and set again whenever a monitor
-is plugged in; the built-in display and HDR screens are left alone. The first time HDR plays on such a monitor, the
-player offers it.
+After an HDR display (an HDR TV, say) has been connected to the Mac, macOS can keep its settings for the SDR monitor
+plugged in where it was, until the Mac restarts, and shows HDR on it about a stop darker. The player tells when it
+sees that, the first time HDR plays on such a monitor: restarting the Mac sets it right.
 
 ## Help it work with your camera
 
@@ -254,7 +253,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
-| `Ctrl+s` | The clip's next look: HDR, then SDR through the maker's LUT (DJI's, for D-Log M), then SDR through NBCUniversal's HLG → SDR conversion, the same for every camera. Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
+| `Ctrl+s` | The clip's next look: HDR, HDR with Dolby Vision (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |

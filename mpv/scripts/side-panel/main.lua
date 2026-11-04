@@ -1,7 +1,6 @@
 -- side-panel: the plugins' settings in a panel at the right of the window, beside the video (it's moved over for it,
 -- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, its quality,
--- the telemetry, the player, and on macOS how bright external SDR monitors are taken to be), and the panel of the
--- one chosen, scrolled with the wheel. What the right-click menu has, as controls: it reads the same state the
+-- the telemetry, the player), and the panel of the one chosen, scrolled with the wheel. What the right-click menu has, as controls: it reads the same state the
 -- plugins keep in user-data/<plugin>/ and runs the same commands. An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- Keys (rebind with `<key> script-binding side_panel/<name>` in input.conf):
@@ -14,7 +13,7 @@
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
 --   open=yes         and the panel beside it
---   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, player, sdr
+--   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, player
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
@@ -113,11 +112,6 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 8.5 * s, cy + 3.25 * s, 17 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx - 3 * s, cy - 4 * s, 2.8 * s), color)
         u:shape(ui.circle_path(cx + 3.5 * s, cy + 4 * s, 2.8 * s), color)
-    elseif name == "sdr" then
-        -- A monitor on its stand
-        u:shape(ui.rrect_path(cx - 9 * s, cy - 7.5 * s, 18 * s, 12 * s, 2 * s), color, stroke)
-        u:box(cx - 1 * s, cy + 4.5 * s, 2 * s, 3 * s, 0, color)
-        u:box(cx - 5 * s, cy + 7 * s, 10 * s, 1.5 * s, 0.75, color)
     elseif name == "keys" then
         u:shape(ui.rrect_path(cx - 9 * s, cy - 6 * s, 18 * s, 12 * s, 2.5 * s), color, stroke)
         for _, x in ipairs({ -5.5, -1, 3.5 }) do u:box(cx + x * s, cy - 3 * s, 2 * s, 2 * s, 0, color) end
@@ -130,19 +124,10 @@ end
 
 local TABS = {
     { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Quality" },
-    { "telemetry", "Telemetry" }, { "player", "Player" }, { "sdr", "SDR on macOS" },
+    { "telemetry", "Telemetry" }, { "player", "Player" },
 }
 local TAB_TITLES = {}
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
-
--- The parts the rail has: SDR on macOS only where the sdr-white plugin runs (macOS, the app)
-local function shown_tabs()
-    local list = {}
-    for _, t in ipairs(TABS) do
-        if t[1] ~= "sdr" or state("sdr_white") then table.insert(list, t) end
-    end
-    return list
-end
 
 local function choose(name)
     if tab == name and open then open = false else tab, open = name, true end
@@ -232,7 +217,7 @@ local function look_note(d, look)
     if look == "hdr" then
         if platform == "windows" then return "The HDR picture as it is: an HDR display shows it, for an SDR one mpv tones it down" end
         return (d.hdr ~= "" and not d.log and ("The file's HDR (" .. d.hdr:upper() .. ") as it is. ") or "The HDR picture as it is. ")
-            .. "An SDR screen gets it toned down by macOS, by how bright it takes the screen to be (SDR on macOS)"
+            .. "An SDR screen gets it toned down by macOS"
     end
     if look == "dv" then
         if d.dv_own then return "HDR with the file's own Dolby Vision metadata: macOS tones it down by them, as Apple's devices do" end
@@ -499,49 +484,8 @@ local function player_part(u, x, w, y)
     return y
 end
 
--- How bright macOS takes external SDR monitors to be (the sdr-white plugin)
-local SDR_MODES = { { "macos", "As macOS has it" }, { "light", "Light room" }, { "auto", "Auto, by the light sensor" },
-                    { "manual", "Manual" } }
-
-local function sdr_part(u, x, w, y)
-    local s = u.s
-    local d = state("sdr_white")
-    if not d then return u:caption(x, w, y, "Needs the sdr-white plugin, on macOS") end
-    y = u:caption(x, w, y, "macOS shows HDR on an external SDR monitor by how bright it takes the monitor to be, and "
-                  .. "takes it for 200 nits: about a stop darker than the standards' conversion to SDR. Set here, "
-                  .. "it's for every app, until the monitor is plugged in again")
-    y = u:heading(x, w, y + 8 * s, "Monitor brightness")
-    local mode = d.mode == "ask" and "macos" or d.mode
-    for _, m in ipairs(SDR_MODES) do
-        local note = nil
-        if m[1] == "light" then note = "as NBCU"
-        elseif m[1] == "auto" then note = d.lux and string.format("%d lux", d.lux) or "no sensor" end
-        y = u:radio(x, w, y, "sdr:" .. m[1], m[2], mode == m[1], "script-message-to sdr_white mode " .. m[1], { note = note })
-    end
-    y = u:slider(x, w, y + 4 * s, "sdr:slider", d.manual or 0.43, function(v)
-        mp.commandv("script-message-to", "sdr_white", "manual", string.format("%.3f", v))
-    end, "Darker", "Lighter", mode ~= "manual")
-    y = u:caption(x, w, y, mode == "auto" and "Lighter in a lit room, darker in the dark. A MacBook's sensor, by its open lid"
-                  or mode == "manual" and "As you like it; Light room is where HDR shows as NBCU's conversion"
-                  or mode == "light" and "HDR as NBCU's conversion shows it, and as the dv look was fitted"
-                  or "macOS's own: 200 nits on the first external monitor")
-    local list = {}
-    for _, sc in ipairs(d.screens or {}) do
-        if sc.sdr then table.insert(list, sc) end
-    end
-    y = u:heading(x, w, y + 8 * s, "SDR monitors")
-    if #list == 0 then return u:caption(x, w, y, "None connected: the built-in display and HDR ones are left as they are") end
-    for _, sc in ipairs(list) do
-        local set = sc.original ~= nil
-        u:text(x, y + 11 * s, sc.name, { size = 13 })
-        u:text(x + w, y + 11 * s, set and "set here" or (sc.white >= 150 and "darker" or "lighter"), { align = 6, size = 12, color = C.dim })
-        y = y + 24 * s
-    end
-    return y
-end
-
 local PARTS = { clip = clip_part, look = look_part, stabilization = stabilization_part, quality = quality_part,
-                telemetry = telemetry_part, player = player_part, sdr = sdr_part }
+                telemetry = telemetry_part, player = player_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
                    quality = "script-message-to gyroflow remember",
@@ -620,7 +564,7 @@ local function draw(w, h, s, hovered)
         icon(u, name, bx + bs / 2, by + bs / 2, active and C.knob or (u:hovered("rail:" .. name) and C.text or C.dim))
         u:hit(bx, by, bs, bs, "rail:" .. name, cmd)
     end
-    for i, t in ipairs(shown_tabs()) do
+    for i, t in ipairs(TABS) do
         rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], t0 + (8 + (i - 1) * 44) * s)
     end
     rail_button(0, "keys", "Keys", "script-message-to footage_menu keys", false, h - (8 + 36 + 44) * s)
@@ -784,7 +728,7 @@ mp.register_script_message("dump", function(path, w, h, s)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/sdr_white", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "osd-dimensions",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)

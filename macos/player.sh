@@ -41,7 +41,7 @@ fi
 # Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up. The
 # video gets a window of its own (finder-launch.lua), for HDR to engage
 [ $# = 0 ] && set -- --player-operation-mode=pseudo-gui "--script=$res/finder-launch.lua"
-for plugin in gyroflow dlogm dji-telemetry highlights footage-menu side-panel sdr-white agent; do
+for plugin in gyroflow dlogm dji-telemetry highlights footage-menu side-panel sdr-check agent; do
     set -- "--script=$res/plugins/$plugin" "$@"
 done
 set -- "--config-dir=$config" --load-scripts=no "--include=$res/app.conf" "$@"

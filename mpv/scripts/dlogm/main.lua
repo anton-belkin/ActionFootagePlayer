@@ -60,11 +60,16 @@
 --   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
 --   remember          the looks files start in on each kind of screen, and the noise reduction, as the default, in
 --                     dlogm.conf
+--   dv-trim <name> <0..4095>  one of the dv look's trims (slope, offset, power, midContrast, clipTrim, saturation,
+--                     chromaWeight, l3Min, l3Avg, l3Max; 2048 neutral): the look is kept in $DLOGM_DATA/dv (else
+--                     ~~/dlogm-dv) and its RPU made by afp-rpu; the dv look and its exports use it
+--   dv-reset          back to the shipped trims (DJI fit)
 -- The state is in user-data/dlogm/ for the menu: log (a curve is applied), recorded (the curve the metadata says, or
 -- ""), curve (the one applied, or ""), look (hdr, maker, nbcu, tonemap, dv, off, or "" when untouched), looks (the ones
--- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), sdr_look (the SDR look an export in SDR
--- takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when unknown), hdr (the file is tagged HDR: hlg or pq, or
--- ""), denoise (the noise reduction is on).
+-- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), maker_lut (which LUT that is and where it's
+-- from), sdr_look (the SDR look an export in SDR takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when
+-- unknown), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on), dv_trims (the dv
+-- look's), dv_custom (they're the user's), dv_own (the dv look is the file's own Dolby Vision).
 --
 -- Options (~~/script-opts/dlogm.conf):
 --   hdr_screen=hdr    what log files start in on an HDR screen: hdr, maker, nbcu, tonemap or dv
@@ -846,20 +851,6 @@ mp.register_script_message("dv-reset", function()
     end
     dv_look, dv_user_rpu = nil, nil
     if current == "dv" then apply("dv") else publish() end
-end)
-
--- The system's tone mapping read again (sdr-white changed how bright macOS takes a screen to be): macOS works it
--- out when a window comes to a screen, so the looks it tones down are shown anew, through the other path for a moment
-mp.register_script_message("refresh", function()
-    if current == "dv" then
-        mp.set_property("file-local-options/macos-sample-buffer-layer", "no")
-    elseif current == "hdr" or (current == "off" and hdr) then
-        mp.set_property("file-local-options/target-colorspace-hint", "no")
-    else
-        return
-    end
-    local m = current
-    mp.add_timeout(0.1, function() if current == m then apply(m) end end)
 end)
 
 mp.register_script_message("remember", function()
