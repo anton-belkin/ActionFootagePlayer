@@ -104,8 +104,25 @@ local function apply()
     end)
 end
 
+local CONF = mp.command_native({ "expand-path", "~~/script-opts/sdr_white.conf" })
+
+-- Another player window (a second instance) may have chosen since: what's in the file wins, so two of them don't
+-- set the screens in turn. True when it changed
+local function reload()
+    local f = io.open(CONF, "r")
+    if not f then return false end
+    local text = f:read("*a") or ""
+    f:close()
+    local m = text:match("mode%s*=%s*(%w+)")
+    local v = tonumber(text:match("manual%s*=%s*([%d%.]+)") or "")
+    local changed = false
+    if m and MODES[m] and m ~= mode then mode, changed = m, true end
+    if v and math.abs(v - manual) > 1e-3 then manual, changed = math.min(1, math.max(0, v)), true end
+    return changed
+end
+
 local function save()
-    local path = mp.command_native({ "expand-path", "~~/script-opts/sdr_white.conf" })
+    local path = CONF
     local d = path:match("^(.*)/")
     if d and not utils.file_info(d) then
         mp.command_native({ name = "subprocess", playback_only = false, args = { "mkdir", "-p", d } })
@@ -175,6 +192,8 @@ mp.register_script_message("apply", apply)
 
 -- A monitor plugged in gets macOS's value again; the sensor moves: read again on a screen change and every 10 s
 mp.observe_property("display-names", "native", function() apply() end)
-mp.add_periodic_timer(10, function() if mode ~= "ask" and mode ~= "macos" then apply() end end)
+mp.add_periodic_timer(10, function()
+    if reload() or (mode ~= "ask" and mode ~= "macos") then apply() end
+end)
 mp.observe_property("user-data/dlogm/look", "native", function() offer() end)
 mp.observe_property("user-data/dlogm/screen", "native", function() offer() end)
