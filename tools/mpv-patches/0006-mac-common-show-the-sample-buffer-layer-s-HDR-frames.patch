@@ -1,4 +1,4 @@
-From b22c9648108b52be8a5676d1e47bd08c24c562a4 Mon Sep 17 00:00:00 2001
+From cf780b1ec12857cc813bdd0ffc9bcb3e0d05dbd7 Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Wed, 4 Nov 2026 17:56:08 +0100
 Subject: [PATCH] mac/common: show the sample buffer layer's HDR frames with
@@ -12,13 +12,13 @@ Dolby Vision RPU, its trims for SDR.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../macos-sample-buffer-layer.txt                  |  1 +
- DOCS/man/options.rst                               |  5 +++++
- osdep/mac/app_bridge.h                             |  1 +
- osdep/mac/app_bridge.m                             |  2 ++
- video/out/mac/common.swift                         |  2 ++
- video/out/mac_common.swift                         | 14 ++++++++++++++
- 6 files changed, 25 insertions(+)
+ .../macos-sample-buffer-layer.txt             |  1 +
+ DOCS/man/options.rst                          |  5 +++++
+ osdep/mac/app_bridge.h                        |  1 +
+ osdep/mac/app_bridge.m                        |  2 ++
+ video/out/mac/common.swift                    |  2 ++
+ video/out/mac_common.swift                    | 19 +++++++++++++++++++
+ 6 files changed, 30 insertions(+)
 
 diff --git a/DOCS/interface-changes/macos-sample-buffer-layer.txt b/DOCS/interface-changes/macos-sample-buffer-layer.txt
 index 03ff1e349..2cd77e6cb 100644
@@ -89,7 +89,7 @@ index e35a50a63..dd7e7fac0 100644
                  break
              }
 diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
-index b2b8c99d8..b7594001e 100644
+index b2b8c99d8..e8600a252 100644
 --- a/video/out/mac_common.swift
 +++ b/video/out/mac_common.swift
 @@ -46,6 +46,7 @@ class MacCommon: Common {
@@ -100,7 +100,7 @@ index b2b8c99d8..b7594001e 100644
              initMisc(vo)
          }
      }
-@@ -119,6 +120,19 @@ class MacCommon: Common {
+@@ -119,6 +120,24 @@ class MacCommon: Common {
          info.pointee.last_queue_display_time = next?.time ?? -1
      }
  
@@ -110,9 +110,14 @@ index b2b8c99d8..b7594001e 100644
 +    func updateSampleBufferRange() {
 +        guard let sampleLayer = sampleBufferLayer else { return }
 +        let edr = option.mac.macos_sample_buffer_edr
++        // preferredDynamicRange is in the macOS 26 SDK (Swift 6.2) and later
++#if compiler(>=6.2)
 +        if #available(macOS 26.0, *) {
 +            sampleLayer.preferredDynamicRange = edr ? .high : .standard
-+        } else if #available(macOS 14.0, *) {
++            return
++        }
++#endif
++        if #available(macOS 14.0, *) {
 +            sampleLayer.wantsExtendedDynamicRangeContent = edr
 +        }
 +    }
