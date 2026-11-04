@@ -22,6 +22,7 @@
 //                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
+//   --dv-rpu:       HLG as Dolby Vision 8.4 with the file's RPUs (src/dv_mux.rs; <name>_stab_dv.mov), macOS
 // Audio is copied as it is; the file gets the source's dates.
 //
 // Decoding and encoding are ffmpeg (Homebrew's on macOS; on Windows and Linux the one next to this binary, else the
@@ -45,6 +46,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use parking_lot::Mutex;
+use vs_gyroflow::dv_mux::{ self, RpuInjector };
 use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
@@ -70,6 +72,9 @@ video with nothing to stabilize it with is color-converted only.
                    background color, the default)
   --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
   --prores         ProRes 422 HQ instead of HEVC 10-bit
+  --dv-rpu <file>  HLG as Dolby Vision 8.4, with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
+                   video gets RPU N, the last the frames after it) in place of VideoToolbox's, and the dvvC box Apple
+                   needs to use them; the player's HDR + Dolby Vision look plays the same file (macOS, HLG only)
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
   --out <folder>   write here instead of <video's folder>/stabilized
@@ -106,6 +111,7 @@ struct Options {
     encoder: Option<String>,
     progress: Progress,
     control: Option<PathBuf>,
+    dv_rpu: Option<PathBuf>,
 }
 
 fn main() {
@@ -113,7 +119,8 @@ fn main() {
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
-                             interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None };
+                             interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
+                             dv_rpu: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -140,6 +147,7 @@ fn main() {
             "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
                 .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
             "--prores" => opts.prores = true,
+            "--dv-rpu" => opts.dv_rpu = Some(PathBuf::from(value("--dv-rpu"))),
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
@@ -500,7 +508,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (None, None) => String::new(),
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
-    let stem = format!("{stem}_{}{range}", if source.is_some() { "stab" } else { "color" });
+    let stem = format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" },
+                       if opts.dv_rpu.is_some() { "_dv" } else { "" });
     let out_path = out_dir.join(format!("{stem}.mov"));
     if out_path.exists() && !opts.force {
         return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
@@ -543,6 +552,17 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
             in_range.to_string(),
         ];
         (String::new(), tags, "colors as recorded".to_string())
+    };
+
+    // Dolby Vision 8.4: HLG HEVC from VideoToolbox, our RPUs in place of its own
+    let dv_rpus = match &opts.dv_rpu {
+        None => None,
+        Some(file) => {
+            if !cfg!(target_os = "macos") || opts.prores || tags[1] != "arib-std-b67" {
+                return Err("--dv-rpu: a Dolby Vision export is HLG in HEVC, from VideoToolbox (macOS)".into());
+            }
+            Some(dv_mux::read_rpu_file(file)?)
+        }
     };
 
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
@@ -604,6 +624,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     if stopped() { return Err("cancelled".into()); }
     let enc = pick_encoder(opts)?;
     if !cfg!(target_os = "macos") { eprintln!("  encoder: {}", enc.name); }
+    if dv_rpus.is_some() && enc.name != "hevc_videotoolbox" { return Err(format!("--dv-rpu: needs hevc_videotoolbox, not {}", enc.name)); }
 
     // Decoder: raw 10-bit planar frames on stdout. Elsewhere than on macOS, whatever hardware decoder ffmpeg finds,
     // else the CPU
@@ -627,10 +648,15 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                   "-framerate", &format!("{}/{}", info.fps.0, info.fps.1),
                   "-color_range", in_range, "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                   "-i", "-"]);
-    if opts.from.is_some() { enc_cmd.args(["-ss", &format!("{from:.6}")]); }
-    if opts.to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
-    enc_cmd.arg("-i").arg(&path)
-        .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c:a", "copy"]);
+    // The audio and metadata from the source; for Dolby Vision, the muxer takes them
+    if dv_rpus.is_none() {
+        if opts.from.is_some() { enc_cmd.args(["-ss", &format!("{from:.6}")]); }
+        if opts.to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
+        enc_cmd.arg("-i").arg(&path)
+            .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c:a", "copy"]);
+    } else {
+        enc_cmd.args(["-map", "0:v"]);
+    }
     let pix_fmt = enc.pix_fmt;
     // The frames carry the input's BT.709 tags through the filters, and the encoder writes the frames' tags, not
     // the -color_* options, so the target's are set on the frames
@@ -643,11 +669,48 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     } else {
         enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
     }
-    enc_cmd.args(["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3],
-                  "-movflags", "+faststart", "-f", "mov"])
-        .arg(&tmp_path)
-        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let color = ["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]];
+    enc_cmd.args(color);
+    if dv_rpus.is_none() {
+        enc_cmd.args(["-movflags", "+faststart", "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
+    } else {
+        // No B-frames: the access units come in display order, the RPUs with them (VideoToolbox writes none anyway)
+        enc_cmd.args(["-bf", "0", "-f", "hevc", "-"]).stdout(Stdio::piped());
+    }
+    enc_cmd.stdin(Stdio::piped()).stderr(Stdio::piped());
     let mut encoder = enc_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+
+    // Dolby Vision: the encoder's HEVC, its RPUs replaced with ours (rewriter), into a MOV with the source's audio and
+    // metadata (muxer); -moov_size puts the moov first with room after it, which the dvvC box then takes in place
+    let mut muxer = None;
+    let mut rewriter = None;
+    if let Some(rpus) = dv_rpus {
+        let moov_size = 256 * 1024 + total_frames * 48;
+        let mut mux_cmd = ffmpeg_command("ffmpeg");
+        // -r, not the demuxer's -framerate: raw HEVC has no timestamps, and with -framerate they come out wrong
+        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", info.fps.0, info.fps.1), "-i", "-"]);
+        if opts.from.is_some() { mux_cmd.args(["-ss", &format!("{from:.6}")]); }
+        if opts.to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
+        mux_cmd.arg("-i").arg(&path)
+            .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c", "copy", "-tag:v", "hvc1"]).args(color)
+            .args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(&tmp_path)
+            .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+        let mut mux = mux_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+        let mut mux_in = std::io::BufWriter::with_capacity(1 << 20, mux.stdin.take().unwrap());
+        let mut enc_out = encoder.stdout.take().unwrap();
+        rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
+            let mut injector = RpuInjector::new(rpus, first_frame);
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let n = enc_out.read(&mut buf).map_err(|e| format!("reading the encoder: {e}"))?;
+                if n == 0 { break; }
+                injector.feed(&buf[..n], &mut mux_in).map_err(|e| format!("muxer stopped: {e}"))?;
+            }
+            injector.finish(&mut mux_in).and_then(|_| mux_in.flush()).map_err(|e| format!("muxer stopped: {e}"))?;
+            Ok(injector.frames)
+        }));
+        muxer = Some(mux);
+    }
 
     let in_frame = w * h * 3; // 4:2:0, 2 bytes per sample
     let out_frame = ow * oh * 3;
@@ -722,7 +785,9 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         let want = BACKGROUND.load(Relaxed);
         if want && !cfg!(target_os = "macos") { std::thread::sleep(THROTTLE); }
         if background != Some(want) {
-            set_background(&[0, decoder.id(), encoder.id()], want);
+            let mut pids = vec![0, decoder.id(), encoder.id()];
+            if let Some(m) = &muxer { pids.push(m.id()); }
+            set_background(&pids, want);
             background = Some(want);
         }
         match result {
@@ -757,11 +822,14 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     // Cancelled: no point in the encoder finishing the file (the decoder may have stopped first, on Ctrl+C)
     if stopped() {
         let _ = encoder.kill();
+        if let Some(m) = muxer.as_mut() { let _ = m.kill(); }
     }
     for t in gpu_threads { let _ = t.join(); }
     let read = reader.join().map_err(|_| "reader panicked".to_string())?;
     let dec_status = decoder.wait().map_err(|e| e.to_string())?;
     let enc_status = encoder.wait().map_err(|e| e.to_string())?;
+    let rewritten = rewriter.map(|r| r.join().map_err(|_| "the RPU rewriter panicked".to_string()));
+    let mux_status = match muxer.as_mut() { Some(m) => Some(m.wait().map_err(|e| e.to_string())?), None => None };
     let stderr_of = |child: Option<std::process::ChildStderr>| {
         let mut s = String::new();
         if let Some(mut e) = child { let _ = e.read_to_string(&mut s); }
@@ -769,6 +837,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
     let dec_err = stderr_of(decoder.stderr.take());
     let enc_err = stderr_of(encoder.stderr.take());
+    let mux_err = stderr_of(muxer.as_mut().and_then(|m| m.stderr.take()));
     eprint!("\r{:60}\r", "");
 
     let result = (|| {
@@ -778,6 +847,14 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         if !dec_status.success() { return Err(format!("decoding: {dec_err}")); }
         if !enc_status.success() { return Err(format!("encoding: {enc_err}")); }
         if read == 0 { return Err("no frames decoded".into()); }
+        if let Some(r) = rewritten {
+            let frames = r??;
+            if !mux_status.map_or(false, |s| s.success()) { return Err(format!("muxing: {mux_err}")); }
+            if frames != read { return Err(format!("Dolby Vision: {frames} pictures for {read} frames")); }
+            let level = dv_mux::patch_dvvc(&tmp_path, fps)?;
+            eprintln!("  Dolby Vision 8.4, level {level}: {} RPUs from {}", frames,
+                      opts.dv_rpu.as_ref().map_or(String::new(), |p| p.display().to_string()));
+        }
         Ok(read)
     })();
     let frames = match result {

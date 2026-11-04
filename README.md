@@ -217,6 +217,26 @@ flow)…** instead: see Stabilization.
 The menu is mpv's own, so it needs mpv 0.41 or later (Homebrew's is); with an older mpv, right click pauses as it
 always did. It's the footage-menu plugin, which shows only the plugins that are there.
 
+### The panel
+
+The same settings as the menu are also in a panel at the right of the window, beside the video (the video moves over
+for it, nothing is covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of
+the one chosen, with switches and buttons, scrolled with the wheel:
+
+- **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
+- **Look**: HDR or an SDR look, the log curve by hand, noise reduction, the clean still frame.
+- **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
+- **Quality**: the frame rate and size it's stabilized at, what fills the edges and how often the trail is written,
+  whether it asks when the GPU can't keep up.
+- **Telemetry**: whether it shows, the corner, the units, the fields.
+- **Player**: speed, looping, fullscreen, always on top, the sound track.
+
+The keys are beside what they do. Look, Stabilization, Quality and Telemetry have **Make these the defaults** at the
+bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
+chosen icon, or the arrow at the top of the panel, leaves only the rail. While the panel shows, mpv's own controls
+(play, the seek bar) are a small box at the bottom of the video. It's the side-panel plugin (`side_panel.conf`:
+`shown=`, `open=`, `tab=`); its Clip buttons and the Keys and Help icons are the menu's.
+
 ### Keys
 
 | Key | | `script-binding` |
@@ -239,6 +259,7 @@ always did. It's the footage-menu plugin, which shows only the plugins that are 
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The menu | `footage_menu/menu` |
+| `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
@@ -606,6 +627,9 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 - `mpv-footage-menu-<version>.zip`, on any system with mpv 0.41 or later: the right-click menu (plain Lua). It
   shows the plugins that are there.
 
+- `mpv-side-panel-<version>.zip`, on any system: the settings in a panel beside the video (plain Lua), with
+  footage-menu for its Clip buttons.
+
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
@@ -631,21 +655,28 @@ LUTs into shaders and installs everything; existing files it replaces are kept a
 ### The app from a checkout, as the release builds it
 
 To try a branch or a fix in the app without waiting for a release, from a checkout on a Mac with
-[Homebrew](https://brew.sh) (`brew install mpv ffmpeg rustup`):
+[Homebrew](https://brew.sh) and Xcode (`brew install ffmpeg rustup`):
+
+```bash
+tools/build_mpv.sh
+```
 
 ```bash
 tools/dev_app.sh
 ```
 
-It builds ActionFootagePlayer the way the release does: the plugins, and Homebrew's mpv, ffmpeg, Python and
-VapourSynth in the app (so it needs no Homebrew to run). Then it puts it in `~/Applications` in place of the one
+`tools/build_mpv.sh` builds the app's mpv once (a few minutes): the commit in `tools/mpv.lock`, with libplacebo
+linked in, the other libraries Homebrew's (it installs mpv's dependencies with Homebrew first; `--no-deps` skips
+that). `tools/dev_app.sh` then builds ActionFootagePlayer the way the release does: the plugins, that mpv, and
+Homebrew's ffmpeg, Python and VapourSynth in the app (so it needs no Homebrew to run). Without `tools/build_mpv.sh`'s
+mpv it takes Homebrew's (`brew install mpv`); `MPV_BIN` names another. Then it puts it in `~/Applications` in place of the one
 there, which it keeps as `build/ActionFootagePlayer-previous.app`, and runs the setup (the default app for MP4, the
 Quick Actions, DJI's LUT).
 - **What it builds:** uncommitted changes too, and `~/.config/mpv` isn't touched. The version says what it is: `0.6.2`
   on a release's tag, else e.g. `0.6.2-dev.3+1a2b3c4` (`.dirty` with uncommitted changes).
 - **How long:** a few minutes, most of it the first cargo build.
-- **How it differs from the release:** the mpv and ffmpeg in it are this Mac's Homebrew ones, where the release's
-  build gets the latest (`brew upgrade mpv ffmpeg` first). Each build is signed anew (ad hoc), so macOS may ask
+- **How it differs from the release:** ffmpeg and the libraries mpv links are this Mac's Homebrew ones, where the
+  release's build gets the latest (`brew upgrade ffmpeg`, then `tools/build_mpv.sh` again, first). Each build is signed anew (ad hoc), so macOS may ask
   again for access to a folder like Downloads.
 - `--no-install` only builds `build/ActionFootagePlayer.app`.
 
@@ -962,6 +993,8 @@ mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/
                               markers.lua reads them from the file
 mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
                               ActionFootagePlayer
+mpv/scripts/side-panel/       the plugins' settings in a panel beside the video (ui.lua draws it)  →
+                              ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
@@ -981,6 +1014,7 @@ macos/                        ActionFootagePlayer: player.sh (the app's executab
 macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
 tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
 tools/dev_app.sh              builds it from the checkout as the release does, and puts it in ~/Applications
+tools/build_mpv.sh            builds the app's mpv (tools/mpv.lock: mpv's commit and libplacebo's, linked in)
 windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
                               gives mpv.exe the app's icon (Rust, no dependencies)
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
@@ -999,9 +1033,10 @@ tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for L
 GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to DJI and is downloaded from
 DJI's site at install.
 
-ActionFootagePlayer.app also carries mpv, ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as
-Homebrew builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
-`Contents/Resources/ThirdParty/` has each one's license files and the Homebrew formula it was built by, and
+ActionFootagePlayer.app also carries mpv (GPL; built by `tools/build_mpv.sh` from the commit in `tools/mpv.lock`,
+with libplacebo, LGPL, linked in) and ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as Homebrew
+builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
+`Contents/Resources/ThirdParty/` has each one's license files (and for Homebrew's, the formula it was built by), and
 `SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them
 at build). The sources are also available from this project on request.
 

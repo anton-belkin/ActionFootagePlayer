@@ -49,7 +49,7 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
-    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR" },
+    { "script-binding dlogm/sdr", "The next look: HDR, the maker's SDR, NBCU's SDR, mpv's tone mapping, Dolby Vision" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand" },
@@ -144,7 +144,8 @@ local function look_title(d, look)
     if look == "hdr" then return (d.log or d.hdr == "") and "HDR" or ("HDR (" .. d.hdr:upper() .. "), as it is") end
     if look == "maker" then return "SDR, " .. (d.maker ~= "" and d.maker or "the maker") .. "'s LUT" end
     if look == "nbcu" then return "SDR, NBCU (neutral)" end
-    if look == "tonemap" then return "SDR, tone-mapped by mpv" end
+    if look == "tonemap" then return d.log and "SDR, HDR tone-mapped by mpv (as on Windows)" or "SDR, tone-mapped by mpv" end
+    if look == "dv" then return d.log and "HDR + Dolby Vision (DJI fit), as macOS shows it" or "With its Dolby Vision, as macOS shows it" end
     return look
 end
 
