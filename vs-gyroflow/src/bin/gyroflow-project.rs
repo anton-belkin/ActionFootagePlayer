@@ -3,11 +3,11 @@
 // Writes the Gyroflow project the plugin plays a video with when it has none next to it (its own motion data,
 // Gyroflow's default preset, then --preset), so the video opens in Gyroflow as it plays: Ctrl+e in mpv runs it.
 //
-//   gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>]
+//   gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto|project] [--horizon-lock <%>]
 //                    [--level weak|medium|strong] [--wide] <video> [project.gyroflow]
 //
 // The project goes next to the video by default, and an existing one is never overwritten. With the lens under water
-// as --underwater says (default auto: as the camera says, where it records it), the horizon lock's amount (0-100,
+// as --underwater says (default auto: as the camera says, where it records it; project: as the preset says), the horizon lock's amount (0-100,
 // 0 off) instead of the preset's, at the level it plays in (--level, default medium: its crop and smoothness), and
 // with --wide in the plugin's wider view: no zoom, at its FOV. The motion data goes into the project.
 
@@ -17,7 +17,7 @@ use vs_gyroflow::{ project as motion_project, Level, Underwater };
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto] [--horizon-lock <%>] [--level weak|medium|strong] [--wide] <video> [project.gyroflow]");
+        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto|project] [--horizon-lock <%>] [--level weak|medium|strong] [--wide] <video> [project.gyroflow]");
         std::process::exit(2);
     };
     let mut value = |name: &str| -> Option<String> {
@@ -28,7 +28,7 @@ fn main() {
     };
     let preset = value("--preset");
     let underwater = value("--underwater").map(|v| Underwater::parse(&v).unwrap_or_else(|| {
-        eprintln!("--underwater takes yes, no or auto");
+        eprintln!("--underwater takes yes, no, auto or project");
         std::process::exit(2);
     })).unwrap_or(Underwater::Auto);
     let horizon_lock = value("--horizon-lock").map(|v| v.parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v)).unwrap_or_else(|| {
