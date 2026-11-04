@@ -191,7 +191,12 @@ fn wide_view(base: &ComputeParams, fov: f64) -> ComputeParams {
 pub struct Engine {
     key: String,
     tx: mpsc::Sender<Job>,
+    /// The size it was loaded for (render_size_for); a filter may ask for another
     pub render_size: (usize, usize),
+    /// The project's output size; nil for a clip without a project, which renders the frame at the input's scale
+    project_size: Option<(usize, usize)>,
+    /// The output frame at the video's scale: its aspect
+    frame_size: (usize, usize),
     pub frame_offset_us: i64,
     /// What fills the parts the frame doesn't cover; off unless set
     pub edges: Arc<edges::Edges>,
@@ -349,6 +354,7 @@ impl Engine {
             return Err(format!("{project} has no video size, is it a Gyroflow project?"));
         }
         let render_size = render_size.unwrap_or(output_size);
+        let project_size = project_json.as_ref().map(|json| project_output_size(json).unwrap_or(output_size));
         log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
 
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
@@ -389,7 +395,20 @@ impl Engine {
                 .spawn(move || m.run(stab, g, level, move || edges.level().unwrap_or(level))).map_err(|e| e.to_string())?;
         }
         let level = motion.is_some().then_some(level);
-        Ok(Engine { key, tx, render_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Engine { key, tx, render_size, project_size, frame_size: output_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
+    }
+
+    /// The size frames of `input_size` render at: `output_override` when the script asks for one, else the project's
+    /// output size, else the frame at the input's scale (a clip without a project, as mpv hands it over: scaled down
+    /// from 8K, or for the display). Any size, from the same engine: gyroflow-core stretches the frame to the buffers
+    /// it's given, the edge fill samples its coarse grids by position, and each GPU worker sets its planes up for
+    /// another size as its frames come (process_plane)
+    pub fn render_size_for(&self, input_size: (usize, usize), output_override: Option<(usize, usize)>) -> (usize, usize) {
+        output_override.or(self.project_size).unwrap_or_else(|| {
+            let out = self.frame_size;
+            let scale = (input_size.0 as f64 / out.0.max(1) as f64).min(input_size.1 as f64 / out.1.max(1) as f64).min(1.0);
+            (((out.0 as f64 * scale) as usize) & !1, ((out.1 as f64 * scale) as usize) & !1)
+        })
     }
 
     /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
@@ -714,17 +733,22 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
     };
 
     let sizes = (pj.src_stride * pj.src_h, pj.dst_stride * pj.dst_h);
+    let mut again = false;
     if plane.buffers != sizes {
         if plane.buffers != (0, 0) {
-            log::info!("Plane {}: buffers of {:?} bytes, not {:?}: its GPU set up again", plane.index, sizes, plane.buffers);
             plane.stab.set_device(plane.device);
+            again = true;
         }
         plane.buffers = sizes;
     }
     let stab = &mut plane.stab;
     if stab.initialized_backend.is_none() || stab.pending_device_change.is_some() {
+        let t = std::time::Instant::now();
         stab.ensure_ready_for_processing::<T>(timestamp_us, None, &mut buffers);
         stab.stab_data.clear();
+        if again {
+            log::info!("Plane {}: its GPU set up again for {}x{} -> {}x{} in {:.0} ms", plane.index, pj.src_w, pj.src_h, pj.dst_w, pj.dst_h, t.elapsed().as_secs_f64() * 1000.0);
+        }
     }
     let mut transform = stab.get_frame_transform_at::<T>(timestamp_us, None, &buffers);
     transform.kernel_params.pixel_value_limit = max_value;
@@ -972,8 +996,9 @@ pub(crate) unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> 
     (err == VSMapPropertyError::Success).then_some(v)
 }
 
-/// The engine the arguments of Stabilize ask for, loaded or from the cache, so LeavesEdges and Stabilize share it
-unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Result<Arc<Engine>, String> {
+/// The engine the arguments of Stabilize ask for, loaded or from the cache, so LeavesEdges and Stabilize share it, and
+/// the size the clip renders at
+unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Result<(Arc<Engine>, (usize, usize)), String> {
     let fmt = &vi.format;
     let is_yuv = fmt.color_family == VSColorFamily::YUV;
     if !(is_yuv || fmt.color_family == VSColorFamily::Gray) || fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || vi.width == 0 {
@@ -1008,7 +1033,7 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
     let underwater = match unsafe { map_get_str(api, input, c"underwater") } {
         None => Underwater::Auto,
-        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto)"))?,
+        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto, project)"))?,
     };
     let level = unsafe { level_arg(api, input) }?;
     let lookahead = unsafe { map_get_f64(api, input, c"lookahead") }.unwrap_or(4.0).clamp(0.0, 60.0);
@@ -1017,9 +1042,14 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
     // One engine for both views (Views): the view it starts in isn't part of what it is
     let fov_key = match fov { Fov::Set(v) => format!("{v}"), Fov::Project | Fov::Wide => String::new() };
-    // The level isn't either: the control file switches it
-    let key = format!("{project}|{mtime}|{}x{}|{:?}{}|{output_override:?}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{}", vi.width, vi.height, fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, (vi.width as usize, vi.height as usize), fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))
+    // The level isn't either: the control file switches it. Nor the sizes, in or out (render_size_for): the paused frame
+    // at full size (still.lua) and another display's size cost no other engine, only the GPU workers set up again for
+    // them. A second engine for a 4K clip ran a 2 GB integrated GPU out of memory
+    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    let input_size = (vi.width as usize, vi.height as usize);
+    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))?;
+    let size = engine.render_size_for(input_size, output_override);
+    Ok((engine, size))
 }
 
 /// The `level` argument (levels.rs), medium without it
@@ -1053,7 +1083,7 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
     let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
     let fmt = vi.format.clone();
-    let engine = match unsafe { engine_for(api, input, &vi) } {
+    let (engine, render_size) = match unsafe { engine_for(api, input, &vi) } {
         Ok(e) => e,
         Err(e) => return fail(node, e),
     };
@@ -1071,17 +1101,18 @@ unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut
     let mut edge_settings = edges::EdgeSettings::default();
     if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }
     let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
-    // Also starts the trail over: mpv reloads the script on every seek
     // The view the filter is made in; the control file has the one switched to since, which wins (mpv makes the
     // filter again on every seek with the arguments it was first given)
     let view = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
     let level = match unsafe { level_arg(api, input) } { Ok(l) => l, Err(e) => return fail(node, e) };
     engine.edges.configure(edge_mode, edge_settings, view, level, edge_control);
     engine.edges.set_realtime(true);
+    engine.edges.seeked(skip_before.is_finite());
 
     let mut out_vi = vi.clone();
-    out_vi.width  = align(engine.render_size.0 as i64, fmt.sub_sampling_w) as c_int;
-    out_vi.height = align(engine.render_size.1 as i64, fmt.sub_sampling_h) as c_int;
+    out_vi.width  = align(render_size.0 as i64, fmt.sub_sampling_w) as c_int;
+    out_vi.height = align(render_size.1 as i64, fmt.sub_sampling_h) as c_int;
+    log::debug!("Stabilize: {}x{} -> {}x{}", vi.width, vi.height, out_vi.width, out_vi.height);
 
     let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
     let filter = Box::new(Filter {
@@ -1105,7 +1136,7 @@ unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *
     let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
     let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
     match unsafe { engine_for(api, input, &vi) } {
-        Ok(engine) => unsafe {
+        Ok((engine, _)) => unsafe {
             // In the view asked for: an engine from the cache may have started in the other
             let view = if map_get_i64(api, input, c"wide").unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
             let index = engine.views.index(view, level_arg(api, input).unwrap_or(Level::Medium));

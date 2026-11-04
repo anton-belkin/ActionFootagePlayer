@@ -368,13 +368,21 @@ local function stabilization_part(u, x, w, y)
     }, horizons[g.horizon_lock])
 
     y = u:heading(x, w, y + 8 * s, "Lens", keys["script-binding gyroflow/lens"])
-    local lenses = { auto = 1, yes = 2, no = 3 }
-    y = u:segmented(x, w, y, "lens", {
+    -- A clip with a project starts with the project's lens; one without, with what sticks
+    local lens_items = {
         { "Auto", "script-message-to gyroflow underwater auto", not g.water },
         { "In water", "script-message-to gyroflow underwater yes" },
         { "Above", "script-message-to gyroflow underwater no" },
-    }, lenses[g.underwater])
-    y = u:caption(x, w, y, g.water and "Auto: as the camera says it was in the water" or ("Auto: this camera doesn't say, so as the " .. (project and "project" or "preset")))
+    }
+    local lenses = { auto = 1, yes = 2, no = 3 }
+    if project then
+        table.insert(lens_items, 1, { "As project", "script-message-to gyroflow underwater project" })
+        lenses = { project = 1, auto = 2, yes = 3, no = 4 }
+    end
+    y = u:segmented(x, w, y, "lens", lens_items, lenses[g.underwater])
+    y = u:caption(x, w, y, g.underwater == "project" and "As the project says"
+                           or g.water and "Auto: as the camera says it was in the water"
+                           or ("Auto: this camera doesn't say, so as the " .. (project and "project" or "preset")))
     y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
                  keys["script-binding gyroflow/fringes"], not g.chromatic_available or g.underwater == "no")
     y = u:switch(x, w, y, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
@@ -408,6 +416,13 @@ local function quality_part(u, x, w, y)
         { "720p", "script-message-to gyroflow quality resolution 720" },
     }, sizes[tostring(g.resolution)])
     y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    y = u:heading(x, w, y + 8 * s, "Paused frame", keys["script-binding gyroflow/full"])
+    local paused = { off = 1, auto = 2 }
+    y = u:segmented(x, w, y, "paused", {
+        { "As it played", "script-message-to gyroflow quality paused_full_size off" },
+        { "Full size", "script-message-to gyroflow quality paused_full_size auto" },
+    }, paused[tostring(g.paused_full_size or "off")])
+    y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
     y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
     for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
         y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])

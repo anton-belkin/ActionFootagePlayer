@@ -63,9 +63,9 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
 
 1. **On the camera:** set the color mode to **D-Log M**. Under water, turn **EIS off**: the camera then records the
    motion data the stabilization uses.
-2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.zip` from the
-   [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), unzip it and move it to
-   Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
+2. **Install:** download `ActionFootagePlayer-<version>-macos-arm64.dmg` from the
+   [latest release](https://github.com/anton-belkin/ActionFootagePlayer/releases/latest), open it and drag the app
+   onto Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
 4. **Copy the clips off the card and double-click one.**
@@ -155,7 +155,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.zip`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.dmg`: the app, with all the plugins and their menu, mpv and ffmpeg in it (or the same app as `-macos-arm64.zip`) |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
 | a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
@@ -166,7 +166,8 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
 oldest macOS those builds are made for.
 
-Unzip ActionFootagePlayer, move it to Applications and open it. It's signed ad hoc, not by an Apple developer
+Open the disk image, drag ActionFootagePlayer onto Applications and open it from there (from the zip: unzip it and
+move it to Applications). It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
 it opens, it offers its setup:
 
@@ -210,7 +211,7 @@ Right-click the video for the menu: everything the keys do, with the keys beside
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
 **Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the level, the horizon locked level, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+the wider view, the level, the horizon locked or not, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in SDR, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
@@ -251,7 +252,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+u` | The lens above water (no refraction), and back to under water or as the camera says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips | `gyroflow/lens` |
+| `Ctrl+u` | The lens above water (no refraction), and back to under water, as the camera says or as the project says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips without a project | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` | The clip's next look: HDR, HDR with Dolby Vision (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
@@ -259,6 +260,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
 | `Ctrl+p` | Clean still frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
+| `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -287,19 +289,20 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
-| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; the clean still frame is made from the frames that play. Right click > Quality sets it |
+| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; at full size while paused (`Ctrl+f`, `paused_full_size=auto`) every frame is there again (stepping through them, the clean still frame). Right click > Quality sets it |
 | `gyroflow.conf`: `edge_fill_rate=auto` | the edge fill rate: how often the sphere trail (`edges=sphere`) is written while playing. `auto`: whenever a GPU worker is free; `50` or `25`: from that % of the frames that play (with `fps_limit=30`, 25 % is ~7.5 a second), for a laptop whose CPU and GPU share their power, where the writes take what the frames need even while a worker is free. Changes without setting the chain up again. Right click > Quality > Edge fill rate sets it |
 | `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a lower frame rate, resolution or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
-| `gyroflow.conf`: `horizon_lock=project` | `yes`: the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the project or preset says |
-| `gyroflow.conf`: `underwater=auto` | the lens: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the project or preset says). See Stabilization |
+| `gyroflow.conf`: `horizon_lock=project` | clips without a project: `yes`, the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the preset says. A clip with a `.gyroflow` plays with the project's |
+| `gyroflow.conf`: `underwater=auto` | the lens of clips without a project: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says), `project` as the preset says. A clip with a `.gyroflow` plays with the project's. See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
 | `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
@@ -337,8 +340,17 @@ stabilized from the picture: `Ctrl+e` (or the menu's Stabilize in Gyroflow) open
 where its motion is found by optical flow. Save the project next to the clip there, and the clip loads again where
 it was, stabilized with it. On Linux and Windows this needs `gyroflow_app` (Options).
 
-The menu's Lock horizon keeps the horizon level, whatever the project says (Gyroflow's horizon lock at 100 %, its
-roll and pitch as the project has them); unticked, it isn't locked. It needs more zoom, so the edges show more.
+**A clip with a project plays as the project says.** It was made in Gyroflow on purpose, so the clip starts with
+its own horizon lock and lens (under water or not, keyframed or not), whatever the menu had for the clip before
+and whatever `gyroflow.conf` says: those are for clips without a project, which play with the default preset.
+Set from the menu or the keys while a clip with a project plays, they're for that clip only; the next one starts
+with its project's again. The edge fill (`Ctrl+b`), the color fringes (`Ctrl+a`) and the clean still frame
+(`Ctrl+p`) aren't Gyroflow's, so they're the player's for every clip.
+
+The menu's Stabilization → Horizon: *Locked level* keeps the horizon level, whatever the project says (Gyroflow's
+horizon lock at 100 %, its roll and pitch as the project has them); *Not locked*; or *As the project says* (as
+the preset says, for a clip without one), what a clip with a project starts with. Locked needs more zoom, so the
+edges show more.
 
 The project is always the `.gyroflow` next to the clip: the video file itself is never written to, so a backup
 of it stays as it is.
@@ -387,15 +399,17 @@ the NAS), and the correction comes in over half a second. While it's paused, the
 (`vs-gyroflow/src/motion.rs`). A project's clip, whose motion data the project has, reads only a tenth of its
 samples for *In water* / *Out of water* (25 s for a 5-minute clip from the NAS before).
 
-**Lens under water, above it, or as the camera says.** The menu's Stabilization → Lens sets the refraction for
-any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above water* (none), or
-*Auto*, the default: as the camera says over the clip, its *In water* / *Out of water* (the telemetry's `water`:
-the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
+**Lens under water, above it, as the camera says, or as the project says.** The menu's Stabilization → Lens sets
+the refraction for any clip, a project's too: *Under water* (1.33, or the project's own when it has one), *Above
+water* (none), *As the project says* (as the preset says, for a clip without one), what a clip with a project
+starts with, or *Auto*, the default for clips without one: as the camera says over the clip, its *In water* /
+*Out of water* (the telemetry's `water`: the barometer's flag, or the camera's underwater confidence). A clip that goes in and out of the water then has
 the refraction where it's in and none where it's out, changing over the one frame between. Only a camera that
 records it has Auto (the Osmo Action 6); for clips from other cameras it's greyed, and the clip plays as its
 project or preset says (the default preset: under water). A project that keyframes the refraction itself keeps
-its keyframes in Auto. It sticks for the next clips, like the horizon lock, and goes into exports and into the
-project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline).
+its keyframes in Auto. It sticks for the next clips without a project, like the horizon lock, and goes into exports
+and into the project `Ctrl+e` writes (Auto as keyframes, which Gyroflow shows on its timeline: so a project made
+that way keeps the camera's *In water* / *Out of water*).
 
 For clips from a camera without Auto shot with EIS off in air, pick Above water, or use a preset without the
 refraction (save one from Gyroflow: Export → Create settings preset, as `default.gyroflow` in one of the places
@@ -494,8 +508,8 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
   edges as playback does (`--edges-blur <%>`); without them, as the project says, edges in its
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
-- `--underwater yes|no|auto`: the lens under water, above it, or (the default) as the camera says over the clip, as
-  the menu's Lens has it (see Stabilization).
+- `--underwater yes|no|auto|project`: the lens under water, above it, (the default) as the camera says over the
+  clip, or as the project or preset says, as the menu's Lens has it (see Stabilization).
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,

@@ -228,10 +228,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # One SHA256SUMS for all of it (the macOS build's has only its own files)
-          (cd dist && sha256sum *.zip *.tar.gz *.exe > SHA256SUMS && cat SHA256SUMS)
+          (cd dist && sha256sum *.dmg *.zip *.tar.gz *.exe > SHA256SUMS && cat SHA256SUMS)
           # actions/checkout leaves the tag as a lightweight one on the commit, and --notes-from-tag would then take
           # the commit's message: the tag itself, with its message
           git fetch --depth=1 --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag ] || { echo "$GITHUB_REF_NAME isn't an annotated tag" >&2; exit 1; }
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/*.exe dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.tar.gz dist/*.zip dist/*.exe dist/SHA256SUMS \
             --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-from-tag
+
+  # The website deployed again, from the website branch, so its download page has this release (website.yml writes
+  # latest.json from it)
+  website:
+    needs: publish
+    uses: anton-belkin/ActionFootagePlayer/.github/workflows/website.yml@website
+    with:
+      ref: website
+    secrets: inherit

@@ -34,6 +34,7 @@ local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge sp
 local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
 local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
 local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
+local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
@@ -55,6 +56,8 @@ local KEY_LABELS = {
     { "script-binding dlogm/denoise", "Noise reduction on / off" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
+    { "script-binding gyroflow/still", "Clean still frame on / off" },
+    { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
@@ -192,6 +195,7 @@ local function stabilization_menu(g, key)
                 or item("Stabilize in Gyroflow (optical flow)…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         }
     end
+    local says = g.kind == "default" and "preset" or "project"
     local edges = {}
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
@@ -208,13 +212,19 @@ local function stabilization_menu(g, key)
             item("Strong: 30 % crop, smoothness 100 %", "script-message-to gyroflow level strong", { checked = g.level == "strong", shortcut = level }),
         }, { shortcut = level, disabled = g.kind == "project" }),
         SEPARATOR,
-        item("Lock horizon", "script-message-to gyroflow horizon-lock " .. (g.horizon_lock == "yes" and "no" or "yes"), { checked = g.horizon_lock == "yes" }),
+        -- A clip with a project starts with the project's horizon lock and lens; one without, with what sticks
+        submenu("Horizon", {
+            item("Locked level", "script-message-to gyroflow horizon-lock yes", { checked = g.horizon_lock == "yes" }),
+            item("Not locked", "script-message-to gyroflow horizon-lock no", { checked = g.horizon_lock == "no" }),
+            item("As the " .. says .. " says", "script-message-to gyroflow horizon-lock project", { checked = g.horizon_lock == "project" }),
+        }),
         submenu("Lens", {
             item("Under water", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
             -- Only a camera that records when it's in the water has it; elsewhere auto is the project's or preset's
             item(g.water and "Auto: as the camera says (In water / Out of water)" or "Auto: this camera doesn't say, so as the "
-                 .. (g.kind == "default" and "preset" or "project") .. " says",
+                 .. says .. " says",
                  "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
+            item("As the " .. says .. " says", "script-message-to gyroflow underwater project", { checked = g.underwater == "project", shortcut = lens }),
             item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
             SEPARATOR,
             -- Only under water: above water no color moves either way
@@ -231,8 +241,8 @@ local function stabilization_menu(g, key)
     }
 end
 
--- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, how often the sphere
--- trail is written, the color fringes (as in Lens), and whether it asks
+-- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, the paused frame's,
+-- how often the sphere trail is written, the color fringes (as in Lens), and whether it asks
 local function quality_menu(g)
     local items = {}
     for _, r in ipairs(FRAME_RATES) do
@@ -242,6 +252,11 @@ local function quality_menu(g)
     for _, r in ipairs(RESOLUTIONS) do
         table.insert(items, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
     end
+    local paused = {}
+    for _, r in ipairs(PAUSED_SIZES) do
+        table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
+    end
+    table.insert(items, submenu("Paused frame", paused))
     table.insert(items, SEPARATOR)
     local fill = {}
     for _, r in ipairs(FILL_RATES) do

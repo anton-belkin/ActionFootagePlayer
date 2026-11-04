@@ -60,9 +60,9 @@ video with nothing to stabilize it with is color-converted only.
   --nbcu           to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve)
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
-  --underwater <yes|no|auto>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the camera says
-                   over the clip, the default: its In water / Out of water (Osmo Action 6), elsewhere the project's or
-                   preset's
+  --underwater <yes|no|auto|project>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the
+                   camera says over the clip, the default: its In water / Out of water (Osmo Action 6), elsewhere the
+                   project's or preset's; project: the project's or preset's, whatever the camera says
   --wide           the gyroflow plugin's wider view (Ctrl+g): no zoom, at the FOV where the stabilized picture
                    covers about as much area as the frame
   --level <level>  for a video without a project, the stabilization's level: weak, medium (the default) or strong:
@@ -136,7 +136,7 @@ fn main() {
             "--no-stabilize" => opts.no_stabilize = true,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
-            "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no or auto")),
+            "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no, auto or project")),
             // The ranges the VapourSynth filter takes them in (lib.rs)
             "--wide" => opts.fov = Fov::Wide,
             "--level" => { let v = value("--level"); opts.level = Level::parse(&v).unwrap_or_else(|| fail(&format!("unknown level {v} (weak, medium, strong)"))); }
