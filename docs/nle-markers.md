@@ -7,9 +7,10 @@ how each editor takes it, how it's started from the player, and how to check it.
 What the player keeps, and where, is the other design: [Moments, clips and project folders](moments-and-workspaces.md).
 This one reads that model and writes it out.
 
-Written 2026-11-04, and rewritten the same day onto that model. The clips' timecode was checked on this Mac (an
-Osmo Action 6, a HERO7 Black). The editors' side comes from their documentation, cited below. What that leaves
-open is marked **(to try)**: those are the imports to do by hand before building ([Checking it](#checking-it)).
+Written 2026-11-04, and rewritten the same day onto that model; Anton's answers are in [Decided](#decided).
+The clips' timecode was checked on this Mac (an Osmo Action 6, a HERO7 Black). The editors' side comes from
+their documentation, cited below. What that leaves open is marked **(to try)**: what can be tried here is in
+[Checking it](#checking-it).
 
 ## In short
 
@@ -31,8 +32,7 @@ open is marked **(to try)**: those are the imports to do by hand before building
     named clip with its in and out, and a sequence of the moments. Not an XMP sidecar: for an MP4, Premiere reads
     XMP from inside the file, and the clip isn't written to.
   - **Gyroflow**: only by an explicit command. The moments of a clip go into a project of their own in
-    `Exports/` as trims, never into the clip's own project. Also the fork's JSON from #1248 (in/out/marker by
-    Unix time).
+    `Exports/` as trims, never into the clip's own project. Not the JSON of #1248's fork, for now.
 - **Times by the clip's own timecode.** The brief assumed action cameras' MP4s have no timecode, but these two
   *do* write a `tmcd` track. It's a camera clock, drop-frame on the DJI at 59.94, and the editors place a clip
   at it. So every time written out is the clip's start timecode plus the time in the clip, on a frame. A clip
@@ -146,9 +146,11 @@ A plain `.fcpxml`, not the `.fcpxmld` bundle.
 - a `project name="<project> – moments"` in the same event: a `sequence` (`tcFormat` as the clips) whose `spine`
   holds an `asset-clip` per moment, **named after it** (`start` = its in, `duration` = its length), in the
   order of the moments' time. That's a rough cut to start from, with the names showing on the timeline.
-- Each moment as a browser clip of its own (an `asset-clip` with the moment's range and name, beside the whole
-  clip's) would show the names in the browser too. Whether FCP takes a second `asset-clip` of one asset as a
-  clip with that range is **(to try)**, and it would double the clips in the event.
+- **An option, off by default: *Moments as clips of their own*.** Each moment becomes an `asset-clip` with the
+  moment's range and name, beside the whole clip's, so the names show in the browser too, and the moments sit
+  in their folders' keyword collections as named clips. Off by default because it doubles the clips in the
+  event, and because whether FCP takes a second `asset-clip` of one asset as a clip with that range can't be
+  checked here (no FCP). The export dialog says so until a user with FCP confirms it.
 - `import-options`: none. Whether to copy the media or leave it in place is then the user's import setting.
   "Leave files in place" links to the originals, which is what a NAS needs.
 
@@ -193,7 +195,8 @@ whether to replace it or keep both, once for the whole import. It doesn't merge.
 trip, after the selection, and the menu says so. A second import with *Replace* gives the newer moments.
 (to try: whether Replace keeps what was done to the clip in FCP since.)
 
-**(to try)** FCP isn't installed on this Mac: [Checking it](#checking-it).
+FCP isn't installed here and won't be: the file is checked against the DTD, and the rest waits for a user
+([Checking it](#checking-it)).
 
 ### DaVinci Resolve
 
@@ -289,58 +292,33 @@ Whether the markers on a `clip` in a bin become the master clip's markers in the
 in the sequence come in, Adobe doesn't say (to try). The sequence has them either way, since its clipitems carry
 the same markers.
 
-**(to try)** Premiere isn't installed on this Mac.
+Premiere isn't available here: a user reports how it imports.
 
 ### Gyroflow
 
-Two ways in, for two uses:
+**A project of the moments, by an explicit command.** Upstream Gyroflow (1.6.0 and later) saves the trims as
+`"trim_ranges_ms": [[start_ms, end_ms], ...]`, in milliseconds of the clip (a negative end counts from the
+clip's end), and renders each range as a file of its own when `output.export_trims_separately` is true
+(`-001`, `-002`…). (`src/core/lib.rs`, `trim_ranges_ms` loaded at L2728–2760 on master `9f8c7fa`.)
 
-1. **A project of the moments, by an explicit command.** Upstream Gyroflow (1.6.0 and later) saves the trims as
-   `"trim_ranges_ms": [[start_ms, end_ms], ...]`, in milliseconds of the clip (a negative end counts from the
-   clip's end), and renders each range as a file of its own when `output.export_trims_separately` is true
-   (`-001`, `-002`…). (`src/core/lib.rs`, `trim_ranges_ms` loaded at L2728–2760 on master `9f8c7fa`.)
+**The clip's own project is never written to.** Gyroflow rebuilds the whole file when it saves
+(`export_gyroflow_data` in `core/lib.rs`: `json!` and `merge_json`), so anything of ours in it would go at
+the next save. And the trims aren't a list on the side: they change the smoothing, the sync and the render.
+A clip's playback project with trims in it would play differently.
 
-   **The clip's own project is never written to.** Gyroflow rebuilds the whole file when it saves
-   (`export_gyroflow_data` in `core/lib.rs`: `json!` and `merge_json`), so anything of ours in it would go at
-   the next save. And the trims aren't a list on the side: they change the smoothing, the sync and the render.
-   A clip's playback project with trims in it would play differently.
+So *Gyroflow: render these moments* (a clip's menu, and Marks for the editor for the whole project) writes
+**`Exports/Gyroflow/<clip>.gyroflow`**: a copy of the clip's own project if it has one, else a new one as
+`Ctrl+e` writes it (gyroflow-project). Its trims are the clip's moments, with `export_trims_separately` true,
+and the output folder is `Exports/Gyroflow/`. Gyroflow opens it with the moments as trims, and so does its
+render queue or the CLI (`gyroflow --preset` takes a project). The player never reads these copies.
 
-   So *Gyroflow: render these moments* (a clip's menu, and Marks for the editor for the whole project) writes
-   **`Exports/Gyroflow/<clip>.gyroflow`**: a copy of the clip's own project if it has one, else a new one as
-   `Ctrl+e` writes it (gyroflow-project). Its trims are the clip's moments, with `export_trims_separately` true,
-   and the output folder is `Exports/Gyroflow/`. Gyroflow opens it with the moments as trims, and so does its
-   render queue or the CLI (`gyroflow --preset` takes a project). The player never reads these copies.
-2. **#1248's fork: a markers JSON for many clips.** In [gyroflow#1248](https://github.com/gyroflow/gyroflow/issues/1248)
-   (open, no word from the maintainer yet), TimoLehnertz's fork (branch `feature/import-markers`,
-   `src/marker_import.rs`) imports a flat JSON array of
-   `{"type":"in","timestamp":…,"name"?,"path"?}`, `{"type":"out","timestamp":…}` and
-   `{"type":"marker","timestamp":…,"name":…,"color"?:"#rrggbb"}`, where `timestamp` is **Unix time in seconds**.
-   It finds the clip by its `creation_time` (whole seconds): a mark goes to the clip whose creation_time ≤ the
-   timestamp < creation_time + duration. The time in the clip is the timestamp minus the creation_time. The fork
-   has an offset for cameras that write local time as UTC. Each in is paired with the next out. The fork writes
-   the result into the clip's settings as upstream's `trim_ranges_ms`.
-
-   *Gyroflow (#1248 markers)* writes `<project> (Gyroflow markers).json` in that format. For each clip,
-   `created` = its `creation_time`, truncated to the second as the fork reads it, so the two agree even when the
-   camera's clock or zone is wrong (the GoPro's 2016). A moment becomes `in` (`created + in`, its name, `path`
-   = `<moment name>.mp4`) and `out`. A mark becomes a `marker` (its name or `"Mark n"`, blue for a camera's),
-   and a favorite clip a `marker` at its start ("Favorite", green), since the format has no rating. A rejected
-   clip's whole-clip entries are left out; its moments still go, since a moment that exists is wanted.
-
-   ```json
-   [
-     {"type": "in", "timestamp": 1792675742.02, "name": "Turtle", "path": "DJI_20261022152841_0068_D-1.mp4"},
-     {"type": "out", "timestamp": 1792675752.03},
-     {"type": "marker", "timestamp": 1792675732.01, "name": "Highlight 1", "color": "#2f6fdf"}
-   ]
-   ```
-
-   The same format read *in* (*Project → Import marks…*) would let the player take in/out times from a timing
-   system, which is Timo's case (races: a rider's start and finish): each in/out pair a moment, each marker a
-   mark. Later, and only if the fork's format holds.
-
-Not chosen: keeping the player's own data in the fork's format. It has no ratings, folders or tags, ties
-everything to a clock that's often wrong, and has no clip names.
+**Not now: #1248's fork.** In [gyroflow#1248](https://github.com/gyroflow/gyroflow/issues/1248) (open, no word
+from the maintainer yet), TimoLehnertz's fork (branch `feature/import-markers`, `src/marker_import.rs`) imports a
+flat JSON array of in/out/marker entries timed in **Unix seconds**, matched to clips by `creation_time` (whole
+seconds), and writes them into the clip's settings as upstream's `trim_ranges_ms`. Anton decided not to write it
+(2026-11-04). If the format lands upstream, a writer is small: a moment is an `in` at `created + in` and an
+`out`, and a mark a `marker`. `created` is the clip's `creation_time` truncated to the second, as the fork reads
+it, so the two agree even when the camera's clock is wrong.
 
 ## How it's started
 
@@ -353,9 +331,8 @@ Marks for the editor            ▸  Final Cut Pro…
                                     DaVinci Resolve…
                                     Premiere Pro…
                                     Gyroflow: render this clip's moments
-                                    Gyroflow: #1248 markers…
                                     ───────
-                                    Clips: ● with moments or marks  ○ all but rejects
+                                    Clips: ● all but rejects  ○ with moments or marks
 ```
 
 The panel's Project section has the same buttons.
@@ -367,14 +344,17 @@ The panel's Project section has the same buttons.
   previews from the player's cache. That's a few small reads per clip, a second or two for a hundred clips on
   the NAS, with a progress line. Then it writes the file and says where: "Final Cut Pro: 14 clips, 23 moments,
   41 marks → 2026-10 Egypt (Final Cut Pro).fcpxml", and shows it in Finder.
-- **Which clips**: by default those with a moment or a mark (the camera's highlights count), leaving out
-  rejects. *All but rejects* takes every clip of the project, for a full selection timeline.
+- **Which clips go into the file**: by default every clip of the project but the rejects, the clips whose
+  preview you deleted from `Clips/`. That's the selection as made in Finder, so a clip kept there without a
+  moment or a mark still reaches the editor, whole, to cut from. *With moments or marks* is the narrower
+  choice: only clips that have a moment, a mark of yours or a camera highlight. A project without `Clips/`
+  previews has no rejects, so "all but rejects" is every clip.
 - **Not automatically.** FCP and Resolve take an import once and don't merge a second one, so a file rewritten
   on every change would be stale the moment it was imported. The moments and marks are the automatic part; the
   editor's file is the step "I've chosen, now to the edit".
 - **Named after the project, in its folder** (next to `Moments/`, not in `Exports/`, which is what gets deleted
   for room): `<project> (Final Cut Pro).fcpxml`, `… (Resolve).fcpxml`, `… (Resolve markers).edl`,
-  `… (Resolve metadata).csv`, `… (Premiere).xml`, `… (Gyroflow markers).json`. Each is overwritten when written
+  `… (Resolve metadata).csv`, `… (Premiere).xml`. Each is overwritten when written
   again.
 - **Open it now** on a Mac (`open -a "Final Cut Pro" <file>`): offered after writing the FCP file, not done by
   itself, since it takes the screen.
@@ -390,7 +370,7 @@ The panel's Project section has the same buttons.
 | Resolve (free) | Clip Color Green, Flag Green (CSV) | Clip Color Red, Flag Red (CSV), left off the timelines | on the *moments* and its folder's timeline; a green marker on *clips* | a green flag on its clip (CSV) | keywords (CSV); a timeline per folder of moments |
 | Resolve Studio | `SetClipColor`, `AddFlag` (script) | the same | a clip marker with a length, a subclip | the same | real bins |
 | Premiere | a label color | left out | a clip with in/out in its folder's bin; in the *moments* sequence | a label color | bins; tags in a comment |
-| Gyroflow | a marker (fork JSON) | left out | a trim range (its own project); in/out (fork JSON) | — | — |
+| Gyroflow | — | — | a trim range (its own project) | — | — |
 
 ## The plan
 
@@ -409,51 +389,65 @@ moments have no keywords but their folders.
    Tests: every frame of a 10-minute span at 59.94 and 29.97 DF, round trip; the three clips' strings as ffprobe
    gives them.
 3. **The project, read** (`marks/project.lua`): the clips, their moments, folders, tags and ratings, and their
-   marks, as one table that every writer takes. Tests: a project tree made in a temporary folder (two ffmpeg
-   clips, moments made by gyroflow-export's `--preview still` or by ffmpeg with the key, a deleted clip preview
-   listed in `clips-made.txt`, tags set with `xattr`).
+   marks, as one table that every writer takes. The marks come through the highlights plugin's own reader
+   (`markers.lua`), which works on the Action 6's clips (Anton checked), and the marks file where there is one.
+   Tests: a project tree in a temporary folder with real Action 6 clips (or links to them) and, next to them,
+   marks files made from their highlights and then changed: moved, removed, added. So the export is tested on
+   known marks without new footage. Plus moments made by ffmpeg with the key, a deleted clip preview listed in
+   `clips-made.txt`, and tags set with `xattr`.
 4. **Writers** (`marks/out/*.lua`): FCPXML, Resolve's FCPXML + EDL + CSV, FCP7 XML, the Gyroflow moments
-   project, the fork's JSON; and the menu. Tests: golden files for the project of step 3, compared byte for
-   byte. FCPXML is checked against Apple's DTD with `xmllint --dtdvalid` (the DTD is in Final Cut Pro's bundle;
-   it's needed once to put into the tests). EDL lines are checked against an EDL Resolve exports itself.
-5. **The imports by hand** (below), which may change step 4. They're also worth doing *before* step 4 with
-   hand-written files: an afternoon that settles every "to try" above.
+   project; and the menu, with FCP's *Moments as clips of their own* option. Tests: golden files for the
+   project of step 3, compared byte for byte. FCPXML is checked against Apple's DTD with `xmllint --dtdvalid`
+   (a copy put into the tests once; see [Checking it](#checking-it) for where it comes from). EDL lines are
+   checked against an EDL Resolve exports itself.
+5. **The Resolve imports by hand** (below), which may change step 4's Resolve writer. They're also worth doing
+   *before* step 4 with hand-written files: an afternoon that settles Resolve's "to try"s.
 6. **README**: Marks for the editor, and in How it works the formats and the timecode.
 
-Later: the Resolve Studio script; reading #1248's JSON in; a recording split into files as one clip.
+Later: the Resolve Studio script; #1248's JSON, out and in, if it lands upstream; a recording split into files
+as one clip.
 
 ## Checking it
 
-Automatic (steps 1–4): the tests above, with no camera or editor needed. Clips with highlights come from the
-real ones: none of the DJI or GoPro clips here has been checked to have any (the highlights plugin's README says
-so). One clip from each camera with three highlights marked, and the seconds they were marked at, is the test
-footage that's missing.
+Automatic (steps 1–4): the tests above, with no camera or editor needed. The highlights are the Action 6's, read
+by the code that already reads them, and the variations are marks files written next to the clips.
 
-By hand, on a Mac, each import in its editor. **Each takes the screen, so Anton is asked first.**
+By hand, only what can be done here:
 
 | Editor | What's imported | What to look at |
 |---|---|---|
 | DaVinci Resolve 21.0 (free, installed) | `(Resolve).fcpxml` with *Automatically import source clips* | all timelines come in (or one per file?); the clips link to the MP4s on the NAS; the Start TC column shows `20:28:05;12`; the moments at the right frames, with their names; whether `marker`/`keyword`/`rating` on the clips survive |
 | | `(Resolve markers).edl` → Timeline Markers from EDL, on *clips* | markers at the marks' frames at 59.94 DF; the moments' lengths; colors; names |
 | | File → Export Metadata From on one clip, then `(Resolve metadata).csv` | the header names; the clip colors, flags, keywords and comments on the right clips; a Smart Bin by keyword |
-| Final Cut Pro (not installed: a 90-day trial) | `(Final Cut Pro).fcpxml`, *Leave files in place* | the event, the clips at their timecode, the markers on the frame, the keyword ranges in their collections and collection folders, favorites and rejects in the filters, the *moments* project with the names; a moment as a browser clip of its own; importing again: replace / keep both |
-| Premiere Pro (not installed: a 7-day trial, or a user) | `(Premiere).xml` | the bins as the folders; the master clips' markers (or only the sequence's); the moments as clips with in/out or subclips; the sequence; relinking to the files; and once, `GX….xmp` next to a clip, to know whether the sidecar is read |
 | Gyroflow 1.6 (installed) | `Exports/Gyroflow/<clip>.gyroflow` written by the player | the moments as trims on its timeline; rendering them one file each into `Exports/Gyroflow/` |
-| #1248's fork (built from `TimoLehnertz/gyroflow`, branch `feature/import-markers`) | `(Gyroflow markers).json` | each moment on the right clip with offset 0, the markers |
 
+**The Resolve checks are a session of their own, and Anton is asked before it starts**: they take the screen.
 Each check gets a line in the PR: the version, what was imported, what came in, with a screenshot.
+
+Not checked here, by decision:
+
+- **Final Cut Pro**: not installed, and not to be. The FCPXML is checked against Apple's DTD (`xmllint`), and
+  the rest waits for a user with FCP. The DTD ships inside FCP's bundle, so a copy has to come from elsewhere
+  (a user's FCP, or one of the open-source FCPXML projects that carry it) **(to find)**.
+- **Premiere Pro**: not available. The FCP7 XML follows Apple's xmeml spec and what Premiere's own exports
+  contain; a user reports how it imports.
+
+## Decided
+
+Anton's answers, 2026-11-04:
+
+1. **Final Cut Pro**: no trial; checked against the DTD only.
+2. **Resolve**: checked here, in a session of its own, after asking.
+3. **Premiere**: not tested.
+4. **Highlights**: they work on the Action 6's clips (Anton checked); the export builds on that code, and is
+   tested on changed marks files next to them.
+5. **#1248's fork**: not written.
+6. **Moments in FCP's browser**: left to the design. An option at export, off by default.
 
 ## Open questions
 
-1. **Final Cut Pro**: there's none on this Mac. Is a trial worth installing, or do you have a Mac with it, for
-   the check?
-2. **Resolve's checks** on this Mac (21.0 free): may I run them, when the screen is free? And don't update to
-   21.1 before then, if the Studio script is to be looked at on the free version too.
-3. **Premiere**: test it at all (a trial), or leave it to a user to report?
-4. **Test footage with highlights**: a DJI clip (the quick switch button while recording) and a GoPro one, with
-   three highlights each and the seconds they were marked at.
-5. **Gyroflow**: write the fork's format now, while #1248 has no answer from the maintainer, or only the
-   moments project until it's settled? It's a small writer, and the issue's author is the user it's for.
-6. **Moments in FCP's browser**: as keyword ranges on the clips only (as designed), or also as clips of their
-   own, named, if FCP takes them? Their names show in the *moments* project either way.
-7. **Which clips by default**: those with a moment or a mark (as designed), or every clip but the rejects?
+1. **Which clips go into the file by default.** When the whole project is exported, which of its clips are in
+   it? As designed now: every clip except those whose preview you deleted from `Clips/`, so what you kept in
+   Finder reaches the editor even without a moment. The alternative is only clips with a moment or a mark
+   (highlights included), a shorter list for a trip with a lot of footage. Both are in the menu; the question is
+   which is ticked first.

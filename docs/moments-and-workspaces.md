@@ -6,7 +6,8 @@ as plain files that Finder and Explorer show and that the editors take in ([Mark
 editor](nle-markers.md) reads them). This is a design, not built yet.
 
 Written 2026-11-04. Decided with Anton beforehand: the project folder and the sources file, marks copied on the
-first edit, moments and clip overviews as small MP4s, `Exports/`. Checked on this Mac, with small files ffmpeg
+first edit, moments and clip overviews as small MP4s, `Exports/`. His answers to the first draft's questions
+are in [Decided](#decided). Checked on this Mac, with small files ffmpeg
 made: the link inside an MP4 (written by ffmpeg, read by mpv), what a plain remux does to it, which frame Quick
 Look shows, and setting a file's dates. Not checked yet: anything on Windows, and typing names in mpv's console.
 Those are marked **(to try)**.
@@ -15,8 +16,8 @@ Those are marked **(to try)**.
 
 - **A project folder per trip.** By default it's the trip's own folder: `Moments/`, `Clips/`, `Exports/` and
   the per-clip files go in next to the footage. When that folder can't be written (a locked card, a read-only
-  share), or you choose so, the project folder is a separate one in `~/Movies/ActionFootagePlayer/<trip>/`
-  (Windows: `Videos\ActionFootagePlayer\`). It repeats the footage's folder tree and has a `Sources.txt` saying
+  share), or you choose so, the project folder is a separate one in `~/Documents/ActionFootagePlayer/<name>/`
+  (Windows: `Documents\ActionFootagePlayer\`), named when it's made. It repeats the footage's folder tree and has a `Sources.txt` saying
   where the footage is. You can fix that file by hand, and it can list several paths, one per computer.
 - **Marks** (points in a clip): the camera's highlights, until you change one. The first change (adding a mark,
   removing a camera one) writes `<clip>.marks.json` with all of them, the camera's flagged as such. Delete
@@ -65,7 +66,7 @@ player writes). By default they're the same folder:
 A separate project folder holds the same things, minus the footage, plus `Sources.txt`:
 
 ```
-~/Movies/ActionFootagePlayer/2026-10 Egypt/
+~/Documents/ActionFootagePlayer/2026-10 Egypt/
   Sources.txt
   Day 1/DJI_20261022152841_0068_D.marks.json
   Day 1/DJI_20261022152841_0068_D.gyroflow
@@ -98,16 +99,18 @@ Z:\2026-10 Egypt
 - `#` starts a comment. The player adds a line when you tell it the footage moved (menu: *Project → Footage
   moved…*). It puts the new path on top and keeps the old ones.
 - For a removable card the player also writes `# volume <id>`: the volume's UUID (`diskutil info`; Windows: the
-  volume serial). Formatting a card gives it a new id, so a card reused for the next trip doesn't open the old
-  trip's project just because it mounts at the same `/Volumes/OSMO ACTION` path. Without the line, the path
-  alone decides.
+  volume serial). Every card of a camera mounts at the same path (`/Volumes/OSMO ACTION`). So without the id,
+  next month's trip on a reformatted card would match last month's project by path, and its moments would land
+  there. Formatting gives a card a new id, so the old project no longer matches and the new trip gets a new
+  one. The id only applies to projects of read-only cards: a writable card's project is on the card itself.
+  Without the line (written by hand, say), the path alone decides.
 
 ### Which project a clip belongs to
 
 When a clip opens, from wherever, the player looks for its project in this order and stops at the first match:
 
 1. **A separate project folder whose sources root contains the clip.** The player reads the `Sources.txt` of
-   every folder in `~/Movies/ActionFootagePlayer/`, plus any project folder you've opened from elsewhere (kept in
+   every folder in `~/Documents/ActionFootagePlayer/`, plus any project folder you've opened from elsewhere (kept in
    a list in the app's settings). That's a few small files, read once at start and again when one changes. If
    several roots contain the clip, the longest wins: a project for `Egypt/Day 2` beats one for `Egypt`.
 2. **A project in the trip folder**: the nearest folder above the clip, or the clip's own folder, that has
@@ -124,10 +127,16 @@ to it. Reading two places would make "where is my moment" a question with two an
   (`DCIM/100MEDIA`, `DCIM/DJI_001`), since that's the card or the copy of one. For a trip folder with day
   subfolders, *Project → Use the folder above* moves the project up a level before anything is saved. Once
   something's saved, it's a move of files, which the player can do while nothing is playing (later).
-- If that folder can't be written, the project is a separate one: `~/Movies/ActionFootagePlayer/<name>/`, where
-  `<name>` is the trip folder's name, or for a card the volume's name and the first clip's date (`OSMO ACTION
-  2026-10-22`). A second one with the same name gets ` 2`. The OSD says where it went: "Saved in
-  ~/Movies/ActionFootagePlayer/OSMO ACTION 2026-10-22 (the card is read-only)".
+- If that folder can't be written, the project is a separate one in the player's own folder,
+  `~/Documents/ActionFootagePlayer/<name>/` (Windows: `Documents\ActionFootagePlayer\`), and **the player asks
+  for its name** in the same dialog as a moment's:
+
+  ```
+  The card is read-only. Project name (Enter: OSMO ACTION 2026-10-22): █
+  ```
+
+  The suggestion is the trip folder's name, or for a card the volume's name and the first clip's date. A name
+  already taken gets ` 2`. Esc saves nothing. The OSD then says where it went.
 - *Project → Keep this project separately* makes a separate one for a writable folder too, for people who don't
   want anything next to their footage.
 
@@ -331,8 +340,8 @@ Moment name (Enter: Turtle 2): █
   prompt, with the field empty. **Tab** puts it in the field to edit, as a completion. **↑** brings back
   earlier names (`history_path`, kept in the project's state).
 - **The suggestion**: the last name typed with the next free number ("Turtle" → "Turtle 2"; "Turtle 2" →
-  "Turtle 3"). With no name typed yet, it's the moment's time by the camera's clock, `15.28.52` (colons aren't
-  allowed in file names on Windows, and Finder shows them as slashes).
+  "Turtle 3"). With no name typed yet, it's the moment's date and time by the camera's clock, `2026-10-22
+  15.28.52` (colons aren't allowed in file names on Windows, and Finder shows them as slashes).
 - **The file name is the name**: `Turtle.mp4`, or `Turtle 2.mp4` if it's taken (in that folder). Characters a
   file name can't have on Windows or macOS (`/ \ : * ? " < > |`, control characters) become `-`. Leading and
   trailing dots and spaces go, Windows' reserved names (`CON`, `NUL`, `COM1`…) get a `-` added, and names are
@@ -369,11 +378,18 @@ right within the trip, on the wrong day.
 - **A moment that exists is liked; one that isn't, isn't.** Deleting the file (in Finder, or *Remove* in the
   player, which moves it to the Trash) is the reject.
 - **Finder tags** on a moment are kept in the file's attributes and never change the file. The player reads
-  them (`xattr`), and the editors get them as keywords. A tag named *Favorite*, or ★, marks a favorite. Which
-  names count is an [open question](#open-questions).
+  them (`xattr`), and the editors get them as keywords.
+- **The favorite is a Finder tag named *Favorite*, in green.** `K` sets it and takes it off. A tag is a name
+  plus a color, and Finder shows the color as the dot. The player counts as a favorite a tag with that name
+  (in any color, in any case) or Finder's own *Green* tag, so tagging green by hand in Finder works too.
+  *Favorite* is English because tags go to the editors as keywords, and the other names are the user's. The
+  name is a setting: `favorite_tag=Favorite` in `workspace.conf` (Right click → Project → Favorite tag, written
+  as the dlogm plugin writes its settings). It's read when deciding, so renaming it later doesn't need the files
+  retagged, provided the old tag is renamed in Finder too.
 - **Windows**: Explorer has no tags for an MP4, but its star rating (Properties → Details) is written *into*
-  the file, as an `Xtra` atom. For our own small files that's fine, unlike the originals. 4–5 stars is a favorite.
-  The player reads the atom with the same box reader.
+  the file, as an `Xtra` atom. For our own small files that's fine, unlike the originals. 4 or 5 stars is a
+  favorite (`favorite_stars=4`), and `K` sets 5. The player reads the atom with the same box reader. Writing it
+  goes through the Windows property system (`System.Rating`), so that Explorer reads it back as its own **(to try)**.
 
 ### Editing
 
@@ -408,8 +424,8 @@ right within the trip, on the wrong day.
   so a deleted one stays deleted. *Make again for removed clips* is the way back.
 - **When**: from the menu (*Project → Make clip previews*), in the background, with the progress in the corner
   and the menu ("Clip previews: 34 of 120"). Never by itself on opening a clip: a card of 300 clips is minutes
-  of work and a few hundred MB read from the NAS. Once a project has `Clips/`, new clips in it get theirs
-  when they're first played (a setting).
+  of work and a few hundred MB read from the NAS, and it would slow the playback it runs beside. New footage
+  added to the project gets its previews the next time the menu item is used.
 
 ## Exports
 
@@ -452,7 +468,7 @@ count on.
 | | A moment (first version) | A moment (later) | A clip |
 |---|---|---|---|
 | Option | `--preview still --at <t>` | `--preview video` | `--preview flipbook --at <t1,t2,…>` |
-| Frames | one, at the middle of the moment, held for its length | the moment, 540p–720p | ~12, at the marks or evenly |
+| Frames | one, held for its length: the first mark inside the moment, else its middle | the moment, 540p–720p | ~12, at the marks or evenly |
 | Stabilized | as it plays | as it plays | no: color only, and only keyframes are decoded |
 | Size | ~35–100 KB | 1–3 MB | 0.5–1 MB |
 
@@ -488,7 +504,7 @@ All of them:
 | `k` | **save the A-B part as a moment** (asks for its name). On a moment being played: update it | free in mpv and the plugins |
 | `M` | **a mark here**; on a mark (within half a second): remove it. Final Cut's key for a marker | free (`m` is mute) |
 | `X` | **this clip isn't interesting**: its preview in `Clips/` goes to the Trash; again: made again | free |
-| `K` | **favorite**: the Favorite tag on the moment playing, else on the clip's preview; again: off | free |
+| `K` | **favorite**: the *Favorite* tag on the moment playing, else on the clip's preview (5 stars on Windows); again: off | free |
 | `Shift+E` | export, asking for a name | as now |
 
 ### The menu
@@ -561,20 +577,26 @@ By hand, each with Anton's go-ahead, since they take the screen or another compu
 | Footage moved | a card, then its copy on the NAS | the separate project follows with one line in `Sources.txt` |
 | LRF/LRV colors | a DJI LRF and a GoPro LRV of log clips | the same LUT gives the same colors as the clip |
 
+## Decided
+
+Anton's answers to the first draft's questions, 2026-11-04:
+
+1. **Keys**: `k`, `M`, `X`, `K` as above.
+2. **The name dialog**: an empty field, with the suggestion in the prompt.
+3. **A name not typed** is the date and time: `2026-10-22 15.28.52`.
+4. **The favorite**: left to the design. It's the green *Favorite* tag (or Finder's *Green*), 4 stars and up
+   on Windows, kept in the player's settings ([Rating and tags](#rating-and-tags)).
+5. **The moment's icon**: the first mark inside it, else the middle frame.
+6. **A new project**: in the footage's own folder when it can be written; otherwise in the player's folder in
+   Documents, after asking for its name.
+7. **The card's volume id**: left to the design. Written, for read-only cards ([`Sources.txt`](#sourcestxt)).
+8. **Clip previews**: never by themselves, only from the menu.
+
 ## Open questions
 
-1. **Keys**: `k` save a moment, `M` mark (again: remove), `X` clip not interesting, `K` favorite. Do these
-   suit you?
-2. **The name dialog**: an empty field with the suggestion in the prompt (Enter takes it, typing replaces
-   it), since mpv's console can't pre-select text. Or the suggestion typed in the field, cleared with Ctrl+C
-   (the console's "clear line")?
-3. **Names without a typed one**: the time `15.28.52`, or with the date `2026-10-22 15.28.52`? The date
-   matters if you gather moments from several days into one folder.
-4. **Favorite in Finder**: a tag named *Favorite*, ★, a color (green)? And on Windows, 4 stars and up?
-5. **An export of a part that is already a moment**: no `export_` moment, and the export takes the moment's
-   name (as designed)? Or always an `export_<name>` moment?
-6. **The moment's icon**: the middle frame, or a mark inside the moment if it has one?
-7. **Where a new project goes**: the clip's folder, or the folder above `DCIM`. Or should the first save ask
-   once ("Save in 2026-10 Egypt / in Day 1 / separately")?
-8. **The card's volume id** in `Sources.txt`, so a reused card doesn't open the last trip's project: worth it?
-9. **Clip previews made by themselves** for new clips of a project that has `Clips/`, or only from the menu?
+1. **Exporting a part that is already a moment.** Exporting a part saves it as a moment too (`export_Turtle`),
+   so the part can be found and played again after the export is deleted. But when you export *a moment*
+   (played from the menu or its file, so the A-B part is exactly that moment), that would give a second moment
+   over the same range: `Turtle` and `export_Turtle`. As designed, no second one is made: the export is named
+   `Turtle.mov` after the moment, and its link points at the same range. Is that right? Or should every export
+   get its own `export_` moment, even a duplicate?
