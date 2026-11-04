@@ -96,8 +96,13 @@ QuickTime and Apple's devices show the export, and shows it in HDR on an HDR scr
 outputs: *HDR, HLG* (macOS tones it down on an SDR screen), *HDR, HLG+DV*, *SDR, HLG+DV* (toned down by the trims on
 an HDR screen too: what an SDR screen shows), mpv's tone mapping, NBCUniversal's neutral HDR → SDR conversion and
 the camera maker's own Rec.709 LUT (DJI's, for D-Log M); on an HDR screen the SDR ones show as an SDR screen would. Exports still play in HDR on an iPhone.
-The Dolby Vision trims are the author's, to taste; the side panel's Dolby Vision has them as sliders,
-and exports take what's set there.
+Each frame's light levels go along with it (Dolby Vision's L1: its darkest, average and brightest, measured on the GPU
+as it plays, on the picture macOS gets), so macOS maps every scene for what's in it rather than for a typical one: a
+dark dive and a sunlit beach each get their own room. The Dolby Vision trims go on top of that; they're the author's,
+to taste, fitted to NBCUniversal's conversion with each frame's levels. The side panel's Dolby Vision has them as
+sliders, with a way back to the author's and to neutral ones (Dolby Vision's own mapping, nothing added), and exports
+take what's set there. Exports carry fixed scene levels for now, not each frame's: on an Apple device they can look a
+little different from the player.
 
 After an HDR display (an HDR TV, say) has been connected to the Mac, macOS can keep its settings for the SDR monitor
 plugged in where it was, until the Mac restarts, and shows HDR on it about a stop darker. The player tells when it
@@ -241,7 +246,7 @@ switches and buttons, scrolled with the wheel:
 - **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame (full size, temporal
   denoise), what fills the edges and how often the trail is written, whether it asks when the GPU can't keep up.
 - **Telemetry**: whether it shows, the corner, the units, the fields.
-- **Dolby Vision** (Mac, the app): the trims, as sliders.
+- **Dolby Vision** (Mac, the app): the trims, as sliders; back to the author's, or neutral ones.
 - **Support**, at the bottom: the version, Keys…, Note for the agent…, Report this camera…, Set up again…, and links
   to the website and GitHub.
 
@@ -291,6 +296,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | | |
 |---|---|
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
+| `dlogm.conf`: `dv_live_l1=yes` | Mac, the app: *HLG+DV* measures each frame's light levels as it plays and sends them with it (`--macos-dovi-live-l1`); `no`: the trims' fixed ones, and the side panel's scene-level sliders back |
 | `dlogm.conf`: `denoise=no` | `yes`: clips start with the noise reduction on (`Ctrl+n`). How strong it is: `glsl-shader-opts=denoise_strength=2` in `mpv.conf` (1 by default, tuned for 10-bit log) |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
