@@ -221,7 +221,7 @@ cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highligh
 cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
-cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua "$workspace/"
+cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua "$workspace/"
 
 echo "== ffmpeg"
 archive=$(fetch "$FFMPEG_URL" "$FFMPEG_SHA256")

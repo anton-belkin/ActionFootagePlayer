@@ -46,6 +46,15 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
 local telemetry = require 'telemetry'
 
 local o = { fields = "", units = "metric", position = "bottom-left", font_size = 28, visible = true }
@@ -286,7 +295,7 @@ local function load()
         for _, name in ipairs(FALLBACK_FIELDS) do names[#names + 1] = name end
         set_fields(names)
     end
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) or #wanted == 0 then return end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     if not PROBED_EXTENSIONS[ext] then return end

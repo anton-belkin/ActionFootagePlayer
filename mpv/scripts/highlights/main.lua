@@ -20,6 +20,15 @@
 --   chapters=yes   the highlights as chapters, which mpv's seek bar shows as marks (next to the file's own, if any)
 
 local mp = require 'mp'
+
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
 local options = require 'mp.options'
 local markers = require 'markers'
 
@@ -53,7 +62,7 @@ end
 
 local function load()
     found = nil
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) then return end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     if not PROBED_EXTENSIONS[ext] then return end

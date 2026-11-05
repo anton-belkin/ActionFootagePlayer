@@ -65,6 +65,7 @@ jobs:
         run: |
           luajit tests/workspace_test.lua
           luajit tests/link_test.lua
+          luajit tests/moments_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes)
 
       - name: Build

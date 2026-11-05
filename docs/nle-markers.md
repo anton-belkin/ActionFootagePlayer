@@ -15,9 +15,9 @@ their documentation, cited below. What that leaves open is marked **(to try)**: 
 ## In short
 
 - **The project is what's exported**: one trip, one go, from the menu. Its parts are:
-  - **Moments** (`Moments/*.mp4`, each a part of a clip): ranges with a name. The subfolders of `Moments/` and the
+  - **Moments** (`Moments/*.afplink.mp4`, each a part of a clip): ranges with a name. The subfolders of `Moments/` and the
     files' Finder tags become bins, keyword collections and keywords; a *Favorite* tag makes a favorite.
-  - **Clips** (`Clips/*.mp4`, a preview per clip): a clip whose preview was deleted is a reject, a *Favorite*
+  - **Clips** (`Clips/*.afplink.mp4`, a preview per clip): a clip whose preview was deleted is a reject, a *Favorite*
     tag a favorite, and the folders and tags are bins and keywords again.
   - **Marks** (the clip's marks file, else its camera highlights): markers.
 - **Out, one file per editor, in the project folder**:
@@ -47,11 +47,11 @@ From the project ([the model](moments-and-workspaces.md)):
 
 | | Where it is | What the editors get |
 |---|---|---|
-| A moment | `Moments/**/<name>.mp4`, its link: clip, `in`, `out` | a range of the clip, named after the file |
-| The moment's folders | `Moments/Reef/Moray eel.mp4` → `Reef` | a bin, a keyword collection, a keyword |
+| A moment | `Moments/**/<name>.afplink.mp4`, its link: clip, `in`, `out` | a range of the clip, named after the file |
+| The moment's folders | `Moments/Reef/Moray eel.afplink.mp4` → `Reef` | a bin, a keyword collection, a keyword |
 | Tags on a moment | Finder tags; Explorer's stars | keywords; *Favorite* (or ★, 4–5 stars) a favorite |
 | A clip | the footage under the sources root (not `Moments/`, `Clips/`, `Exports/`) | a clip, at its timecode |
-| A clip's rating | `Clips/**/<clip>.mp4`, and `.actionfootageplayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
+| A clip's rating | `Clips/**/<clip>.afplink.mp4`, and `.actionfootageplayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
 | A clip's folders and tags | `Clips/Day 1/…`, Finder tags | a bin, keywords |
 | Marks | `<clip>.marks.json` in the project, else the clip's highlights | markers; a camera's with its note ("DJI quick switch") |
 
@@ -154,7 +154,7 @@ A plain `.fcpxml`, not the `.fcpxmld` bundle.
 - `import-options`: none. Whether to copy the media or leave it in place is then the user's import setting.
   "Leave files in place" links to the originals, which is what a NAS needs.
 
-Example: the Action 6 clip above, a highlight at 10.01 s and the moment `Moments/Reef/Turtle.mp4` from 20.02 s to
+Example: the Action 6 clip above, a highlight at 10.01 s and the moment `Moments/Reef/Turtle.afplink.mp4` from 20.02 s to
 30.03 s, tagged *Favorite*:
 
 ```xml
@@ -365,7 +365,7 @@ The panel's Project section has the same buttons.
 
 | | Clip favorite | Clip reject | Moment | Moment favorite | Folders and tags |
 |---|---|---|---|---|---|
-| | *Favorite* tag on `Clips/<clip>.mp4` | its preview deleted | the file | *Favorite* tag | `Moments/` and `Clips/` subfolders, Finder tags |
+| | *Favorite* tag on `Clips/<clip>.afplink.mp4` | its preview deleted | the file | *Favorite* tag | `Moments/` and `Clips/` subfolders, Finder tags |
 | FCP | `rating value="favorite"` over the clip | `rating value="reject"` over the clip | keyword range, in the *moments* project | `rating value="favorite"` over it | keywords, collections in collection folders |
 | Resolve (free) | Clip Color Green, Flag Green (CSV) | Clip Color Red, Flag Red (CSV), left off the timelines | on the *moments* and its folder's timeline; a green marker on *clips* | a green flag on its clip (CSV) | keywords (CSV); a timeline per folder of moments |
 | Resolve Studio | `SetClipColor`, `AddFlag` (script) | the same | a clip marker with a length, a subclip | the same | real bins |

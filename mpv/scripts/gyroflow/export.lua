@@ -17,6 +17,11 @@
 --                        the dlogm plugin would choose (its sdr_look)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
+--   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
+--                        and stabilized as the clip plays: { id, clip, from, to, at, link, dates, output, force,
+--                        reply }; the answer is `script-message-to <reply> preview-done <id> <json>`, { ok, error }
+--
+-- The clip is the one playing, or the original when the file playing is a moment (user-data/workspace/clip).
 --
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
@@ -47,12 +52,21 @@ local playing = false
 local timer
 local last_export = nil
 
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
+
 -- For the right-click menu: whether the clip playing is being exported, and the last file exported
 local function publish()
-    mp.set_property_native("user-data/gyroflow/exporting", running[mp.get_property("path") or ""] ~= nil)
+    mp.set_property_native("user-data/gyroflow/exporting", running[clip_path() or ""] ~= nil)
     mp.set_property_native("user-data/gyroflow/last_export", last_export or "")
 end
 mp.observe_property("path", "string", publish)
+mp.observe_property("user-data/workspace/clip", "string", publish)
 
 -- On Windows, the OSD message is all
 local function notify(title, text)
@@ -197,13 +211,15 @@ end)
 
 -- The clip playing, or nil (and why on screen)
 local function local_path()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Export: not a local file", 2)
         return nil
     end
     return path
 end
+
+local look_args, run_export
 
 -- `sdr`: in SDR whatever plays
 local function start(path, sdr)
@@ -218,6 +234,21 @@ local function start(path, sdr)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
+    look_args(args, sdr)
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local range = ""
+    if a and b and b > a then
+        table.insert(args, "--from"); table.insert(args, string.format("%.3f", a))
+        table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
+        range = " " .. clock(a) .. "-" .. clock(b)
+    end
+    table.insert(args, path)
+    return run_export(path, args, range, progress, control)
+end
+
+-- The options that make gyroflow-export render as the clip plays: its look (`sdr`: in SDR whatever plays), its
+-- stabilization
+function look_args(args, sdr)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
         table.insert(args, "--curve"); table.insert(args, "none")
@@ -251,15 +282,9 @@ local function start(path, sdr)
         table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")
     end
     if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
-    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-    local range = ""
-    if a and b and b > a then
-        table.insert(args, "--from"); table.insert(args, string.format("%.3f", a))
-        table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
-        range = " " .. clock(a) .. "-" .. clock(b)
-    end
-    table.insert(args, path)
+end
 
+function run_export(path, args, range, progress, control)
     local name = platform.file_name(path)
     local job = { name = name, range = range, progress = progress, control = control }
     running[path] = job
@@ -333,4 +358,34 @@ mp.register_script_message("reveal-last-export", function()
         args = { "xdg-open", last_export:match("^(.*)/") or "." }
     end
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end)
+end)
+
+-- A moment's preview, for the workspace plugin: one frame in SDR, stabilized as the clip plays, held for its part.
+-- Short (a second or two), so it runs at once, beside an export if there's one
+mp.register_script_message("preview", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
+    local function reply(ok, err)
+        mp.commandv("script-message-to", req.reply, "preview-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err }))
+    end
+    local info = utils.file_info(EXPORT)
+    if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
+    local args = { EXPORT, "--preview", "still" }
+    if req.force then table.insert(args, "--force") end
+    look_args(args, true)
+    local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
+    add("--from", req.from and string.format("%.3f", req.from))
+    add("--to", req.to and string.format("%.3f", req.to))
+    add("--at", req.at and string.format("%.3f", req.at))
+    add("--link", req.link)
+    add("--dates", req.dates)
+    add("--output", req.output)
+    table.insert(args, req.clip)
+    mp.msg.info("preview: " .. table.concat(args, " "))
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        local err = r and r.stderr or ""
+        if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then return reply(true) end
+        mp.msg.warn("preview: " .. err)
+        reply(false, last_line(err) or "gyroflow-export failed")
+    end)
 end)

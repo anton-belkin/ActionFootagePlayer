@@ -135,6 +135,15 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
+
 local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
@@ -183,7 +192,7 @@ end
 -- nil when it isn't installed or speaks of another file
 local function workspace_of(path)
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) == "table" and ws.path == path then return ws end
+    if type(ws) == "table" and ws.path == mp.get_property("path") and (ws.path == path or ws.clip == path) then return ws end
     return nil
 end
 
@@ -551,9 +560,9 @@ end
 local function setup(done)
     current_source, stab_off = nil, false
     clip_settings(nil)
-    local path = mp.get_property("path")
-    if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
+    if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
+    local path = clip_path()
     if not file_exists(PLUGIN) then
         if find_project(path) then mp.msg.warn("plugin missing at " .. PLUGIN) end
         return done()
@@ -1025,7 +1034,7 @@ local function open_in_gyroflow(file, project, opened_message)
         return
     end
     mp.set_property_bool("pause", true)
-    local video = mp.get_property("path")
+    local video = clip_path()
     if not (watch and watch.project == project and watch.video == video) then
         stop_watching()
         watch = { project = project, video = video, version = project and file_version(project) or nil }
@@ -1049,7 +1058,7 @@ local function edit_project(project)
 end
 
 mp.add_key_binding("Ctrl+e", "edit", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Gyroflow: not a local file", 1.5)
         return

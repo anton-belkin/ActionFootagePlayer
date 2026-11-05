@@ -96,6 +96,15 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
 local dji_color = require 'dji_color'
 local gopro_color = require 'gopro_color'
 local video_color = require 'video_color'
@@ -611,7 +620,7 @@ ask_screens()
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function(hook)
     base, curve, current, announce, recorded, hdr, touched, shown_for = nil, nil, nil, false, nil, nil, false, nil
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
     for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end

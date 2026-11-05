@@ -22,11 +22,11 @@ Those are marked **(to try)**.
 - **Marks** (points in a clip): the camera's highlights, until you change one. The first change (adding a mark,
   removing a camera one) writes `<clip>.marks.json` with all of them, the camera's flagged as such. Delete
   the file, and it's the camera's again. Nothing is ever written into a Gyroflow project.
-- **Moments** (parts of a clip) are files: `Moments/Turtle.mp4`, a small real MP4 with a color preview, and
+- **Moments** (parts of a clip) are files: `Moments/Turtle.afplink.mp4`, a small real MP4 with a color preview, and
   inside it a link to the part of the original. Finder and Explorer show the frame, Quick Look plays it, and a
   double click opens the player, which plays that part of the original in full quality, stabilized. Deleting
   the file deletes the moment. Subfolders are yours, to sort moments into, and the editors get them as bins.
-- **Clips** (the trip at a glance): `Clips/<clip>.mp4` per clip, a flipbook of a dozen color frames from it,
+- **Clips** (the trip at a glance): `Clips/<clip>.afplink.mp4` per clip, a flipbook of a dozen color frames from it,
   linked to the whole clip. The grid of icons is in color, not log gray, and the space bar flips through a clip
   in seconds. Deleting one says "not interesting".
 - **Exports** go to `Exports/` (now `stabilized/`), named in the same dialog as moments, with the same link
@@ -52,12 +52,12 @@ player writes). By default they're the same folder:
   Day 2/
     GX011057.MP4
   Moments/
-    Turtle.mp4
+    Turtle.afplink.mp4
     Reef/
-      Moray eel.mp4
+      Moray eel.afplink.mp4
   Clips/
-    Day 1/DJI_20261022152841_0068_D.mp4
-    Day 2/GX011057.mp4
+    Day 1/DJI_20261022152841_0068_D.afplink.mp4
+    Day 2/GX011057.afplink.mp4
   Exports/
     Turtle.mov
   .actionfootageplayer/               the player's state for this project (hidden)
@@ -220,7 +220,7 @@ editor](nle-markers.md#gyroflow)).
 
 ### The file
 
-`Moments/<name>.mp4`, one per moment: a real, small MP4 that any OS can show and play, with the link to the
+`Moments/<name>.afplink.mp4`, one per moment: a real, small MP4 that any OS can show and play, with the link to the
 original inside.
 
 - **The first version**: one frame, in color, held for the moment's length (`gyroflow-export --preview still`).
@@ -353,7 +353,7 @@ Moment name (Enter: Turtle 2): █
 - **The suggestion**: the last name typed with the next free number ("Turtle" → "Turtle 2"; "Turtle 2" →
   "Turtle 3"). With no name typed yet, it's the moment's date and time by the camera's clock, `2026-10-22
   15.28.52` (colons aren't allowed in file names on Windows, and Finder shows them as slashes).
-- **The file name is the name**: `Turtle.mp4`, or `Turtle 2.mp4` if it's taken (in that folder). Characters a
+- **The file name is the name**: `Turtle.afplink.mp4`, or `Turtle 2.afplink.mp4` if it's taken (in that folder). Characters a
   file name can't have on Windows or macOS (`/ \ : * ? " < > |`, control characters) become `-`. Leading and
   trailing dots and spaces go, Windows' reserved names (`CON`, `NUL`, `COM1`…) get a `-` added, and names are
   kept under 200 bytes.
@@ -571,9 +571,32 @@ first".
    the file's dates, creation time included; `qlmanage -t`: the thumbnail is the cover; mpv reads both keys.
    Not checked: Photos' day from `com.apple.quicktime.creationdate` (AVFoundation's `creationDate` stays nil
    for an MP4), Explorer.
-4. **Moments**: `k` and the name dialog, `Moments/` scanned and cached, chapters, playing a moment's file and
-   the folder, update, rename, remove. Tests: mpv with `--vo=null` over the IPC socket, as for the editors'
-   design. The dialog's typing is checked by hand.
+4. **Moments** (**done**, but the side panel's lists and typing in other alphabets): in the workspace plugin.
+   `moments.lua` is the part with no mpv in it (names, dates, which clip a moment is of, where its original is,
+   `Moments/` read; `luajit tests/moments_test.lua`), `main.lua` the rest:
+   - `k` asks the name (`mp.input`), makes the project at the first save, and asks the gyroflow plugin for the
+     preview (`script-message-to gyroflow preview`, which renders with the same options as an export, in SDR).
+     The history of names (↑) is `.actionfootageplayer/moment-names.txt`.
+   - `Moments/` is read when a clip of the project loads and again when one of its folders changes (looked at
+     every 5 s); what's read of each file is cached in mpv's cache folder by size and time.
+   - The clip's moments are chapters beside the highlights (put back when another plugin sets the chapters) and
+     a *Moments* submenu: play, rename, remove (to the Trash: macOS's `trash`, Windows' recycle bin, `gio trash`),
+     show in Finder.
+   - A moment's file plays its original (`stream-open-filename`), looping its part, titled with its name; the
+     other plugins read the clip from `user-data/workspace/clip` (gyroflow and its export, dlogm, the telemetry,
+     highlights, the menu, the agent's notes). Opened on its own, mpv first makes the playlist of the files beside
+     it (the app's `autocreate-playlist`), then loads it again from there, and only that load is redirected:
+     redirected at once, the playlist became the original's folder. So the moments beside it are next and
+     previous.
+   - `Moments/` (or a folder in it) opened plays its moments one after another, each ending at its out, in the
+     order they happened.
+   - Updating (`k` on a moment whose part was moved) writes the file again; gyroflow-export keeps the Finder tags,
+     label and comment of a file it replaces.
+   Checked headless on clip 0093 (mpv `--vo=null` over the IPC socket): the first moment makes the project; the
+   chapters; `k` and Enter saves the suggestion ("Лодка 2"); the history; the moment's file plays the original,
+   stabilized, 20–30 s looped, titled; the update (out 30 → 31) and a Finder tag kept through it; rename by typing
+   in the console; remove; the folder in time order. Not checked: typing other alphabets and input methods, the
+   OSD and the console as they look, Windows and Linux.
 5. **Exports to `Exports/`**: the dialog, the names, the link, the moment that comes with it, gyroflow-export's
    new default, the README's note on `stabilized/`.
 6. **Marks**: the marks file on the first change, `M`, the camera flag, the highlights plugin reading the file
@@ -619,6 +642,13 @@ Anton's answer to the second draft's question, 2026-11-05:
 
 9. **Exporting a part that is already a moment** makes no second moment: the export is named after the moment
    (`Turtle.mov`), and its link points at the same range.
+
+Anton's idea while it was built, 2026-11-05:
+
+10. **Link files have a double extension**, `.afplink.mp4`: moments (`Moments/Turtle.afplink.mp4`) and clip
+    previews. It says what the file is, and every system still opens it as an MP4. Exports are videos of their
+    own and keep `.mov`. A link file renamed in Finder without it is still read (any `.mp4` under `Moments/`), and
+    its name is shown without `.mp4`.
 
 ## Open questions
 

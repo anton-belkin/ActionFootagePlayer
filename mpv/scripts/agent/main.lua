@@ -35,6 +35,15 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
 local input = require 'mp.input'
 
 local o = { socket = "" }
@@ -294,7 +303,7 @@ local function save(comment)
     end
     local json = utils.format_json({
         format = FORMAT, comment = comment, created = report.created,
-        clip = mp.get_property("path"), time = report.time, frame_number = report.frame_number,
+        clip = clip_path(), time = report.time, frame_number = report.frame_number,
         frame_size = { w = fw, h = fh }, screen_size = { w = d.w, h = d.h },
         areas = areas, files = { screen = "screen.png", marked = "marked.png", frame = "frame.png", log = "log.txt" },
         state = report.state,

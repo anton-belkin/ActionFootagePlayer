@@ -98,7 +98,8 @@ Previews, for the player's moments (docs/moments-and-workspaces.md): small H.264
 shows and plays, the frame also their cover art (the icon)
   --preview still  one frame, stabilized as with the options above, in SDR (the maker's LUT for D-Log M, else
                    NBCU's conversion; HLG through NBCU's), held for --from to --to (the whole video without them);
-                   by default <name>_still.mp4 in --out or next to the video
+                   by default <name>.afplink.mp4 in --out or next to the video (the player's
+                   moments are Moments/<moment>.afplink.mp4)
   --at <time>      the frame's time (default: the middle of --from to --to)
   --link <json>    the link to the original the player keeps in it (an MP4 key, ch.actionfootageplayer.link)
   --dates <time>   its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00): the MP4's creation time,
@@ -382,6 +383,27 @@ impl Dates {
         if self.unix >= 0.0 { std::time::UNIX_EPOCH + d } else { std::time::UNIX_EPOCH - d }
     }
 }
+
+// The Finder's own attributes of a file: its tags (and their colors), its label, its comment. A file replaced
+// (--force: a moment updated, an export made again) keeps them, as it would if edited in place
+#[cfg(target_os = "macos")]
+const FINDER_ATTRIBUTES: &[&str] = &["com.apple.metadata:_kMDItemUserTags", "com.apple.FinderInfo", "com.apple.metadata:kMDItemFinderComment"];
+
+#[cfg(target_os = "macos")]
+fn copy_finder_attributes(from: &Path, to: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let (Ok(from), Ok(to)) = (std::ffi::CString::new(from.as_os_str().as_bytes()), std::ffi::CString::new(to.as_os_str().as_bytes())) else { return };
+    for name in FINDER_ATTRIBUTES {
+        let name = std::ffi::CString::new(*name).unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let n = unsafe { libc::getxattr(from.as_ptr(), name.as_ptr(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0, 0) };
+        if n <= 0 { continue; }
+        unsafe { libc::setxattr(to.as_ptr(), name.as_ptr(), buf.as_ptr() as *const libc::c_void, n as usize, 0, 0); }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_finder_attributes(_from: &Path, _to: &Path) {}
 
 fn file_name(path: &str) -> String {
     Path::new(path).file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string())
@@ -696,7 +718,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (None, None) => String::new(),
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
-    let stem = if preview.is_some() { format!("{stem}_still") } else {
+    // A preview is a link to its original: .afplink.mp4, which still opens as an MP4
+    let stem = if preview.is_some() { format!("{stem}.afplink") } else {
         format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" }, if opts.dv_rpu.is_some() { "_dv" } else { "" })
     };
     let ext = if preview.is_some() { "mp4" } else { "mov" };
@@ -1117,6 +1140,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     if let (Some(modified), Ok(f)) = (modified, std::fs::File::options().write(true).open(&tmp_path)) {
         let _ = f.set_modified(modified);
     }
+    if out_path.exists() { copy_finder_attributes(&out_path, &tmp_path); }
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));

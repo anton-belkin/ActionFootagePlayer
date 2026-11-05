@@ -272,6 +272,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+p` | Temporal denoise of the paused frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
+| `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
@@ -532,20 +533,20 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
   writes the progress there as JSON twice a second (that's how mpv shows it).
 - `--output <file>` writes that file instead (one clip).
 
-**Previews** are what the player's moments will be made of ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)):
+**Previews** are what the player's moments are made of ([Moments](#moments), [docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)):
 a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the clip is.
 
 ```bash
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --preview still --from 20 --to 30 --at 26.4 \
-    --dates 2026-10-24T09:46:07+03:00 --output Moments/Turtle.mp4 DJI_0093_D.MP4
+    --dates 2026-10-24T09:46:07+03:00 --output Moments/Turtle.afplink.mp4 DJI_0093_D.MP4
 ```
 
 - `--preview still`: the frame at `--at` (else the middle of `--from` to `--to`), stabilized as an export would be
   with the same options, held for `--from` to `--to` (the whole clip without them): H.264 at 960 pixels on the
   long side, 10 fps, one keyframe, its frame also the cover art, so the frame is the file's icon. 150-350 KB for a
   camera's frame. D-Log M goes through DJI's Rec.709 LUT, other log curves and HLG through NBCU's conversion;
-  a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>_still.mp4` next to
-  the clip (or in `--out`).
+  a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>.afplink.mp4` next
+  to the clip (or in `--out`): the double extension says it's a link, and it opens as an MP4 anywhere.
 - `--link <json>`: the link to the original the player keeps in it, an MP4 key (`ch.actionfootageplayer.link`)
   that copying, renaming and tags keep, and a remux without `-map_metadata 0` loses.
 - `--dates <time>`: its date, with the time zone: the MP4's creation time, QuickTime's creation date (the day
@@ -625,6 +626,29 @@ Each file of a recording the camera split has its own. None of it has been tried
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
 [Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
+### Moments
+
+A moment is a part of a clip you want to keep: the turtle, the jump. Mark it with `l` at its start and `l` at its
+end, press `k`, type its name (Enter alone takes the one suggested: the last name with the next number, "Turtle 2",
+or the date and time), and it's saved as a small file in a **Moments** folder of the trip:
+`Moments/Turtle.afplink.mp4`.
+
+- **It's a link, not a copy.** The file is one frame of the moment, in color and stabilized, held for its length,
+  some 150-350 KB. Finder shows that frame as its icon, and the double extension says it's a link (it still opens
+  as an MP4 anywhere). Inside it is where its part of the original clip is.
+- **Opening it in the player plays the original**, in full quality, from the moment's start, looping its part,
+  with the original's stabilization, look and telemetry. The moments beside it are the next and previous files.
+  Opening the **Moments** folder plays all of them one after another, in the order they happened.
+- **Where**: the first moment of a clip makes the trip's project in the clip's folder (above `DCIM` for a camera's
+  own folders): a hidden `.actionfootageplayer` folder and `Moments/` beside the footage. A clip under a folder
+  that already has one belongs to it. A card or folder that can't be written isn't supported yet.
+- **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
+  **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
+- **Changing one**: play it, move its start or end with `l`, press `k`, and Enter updates it; a new name saves a new
+  moment instead. Its Finder tags stay.
+- Sort a Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
+  order things happened, whatever their names.
 
 ### Notes for an AI agent
 
@@ -894,10 +918,11 @@ ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 - **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
 - **`highlights`**: the moments the camera marked (DJI, GoPro), on the seek bar and a key away. Plain Lua, any mpv
   on any system.
-- **`workspace`**: the project a clip belongs to, its trip folder, for the other plugins: where a clip's Gyroflow
-  project is, and soon its moments, marks and exports ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)).
-  Plain Lua, any mpv on any system. Without it, the gyroflow plugin looks next to the clip, which is the same place
-  for now.
+- **`workspace`**: the project a clip belongs to, its trip folder, for the other plugins, and its moments (`k`,
+  [Moments](#moments)): where a clip's Gyroflow project is, and soon its marks and exports
+  ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)). Plain Lua, any mpv 0.38 or later for naming
+  moments (older ones save them with the suggested name); the moments' previews need the gyroflow plugin. Without
+  it, the gyroflow plugin looks next to the clip, which is the same place for now.
 
 None needs anything in `mpv.conf` or `input.conf`.
 
@@ -1056,11 +1081,13 @@ mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's I
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
                               Lua; vs-gyroflow/src/workspace.rs is its twin), and link.lua, which reads the link in a
-                              moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it)  →  ~/.config/mpv/scripts/workspace, and
+                              moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it), and moments.lua, the moments'
+                              part with no mpv in it  →  ~/.config/mpv/scripts/workspace, and
                               in ActionFootagePlayer
 tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
                               `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
-                              files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export
+                              files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export;
+                              moments_test.lua
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is

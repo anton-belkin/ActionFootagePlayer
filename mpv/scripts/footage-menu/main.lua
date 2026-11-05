@@ -21,6 +21,15 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    return path
+end
+
 local o = { setup = "", version = "", menu = "auto" }
 options.read_options(o, "footage_menu")
 
@@ -51,6 +60,7 @@ local KEY_LABELS = {
     { "cycle pause", "Play / pause" },
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
+    { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
     { "script-binding highlights/next", "Next highlight the camera marked" },
     { "script-binding highlights/prev", "Previous highlight" },
     { "script-binding dlogm/sdr", "The next video output: HDR, HLG+DV in HDR and in SDR, mpv's tone mapping, NBCU's SDR, the maker's SDR" },
@@ -336,6 +346,25 @@ local function highlights_menu(h, key)
     return items
 end
 
+-- The clip's moments (the workspace plugin's), each with what can be done to it
+local function moments_menu(w)
+    local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
+    local items = {}
+    for i, m in ipairs(w.moments or {}) do
+        local playing = w.moment and w.moment.file == m.file
+        table.insert(items, submenu(m.name .. "    " .. clock(m["in"]) .. "–" .. clock(m.out), {
+            item("Play", "script-message-to workspace moment-play " .. i, { disabled = playing }),
+            item("Rename…", "script-message-to workspace moment-rename " .. i),
+            item("Remove (to the Trash)", "script-message-to workspace moment-remove " .. i),
+            item(reveal, "script-message-to workspace moment-reveal " .. i),
+        }, { checked = playing }))
+    end
+    if #items > 0 then table.insert(items, SEPARATOR) end
+    table.insert(items, item(platform == "darwin" and "Show Moments folder in Finder" or "Show Moments folder",
+                             "script-message-to workspace moments-folder"))
+    return items
+end
+
 local function clip_menu(path, key)
     local pos, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -402,6 +431,19 @@ local function build()
             else
                 add(item((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip", "script-binding gyroflow/export", { shortcut = export }))
             end
+        end
+        local w = state("workspace")
+        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) then
+            local moment = key["script-binding workspace/moment"]
+            if w.saving then
+                add(info("Saving " .. w.saving .. "…"))
+            elseif w.moment and a and b and (math.abs(a - w.moment["in"]) >= 0.001 or math.abs(b - w.moment.out) >= 0.001) then
+                add(item("Update " .. w.moment.name .. " to " .. clock(a) .. "–" .. clock(b) .. "…", "script-binding workspace/moment", { shortcut = moment }))
+            elseif not w.moment then
+                add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",
+                         "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
+            end
+            if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
         if h and h.times then add(submenu("Highlights (" .. #h.times .. ")", highlights_menu(h, key))) end
         add(SEPARATOR)
@@ -484,7 +526,7 @@ local function open_url(url)
 end
 
 mp.register_script_message("reveal", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not local_file(path) then return end
     path = utils.join_path(mp.get_property("working-directory") or "", path)
     if platform == "darwin" then run({ "open", "-R", path })
@@ -493,7 +535,7 @@ mp.register_script_message("reveal", function()
 end)
 
 mp.register_script_message("copy-path", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path then return end
     if local_file(path) then path = utils.join_path(mp.get_property("working-directory") or "", path) end
     -- The clipboard property is mpv 0.40's
@@ -519,7 +561,7 @@ end
 
 -- A new issue on GitHub, with what the plugins found in the clip
 mp.register_script_message("report", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not local_file(path) then return end
     local d, g, t, h = state("dlogm"), state("gyroflow"), state("dji_telemetry"), state("highlights")
     local camera = t and t.model ~= "" and (CAMERAS[t.model] or t.model) or "(which camera?)"
