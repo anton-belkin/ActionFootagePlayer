@@ -211,6 +211,18 @@ local function clip_part(u, x, w, y)
     y = u:button(x + half + 8 * s, half, y, "mark-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
     if a or b then y = u:button(x, w, y, "clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no") end
 
+    -- Crop mode (the gyroflow plugin's crop.lua): a frame over the video, the picture moved under it
+    if g and local_file(path) then
+        local c = g.crop or {}
+        y = u:heading(x, w, y + 10 * s, "Frame")
+        y = u:switch(x, w, y, "crop", "Crop", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
+        if c.active then
+            y = u:button(x, w, y, "crop-aspect", "Aspect: " .. (c.aspect or "original"), "script-message-to gyroflow crop-aspect next")
+            y = u:caption(x, w, y, c.camera and "Drag or scroll turns the camera, the wheel or a pinch zooms, Alt+drag levels"
+                                             or "Drag or scroll moves the picture, the wheel or a pinch zooms")
+        end
+    end
+
     if g and local_file(path) then
         y = u:heading(x, w, y + 10 * s, "Export")
         if g.exporting then

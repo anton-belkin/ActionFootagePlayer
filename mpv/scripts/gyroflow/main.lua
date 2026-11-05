@@ -146,6 +146,7 @@ end
 local platform = require 'platform'
 local still = require 'still'
 local quality = require 'quality'
+local crop = require 'crop'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
@@ -324,7 +325,8 @@ local chromatic = o.chromatic
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate))
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate)
+            .. crop.control_words())
     f:close()
 end
 local function has_project(source)
@@ -431,6 +433,19 @@ still.init(o, function()
     end
     return false
 end, function() return current_source and not stab_off and frame_step(current_source) or 1 end)
+
+-- Crop mode (c): the camera turned and zoomed by the plugin where it stabilizes the clip, mpv's own pan and zoom elsewhere
+crop.init({
+    stabilizing = function()
+        if not current_source or stab_off then return false end
+        for _, f in ipairs(mp.get_property_native("vf") or {}) do
+            if f.label == LABEL and f.enabled ~= false then return true end
+        end
+        return false
+    end,
+    write = function() write_edge_control() end,
+    control_path = function() return EDGE_CONTROL end,
+})
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()

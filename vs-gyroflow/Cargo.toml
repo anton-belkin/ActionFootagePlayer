@@ -15,8 +15,9 @@ crate-type = ["cdylib", "rlib"]
 # would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
 # From the fork until upstream has it: 3d9f610 with MemoryHints::MemoryUsage on integrated GPUs (branch
 # integrated-gpu-memory-usage-3d9f610), without which 3 workers on an Intel iGPU took 9 GB of RAM and the next clip ran
-# the GPU out of memory. Back to gyroflow/gyroflow once the pull request with it is merged
-gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "1e7f531", default-features = false, features = ["bundle-lens-profiles"] }
+# the GPU out of memory. Back to gyroflow/gyroflow once the pull request with it is merged. On top of it (branch
+# view-rotation): ComputeParams::view_rotation, the output camera turned after the smoothing, for crop mode's pan
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "9405503", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.1", features = ["unstable-api"] }
 url = "2"

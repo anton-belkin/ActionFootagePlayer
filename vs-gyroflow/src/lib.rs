@@ -134,12 +134,51 @@ struct Job {
     edges: Option<edges::EdgeJob>,
     /// The view to render it in (Views)
     view: u8,
+    /// The camera turned and zoomed in that view (crop mode)
+    camera: Camera,
     /// The frame's lens geometry written into its luma for mpv's chromatic.glsl (dispersion.rs)
     marker: bool,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
 unsafe impl Send for Job { }
+
+/// The camera turned and zoomed on top of the stabilization (crop mode): yaw, pitch and roll in degrees, after the
+/// smoothing (gyroflow-core's `view_rotation`, so turning it smooths nothing again), and the FOV times `zoom`. A new
+/// camera is new parameters for the next frame, as a view is
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub roll: f64,
+    pub zoom: f64,
+}
+
+impl Default for Camera {
+    fn default() -> Camera { Camera { yaw: 0.0, pitch: 0.0, roll: 0.0, zoom: 1.0 } }
+}
+
+impl Camera {
+    /// `yaw,pitch,roll,zoom`
+    pub fn parse(v: &str) -> Option<Camera> {
+        let n: Vec<f64> = v.split(',').map(|x| x.trim().parse::<f64>()).collect::<Result<_, _>>().ok()?;
+        match n[..] {
+            [yaw, pitch, roll, zoom] if n.iter().all(|x| x.is_finite()) && zoom > 0.0 =>
+                Some(Camera { yaw: yaw.clamp(-180.0, 180.0), pitch: pitch.clamp(-90.0, 90.0), roll: roll.clamp(-180.0, 180.0), zoom: zoom.clamp(0.05, 8.0) }),
+            _ => None,
+        }
+    }
+
+    pub fn is_default(&self) -> bool { *self == Camera::default() }
+
+    /// A view's parameters seen through this camera
+    pub fn apply(&self, base: &ComputeParams) -> ComputeParams {
+        let mut p = base.clone();
+        p.view_rotation = (self.yaw, self.pitch, self.roll);
+        p.fov_scale *= self.zoom;
+        p
+    }
+}
 
 /// The FOV the stabilization renders at
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -420,6 +459,9 @@ impl Engine {
         let view = self.views.index(view, self.edges.level().or(self.level).unwrap_or(Level::Medium));
         self.edges.set_expected(self.views.uncovered[view].0 > 0);
         let view = view as u8;
+        // Turned or zoomed out, the frame may leave edges where the view itself never does
+        let camera = self.edges.camera();
+        if !camera.is_default() { self.edges.set_expected(true); }
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
             // No frame of the clip leaves edges (uncovered_frames): nothing to fill, nor the source scaled down and the
@@ -429,7 +471,7 @@ impl Engine {
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -658,6 +700,7 @@ fn process_planes(planes: &mut [PlaneStab], cfg: WorkerConfig, timestamp_us: i64
 fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mpsc::Receiver<Job>>, cfg: WorkerConfig, geometry: &[((usize, usize), (usize, usize))], edges: &edges::Edges, ready: mpsc::Sender<()>) {
     // Video without a range property is almost always limited; rebuilt if a frame says otherwise
     let mut limited_range = cfg.is_yuv;
+    let mut camera = Camera::default();
     let mut planes = create_planes(mgr, &views.params[view as usize], cfg, geometry.len(), limited_range);
     let mut edge_worker = edges::EdgeWorker::new(mgr, &views.params[view as usize], cfg, &edges.geometry, limited_range);
     // For the marker (dispersion.rs): what the frame shows where it doesn't cover the output and nothing fills it
@@ -686,14 +729,15 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
         // Hold the lock only while waiting, so the other worker takes the next frame
         let Ok(job) = rx.lock().recv() else { break };
         let t = std::time::Instant::now();
-        if job.limited_range != limited_range || job.view != view {
-            // Another view, or the background color in another range: new parameters, the GPU setup stays
-            (limited_range, view) = (job.limited_range, job.view);
-            let base = &views.params[view as usize];
+        if job.limited_range != limited_range || job.view != view || job.camera != camera {
+            // Another view, camera, or the background color in another range: new parameters, the GPU setup stays
+            (limited_range, view, camera) = (job.limited_range, job.view, job.camera);
+            let base = camera.apply(&views.params[view as usize]);
             for plane in planes.iter_mut() {
-                plane.stab.set_compute_params(plane_compute_params(base, cfg, plane.index, limited_range));
+                plane.stab.set_compute_params(plane_compute_params(&base, cfg, plane.index, limited_range));
             }
-            edge_worker.set_view(base, cfg, limited_range);
+            edge_worker.set_view(&base, cfg, limited_range);
+            edges.write_camera_info(&base, &camera, job.timestamp_us);
         }
         let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
         let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
