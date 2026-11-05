@@ -1,0 +1,70 @@
+From f4303ae7a4d9af1d81f38aac1133f81bf0345b4e Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Thu, 5 Nov 2026 22:51:09 +0100
+Subject: [PATCH] mac/vulkan: commit the Metal layer's HDR state set on the VO
+ thread
+
+MoltenVK sets the layer's colorspace, wantsExtendedDynamicRangeContent and
+edrMetadata when it creates the swapchain, on the VO thread. That thread
+has no run loop, so the implicit transaction they are in was committed
+only with whatever the main thread committed next, and on macOS 27 an
+HLG or PQ swapchain mostly never switched the display to EDR: the video
+stayed SDR-dim. Flush the transaction when one of them changes off the
+main thread.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/mac/metal_layer.swift | 23 ++++++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/video/out/mac/metal_layer.swift b/video/out/mac/metal_layer.swift
+index 40abf65cb..5a321f164 100644
+--- a/video/out/mac/metal_layer.swift
++++ b/video/out/mac/metal_layer.swift
+@@ -43,23 +43,40 @@ class MetalLayer: CAMetalLayer {
+     var previousColorspace: CGColorSpace?
+     override var colorspace: CGColorSpace? {
+         didSet {
+-            if colorspace != previousColorspace { logState(property: "colorspace") }
++            if colorspace != previousColorspace {
++                logState(property: "colorspace")
++                commitFromVoThread()
++            }
+             previousColorspace = colorspace
+         }
+     }
+ 
+     override var edrMetadata: CAEDRMetadata? {
+         didSet {
+-            if edrMetadata != oldValue { logState(property: "HDR metadata") }
++            if edrMetadata != oldValue {
++                logState(property: "HDR metadata")
++                commitFromVoThread()
++            }
+         }
+     }
+ 
+     override var wantsExtendedDynamicRangeContent: Bool {
+         didSet {
+-            if wantsExtendedDynamicRangeContent != oldValue { logState(property: "HDR") }
++            if wantsExtendedDynamicRangeContent != oldValue {
++                logState(property: "HDR")
++                commitFromVoThread()
++            }
+         }
+     }
+ 
++    // MoltenVK sets the color space and EDR properties when it creates the swapchain, on the VO thread,
++    // which has no run loop to commit the implicit transaction they are in. Left to be committed with
++    // whatever the main thread commits next, an HDR swapchain often never switched the display to EDR
++    // (macOS 27: HLG and PQ shown SDR-dim)
++    func commitFromVoThread() {
++        if !Thread.isMainThread { CATransaction.flush() }
++    }
++
+     override var displaySyncEnabled: Bool {
+         didSet {
+             if displaySyncEnabled != oldValue { logState(property: "display sync") }
+-- 
+2.42.0
+
