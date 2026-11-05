@@ -635,6 +635,12 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let to = opt_to.unwrap_or(info.duration).min(info.duration.max(from));
     // With -ss before -i, ffmpeg starts at the first frame at or after `from`
     let first_frame = (from * fps - 1e-6).ceil().max(0.0) as u64;
+    // Where the decoder seeks: a quarter of a frame before that frame. ffmpeg's raw output keeps a constant frame
+    // rate, and a first frame much after the seek point (half a frame) has it repeat one to fill the gap: every
+    // frame after it then got the motion data of the one before, and the stabilized picture shook (its roll most)
+    let seek = (first_frame as f64 - 0.25).max(0.0) / fps;
+    // The audio from the first frame's time, with it
+    let video_start = first_frame as f64 / fps;
     let total_frames = if opt_from.is_some() || opt_to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) };
 
     // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size. Color only: none,
@@ -719,7 +725,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let mut dec_cmd = ffmpeg_command("ffmpeg");
     dec_cmd.args(["-nostdin", "-v", "error"]);
     if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
-    if opt_from.is_some() { dec_cmd.args(["-ss", &format!("{from:.6}")]); }
+    if opt_from.is_some() { dec_cmd.args(["-ss", &format!("{seek:.6}")]); }
     if opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
     dec_cmd.arg("-i").arg(&path)
         .args(["-map", "0:v:0", "-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
@@ -739,7 +745,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                   "-i", "-"]);
     // The audio and metadata from the source; for Dolby Vision, the muxer takes them
     if dv_rpus.is_none() {
-        if opt_from.is_some() { enc_cmd.args(["-ss", &format!("{from:.6}")]); }
+        if opt_from.is_some() { enc_cmd.args(["-ss", &format!("{video_start:.6}")]); }
         if opt_to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
         enc_cmd.arg("-i").arg(&path)
             .args(["-map", "0:v", "-map", audio, "-map_metadata", "1", "-c:a", "copy"]);
@@ -789,7 +795,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let mut mux_cmd = ffmpeg_command("ffmpeg");
         // -r, not the demuxer's -framerate: raw HEVC has no timestamps, and with -framerate they come out wrong
         mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", info.fps.0, info.fps.1), "-i", "-"]);
-        if opt_from.is_some() { mux_cmd.args(["-ss", &format!("{from:.6}")]); }
+        if opt_from.is_some() { mux_cmd.args(["-ss", &format!("{video_start:.6}")]); }
         if opt_to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
         mux_cmd.arg("-i").arg(&path)
             .args(["-map", "0:v", "-map", audio, "-map_metadata", "1", "-c", "copy", "-tag:v", "hvc1"]).args(color)

@@ -131,7 +131,7 @@
 --   live_photo=yes  a photo (Alt+s; Enter in crop mode) with the motion around it, as a phone's: live, a Live Photo
 --                (a .mov next to the HEIC, for Apple's devices; macOS only), motion, a Motion Photo (an Ultra HDR JPEG
 --                with the video in it, for Android's), no, the still alone; yes: Live Photos on macOS, Motion Photos
---                elsewhere. The crop panel's choice sets it, kept here at once (export.lua)
+--                elsewhere. The Save frame panel's choice sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 

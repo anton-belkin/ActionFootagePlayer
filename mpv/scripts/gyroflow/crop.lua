@@ -547,7 +547,7 @@ function M.set(on)
         -- The app's mpv (tools/mpv-patches/0008); others have no such option
         gestures = mp.set_property_native("macos-gesture-messages", true) == true
         for _, b in ipairs(BINDINGS) do mp.add_forced_key_binding(b[1], b[2], b[3], b[4]) end
-        mp.osd_message("Crop: drag to pan, wheel or pinch to zoom, Alt+drag to level", 3)
+        mp.osd_message("Save frame: drag to pan, wheel or pinch to zoom, Alt+drag to level, Enter to save", 3)
     else
         for _, b in ipairs(BINDINGS) do mp.remove_key_binding(b[2]) end
         if saved.dragging ~= nil then mp.set_property_native("window-dragging", saved.dragging) end
@@ -567,7 +567,7 @@ function M.set(on)
                 if t then mp.commandv("seek", tostring(t), "absolute+exact") end
             end
         end
-        mp.osd_message("Crop: off", 1)
+        mp.osd_message("Save frame: off", 1)
     end
     if cam then changed() else draw(); publish() end
 end

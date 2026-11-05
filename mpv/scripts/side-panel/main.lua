@@ -145,11 +145,11 @@ local function icon(u, name, cx, cy, color)
         for _, x in ipairs({ -5.5, -1, 3.5 }) do u:box(cx + x * s, cy - 3 * s, 2 * s, 2 * s, 0, color) end
         u:box(cx - 4.5 * s, cy + 1.5 * s, 9 * s, 1.6 * s, 0, color)
     elseif name == "crop" then
-        -- Two corners crossing, as a crop tool's
-        u:box(cx - 6 * s, cy - 9 * s, 1.6 * s, 15 * s, 0, color)
-        u:box(cx - 6 * s, cy + 4.4 * s, 15 * s, 1.6 * s, 0, color)
-        u:box(cx - 9 * s, cy - 6 * s, 15 * s, 1.6 * s, 0, color)
-        u:box(cx + 4.4 * s, cy - 6 * s, 1.6 * s, 15 * s, 0, color)
+        -- A camera: the body with its viewfinder bump, the lens
+        u:shape(ui.rrect_path(cx - 9 * s, cy - 5 * s, 18 * s, 12.5 * s, 2.5 * s), color, stroke)
+        u:shape("m " .. at(-4, -5) .. " l " .. at(-2.5, -8) .. " " .. at(2.5, -8) .. " " .. at(4, -5), color)
+        u:shape(ui.circle_path(cx, cy + 1.2 * s, 3.6 * s), color, stroke)
+        u:shape(ui.circle_path(cx + 6 * s, cy - 2.4 * s, 0.9 * s), color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -158,7 +158,7 @@ end
 
 -- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 local TABS = {
-    { "clip", "Clip" }, { "crop", "Crop" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
+    { "clip", "Clip" }, { "crop", "Save frame" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
     { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -617,19 +617,27 @@ local function support_part(u, x, w, y)
     return u:button(x + half + 8 * s, half, y, "github", "GitHub", function() open_url(REPO) end)
 end
 
--- Crop mode (the gyroflow plugin's crop.lua): a frame over the video, the picture moved under it, or the camera turned
--- where the clip is stabilized
+-- Save frame (the gyroflow plugin's crop.lua, its crop mode): a frame over the video for a photo of the frame on
+-- screen, the picture moved under it, or the camera turned where the clip is stabilized. For this frame only: the
+-- whole video's crop is Gyroflow's
 local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
 local function crop_part(u, x, w, y)
     local s = u.s
     local g = state("gyroflow")
-    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Open a clip to frame a still or a part of it") end
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Open a clip to save a frame of it as a photo") end
     if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
     local c = g.crop or {}
-    y = u:switch(x, w, y, "crop", "Crop mode", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
+    -- The whole video's crop, rotation and zoom are the stabilization's, in Gyroflow
+    local function whole_video(y)
+        y = u:caption(x, w, y + 10 * s, "This frames the photo only. To crop the whole video, set its crop and zoom in Gyroflow")
+        return u:button(x, w, y + 4 * s, "crop-gyroflow", g.available and "Open in Gyroflow…" or "Stabilize in Gyroflow…",
+                        "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
+    end
+    y = u:switch(x, w, y, "crop", "Frame the photo", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
     if not c.active then
-        return u:caption(x, w, y, "A frame over the video, for a still or a part of the clip. Where the clip is stabilized, "
-                                  .. "moving the picture turns the camera, and zoom is its angle of view")
+        y = u:caption(x, w, y, "A frame over the video, for a photo of the frame on screen. Where the clip is stabilized, "
+                               .. "moving the picture turns the camera, and zoom is its angle of view")
+        return whole_video(y)
     end
     local function set(key, v) mp.commandv("script-message-to", "gyroflow", "crop-set", key, string.format("%.5f", v)) end
     local function value_row(label, value)
@@ -692,7 +700,8 @@ local function crop_part(u, x, w, y)
               or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
               or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
     y = u:caption(x, w, y, what .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
-    return u:button(x, w, y + 6 * s, "crop-leave", "Leave crop mode", "script-message-to gyroflow crop no", { key = "Esc" })
+    y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
+    return whole_video(y)
 end
 
 local PARTS = { clip = clip_part, crop = crop_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
