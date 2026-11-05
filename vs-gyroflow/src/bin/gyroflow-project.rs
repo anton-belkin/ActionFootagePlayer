@@ -15,8 +15,10 @@
 //   --print-trim        <project.gyroflow>: its first trim range, "<in>,<out>" in seconds (nothing without one): a
 //                       moment's ends changed in Gyroflow, which the player takes
 //
-// The output frame as the player has it (vs_gyroflow::Frame), new, copied or edited alike; without them, the project's:
-//   --rotation <deg>    the picture turned clockwise by 0, 90, 180 or 270 degrees: Gyroflow's video rotation
+// The output frame as the player has it (vs_gyroflow::Frame), new, copied or edited alike; without them, the project's
+// (a new one: upright as the file's display matrix says, a camera held vertical):
+//   --rotation <deg>    the picture turned clockwise by 0, 90, 180 or 270 degrees, on top of the file's own turn:
+//                       Gyroflow's video rotation
 //   --aspect <W:H>      the output cut to this aspect after the rotation (original: the whole frame): its output size,
 //                       the largest centered rectangle of it in the turned video, sides rounded down to even
 //   --projection <p>    Gyroflow's output projection: rectilinear, stereographic, equidistant, equisolid, orthographic
@@ -104,7 +106,7 @@ fn main() {
         if args.len() != 1 || args[0].starts_with("--") { usage(); }
         let project = PathBuf::from(&args[0]);
         let result = std::fs::read_to_string(&project).map_err(|e| format!("{}: {e}", project.display()))
-            .and_then(|text| adjust(&text, trim, alone, horizon_lock, frame))
+            .and_then(|text| { let frame = on_top_of_the_file(frame, project_video(&text, &project).as_deref()); adjust(&text, trim, alone, horizon_lock, frame) })
             .and_then(|text| write_whole(&project, &text));
         if let Err(e) = result {
             eprintln!("gyroflow-project: {e}");
@@ -121,7 +123,7 @@ fn main() {
         // The video's own project, copied with the moment's trim: it then lives apart from it
         Some(src) => if project.exists() { Err(format!("{} already exists", project.display())) } else {
             std::fs::read_to_string(src).map_err(|e| format!("{src}: {e}"))
-                .and_then(|text| adjust(&text, trim, alone, horizon_lock, frame))
+                .and_then(|text| adjust(&text, trim, alone, horizon_lock, on_top_of_the_file(frame, Some(&video))))
                 .and_then(|text| write_whole(&project, &text))
         },
         None => run(&video, &project, preset.as_deref(), underwater, horizon_lock, level, wide, trim, alone, frame),
@@ -130,6 +132,22 @@ fn main() {
         eprintln!("gyroflow-project: {e}");
         std::process::exit(1);
     }
+}
+
+// The frame flags on top of the video's own turn (its display matrix); none given: none, the project's as it is
+fn on_top_of_the_file(frame: Frame, video: Option<&Path>) -> Frame {
+    if frame.is_none() { return frame; }
+    frame.for_video(video.and_then(|v| vs_gyroflow::mp4meta::display_rotation(v).ok()).unwrap_or(0), None)
+}
+
+// A project's video, as Gyroflow finds it: its videofile (a URL or a path), else next to the project
+fn project_video(text: &str, project: &Path) -> Option<PathBuf> {
+    let json: serde_json::Value = serde_json::from_str(text).ok()?;
+    let v = json.get("videofile")?.as_str()?;
+    let path = PathBuf::from(if v.contains("://") { gyroflow_core::filesystem::url_to_path(v) } else { v.to_string() });
+    if path.exists() { return Some(path); }
+    let beside = project.parent()?.join(path.file_name()?);
+    beside.exists().then_some(beside)
 }
 
 // A project's JSON with a trim range (seconds of the video), "only within it", the horizon lock's amount and the

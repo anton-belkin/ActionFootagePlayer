@@ -252,6 +252,9 @@ local function frame_part(u, x, w, y, g)
         { "180°", "script-message-to gyroflow rotate 180" },
         { "90° ↺", "script-message-to gyroflow rotate 270" },
     }, turns[g.rotation or 0])
+    if (g.file_rotation or 0) ~= 0 then
+        y = u:caption(x, w, y, "Recorded with the camera turned: shown upright as the file says (" .. g.file_rotation .. "°), and turned more by these")
+    end
     y = u:caption(x, w, y + 4 * s, "Lens")
     local stabilized = g.available and g.view ~= "off"
     for _, p in ipairs(PROJECTIONS) do

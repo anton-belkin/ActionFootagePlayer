@@ -73,7 +73,8 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
                    10, 20 or 30 % of the frame cropped, smoothness 50, 75 or 100 % (Ctrl+s)
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
   --rotation <deg> the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of
-                   the project's rotation; not stabilized, ffmpeg's transpose
+                   the project's rotation; not stabilized, ffmpeg's transpose. On top of the turn the file asks for (a
+                   camera held vertical: its display matrix), which every output has: upright as players show it
   --aspect <W:H>   the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16: the
                    largest centered rectangle of it, sides rounded down to even (original, the default: the whole
                    frame); in place of the project's output size. Stabilized, Gyroflow's zoom fits the picture to it
@@ -885,9 +886,11 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
         None if info.transfer.as_deref() == Some("arib-std-b67") => Some(lut(NBCU_HLG)?),
         None => None,
     };
-    // Turned and cut as --rotation and --aspect say, before it's scaled down
-    let turn = opts.frame.ffmpeg_filter((src.width, src.height));
-    let (pw, ph) = { let (fw, fh) = opts.frame.size((src.width, src.height)); preview_size(fw, fh) };
+    // Decoded as the sensor has it (-noautorotate), then turned upright as the file says (its display matrix: the low
+    // resolution copy's own) and as --rotation and --aspect say, before it's scaled down
+    let frame = opts.frame.for_video(display_rotation(&source), None);
+    let turn = frame.ffmpeg_filter((src.width, src.height));
+    let (pw, ph) = { let (fw, fh) = frame.size((src.width, src.height)); preview_size(fw, fh) };
     let in_range = if src.full_range { "pc" } else { "tv" };
     let look = match &cube {
         Some(c) => format!(",scale=in_color_matrix={}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
@@ -914,7 +917,7 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
         let mut cmd = ffmpeg_command("ffmpeg");
         cmd.args(["-nostdin", "-v", "error"]);
         if keyframes { cmd.args(["-skip_frame", "nokey", "-noaccurate_seek"]); }
-        cmd.args(["-ss", &format!("{t:.3}"), "-i"]).arg(&source)
+        cmd.args(["-ss", &format!("{t:.3}"), "-noautorotate", "-i"]).arg(&source)
             .args(["-map", "0:v:0", "-frames:v", "1", "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"])
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
@@ -980,6 +983,20 @@ struct Part {
     max_fps: f64,
     mp4: bool,
     dv: bool,
+}
+
+// How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
+fn display_rotation(path: &Path) -> u16 {
+    vs_gyroflow::mp4meta::display_rotation(path).unwrap_or(0)
+}
+
+// The frames a decoder hands over (the sensor's, of `size`: -noautorotate) and the filters that make them so: for the
+// engine as they are (it turns them itself, Engine::load), else turned upright as the file says, --rotation on top,
+// and cut to --aspect
+fn decoded_frame(stabilized: bool, path: &Path, size: (usize, usize), opts: &Options) -> ((usize, usize), String) {
+    if stabilized { return (size, String::new()); }
+    let frame = opts.frame.for_video(display_rotation(path), None);
+    (frame.size(size), frame.ffmpeg_filter(size))
 }
 
 fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, String> {
@@ -1145,8 +1162,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
         e.edges.set_camera(camera);
     }
-    // The frames as decoded: the source's size for the engine, else turned and cut by the decoder (--rotation, --aspect)
-    let ((dw, dh), turn) = if engine.is_some() { ((w, h), String::new()) } else { (opts.frame.size((w, h)), opts.frame.ffmpeg_filter((w, h))) };
+    // The frames as decoded, as the sensor has them (-noautorotate): the source's size for the engine (which turns them
+    // itself, Engine::load), else turned upright as the file says and turned and cut by --rotation and --aspect
+    let ((dw, dh), turn) = decoded_frame(engine.is_some(), &path, (w, h), opts);
     // Zoomed out, rendered that much bigger, as a photo is
     let (ow, oh) = engine.as_ref().map_or((dw, dh), |e| {
         let s = camera.zoom.clamp(1.0, 2.0);
@@ -1207,7 +1225,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
     if preview.is_some() || opt_from.is_some() { dec_cmd.args(["-ss", &format!("{seek:.6}")]); }
     if preview.is_none() && opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
-    dec_cmd.arg("-i").arg(&path).args(["-map", "0:v:0"]);
+    dec_cmd.args(["-noautorotate", "-i"]).arg(&path).args(["-map", "0:v:0"]);
     if preview.is_some() { dec_cmd.args(["-frames:v", "1"]); }
     dec_cmd.args(["-vf", &format!("scale={w}:{h}{}{turn}", if turn.is_empty() { "" } else { "," }), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -1613,8 +1631,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
         e.edges.set_camera(camera);
     }
-    // The frames as decoded: the source's size for the engine, else turned and cut by the decoder (--rotation, --aspect)
-    let ((dw, dh), turn) = if engine.is_some() { ((w, h), String::new()) } else { (opts.frame.size((w, h)), opts.frame.ffmpeg_filter((w, h))) };
+    // The frames as decoded, as for an export (decoded_frame)
+    let ((dw, dh), turn) = decoded_frame(engine.is_some(), &path, (w, h), opts);
     // Zoomed out (crop mode's camera starts so), rendered that much bigger: the frame's part keeps the pixels the
     // view has at its own zoom
     let (rw, rh) = match &engine {
@@ -1637,7 +1655,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
     // With -ss before -i, the first frame at or after it
     if first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", (first as f64 - 0.25) / fps)]); }
-    dec_cmd.arg("-i").arg(&path)
+    dec_cmd.args(["-noautorotate", "-i"]).arg(&path)
         .args(["-map", "0:v:0", "-frames:v", &(last - first + 1).to_string(), "-vf", &format!("scale={w}:{h}{}{turn}", if turn.is_empty() { "" } else { "," }),
                "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());

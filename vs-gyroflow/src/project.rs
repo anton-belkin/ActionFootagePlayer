@@ -23,13 +23,15 @@ use crate::water::Underwater;
 /// `level`: the level it plays in; `wide`: the plugin's wider view, as Gyroflow has it: its zoom off, at the FOV
 /// `wide_fov` finds
 /// `frame`: the output frame turned, cut to an aspect and its projection, as Engine::load has it (Frame): the
-/// project's rotation, output size and output projection
+/// project's rotation, output size and output projection; its rotation on top of the file's own turn
 pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool, project_path: &str, frame: crate::Frame) -> Result<String, String> {
     let (stab, _, _) = crate::load_manager(video, preset, horizon_lock, underwater, 0.0)?;
     if !stab.gyro.read().has_motion() {
         return Err(format!("{video} has no motion data"));
     }
-    // Before the level's or the wider view's FOV is measured, as Engine::load
+    // Before the level's or the wider view's FOV is measured, as Engine::load; turned upright as the file says (its
+    // display matrix), the frame's rotation on top: Gyroflow opens it as it plays
+    let frame = frame.for_video(crate::mp4meta::display_rotation(std::path::Path::new(video)).unwrap_or(0), None);
     if let Some(projection) = frame.projection { stab.set_output_projection(projection); }
     if !frame.is_none() {
         stab.set_video_rotation(frame.gyroflow_rotation());

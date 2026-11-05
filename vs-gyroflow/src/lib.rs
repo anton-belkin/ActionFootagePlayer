@@ -242,6 +242,19 @@ impl Frame {
         ((1..=1000).contains(&w) && (1..=1000).contains(&h)).then_some(Some((w, h)))
     }
 
+    /// The frame a video renders in, its file's own turn counted (`display_rotation`, mp4meta.rs: what a player turns
+    /// it by to show it upright; the plugin's frames are the sensor's, unturned): this one's rotation on top of it. A
+    /// project (`project_rotation`, its video_rotation, Gyroflow's) without a frame of its own keeps its own rotation and
+    /// size, unless it has none (0) for a turned file, as the player's projects had before it turned them: the file's
+    /// turn then
+    pub fn for_video(self, display_rotation: u16, project_rotation: Option<f64>) -> Frame {
+        let on_top = Frame { rotation: (display_rotation + self.rotation) % 360, ..self };
+        match project_rotation {
+            Some(r) if self.is_none() => if r == 0.0 && display_rotation != 0 { on_top } else { self },
+            _ => on_top,
+        }
+    }
+
     /// No size or rotation of its own: the project's output size and rotation, as without a frame (the projection apart)
     pub fn is_none(&self) -> bool { self.rotation == 0 && self.aspect.is_none() }
 
@@ -449,6 +462,14 @@ impl Engine {
     pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead)?;
+        // The frame's rotation on top of the file's own turn: the frames come unturned (mpv's video-rotate off)
+        let frame = {
+            let video = if project_json.is_some() { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+            let turn = mp4meta::display_rotation(std::path::Path::new(&video)).unwrap_or(0);
+            let frame = frame.for_video(turn, project_json.as_ref().map(|_| stab.params.read().video_rotation));
+            if turn != 0 { log::info!("{video}: turned {turn}° to show it upright"); }
+            frame
+        };
         // The frame's projection, before anything measures the frame (the zoom, the levels, the wider view)
         if let Some(projection) = frame.projection { stab.set_output_projection(projection); }
         if let (Some(alone), None) = (alone, motion.as_ref()) {
@@ -1604,6 +1625,21 @@ mod frame_tests {
         assert_eq!(frame(0, "4:5").size((2688, 1512)), (1208, 1512));
         assert_eq!(frame(0, "3:4").size((1920, 1080)), (810, 1080));
         assert_eq!(frame(0, "9:16").size((1920, 1080)), (606, 1080));
+    }
+
+    #[test]
+    fn on_top_of_the_files_turn() {
+        let user = frame(90, "original");
+        // A video: the file's turn, the frame's on top of it
+        assert_eq!(Frame::default().for_video(90, None).size(UHD), (2160, 3840));
+        assert_eq!(user.for_video(90, None).rotation, 180);
+        assert_eq!(frame(270, "9:16").for_video(90, None), Frame { rotation: 0, aspect: Some((9, 16)), projection: None });
+        assert!(Frame::default().for_video(0, None).is_none());
+        // A project: its own rotation kept without a frame of its own, the file's where it has none
+        assert_eq!(Frame::default().for_video(90, Some(270.0)), Frame::default());
+        assert_eq!(Frame::default().for_video(90, Some(0.0)).rotation, 90);
+        assert!(Frame::default().for_video(0, Some(0.0)).is_none());
+        assert_eq!(user.for_video(90, Some(270.0)).rotation, 180);
     }
 
     #[test]

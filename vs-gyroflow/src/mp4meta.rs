@@ -360,9 +360,78 @@ pub fn read_key(path: &Path, key: &str) -> Result<Option<String>, String> {
     Ok(read_keys(path)?.into_iter().find(|(k, _)| k == key).map(|(_, v)| v))
 }
 
+/// The turn a player gives the video to show it upright, clockwise in degrees, 0, 90, 180 or 270: the display matrix of
+/// its first video track's header (`moov/trak/tkhd`), as a camera held on its side writes it (an Osmo Action 6 shot
+/// vertical: 3840x2160 turned 90, which ffprobe shows as `rotation: -90`, counterclockwise). The matrix's `a b c d`
+/// in 16.16, a point (x, y) shown at (a·x + c·y, b·x + d·y): turned by atan2(b, a), rounded to a quarter. A mirrored
+/// one is taken for its turn alone. 0 for a file without a moov or a video track
+pub fn display_rotation(path: &Path) -> Result<u16, String> {
+    let mut f = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let top = top_level(&mut f)?;
+    let Some(&(moov_at, moov_size, _)) = top.iter().find(|b| &b.2 == b"moov") else { return Ok(0) };
+    let mut moov = vec![0u8; moov_size as usize];
+    f.seek(SeekFrom::Start(moov_at)).map_err(|e| e.to_string())?;
+    f.read_exact(&mut moov).map_err(|e| e.to_string())?;
+    Ok(rotation_in_moov(&moov)?.unwrap_or(0))
+}
+
+/// The first video track's turn in a moov (the box, header included), None without one
+fn rotation_in_moov(moov: &[u8]) -> Result<Option<u16>, String> {
+    let head = boxes(moov, 0, moov.len())?[0];
+    for trak in boxes(moov, head.header, moov.len())?.iter().filter(|k| &k.kind == b"trak") {
+        let kids = boxes(moov, trak.body().start, trak.body().end)?;
+        let video = kids.iter().filter(|k| &k.kind == b"mdia").any(|mdia| {
+            boxes(moov, mdia.body().start, mdia.body().end).unwrap_or_default().iter()
+                // hdlr: version and flags, pre_defined, then the handler type
+                .any(|h| &h.kind == b"hdlr" && h.size >= h.header + 12 && &moov[h.body().start + 8..h.body().start + 12] == b"vide")
+        });
+        let Some(tkhd) = kids.iter().find(|k| &k.kind == b"tkhd") else { continue };
+        if !video { continue; }
+        let body = tkhd.body();
+        // After version and flags: times, track ID, reserved and duration (20 bytes, 32 in version 1), then reserved
+        // (8), layer, group, volume and reserved (8): the matrix
+        let at = body.start + 4 + if moov[body.start] == 1 { 32 } else { 20 } + 16;
+        if at + 36 > body.end { return Err("a broken tkhd".into()); }
+        let v = |i: usize| be32(moov, at + 4 * i) as i32 as f64 / 65536.0;
+        let (a, b) = (v(0), v(1));
+        if a == 0.0 && b == 0.0 { return Ok(Some(0)); }
+        let degrees = b.atan2(a).to_degrees();
+        return Ok(Some(((degrees / 90.0).round() as i64 * 90).rem_euclid(360) as u16));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A moov of a sound track and a video track whose header has the matrix (a, b, c, d)
+    fn turned_moov(m: [i32; 4], version: u8) -> Vec<u8> {
+        let hdlr = |kind: &[u8; 4]| { let mut b = vec![0u8; 8]; b.extend_from_slice(kind); b.extend_from_slice(&[0u8; 12]); make_box(b"hdlr", &b) };
+        let tkhd = |m: [i32; 4]| {
+            let mut b = vec![version, 0, 0, 3];
+            b.extend(std::iter::repeat(0u8).take(if version == 1 { 32 } else { 20 } + 16));
+            for x in [m[0], m[1], 0, m[2], m[3], 0, 0, 0, 0x4000_0000] { b.extend_from_slice(&x.to_be_bytes()); }
+            b.extend_from_slice(&[0u8; 8]);
+            make_box(b"tkhd", &b)
+        };
+        let one = 0x10000;
+        let sound = make_box(b"trak", &[tkhd([one, 0, 0, one]), make_box(b"mdia", &hdlr(b"soun"))].concat());
+        let video = make_box(b"trak", &[tkhd(m), make_box(b"mdia", &hdlr(b"vide"))].concat());
+        make_box(b"moov", &[sound, video].concat())
+    }
+
+    #[test]
+    fn a_turn_by_the_video_tracks_matrix() {
+        let one = 0x10000;
+        // The Osmo Action 6 held vertical: (0, 1, -1, 0), ffprobe's -90
+        assert_eq!(rotation_in_moov(&turned_moov([0, one, -one, 0], 0)).unwrap(), Some(90));
+        assert_eq!(rotation_in_moov(&turned_moov([0, one, -one, 0], 1)).unwrap(), Some(90));
+        assert_eq!(rotation_in_moov(&turned_moov([-one, 0, 0, -one], 0)).unwrap(), Some(180));
+        assert_eq!(rotation_in_moov(&turned_moov([0, -one, one, 0], 0)).unwrap(), Some(270));
+        assert_eq!(rotation_in_moov(&turned_moov([one, 0, 0, one], 0)).unwrap(), Some(0));
+        assert_eq!(rotation_in_moov(&make_box(b"moov", &[])).unwrap(), None);
+    }
 
     // A file of ftyp, moov (one track whose chunks are in mdat, plus extra boxes) and mdat, in either order
     fn file(moov_first: bool, wide: bool, extra: &[Vec<u8>]) -> (Vec<u8>, Vec<u8>) {

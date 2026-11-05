@@ -70,7 +70,8 @@
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
--- Gyroflow), exporting, last_export, live_photo.
+-- Gyroflow), exporting, last_export, live_photo, aspect, rotation (the frame's turn, on top of the file's own),
+-- projection, file_rotation (how the file says it's shown: its display matrix, clockwise).
 --
 -- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
 -- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
@@ -261,7 +262,9 @@ local function find_source(path, done)
                 if not preset and file_exists(p) then preset = p end
             end
         end
-        done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water })
+        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
+        done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
+               rotation = tonumber(info.rotation) or 0 })
     end)
 end
 
@@ -315,7 +318,12 @@ local function render_sizes(source, full)
     local w, h = source.width, source.height
     if not w or not h or w <= 0 or h <= 0 then return { key = "" } end
     local ow, oh = source.out_width or w, source.out_height or h
-    if frame.rotation ~= 0 or frame.aspect ~= "original" then ow, oh = frame_size(w, h) end
+    -- The file's own turn (its display matrix: a camera held upright) comes first, then the frame's: the plugin renders
+    -- it upright (vs-gyroflow's Frame), and mpv doesn't turn it again. A project has its own, unless the frame changes it
+    local turn = (source.rotation or 0) % 360
+    if frame.rotation ~= 0 or frame.aspect ~= "original" or (turn ~= 0 and source.kind ~= "project") then
+        ow, oh = frame_size(w, h, { rotation = (turn + frame.rotation) % 360, aspect = frame.aspect })
+    end
     local scale = 1
     local dw, dh = display_size()
     if o.resolution ~= "video" and dw and not full then scale = math.min(1, dw / ow, dh / oh) end
@@ -555,6 +563,7 @@ local function publish()
         edges_blur = edge_blur,
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
         ask_when_slow = o.ask_when_slow, aspect = frame.aspect, rotation = frame.rotation, projection = frame.projection,
+        file_rotation = current_source and current_source.rotation or 0,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -643,6 +652,8 @@ local function add_filter(source)
     if scale then table.insert(vf, scale) end
     table.insert(vf, gyroflow_filter(source, not off))
     mp.set_property_native("file-local-options/vf", vf)
+    -- The plugin's frame is upright: mpv's own turn by the file's display matrix would turn it again
+    mp.set_property("file-local-options/video-rotate", off and tostring(frame.rotation) or "no")
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
@@ -650,13 +661,22 @@ local function add_filter(source)
                 .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
--- Whether the camera of a clip with a project next to it records when it's in the water (gyroflow-probe; a clip
--- without one was probed before it loaded), for the menu: it plays meanwhile
+-- The chain set up again (further down)
+local place_filters
+-- Whether the camera of a clip with a project next to it records when it's in the water, and how its file says it's
+-- turned (gyroflow-probe; a clip without one was probed before it loaded), for the menu: it plays meanwhile
 local function find_water(path, source)
     if not file_exists(PROBE) then return end
     mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
         local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
-        if info and info.water and current_source == source then
+        if not info or current_source ~= source then return end
+        -- The file's own turn, for the render size of a frame changed over the project's
+        local turn = tonumber(info.rotation) or 0
+        if turn ~= (source.rotation or 0) then
+            source.rotation = turn
+            if (frame.rotation ~= 0 or frame.aspect ~= "original") and not stab_off then place_filters(true) end
+        end
+        if info.water then
             source.water = true
             publish()
         end
@@ -742,7 +762,7 @@ mp.register_event("shutdown", function() os.remove(EDGE_CONTROL) end)
 -- The input scaling and the stabilization set up again in the filter chain where they are, for the sizes as they are
 -- now (the display's); the decoding with them, when the input scaling comes or goes (the Mac's: on the GPU or not).
 -- full: at full size, for the paused frame (still.lua)
-local function place_filters(enabled, full)
+place_filters = function(enabled, full)
     full_size = full or false
     -- The window stays as it is at full size, which mpv would grow it to (up to autofit-larger) while paused; mpv's own
     -- setting back once the frame is at the playback size again
@@ -879,20 +899,23 @@ end
 -- the decoded frame's own coordinates, before the turn
 mpv_frame = function()
     if not mp.get_property("path") then return end
-    local rotation, crop = 0, ""
+    -- Stabilized, the plugin's frame is upright already (the file's turn and the frame's): mpv turns it no more
+    local rotation, crop = "no", ""
     if not (current_source and not stab_off) then
-        rotation = frame.rotation
+        -- mpv's turn is added to the file's own (its display matrix), and the crop is in the decoded frame's coordinates
+        rotation = tostring(frame.rotation)
         local d = mp.get_property_native("video-dec-params")
         if frame.aspect ~= "original" and type(d) == "table" and d.w and d.h then
-            local fw, fh = frame_size(d.w, d.h)
-            if rotation == 90 or rotation == 270 then fw, fh = fh, fw end
+            local total = ((tonumber(d.rotate) or 0) + frame.rotation) % 360
+            local fw, fh = frame_size(d.w, d.h, { rotation = total, aspect = frame.aspect })
+            if total == 90 or total == 270 then fw, fh = fh, fw end
             fw, fh = math.min(fw, d.w), math.min(fh, d.h)
             -- The whole frame (9:16 turned a quarter): nothing to crop
             if fw < d.w - 1 or fh < d.h - 1 then crop = string.format("%dx%d+%d+%d", fw, fh, math.floor((d.w - fw) / 4) * 2, math.floor((d.h - fh) / 4) * 2) end
         end
     end
-    if mp.get_property("file-local-options/video-rotate") ~= tostring(rotation) then
-        mp.set_property("file-local-options/video-rotate", tostring(rotation))
+    if mp.get_property("file-local-options/video-rotate") ~= rotation then
+        mp.set_property("file-local-options/video-rotate", rotation)
     end
     if (mp.get_property("file-local-options/video-crop") or "") ~= crop then mp.set_property("file-local-options/video-crop", crop) end
 end
