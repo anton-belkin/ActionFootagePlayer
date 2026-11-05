@@ -1104,7 +1104,7 @@ mp.add_key_binding("X", "not-interesting", function()
     do
         local info = utils.file_info(state.clip)
         local preview = preview_for(state.relative, info and info.size)
-        if fs.is_file(preview) then
+        if preview then
             return trash(preview, function(ok)
                 mp.osd_message(ok and "Not interesting: its preview is in the Trash (X again: made again)" or "Couldn't move the preview to the Trash", 3)
                 recount()
