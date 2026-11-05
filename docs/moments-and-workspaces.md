@@ -223,14 +223,19 @@ editor](nle-markers.md#gyroflow)).
 `Moments/<name>.mp4`, one per moment: a real, small MP4 that any OS can show and play, with the link to the
 original inside.
 
-- **The first version**: one frame, in color, held for the moment's length. A still of 960×540 held for 8
-  seconds made here (H.264, VideoToolbox) is **35 KB**. Quick Look shows the picture with the moment's
-  real length.
+- **The first version**: one frame, in color, held for the moment's length (`gyroflow-export --preview still`).
+  960 pixels on the long side, H.264 by x264 at 10 fps with one keyframe: **150–350 KB** for a camera's frame,
+  most of it that keyframe (a noisy underwater D-Log M frame is the 350). A test pattern made here first was 35 KB;
+  a keyframe every 10 s, x264's default, made a 30-second one 1 MB, and VideoToolbox spends some KB on every
+  repeated frame. Quick Look shows the picture with the moment's real length.
 - **Later**: the moment itself, 540p–720p, 1–3 MB, with its sound. Quick Look and the phone then play the moment.
   The player still plays the original.
 - **The icon** is the frame in the file's cover art (MP4 `covr`, written as an `attached_pic` stream). Without
-  cover art, Quick Look picks its own frame. Here it took one from the middle of an 8-second test file; with
-  cover art, it showed the cover. Windows Explorer shows MP4 cover art as the thumbnail too **(to try)**.
+  cover art, Quick Look picks its own frame. With it, Quick Look's thumbnail (`qlmanage -t`) is the cover, not
+  the video: a red video with a lake as its cover got the lake. Windows Explorer shows MP4 cover art as the
+  thumbnail too **(to try)**. ffmpeg writes the cover only from a picture it copies (`-c copy` of a JPEG), not
+  one it encodes alongside the held frame (the video then stops after its first second), so the frame is made as
+  a JPEG first.
 - **H.264, 8-bit, SDR, `yuv420p`**: Explorer can't make thumbnails of HEVC without Microsoft's paid HEVC
   extension, phones and every app play H.264, and an SDR picture looks right in every icon.
 
@@ -262,16 +267,21 @@ A metadata key in the MP4, `ch.actionfootageplayer.link`, whose value is JSON:
 - `roots`: the absolute sources roots when it was made, a hint for a moment file copied out of its project (to
   the Desktop, say) and opened there.
 
-**Where it is in the file**: an `mdta` key in `moov/udta/meta` (`keys` + `ilst`), the place QuickTime keeps
-`com.apple.quicktime.*` keys. Checked here:
+**Where it is in the file**: an `mdta` key in `moov/meta` (`hdlr` mdta, `keys`, `ilst`), with no version and
+flags before its boxes: where and how Apple's own files keep `com.apple.quicktime.*` keys. Checked here:
 
-- ffmpeg writes it while encoding: `-movflags use_metadata_tags -metadata ch.actionfootageplayer.link=…`.
-- **mpv reads it** as `metadata["ch.actionfootageplayer.link"]` (a Lua script printed the JSON intact,
-  Cyrillic too), and ffprobe shows it as a format tag.
-- With `+faststart` the `moov` is at the start: in the 35 KB test file the key was at byte 961. So the
-  plugin's own reader, which walks boxes as `markers.lua` does, reads the first 16 KB of a file to get the key
-  without mpv opening it. It needs that to find a clip's moments ([below](#finding-a-clips-moments)). For a
-  large export, whose `moov` may be at the end, the reader seeks over `mdat`.
+- **AVFoundation** (Quick Look, Photos) reads mdta keys only there and in that form. ffmpeg's own
+  `-movflags use_metadata_tags` puts them in `moov/udta/meta`, with version and flags, where AVFoundation takes
+  them for iTunes items named 1, 2, 3; and with that flag ffmpeg leaves out the cover art. So gyroflow-export
+  writes the file with ffmpeg (cover included) and then adds the keys itself (`vs-gyroflow/src/mp4meta.rs`):
+  the `moov` grows, the media after it moves, and the tracks' chunk offsets with it.
+- **mpv reads it** as `metadata/by-key/ch.actionfootageplayer.link` (printed intact, Cyrillic too), and ffprobe
+  shows it as a format tag. The same goes for `com.apple.quicktime.creationdate`, written beside it.
+- **The plugin's own reader** (`mpv/scripts/workspace/link.lua`) walks the boxes as `markers.lua` does and reads
+  only the `meta` boxes, so it gets the key without mpv opening the file. It needs that to find a clip's moments
+  ([below](#finding-a-clips-moments)). With `+faststart` the `moov` is near the start; where it's at the end
+  (a large export), the reader seeks over `mdat`. It reads `moov/udta/meta` too, where a remux with
+  `-map_metadata 0 -movflags use_metadata_tags` leaves it.
 
 Not chosen:
 
@@ -289,7 +299,7 @@ Not chosen:
 | Copy, move or rename in Finder or Explorer, `cp`, `rsync`, copying to the NAS, AirDrop, iCloud Drive | kept: it's in the file's bytes |
 | A Finder tag, a Finder comment | kept: those are attributes, not the file |
 | Moving the moment within `Moments/`, or moving the whole project with the footage | kept and still right: the path is relative to the sources root |
-| ffmpeg `-c copy` remux | **lost** (checked). Kept with `-map_metadata 0 -movflags use_metadata_tags` |
+| ffmpeg `-c copy` remux | **lost** (checked). Kept with `-map_metadata 0 -movflags use_metadata_tags`, in ffmpeg's place: the player reads it, Apple's apps no longer do |
 | Explorer's star rating (Windows rewrites the `moov` to add its `Xtra` atom) | probably kept **(to try)** |
 | Photos (Mac, iPhone) | the original file is kept as imported; an edited or shared copy loses it |
 | A messenger, a re-encode, an editor's export | lost. It's then simply a video |
@@ -477,12 +487,14 @@ All of them:
 
 - **The look in SDR**: the player's SDR look for the clip, whichever one `export sdr` would pick (the dlogm
   plugin's `sdr_look`). A clip that isn't log keeps its colors. An HLG one goes through NBCU's HLG → SDR.
-- **H.264 8-bit** with the hardware encoder: VideoToolbox on a Mac (`h264_videotoolbox`, used for the tests
-  here). On Windows, Media Foundation, NVENC, Quick Sync or AMF, picked the way gyroflow-export already picks
-  its HEVC encoder, the first that encodes a test frame. They're all in Gyan's build the app carries. On Linux,
-  VAAPI, else `libx264`. For a still, the encoder hardly matters.
-- **`--link <json>`** writes the key, `--cover <t>` the cover art, and `--dates <time>` the dates
-  ([above](#dates)). gyroflow-export already gives its exports the source's dates.
+- **H.264 8-bit**: x264 for stills, which spends some 40 bytes on a repeated frame where VideoToolbox spends
+  KB, then the hardware encoders, the first that encodes a test frame (VideoToolbox, NVENC, Quick Sync, AMF,
+  Media Foundation). x264 is in Homebrew's ffmpeg, which the app carries, and in Gyan's build on Windows. For
+  video previews, the hardware ones first, as for exports.
+- **`--link <json>`** writes the key and `--dates <time>` the dates ([above](#dates)), an ISO 8601 time with its
+  zone; the player works the zone out. A still's cover art is its own frame; `--cover <t>`, a cover from another
+  time, comes with the flipbooks and video previews. gyroflow-export already gives its exports the source's
+  dates, and `--output <file>` names the file.
 - **Only keyframes for clips**: ffmpeg `-skip_frame nokey`, a seek to each time, and the keyframe nearest each
   time taken. Action cameras put one every half second to a second, so a frame is at most that far off.
 - **The low-res copies** where they're next to the clip: DJI's `.LRF` and GoPro's `.LRV` (`GL010123.LRV` for
@@ -547,12 +559,18 @@ first".
    `vs-gyroflow/src/workspace.rs`. Tests: `luajit tests/workspace_test.lua` and `cargo test` over the same cases,
    `tests/workspace_cases.txt` (nested trips, `DCIM`, the home folder, volumes, Windows paths). The clip's real
    path for the other plugins comes with moments (step 4), the first time it differs from mpv's `path`.
-2. **The link**: the key reader in Lua (the `moov/udta/meta` walk, beside `highlights/mp4info.lua` of the
-   editors' design) and the writer in gyroflow-export. Tests: files ffmpeg makes, read back; copied, renamed,
-   tagged with `xattr`, remuxed (lost) and remuxed with `-map_metadata 0` (kept).
-3. **Still previews**: `--preview still`, `--link`, `--cover`, `--dates`. Tests: a short ffmpeg clip in;
-   the key, the cover stream, the dates and the look checked by ffprobe and `stat`; Finder's thumbnail by
-   `qlmanage -t`, which needs no screen.
+2. **The link** (**done**): `mpv/scripts/workspace/link.lua` reads the keys (`moov/meta`, then
+   `moov/udta/meta`), `vs-gyroflow/src/mp4meta.rs` writes them for gyroflow-export. Tests:
+   `luajit tests/link_test.lua` (boxes made in the test; ffmpeg's files copied, renamed, tagged with `xattr`,
+   remuxed: lost, remuxed with `-map_metadata 0`: kept) and `cargo test` (the chunk offsets moved, moov first
+   or last, `co64`, other `meta` boxes and the cover kept).
+3. **Still previews** (**done**): `gyroflow-export --preview still`, `--at`, `--link`, `--dates`, `--output`.
+   Tests: `GYROFLOW_EXPORT=<binary> luajit tests/link_test.lua` makes one from an ffmpeg clip and reads its keys
+   back, in CI after the build. Checked by hand without a screen: clips 0093 (underwater, stabilized) and 0072
+   (D-Log M above water) in the right colors; ffprobe: H.264 and the cover stream, the key and the date; `stat`:
+   the file's dates, creation time included; `qlmanage -t`: the thumbnail is the cover; mpv reads both keys.
+   Not checked: Photos' day from `com.apple.quicktime.creationdate` (AVFoundation's `creationDate` stays nil
+   for an MP4), Explorer.
 4. **Moments**: `k` and the name dialog, `Moments/` scanned and cached, chapters, playing a moment's file and
    the folder, update, rename, remove. Tests: mpv with `--vo=null` over the IPC socket, as for the editors'
    design. The dialog's typing is checked by hand.

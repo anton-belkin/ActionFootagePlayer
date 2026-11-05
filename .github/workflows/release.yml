@@ -59,17 +59,22 @@ jobs:
         if: steps.mpv.outputs.cache-hit != 'true'
         run: tools/build_mpv.sh --no-deps
 
-      # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); LuaJIT is
-      # one of mpv's dependencies
+      # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
+      # reader over files made here and by ffmpeg, and the MP4 keys' writer; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
-          (cd vs-gyroflow && cargo test --release --lib workspace)
+          luajit tests/link_test.lua
+          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes)
 
       - name: Build
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
           MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
+
+      # A preview gyroflow-export makes, its link read back by the player's reader
+      - name: Preview test
+        run: GYROFLOW_EXPORT=vs-gyroflow/target/release/gyroflow-export luajit tests/link_test.lua
 
       - uses: actions/upload-artifact@v4
         with:

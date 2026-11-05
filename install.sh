@@ -262,6 +262,7 @@ put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
 # The project a clip belongs to (its trip folder), for the other plugins
 put mpv/scripts/workspace/main.lua      "$WORKSPACE/main.lua" 644
 put mpv/scripts/workspace/workspace.lua "$WORKSPACE/workspace.lua" 644
+put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do

@@ -530,6 +530,27 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
+- `--output <file>` writes that file instead (one clip).
+
+**Previews** are what the player's moments will be made of ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)):
+a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the clip is.
+
+```bash
+~/.config/mpv/scripts/gyroflow/gyroflow-export --preview still --from 20 --to 30 --at 26.4 \
+    --dates 2026-10-24T09:46:07+03:00 --output Moments/Turtle.mp4 DJI_0093_D.MP4
+```
+
+- `--preview still`: the frame at `--at` (else the middle of `--from` to `--to`), stabilized as an export would be
+  with the same options, held for `--from` to `--to` (the whole clip without them): H.264 at 960 pixels on the
+  long side, 10 fps, one keyframe, its frame also the cover art, so the frame is the file's icon. 150-350 KB for a
+  camera's frame. D-Log M goes through DJI's Rec.709 LUT, other log curves and HLG through NBCU's conversion;
+  a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>_still.mp4` next to
+  the clip (or in `--out`).
+- `--link <json>`: the link to the original the player keeps in it, an MP4 key (`ch.actionfootageplayer.link`)
+  that copying, renaming and tags keep, and a remux without `-map_metadata 0` loses.
+- `--dates <time>`: its date, with the time zone: the MP4's creation time, QuickTime's creation date (the day
+  Photos files it under) and the file's dates, so a folder of them sorts by when it happened. Without it, the
+  clip's file dates.
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
@@ -1034,10 +1055,12 @@ mpv/scripts/side-panel/       the plugins' settings in a panel beside the video 
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
-                              Lua; vs-gyroflow/src/workspace.rs is its twin)  →  ~/.config/mpv/scripts/workspace, and
+                              Lua; vs-gyroflow/src/workspace.rs is its twin), and link.lua, which reads the link in a
+                              moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it)  →  ~/.config/mpv/scripts/workspace, and
                               in ActionFootagePlayer
 tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
-                              `cargo test` in vs-gyroflow/ reads too
+                              `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
+                              files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is

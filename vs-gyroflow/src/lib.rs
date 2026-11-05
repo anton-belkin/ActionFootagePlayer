@@ -32,6 +32,7 @@ pub mod motion;
 pub mod dovi;
 pub mod dv_mux;
 pub mod workspace;
+pub mod mp4meta;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
