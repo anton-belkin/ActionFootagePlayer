@@ -105,6 +105,83 @@ fn meta_box(keys: &[(&str, &str)]) -> Vec<u8> {
     make_box(b"meta", &body)
 }
 
+/// A `moov/meta` (the box, header included) with these keys set in it: the mdta keys it had stay as they were, byte
+/// for byte and whatever their type (a camera's own), ours replace the ones of the same name or come after them. With
+/// no meta (None), a new one. For a cut (cut.rs), whose moov is written anew anyway
+pub fn merged_meta(old: Option<&[u8]>, keys: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+    let Some(old) = old else { return Ok(meta_box(keys)) };
+    let meta = *boxes(old, 0, old.len())?.first().ok_or("an empty meta")?;
+    let kids = meta_children(old, &meta)?;
+    if handler(old, &kids) != Some(*b"mdta") { return Err("a meta that isn't mdta".into()); }
+    let r = meta.body();
+    let versioned = !(r.len() >= 8 && &old[r.start + 4..r.start + 8] == b"hdlr");
+    // The key entries as they are (size, namespace, name), and the items by their 1-based index
+    let mut entries: Vec<Vec<u8>> = Vec::new();
+    let mut keys_head = vec![0u8; 4];
+    if let Some(k) = kids.iter().find(|k| &k.kind == b"keys") {
+        let r = k.body();
+        if r.len() < 8 { return Err("a broken keys box".into()); }
+        keys_head = old[r.start..r.start + 4].to_vec();
+        let mut at = r.start + 8;
+        for _ in 0..be32(old, r.start + 4) {
+            if at + 8 > r.end { return Err("a broken keys box".into()); }
+            let size = be32(old, at) as usize;
+            if size < 8 || at + size > r.end { return Err("a broken keys box".into()); }
+            entries.push(old[at..at + size].to_vec());
+            at += size;
+        }
+    }
+    let mut items: Vec<(u32, Vec<u8>)> = Vec::new();
+    if let Some(l) = kids.iter().find(|k| &k.kind == b"ilst") {
+        for item in boxes(old, l.body().start, l.body().end)? {
+            items.push((u32::from_be_bytes(item.kind), old[item.body()].to_vec()));
+        }
+    }
+    for (k, v) in keys {
+        let index = match entries.iter().position(|e| &e[4..8] == b"mdta" && &e[8..] == k.as_bytes()) {
+            Some(i) => i as u32 + 1,
+            None => {
+                let mut e = (8 + k.len() as u32).to_be_bytes().to_vec();
+                e.extend_from_slice(b"mdta");
+                e.extend_from_slice(k.as_bytes());
+                entries.push(e);
+                entries.len() as u32
+            }
+        };
+        items.retain(|(i, _)| *i != index);
+        let mut data = vec![0, 0, 0, 1, 0, 0, 0, 0];
+        data.extend_from_slice(v.as_bytes());
+        items.push((index, make_box(b"data", &data)));
+    }
+    let mut key_list = keys_head;
+    key_list.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for e in &entries { key_list.extend_from_slice(e); }
+    let keys_box = make_box(b"keys", &key_list);
+    let ilst_box = make_box(b"ilst", &items.iter().flat_map(|(i, b)| make_box(&i.to_be_bytes(), b)).collect::<Vec<u8>>());
+    let mut body = if versioned { old[r.start..r.start + 4].to_vec() } else { Vec::new() };
+    let (mut has_keys, mut has_ilst) = (false, false);
+    for k in &kids {
+        match &k.kind {
+            b"keys" => { body.extend_from_slice(&keys_box); has_keys = true; }
+            b"ilst" => {
+                if !has_keys { body.extend_from_slice(&keys_box); has_keys = true; }
+                body.extend_from_slice(&ilst_box);
+                has_ilst = true;
+            }
+            _ => body.extend_from_slice(&old[k.at..k.at + k.size]),
+        }
+    }
+    if !has_keys { body.extend_from_slice(&keys_box); }
+    if !has_ilst { body.extend_from_slice(&ilst_box); }
+    Ok(make_box(b"meta", &body))
+}
+
+/// The value of a key in an mdta `meta` box (the box, header included), when it's text
+pub fn key_in_meta(meta: &[u8], key: &str) -> Option<String> {
+    let m = *boxes(meta, 0, meta.len()).ok()?.first()?;
+    mdta_keys(meta, &m).ok()?.into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
 /// The handler of a `meta` box's body, either form (with version and flags or without): its boxes
 fn meta_children(b: &[u8], meta: &Box_) -> Result<Vec<Box_>, String> {
     let r = meta.body();

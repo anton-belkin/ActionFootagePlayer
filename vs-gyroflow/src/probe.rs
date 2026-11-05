@@ -104,6 +104,27 @@ fn has_lens_profile(input: &Input, samples: &[SampleInfo], width: usize, height:
     db.contains_id(&id)
 }
 
+/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile Gyroflow would load for the video ("" when
+/// none): what a cut must still read as (cut.rs)
+pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
+    let url = filesystem::path_to_url(path);
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let video = util::get_video_metadata(&mut file, size, &url).ok()?;
+    let options = InputOptions { probe_only: true, ..Default::default() };
+    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
+    let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
+    let samples = input.samples.as_deref().unwrap_or_default();
+    // The lens the file itself has (DJI, newer GoPros), else the one Gyroflow's database has for it
+    let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
+        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
+    let lens = if in_file { "in the file".to_string() } else {
+        CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps)
+            .map(|id| id.get_identifier_for_autoload()).unwrap_or_default()
+    };
+    Some((camera, lens))
+}
+
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
     match v {
         serde_json::Value::Object(map) => map.get(key).filter(|x| !x.is_null()).or_else(|| map.values().find_map(|x| find_key(x, key))),
