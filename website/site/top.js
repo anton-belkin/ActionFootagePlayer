@@ -50,3 +50,22 @@
   // The header changes height with the window's width and once the web fonts arrive
   if (window.ResizeObserver) new ResizeObserver(measure).observe(top);
 })();
+
+/* The header's menus (this page's sections, the language) close when a link in them is chosen, on a click
+   outside them and on Escape, as menus do; without this script they still open and close on their summary. */
+(function () {
+  "use strict";
+  var menus = document.querySelectorAll(".top details");
+  if (!menus.length) return;
+  function closeAll(except) {
+    for (var i = 0; i < menus.length; i++) if (menus[i] !== except) menus[i].open = false;
+  }
+  for (var i = 0; i < menus.length; i++) {
+    menus[i].addEventListener("click", function (e) {
+      if (e.target.closest("a")) this.open = false;
+    });
+    menus[i].addEventListener("toggle", function () { if (this.open) closeAll(this); });
+  }
+  document.addEventListener("click", function (e) { if (!e.target.closest(".top details")) closeAll(null); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAll(null); });
+})();
