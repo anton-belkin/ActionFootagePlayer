@@ -652,7 +652,7 @@ HiLight". A marks file left from another clip with the same name (GoPro reuses t
 
 Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
-[Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
+[Highlights](#highlights) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 ### Moments
