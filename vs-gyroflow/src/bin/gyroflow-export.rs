@@ -72,6 +72,14 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --level <level>  for a video without a project, the stabilization's level: weak, medium (the default) or strong:
                    10, 20 or 30 % of the frame cropped, smoothness 50, 75 or 100 % (Ctrl+s)
   --fov <x>        Gyroflow's FOV (Advanced) instead of the project's
+  --rotation <deg> the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of
+                   the project's rotation; not stabilized, ffmpeg's transpose
+  --aspect <W:H>   the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16: the
+                   largest centered rectangle of it, sides rounded down to even (original, the default: the whole
+                   frame); in place of the project's output size. Stabilized, Gyroflow's zoom fits the picture to it
+  --projection <p> Gyroflow's output projection: rectilinear, stereographic, equidistant, equisolid or
+                   orthographic, in place of the project's or preset's (rectilinear without one). Stabilized only: with
+                   --no-stabilize, or nothing to stabilize with, there's no lens model and it's ignored
   --edges <mode>   what fills the edges the stabilized frame leaves: sphere, smooth, or off (the project's
                    background color, the default)
   --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
@@ -128,7 +136,8 @@ rendition as the image, the HDR one (HLG) above it
   --grain <x>      how much of its grain the clean-up keeps (0-1, default 0.25)
   --camera <yaw,pitch,roll,zoom>  the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua;
                    a video export takes it too)
-  --crop <x,y,w,h> the part of the frame to keep, in shares of its width and height (0-1; a video export's too)
+  --crop <x,y,w,h> the part of the frame to keep, in shares of its width and height (0-1; a video export's too),
+                   of the frame as --rotation and --aspect have it
   --format <heic|jpeg>  HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere)
   --live           with the motion around it, 1.5 s on each side, as the export plays it (--sdr, --nbcu, --dv-rpu
                    say how; at most 1920 wide or high): a HEIC becomes a Live Photo (a .mov next to it, paired by
@@ -148,6 +157,8 @@ struct Options {
     underwater: Underwater,
     fov: Fov,
     level: Level,
+    // --rotation, --aspect, --projection: the output frame turned and cut, its projection (vs_gyroflow::Frame)
+    frame: vs_gyroflow::Frame,
     edges: EdgeMode,
     edge_settings: EdgeSettings,
     prores: bool,
@@ -207,7 +218,7 @@ fn main() {
     }
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
+    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
@@ -234,6 +245,12 @@ fn main() {
             "--level" => { let v = value("--level"); opts.level = Level::parse(&v).unwrap_or_else(|| fail(&format!("unknown level {v} (weak, medium, strong)"))); }
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)
                 .unwrap_or_else(|| fail("--fov takes a number above 0")).clamp(0.1, 4.0)),
+            "--rotation" => { let v = value("--rotation"); opts.frame.rotation = v.trim().parse::<i64>().ok().and_then(vs_gyroflow::Frame::parse_rotation)
+                .unwrap_or_else(|| fail(&format!("--rotation {v}: 0, 90, 180 or 270"))); }
+            "--aspect" => { let v = value("--aspect"); opts.frame.aspect = vs_gyroflow::Frame::parse_aspect(&v)
+                .unwrap_or_else(|| fail(&format!("--aspect {v}: original or W:H, such as 16:9 or 9:16"))); }
+            "--projection" => { let v = value("--projection"); opts.frame.projection = Some(vs_gyroflow::Frame::parse_projection(&v)
+                .unwrap_or_else(|| fail(&format!("--projection {v}: rectilinear, stereographic, equidistant, equisolid or orthographic")))); }
             "--edges" => { let v = value("--edges"); opts.edges = EdgeMode::parse(&v)
                 .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, sphere, smooth)"))); }
             "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
@@ -868,7 +885,9 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
         None if info.transfer.as_deref() == Some("arib-std-b67") => Some(lut(NBCU_HLG)?),
         None => None,
     };
-    let (pw, ph) = preview_size(src.width, src.height);
+    // Turned and cut as --rotation and --aspect say, before it's scaled down
+    let turn = opts.frame.ffmpeg_filter((src.width, src.height));
+    let (pw, ph) = { let (fw, fh) = opts.frame.size((src.width, src.height)); preview_size(fw, fh) };
     let in_range = if src.full_range { "pc" } else { "tv" };
     let look = match &cube {
         Some(c) => format!(",scale=in_color_matrix={}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
@@ -880,7 +899,7 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
              src.matrix.clone().unwrap_or_else(|| "bt709".into())]
     };
     // Smaller first: the LUT on 960 pixels, not 4K
-    let vf = format!("scale={pw}:{ph}:flags=lanczos{look},format=yuv420p");
+    let vf = format!("{turn}{}scale={pw}:{ph}:flags=lanczos{look},format=yuv420p", if turn.is_empty() { "" } else { "," });
     let size = pw * ph * 3 / 2;
     eprintln!("{}: flipbook of {} frames{} · {}", file_name(file), times.len(),
               low.as_ref().map_or(String::new(), |l| format!(" from {}", l.file_name().unwrap_or_default().to_string_lossy())),
@@ -977,6 +996,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         (Err(_), Some(_)) => None,
         // A preview shows the clip as it plays, whatever there is to change
         (Err(_), None) if opts.preview.is_some() => None,
+        // Turned or cut (--rotation, --aspect): that much to change
+        (Err(_), None) if !opts.frame.is_none() => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
     let info = ffprobe(&path)?;
@@ -1107,7 +1128,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers,
                                                    // --alone: --from to --to's own motion, a photo's motion too
-                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project)?)),
+                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project, opts.frame)?)),
         None => None,
     };
     // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to
@@ -1124,8 +1145,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
         e.edges.set_camera(camera);
     }
+    // The frames as decoded: the source's size for the engine, else turned and cut by the decoder (--rotation, --aspect)
+    let ((dw, dh), turn) = if engine.is_some() { ((w, h), String::new()) } else { (opts.frame.size((w, h)), opts.frame.ffmpeg_filter((w, h))) };
     // Zoomed out, rendered that much bigger, as a photo is
-    let (ow, oh) = engine.as_ref().map_or((w, h), |e| {
+    let (ow, oh) = engine.as_ref().map_or((dw, dh), |e| {
         let s = camera.zoom.clamp(1.0, 2.0);
         (((e.render_size.0 as f64 * s) as usize) & !1, ((e.render_size.1 as f64 * s) as usize) & !1)
     });
@@ -1186,7 +1209,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     if preview.is_none() && opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
     dec_cmd.arg("-i").arg(&path).args(["-map", "0:v:0"]);
     if preview.is_some() { dec_cmd.args(["-frames:v", "1"]); }
-    dec_cmd.args(["-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
+    dec_cmd.args(["-vf", &format!("scale={w}:{h}{}{turn}", if turn.is_empty() { "" } else { "," }), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
 
@@ -1301,7 +1324,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         muxer = Some(mux);
     }
 
-    let in_frame = w * h * 3; // 4:2:0, 2 bytes per sample
+    let in_frame = dw * dh * 3; // 4:2:0, 2 bytes per sample
     let out_frame = ow * oh * 3;
     let plane_dims = |(w, h): (usize, usize)| [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
 
@@ -1577,7 +1600,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
                                      (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
                                      // --alone: the part (--from, --to) stabilized by its own motion, as a moment plays
-                                     opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project)?),
+                                     opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project, opts.frame)?),
         None => None,
     };
     // A turned or zoomed out camera may leave edges where the view itself never does
@@ -1590,6 +1613,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
         e.edges.set_camera(camera);
     }
+    // The frames as decoded: the source's size for the engine, else turned and cut by the decoder (--rotation, --aspect)
+    let ((dw, dh), turn) = if engine.is_some() { ((w, h), String::new()) } else { (opts.frame.size((w, h)), opts.frame.ffmpeg_filter((w, h))) };
     // Zoomed out (crop mode's camera starts so), rendered that much bigger: the frame's part keeps the pixels the
     // view has at its own zoom
     let (rw, rh) = match &engine {
@@ -1597,7 +1622,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let s = camera.zoom.clamp(1.0, 2.0);
             (((e.render_size.0 as f64 * s) as usize) & !1, ((e.render_size.1 as f64 * s) as usize) & !1)
         }
-        None => (w, h),
+        None => (dw, dh),
     };
     // The frames it's made from: the one at `t` and `r` on each side; before them, a second for the edge fill's
     // sphere to have what was around, as it has playing
@@ -1613,7 +1638,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     // With -ss before -i, the first frame at or after it
     if first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", (first as f64 - 0.25) / fps)]); }
     dec_cmd.arg("-i").arg(&path)
-        .args(["-map", "0:v:0", "-frames:v", &(last - first + 1).to_string(), "-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
+        .args(["-map", "0:v:0", "-frames:v", &(last - first + 1).to_string(), "-vf", &format!("scale={w}:{h}{}{turn}", if turn.is_empty() { "" } else { "," }),
+               "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
     let mut dec_out = decoder.stdout.take().unwrap();
@@ -1621,7 +1647,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let mut window: Vec<(u64, Vec<u8>)> = Vec::new();
     for index in first..=last {
         if stopped() { return Err("cancelled".into()); }
-        let mut src = vec![0u8; w * h * 3];
+        let mut src = vec![0u8; dw * dh * 3];
         if dec_out.read_exact(&mut src).is_err() { break; }
         let frame = match &engine {
             None => src,

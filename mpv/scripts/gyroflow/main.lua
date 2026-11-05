@@ -283,6 +283,30 @@ local function even(v)
     return math.max(2, math.floor(v / 2) * 2)
 end
 
+-- The output's frame, this clip's (the Clip tab's; saved with its view): turned clockwise by 0, 90, 180 or 270
+-- degrees, then cut to an aspect ("original": the frame's own). Where it's stabilized, Gyroflow's output size and
+-- rotation (vs-gyroflow), its zoom fitting the picture into it; elsewhere mpv's video-rotate and video-crop. A clip
+-- with a project has the project's own unless changed here, for viewing
+local ASPECTS = { original = true, ["16:9"] = true, ["4:3"] = true, ["1:1"] = true, ["4:5"] = true, ["3:4"] = true, ["9:16"] = true }
+-- And the output's lens where it's stabilized, Gyroflow's output projection: linear (rectilinear, straight lines
+-- straight), or a fisheye, its edges more and more compressed: stereographic, equidistant, equisolid, orthographic. For
+-- Wide footage above water, too wide for linear: its center squeezed, its edges thin
+local PROJECTIONS = { linear = 0, stereographic = 1, equidistant = 2, equisolid = 3, orthographic = 4 }
+local frame = { aspect = "original", rotation = 0, projection = "linear" }
+
+-- The size of a w x h frame turned and cut to the aspect: its largest centered part of that aspect, each side
+-- rounded down to even (vs-gyroflow's Frame::size, which renders it)
+local function frame_size(w, h, f)
+    f = f or frame
+    if f.rotation == 90 or f.rotation == 270 then w, h = h, w end
+    local aw, ah = tostring(f.aspect):match("^(%d+):(%d+)$")
+    aw, ah = tonumber(aw), tonumber(ah)
+    if aw and ah and aw > 0 and ah > 0 then
+        if w * ah > h * aw then w = math.floor(h * aw / ah) else h = math.floor(w * ah / aw) end
+    end
+    return math.max(2, math.floor(w / 2) * 2), math.max(2, math.floor(h / 2) * 2)
+end
+
 -- The sizes to stabilize at: { input = { w, h } the video is scaled down to on the way (nil: as it is), output =
 -- { w, h } the plugin renders (nil: the project's, or the input's), key: both, to tell a change }. The output fits the
 -- display; the input keeps zoom_margin more, so the part of the frame that shows isn't enlarged. full: the sizes for
@@ -291,6 +315,7 @@ local function render_sizes(source, full)
     local w, h = source.width, source.height
     if not w or not h or w <= 0 or h <= 0 then return { key = "" } end
     local ow, oh = source.out_width or w, source.out_height or h
+    if frame.rotation ~= 0 or frame.aspect ~= "original" then ow, oh = frame_size(w, h) end
     local scale = 1
     local dw, dh = display_size()
     if o.resolution ~= "video" and dw and not full then scale = math.min(1, dw / ow, dh / oh) end
@@ -382,16 +407,18 @@ local underwater = sticky_underwater
 -- Under water, auto or the project's, before Ctrl+u took the lens out of the water
 local underwater_back = underwater ~= "no" and underwater or "auto"
 
--- The workspace plugin's settings for the file playing, when it keeps its own (a moment's, as it was made: view,
--- level, horizon_lock), the part stabilized on its own (trim: { in, out }, a moment's without a project), and its
--- switch as it's viewed (alone: its project's "only within the trim range"). They don't stick for the next clips
+-- The workspace plugin's settings for the file playing, when it has some saved (a moment's or clip preview's own, as
+-- it was made, else the clip's own file's: view, level, horizon_lock, underwater, chromatic, aspect, rotation), the
+-- part stabilized on its own (trim: { in, out }, a moment's without a project), and its switch as it's viewed (alone:
+-- its project's "only within the trim range"). They don't stick for the next clips
 local function fixed()
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.stab, ws.trim, ws.alone end
+    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.view, ws.trim, ws.alone end
     return nil, nil, nil
 end
--- The level that sticks, while a moment plays at its own
-local level_before = nil
+-- What sticks, while a clip plays with its own saved level and color fringes
+local level_before, chromatic_before = nil, nil
+
 
 -- The horizon lock and the lens a clip starts with: a project's own, or what sticks
 local function clip_settings(source)
@@ -477,7 +504,10 @@ local function gyroflow_filter(source, enabled)
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL,
                                                 time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
-                                                alone = project_alone }),
+                                                alone = project_alone,
+                                                rotation = frame.rotation ~= 0 and frame.rotation or nil,
+                                                aspect = frame.aspect ~= "original" and frame.aspect or nil,
+                                                projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -524,7 +554,7 @@ local function publish()
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
-        ask_when_slow = o.ask_when_slow,
+        ask_when_slow = o.ask_when_slow, aspect = frame.aspect, rotation = frame.rotation, projection = frame.projection,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -576,10 +606,21 @@ local function add_filter(source)
     local own = fixed()
     local off = false
     if type(own) == "table" then
+        -- With a project, its level and lens are the project's (the workspace plugin leaves out what a project has; a
+        -- horizon here is one forced for every moment this session)
+        local project = has_project(source)
         if own.view == "normal" or own.view == "wide" then view = own.view elseif own.view == "off" then off = true end
-        if LEVEL_LABELS[own.level] then level_before = level_before or level; level = own.level end
+        if LEVEL_LABELS[own.level] and not project then level_before = level_before or level; level = own.level end
         if own.horizon_lock == "yes" or own.horizon_lock == "no" then horizon = own.horizon_lock == "yes"
         elseif own.horizon_lock == "project" then horizon = nil end
+        if UNDERWATER_LABELS[own.underwater] and own.underwater ~= "project" and not project then
+            underwater = own.underwater
+            underwater_back = underwater ~= "no" and underwater or "auto"
+        end
+        if type(own.chromatic) == "boolean" and own.chromatic ~= chromatic then
+            if chromatic_before == nil then chromatic_before = chromatic end
+            chromatic = own.chromatic
+        end
     end
     stab_off = off
     write_edge_control()
@@ -625,9 +666,19 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
-    -- Back to the level that sticks, after a moment's own
+    -- Back to the level and color fringes that stick, after a clip's own
     if level_before then level, level_before = level_before, nil end
+    if chromatic_before ~= nil then chromatic, chromatic_before = chromatic_before, nil end
     clip_settings(nil)
+    -- The frame: the clip's saved one, else its own
+    local own = fixed()
+    frame = { aspect = "original", rotation = 0, projection = "linear" }
+    if type(own) == "table" then
+        if ASPECTS[own.aspect] then frame.aspect = own.aspect end
+        if PROJECTIONS[own.projection] then frame.projection = own.projection end
+        local r = tonumber(own.rotation)
+        if r == 90 or r == 180 or r == 270 then frame.rotation = r end
+    end
     if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
     local path = clip_path()
@@ -803,6 +854,8 @@ local function no_source()
     mp.osd_message("Gyroflow: no project or motion data for this file", 1.5)
 end
 
+-- mpv's own turn and crop of the frame (further down)
+local mpv_frame
 -- The stabilization on (normal), on with the wider view (wide), or off for this clip; normal and wide stick
 local function show(v)
     if not current_source then return no_source() end
@@ -816,10 +869,68 @@ local function show(v)
     -- clip, whose rate depends on the view's edges (gyroflow.vpy), nor on or off: the input scaling goes with it, off
     -- shows the video as it is
     if not (was_on and enabled and not fast(current_source)) then place_filters(enabled) end
+    mpv_frame()
     publish()
     mp.msg.info("stabilization " .. view_label(v))
     mp.osd_message("Gyroflow: " .. view_label(v), 1.5)
 end
+
+-- mpv's own turn and crop of the frame where the stabilization doesn't make it (off, or no motion data): the crop in
+-- the decoded frame's own coordinates, before the turn
+mpv_frame = function()
+    if not mp.get_property("path") then return end
+    local rotation, crop = 0, ""
+    if not (current_source and not stab_off) then
+        rotation = frame.rotation
+        local d = mp.get_property_native("video-dec-params")
+        if frame.aspect ~= "original" and type(d) == "table" and d.w and d.h then
+            local fw, fh = frame_size(d.w, d.h)
+            if rotation == 90 or rotation == 270 then fw, fh = fh, fw end
+            fw, fh = math.min(fw, d.w), math.min(fh, d.h)
+            -- The whole frame (9:16 turned a quarter): nothing to crop
+            if fw < d.w - 1 or fh < d.h - 1 then crop = string.format("%dx%d+%d+%d", fw, fh, math.floor((d.w - fw) / 4) * 2, math.floor((d.h - fh) / 4) * 2) end
+        end
+    end
+    if mp.get_property("file-local-options/video-rotate") ~= tostring(rotation) then
+        mp.set_property("file-local-options/video-rotate", tostring(rotation))
+    end
+    if (mp.get_property("file-local-options/video-crop") or "") ~= crop then mp.set_property("file-local-options/video-crop", crop) end
+end
+mp.observe_property("video-dec-params", "native", function() mpv_frame() end)
+
+local ROTATION_LABELS = { [0] = "not turned", [90] = "turned 90° right", [180] = "turned 180°", [270] = "turned 90° left" }
+
+-- The frame turned and cut to an aspect, for this clip: set up again where it's stabilized (its output size changes)
+local PROJECTION_LABELS = { linear = "linear lens", stereographic = "stereographic fisheye", equidistant = "equidistant fisheye",
+                            equisolid = "equisolid fisheye", orthographic = "orthographic fisheye" }
+local function set_frame(aspect, rotation, projection)
+    projection = projection or frame.projection
+    if aspect == frame.aspect and rotation == frame.rotation and projection == frame.projection then return end
+    frame = { aspect = aspect, rotation = rotation, projection = projection }
+    local message = "Frame: " .. (aspect == "original" and "its own aspect" or aspect) .. ", " .. ROTATION_LABELS[rotation]
+        .. ", " .. PROJECTION_LABELS[projection]
+    if current_source and not stab_off then
+        with_pause(message, function() place_filters(true) end)
+    else
+        mp.osd_message(message, 2)
+    end
+    mpv_frame()
+    publish()
+end
+
+mp.register_script_message("projection", function(p)
+    if PROJECTIONS[p] then set_frame(frame.aspect, frame.rotation, p) end
+end)
+
+mp.register_script_message("aspect", function(a)
+    if ASPECTS[a] then set_frame(a, frame.rotation) end
+end)
+
+-- right, left: a quarter turn clockwise or back; 0, 90, 180, 270: that turn
+mp.register_script_message("rotate", function(v)
+    local r = v == "right" and (frame.rotation + 90) % 360 or v == "left" and (frame.rotation + 270) % 360 or tonumber(v)
+    if ROTATION_LABELS[r] then set_frame(frame.aspect, r) end
+end)
 
 -- on -> wider view -> off -> on
 mp.add_key_binding("Ctrl+g", "toggle", function()
@@ -876,7 +987,7 @@ end)
 local function set_underwater(value)
     underwater = value
     if value ~= "no" then underwater_back = value end
-    if not has_project(current_source) then sticky_underwater = value end
+    if not has_project(current_source) and not fixed() then sticky_underwater = value end
     rebuild_filter()
     publish()
     local says = current_source and current_source.kind == "default" and "preset" or "project"
@@ -905,6 +1016,8 @@ local function set_chromatic(value)
     if not chromatic_shader then
         return mp.osd_message("Gyroflow: color fringes are taken out only with vo=gpu-next or gpu", 2)
     end
+    -- On a clip with its own saved, the one that sticks comes back after it
+    if fixed() and chromatic_before == nil then chromatic_before = chromatic end
     chromatic = value
     write_edge_control()
     publish()
@@ -1155,6 +1268,10 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)
     end
+    -- The frame as it plays: the project has it from then on (its output size, rotation and projection)
+    if frame.rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(frame.rotation)) end
+    if frame.aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, frame.aspect) end
+    if frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
     -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
     local ws = workspace_of(path)
     if ws and ws.moment and ws.moment["in"] and ws.snap then

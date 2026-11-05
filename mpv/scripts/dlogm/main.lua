@@ -617,6 +617,14 @@ local function ask_screens(done)
 end
 ask_screens()
 
+-- The log curve the file is saved to play with (the workspace plugin's view, docs/moments-and-workspaces.md):
+-- a curve's id, auto (its metadata's), or nil (nothing saved)
+local function saved_curve()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.view) == "table" then return ws.view.curve end
+    return nil
+end
+
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function(hook)
     base, curve, current, announce, recorded, hdr, touched, shown_for = nil, nil, nil, false, nil, nil, false, nil
@@ -633,9 +641,13 @@ mp.add_hook("on_preloaded", 50, function(hook)
         for _, track in ipairs(mp.get_property_native("track-list") or {}) do
             if track.type == "video" and track.selected and track["dolby-vision-profile"] then hdr.dv_signaled = true end
         end
-    else
+    end
+    -- The curve the clip is saved to play with, by hand (the workspace plugin's view: a curve's id, or auto)
+    local saved = saved_curve()
+    if saved and CURVE[saved] then curve = CURVE[saved] end
+    if not trc then
         recorded = recorded_curve(path)
-        curve = recorded
+        curve = (saved and CURVE[saved]) or recorded
         if not curve then
             mp.msg.verbose("not log footage it knows")
             if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end

@@ -269,6 +269,7 @@ put mpv/scripts/workspace/workspace.lua "$WORKSPACE/workspace.lua" 644
 put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
 put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
+put mpv/scripts/workspace/sidecar.lua   "$WORKSPACE/sidecar.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644

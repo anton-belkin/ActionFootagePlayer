@@ -246,7 +246,9 @@ switches and buttons, scrolled with the wheel:
   its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
   interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
   were moved).
-- **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
+- **Clip**: what it is, Finder and its path, its [saved view](#a-clips-saved-view-and-frame) (**Save**, **Auto
+  save**), marking a part, its **Frame** (aspect, a turn by 90°, the lens: linear or a fisheye), exporting it, the
+  highlights, the next and previous clip.
 - **Look**: the video output (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping; NBCU's and the maker's SDR),
   the log curve by hand, noise reduction.
 - **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
@@ -661,16 +663,40 @@ usually happened.
   HiLight", or the remote.
 
 **Your own marks**: `M` adds one where the video is, and on a mark (within half a second) removes it, a camera's
-too. The first change writes `<clip>.marks.json` beside the clip, with the camera's marks copied in and flagged as
-the camera's; from then on that file is the clip's marks. Marks need no project. Delete it,
-and the camera's are back. The menu's **Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro
-HiLight". A marks file left from another clip with the same name (GoPro reuses them on every card) is renamed
-`.marks.json.old` rather than shown on the wrong clip.
+too. The first change writes the marks into the clip's own file beside it, `<clip>.afp.json` (which also keeps its
+[saved view](#a-clips-saved-view-and-frame)), with the camera's marks copied in and flagged as the camera's; from
+then on that list is the clip's marks. Marks need no project. Delete the file, and the camera's are back. The menu's
+**Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro HiLight". A file left from another clip
+with the same name (GoPro reuses them on every card) is renamed `.afp.json.old` rather than shown on the wrong clip.
+A `<clip>.marks.json` from 0.8 is read, and becomes the `.afp.json` at the next change.
 
 Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
 [Highlights](#highlights) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
+### A clip's saved view and frame
+
+How a clip is viewed can be kept with it, in its own file beside it (`<clip>.afp.json`, with its marks): the log
+curve (as the camera says, or one picked by hand), the stabilization (on, wider, off), its level, the horizon, the
+lens under water or above, the water's color fringes, and the **Frame**. The clip then opens as it was saved,
+whatever the defaults are. The video output (HDR or SDR, which depends on the screen) and the noise reduction
+aren't kept.
+
+- **Save** in the Clip tab writes it; the panel says whether the clip plays as saved, or was changed for viewing.
+  **Defaults** forgets it. **Auto save**, for this session, writes each change as it's made.
+- **Frame**: the output's aspect (the video's own, 16:9, 4:3, 1:1, 4:5, 3:4, 9:16), a turn by 90°, 180° or 270°
+  for footage shot with the camera on its side, and the lens: linear (straight lines straight), or a fisheye, its
+  edges more and more compressed (Gyroflow's stereographic, equidistant, equisolid and orthographic output
+  projections), for Wide footage above water, which linear makes too wide: its center squeezed, its edges thin.
+  The player shows it as it'll be, and exports, moments, clip previews and photos are made in it. Where the clip
+  isn't stabilized, mpv turns and crops it; the lens needs the stabilization.
+- **A clip with a Gyroflow project**: what the project has (the smoothing, horizon, lens under water, output size,
+  turn and projection) is the project's. Changed in the panel, it's for viewing only and isn't saved beside the
+  project: change it in Gyroflow (`Ctrl+e`) to keep it.
+- **Moments and clip previews** have **Settings of its own** (the Project tab, while one plays): on, they keep
+  their own view, whatever the clip's becomes; off, they play as the clip is saved. A moment has its own from the
+  start, a clip preview the clip's; either can be switched.
 
 ### Moments
 
@@ -697,8 +723,9 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
-- **Stabilized as it was made**: a moment keeps the stabilization it was saved with. Over the default preset, its
-  view, level and horizon lock; a clip with a Gyroflow project gives the
+- **Viewed as it was made**: a moment keeps the [view](#a-clips-saved-view-and-frame) it was saved with (its own
+  settings, which can be switched off to play as the clip is saved). Over the default preset, its log curve, view,
+  level, horizon, lens, color fringes and frame; a clip with a Gyroflow project gives the
   moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the clip's project changed later doesn't change the
   moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
   project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
@@ -730,9 +757,9 @@ file for each clip of the trip in a **_Clips** folder, beside the footage's own 
 - **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
   clip previews* doesn't bring it back (`_ActionFootagePlayer/clips-made.txt` lists what was made). `X` again, or
   *Make again for removed clips*, does.
-- **Variants**: a clip preview plays with its clip's stabilization. **Its own stabilization** (the panel, while it
-  plays) gives it a project of its own beside it (a copy of the clip's, or made from its motion data as it plays):
-  copy the preview in Finder for another, and each is a variant of the same clip.
+- **Variants**: a clip preview plays as its clip is saved to. **Settings of its own** (the panel, while it plays)
+  gives it its own view, and a copy of the clip's Gyroflow project when it has one: copy the preview in Finder for
+  another, and each is a variant of the same clip.
 - **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
   into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
   lose them: their moments and previews point at their names.)

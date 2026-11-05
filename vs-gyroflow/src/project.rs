@@ -22,10 +22,19 @@ use crate::water::Underwater;
 /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the preset's
 /// `level`: the level it plays in; `wide`: the plugin's wider view, as Gyroflow has it: its zoom off, at the FOV
 /// `wide_fov` finds
-pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool, project_path: &str) -> Result<String, String> {
+/// `frame`: the output frame turned, cut to an aspect and its projection, as Engine::load has it (Frame): the
+/// project's rotation, output size and output projection
+pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool, project_path: &str, frame: crate::Frame) -> Result<String, String> {
     let (stab, _, _) = crate::load_manager(video, preset, horizon_lock, underwater, 0.0)?;
     if !stab.gyro.read().has_motion() {
         return Err(format!("{video} has no motion data"));
+    }
+    // Before the level's or the wider view's FOV is measured, as Engine::load
+    if let Some(projection) = frame.projection { stab.set_output_projection(projection); }
+    if !frame.is_none() {
+        stab.set_video_rotation(frame.gyroflow_rotation());
+        let (w, h) = frame.size(stab.params.read().size);
+        stab.set_output_size(w, h);
     }
     stab.set_smoothing_param("smoothness", level.smoothness());
     stab.set_adaptive_zoom(0.0);

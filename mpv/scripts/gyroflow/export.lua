@@ -235,6 +235,9 @@ end
 
 local run_export
 
+-- The output's lens (the gyroflow plugin's projection), as gyroflow-export names it; linear is its default
+local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true, orthographic = true }
+
 -- The color and stabilization as they play, into args. `sdr`: in SDR whatever plays; `photo`: the photo's image is
 -- what an SDR screen shows of the look (--sdr-image), its gain map leads to the HLG, and its motion (`live`) is the
 -- video as Shift+E exports it (--sdr, --nbcu, --dv-rpu):
@@ -282,6 +285,33 @@ local function as_it_plays(args, sdr, photo, live)
         table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")
     end
     if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
+    -- The output's frame: turned, and of another aspect (the Clip tab's), stabilized or not
+    local rotation, aspect = gyroflow("rotation"), gyroflow("aspect")
+    if rotation and rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(rotation)) end
+    if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
+    local projection = gyroflow("projection")
+    if PROJECTIONS[projection] and view ~= "off" then table.insert(args, "--projection"); table.insert(args, projection) end
+end
+
+-- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
+-- args, for a clip that isn't the one playing (the Project tab's moments and photos of marks): what isn't saved is
+-- gyroflow-export's own default (the curve from the clip's metadata, the preset's), the edge fill as it's set here
+local function view_args(args, v)
+    local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
+    if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
+    if v.view == "off" then add("--no-stabilize") elseif v.view == "wide" then add("--wide") end
+    if v.level then add("--level", v.level) end
+    local edges = mp.get_property_native("user-data/gyroflow/edges")
+    if edges then
+        add("--edges", edges)
+        local blur = mp.get_property_native("user-data/gyroflow/edges_blur")
+        if blur then add("--edges-blur", string.format("%g", blur)) end
+    end
+    if v.horizon_lock == "yes" or v.horizon_lock == "no" then add("--horizon-lock", v.horizon_lock == "yes" and "100" or "0") end
+    if v.underwater then add("--underwater", v.underwater) end
+    if v.rotation and v.rotation ~= 0 then add("--rotation", v.rotation) end
+    if v.aspect and v.aspect ~= "original" then add("--aspect", v.aspect) end
+    if PROJECTIONS[v.projection] and v.view ~= "off" then add("--projection", v.projection) end
 end
 
 local function installed(what)
@@ -427,13 +457,14 @@ mp.register_script_message("preview", function(json)
     local req = utils.parse_json(json or "")
     if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
     local function reply(ok, err)
-        mp.commandv("script-message-to", req.reply, "preview-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err }))
+        mp.commandv("script-message-to", req.reply, req.done or "preview-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err }))
     end
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
-    as_it_plays(args, true, false, false)
+    -- Another clip's (req.view: its saved view), or as this one plays
+    if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
     -- on its own
     if req.project ~= nil then
