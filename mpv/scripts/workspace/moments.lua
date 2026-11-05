@@ -19,6 +19,39 @@ M.FOLDER = "Moments"
 M.EXT = ".afplink.mp4"
 -- Exports, videos of their own: Exports/<name>[ (SDR)].mov
 M.EXPORTS = "Exports"
+-- Clip previews: Clips/<the clip's path>.afplink.mp4
+M.CLIPS = "Clips"
+-- What a project's footage is: videos, not the player's own folders
+M.FOOTAGE = { mp4 = true, mov = true }
+local OWN_FOLDERS = { moments = true, clips = true, exports = true, stabilized = true }
+
+-- A clip preview's path in Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
+-- a camera's own folders (DCIM and the one in it)
+function M.clip_preview_relative(relative)
+    local parts = {}
+    for p in relative:gmatch("[^/]+") do parts[#parts + 1] = p end
+    local out, i = {}, 1
+    while i <= #parts do
+        if parts[i]:upper() == "DCIM" and i < #parts - 1 then i = i + 2
+        else out[#out + 1] = parts[i]; i = i + 1 end
+    end
+    out[#out] = out[#out]:gsub("%.[^.]*$", "") .. M.EXT
+    return table.concat(out, "/")
+end
+
+-- .actionfootageplayer/clips-made.txt: a line per clip a preview was made for, its path in the project and its size
+function M.parse_made(text)
+    local made = {}
+    for line in (text or ""):gmatch("[^\r\n]+") do
+        local rel, size = line:match("^(.-)\t(%d+)$")
+        if rel then made[rel .. "\t" .. size] = true end
+    end
+    return made
+end
+
+function M.made_line(relative, size)
+    return relative .. "\t" .. tostring(size)
+end
 
 -- Characters a file name can't have on Windows or macOS, and Windows' reserved names
 local RESERVED = { CON = true, PRN = true, AUX = true, NUL = true }
@@ -280,6 +313,29 @@ function M.new(ws, fs)
             if (ta ~= nil) ~= (tb ~= nil) then return ta ~= nil end
             return a.file < b.file
         end)
+        return out
+    end
+
+    -- The project's clips: its videos, but the player's own folders, hidden ones and link files. { file, relative }
+    function self.footage(project)
+        local out = {}
+        local function walk(dir, rel, depth)
+            for _, name in ipairs(fs.readdir(dir, "files") or {}) do
+                local lower = name:lower()
+                local ext = lower:match("%.([^.]+)$")
+                if ext and M.FOOTAGE[ext] and name:sub(1, 1) ~= "." and lower:sub(-#M.EXT) ~= M.EXT then
+                    out[#out + 1] = { file = ws.join(dir, name), relative = rel and (rel .. "/" .. name) or name }
+                end
+            end
+            if depth >= 8 then return end
+            for _, name in ipairs(fs.readdir(dir, "dirs") or {}) do
+                if name:sub(1, 1) ~= "." and not (depth == 0 and OWN_FOLDERS[name:lower()]) then
+                    walk(ws.join(dir, name), rel and (rel .. "/" .. name) or name, depth + 1)
+                end
+            end
+        end
+        walk(project, nil, 0)
+        table.sort(out, function(a, b) return a.relative < b.relative end)
         return out
     end
 

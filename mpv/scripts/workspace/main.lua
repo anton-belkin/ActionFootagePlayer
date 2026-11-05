@@ -16,6 +16,12 @@
 --   Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
+-- Clip previews: Clips/<the clip's path>.afplink.mp4, a flipbook of the clip in color (its marks, else a dozen
+-- frames), made from the menu (Project -> Make clip previews), one at a time in the background, only for clips not
+-- in .actionfootageplayer/clips-made.txt, so that one deleted (X, or in Finder: not interesting) stays deleted.
+--   X                   this clip isn't interesting: its preview to the Trash; again: made again
+-- A clip preview's file plays its original, all of it.
+--
 -- Exports (Shift+E, the gyroflow plugin's) go to <project>/Exports/, named in the same dialog: <name>.mov, with the
 -- look in parentheses unless it's HDR ("Turtle (SDR).mov"), the link inside (kind export). A part that isn't a
 -- moment yet is saved as the moment export_<name> beside it; one that is (played, or equal to one to the frame)
@@ -25,6 +31,9 @@
 --   path            what mpv plays (its `path`): the rest is for this file only, so a plugin checks it's its own
 --   clip            the clip itself, as an absolute path: the original when a moment's file plays
 --   moment          when a moment's file plays: { file, name, in, out } (missing = true: no original found)
+--   redirected      yes when the file playing is a link (a moment, a clip preview) and mpv plays `clip` instead
+--   clip_preview    when a clip preview plays: { file }
+--   clips           while clip previews are made: { done, total }
 --   project         the project's folder, absent for none
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
@@ -38,7 +47,8 @@
 --
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
--- moment's place in user-data/workspace/moments, from 1. open-original: an export's original, at its part. For the
+-- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
+-- project-folder (show it). open-original: an export's original, at its part. For the
 -- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
 -- link }).
 --
@@ -249,6 +259,22 @@ local function open_moment(path)
                          ["in"] = l["in"], out = l.out }
         return
     end
+    if type(l) == "table" and l.v == 1 and l.kind == "clip" then
+        -- A clip preview: its original, all of it
+        if before_autocreate() then return end
+        local original = moments.original(l, moments.project_of(state.clip, moments_lib.CLIPS))
+        if not original then
+            mp.osd_message(moments_lib.display_name(state.clip) .. ": the clip isn't at " .. tostring(l.clip), 6)
+            return
+        end
+        local file = state.clip
+        mp.set_property("stream-open-filename", original)
+        state = describe(original)
+        state.path = path
+        state.redirected = true
+        state.clip_preview = { file = file }
+        return
+    end
     if type(l) ~= "table" or l.v ~= 1 or l.kind ~= "moment" or type(l["in"]) ~= "number" or type(l.out) ~= "number" then
         return
     end
@@ -278,6 +304,7 @@ local function open_moment(path)
     mp.set_property("file-local-options/force-media-title", name)
     state = describe(original)
     state.path = path
+    state.redirected = true
     state.moment = { file = file, name = name, ["in"] = a, out = b }
 end
 
@@ -667,4 +694,181 @@ mp.register_script_message("open-original", function()
     -- playlist it makes of its folder
     wanted = { file = e.original, ["in"] = e["in"], out = e.out }
     mp.commandv("loadfile", e.original, "replace")
+end)
+
+-- Clip previews (Clips/): one at a time, in the background, from the menu or X
+local clips_job = nil
+local overlay = mp.create_osd_overlay("ass-events")
+
+-- The highlights plugin's reader of the camera's marks, when it's beside this one (the app has both)
+local markers = nil
+do
+    local dir = mp.get_script_directory()
+    local plugins = dir and dir:match("^(.*)[/\\][^/\\]+[/\\]?$")
+    if plugins then
+        package.path = package.path .. ";" .. utils.join_path(utils.join_path(plugins, "highlights"), "?.lua")
+        local ok, m = pcall(require, "markers")
+        if ok then markers = m end
+    end
+end
+
+local function made_file() return state_file("clips-made.txt") end
+
+local function read_made()
+    local f = made_file() and io.open(made_file(), "r")
+    if not f then return {} end
+    local text = f:read("*a")
+    f:close()
+    return moments_lib.parse_made(text)
+end
+
+-- A clip's marks: its marks file's, else the camera's; nil for none
+local function marks_of(clip)
+    local f = io.open(ws.marks_file(clip), "r")
+    if f then
+        local doc = utils.parse_json(f:read("*a") or "")
+        f:close()
+        local times = {}
+        for _, m in ipairs(type(doc) == "table" and type(doc.marks) == "table" and doc.marks or {}) do
+            if type(m) == "table" and type(m.t) == "number" then times[#times + 1] = m.t end
+        end
+        table.sort(times)
+        if #times > 0 then return times end
+    end
+    if markers then
+        local ok, m = pcall(markers.read, clip)
+        if ok and m and #m.times > 0 then return m.times end
+    end
+    return nil
+end
+
+local function native(rel) return windows and rel:gsub("/", "\\") or rel end
+
+local function preview_of(root, relative)
+    return ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(relative)))
+end
+
+local function draw_progress()
+    if not clips_job then
+        overlay:remove()
+        return
+    end
+    overlay.data = string.format("{\\an1\\fs18\\bord1.5}Clip previews: %d of %d", clips_job.done, clips_job.total)
+    overlay:update()
+end
+
+local function next_clip()
+    local job = clips_job
+    if not job then return end
+    local c = not job.stopping and table.remove(job.queue, 1)
+    if not c then
+        clips_job = nil
+        state.clips = nil
+        publish()
+        draw_progress()
+        local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
+        mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " failed") or ""), 4)
+        return
+    end
+    local exporter = mp.get_property_native("user-data/gyroflow/exporter")
+    local out = preview_of(job.project, c.relative)
+    local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
+    -- At background priority while a video plays
+    if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
+    local times = marks_of(c.file)
+    if times then
+        local list = {}
+        for i, t in ipairs(times) do list[i] = string.format("%.3f", t) end
+        table.insert(args, "--at"); table.insert(args, table.concat(list, ","))
+        table.insert(args, "--cover"); table.insert(args, list[1])
+    end
+    table.insert(args, "--link")
+    table.insert(args, utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project } }))
+    table.insert(args, c.file)
+    mp.msg.verbose("clip preview: " .. table.concat(args, " "))
+    job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        if r and r.status == 0 then
+            job.made = job.made + 1
+            local f = io.open(ws.join(ws.join(job.project, workspace.STATE_DIR), "clips-made.txt"), "a")
+            if f then f:write(moments_lib.made_line(c.relative, c.size), "\n"); f:close() end
+        elseif not job.stopping then
+            job.failed = job.failed + 1
+            mp.msg.warn("clip preview of " .. c.relative .. ": " .. tostring(r and r.stderr or r and r.error_string))
+        end
+        job.done = job.done + 1
+        state.clips = { done = job.done, total = job.total }
+        publish()
+        draw_progress()
+        next_clip()
+    end)
+end
+
+local function start_clips(root, queue, what)
+    if not mp.get_property_native("user-data/gyroflow/exporter") then
+        return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
+    end
+    clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0 }
+    state.clips = { done = 0, total = #queue }
+    publish()
+    draw_progress()
+    mp.osd_message(what, 3)
+    next_clip()
+end
+
+-- The project's clips without a preview made (again: the ones made and since deleted)
+local function make_clips(again)
+    if clips_job then return mp.osd_message("Clip previews are being made", 2) end
+    if not state.clip or state.clip:find("://", 1, true) then return end
+    local root = state.project or make_project()
+    if not root then return end
+    local made = read_made()
+    local queue = {}
+    for _, c in ipairs(moments.footage(root)) do
+        local info = utils.file_info(c.file)
+        c.size = info and info.size
+        local listed = made[moments_lib.made_line(c.relative, c.size)]
+        if (again and listed and not fs.is_file(preview_of(root, c.relative))) or (not again and not listed) then
+            queue[#queue + 1] = c
+        end
+    end
+    if #queue == 0 then
+        return mp.osd_message(again and "No clip preview was removed" or "Every clip has its preview (removed ones: Make again for removed clips)", 4)
+    end
+    start_clips(root, queue, "Clip previews: " .. #queue .. (#queue == 1 and " clip" or " clips") .. ", in the background")
+end
+
+mp.register_script_message("clips-make", function() make_clips(false) end)
+mp.register_script_message("clips-again", function() make_clips(true) end)
+mp.register_script_message("clips-stop", function()
+    if not clips_job then return end
+    clips_job.stopping = true
+    if clips_job.id then mp.abort_async_command(clips_job.id) end
+end)
+mp.register_script_message("project-folder", function()
+    if state.project then reveal(state.project, true) end
+end)
+
+-- X: this clip isn't interesting, its preview to the Trash; without one, it's made (again)
+mp.add_key_binding("X", "not-interesting", function()
+    if not state.clip or state.clip:find("://", 1, true) or state.export then return end
+    if not state.relative and not state.project then
+        -- No project: nothing removed; the preview is made, in a new project
+    elseif state.project then
+        local preview = preview_of(state.project, state.relative)
+        if fs.is_file(preview) then
+            return trash(preview, function(ok)
+                mp.osd_message(ok and "Not interesting: its preview is in the Trash (X again: made again)" or "Couldn't move the preview to the Trash", 3)
+            end)
+        end
+    end
+    if clips_job then return mp.osd_message("Clip previews are being made", 2) end
+    local root = state.project or make_project()
+    if not root then return end
+    local info = utils.file_info(state.clip)
+    local c = { file = state.clip, relative = ws.relative(state.clip, root), size = info and info.size }
+    start_clips(root, { c }, "Making this clip's preview again")
+end)
+
+mp.register_event("shutdown", function()
+    if clips_job and clips_job.id then clips_job.stopping = true; mp.abort_async_command(clips_job.id) end
 end)

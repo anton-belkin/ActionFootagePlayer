@@ -149,5 +149,23 @@ expect("unique export", (m.unique_file("/T/Egypt/Exports", "Turtle", " (SDR).mov
 expect("export's project", m.project_of("/T/Egypt/Exports/Turtle (SDR).mov", "Exports"), "/T/Egypt")
 expect("not a moment's", m.project_of("/T/Egypt/Exports/Turtle (SDR).mov"), nil)
 
+-- Clip previews
+expect("clip preview", moments_lib.clip_preview_relative("Day 1/DJI_0068_D.MP4"), "Day 1/DJI_0068_D.afplink.mp4")
+expect("clip preview, card", moments_lib.clip_preview_relative("DCIM/100GOPRO/GX011057.MP4"), "GX011057.afplink.mp4")
+expect("clip preview, card in a day", moments_lib.clip_preview_relative("Day 2/DCIM/DJI_001/A.MP4"), "Day 2/A.afplink.mp4")
+expect("clip preview, a file named DCIM", moments_lib.clip_preview_relative("DCIM/A.MP4"), "DCIM/A.afplink.mp4")
+local made = moments_lib.parse_made(moments_lib.made_line("Day 1/A.MP4", 100) .. "\n" .. moments_lib.made_line("B.MP4", 7) .. "\r\n")
+expect("made", made["Day 1/A.MP4\t100"], true)
+expect("made, other size", made["Day 1/A.MP4\t101"], nil)
+expect("made, CRLF", made["B.MP4\t7"], true)
+file("/T/Egypt/Day 1/A.LRF", 10)
+file("/T/Egypt/.hidden/C.MP4", 10)
+file("/T/Egypt/Exports/x.mov", 10)
+file("/T/Egypt/Clips/Day 1/A.afplink.mp4", 10)
+local clips = m.footage("/T/Egypt")
+local rels = {}
+for _, c in ipairs(clips) do rels[#rels + 1] = c.relative end
+expect("footage", table.concat(rels, ","), "Day 1/A.MP4,Day 1/B.MP4")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

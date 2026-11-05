@@ -635,7 +635,33 @@ first".
    - `M` at 26.5 s removes the camera's mark at 26.38 s;
    - the file is read when the clip loads again;
    - a file with another clip's size goes to `.old`, and the camera's marks come back.
-7. **Clips**: `--preview flipbook` (keyframes, LRF/LRV), the background queue, `clips-made.txt`, the menu, `X`.
+7. **Clips** (**done**):
+   - **gyroflow-export `--preview flipbook`**:
+     - frames: `--at t1,t2,…`, else about 12, at least 10 s apart, after the first second;
+     - `--cover` takes the nearest frame;
+     - each frame is the keyframe at or before its time (`-skip_frame nokey -noaccurate_seek`), from the LRF or LRV
+       when there is one;
+     - the look is the still's SDR one, not stabilized;
+     - 2 frames a second;
+     - the clip's own date, with the zone a DJI name gives.
+   - **The LRF:** an Osmo Action 6's `.LRF` is H.264 1280×720 at 29.97 fps, a keyframe every second, and in the
+     same D-Log M as the clip (the same brightness, checked side by side). So the same LUT applies.
+   - **The player**, in the workspace plugin, from the menu (*Project*):
+     - *Make clip previews* goes through the project's videos, not its own folders, hidden ones or link files.
+       It makes previews for the clips not in `clips-made.txt` (path and size), one at a time, at background
+       priority while a video plays, with the progress in the bottom-left corner;
+     - *Make again for removed clips*; *Stop*;
+     - the frames are the clip's marks (its marks file, else the camera's, through the highlights plugin's
+       `markers.lua` beside it), else the default.
+   - **`X`** moves the clip's preview to the Trash; again: made again.
+   - **A clip preview opened** plays its clip, all of it. The plugins follow `redirected`, set for moments and
+     clip previews.
+   - **Checked headless** on clips 0093 and 0072 in `Day 1/` and `Day 2/` of one project:
+     - both previews made in 2.6 s, from their LRFs, 0093's at its two highlights (413 KB and 130 KB);
+     - `clips-made.txt`; *Make* again makes nothing;
+     - `X` trashes one, and *Make* leaves it deleted;
+     - `X` again and *Make again for removed clips* bring it back;
+     - a preview opened plays its 30.4 s clip in its look.
 8. **Tags**: Finder tags and Explorer's stars read; `K`.
 9. **Separate project folders**: `Sources.txt`, the list, the longest match, read-only folders, *Footage
    moved…*, *Keep this project separately*, the volume id.

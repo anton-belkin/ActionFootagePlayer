@@ -58,7 +58,7 @@ local last_export = nil
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
-    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
     return path
 end
 
@@ -66,6 +66,8 @@ end
 local function publish()
     mp.set_property_native("user-data/gyroflow/exporting", running[clip_path() or ""] ~= nil)
     mp.set_property_native("user-data/gyroflow/last_export", last_export or "")
+    -- For the workspace plugin's clip previews, which run it themselves
+    mp.set_property_native("user-data/gyroflow/exporter", EXPORT)
 end
 mp.observe_property("path", "string", publish)
 mp.observe_property("user-data/workspace/clip", "string", publish)

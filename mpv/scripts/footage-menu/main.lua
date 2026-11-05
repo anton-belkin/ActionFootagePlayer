@@ -26,7 +26,7 @@ local utils = require 'mp.utils'
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
-    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
     return path
 end
 
@@ -61,6 +61,7 @@ local KEY_LABELS = {
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
+    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in Clips/ to the Trash (again: made again)" },
     { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
     { "script-binding highlights/prev", "Previous mark" },
     { "script-binding highlights/mark", "A mark here; on one, remove it" },
@@ -375,6 +376,24 @@ local function moments_menu(w)
     return items
 end
 
+-- The trip's project (the workspace plugin's): its clip previews, its folder
+local function project_menu(w, key)
+    local reveal = platform == "darwin" and "Show project folder in Finder" or "Show project folder"
+    local items = { info(w.project and ("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) or "No project yet: the first moment, mark or clip preview makes one") }
+    table.insert(items, SEPARATOR)
+    if w.clips then
+        table.insert(items, info("Clip previews: " .. w.clips.done .. " of " .. w.clips.total))
+        table.insert(items, item("Stop clip previews", "script-message-to workspace clips-stop"))
+    else
+        table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
+        table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
+    end
+    table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
+    table.insert(items, SEPARATOR)
+    table.insert(items, item(reveal, "script-message-to workspace project-folder", { disabled = not w.project }))
+    return items
+end
+
 local function clip_menu(path, key)
     local pos, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -461,6 +480,7 @@ local function build()
             end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
+        if w and w.clip and local_file(w.clip) then add(submenu("Project", project_menu(w, key))) end
         if h and local_file(path) then add(submenu(h.times and #h.times > 0 and ("Marks (" .. #h.times .. ")") or "Marks", marks_menu({ times = h.times or {}, marks = h.marks }, key))) end
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end

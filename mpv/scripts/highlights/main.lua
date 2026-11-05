@@ -37,7 +37,7 @@ local markers = require 'markers'
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
-    if path and type(ws) == "table" and ws.path == path and ws.moment and ws.clip then return ws.clip end
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
     return path
 end
 

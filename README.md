@@ -274,6 +274,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
+| `X` | This clip isn't interesting: its preview in `Clips/` to the Trash; again: made again | `workspace/not-interesting` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
@@ -568,6 +569,10 @@ a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the
   camera's frame. D-Log M goes through DJI's Rec.709 LUT, other log curves and HLG through NBCU's conversion;
   a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>.afplink.mp4` next
   to the clip (or in `--out`): the double extension says it's a link, and it opens as an MP4 anywhere.
+- `--preview flipbook`: the clip at a glance ([Clip previews](#clip-previews-the-trip-at-a-glance)): a frame at
+  each of `--at t1,t2,…` (else about a dozen, 10 s apart at least), the keyframe at or before it, from the `.LRF` or
+  `.LRV` beside the clip when there is one, in the same SDR look and not stabilized, 2 a second; `--cover <t>` makes
+  the nearest frame its icon. It has the clip's own date.
 - `--link <json>`: the link to the original the player keeps in it, an MP4 key (`ch.actionfootageplayer.link`)
   that copying, renaming and tags keep, and a remux without `-map_metadata 0` loses.
 - `--dates <time>`: its date, with the time zone: the MP4's creation time, QuickTime's creation date (the day
@@ -677,6 +682,23 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
   moment instead. Its Finder tags stay.
 - Sort a Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
+
+### Clip previews: the trip at a glance
+
+A folder of log footage is a wall of gray icons. **Project → Make clip previews** (right click) makes a small
+file for each clip of the trip in a **Clips** folder, beside the footage's own folders:
+`Clips/Day 1/DJI_0068_D.afplink.mp4`.
+
+- **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
+  yours, or about a dozen frames through it, 2 a second, at 960 pixels. Finder's icons are then the trip in color,
+  and Quick Look (space bar) flips through each clip. A double click in the player plays the clip itself.
+- **How long it takes**: a second or so per clip. Only keyframes are decoded, from the low-resolution copy the
+  camera writes beside the clip when there is one (DJI's `.LRF`, GoPro's `.LRV`). That's far less to read from a
+  NAS. They're made one at a time in the background, with the progress in the bottom-left corner, and never by
+  themselves: the menu item makes them for the clips that have none, new footage that is.
+- **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
+  clip previews* doesn't bring it back (`.actionfootageplayer/clips-made.txt` lists what was made). `X` again, or
+  *Make again for removed clips*, does.
 
 ### Notes for an AI agent
 
