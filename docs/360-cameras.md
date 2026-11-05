@@ -202,6 +202,8 @@ from the table above.
 
 ## The plan
 
+In detail, with what each step touches and when it's done: [360-implementation-plan.md](360-implementation-plan.md).
+
 0. **Stitched clips**: the view shader with the head, gestures, FOV; spherical metadata recognized.
 1. **The stamp**: read raw luma in gpu-next (the to-try above), on a synthetic stamped clip.
 2. **A throughput spike**: two 8K HEVC 10-bit tracks through lavfi-complex into VapourSynth, no render.
