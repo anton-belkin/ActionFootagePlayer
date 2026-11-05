@@ -27,6 +27,9 @@
 .lib-tree ul { display: grid; gap: 7px; margin: 7px 0 0 0.35em; padding-left: 1.1em; border-left: 1px solid var(--line); }
 .lib-tree .dir { font-weight: 500; }
 .lib-tree .dir::after { content: "/"; color: var(--muted); }
+/* Each file's size, at the right edge: the originals and exports big, moments and flip-books tiny */
+.lib-tree .sz { float: right; margin-left: 14px; font-variant-numeric: tabular-nums; color: var(--accent-ink); white-space: nowrap; }
+.lib-tree .sz.big { color: var(--ink); font-weight: 600; }
 .lib-tree .c { display: block; font-family: var(--f-body); font-size: 0.8rem; color: var(--muted); }
 
 /* Lists in the text */
