@@ -537,12 +537,14 @@ fn filter_path(p: &Path) -> String {
 }
 
 /// A photo's motion (a Live Photo's or Motion Photo's video): a part of the video, written to `out` as it'd export,
-/// at most `max_side` wide or high, as an MP4 (`mp4`), Dolby Vision as the look has it or not (`dv`)
+/// at most `max_side` wide or high and `bits_per_pixel` a pixel of each frame, as an MP4 (`mp4`), Dolby Vision as
+/// the look has it or not (`dv`)
 struct Part {
     from: f64,
     to: f64,
     out: PathBuf,
     max_side: usize,
+    bits_per_pixel: f64,
     mp4: bool,
     dv: bool,
 }
@@ -735,7 +737,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // Encoder: the stabilized frames, audio and metadata from the source
     // A photo's motion: the first audio track alone (a Motion Photo has one at most; DJI's cameras record two)
     let audio = if part.is_some() { "1:a:0?" } else { "1:a?" };
-    let bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (fw * fh) as f64 / (w * h) as f64;
+    let mut bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (fw * fh) as f64 / (w * h) as f64;
+    // A photo's motion: no more than a phone gives its own
+    if let Some(p) = part { bit_rate = bit_rate.min(p.bits_per_pixel * (fw * fh) as f64 * fps); }
     let mut enc_cmd = ffmpeg_command("ffmpeg");
     enc_cmd.args(["-nostdin", "-v", "error", "-y"]).args(&enc.global);
     enc_cmd.args([
@@ -1060,6 +1064,8 @@ fn macos_sdr(helper: &Path, hdr: &vs_gyroflow::photo::Image, dir: &Path) -> Resu
 /// A Live Photo's or Motion Photo's motion: this long around the photo, as an iPhone's, and at most this wide or high
 const LIVE_SECONDS: f64 = 3.0;
 const LIVE_MAX_SIDE: usize = 1920;
+/// Its bit rate: about an iPhone's Live Photo's (1920x1440 at 30 fps in ~8 Mbit/s); 3 s of 1080p60 is ~5 MB
+const LIVE_BITS_PER_PIXEL: f64 = 0.1;
 
 /// A Live Photo's content identifier: a random UUID (version 4), as Apple's cameras write it
 fn content_id() -> Result<String, String> {
@@ -1237,7 +1243,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         let from = (t - half).max(0.0);
         let to = (t + half).min(info.duration.max(from + 1.0 / fps));
         let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
-        let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, mp4: jpeg, dv: !jpeg };
+        let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, mp4: jpeg, dv: !jpeg };
         match export(file, opts, Some(&part)) {
             // The photo's frame in it: the part starts at the first frame at or after `from`
             Ok(_) => Some((TempFile(video), (n as f64 - (from * fps - 1e-6).ceil().max(0.0)) / fps)),
