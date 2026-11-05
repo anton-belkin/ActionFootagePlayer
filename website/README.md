@@ -18,10 +18,19 @@ Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 202
 site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
+  moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
+  features.html  every feature on one page, the reference the other pages link to (footer: All features)
+  hub.css, divers.css, moments.css, features.css
+                 each page's own styles, next to the shared styles.css
+  media/         real footage from an Osmo Action 6: stab-underwater.mp4 (+ .jpg poster; as recorded | as it
+                 plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
+                 seek bar). No people's faces in them
   download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
   download.js    fills download.html in from latest.json: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
-  top.js         measures the sticky header, so links to #anchors land below it with the heading in view
+  top.js         measures the sticky header, so links to #anchors land below it with the heading in view; opens a
+                 FAQ <details> a link points to; and sets <html data-os="mac|win"> for the visitor's own words
+                 (Finder or File Explorer, …) and download order: see "The visitor's system" below
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
   favicon.ico, apple-touch-icon.png
@@ -102,3 +111,13 @@ after it landed. Nothing to do by hand; the HTML in the repository keeps the pla
 
 The release workflow runs on every pull request, so a site-only pull request also triggers a full build; a
 `paths-ignore: ['website/**']` on its `pull_request` trigger would avoid that.
+
+## The visitor's system
+
+Where a page names something of the desktop (Finder or File Explorer, Quick Look or the preview pane, Finder tags
+or star ratings), it has both, side by side: `<span class="os-mac">Finder</span><span class="os-win">File
+Explorer</span>` (or a pair of `<p>`s). `top.js` sets `<html data-os>`: `mac` on a Mac, iPhone or iPad, `win`
+anywhere else (Windows; Android and Linux visitors are taken to use Windows). `styles.css` hides the other one;
+without script, the Mac's shows. A pair of download buttons in a container marked `data-os-swap`, with `.dl-mac` and
+`.dl-win`, gets the visitor's first and primary. Facts that are Apple's only (Dolby Vision on iPhones, iPads and
+Macs, the Mac app's own features) are the same for everyone. Translations carry both variants too.

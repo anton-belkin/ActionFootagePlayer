@@ -341,3 +341,16 @@ footer a { color: var(--ink); }
 .compat li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .compat-name { font-weight: 600; }
 .compat-note { flex-basis: 100%; color: var(--muted); }
+
+/* Real footage and screenshots: a figure with labels over its two halves (before | after) and a caption */
+.media { margin: 0; display: grid; gap: 10px; }
+.media video, .media img { display: block; width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); background: #05080c; }
+.media .halves { display: grid; grid-template-columns: 1fr 1fr; font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.media .halves span:last-child { text-align: right; color: var(--accent-ink); }
+.media figcaption { font-size: 0.9rem; color: var(--muted); }
+/* A place kept for a screenshot still to come */
+.media-slot { display: grid; place-items: center; aspect-ratio: 16 / 10; padding: 24px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); text-align: center; font-size: 0.9rem; }
+
+/* Words for the visitor's system (top.js sets <html data-os>): the Mac's unless it says "win" */
+html:not([data-os="win"]) .os-win { display: none; }
+[data-os="win"] .os-mac { display: none; }

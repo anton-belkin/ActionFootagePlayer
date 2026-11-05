@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Toutes les fonctions · Action Footage Player</title>
+<meta name="description" content="Toutes les fonctions d’Action Footage Player au même endroit : le log en couleur et en HDR, la stabilisation à partir des données de mouvement de la caméra (sous l’eau aussi), la télémétrie, les highlights, les moments et les repères, les dossiers de projet, l’export en une touche, le passage à votre logiciel de montage, l’image fixe nettoyée, les touches, les caméras et les plateformes.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/features">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/features">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/features">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/features">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/features">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../features.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, accueil">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#keys" class="opt">Touches</a>
+      <a href="#cameras" class="opt">Caméras</a>
+      <a href="download.html" class="opt">Télécharger</a>
+      <a href="index.html" class="opt-xs">Accueil</a>
+    </nav>
+    <details class="lang">
+      <summary aria-label="Langue : français"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>FR</summary>
+      <ul>
+        <li><a href="../features.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/features.html" hreflang="fr" lang="fr" aria-current="page">Français</a></li>
+        <li><a href="../ru/features.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/features.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Cette page a été traduite automatiquement de l’anglais et peut contenir des erreurs. <a href="../features.html" hreflang="en">Lire l’original en anglais</a></p>
+</div>
+
+<main id="top">
+  <section class="hero band ref-hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Référence · toutes les fonctions</p>
+        <h1>Toutes les fonctions</h1>
+        <p class="lede">Ce que fait Action Footage Player, groupe par groupe : chaque fonction en une phrase ou deux, ses touches, et jusqu’où elle a été essayée.</p>
+        <div class="status">
+          <span><i class="dot" aria-hidden="true"></i>Version alpha</span>
+          <span>Novembre 2026</span>
+          <span>GPL-3.0</span>
+        </div>
+        <p class="legend">
+          <span><span class="pill ok">Vérifié</span> lu dans l’app sur un Mac, sur de vraies images</span>
+          <span><span class="pill exp">Devrait fonctionner</span> conçu d’après les métadonnées publiées par le fabricant ou des clips d’exemple, pas encore essayé sur de vraies images</span>
+          <span><span class="pill part">Pas encore</span> ne fonctionne pas encore</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="band">
+    <div class="wrap ref">
+      <nav class="toc" aria-label="Sur cette page">
+        <p class="toc-title">Sur cette page</p>
+        <ol>
+          <li><a href="#opening">Ouvrir les clips</a></li>
+          <li><a href="#color">Le log en couleur &amp; les rendus</a></li>
+          <li><a href="#hdr">Le HDR sur tout écran</a></li>
+          <li><a href="#stabilization">Stabilisation</a>
+            <ol>
+              <li><a href="#stab-gyro">Avec le gyroscope de la caméra</a></li>
+              <li><a href="#stab-projects">Projets Gyroflow</a></li>
+              <li><a href="#stab-underwater">Sous l’eau</a></li>
+              <li><a href="#stab-edges">Bords, sphère</a></li>
+            </ol>
+          </li>
+          <li><a href="#telemetry">Télémétrie</a></li>
+          <li><a href="#highlights">Highlights &amp; passages</a></li>
+          <li><a href="#moments">Moments, repères &amp; projets</a></li>
+          <li><a href="#export">Exporter &amp; partager</a></li>
+          <li><a href="#editors">Vers votre logiciel de montage</a></li>
+          <li><a href="#still">Image fixe nettoyée</a></li>
+          <li><a href="#denoise">Bruit &amp; couleur sous l’eau</a></li>
+          <li><a href="#panel">Panneau latéral &amp; menu</a></li>
+          <li><a href="#keys">Touches</a></li>
+          <li><a href="#cameras">Caméras</a></li>
+          <li><a href="#platforms">Plateformes &amp; installation</a></li>
+          <li><a href="#options">Options pour utilisateurs avancés</a></li>
+          <li><a href="#command-line">Ligne de commande</a></li>
+        </ol>
+      </nav>
+
+      <div class="ref-body">
+
+        <section class="group" id="opening">
+          <h2>Ouvrir les clips</h2>
+          <p class="group-lede">Pas d’import, pas de bibliothèque, rien à calculer d’abord : le clip se lit là où il est.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Un double-clic sur un clip</h3></div>
+              <div class="feat-text">
+                <p>La configuration de l’app pour Mac en fait l’app par défaut des vidéos MP4 (macOS vous demande de confirmer) : un double-clic sur l’une d’elles la lit avec tout ce que décrit cette page. Les autres vidéos s’ouvrent avec elle depuis « Ouvrir avec » dans le Finder.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les Quick Actions du Finder</h3><p class="feat-keys"><span class="where">macOS</span></p></div>
+              <div class="feat-text">
+                <p>Clic droit → Quick Actions : <i>Play Stabilized</i> ouvre les vidéos sélectionnées dans le lecteur ; <i>Stabilize + LUT</i> les exporte en arrière-plan, avec une notification à chaque vidéo terminée.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Le menu de l’Explorateur</h3><p class="feat-keys"><span class="where">Windows</span></p></div>
+              <div class="feat-text">
+                <p>ActionFootagePlayer figure dans « Ouvrir avec » pour les vidéos MP4 et MOV, et le menu de l’Explorateur propose <i>Play in ActionFootagePlayer</i> et <i>Stabilize + LUT</i>, qui exporte dans une fenêtre à part montrant l’avancement (sous Windows 11, dans « Afficher plus d’options »).</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Une seule fenêtre, tout le dossier</h3></div>
+              <div class="feat-text">
+                <p>Une vidéo ouverte pendant qu’une autre est lue prend sa place. Les autres vidéos du dossier sont les clips suivant et précédent, dans la partie Clip du panneau latéral.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Ce qu’est le clip</h3><p class="feat-keys">panneau → Clip</p></div>
+              <div class="feat-text">
+                <p>Dans la partie Clip du panneau latéral : la caméra, sa courbe log, s’il contient des données de mouvement et de la télémétrie, et combien de highlights il a.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les originaux restent tels quels</h3></div>
+              <div class="feat-text">
+                <p>Le fichier vidéo n’est jamais modifié ni réencodé. Un projet Gyroflow est un fichier <code>.gyroflow</code> à côté du clip ; les repères, les moments et les exports vont dans le <a class="text-link" href="#projects">dossier de projet</a>.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Directement depuis la caméra</h3></div>
+              <div class="feat-text">
+                <p>Lisez les clips tels qu’ils sortent de la carte. Une app qui les exporte ou les découpe supprime les métadonnées que lit le lecteur : le mode log, les données de mouvement, la télémétrie, les highlights.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="color">
+          <h2>Le log en couleur &amp; les rendus</h2>
+          <p class="group-lede">Le log est le mode de la caméra qui enregistre le plus, mais ses clips sortent plats et gris et demandent normalement un étalonnage. Ici, ils se lisent tout de suite en couleur.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Le log reconnu tout seul</h3></div>
+              <div class="feat-text">
+                <p>Ce sont les métadonnées du clip qui disent qu’il est en log, pas son nom de fichier, donc il n’y a rien à régler : D-Log M sur l’Osmo Action 6 et l’Osmo 360, GP-Log et GP-Log2 sur les GoPro récentes. Les clips normaux se lisent comme d’habitude.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> Osmo Action 6 (D-Log M) ; GoPro HERO12 Black (GP-Log, firmware 1.20 ou plus récent)</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> Osmo 360 ; HERO13 Black ; GP-Log2 (MISSION 1)</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Le log en HDR</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>h</kbd></p></div>
+              <div class="feat-text">
+                <p>D-Log M, D-Log, GP-Log, GP-Log2 et I-Log 10 bits sont convertis en HDR (Rec.2100 HLG) : une transformation technique fixe, la même pour chaque clip, sans rendu créatif ajouté. <kbd>Ctrl</kbd>+<kbd>h</kbd> passe directement en HDR.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>La courbe log à la main</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>l</kbd></p></div>
+              <div class="feat-text">
+                <p>Pour les clips dont les métadonnées ne le disent pas : D-Log M, D-Log, GP-Log, GP-Log2 et I-Log (10 bits) tour à tour, en HDR.</p>
+                <p class="feat-status">
+                  <span><span class="pill exp">Devrait fonctionner</span> Insta360 à objectif unique, I-Log 10 bits</span>
+                  <span><span class="pill part">Pas encore</span> I-Log 8 bits</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les rendus SDR</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>s</kbd></p></div>
+              <div class="feat-text">
+                <p>Du SDR par la conversion HLG → SDR neutre de NBCUniversal (la même pour toutes les caméras), par la propre LUT Rec.709 du fabricant de la caméra (celle de DJI, pour le D-Log M), ou par le tone mapping de mpv. <kbd>Ctrl</kbd>+<kbd>s</kbd> les parcourt avec les <a class="text-link" href="#hdr">sorties HDR</a>.</p>
+                <p class="feat-status">
+                  <span><span class="pill part">Pas encore</span> une LUT Rec.709 du fabricant pour les courbes autres que D-Log M</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>La LUT de DJI, depuis DJI</h3></div>
+              <div class="feat-text">
+                <p>La LUT Rec.709 de DJI n’est pas redistribuée : la configuration de l’app la télécharge chez DJI et la vérifie. Le HDR et le SDR de NBCU fonctionnent sans elle.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Tel qu’enregistré</h3><p class="feat-keys"><kbd>L</kbd></p></div>
+              <div class="feat-text">
+                <p>Traitement du log désactivé pour ce clip : le fichier tel quel, plat comme la caméra l’a enregistré.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les fichiers HDR se lisent tels quels</h3></div>
+              <div class="feat-text">
+                <p>Un fichier marqué HDR (un export, une vidéo HDR de téléphone ou de caméra d’action) se lit en HDR sans LUT, et n’est jamais pris pour du log et étalonné une seconde fois. <kbd>Ctrl</kbd>+<kbd>s</kbd> le montre en SDR par la conversion de NBCU.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="hdr">
+          <h2>Le HDR sur tout écran</h2>
+          <p class="group-lede">Sur un écran HDR, le log devient une conversion technique, la même pour chaque clip, et se fait donc automatiquement. Sur un Mac qui n’en a pas, macOS atténue le HDR pour cet écran, avec les niveaux de lumière propres à chaque image.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Ce dans quoi démarrent les clips</h3></div>
+              <div class="feat-text">
+                <p>Sur un écran HDR (celui d’un MacBook Pro, par exemple), les clips en log démarrent en HDR. Sur un Mac sans écran HDR (un MacBook Air, la plupart des écrans externes), ils démarrent en <i>HDR, HLG+DV</i> : du HLG affiché par la gestion d’affichage Dolby Vision&reg; propre à macOS, qui l’atténue pour cet écran, comme QuickTime et les appareils Apple affichent l’export. Ce que vous choisissez avec <kbd>Ctrl</kbd>+<kbd>s</kbd> est ce dans quoi démarrent les clips suivants sur ce type d’écran, pour la session.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les sorties vidéo</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>s</kbd></p></div>
+              <div class="feat-text">
+                <p>La sortie vidéo suivante du clip, parmi celles qu’il a :</p>
+                <ul>
+                  <li><i>HDR, HLG</i> : du HDR ; sur un écran sans HDR, macOS l’atténue ;</li>
+                  <li><i>HDR, HLG+DV</i> : du HDR sur un écran HDR, atténué par les trims sur un écran qui n’en a pas ;</li>
+                  <li><i>SDR, HLG+DV</i> : atténué par les trims sur un écran HDR aussi : ce que montre un écran SDR ;</li>
+                  <li>du SDR par le tone mapping de mpv, par la conversion HLG → SDR neutre de NBCUniversal, ou par la propre LUT Rec.709 du fabricant de la caméra (celle de DJI, pour le D-Log M).</li>
+                </ul>
+                <p>Sur un écran HDR, les sorties SDR s’affichent comme un écran SDR les afficherait.</p>
+                <p class="feat-status"><span><span class="where">App Mac</span> les deux sorties <i>HLG+DV</i></span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les niveaux de lumière de chaque image</h3><p class="feat-keys"><span class="where">App Mac</span></p></div>
+              <div class="feat-text">
+                <p>Avec <i>HLG+DV</i>, les niveaux le plus sombre, moyen et le plus clair de chaque image l’accompagnent (le L1 de Dolby Vision), mesurés sur le GPU pendant la lecture : macOS adapte ainsi chaque scène à ce qu’elle contient plutôt qu’à une scène type, et une plongée sombre comme une plage en plein soleil ont chacune leur marge. Les exports mesurent chacune de leurs images de la même façon.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les trims : ceux de l’auteur, ou neutres</h3><p class="feat-keys"><span class="where">App Mac</span></p></div>
+              <div class="feat-text">
+                <p>Les trims s’ajoutent aux niveaux de l’image : ceux de l’auteur, à son goût, ajustés sur la conversion HLG → SDR de NBCUniversal, sans décalage au niveau de la scène, si bien qu’un écran HDR reçoit toujours du HDR. La partie Dolby Vision du panneau latéral les présente en curseurs, avec un retour possible à ceux de l’auteur et à des trims neutres (l’adaptation propre à Dolby Vision, rien d’ajouté). Les exports reprennent ce qui y est réglé.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les exports pour les appareils Apple</h3></div>
+              <div class="feat-text">
+                <p>Les exports faits sur un Mac sont en HEVC Main10 HLG avec des métadonnées Dolby Vision de profil 8.4 : le lecteur écrit lui-même des métadonnées Dolby Vision compatibles (RPU). Les appareils Apple, un iPhone ou un Mac, les lisent en HDR et, sur un écran standard, appliquent les trims : ils les affichent donc comme le lecteur. Les appareils sans Dolby Vision lisent du HLG ordinaire et l’atténuent eux-mêmes.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les écrans de l’autre type</h3></div>
+              <div class="feat-text">
+                <p>Un clip garde son rendu quand sa fenêtre passe sur un écran de l’autre type. Sous Windows et Linux, tout écran compte comme HDR.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Un écran affiché trop sombre</h3><p class="feat-keys"><span class="where">macOS</span></p></div>
+              <div class="feat-text">
+                <p>Après qu’un écran HDR (une TV HDR, par exemple) a été branché, macOS peut afficher le HDR environ un diaphragme plus sombre sur l’écran SDR branché à sa place, jusqu’au redémarrage du Mac. Le lecteur vous le signale quand il le constate, la première fois que du HDR est lu sur un tel écran.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="stabilization">
+          <h2>Stabilisation</h2>
+          <p class="group-lede">Avec le moteur de <a class="text-link" href="https://gyroflow.xyz">Gyroflow</a>, pendant la lecture du clip et en même temps que la conversion du log : rien n’est calculé d’abord.</p>
+          <div class="feats">
+            <div class="feat" id="stab-gyro">
+              <div><h3>Avec les données de mouvement de la caméra</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>g</kbd></p></div>
+              <div class="feat-text">
+                <p>Les clips enregistrés avec la stabilisation de la caméra désactivée se lisent stabilisés sans projet : DJI avec l’EIS désactivé, GoPro avec HyperSmooth désactivé, Insta360 avec FlowState désactivé. Seulement si la caméra a enregistré qu’elle était désactivée : un clip déjà stabilisé par la caméra se lit tel quel.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> Osmo Action 6 (EIS désactivé) ; GoPro HERO12 Black (HyperSmooth désactivé)</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> Osmo 360 ; autres caméras DJI ; autres GoPro ; Insta360 à objectif unique</span>
+                  <span><span class="pill part">Pas encore</span> autres caméras, sans projet</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Rien à calculer d’abord</h3></div>
+              <div class="feat-text">
+                <p>Les anciens voyages se lisent stabilisés tels quels, sans copie calculée de chaque clip à faire et à garder : un fichier n’est écrit que pour les passages que vous exportez.</p>
+                <p>La stabilisation elle-même est le moteur de Gyroflow ; le lecteur y ajoute la lecture en temps réel, le HDR à partir du log et la télémétrie.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Activée, plus large, désactivée</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>g</kbd></p></div>
+              <div class="feat-text">
+                <p>Stabilisation activée → activée avec une vue plus large → désactivée. La vue plus large ne zoome pas : l’image stabilisée couvre à peu près autant de la fenêtre que l’image d’origine, et les bords apparaissent par moments, remplis. Le réglage est conservé pour les clips suivants.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Quelle force</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>k</kbd></p></div>
+              <div class="feat-text">
+                <p>Faible, moyenne ou forte, pour un clip sans projet : 10, 20 ou 30 % de recadrage, lissage à 50, 75 ou 100 %. Elle change pendant la lecture du clip, et est conservée pour les clips suivants.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Horizon</h3><p class="feat-keys">panneau → Stabilization</p></div>
+              <div class="feat-text">
+                <p>Verrouillé à niveau, non verrouillé, ou comme le dit le projet. Verrouillé demande plus de zoom, donc les bords apparaissent davantage.</p>
+              </div>
+            </div>
+            <div class="feat" id="stab-projects">
+              <div><h3>Projets Gyroflow</h3></div>
+              <div class="feat-text">
+                <p>Un projet fait dans Gyroflow et enregistré à côté du clip est utilisé tel quel : le clip se lit comme le dit le projet, y compris son verrouillage d’horizon et son objectif.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> Osmo Action 6</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> les autres caméras, et toute caméra que Gyroflow prend en charge</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Ouvrir dans Gyroflow</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>e</kbd></p></div>
+              <div class="feat-text">
+                <p>Met en pause et ouvre le projet du clip dans Gyroflow, écrit d’abord à côté du clip s’il n’en a pas, d’après ce que vous avez vu : le même objectif, le même lissage, le même zoom et la même réfraction. À chaque enregistrement là-bas, la stabilisation ici se recharge au même endroit. Un projet déjà présent n’est jamais écrasé.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Clips sans données de mouvement</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>e</kbd></p></div>
+              <div class="feat-text">
+                <p>Un clip filmé avec la stabilisation de la caméra activée, ou par une caméra qui n’en enregistre pas, s’ouvre tel quel dans Gyroflow, pour être stabilisé à partir de l’image (flux optique). Enregistrez-y le projet, et le clip se lit stabilisé avec lui. Le menu le propose sous <i>Stabilize in Gyroflow (optical flow)…</i></p>
+              </div>
+            </div>
+            <div class="feat" id="stab-underwater">
+              <div><h3>Sous l’eau</h3></div>
+              <div class="feat-text">
+                <p>La stabilisation intégrée à la caméra abandonne sous l’eau. Désactivez-la, et le clip se lit stable ici : le préréglage par défaut est fait pour les images sous l’eau, corrigé de la façon dont l’eau dévie la lumière. Sur un clip de test, le tremblement entre les images est passé de 0,16 px à 0,02 px.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Objectif dans l’eau ou hors de l’eau</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>u</kbd></p></div>
+              <div class="feat-text">
+                <p>L’objectif hors de l’eau, puis de nouveau sous l’eau. Par défaut, la réfraction suit le <i>In water</i> / <i>Out of water</i> de la caméra au fil du clip, et change en l’espace d’une image. Les clips des autres caméras se lisent comme le disent le projet ou le préréglage (sous l’eau, par défaut).</p>
+                <p class="feat-status">
+                  <span>Suivre la caméra : l’Osmo Action 6, seule caméra qui l’enregistre.</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat" id="stab-edges">
+              <div><h3>Bords remplis</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>b</kbd></p></div>
+              <div class="feat-text">
+                <p>Ce qui remplit les zones que l’image stabilisée ne couvre pas, flouté et fondu dans l’image :</p>
+                <ul>
+                  <li><b>sphere</b>, par défaut : ce qui a été vu en dernier dans cette direction du monde, si bien que cela reste aligné avec l’image pendant un panoramique ; là où rien n’a encore été vu, les couleurs alentour s’étalent ;</li>
+                  <li><b>smooth</b> : seulement les couleurs de l’image elle-même, étalées depuis son bord ;</li>
+                  <li><b>off</b> : la couleur de fond du projet, comme Gyroflow la rend.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Démarre tout de suite</h3></div>
+              <div class="feat-text">
+                <p>Un clip sans projet se lit dès ses premières secondes de données de mouvement et lit le reste pendant la lecture : depuis un NAS en une seconde environ, là où tout lire d’abord prenait 5 à 10 s.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Sur un ordinateur plus lent</h3><p class="feat-keys">panneau → Performance &amp; Quality</p></div>
+              <div class="feat-text">
+                <p>Quand la stabilisation perd des images pendant plus de 2 s, la lecture se met en pause et propose une fréquence d’images, une résolution ou un remplissage des bords plus bas. La partie Performance &amp; Quality du panneau latéral les règle.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="telemetry">
+          <h2>Télémétrie</h2>
+          <p class="group-lede">Ce que la caméra a mesuré, par-dessus la vidéo, lu dans le clip à son ouverture.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>À l’écran</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>t</kbd></p></div>
+              <div class="feat-text">
+                <p>Chaque champ s’affiche quand le clip l’a : la profondeur et <i>In water</i> / <i>Out of water</i> sur un clip DJI ; sur une GoPro, la position et la vitesse une fois le GPS calé, ou l’exposition sur une GoPro sans GPS. <kbd>Ctrl</kbd>+<kbd>t</kbd> l’éteint et la rallume ; le réglage est conservé pour les clips suivants.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> la profondeur, dans l’eau, sur l’Osmo Action 6</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> ses autres champs (aucune position GPS vue jusqu’ici) ; Osmo 360 ; GPS, vitesse et exposition des GoPro</span>
+                  <span><span class="pill part">Pas encore</span> les autres caméras</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Profondeur</h3></div>
+              <div class="feat-text">
+                <p>Sous l’eau, d’après le baromètre, par pas de 0,1 m environ une fois par seconde. Dans un caisson de plongée, elle n’est pas enregistrée (le baromètre mesure l’air du caisson), mais <i>In water</i> s’affiche quand même, d’après l’image.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>D’autres champs</h3><p class="feat-keys">panneau → Telemetry</p></div>
+              <div class="feat-text">
+                <p>Disponibles sur demande : la pression, l’altitude hors de l’eau (relative, donc indicative), l’exposition (ISO, vitesse d’obturation, ouverture, balance des blancs), et sur une Osmo 360 la température du capteur d’image et la fréquence cardiaque d’un appareil appairé.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Où, et dans quelles unités</h3></div>
+              <div class="feat-text">
+                <p>N’importe quel coin de la vidéo (en bas à gauche par défaut), en métrique ou en impérial (pieds, mph, °F), depuis le menu ou le panneau latéral.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="highlights">
+          <h2>Highlights &amp; passages</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Les highlights de la caméra</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></p></div>
+              <div class="feat-text">
+                <p>Appuyez sur le bouton highlight de la caméra pendant l’enregistrement : les marques apparaissent sur la barre de lecture, et les touches sautent à la suivante et à la précédente, deux secondes avant elle, car le moment a généralement eu lieu quand vous appuyez. <kbd>Page Up</kbd> / <kbd>Page Down</kbd> vont à la marque elle-même.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> DJI Osmo Action 6 (le bouton de changement rapide, ou la télécommande Bluetooth GPS)</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> DJI Osmo Action 4 et Action 5 Pro ; GoPro HERO5 et plus récentes (HiLight, « GoPro, HiLight », ou la télécommande)</span>
+                  <span>L’Osmo 360 et la Pocket 3 ne marquent pas de highlights.</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Tous, par heure</h3><p class="feat-keys">panneau → Clip</p></div>
+              <div class="feat-text">
+                <p>La partie Clip du panneau latéral a chaque highlight ; sans le panneau, le menu des plugins les liste par instant.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Marquer un passage</h3><p class="feat-keys"><kbd>l</kbd> deux fois</p></div>
+              <div class="feat-text">
+                <p>Au début du passage et à sa fin (la boucle A-B de mpv) : ce que <kbd>Shift</kbd>+<kbd>E</kbd> exporte ensuite, et ce que <kbd>k</kbd> enregistre comme <a class="text-link" href="#moments">moment</a>.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="moments">
+          <h2>Moments, repères &amp; projets</h2>
+          <p class="group-lede">Ce que vous gardez d’un voyage, en simples fichiers dans son dossier, que <span class="os-mac">le Finder affiche</span><span class="os-win">l’Explorateur de fichiers affiche</span> et que <a class="text-link" href="#editors">votre logiciel de montage</a> importe. L’histoire, de la carte au montage : <a class="text-link" href="moments.html">Moments et repères</a>.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Enregistrer un moment</h3><p class="feat-keys"><kbd>k</kbd></p></div>
+              <div class="feat-text">
+                <p>Marquez un passage avec <kbd>l</kbd> deux fois, puis <kbd>k</kbd> l’enregistre comme moment, après vous avoir demandé son nom. Le champ est vide, avec une suggestion affichée : <kbd>Enter</kbd> la prend, taper la remplace, <kbd>Esc</kbd> annule. Un moment que vous ne nommez pas porte sa date et son heure.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Un moment est un petit fichier</h3></div>
+              <div class="feat-text">
+                <p>Chaque moment est un petit MP4 dans le dossier <code>Moments/</code> du projet, sous son nom. <span class="os-mac">Les vignettes du Finder et Quick Look le montrent</span><span class="os-win">Les vignettes de l’Explorateur de fichiers et son volet de visualisation (<kbd>Alt</kbd>+<kbd>P</kbd>) le montrent</span> en couleur, pas dans le gris du log. Un double-clic lit ce passage de l’original, en pleine qualité et stabilisé.</p>
+                <p>Son icône est le premier repère qu’il contient, sinon son image du milieu. Les dates du fichier sont l’heure réelle du moment : triés par date, les moments sont dans l’ordre où ils se sont produits.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Rangez-les comme n’importe quels fichiers</h3></div>
+              <div class="feat-text">
+                <p>Supprimer le fichier supprime le moment. Les sous-dossiers de <code>Moments/</code> sont à vous, pour y classer les moments ; renommer un fichier renomme le moment.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Repères</h3><p class="feat-keys"><kbd>M</kbd></p></div>
+              <div class="feat-text">
+                <p>Des points dans un clip, sur la barre de lecture. <kbd>M</kbd> ajoute un repère là où en est la vidéo ; sur un repère, il le retire. Les repères sont les highlights de la caméra jusqu’à ce que vous en changiez un : votre première modification les enregistre tous dans un petit fichier de repères propre au clip, <code>&lt;clip&gt;.marks.json</code>. Supprimez ce fichier, et ceux de la caméra reviennent.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Tout le voyage d’un coup d’œil</h3><p class="feat-keys">menu → Project</p></div>
+              <div class="feat-text">
+                <p>Créé depuis le menu, quand vous le demandez : un dossier <code>Clips/</code> avec un petit MP4 par clip, un flip-book du clip en couleur. <span class="os-mac">En présentation par icônes, le dossier montre tout le voyage en couleur au lieu d’un mur de gris log, et Quick Look feuillette chaque clip en quelques secondes.</span><span class="os-win">En affichage Grandes icônes, le dossier montre tout le voyage en couleur au lieu d’un mur de gris log, et le volet de visualisation (<kbd>Alt</kbd>+<kbd>P</kbd>) feuillette chaque clip en quelques secondes.</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Mettre un clip de côté</h3><p class="feat-keys"><kbd>X</kbd></p></div>
+              <div class="feat-text">
+                <p>Pas intéressant : <kbd>X</kbd> dans le lecteur, ou supprimer le flip-book du clip dans <code>Clips/</code>, ce qui revient au même. Le clip lui-même reste où il est.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Favoris et notes</h3><p class="feat-keys"><kbd>K</kbd></p></div>
+              <div class="feat-text">
+                <p>Un moment ou le flip-book d’un clip qui existe est gardé ; supprimé, il ne l’est pas. <kbd>K</kbd> fait du moment en cours de lecture, sinon du clip, un favori, et à nouveau le retire : <span class="os-mac">un tag vert <i>Favorite</i> dans le Finder</span><span class="os-win">une note de 4 étoiles ou plus dans l’Explorateur de fichiers</span>. Votre logiciel de montage les reçoit aussi.</p>
+              </div>
+            </div>
+            <div class="feat" id="projects">
+              <div><h3>Dossiers de projet</h3></div>
+              <div class="feat-text">
+                <p>Les moments, les repères, les flip-books des clips et les exports vont dans le dossier du voyage lui-même, à côté des images. Quand ce dossier n’est pas accessible en écriture (une carte verrouillée, un partage en lecture seule), le lecteur demande un nom et crée un dossier de projet dans son dossier des Documents (<code>Documents/ActionFootagePlayer/</code>), avec un <code>Sources.txt</code> qui pointe vers les images.</p>
+                <p>Les fichiers originaux ne sont jamais modifiés.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="moments.html">Moments et repères</a>
+          </div>
+        </section>
+
+        <section class="group" id="export">
+          <h2>Exporter &amp; partager</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Exporter ce que vous voyez</h3><p class="feat-keys"><kbd>Shift</kbd>+<kbd>E</kbd></p></div>
+              <div class="feat-text">
+                <p>Le clip tel qu’il est lu, en une passe : stabilisé ou non, avec la même vue, les mêmes bords, le même horizon et le même objectif, le même rendu. Avec un passage marqué, seulement ce passage. <kbd>Shift</kbd>+<kbd>E</kbd> deux fois sur un clip en cours d’export l’annule.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Vérifié</span> les exports HDR depuis l’Osmo Action 6</span>
+                  <span><span class="pill exp">Devrait fonctionner</span> les exports Rec.709 ; les autres caméras (toute caméra prise en charge par Gyroflow : avec un projet)</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Un fichier pour votre téléphone</h3></div>
+              <div class="feat-text">
+                <p>Les clips en log s’exportent en HEVC 10 bits en HDR (Rec.2100 HLG), marqués pour que macOS, iOS et YouTube les affichent en HDR ; faits sur un Mac, ils portent aussi des métadonnées Dolby Vision pour les appareils Apple (voir <a class="text-link" href="#hdr">Le HDR sur tout écran</a>). Dans un rendu SDR, l’export est en Rec.709 ; Export in SDR dans le menu le fait quel que soit le rendu lu. Le 10 bits reste en 10 bits.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Où il va</h3></div>
+              <div class="feat-text">
+                <p>Le dossier <code>Exports/</code> du projet, sous le nom que vous lui donnez dans le même dialogue que pour un moment, avec le rendu entre parenthèses quand ce n’est pas celui par défaut : <code>Turtle.mov</code>, <code>Turtle (SDR).mov</code>. Il porte un lien vers l’original, que lit <i>Open the original</i> dans le menu. Le son est copié tel quel et le fichier garde les dates du clip. Une notification indique où il est allé, et le menu montre le dernier export dans <span class="os-mac">le Finder</span><span class="os-win">l’Explorateur de fichiers</span>.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Continuer à regarder pendant ce temps</h3></div>
+              <div class="feat-text">
+                <p>La lecture continue pendant un export, avec son avancement en haut à droite ; plusieurs clips peuvent s’exporter à la fois. Sur un Mac, un export tourne en priorité d’arrière-plan pendant la lecture de la vidéo, et s’arrête presque : mettez en pause, et il reprend à pleine vitesse.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Plusieurs clips à la fois</h3></div>
+              <div class="feat-text">
+                <p><i>Stabilize + LUT</i>, dans <span class="os-mac">les Quick Actions du Finder</span><span class="os-win">le menu contextuel de l’Explorateur de fichiers</span>, exporte les vidéos sélectionnées ; la <a class="text-link" href="#command-line">ligne de commande</a> aussi, qui peut en plus écrire du ProRes 422 HQ pour le montage.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Sous Windows</h3><p class="feat-keys"><span class="where">Windows</span></p></div>
+              <div class="feat-text">
+                <p>Les exports sont encodés avec le premier qui fonctionne parmi NVENC, Quick Sync et AMF, sinon x265 sur le processeur (bien plus lent ; sous Windows on ARM, toujours).</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="editors">
+          <h2>Vers votre logiciel de montage</h2>
+          <p class="group-lede">Une fois vos choix faits, les moments et les repères partent vers votre logiciel de montage, sur les fichiers originaux : un seul import, rien n’est rendu.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Repères pour le montage</h3><p class="feat-keys">menu → Marks for the editor</p></div>
+              <div class="feat-text">
+                <p>Choisissez le logiciel, et le lecteur écrit pour lui le fichier du voyage dans le dossier de projet, au nom du projet, et indique où il se trouve. Il prend tous les clips que vous n’avez pas mis de côté, ou seulement ceux qui ont un moment ou un repère. <span class="os-mac">Les dossiers de moments deviennent des chutiers, les tags du Finder des mots-clés, et les favoris restent des favoris.</span><span class="os-win">Les dossiers de moments deviennent des chutiers, et les favoris restent des favoris.</span> Les temps suivent le timecode propre des clips, si bien que chaque marqueur tombe sur son image.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Final Cut Pro</h3></div>
+              <div class="feat-text">
+                <p>Un événement avec les clips et les repères comme marqueurs, les moments comme plages de mots-clés avec favoris et rejets, et un projet des moments à la suite.</p>
+                <p class="feat-status"><span>FCPXML 1.10 : Fichier → Importer → XML.</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>DaVinci Resolve</h3><p class="feat-keys">la version gratuite aussi</p></div>
+              <div class="feat-text">
+                <p>Des timelines sur les fichiers originaux : les moments, une par dossier de moments, et les clips. Les repères y vont comme marqueurs de timeline, et les favoris, les rejets et les mots-clés comme couleurs de clip, drapeaux et mots-clés.</p>
+                <p class="feat-status"><span>FCPXML, plus un EDL de marqueurs et un CSV de métadonnées.</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Premiere Pro</h3></div>
+              <div class="feat-text">
+                <p>Des chutiers à l’image de vos dossiers, les clips avec leurs marqueurs, chaque moment comme clip nommé avec son entrée et sa sortie, et une séquence des moments.</p>
+                <p class="feat-status"><span>FCP7 XML : Fichier → Importer.</span></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="still">
+          <h2>Image fixe nettoyée</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Débruitage temporel de l’image en pause</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
+              <div class="feat-text">
+                <p>Un instant après la mise en pause, l’image est reconstruite à partir d’elle-même et des 5 images de chaque côté, chacune ramenée sur elle selon le mouvement entre elles : son bruit et les particules dans l’eau disparaissent en grande partie, et le détail reste. Environ une seconde pour de la 4K ; la stabilisation doit être activée. Le réglage est conservé pour les clips suivants.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Image en pause en pleine taille</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>f</kbd></p></div>
+              <div class="feat-text">
+                <p>L’image en pause à la résolution propre de la source, quels que soient les réglages de lecture, nettoyée dans la même passe quand <kbd>Ctrl</kbd>+<kbd>p</kbd> est activé. Quality → Paused frame → At full size le fait après chaque pause.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="denoise">
+          <h2>Réduction du bruit &amp; couleur sous l’eau</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Réduction du bruit</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>n</kbd></p></div>
+              <div class="feat-text">
+                <p>Les taches de couleur dans les ombres et sous l’eau disparaissent en grande partie, et le détail reste. N’importe quel clip, en log ou non, sur le GPU. Le réglage est conservé pour les clips suivants. Lecture seulement : les exports ne sont pas débruités.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Franges de couleur sous l’eau</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>a</kbd></p></div>
+              <div class="feat-text">
+                <p>L’eau dévie davantage le bleu que le rouge, si bien que derrière la vitre plate de la caméra, le rouge et le bleu se séparent vers les bords de l’image. Partout où l’objectif est sous l’eau, chaque couleur est ramenée là où tombe son propre rayon, par la physique seule, sans rien d’ajusté sur des images ; hors de l’eau, rien ne change. <kbd>Ctrl</kbd>+<kbd>a</kbd> laisse les franges telles qu’enregistrées, puis les retire de nouveau. Lecture seulement.</p>
+                <p class="feat-status">
+                  <span>Sur des clips de plongée de l’Osmo Action 6, la frange rouge de 3 à 7 px sur les bords revient à un pixel environ.</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="panel">
+          <h2>Panneau latéral &amp; menu</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Le panneau latéral</h3><p class="feat-keys"><kbd>Tab</kbd></p></div>
+              <div class="feat-text">
+                <p>Les réglages, dans un panneau à droite de la fenêtre, à côté de la vidéo, qui se décale pour lui ; les touches sont à côté de ce qu’elles font. <kbd>Tab</kbd> le masque et l’affiche de nouveau.</p>
+                <ul>
+                  <li><b>Clip</b> : ce qu’il est, <span class="os-mac">le Finder</span><span class="os-win">l’Explorateur de fichiers</span> et son chemin, marquer une partie, l’enregistrer comme moment, l’exporter, les moments et les repères, le clip suivant et le précédent ;</li>
+                  <li><b>Look</b> : la sortie vidéo, la courbe log à la main, la réduction du bruit ;</li>
+                  <li><b>Stabilization</b> : Gyroflow, la vue, le niveau, l’horizon, l’objectif et ses franges colorées ;</li>
+                  <li><b>Performance &amp; Quality</b> : la fréquence d’images et la taille de la stabilisation, l’image en pause, le remplissage des bords, s’il demande quand le GPU ne suit pas ;</li>
+                  <li><b>Telemetry</b> : si elle s’affiche, le coin, les unités, les champs ;</li>
+                  <li><b>Dolby Vision</b> (l’app Mac) : les trims, en curseurs ;</li>
+                  <li><b>Support</b> : la version, Keys…, Note for the agent…, Report this camera…, Set up again…, et des liens vers le site et GitHub.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Le menu</h3><p class="feat-keys">clic droit</p></div>
+              <div class="feat-text">
+                <p>Avec le panneau latéral (l’app, et le zip des plugins), le clic droit ouvre le menu propre à mpv. Sans lui, le clic droit ouvre le menu des plugins : tout ce que font les touches, avec les touches à côté, et ce qui n’a pas de touche. Il demande mpv 0.41 ou plus récent.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Make these the defaults</h3></div>
+              <div class="feat-text">
+                <p>En bas de Look, Stabilization, Quality et Telemetry (Remember as default, dans le menu) : les réglages tels qu’ils sont, pour le prochain démarrage.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Report this camera…</h3><p class="feat-keys">panneau → Support</p></div>
+              <div class="feat-text">
+                <p>Ouvre une issue sur GitHub avec ce que les plugins ont trouvé dans le clip.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="keys">
+          <h2>Touches</h2>
+          <p class="group-lede">Chaque action est aussi dans le panneau latéral, avec sa touche à côté.</p>
+          <div class="compare-wrap">
+            <table class="keytable">
+              <thead><tr><th scope="col">Touche</th><th scope="col">Ce qu’elle fait</th><th scope="col">Nom, pour <code>input.conf</code></th></tr></thead>
+              <tbody>
+                <tr><td><kbd>l</kbd> deux fois</td><td>Marquer un passage : son début, puis sa fin (la boucle A-B de mpv)</td><td></td></tr>
+                <tr><td><kbd>k</kbd></td><td>Enregistrer le passage marqué comme moment, après avoir demandé son nom</td><td></td></tr>
+                <tr><td><kbd>M</kbd></td><td>Un repère ici ; sur un repère : le retirer</td><td></td></tr>
+                <tr><td><kbd>X</kbd></td><td>Mettre le clip de côté : pas intéressant</td><td></td></tr>
+                <tr><td><kbd>K</kbd></td><td>Favori : le moment en cours de lecture, sinon le clip ; à nouveau : retiré</td><td></td></tr>
+                <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>Exporter le clip tel qu’il est lu, ou le passage marqué, après avoir demandé son nom ; deux fois : annuler</td><td><code>gyroflow/export</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>g</kbd></td><td>Stabilisation activée → vue plus large → désactivée</td><td><code>gyroflow/toggle</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>k</kbd></td><td>Force de la stabilisation : faible → moyenne → forte</td><td><code>gyroflow/level</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>b</kbd></td><td>Ce qui remplit les bords : sphere, smooth, off</td><td><code>gyroflow/edges</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>u</kbd></td><td>L’objectif hors de l’eau, et retour</td><td><code>gyroflow/lens</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>a</kbd></td><td>Franges de couleur sous l’eau retirées, ou laissées telles qu’enregistrées</td><td><code>gyroflow/fringes</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>e</kbd></td><td>Ouvrir le clip dans Gyroflow</td><td><code>gyroflow/edit</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>Débruitage temporel de l’image en pause (l’image fixe nettoyée), activé ou non</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>f</kbd></td><td>L’image en pause en pleine taille</td><td><code>gyroflow/full</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>s</kbd></td><td>La sortie vidéo suivante : HDR, <i>HLG+DV</i> (app Mac) et les rendus SDR</td><td><code>dlogm/sdr</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>h</kbd></td><td>Directement en HDR</td><td><code>dlogm/hdr</code></td></tr>
+                <tr><td><kbd>L</kbd></td><td>Traitement du log désactivé : le clip tel qu’enregistré</td><td><code>dlogm/off</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>l</kbd></td><td>La courbe log à la main</td><td><code>dlogm/curve</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>n</kbd></td><td>Réduction du bruit activée ou non</td><td><code>dlogm/denoise</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>t</kbd></td><td>Télémétrie éteinte ou affichée</td><td><code>dji_telemetry/toggle</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></td><td>Highlight suivant, highlight précédent (quelques secondes avant)</td><td><code>highlights/next</code>, <code>highlights/prev</code></td></tr>
+                <tr><td><kbd>Page Up</kbd> / <kbd>Page Down</kbd></td><td>Les highlights aussi, à la marque même (les touches de chapitre de mpv)</td><td></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>r</kbd></td><td>Une note pour un agent IA</td><td><code>agent/report</code></td></tr>
+                <tr><td>clic droit</td><td>Le menu des plugins, quand il n’y a pas de panneau latéral (le menu propre à mpv avec lui)</td><td><code>footage_menu/menu</code></td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>Le panneau latéral, masqué ou affiché</td><td><code>side_panel/toggle</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">D’autres touches : associez les noms dans <code>input.conf</code>, par exemple <code>Ctrl+d script-binding dlogm/sdr</code>.</p>
+        </section>
+
+        <section class="group" id="cameras">
+          <h2>Caméras</h2>
+          <p class="group-lede">Utilisé au quotidien avec la DJI Osmo Action 6, et essayé sur une GoPro HERO12 Black. Les autres caméras DJI, les autres GoPro et les Insta360 sont prises en compte, mais pas encore essayées sur de vraies images.</p>
+          <div class="btns">
+            <a class="btn" href="index.html#cameras">Ce qui fonctionne, caméra par caméra</a>
+            <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer#other-cameras-and-how-to-help">L’aider à fonctionner avec la vôtre</a>
+          </div>
+          <p class="note">Quelques secondes d’images tout droit sorties de la carte, dans une issue GitHub, sont le moyen le plus rapide de faire passer une caméra à vérifiée.</p>
+        </section>
+
+        <section class="group" id="platforms">
+          <h2>Plateformes &amp; installation</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Mac avec Apple Silicon</h3><p class="feat-keys"><span class="pill ok">Utilisé au quotidien</span></p></div>
+              <div class="feat-text">
+                <p>macOS 15 ou plus récent. L’app contient ses propres mpv et ffmpeg : rien d’autre à installer. Elle est signée ad hoc, donc la première fois : Réglages Système → Confidentialité et sécurité → Ouvrir quand même. Sa configuration en fait le lecteur des vidéos MP4, ajoute les Quick Actions et télécharge la LUT de DJI.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Windows 10 ou 11</h3><p class="feat-keys"><span class="pill exp">Alpha</span></p></div>
+              <div class="feat-text">
+                <p>Une app à part, pour x86-64 et pour Windows 11 on ARM, avec tout dedans. L’app x86-64 a été essayée et fonctionne, encore peu testée ; celle pour ARM n’est vérifiée que par la compilation. Elle s’installe pour vous seul, sans droits d’administrateur ; SmartScreen avertit la première fois : Informations complémentaires → Exécuter quand même.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Linux</h3><p class="feat-keys"><span class="pill exp">Pas essayé</span></p></div>
+              <div class="feat-text">
+                <p>Les plugins, dans votre propre mpv : construits à chaque version, pas encore essayés. La stabilisation demande un mpv compilé avec VapourSynth.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les plugins dans votre propre mpv</h3></div>
+              <div class="feat-text">
+                <p>Sur tout système : le log en couleur, la télémétrie, les highlights et le menu sont du Lua simple et des shaders GPU. La stabilisation et l’export demandent un mpv compilé avec VapourSynth, et sont fournis compilés pour macOS sur Apple Silicon, Linux x86-64 et Windows. Rien ne va dans <code>mpv.conf</code> ni <code>input.conf</code>.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn primary" href="download.html">Téléchargements et étapes d’installation</a>
+          </div>
+        </section>
+
+        <section class="group" id="options">
+          <h2>Options pour utilisateurs avancés</h2>
+          <p class="group-lede">Chaque plugin lit un <code>&lt;plugin&gt;.conf</code> dans le dossier <code>mpv/script-opts/</code> de l’app, dans <code>~/Library/Application Support/ActionFootagePlayer/</code> (Windows : <code>%LOCALAPPDATA%\ActionFootagePlayer\</code>). Remember as default les écrit pour vous. Quelques-unes :</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Fichiers de réglages</h3></div>
+              <div class="feat-text">
+                <dl class="optlist">
+                  <dt><code>dlogm.conf</code></dt><dd><code>mode=hdr</code> ou <code>sdr</code> : ce dans quoi démarrent les clips D-Log M ; <code>denoise=yes</code> : réduction du bruit activée dès le départ ; <code>dv_live_l1=no</code> (l’app Mac) : les niveaux de lumière fixes des trims au lieu de ceux de chaque image</dd>
+                  <dt><code>gyroflow.conf</code></dt><dd><code>view</code>, <code>level</code>, <code>horizon_lock</code>, <code>underwater</code>, <code>chromatic</code>, <code>edges</code> : ce avec quoi démarrent les clips sans projet ; <code>resolution</code>, <code>fps_limit</code>, <code>edge_fill_rate</code>, <code>ask_when_slow</code> : pour les ordinateurs plus lents ; <code>still_radius</code>, <code>paused_full_size</code> : l’image fixe nettoyée</dd>
+                  <dt><code>dji_telemetry.conf</code></dt><dd><code>fields</code>, <code>units</code>, <code>position</code>, <code>font_size</code>, <code>visible</code></dd>
+                  <dt><code>highlights.conf</code></dt><dd><code>before=2</code> : combien de secondes avant un highlight un saut arrive ; <code>chapters</code> : les marques sur la barre de lecture</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Votre propre préréglage par défaut</h3></div>
+              <div class="feat-text">
+                <p>Les clips sans projet reçoivent le préréglage par défaut de Gyroflow, puis un <code>default.gyroflow</code> à vous, placé dans le dossier <code>gyroflow/</code> de l’app.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Notes pour un agent IA</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>r</kbd></p></div>
+              <div class="feat-text">
+                <p>Pour travailler sur le lecteur avec un agent IA : tracez un rectangle autour de ce dont vous parlez, écrivez une ligne, et la note est enregistrée avec l’écran, l’image et ce que faisait le lecteur, pour que l’agent la lise.</p>
+              </div>
+            </div>
+          </div>
+          <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#options">Toutes les options, dans le README sur GitHub</a></p>
+        </section>
+
+        <section class="group" id="command-line">
+          <h2>Ligne de commande</h2>
+          <p class="group-lede">L’export, pour un clip ou plusieurs, depuis un terminal : ce que fait <kbd>Shift</kbd>+<kbd>E</kbd>, dans le dossier des plugins.</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3><code>gyroflow-export</code></h3></div>
+              <div class="feat-text">
+                <pre class="cmd"><code>~/.config/mpv/scripts/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4</code></pre>
+                <dl class="optlist">
+                  <dt><code>--prores</code></dt><dd>ProRes 422 HQ au lieu de HEVC, pour le montage</dd>
+                  <dt><code>--sdr</code>, <code>--nbcu</code></dt><dd>Rec.709 : le D-Log M par la LUT de DJI, ou toute courbe par la conversion de NBCU</dd>
+                  <dt><code>--level</code>, <code>--wide</code>, <code>--edges</code>, <code>--underwater</code></dt><dd>la stabilisation, comme la règlent les touches et le menu</dd>
+                  <dt><code>--no-stabilize</code></dt><dd>la conversion des couleurs seulement</dd>
+                  <dt><code>--background</code></dt><dd>en priorité d’arrière-plan, pour continuer à travailler pendant ce temps</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Les options de mpv</h3></div>
+              <div class="feat-text">
+                <p>Les options des plugins fonctionnent aussi sur la ligne de commande de mpv : <code>--script-opts=dlogm-mode=sdr</code>.</p>
+              </div>
+            </div>
+          </div>
+          <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#exporting">L’export, dans le README sur GitHub</a></p>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · Créé par un plongeur à Genève, en Suisse</span>
+      <a href="index.html">Accueil</a>
+      <a href="download.html">Téléchargements</a>
+      <a href="features.html">Toutes les fonctions</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+    </div>
+    <p>Bâti sur le moteur de stabilisation de Gyroflow et le telemetry-parser d’Adrian Eddy, que nous remercions, avec les LUT HDR D-Log M et GP-Log dérivées des LUT shaper de Zeb Gardner (utilisées avec son autorisation), et les courbes log publiées par DJI, GoPro et Insta360. L’app intègre mpv et ffmpeg, sous leurs propres licences. Sans affiliation avec DJI, GoPro ou Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision et le symbole double-D sont des marques de commerce de Dolby Laboratories Licensing Corporation. Action Footage Player n’est pas affilié à Dolby ni cautionné par Dolby. Le lecteur écrit lui-même les métadonnées Dolby Vision, avec la bibliothèque open source <code>dolby_vision</code> (MIT) ; aucun logiciel Dolby n’est inclus.</p>
+    <p class="mt-foot">Cette page a été traduite automatiquement de l’anglais et peut contenir des erreurs. <a href="../features.html" hreflang="en">Lire l’original en anglais</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>
