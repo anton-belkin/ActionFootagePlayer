@@ -618,8 +618,23 @@ first".
    - the links' look and range;
    - an export opened, then its original at 30–32 s;
    - gyroflow-export alone: the project made, the key written in place (the file's length the same).
-6. **Marks**: the marks file on the first change, `M`, the camera flag, the highlights plugin reading the file
-   when there is one.
+6. **Marks** (**done**, but naming a mark): in the highlights plugin.
+   - `M` adds a mark, or removes the one within half a second, the camera's too.
+   - The first change writes `<clip>.marks.json` beside the clip (`user-data/workspace/marks_file`;
+     `workspace.lua`'s `marks_file`, with its Rust twin for the editors' export, in the shared cases), with the
+     camera's copied in and flagged (`"camera": "dji"`). Then the workspace plugin makes the project
+     (`make-project`).
+   - The file is read when there is one; a file whose clip has another size becomes `.marks.json.old`. It's
+     written whole through a temporary file, and fields it doesn't know are kept.
+   - The marks are the chapters ("Highlight 2" for the camera's, "Mark 1" for yours, a name when it has one), and
+     the menu's *Marks*: each by time with "DJI quick switch" or its name, *Add a mark here* / *Remove the mark
+     here*. The panel lists them as Marks. A moment's preview frame is the first mark inside it.
+
+   Checked headless on clip 0093 (two DJI highlights):
+   - `M` at 10 s writes the file with the three marks and makes the project;
+   - `M` at 26.5 s removes the camera's mark at 26.38 s;
+   - the file is read when the clip loads again;
+   - a file with another clip's size goes to `.old`, and the camera's marks come back.
 7. **Clips**: `--preview flipbook` (keyframes, LRF/LRV), the background queue, `clips-made.txt`, the menu, `X`.
 8. **Tags**: Finder tags and Explorer's stars read; `K`.
 9. **Separate project folders**: `Sources.txt`, the list, the longest match, read-only folders, *Footage

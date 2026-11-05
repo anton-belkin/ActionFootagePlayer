@@ -103,6 +103,11 @@ pub fn gyroflow_new(clip: &Path) -> PathBuf {
     clip.with_extension("gyroflow")
 }
 
+/// The clip's marks, once changed: <name>.marks.json next to it
+pub fn marks_file(clip: &Path) -> PathBuf {
+    clip.with_extension("marks.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +169,7 @@ mod tests {
                     "new" => Some(new_project_root(clip).display().to_string()),
                     "gyroflow" => gyroflow_project(clip).map(|p| p.display().to_string()),
                     "gyroflow-new" => Some(gyroflow_new(clip).display().to_string()),
+                    "marks" => Some(marks_file(clip).display().to_string()),
                     _ => panic!("unknown expectation {key}"),
                 };
                 let want = if key == "relative" { Some(value.to_string()) } else { at(&base, value).map(|p| p.display().to_string()) };

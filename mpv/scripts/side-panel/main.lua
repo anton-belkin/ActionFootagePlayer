@@ -185,7 +185,7 @@ local function passport(d, g, t, h)
     end
     if g then table.insert(parts, g.available and (g.kind == "project" and "Gyroflow project" or "gyro") or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
-    if h and h.times then table.insert(parts, #h.times == 1 and "1 highlight" or (#h.times .. " highlights")) end
+    if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return table.concat(parts, " · ")
 end
 
@@ -225,11 +225,13 @@ local function clip_part(u, x, w, y)
         y = u:button(x, w, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
     end
 
-    if h and h.times then
-        y = u:heading(x, w, y + 10 * s, "Highlights", keys["script-binding highlights/next"])
+    if h and h.times and #h.times > 0 then
+        y = u:heading(x, w, y + 10 * s, "Marks", keys["script-binding highlights/next"])
         local pos = mp.get_property_number("time-pos", 0)
         for i, time in ipairs(h.times) do
-            y = u:radio(x, w, y, "hl:" .. i, "Highlight " .. i, math.abs(pos - time) < 0.5, "script-message-to highlights go " .. i, { note = clock(time) })
+            local m = h.marks and h.marks[i] or {}
+            local label = (m.name and m.name ~= "") and m.name or (m.camera and ("Highlight " .. i) or ("Mark " .. i))
+            y = u:radio(x, w, y, "hl:" .. i, label, math.abs(pos - time) < 0.5, "script-message-to highlights go " .. i, { note = clock(time) })
         end
     end
 

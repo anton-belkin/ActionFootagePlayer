@@ -273,6 +273,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
+| `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
@@ -627,7 +628,7 @@ python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # ev
 python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
 ```
 
-### Highlights
+### Highlights and marks
 
 A press of the camera's highlight button while it records marks that moment in the clip, and the highlights plugin
 reads the marks when the clip opens: they show on the seek bar as chapters ("Highlight 1", ...), `Ctrl+]` and
@@ -641,6 +642,13 @@ usually happened.
   known yet.
 - **GoPro HERO5 and later**: the HiLight button (the mode button, while recording), the voice command "GoPro,
   HiLight", or the remote.
+
+**Your own marks**: `M` adds one where the video is, and on a mark (within half a second) removes it, a camera's
+too. The first change writes `<clip>.marks.json` beside the clip, with the camera's marks copied in and flagged as
+the camera's, and makes the trip's project as a moment does; from then on that file is the clip's marks. Delete it,
+and the camera's are back. The menu's **Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro
+HiLight". A marks file left from another clip with the same name (GoPro reuses them on every card) is renamed
+`.marks.json.old` rather than shown on the wrong clip.
 
 Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
@@ -1056,7 +1064,7 @@ GoPro's metadata track is the one whose samples are `gpmd`: GPMF, nested KLV ite
 `SHUT`, ...), big-endian, each scaled by the `SCAL` before it. A sample holds about a second; its values are spread
 evenly over it. GPS5 (HERO5-10) has the fix for the whole sample in `GPSF`, GPS9 (HERO11 and later) in each row.
 
-### Highlights
+### Highlights and marks
 
 `mpv/scripts/highlights/markers.lua` walks the file's boxes with seeks (mdat isn't read) and reads the few that
 hold the highlights:

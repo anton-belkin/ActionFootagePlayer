@@ -61,8 +61,9 @@ local KEY_LABELS = {
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
-    { "script-binding highlights/next", "Next highlight the camera marked" },
-    { "script-binding highlights/prev", "Previous highlight" },
+    { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
+    { "script-binding highlights/prev", "Previous mark" },
+    { "script-binding highlights/mark", "A mark here; on one, remove it" },
     { "script-binding dlogm/sdr", "The next video output: HDR, HLG+DV in HDR and in SDR, mpv's tone mapping, NBCU's SDR, the maker's SDR" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
@@ -149,7 +150,7 @@ local function passport(d, g, t, h)
     end
     if g then table.insert(parts, g.available and (KIND_LABELS[g.kind] or "gyro") or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
-    if h and h.times then table.insert(parts, #h.times == 1 and "1 highlight" or (#h.times .. " highlights")) end
+    if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
@@ -334,15 +335,24 @@ local function tracks_menu(kind, command)
     return any and items or nil
 end
 
-local function highlights_menu(h, key)
+-- The clip's marks: the camera's ("DJI quick switch") and your own, by time
+local MARK_NOTES = { dji = "DJI quick switch", gopro = "GoPro HiLight" }
+local function marks_menu(h, key)
     local items = {
-        item("Next", "script-binding highlights/next", { shortcut = key["script-binding highlights/next"] }),
-        item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"] }),
+        item("Next", "script-binding highlights/next", { shortcut = key["script-binding highlights/next"], disabled = #h.times == 0 }),
+        item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"], disabled = #h.times == 0 }),
         SEPARATOR,
     }
+    local pos = mp.get_property_number("time-pos", 0)
+    local here = false
     for i, t in ipairs(h.times) do
-        table.insert(items, item(i .. "    " .. clock(t), "script-message-to highlights go " .. i))
+        local m = h.marks and h.marks[i] or {}
+        local note = (m.name and m.name ~= "") and m.name or MARK_NOTES[m.camera or ""] or ""
+        if math.abs(t - pos) <= 0.5 then here = true end
+        table.insert(items, item(string.format("%.1f s", t) .. (note ~= "" and ("    " .. note) or ""), "script-message-to highlights go " .. i))
     end
+    if #h.times > 0 then table.insert(items, SEPARATOR) end
+    table.insert(items, item(here and "Remove the mark here" or "Add a mark here", "script-binding highlights/mark", { shortcut = key["script-binding highlights/mark"] }))
     return items
 end
 
@@ -451,7 +461,7 @@ local function build()
             end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
-        if h and h.times then add(submenu("Highlights (" .. #h.times .. ")", highlights_menu(h, key))) end
+        if h and local_file(path) then add(submenu(h.times and #h.times > 0 and ("Marks (" .. #h.times .. ")") or "Marks", marks_menu({ times = h.times or {}, marks = h.marks }, key))) end
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end
         if g and local_file(path) then add(submenu("Stabilization", stabilization_menu(g, key))) end

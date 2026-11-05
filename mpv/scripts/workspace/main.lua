@@ -29,6 +29,7 @@
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
+--   marks_file      where its marks are once changed (the highlights plugin's M)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's Moments/ folder
 --   saving          a moment's name while it's being saved
@@ -163,6 +164,7 @@ local function describe(path)
         relative = root and ws.relative(clip, root) or nil,
         gyroflow_projects = ws.gyroflow_projects(clip),
         gyroflow_new = ws.gyroflow_new(clip),
+        marks_file = ws.marks_file(clip),
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
     }
 end
@@ -650,6 +652,11 @@ mp.register_script_message("export-name", function(json)
         -- Every export can be found from a moment, and played in full quality after it's deleted
         if part and not same then save("export_" .. final, nil, nil, true) end
     end)
+end)
+
+-- The highlights plugin wrote the clip's marks: the clip belongs to a project from then on
+mp.register_script_message("make-project", function()
+    if state.clip and not state.clip:find("://", 1, true) and not state.moment then make_project() end
 end)
 
 -- An export's original, at its part

@@ -166,6 +166,13 @@ function M.new(fs)
         return ws.gyroflow_projects(clip)[1]
     end
 
+    -- The clip's marks, once changed: <name>.marks.json next to it (in a separate project folder, later, at its place
+    -- there)
+    function ws.marks_file(clip)
+        local base = clip:match(windows and "^(.*)%.[^./\\]+$" or "^(.*)%.[^./]+$") or clip
+        return base .. ".marks.json"
+    end
+
     return ws
 end
 
