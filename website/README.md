@@ -72,6 +72,10 @@ Every page, English included, carries:
   `https://actionfootageplayer.ch/…` URLs;
 - the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
   page in each language.
+- the header's links are the same on every page and in every language: Under water (divers), Hours of clips
+  (moments), All features, Download, with the page you're on marked by `aria-current`; links to a page's own
+  sections stay in the page. Below 760px they take a second row of the header; French uses the short labels
+  (Heures de clips, Fonctions) so all four fit a 375px phone.
 
 Fonts: Archivo, the display face, covers Latin only. Russian pages load Roboto Flex (Cyrillic, with a width axis like
 Archivo's) for headings; IBM Plex Sans and Mono cover Cyrillic. Chinese uses the system's CJK face after the Latin
