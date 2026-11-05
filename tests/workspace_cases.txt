@@ -17,7 +17,7 @@
 
 case a project in the trip folder
 tree
-  Egypt/.actionfootageplayer/
+  Egypt/_ActionFootagePlayer/
   Egypt/Day 1/DJI_0068_D.MP4
   Egypt/Day 1/DJI_0068_D.gyroflow
   Egypt/Day 2/GX011057.MP4
@@ -44,7 +44,7 @@ clip Egypt/Day 1/A.MP4
 
 case a clip in the project's own folder
 tree
-  Egypt/.actionfootageplayer/
+  Egypt/_ActionFootagePlayer/
   Egypt/A.MP4
 clip Egypt/A.MP4
   project Egypt
@@ -52,8 +52,8 @@ clip Egypt/A.MP4
 
 case the nearest project wins
 tree
-  Egypt/.actionfootageplayer/
-  Egypt/Day 2/.actionfootageplayer/
+  Egypt/_ActionFootagePlayer/
+  Egypt/Day 2/_ActionFootagePlayer/
   Egypt/Day 2/B.MP4
   Egypt/Day 1/A.MP4
 clip Egypt/Day 2/B.MP4
@@ -65,7 +65,7 @@ clip Egypt/Day 1/A.MP4
 
 case a file named like the state folder is no project
 tree
-  Egypt/.actionfootageplayer
+  Egypt/_ActionFootagePlayer
   Egypt/A.MP4
 clip Egypt/A.MP4
   project -
@@ -73,7 +73,7 @@ clip Egypt/A.MP4
 case the search stops at the home folder
 home me
 tree
-  me/.actionfootageplayer/
+  me/_ActionFootagePlayer/
   me/Movies/A.MP4
 clip me/Movies/A.MP4
   project -
@@ -81,7 +81,7 @@ clip me/Movies/A.MP4
 case the home folder's own projects
 home me
 tree
-  me/Movies/Egypt/.actionfootageplayer/
+  me/Movies/Egypt/_ActionFootagePlayer/
   me/Movies/Egypt/A.MP4
 clip me/Movies/Egypt/A.MP4
   project me/Movies/Egypt
@@ -104,7 +104,7 @@ clip dcim-ish/Day 1/DCIM/x/y/A.MP4
 
 case a card's project on its top folder
 tree
-  OSMO ACTION/.actionfootageplayer/
+  OSMO ACTION/_ActionFootagePlayer/
   OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
 clip OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
   project OSMO ACTION

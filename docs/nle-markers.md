@@ -15,9 +15,9 @@ their documentation, cited below. What that leaves open is marked **(to try)**: 
 ## In short
 
 - **The project is what's exported**: one trip, one go, from the menu. Its parts are:
-  - **Moments** (`Moments/*.afplink.mp4`, each a part of a clip): ranges with a name. The subfolders of `Moments/` and the
+  - **Moments** (`_Moments/*.afplink.mp4`, each a part of a clip): ranges with a name. The subfolders of `_Moments/` and the
     files' Finder tags become bins, keyword collections and keywords; a *Favorite* tag makes a favorite.
-  - **Clips** (`Clips/*.afplink.mp4`, a preview per clip): a clip whose preview was deleted is a reject, a *Favorite*
+  - **Clips** (`_Clips/*.afplink.mp4`, a preview per clip): a clip whose preview was deleted is a reject, a *Favorite*
     tag a favorite, and the folders and tags are bins and keywords again.
   - **Marks** (the clip's marks file, else its camera highlights): markers.
 - **Out, one file per editor, in the project folder**:
@@ -32,7 +32,7 @@ their documentation, cited below. What that leaves open is marked **(to try)**: 
     named clip with its in and out, and a sequence of the moments. Not an XMP sidecar: for an MP4, Premiere reads
     XMP from inside the file, and the clip isn't written to.
   - **Gyroflow**: only by an explicit command. The moments of a clip go into a project of their own in
-    `Exports/` as trims, never into the clip's own project. Not the JSON of #1248's fork, for now.
+    `_Exports/` as trims, never into the clip's own project. Not the JSON of #1248's fork, for now.
 - **Times by the clip's own timecode.** The brief assumed action cameras' MP4s have no timecode, but these two
   *do* write a `tmcd` track. It's a camera clock, drop-frame on the DJI at 59.94, and the editors place a clip
   at it. So every time written out is the clip's start timecode plus the time in the clip, on a frame. A clip
@@ -47,12 +47,12 @@ From the project ([the model](moments-and-workspaces.md)):
 
 | | Where it is | What the editors get |
 |---|---|---|
-| A moment | `Moments/**/<name>.afplink.mp4`, its link: clip, `in`, `out` | a range of the clip, named after the file |
-| The moment's folders | `Moments/Reef/Moray eel.afplink.mp4` → `Reef` | a bin, a keyword collection, a keyword |
+| A moment | `_Moments/**/<name>.afplink.mp4`, its link: clip, `in`, `out` | a range of the clip, named after the file |
+| The moment's folders | `_Moments/Reef/Moray eel.afplink.mp4` → `Reef` | a bin, a keyword collection, a keyword |
 | Tags on a moment | Finder tags; Explorer's stars | keywords; *Favorite* (or ★, 4–5 stars) a favorite |
-| A clip | the footage under the sources root (not `Moments/`, `Clips/`, `Exports/`) | a clip, at its timecode |
-| A clip's rating | `Clips/**/<clip>.afplink.mp4`, and `.actionfootageplayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
-| A clip's folders and tags | `Clips/Day 1/…`, Finder tags | a bin, keywords |
+| A clip | the footage under the sources root (not `_Moments/`, `_Clips/`, `_Exports/`) | a clip, at its timecode |
+| A clip's rating | `_Clips/**/<clip>.afplink.mp4`, and `_ActionFootagePlayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
+| A clip's folders and tags | `_Clips/Day 1/…`, Finder tags | a bin, keywords |
 | Marks | `<clip>.marks.json` in the project, else the clip's highlights | markers; a camera's with its note ("DJI quick switch") |
 
 Nothing more is read from the clips than their header: timecode, frame rate, size, duration and highlights.
@@ -137,12 +137,12 @@ A plain `.fcpxml`, not the `.fcpxmld` bundle.
     several keywords (`"Moments, Reef, Night"`), and `note` = its name. So each moment shows in the event as a
     range, and in the Keyword Collections *Moments*, *Reef* and *Night*;
   - a `rating value="favorite"` over a moment tagged *Favorite*, and over the whole clip when its preview in
-    `Clips/` is, `value="reject"` over the whole clip when its preview was deleted. FCP shows them as green and
+    `_Clips/` is, `value="reject"` over the whole clip when its preview was deleted. FCP shows them as green and
     red lines, under the browser's Favorites and Hide Rejected filters;
   - in the DTD's order: markers, keywords, ratings, then `metadata`. A file out of order is refused whole.
 - the event's `keyword-collection`s, one per keyword, inside a `collection-folder` per folder level of
-  `Moments/` (`Reef/Night/` → folder *Reef*, collection *Night*), which is how FCP nests them. The clips'
-  folders in `Clips/` are keywords on the whole clip in the same way.
+  `_Moments/` (`Reef/Night/` → folder *Reef*, collection *Night*), which is how FCP nests them. The clips'
+  folders in `_Clips/` are keywords on the whole clip in the same way.
 - a `project name="<project> – moments"` in the same event: a `sequence` (`tcFormat` as the clips) whose `spine`
   holds an `asset-clip` per moment, **named after it** (`start` = its in, `duration` = its length), in the
   order of the moments' time. That's a rough cut to start from, with the names showing on the timeline.
@@ -154,7 +154,7 @@ A plain `.fcpxml`, not the `.fcpxmld` bundle.
 - `import-options`: none. Whether to copy the media or leave it in place is then the user's import setting.
   "Leave files in place" links to the originals, which is what a NAS needs.
 
-Example: the Action 6 clip above, a highlight at 10.01 s and the moment `Moments/Reef/Turtle.afplink.mp4` from 20.02 s to
+Example: the Action 6 clip above, a highlight at 10.01 s and the moment `_Moments/Reef/Turtle.afplink.mp4` from 20.02 s to
 30.03 s, tagged *Favorite*:
 
 ```xml
@@ -218,7 +218,7 @@ So, three files and a timeline to carry what the clips can't:
    timecode (Reference Manual, Conform). It's the FCP file without the event's browser clips, as projects, which
    Resolve imports as timelines on the original files:
    - **"<project> – moments"**: every moment in a row, named, as for FCP;
-   - **"<project> – <folder>"**: one per folder of `Moments/` with moments in it (`Reef`, `Reef / Night`). A
+   - **"<project> – <folder>"**: one per folder of `_Moments/` with moments in it (`Reef`, `Reef / Night`). A
      timeline is the nearest thing to a bin of parts that a file can give Resolve;
    - **"<project> – clips"**: every clip that isn't a reject, whole and in timecode order. This is where the
      marks go, since a timeline is the one place Resolve takes markers from a file.
@@ -246,7 +246,7 @@ So, three files and a timeline to carry what the clips can't:
 3. **`<project> (Resolve metadata).csv`**: ratings and keywords on the clips in the media pool. File → Import
    Metadata To → Media Pool, matched by file name (the manual's *Match using filename*). Columns: File Name,
    Clip Color (Green for a favorite, Red for a reject), Flags, Keywords (the clip's folders and tags in
-   `Clips/`, and *Moments* plus its moments' folders and tags), Comments (the moments in words: "0:20–0:30
+   `_Clips/`, and *Moments* plus its moments' folders and tags), Comments (the moments in words: "0:20–0:30
    Turtle; 1:02–1:10 Moray eel"). A Smart Bin by keyword then gathers a folder's clips, which is Resolve's way
    to a bin from metadata. The exact header names aren't documented: they're taken from a CSV that Resolve
    exports itself (File → Export Metadata From) (to try).
@@ -274,14 +274,14 @@ of them (and Divecut, the paid competitor, needs Studio for the same reason).
 So it's **`<project> (Premiere).xml`**, FCP7 XML (`xmeml version="4"`), imported with File → Import. Premiere
 makes a bin of it, and inside it the `bin`s the file nests:
 
-- **Clips**: a bin per folder of `Clips/` (`Day 1`), and in it a `clip` per clip (rejects left out), its `file`
+- **Clips**: a bin per folder of `_Clips/` (`Day 1`), and in it a `clip` per clip (rejects left out), its `file`
   with `pathurl` `file://localhost/Volumes/...` (percent-encoded), `rate` (`<timebase>60</timebase><ntsc>TRUE</ntsc>`
   for 59.94), `duration` in frames, and `timecode` (`string`, `frame`, `displayformat DF`/`NDF`). With the
   timecode, Premiere's Link Media, which matches on File Name and Media Start, finds the file. Each file is
   described once (`file id`), and later references use the id.
 - **Markers on each clip**: `name`, `comment`, `in` = the frame from the start of the file, `out` = -1 for a
   point (a mark) or the moment's out frame (a moment, which Premiere shows as a marker with a length).
-- **Moments**: a bin per folder of `Moments/` (`Moments`, `Moments/Reef`), and in it a `clip` per moment, named
+- **Moments**: a bin per folder of `_Moments/` (`_Moments`, `_Moments/Reef`), and in it a `clip` per moment, named
   after it, on the same `file`, with the moment's `in` and `out`. In Premiere that's the clip with its in and out
   points set, or a subclip (to try which; a `subclipinfo` element is the other way to write it).
 - **A sequence** "<project> – moments" of `clipitem`s, each a moment, named, on the same `file`.
@@ -307,9 +307,9 @@ the next save. And the trims aren't a list on the side: they change the smoothin
 A clip's playback project with trims in it would play differently.
 
 So *Gyroflow: render these moments* (a clip's menu, and Marks for the editor for the whole project) writes
-**`Exports/Gyroflow/<clip>.gyroflow`**: a copy of the clip's own project if it has one, else a new one as
+**`_Exports/Gyroflow/<clip>.gyroflow`**: a copy of the clip's own project if it has one, else a new one as
 `Ctrl+e` writes it (gyroflow-project). Its trims are the clip's moments, with `export_trims_separately` true,
-and the output folder is `Exports/Gyroflow/`. Gyroflow opens it with the moments as trims, and so does its
+and the output folder is `_Exports/Gyroflow/`. Gyroflow opens it with the moments as trims, and so does its
 render queue or the CLI (`gyroflow --preset` takes a project). The player never reads these copies.
 
 **Not now: #1248's fork.** In [gyroflow#1248](https://github.com/gyroflow/gyroflow/issues/1248) (open, no word
@@ -345,14 +345,14 @@ The panel's Project section has the same buttons.
   the NAS, with a progress line. Then it writes the file and says where: "Final Cut Pro: 14 clips, 23 moments,
   41 marks → 2026-10 Egypt (Final Cut Pro).fcpxml", and shows it in Finder.
 - **Which clips go into the file**: by default every clip of the project but the rejects, the clips whose
-  preview you deleted from `Clips/`. That's the selection as made in Finder, so a clip kept there without a
+  preview you deleted from `_Clips/`. That's the selection as made in Finder, so a clip kept there without a
   moment or a mark still reaches the editor, whole, to cut from. *With moments or marks* is the narrower
-  choice: only clips that have a moment, a mark of yours or a camera highlight. A project without `Clips/`
+  choice: only clips that have a moment, a mark of yours or a camera highlight. A project without `_Clips/`
   previews has no rejects, so "all but rejects" is every clip.
 - **Not automatically.** FCP and Resolve take an import once and don't merge a second one, so a file rewritten
   on every change would be stale the moment it was imported. The moments and marks are the automatic part; the
   editor's file is the step "I've chosen, now to the edit".
-- **Named after the project, in its folder** (next to `Moments/`, not in `Exports/`, which is what gets deleted
+- **Named after the project, in its folder** (next to `_Moments/`, not in `_Exports/`, which is what gets deleted
   for room): `<project> (Final Cut Pro).fcpxml`, `… (Resolve).fcpxml`, `… (Resolve markers).edl`,
   `… (Resolve metadata).csv`, `… (Premiere).xml`. Each is overwritten when written
   again.
@@ -365,7 +365,7 @@ The panel's Project section has the same buttons.
 
 | | Clip favorite | Clip reject | Moment | Moment favorite | Folders and tags |
 |---|---|---|---|---|---|
-| | *Favorite* tag on `Clips/<clip>.afplink.mp4` | its preview deleted | the file | *Favorite* tag | `Moments/` and `Clips/` subfolders, Finder tags |
+| | *Favorite* tag on `_Clips/<clip>.afplink.mp4` | its preview deleted | the file | *Favorite* tag | `_Moments/` and `_Clips/` subfolders, Finder tags |
 | FCP | `rating value="favorite"` over the clip | `rating value="reject"` over the clip | keyword range, in the *moments* project | `rating value="favorite"` over it | keywords, collections in collection folders |
 | Resolve (free) | Clip Color Green, Flag Green (CSV) | Clip Color Red, Flag Red (CSV), left off the timelines | on the *moments* and its folder's timeline; a green marker on *clips* | a green flag on its clip (CSV) | keywords (CSV); a timeline per folder of moments |
 | Resolve Studio | `SetClipColor`, `AddFlag` (script) | the same | a clip marker with a length, a subclip | the same | real bins |
@@ -419,7 +419,7 @@ By hand, only what can be done here:
 | DaVinci Resolve 21.0 (free, installed) | `(Resolve).fcpxml` with *Automatically import source clips* | all timelines come in (or one per file?); the clips link to the MP4s on the NAS; the Start TC column shows `20:28:05;12`; the moments at the right frames, with their names; whether `marker`/`keyword`/`rating` on the clips survive |
 | | `(Resolve markers).edl` → Timeline Markers from EDL, on *clips* | markers at the marks' frames at 59.94 DF; the moments' lengths; colors; names |
 | | File → Export Metadata From on one clip, then `(Resolve metadata).csv` | the header names; the clip colors, flags, keywords and comments on the right clips; a Smart Bin by keyword |
-| Gyroflow 1.6 (installed) | `Exports/Gyroflow/<clip>.gyroflow` written by the player | the moments as trims on its timeline; rendering them one file each into `Exports/Gyroflow/` |
+| Gyroflow 1.6 (installed) | `_Exports/Gyroflow/<clip>.gyroflow` written by the player | the moments as trims on its timeline; rendering them one file each into `_Exports/Gyroflow/` |
 
 **The Resolve checks are a session of their own, and Anton is asked before it starts**: they take the screen.
 Each check gets a line in the PR: the version, what was imported, what came in, with a screenshot.

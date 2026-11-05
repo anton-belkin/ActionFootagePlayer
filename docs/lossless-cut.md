@@ -95,7 +95,7 @@ ends it's another clip's start. The same render twice is identical, the motion d
   seam. The second starts at the keyframe at or before the part's end (up to 1 s of it kept).
 - **afp-cut writes each part hidden** (`.<name>.cut1.MP4`) and reads it back as the original. Only when all are
   checked does mpv let go of the file (Windows can't move an open one) and the original go to the Trash, with its
-  LRF, its Gyroflow project, its clip preview in `Clips/` and its marks file. Not checked: the parts are removed,
+  LRF, its Gyroflow project, its clip preview in `_Clips/` and its marks file. Not checked: the parts are removed,
   the clip is as it was, and it says why (an iPhone clip: B-frames). The Trash refusing: the parts stay beside it as
   `<name> (cut 1)`, the original as it was.
 - **Names**: the first part takes the original's name; a second one its own recording time the camera's way
@@ -104,7 +104,9 @@ ends it's another clip's start. The same render twice is identical, the motion d
 - **What follows the clip**: each part gets its marks file with the marks in it at its time (camera marks too,
   matching its moved highlights; none in it: none written). Each moment goes to the part it overlaps most, its
   link rewritten (`afp-cut --set-key`: the part's path, size, created, in and out at its time); one all in the part
-  cut out goes to the Trash with the original, since its link would name the first part. The Gyroflow project
+  cut out goes to the Trash with the original, since its link would name the first part. A moment's or clip
+  preview's own Gyroflow project goes to the Trash too: its sync, trim and video are the original's, in its time;
+  the moment then plays with the settings saved in it, over the preset. The Gyroflow project
   isn't made again by itself: `Ctrl+e` makes one. Clip previews are made again by *Make clip previews* (a new size
   is a new clip to it). Exports aren't touched.
 - It plays on in the part that has where it played, at the same frame.

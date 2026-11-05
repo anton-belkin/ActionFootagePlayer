@@ -338,6 +338,17 @@ local function actions(u, x, w, y, id, list)
     return y + 4 * s
 end
 
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return not ws.own_project and g.level ~= st.level
+end
+
 local function project_part(u, x, w, y)
     local s = u.s
     local ws = state("workspace")
@@ -354,8 +365,8 @@ local function project_part(u, x, w, y)
     if not ws.project then
         u:text(ix, y + 8 * s, "No project yet", { size = 14, bold = true })
         y = y + 22 * s
-        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders Moments, Clips and Exports, "
-            .. "and a hidden .actionfootageplayer for its own notes. A clip's own files, its marks and Gyroflow project, "
+        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders _Moments, _Clips and _Exports, "
+            .. "and _ActionFootagePlayer for its own notes. A clip's own files, its marks and Gyroflow project, "
             .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
             .. "kept beside the clip anyway.")
         local choices = ws.project_choices or {}
@@ -410,6 +421,7 @@ local function project_part(u, x, w, y)
             y = actions(u, ix, iw, y + 2 * s, "card", {
                 { platform == "darwin" and "Project folder in Finder" or "Project folder", "script-message-to workspace project-folder" },
                 { "Make again for removed clips", "script-message-to workspace clips-again" },
+                { (ws.moments_alone and "✓ " or "") .. "New moments stabilized on their own", "script-message-to workspace moments-alone" },
             })
         end
         local where = platform == "darwin" and "Finder" or "the folder"
@@ -418,7 +430,7 @@ local function project_part(u, x, w, y)
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
         elseif st and st.new > 0 then
             y = u:button(ix, iw, y + 2 * s, "clips-make", "Make clip previews · " .. st.new .. " new", "script-message-to workspace clips-make")
-            -- All in Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
+            -- All in _Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
             y = u:switch(ix, iw, y - 2 * s, "clips-flat", "Ignore subfolders", ws.clips_flat == true, "script-message-to workspace clips-flat")
         end
         if ws.clips_failed and not ws.clips then
@@ -446,6 +458,29 @@ local function project_part(u, x, w, y)
     if mo then
         y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
+        -- How it's stabilized: as it was made
+        if ws.snap then
+            -- Stabilized on its own or with its clip: As saved (each moment's), or one way for every moment this session
+            local f = (ws.force or {}).alone
+            y = u:heading(x, w, y + 2 * s, "Stabilized")
+            y = u:segmented(x, w, y, "alone", {
+                { "As saved", "script-message-to workspace moment-force alone saved" },
+                { "On its own", "script-message-to workspace moment-force alone yes" },
+                { "With its clip", "script-message-to workspace moment-force alone no" },
+            }, f == nil and 1 or (f and 2 or 3))
+            if f == nil then y = u:caption(x, w, y - 2 * s, "This one was saved " .. (ws.moment.alone and "on its own" or "with its clip")) end
+            -- Viewing is never saving: changed here or in the other tabs, it's kept in the moment only by this
+            if moment_changed(ws) then
+                y = u:caption(x, w, y, "Changed for viewing only: the moment is as it was saved", { color = C.text })
+                y = u:button(x, w, y, "keep", "Keep in " .. fit(mo.name, w * 0.6, 12, s, true), "script-message-to workspace moment-keep", { primary = true })
+            end
+            local g = state("gyroflow") or {}
+            y = u:caption(x, w, y - 2 * s, ws.own_project and "Its own Gyroflow project: changes to the clip's don't reach it"
+                or ("The default preset, " .. (g.view == "off" and "stabilization off" or ((g.level or "medium") .. (g.view == "wide" and ", wider view" or "")))
+                    .. ": the clip's project, if it gets one, doesn't reach it"))
+        else
+            y = u:caption(x, w, y, "Made before moments kept their stabilization: it plays with the clip's. Trim or update it to keep its own")
+        end
         local idx
         for i, m in ipairs(ws.moments or {}) do if m.file == mo.file then idx = i end end
         if idx then
@@ -455,6 +490,11 @@ local function project_part(u, x, w, y)
                 { REVEAL, "script-message-to workspace moment-reveal " .. idx },
             })
         end
+    elseif ws.playing_preview then
+        -- A clip preview playing: its own stabilization, a variant of the clip's
+        y = u:switch(x, w, y, "clip-own", "Its own stabilization", ws.own_project ~= nil, "script-message-to workspace clip-own")
+        y = u:caption(x, w, y - 2 * s, ws.own_project and "A project of this preview's own: a variant of the clip's (Ctrl+e opens it)"
+            or "The clip's, as it plays. Copy the preview in Finder for another variant")
     elseif ws.editing then
         y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
@@ -716,32 +756,51 @@ local function stabilization_part(u, x, w, y)
     y = y + ch + 14 * s
     if not g.available then return y end
 
+    -- A moment playing: each setting As saved (every moment as it was saved), or one value for every moment this
+    -- session (the workspace plugin's force); a clip's are as they always were
+    local ws = state("workspace")
+    local moment = ws and ws.moment and ws.snap and ws.path == mp.get_property("path")
+    local force = moment and (ws.force or {}) or nil
+    -- The options with As saved first, their commands through the workspace plugin, and which is chosen
+    local function with_saved(key, options, values, current)
+        if not moment then return options, values[current] end
+        local list = { { "As saved", "script-message-to workspace moment-force " .. key .. " saved" } }
+        for _, o in ipairs(options) do
+            table.insert(list, { o[1], "script-message-to workspace moment-force " .. key .. " " .. o[4], o[3] })
+        end
+        return list, force[key] == nil and 1 or (values[force[key]] and values[force[key]] + 1)
+    end
+    if moment then y = u:caption(x, w, y, "A moment: As saved plays each moment as it was saved; a value, every moment this session") end
+
     y = u:heading(x, w, y, "View", keys["script-binding gyroflow/toggle"])
     local views = { normal = 1, wide = 2, off = 3 }
-    y = u:segmented(x, w, y, "view", {
-        { "On", "script-message-to gyroflow view normal" },
-        { "Wider", "script-message-to gyroflow view wide" },
-        { "Off", "script-message-to gyroflow view off" },
-    }, views[g.view])
+    local view_list, view_on = with_saved("view", {
+        { "On", "script-message-to gyroflow view normal", nil, "normal" },
+        { "Wider", "script-message-to gyroflow view wide", nil, "wide" },
+        { "Off", "script-message-to gyroflow view off", nil, "off" },
+    }, views, g.view)
+    y = u:segmented(x, w, y, "view", view_list, view_on)
     y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or g.view == "off" and "As recorded, for this clip" or "Zoomed in so no edge shows")
 
     local project = g.kind == "project"
     y = u:heading(x, w, y + 8 * s, "Level", keys["script-binding gyroflow/level"])
     local levels = { weak = 1, medium = 2, strong = 3 }
-    y = u:segmented(x, w, y, "level", {
-        { "Weak", "script-message-to gyroflow level weak" },
-        { "Medium", "script-message-to gyroflow level medium" },
-        { "Strong", "script-message-to gyroflow level strong" },
-    }, levels[g.level], project)
+    local level_list, level_on = with_saved("level", {
+        { "Weak", "script-message-to gyroflow level weak", nil, "weak" },
+        { "Medium", "script-message-to gyroflow level medium", nil, "medium" },
+        { "Strong", "script-message-to gyroflow level strong", nil, "strong" },
+    }, levels, g.level)
+    y = u:segmented(x, w, y, "level", level_list, level_on, project)
     y = u:caption(x, w, y, project and "This clip has its project's smoothing; the level is for clips without one" or LEVEL_NOTES[g.level] or "")
 
     y = u:heading(x, w, y + 8 * s, "Horizon")
     local horizons = { project = 1, yes = 2, no = 3 }
-    y = u:segmented(x, w, y, "horizon", {
-        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project" },
-        { "Level", "script-message-to gyroflow horizon-lock yes" },
-        { "Free", "script-message-to gyroflow horizon-lock no" },
-    }, horizons[g.horizon_lock])
+    local horizon_list, horizon_on = with_saved("horizon_lock", {
+        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project", nil, "project" },
+        { "Level", "script-message-to gyroflow horizon-lock yes", nil, "yes" },
+        { "Free", "script-message-to gyroflow horizon-lock no", nil, "no" },
+    }, horizons, g.horizon_lock)
+    y = u:segmented(x, w, y, "horizon", horizon_list, horizon_on)
 
     y = u:heading(x, w, y + 8 * s, "Lens", keys["script-binding gyroflow/lens"])
     -- A clip with a project starts with the project's lens; one without, with what sticks

@@ -6,7 +6,7 @@ as plain files that Finder and Explorer show and that the editors take in ([Mark
 editor](nle-markers.md) reads them). This is a design, not built yet.
 
 Written 2026-11-04. Decided with Anton beforehand: the project folder and the sources file, marks copied on the
-first edit, moments and clip overviews as small MP4s, `Exports/`. His answers to the first draft's questions
+first edit, moments and clip overviews as small MP4s, `_Exports/`. His answers to the first draft's questions
 are in [Decided](#decided). Checked on this Mac, with small files ffmpeg
 made: the link inside an MP4 (written by ffmpeg, read by mpv), what a plain remux does to it, which frame Quick
 Look shows, and setting a file's dates. Not checked yet: anything on Windows, and typing names in mpv's console.
@@ -14,7 +14,7 @@ Those are marked **(to try)**.
 
 ## In short
 
-- **A project folder per trip.** By default it's the trip's own folder: `Moments/`, `Clips/`, `Exports/` and
+- **A project folder per trip.** By default it's the trip's own folder: `_Moments/`, `_Clips/`, `_Exports/` and
   the per-clip files go in next to the footage. When that folder can't be written (a locked card, a read-only
   share), or you choose so, the project folder is a separate one in `~/Documents/ActionFootagePlayer/<name>/`
   (Windows: `Documents\ActionFootagePlayer\`), named when it's made. It repeats the footage's folder tree and has a `Sources.txt` saying
@@ -22,15 +22,15 @@ Those are marked **(to try)**.
 - **Marks** (points in a clip): the camera's highlights, until you change one. The first change (adding a mark,
   removing a camera one) writes `<clip>.marks.json` with all of them, the camera's flagged as such. Delete
   the file, and it's the camera's again. Nothing is ever written into a Gyroflow project.
-- **Moments** (parts of a clip) are files: `Moments/Turtle.afplink.mp4`, a small real MP4 with a color preview, and
+- **Moments** (parts of a clip) are files: `_Moments/Turtle.afplink.mp4`, a small real MP4 with a color preview, and
   inside it a link to the part of the original. Finder and Explorer show the frame, Quick Look plays it, and a
   double click opens the player, which plays that part of the original in full quality, stabilized. Deleting
   the file deletes the moment. Subfolders are yours, to sort moments into, and the editors get them as bins.
-- **Clips** (the trip at a glance): `Clips/<clip>.afplink.mp4` per clip, a flipbook of a dozen color frames from it,
+- **Clips** (the trip at a glance): `_Clips/<clip>.afplink.mp4` per clip, a flipbook of a dozen color frames from it,
   linked to the whole clip. The grid of icons is in color, not log gray, and the space bar flips through a clip
   in seconds. Deleting one says "not interesting".
-- **Exports** go to `Exports/` (now `stabilized/`), named in the same dialog as moments, with the same link
-  inside. Old `stabilized/` folders stay where they are; new exports go to `Exports/`.
+- **Exports** go to `_Exports/` (now `stabilized/`), named in the same dialog as moments, with the same link
+  inside. Old `stabilized/` folders stay where they are; new exports go to `_Exports/`.
 - **Rating is the file system**: a moment or clip that exists is kept, a deleted one is not. Finder tags (and
   Explorer's stars, on Windows) go further: favorite, and keywords for the editors.
 - **The previews are rendered by gyroflow-export**, which already renders a clip the way the player shows it
@@ -51,16 +51,16 @@ player writes). By default they're the same folder:
     DJI_20261022152841_0068_D.marks.json      its marks, once edited
   Day 2/
     GX011057.MP4
-  Moments/
+  _Moments/
     Turtle.afplink.mp4
     Reef/
       Moray eel.afplink.mp4
-  Clips/
+  _Clips/
     Day 1/DJI_20261022152841_0068_D.afplink.mp4
     Day 2/GX011057.afplink.mp4
-  Exports/
+  _Exports/
     Turtle.mov
-  .actionfootageplayer/               the player's state for this project (hidden)
+  _ActionFootagePlayer/               the player's state for this project (hidden)
 ```
 
 A separate project folder holds the same things, minus the footage, plus `Sources.txt`:
@@ -70,7 +70,7 @@ A separate project folder holds the same things, minus the footage, plus `Source
   Sources.txt
   Day 1/DJI_20261022152841_0068_D.marks.json
   Day 1/DJI_20261022152841_0068_D.gyroflow
-  Moments/  Clips/  Exports/  .actionfootageplayer/
+  _Moments/  _Clips/  _Exports/  _ActionFootagePlayer/
 ```
 
 The per-clip files sit at the clip's path relative to the sources root, so the tree repeats the footage's
@@ -114,7 +114,7 @@ When a clip opens, from wherever, the player looks for its project in this order
    a list in the app's settings). That's a few small files, read once at start and again when one changes. If
    several roots contain the clip, the longest wins: a project for `Egypt/Day 2` beats one for `Egypt`.
 2. **A project in the trip folder**: the nearest folder above the clip, or the clip's own folder, that has
-   `.actionfootageplayer/` in it. The search stops at the volume's root or the home folder.
+   `_ActionFootagePlayer/` in it. The search stops at the volume's root or the home folder.
 3. **No project**: only what's in the clip itself (its highlights, its timecode). Nothing is written until
    something is saved.
 
@@ -226,7 +226,7 @@ editor](nle-markers.md#gyroflow)).
 
 ### The file
 
-`Moments/<name>.afplink.mp4`, one per moment: a real, small MP4 that any OS can show and play, with the link to the
+`_Moments/<name>.afplink.mp4`, one per moment: a real, small MP4 that any OS can show and play, with the link to the
 original inside.
 
 - **The first version**: one frame, in color, held for the moment's length (`gyroflow-export --preview still`).
@@ -304,7 +304,7 @@ Not chosen:
 |---|---|
 | Copy, move or rename in Finder or Explorer, `cp`, `rsync`, copying to the NAS, AirDrop, iCloud Drive | kept: it's in the file's bytes |
 | A Finder tag, a Finder comment | kept: those are attributes, not the file |
-| Moving the moment within `Moments/`, or moving the whole project with the footage | kept and still right: the path is relative to the sources root |
+| Moving the moment within `_Moments/`, or moving the whole project with the footage | kept and still right: the path is relative to the sources root |
 | ffmpeg `-c copy` remux | **lost** (checked). Kept with `-map_metadata 0 -movflags use_metadata_tags`, in ffmpeg's place: the player reads it, Apple's apps no longer do |
 | Explorer's star rating (Windows rewrites the `moov` to add its `Xtra` atom) | probably kept **(to try)** |
 | Photos (Mac, iPhone) | the original file is kept as imported; an edited or shared copy loses it |
@@ -312,13 +312,13 @@ Not chosen:
 
 ### Finding a clip's moments
 
-- The player reads every `.mp4` under `Moments/`, subfolders included, for its key. A moment belongs to the
+- The player reads every `.mp4` under `_Moments/`, subfolders included, for its key. A moment belongs to the
   clip whose relative path, size and `created` match.
 - **A cache** in the app's cache folder (not in the project, so two computers on one NAS don't fight over it)
   keeps each file's key by path, size, modification time and change time. A scan then only lists the folders
   and stats the files. Even without the cache it's cheap: 300 moments × 16 KB is about 5 MB from the NAS.
-- **The scan runs** when a clip of the project opens, and again when `Moments/`'s modification time changes,
-  which a file added or removed changes. A rename in a subfolder doesn't change `Moments/`'s own time, so the
+- **The scan runs** when a clip of the project opens, and again when `_Moments/`'s modification time changes,
+  which a file added or removed changes. A rename in a subfolder doesn't change `_Moments/`'s own time, so the
   player also lists the folders again every few seconds while a clip plays: a stat per folder.
 - The clip's moments show on the seek bar as chapters ("Turtle" at its in, "Turtle end" at its out) with the
   marks, and in the menu.
@@ -328,7 +328,7 @@ Not chosen:
 Opening a moment's file (a double click, the player being the default app for MP4 on a Mac; or the menu):
 
 1. An `on_load` hook reads the key before mpv opens the file.
-2. It finds the original: the moment's project is the folder above `Moments/` (with `.actionfootageplayer/`
+2. It finds the original: the moment's project is the folder above `_Moments/` (with `_ActionFootagePlayer/`
    in it), its sources root `Sources.txt`'s or the project folder itself, then `clip` under it, then the
    `roots` hints. Size and `created` must match.
 3. Found: mpv opens the original instead (`stream-open-filename`), at `in` (`start`), with `in`–`out` as the
@@ -337,6 +337,35 @@ Opening a moment's file (a double click, the player being the default app for MP
    original's.
 4. Not found: the OSD says so ("Turtle: the original isn't at …/Day 1/DJI_…_D.MP4"), and the preview plays.
    The menu offers *Project → Footage moved…*.
+
+**A moment is stabilized as it was made** (Anton, 2026-11-05): nothing it plays with changes later by itself.
+- `snap` in its link: its stabilization is its own. `stab`: the settings it was made with over the preset (view,
+  level, horizon lock). The gyroflow plugin applies them for that file only (`user-data/workspace/stab`), the
+  settings that stick for the next clips untouched.
+- **Viewing is never saving** (Anton): the moment stays as it was saved until **Keep in <name>** (the panel shows it
+  with "Changed for viewing only"; the menu has it too), which writes how it's viewed into the moment and its own
+  project.
+- **As saved** (Anton): while a moment plays, each setting (view, level, horizon lock; *Stabilized*: on its own or
+  with its clip) has *As saved* first, the default: every moment as it was saved. A value chosen instead (in the
+  panel, or a key: Ctrl+g, Ctrl+k) is for every moment this session (`force`, the workspace plugin's), until As
+  saved again. It's apart from the settings clips keep between them, which it doesn't change, nor they it; a clip
+  has no As saved. The switch as viewed reaches a project's "only within the trim range" through the engine
+  (`alone`), its file untouched. `k` (its ends) and a trim changed in Gyroflow are edits of the moment, and saved as they are.
+- Marks are the clip's, never a moment's own (Anton): one marks file per clip; a moment shows those inside it.
+- Made from a clip with a Gyroflow project: a copy of it beside the moment (`_Moments/Turtle.gyroflow`,
+  `gyroflow-project --copy … --trim in,out --alone yes|no`), its trim range the moment, which it plays with from then
+  on. Without one: the preset, and a project the clip gets later doesn't reach it (no inheriting by itself; taking
+  the clip's explicitly is for later).
+- `alone`, *Stabilize on its own*: its smoothing and crop from its own motion, Gyroflow's *within the trim range
+  only* (`trim_range_only` in its project; without one the engine's `trim`, for which the player's own smoothing,
+  Predictive, holds the motion outside it at its edges). `gyroflow-export --alone` the same for previews and exports.
+- `Ctrl+e` on a moment opens its own project, made from what it plays with if it has none (`gyroflow-project
+  --trim --alone`). Its ends and its project's trim follow each other: `k` edits the trim (`--edit`); a trim changed
+  in Gyroflow becomes its ends as it loads (`--print-trim`). Rename and Remove take the project with it.
+- Moments made before have no `snap` and play with the clip's.
+- A clip preview has none of this: it plays with its clip's, unless *Its own stabilization* gives it a project
+  beside it (a copy of the clip's, or from its motion data), a variant; copies of the preview, each with its own,
+  are variants of one clip.
 
 A moment plays its part once, then the next one in the playlist (the folder's), and pauses at its end when it's the
 last (Anton, 2026-11-05: no looping). And it plays **as a video of its own** (Anton, the same day: the seek bar and
@@ -347,7 +376,7 @@ publishes `offset` (its in) and `length`, and every plugin that times the clip a
 the next frame), the telemetry, the marks (only those inside it, in its time; `M` writes clip times), exports (its
 part, or the moment itself when nothing's marked) and moments saved (a part of it marked and `k` trims it). The
 panel shows the moment: its marks, Rename, Remove, *Open the whole clip*, which opens the clip at the moment's start,
-its part marked but not looped (`ab-loop-count=0`), the moment being edited there (`k` updates it). **Opening the `Moments/` folder** plays them all, one after
+its part marked but not looped (`ab-loop-count=0`), the moment being edited there (`k` updates it). **Opening the `_Moments/` folder** plays them all, one after
 another, each part of its original in full quality, sorted by the time of the moment (not by name). That's a
 highlight reel of the trip, with no rendering.
 
@@ -429,7 +458,7 @@ right within the trip, on the wrong day.
 
 ## Clips: the trip at a glance
 
-`Clips/` has a small MP4 for each clip, built the same way as a moment's but showing the whole clip. It solves
+`_Clips/` has a small MP4 for each clip, built the same way as a moment's but showing the whole clip. It solves
 "a folder of log footage is a wall of gray icons":
 
 - **What's in it**: a flipbook. If the clip has marks, it shows the marked frames. Otherwise it shows about 12
@@ -440,12 +469,12 @@ right within the trip, on the wrong day.
   through in 6 seconds, and the arrow keys go to the next clip. On Windows, Explorer's icons and its preview
   pane do the same.
 - **The key**: `kind: "clip"`, the whole clip. A double click plays the original, all of it.
-- **The tree**: `Clips/` repeats the footage's folders (`Clips/Day 1/…`), without camera folders such as
+- **The tree**: `_Clips/` repeats the footage's folders (`_Clips/Day 1/…`), without camera folders such as
   `DCIM/100MEDIA`. The file has the clip's name and dates (its `creation_time`). Moving the files into folders
   of your own is fine, and the editors get those folders as bins.
 - **Deleting one** says the clip isn't interesting: that's sorting the trip in Finder. Tags on them are the
   clip's rating and keywords, as for moments.
-- **Deleted vs. not made yet**: `.actionfootageplayer/clips-made.txt` lists every clip a preview was made for
+- **Deleted vs. not made yet**: `_ActionFootagePlayer/clips-made.txt` lists every clip a preview was made for
   (relative path and size). *Make clip previews* makes them only for clips not on the list, new footage that is,
   so a deleted one stays deleted. *Make again for removed clips* is the way back.
 - **When**: from the menu (*Project → Make clip previews*), in the background, with the progress in the corner
@@ -455,12 +484,12 @@ right within the trip, on the wrong day.
 
 ## Exports
 
-`Exports/` in the project folder, instead of `stabilized/` next to the clip.
+`_Exports/` in the project folder, instead of `stabilized/` next to the clip.
 
-- **Kept apart from `Moments/`**: there may be several exports of one moment (HDR, SDR, ProRes), and exports
+- **Kept apart from `_Moments/`**: there may be several exports of one moment (HDR, SDR, ProRes), and exports
   are what gets deleted to make room. A moment is a few KB and stays.
 - **Named in the same dialog** (`Shift+E`), with the suggestion being the moment's name when the A-B part is a
-  moment, else as for a moment. The file: `Exports/<name>.mov`, with the look in parentheses unless it's the
+  moment, else as for a moment. The file: `_Exports/<name>.mov`, with the look in parentheses unless it's the
   default HDR: `Turtle (SDR).mov`, `Turtle (Dolby Vision).mov`, `Turtle (ProRes).mov`, and ` 2` when taken.
 - **The same link inside**: `kind: "export"`, with the look and whether it's stabilized. gyroflow-export writes
   it with the other metadata (ffmpeg's muxer, or `dv_mux.rs` for Dolby Vision). Opening an export plays the
@@ -470,18 +499,18 @@ right within the trip, on the wrong day.
   can be found from its moment and played in full quality later, even after the export is deleted to make
   room. The exception is when the part *is* a moment, played from the menu or its file, or equal to one to the
   frame: then no second moment is made, and the export is named after it ([Decided](#decided)). A whole clip
-  exported makes no moment; its preview in `Clips/` is that.
+  exported makes no moment; its preview in `_Clips/` is that.
 
-### From `stabilized/` to `Exports/`
+### From `stabilized/` to `_Exports/`
 
-- **New exports go to `Exports/`**, from the player, the Finder quick action and the command line. The player
+- **New exports go to `_Exports/`**, from the player, the Finder quick action and the command line. The player
   asks for the project to be initialized first; without the player, a video in no project exports to
   `stabilized/` next to it as before.
 - **Old `stabilized/` folders are left alone.** The player never reads them back: "Show the last export" is
   only the last one this session, and the skip-if-it-exists check looks where the new export would go. So
   nothing breaks, and nothing of anyone's is moved without asking.
 - **The release notes and the README say so.** A script of yours that reads `stabilized/` passes `--out`.
-- *Project → Move old exports here* (the `stabilized/` folders of the project's clips into `Exports/`) is
+- *Project → Move old exports here* (the `stabilized/` folders of the project's clips into `_Exports/`) is
   for later, if someone asks.
 
 ## Making the previews
@@ -532,7 +561,7 @@ All of them:
 | `l` | as now: the A-B part | — |
 | `k` | **save the A-B part as a moment** (asks for its name). On a moment being played: update it | free in mpv and the plugins |
 | `M` | **a mark here**; on a mark (within half a second): remove it. Final Cut's key for a marker | free (`m` is mute) |
-| `X` | **this clip isn't interesting**: its preview in `Clips/` goes to the Trash; again: made again | free |
+| `X` | **this clip isn't interesting**: its preview in `_Clips/` goes to the Trash; again: made again | free |
 | `K` | **favorite**: the *Favorite* tag on the moment playing, else on the clip's preview (5 stars on Windows); again: off | free |
 | `Shift+E` | export, asking for a name | as now |
 
@@ -601,11 +630,11 @@ first".
    for an MP4), Explorer.
 4. **Moments** (**done**, but the side panel's lists and typing in other alphabets): in the workspace plugin.
    `moments.lua` is the part with no mpv in it (names, dates, which clip a moment is of, where its original is,
-   `Moments/` read; `luajit tests/moments_test.lua`), `main.lua` the rest:
+   `_Moments/` read; `luajit tests/moments_test.lua`), `main.lua` the rest:
    - `k` asks the name (`mp.input`), makes the project at the first save, and asks the gyroflow plugin for the
      preview (`script-message-to gyroflow preview`, which renders with the same options as an export, in SDR).
-     The history of names (↑) is `.actionfootageplayer/moment-names.txt`.
-   - `Moments/` is read when a clip of the project loads and again when one of its folders changes (looked at
+     The history of names (↑) is `_ActionFootagePlayer/moment-names.txt`.
+   - `_Moments/` is read when a clip of the project loads and again when one of its folders changes (looked at
      every 5 s); what's read of each file is cached in mpv's cache folder by size and time.
    - The clip's moments are chapters beside the highlights (put back when another plugin sets the chapters) and
      a *Moments* submenu: play, rename, remove (to the Trash: macOS's `trash`, Windows' recycle bin, `gio trash`),
@@ -616,7 +645,7 @@ first".
      it (the app's `autocreate-playlist`), then loads it again from there, and only that load is redirected:
      redirected at once, the playlist became the original's folder. So the moments beside it are next and
      previous.
-   - `Moments/` (or a folder in it) opened plays its moments one after another, each ending at its out, in the
+   - `_Moments/` (or a folder in it) opened plays its moments one after another, each ending at its out, in the
      order they happened.
    - Updating (`k` on a moment whose part was moved) writes the file again; gyroflow-export keeps the Finder tags,
      label and comment of a file it replaces.
@@ -625,15 +654,15 @@ first".
    stabilized, 20–30 s looped, titled; the update (out 30 → 31) and a Finder tag kept through it; rename by typing
    in the console; remove; the folder in time order. Not checked: typing other alphabets and input methods, the
    OSD and the console as they look, Windows and Linux.
-5. **Exports to `Exports/`** (**done**):
+5. **Exports to `_Exports/`** (**done**):
    - `Shift+E` asks the workspace plugin for the name (`export-name`, answered with `export-start`), in the
-     moments' dialog. The file is `Exports/<name>[ (SDR| Dolby Vision)].mov`, ` 2` when taken.
+     moments' dialog. The file is `_Exports/<name>[ (SDR| Dolby Vision)].mov`, ` 2` when taken.
    - The part when it's a moment names it. A moment of the user's comes before one an earlier export made, whose
      `export_` is left out of the name. Otherwise the moment `export_<name>` is saved with it, quietly.
    - The link (`kind: "export"`, `look`: `hdr`, `maker`, `nbcu`, `dv` or `recorded`, `stabilized`) goes in with
      `--link`. gyroflow-export then reserves room after the `moov` (`-moov_size`, as for Dolby Vision, in place of
      `+faststart`), and `mp4meta.rs` writes the key into it in place: a 4K export isn't written twice.
-   - gyroflow-export's default is `<project>/Exports/`, and it makes the project when there's none, as the
+   - gyroflow-export's default is `<project>/_Exports/`, and it makes the project when there's none, as the
      player's first save does.
    - An export opened plays as it is. The menu's *Open the original* sets its part as the original loads: options
      given to `loadfile` are lost when mpv loads it again from the playlist of its folder.
@@ -731,12 +760,14 @@ Anton's answer to the second draft's question, 2026-11-05:
 9. **Exporting a part that is already a moment** makes no second moment: the export is named after the moment
    (`Turtle.mov`), and its link points at the same range.
 
-Anton's idea while it was built, 2026-11-05:
+Anton's ideas while it was built, 2026-11-05:
 
-10. **Link files have a double extension**, `.afplink.mp4`: moments (`Moments/Turtle.afplink.mp4`) and clip
+10. **Link files have a double extension**, `.afplink.mp4`: moments (`_Moments/Turtle.afplink.mp4`) and clip
     previews. It says what the file is, and every system still opens it as an MP4. Exports are videos of their
-    own and keep `.mov`. A link file renamed in Finder without it is still read (any `.mp4` under `Moments/`), and
+    own and keep `.mov`. A link file renamed in Finder without it is still read (any `.mp4` under `_Moments/`), and
     its name is shown without `.mp4`.
+11. **The project's folders start with an underscore**: `_Moments`, `_Clips`, `_Exports`, so that sorted by name
+    they come first, before the footage's.
 
 ## Open questions
 

@@ -2,7 +2,7 @@
 -- Plain Lua with no mpv in it, so that luajit tests it (tests/workspace_test.lua) over the same cases as its Rust
 -- twin in gyroflow-export (vs-gyroflow/src/workspace.rs): keep the two in step.
 --
--- A project is a folder with `.actionfootageplayer/` in it, the trip folder: its footage is under it, and the
+-- A project is a folder with `_ActionFootagePlayer/` in it, the trip folder: its footage is under it, and the
 -- player's files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip.
 -- Separate project folders (Sources.txt) come later; every path here is already the same for them.
 --
@@ -14,8 +14,9 @@
 
 local M = {}
 
--- The folder a project's state is kept in, which also marks a folder as one
-M.STATE_DIR = ".actionfootageplayer"
+-- The folder a project's state is kept in, which also marks a folder as one. Not hidden: the project is its files,
+-- where the user sees them, and the underscore puts it first by name, with _Moments, _Clips and _Exports
+M.STATE_DIR = "_ActionFootagePlayer"
 
 function M.new(fs)
     local ws = {}

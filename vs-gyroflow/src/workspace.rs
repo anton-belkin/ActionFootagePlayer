@@ -2,13 +2,13 @@
 // twin of the workspace mpv plugin's workspace.lua, for gyroflow-export run without the player (the Finder quick
 // action, the command line). Both are tested over tests/workspace_cases.txt: keep the two in step.
 //
-// A project is a folder with `.actionfootageplayer/` in it, the trip folder: its footage is under it, and the
+// A project is a folder with `_ActionFootagePlayer/` in it, the trip folder: its footage is under it, and the
 // player's files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip.
 
 use std::path::{ Path, PathBuf };
 
 /// The folder a project's state is kept in, which also marks a folder as one
-pub const STATE_DIR: &str = ".actionfootageplayer";
+pub const STATE_DIR: &str = "_ActionFootagePlayer";
 
 /// A volume's top folder, where looking further up for a project ends: a disk or a share as the system mounts it
 /// (/Volumes/<name>, /media/<user>/<name>, /run/media/<user>/<name>, /mnt/<name>, C:\, \\nas\video), or /.

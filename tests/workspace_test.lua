@@ -127,7 +127,7 @@ expect("windows gyroflow", win.gyroflow_new("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip
 expect("windows marks", win.marks_file("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.marks.json")
 
 -- The project search on Windows: the drive's top is looked at, the home folder isn't
-local wdirs = { ["E:\\.actionfootageplayer"] = true, ["C:\\Users\\me\\.actionfootageplayer"] = true }
+local wdirs = { ["E:\\_ActionFootagePlayer"] = true, ["C:\\Users\\me\\_ActionFootagePlayer"] = true }
 local wfs = { is_dir = function(p) return wdirs[p] == true end, is_file = function() return false end,
               home = "C:\\Users\\me", windows = true }
 local w = workspace.new(wfs)

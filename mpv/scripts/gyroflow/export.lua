@@ -1,7 +1,7 @@
 -- Shift+E: export the current video the way it plays, stabilized and with the log curve's LUT (the dlogm plugin's),
 -- with gyroflow-export (one pass). With the workspace plugin, it asks the name and the export goes to the project's
--- Exports/ with its link inside (and the part, when it isn't a moment yet, is saved as one: workspace/main.lua);
--- without it, gyroflow-export's own default (the project's Exports/). With an A-B loop set (the `l` key), only
+-- _Exports/ with its link inside (and the part, when it isn't a moment yet, is saved as one: workspace/main.lua);
+-- without it, gyroflow-export's own default (the project's _Exports/). With an A-B loop set (the `l` key), only
 -- that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
 -- as a notification. Shift+E again on a video being exported, twice, cancels it.
 --
@@ -248,6 +248,7 @@ local function start(path, sdr, named)
         table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
         range = " " .. clock(a) .. "-" .. clock(b)
     end
+    if named and named.alone == true then table.insert(args, "--alone") elseif named and named.alone == false then table.insert(args, "--whole") end
     if named and named.output then
         table.insert(args, "--output"); table.insert(args, named.output)
         if named.link then table.insert(args, "--link"); table.insert(args, named.link) end
@@ -408,6 +409,15 @@ mp.register_script_message("preview", function(json)
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
     look_args(args, true)
+    -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
+    -- on its own
+    if req.project ~= nil then
+        for i = #args - 1, 1, -1 do
+            if args[i] == "--project" then table.remove(args, i + 1); table.remove(args, i) end
+        end
+        if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
+    end
+    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
     add("--from", req.from and string.format("%.3f", req.from))
     add("--to", req.to and string.format("%.3f", req.to))

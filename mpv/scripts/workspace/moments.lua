@@ -1,7 +1,7 @@
--- Moments (docs/moments-and-workspaces.md): parts of a clip kept as small MP4s in the project's Moments/ folder,
+-- Moments (docs/moments-and-workspaces.md): parts of a clip kept as small MP4s in the project's _Moments/ folder,
 -- `<name>.afplink.mp4`, each with the link to its original inside (link.lua reads it). This is the part with no mpv
 -- in it, so that luajit tests it (tests/moments_test.lua): names, dates, which clip a moment is of, where its
--- original is, and the Moments/ folder read.
+-- original is, and the _Moments/ folder read.
 --
 --   local moments = require('moments').new(ws, fs)   -- ws: workspace.lua's; fs: is_dir, is_file, info, readdir,
 --                                                    -- read_link (link.lua's read), parse_json
@@ -14,19 +14,20 @@ local STATE_DIR = require('workspace').STATE_DIR
 
 local M = {}
 
-M.FOLDER = "Moments"
+-- The project's folders start with _: sorted by name, they come first (Anton, 2026-11-05)
+M.FOLDER = "_Moments"
 -- The double extension says what the file is, and it still opens as an MP4
 M.EXT = ".afplink.mp4"
--- Exports, videos of their own: Exports/<name>[ (SDR)].mov
-M.EXPORTS = "Exports"
--- Clip previews: Clips/<the clip's path>.afplink.mp4
-M.CLIPS = "Clips"
+-- Exports, videos of their own: _Exports/<name>[ (SDR)].mov
+M.EXPORTS = "_Exports"
+-- Clip previews: _Clips/<the clip's path>.afplink.mp4
+M.CLIPS = "_Clips"
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
-local OWN_FOLDERS = { moments = true, clips = true, exports = true, stabilized = true }
+local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, moments = true, clips = true, exports = true, stabilized = true }
 
--- A clip preview's path in Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
--- a camera's own folders (DCIM and the one in it). `flat`: all in Clips/ itself ("A.afplink.mp4")
+-- A clip preview's path in _Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
+-- a camera's own folders (DCIM and the one in it). `flat`: all in _Clips/ itself ("A.afplink.mp4")
 function M.clip_preview_relative(relative, flat)
     if flat then
         local name = relative:match("([^/]+)$") or relative
@@ -43,7 +44,7 @@ function M.clip_preview_relative(relative, flat)
     return table.concat(out, "/")
 end
 
--- .actionfootageplayer/clips-made.txt: a line per clip a preview was made for, its path in the project and its size
+-- _ActionFootagePlayer/clips-made.txt: a line per clip a preview was made for, its path in the project and its size
 function M.parse_made(text)
     local made = {}
     for line in (text or ""):gmatch("[^\r\n]+") do
@@ -216,8 +217,8 @@ function M.new(ws, fs)
         end
     end
 
-    -- Every .mp4 under <project>/Moments/ (or `folder`), subfolders included, with its link (of `kind`: moment, or
-    -- clip for Clips/). cache[file] = { size, mtime, raw } keeps what was read of a file, read again only when its
+    -- Every .mp4 under <project>/_Moments/ (or `folder`), subfolders included, with its link (of `kind`: moment, or
+    -- clip for _Clips/). cache[file] = { size, mtime, raw } keeps what was read of a file, read again only when its
     -- size or time changes. dirs: each folder's modification time, which a file added, removed or renamed in it
     -- changes. A link file renamed or moved is found all the same: by what's inside it
     function self.scan(project, cache, folder, kind)
@@ -278,7 +279,7 @@ function M.new(ws, fs)
         return out
     end
 
-    -- The project a moment's file is in: the folder above the Moments/ it's in (subfolders too), with the state
+    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the state
     -- folder in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
     function self.project_of(file, folder)
         folder = (folder or M.FOLDER):lower()

@@ -61,7 +61,7 @@ local KEY_LABELS = {
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
-    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in Clips/ to the Trash (again: made again)" },
+    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in _Clips/ to the Trash (again: made again)" },
     { "script-binding workspace/cut-out", "Cut the marked part out of the clip (spoiled), without re-encoding; the original to the Trash" },
     { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
     { "script-binding highlights/prev", "Previous mark" },
@@ -358,6 +358,17 @@ local function marks_menu(h, key)
     return items
 end
 
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return not ws.own_project and g.level ~= st.level
+end
+
 -- The clip's moments (the workspace plugin's), each with what can be done to it
 local function moments_menu(w)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -373,7 +384,7 @@ local function moments_menu(w)
         }, { checked = playing }))
     end
     if #items > 0 then table.insert(items, SEPARATOR) end
-    table.insert(items, item(platform == "darwin" and "Show Moments folder in Finder" or "Show Moments folder",
+    table.insert(items, item(platform == "darwin" and "Show _Moments folder in Finder" or "Show _Moments folder",
                              "script-message-to workspace moments-folder"))
     return items
 end
@@ -402,6 +413,7 @@ local function project_menu(w, key)
         table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
         table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
         table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
+        table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
     end
     table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
     table.insert(items, SEPARATOR)
@@ -493,6 +505,9 @@ local function build()
                 add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",
                          "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
             end
+            if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
+            if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
+            if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
         -- Cutting a spoiled part out: of a clip itself, not a moment, clip preview or export

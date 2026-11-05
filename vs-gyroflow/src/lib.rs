@@ -279,9 +279,22 @@ impl Engine {
     /// `underwater`: the lens under water, not, or as the camera says (water.rs)
     /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
     /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize) -> Result<Engine, String> {
+    /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
+    /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
+    /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead)?;
+        if let (Some(alone), None) = (alone, motion.as_ref()) {
+            stab.smoothing.write().current_mut().set_parameter("trim_range_only", if alone { 1.0 } else { 0.0 });
+        }
+        if let (Some((start, end)), Some(_)) = (trim, motion.as_ref()) {
+            let duration = stab.params.read().duration_ms / 1000.0;
+            if duration > 0.0 && end > start {
+                stab.set_trim_ranges(vec![((start / duration).clamp(0.0, 1.0), (end / duration).clamp(0.0, 1.0))]);
+                log::info!("{project}: {start:.2}-{end:.2} s stabilized on its own");
+            }
+        }
         // The wider view is the project's zoom taken away afterwards (Views)
         if let Fov::Set(fov) = fov { stab.set_fov(fov); }
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
@@ -1040,6 +1053,13 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     };
     let level = unsafe { level_arg(api, input) }?;
     let lookahead = unsafe { map_get_f64(api, input, c"lookahead") }.unwrap_or(4.0).clamp(0.0, 60.0);
+    // A project's "only within the trim range", as it's viewed (a moment's switch)
+    let alone = unsafe { map_get_i64(api, input, c"alone") }.map(|v| v != 0);
+    // A part stabilized on its own (a moment's), seconds of the video
+    let trim = match unsafe { (map_get_f64(api, input, c"trim_start"), map_get_f64(api, input, c"trim_end")) } {
+        (Some(a), Some(b)) if b > a => Some((a, b)),
+        _ => None,
+    };
     // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
@@ -1048,9 +1068,9 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     // The level isn't either: the control file switches it. Nor the sizes, in or out (render_size_for): the paused frame
     // at full size (still.lua) and another display's size cost no other engine, only the GPU workers set up again for
     // them. A second engine for a 4K clip ran a 2 GB integrated GPU out of memory
-    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
     let input_size = (vi.width as usize, vi.height as usize);
-    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers))?;
+    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone))?;
     let size = engine.render_size_for(input_size, output_override);
     Ok((engine, size))
 }
@@ -1177,10 +1197,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),

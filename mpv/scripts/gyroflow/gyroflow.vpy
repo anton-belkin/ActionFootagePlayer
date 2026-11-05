@@ -29,6 +29,13 @@ if args.get('lookahead') is not None:
 # A moment played as a video of its own: its frames' times from 0, its part starting this far into the clip
 if args.get('time_offset'):
     stab['time_offset'] = float(args['time_offset'])
+# A moment without a project of its own, stabilized on its own: its part, seconds of the clip
+# A moment's switch as it's viewed: its project's "only within the trim range", whatever the project says
+if args.get('alone') is not None:
+    stab['alone'] = 1 if args['alone'] else 0
+if args.get('trim_start') is not None and args.get('trim_end') is not None:
+    stab['trim_start'] = float(args['trim_start'])
+    stab['trim_end'] = float(args['trim_end'])
 if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 if args.get('underwater'):

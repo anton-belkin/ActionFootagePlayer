@@ -375,6 +375,17 @@ local underwater = sticky_underwater
 -- Under water, auto or the project's, before Ctrl+u took the lens out of the water
 local underwater_back = underwater ~= "no" and underwater or "auto"
 
+-- The workspace plugin's settings for the file playing, when it keeps its own (a moment's, as it was made: view,
+-- level, horizon_lock), the part stabilized on its own (trim: { in, out }, a moment's without a project), and its
+-- switch as it's viewed (alone: its project's "only within the trim range"). They don't stick for the next clips
+local function fixed()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.stab, ws.trim, ws.alone end
+    return nil, nil, nil
+end
+-- The level that sticks, while a moment plays at its own
+local level_before = nil
+
 -- The horizon lock and the lens a clip starts with: a project's own, or what sticks
 local function clip_settings(source)
     if has_project(source) then
@@ -434,6 +445,10 @@ end
 
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
+    local _, trim, alone = fixed()
+    -- A project's "only within the trim range" as it's viewed: true or false, nil for the project's own
+    local project_alone = nil
+    if has_project(source) and alone ~= nil then project_alone = alone end
     return {
         name = "vapoursynth",
         label = LABEL,
@@ -444,7 +459,8 @@ local function gyroflow_filter(source, enabled)
                                                 fast = not full_size and frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL,
-                                                time_offset = time_offset() }),
+                                                time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
+                                                alone = project_alone }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -525,6 +541,16 @@ local function add_filter(source)
     end
     view = has_project(source) and "normal" or sticky_view
     clip_settings(source)
+    -- A moment's own settings, as it was made
+    local own = fixed()
+    local off = false
+    if type(own) == "table" then
+        if own.view == "normal" or own.view == "wide" then view = own.view elseif own.view == "off" then off = true end
+        if LEVEL_LABELS[own.level] then level_before = level_before or level; level = own.level end
+        if own.horizon_lock == "yes" or own.horizon_lock == "no" then horizon = own.horizon_lock == "yes"
+        elseif own.horizon_lock == "project" then horizon = nil end
+    end
+    stab_off = off
     write_edge_control()
 
     local sizes = render_sizes(source)
@@ -543,7 +569,7 @@ local function add_filter(source)
     local step = step_filter(source, true)
     if step then table.insert(vf, step) end
     if scale then table.insert(vf, scale) end
-    table.insert(vf, gyroflow_filter(source, true))
+    table.insert(vf, gyroflow_filter(source, not off))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
@@ -568,6 +594,8 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
+    -- Back to the level that sticks, after a moment's own
+    if level_before then level, level_before = level_before, nil end
     clip_settings(nil)
     if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
@@ -750,7 +778,7 @@ local function show(v)
     local was_on = not stab_off
     local enabled = v ~= "off"
     if enabled then view = v end
-    if enabled and not has_project(current_source) then sticky_view = v end
+    if enabled and not has_project(current_source) and not fixed() then sticky_view = v end
     stab_off = not enabled
     write_edge_control()
     -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
@@ -777,6 +805,8 @@ local function set_level(l)
     if has_project(current_source) then
         return mp.osd_message("Gyroflow: the project's own smoothing and zoom (edit them in Gyroflow, Ctrl+e)", 2)
     end
+    -- A moment's own level doesn't stick: the one before it comes back after it
+    if fixed() and not level_before then level_before = level end
     level = l
     write_edge_control()
     publish()
@@ -805,7 +835,7 @@ mp.register_script_message("horizon-lock", function(value)
     else
         return
     end
-    if not has_project(current_source) then sticky_horizon = horizon end
+    if not has_project(current_source) and not fixed() then sticky_horizon = horizon end
     rebuild_filter()
     publish()
     local says = current_source and current_source.kind == "default" and "preset" or "project"
@@ -1093,6 +1123,12 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     end
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)
+    end
+    -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
+    local ws = workspace_of(path)
+    if ws and ws.moment and ws.moment["in"] and ws.snap then
+        table.insert(args, "--trim"); table.insert(args, string.format("%.3f,%.3f", ws.moment["in"], ws.moment.out))
+        table.insert(args, "--alone"); table.insert(args, ws.alone and "yes" or "no")
     end
     table.insert(args, path); table.insert(args, project)
     mp.osd_message("Gyroflow: writing the project...", 2)

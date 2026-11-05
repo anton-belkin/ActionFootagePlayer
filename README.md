@@ -78,7 +78,7 @@ through the stabilization, a wider view of it, and off. [All keys](#keys) · [In
 You shot the dive in D-Log M, with EIS off because under water it doesn't hold. In the hotel, you copy the card to
 the laptop and double-click the first clip: it plays stabilized, in HDR, with the depth in the corner. You skip
 through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, type "Turtle",
-and pause for half a minute. The fragment is `Exports/Turtle.mov` in the trip's folder, ready to AirDrop to the group
+and pause for half a minute. The fragment is `_Exports/Turtle.mov` in the trip's folder, ready to AirDrop to the group
 the same evening, in HDR, and the turtle is a [moment](#moments) too, to play again in full quality later. The originals are untouched for proper editing later.
 
 ## Why log, and why HDR
@@ -282,7 +282,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
-| `X` | This clip isn't interesting: its preview in `Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `X` | This clip isn't interesting: its preview in `_Clips/` to the Trash; again: made again | `workspace/not-interesting` |
 | `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -503,7 +503,7 @@ or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversio
 Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part.
 
 It asks the export's name first, as a moment does (Enter alone takes the suggestion), and the file goes to the
-trip's **Exports** folder: `Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
+trip's **_Exports** folder: `_Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
 `Turtle (Dolby Vision).mov`), and ` 2` when the name is taken. A part that's a moment (played from its file or the
 menu, or the same part to the frame) is named after it; any other part is also saved as the moment
 `export_Turtle`, so it can be found and played in full quality after the export is deleted to make room. Inside the
@@ -530,7 +530,7 @@ The same from a terminal, for one clip or many:
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
-The result goes to the `Exports/` folder of the clip's project (the trip folder with `.actionfootageplayer/` in it
+The result goes to the `_Exports/` folder of the clip's project (the trip folder with `_ActionFootagePlayer/` in it
 above the clip, as the player initializes it), or with none to a `stabilized/` folder next to the clip, as
 `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
 names the file.
@@ -569,7 +569,7 @@ a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the
 
 ```bash
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --preview still --from 20 --to 30 --at 26.4 \
-    --dates 2026-10-24T09:46:07+03:00 --output Moments/Turtle.afplink.mp4 DJI_0093_D.MP4
+    --dates 2026-10-24T09:46:07+03:00 --output _Moments/Turtle.afplink.mp4 DJI_0093_D.MP4
 ```
 
 - `--preview still`: the frame at `--at` (else the middle of `--from` to `--to`), stabilized as an export would be
@@ -673,8 +673,8 @@ settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 A moment is a part of a clip you want to keep: the turtle, the jump. Mark it with `l` at its start and `l` at its
 end, press `k`, type its name (Enter alone takes the one suggested: the last name with the next number, "Turtle 2",
-or the date and time), and it's saved as a small file in a **Moments** folder of the trip:
-`Moments/Turtle.afplink.mp4`.
+or the date and time), and it's saved as a small file in a **_Moments** folder of the trip:
+`_Moments/Turtle.afplink.mp4`.
 
 - **It's a link, not a copy.** The file is one frame of the moment, in color and stabilized, held for its length,
   some 150-350 KB. Finder shows that frame as its icon, and the double extension says it's a link (it still opens
@@ -682,28 +682,38 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
 - **Opening it in the player plays its part of the original as a video of its own**, in full quality, with the
   original's stabilization, look and telemetry: the seek bar is the moment's, from 0:00 to its length, and the
   panel shows the moment (its marks, Rename, Remove). Then the next moment in the folder, and at the last one it
-  stops. Opening the **Moments** folder plays all of them one after another, in the order they happened.
+  stops. Opening the **_Moments** folder plays all of them one after another, in the order they happened.
 - **Its whole clip**: *Open the whole clip* in the panel (or a moment's `⋯`: *In its clip*) opens the clip at the
   moment's start, its part marked but not looped, to see what came before and after. Moving its start or end
   there and `k` updates that moment; inside the moment, marking a part of it and `k` trims it.
 - **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
   moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
-  hidden `.actionfootageplayer` folder there, and `Moments/`, `Clips/` and `Exports/` once there's something to
+  `_ActionFootagePlayer` folder there, and `_Moments/`, `_Clips/` and `_Exports/` once there's something to
   keep. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
+- **Stabilized as it was made**: a moment keeps the stabilization it was saved with. Over the default preset, its
+  view, level and horizon lock; a clip with a Gyroflow project gives the
+  moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the clip's project changed later doesn't change the
+  moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
+  project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
+  its own project in Gyroflow, made then from what it plays with if it has none; a trim changed there becomes the
+  moment's ends. While a moment plays, each stabilization setting has **As saved** first: every moment plays as it
+  was saved. Pick a value instead and it's for every moment this session (a playlist of moments all at Strong, say),
+  without touching how clips play; back to As saved, each moment is its own again. None of it changes a moment: only
+  **Keep in Turtle** in the panel writes how it's viewed into it.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
-- Sort a Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
+- Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 
 ### Clip previews: the trip at a glance
 
 A folder of log footage is a wall of gray icons. **Project → Make clip previews** (right click) makes a small
-file for each clip of the trip in a **Clips** folder, beside the footage's own folders:
-`Clips/Day 1/DJI_0068_D.afplink.mp4`.
+file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
+`_Clips/Day 1/DJI_0068_D.afplink.mp4`.
 
 - **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
   yours, or about a dozen frames through it, 2 a second, at 960 pixels. Finder's icons are then the trip in color,
@@ -713,8 +723,11 @@ file for each clip of the trip in a **Clips** folder, beside the footage's own f
   NAS. They're made one at a time in the background, with the progress in the bottom-left corner, and never by
   themselves: the menu item makes them for the clips that have none, new footage that is.
 - **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
-  clip previews* doesn't bring it back (`.actionfootageplayer/clips-made.txt` lists what was made). `X` again, or
+  clip previews* doesn't bring it back (`_ActionFootagePlayer/clips-made.txt` lists what was made). `X` again, or
   *Make again for removed clips*, does.
+- **Variants**: a clip preview plays with its clip's stabilization. **Its own stabilization** (the panel, while it
+  plays) gives it a project of its own beside it (a copy of the clip's, or made from its motion data as it plays):
+  copy the preview in Finder for another, and each is a variant of the same clip.
 - **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
   into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
   lose them: their moments and previews point at their names.)
