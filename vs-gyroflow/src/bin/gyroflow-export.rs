@@ -1106,7 +1106,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         // All of the motion data before it starts (look-ahead 0): an export has the time
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers,
-                                                   opts.alone.then_some((from, to)), opts.alone_project)?)),
+                                                   // --alone: --from to --to's own motion, a photo's motion too
+                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project)?)),
         None => None,
     };
     // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to
@@ -1575,7 +1576,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let engine = match &source {
         Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
                                      (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
-                                     None, opts.alone_project)?),
+                                     // --alone: the part (--from, --to) stabilized by its own motion, as a moment plays
+                                     opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project)?),
         None => None,
     };
     // A turned or zoomed out camera may leave edges where the view itself never does

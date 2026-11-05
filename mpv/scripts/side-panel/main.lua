@@ -1074,7 +1074,10 @@ local function crop_part(u, x, w, y)
     local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
               or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
               or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-    y = u:caption(x, w, y, what .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
+    -- Where gyroflow-export puts it: the project's _Stills, else stabilized/ next to the clip
+    local ws = state("workspace")
+    local where = type(ws) == "table" and ws.project and "the project's _Stills folder" or "the stabilized folder by the clip"
+    y = u:caption(x, w, y, what .. " in " .. where .. ": the SDR look, brighter where the screen has HDR")
     y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
     return whole_video(y)
 end

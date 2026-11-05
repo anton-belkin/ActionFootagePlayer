@@ -479,6 +479,14 @@ local function photo()
     -- A Motion Photo is a JPEG (the default off macOS)
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     as_it_plays(args, false, true, live)
+    -- A moment stabilized on its own (by its part's motion alone, the gyroflow plugin's fixed()), as it plays: its
+    -- part of the clip; one with a project of its own, the project's "only within the trim range" as it's viewed
+    local moment = type(ws) == "table" and ws.path == mp.get_property("path")
+    if moment and type(ws.trim) == "table" and ws.trim["in"] and ws.trim.out then
+        for _, a in ipairs({ "--alone", "--from", string.format("%.4f", ws.trim["in"]), "--to", string.format("%.4f", ws.trim.out) }) do table.insert(args, a) end
+    elseif moment and ws.alone ~= nil and (mp.get_property_native("user-data/gyroflow/project") or "") ~= "" then
+        table.insert(args, ws.alone and "--alone" or "--whole")
+    end
     local still = mp.get_property_native("user-data/gyroflow/still")
     if still == false then table.insert(args, "--radius"); table.insert(args, "0") end
     local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
