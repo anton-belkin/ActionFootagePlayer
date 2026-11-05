@@ -537,14 +537,15 @@ fn filter_path(p: &Path) -> String {
 }
 
 /// A photo's motion (a Live Photo's or Motion Photo's video): a part of the video, written to `out` as it'd export,
-/// at most `max_side` wide or high and `bits_per_pixel` a pixel of each frame, as an MP4 (`mp4`), Dolby Vision as
-/// the look has it or not (`dv`)
+/// at most `max_side` wide or high, `max_fps` frames a second (every second, third… frame: `frame_step`) and
+/// `bits_per_pixel` a pixel of each frame, as an MP4 (`mp4`), Dolby Vision as the look has it or not (`dv`)
 struct Part {
     from: f64,
     to: f64,
     out: PathBuf,
     max_side: usize,
     bits_per_pixel: f64,
+    max_fps: f64,
     mp4: bool,
     dv: bool,
 }
@@ -643,7 +644,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let seek = (first_frame as f64 - 0.25).max(0.0) / fps;
     // The audio from the first frame's time, with it
     let video_start = first_frame as f64 / fps;
-    let total_frames = if opt_from.is_some() || opt_to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) };
+    // A part at a lower frame rate: every `step`th frame from the first, the others not even rendered
+    let step = part.map_or(1, |p| frame_step(fps, p.max_fps));
+    let out_rate = (info.fps.0, info.fps.1 * step);
+    let total_frames = if opt_from.is_some() || opt_to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) }.div_ceil(step);
 
     // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size. Color only: none,
     // the frames go to the LUT as they are decoded
@@ -739,12 +743,12 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let audio = if part.is_some() { "1:a:0?" } else { "1:a?" };
     let mut bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (fw * fh) as f64 / (w * h) as f64;
     // A photo's motion: no more than a phone gives its own
-    if let Some(p) = part { bit_rate = bit_rate.min(p.bits_per_pixel * (fw * fh) as f64 * fps); }
+    if let Some(p) = part { bit_rate = bit_rate.min(p.bits_per_pixel * (fw * fh) as f64 * fps / step as f64); }
     let mut enc_cmd = ffmpeg_command("ffmpeg");
     enc_cmd.args(["-nostdin", "-v", "error", "-y"]).args(&enc.global);
     enc_cmd.args([
                   "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", &format!("{ow}x{oh}"),
-                  "-framerate", &format!("{}/{}", info.fps.0, info.fps.1),
+                  "-framerate", &format!("{}/{}", out_rate.0, out_rate.1),
                   "-color_range", in_range, "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                   "-i", "-"]);
     // The audio and metadata from the source; for Dolby Vision, the muxer takes them
@@ -798,7 +802,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let moov_size = 256 * 1024 + total_frames * 48;
         let mut mux_cmd = ffmpeg_command("ffmpeg");
         // -r, not the demuxer's -framerate: raw HEVC has no timestamps, and with -framerate they come out wrong
-        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", info.fps.0, info.fps.1), "-i", "-"]);
+        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", out_rate.0, out_rate.1), "-i", "-"]);
         if opt_from.is_some() { mux_cmd.args(["-ss", &format!("{video_start:.6}")]); }
         if opt_to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
         mux_cmd.arg("-i").arg(&path)
@@ -809,7 +813,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let mut mux_in = std::io::BufWriter::with_capacity(1 << 20, mux.stdin.take().unwrap());
         let mut enc_out = encoder.stdout.take().unwrap();
         rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
-            let mut injector = RpuInjector::new(rpus, first_frame);
+            let mut injector = RpuInjector::new(rpus, first_frame).step(step);
             if live_l1 { injector = injector.live_l1(l1_rx); }
             let mut buf = vec![0u8; 1 << 20];
             loop {
@@ -833,7 +837,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let (done_tx, done_rx) = mpsc::sync_channel::<(u64, Result<(Vec<u8>, Option<[f64; 3]>), String>)>(in_flight);
     let mut dec_out = decoder.stdout.take().unwrap();
     let reader = std::thread::spawn(move || -> Result<u64, String> {
-        let mut n = 0;
+        // n: the frames written; `read`, decoded (every `step`th of them is written)
+        let (mut n, mut read) = (0, 0u64);
         loop {
             let mut buf = vec![0u8; in_frame];
             match dec_out.read_exact(&mut buf) {
@@ -841,6 +846,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(n),
                 Err(e) => return Err(format!("reading decoded frames: {e}")),
             }
+            read += 1;
+            if (read - 1) % step != 0 { continue; }
             if frame_tx.send((n, buf)).is_err() { return Ok(n); }
             n += 1;
         }
@@ -858,7 +865,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                     Some(engine) => {
                         let mut dst = vec![0u8; out_frame];
                         // Frame times from the start of the file, as Gyroflow and mpv count them
-                        let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                        let timestamp_us = (((first_frame + n * step) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
                         let mut planes = Vec::with_capacity(3);
                         let (mut so, mut doff) = (0, 0);
                         for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
@@ -1066,6 +1073,13 @@ const LIVE_SECONDS: f64 = 3.0;
 const LIVE_MAX_SIDE: usize = 1920;
 /// Its bit rate: about an iPhone's Live Photo's (1920x1440 at 30 fps in ~8 Mbit/s); 3 s of 1080p60 is ~5 MB
 const LIVE_BITS_PER_PIXEL: f64 = 0.1;
+/// And at most 30 frames a second, as an iPhone's: it's the photo's context, not a video of its own
+const LIVE_MAX_FPS: f64 = 30.0;
+
+/// Every how many frames a part at most `max_fps` takes: 59.94 and 50 fps every 2nd, 120 every 4th, 30 and less all
+fn frame_step(fps: f64, max_fps: f64) -> u64 {
+    (fps / max_fps - 0.01).ceil().max(1.0) as u64
+}
 
 /// A Live Photo's content identifier: a random UUID (version 4), as Apple's cameras write it
 fn content_id() -> Result<String, String> {
@@ -1240,13 +1254,17 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     drop(engine);
     let live = if opts.live {
         let half = LIVE_SECONDS / 2.0;
-        let from = (t - half).max(0.0);
+        // From a frame the photo's is a whole number of steps after, so the video has the photo's frame
+        let step = frame_step(fps, LIVE_MAX_FPS);
+        let first = ((t - half).max(0.0) * fps - 1e-6).ceil().max(0.0) as u64;
+        let first = n - (n.saturating_sub(first) / step) * step;
+        let from = first as f64 / fps;
         let to = (t + half).min(info.duration.max(from + 1.0 / fps));
         let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
-        let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, mp4: jpeg, dv: !jpeg };
+        let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg };
         match export(file, opts, Some(&part)) {
-            // The photo's frame in it: the part starts at the first frame at or after `from`
-            Ok(_) => Some((TempFile(video), (n as f64 - (from * fps - 1e-6).ceil().max(0.0)) / fps)),
+            // The photo's frame in it: the part starts at `first`
+            Ok(_) => Some((TempFile(video), (n - first) as f64 / fps)),
             Err(e) if stopped() => return Err(e),
             Err(e) => { eprintln!("  no motion, the photo alone: {e}"); None }
         }
