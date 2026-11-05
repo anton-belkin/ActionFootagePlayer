@@ -35,6 +35,7 @@ pub mod workspace;
 pub mod mp4meta;
 pub mod cut;
 pub mod photo;
+pub mod stamp;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -1282,6 +1283,9 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), still::still_create, null_mut(), plugin);
+        // Test only: stamps known values for the 360 stamp's test (tools/stamp360/)
+        (api.registerFunction)(c"Stamp360Test".as_ptr(), c"clip:vnode;log:data:opt;time_base:int:opt;".as_ptr(),
+                               c"clip:vnode;".as_ptr(), stamp::test_create, null_mut(), plugin);
     }
 }
 
