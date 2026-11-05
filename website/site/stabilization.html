@@ -126,30 +126,30 @@
     </div>
   </section>
 
-  <!-- Gyroflow on its own, before how the player uses it -->
-  <section class="section band" id="what-gyroflow">
+  <!-- How stabilization works at all, and what this player uses for it -->
+  <section class="section band" id="how-it-works">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">Gyroflow</p>
-        <h2>First, what Gyroflow is.</h2>
-        <p class="lede"><a class="text-link" href="https://gyroflow.xyz" rel="noopener">Gyroflow</a> is a free, open-source app that steadies video from the motion the camera recorded. It's a separate project, made by its own developers. Action Footage Player is built on its engine.</p>
+        <p class="eyebrow">How it works</p>
+        <h2>What it takes to steady a clip.</h2>
+        <p class="lede">A shaky clip is the camera turning a little, many times a second. To steady it, each frame is turned back by as much as the camera turned. That takes three things: how the camera moved, how its lens draws the picture, and a program that puts the two together.</p>
       </div>
       <div class="gap-grid st-gf">
         <div class="gap-item">
-          <h3>The gyroscope</h3>
-          <p>Most action cameras have a gyroscope: a sensor that records, hundreds of times a second, how the camera turned. That's the clip's <strong>gyro data</strong>, or motion data, written into the video file. Gyroflow reads it and turns each frame back by as much as the camera turned, keeping a smoothed version of the movement you meant.</p>
+          <h3>How the camera moved</h3>
+          <p>Most action cameras have a gyroscope: a sensor that records, hundreds of times a second, how the camera turned. That's the clip's <strong>gyro data</strong>, or motion data, written into the video file. It's exact, and reading it takes no time. You get it when the camera's own stabilization is off: what to set is <a class="text-link" href="#camera">just below</a>.</p>
         </div>
         <div class="gap-item">
-          <h3>The lens</h3>
-          <p>An action camera's wide lens bends the picture, more toward the edges. Gyroflow knows each camera's lens, from its database of lens profiles or from what the camera writes into the file. So it turns the picture as the lens actually saw it, and straight lines stay straight instead of wobbling at the edges.</p>
+          <h3>No gyro data? From the picture</h3>
+          <p>A clip without gyro data can still be steadied: the motion is then found in the picture itself, by following details from frame to frame (optical flow). It's slower, so it's done once, ahead of time, and saved.</p>
         </div>
         <div class="gap-item">
-          <h3>On its own</h3>
-          <p>Gyroflow is an app you load a clip into. You choose how smooth, how much zoom, whether to lock the horizon, then render a new, steady video file. What you chose for a clip can be saved as a small project file, <code>.gyroflow</code>, next to the clip.</p>
+          <h3>How the lens draws the picture</h3>
+          <p>An action camera's wide lens bends the picture, more toward the edges. To turn a frame back the right way, the program needs that lens's shape: its profile. Then straight lines stay straight instead of wobbling at the edges.</p>
         </div>
         <div class="gap-item">
-          <h3>In this player</h3>
-          <p>The player runs Gyroflow's engine while the clip plays, so the same stabilization happens with nothing to render first. It also reads Gyroflow's project files: a clip you tuned in Gyroflow plays the way you tuned it. And when you want Gyroflow's own controls, <kbd>Ctrl</kbd>+<kbd>e</kbd> opens the clip in it.</p>
+          <h3>The program: Gyroflow</h3>
+          <p>The program that does it here is <a class="text-link" href="https://gyroflow.xyz" rel="noopener">Gyroflow</a>, free and open source. Its engine runs inside the player while the clip plays, so there's nothing to render first. It knows the lenses of most action cameras. Gyroflow is also an app of its own, for the clips that need more: the player opens a clip in it with <kbd>Ctrl</kbd>+<kbd>e</kbd>, and plays what you save there.</p>
         </div>
       </div>
     </div>

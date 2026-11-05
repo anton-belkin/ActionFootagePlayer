@@ -1,6 +1,6 @@
 /* Stabilization page: the decision flow, the settings lists, the limits. Builds on styles.css. */
 
-/* What Gyroflow is: four short parts, two by two */
+/* How stabilization works: four short parts, two by two */
 @media (min-width: 700px) { .st-gf { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* How it decides: the ordered steps beside the flow diagram */
