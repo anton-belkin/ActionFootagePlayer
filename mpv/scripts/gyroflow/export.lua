@@ -19,8 +19,8 @@
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --   photo                the frame on screen as a photo (Alt+s; Enter in crop mode): gyroflow-export --photo, as it
 --                        plays (the same stabilization, the frame cleaned up from its neighbours as Ctrl+p does, crop
---                        mode's camera and frame), the SDR look as the image with a gain map to the HDR one: a HEIC on
---                        macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder
+--                        mode's camera and frame), as an SDR screen shows the look (as_it_plays) with a gain map to the
+--                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder
 --
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
@@ -209,8 +209,13 @@ local function local_path()
     return path
 end
 
--- The color and stabilization as they play, into args. `sdr`: in SDR whatever plays; `photo`: the SDR look the photo's
--- image is in (its HDR look is HLG whatever plays)
+-- The color and stabilization as they play, into args. `sdr`: in SDR whatever plays; `photo`: the photo's image is
+-- what an SDR screen shows of the look (--sdr-image), its gain map leads to the HLG:
+--   maker                     the maker's LUT
+--   hdr                       the HLG as macOS tones it down for an SDR screen (elsewhere NBCU's)
+--   nbcu, tonemap, dv, dvsdr  NBCU's conversion: Dolby Vision's own SDR, as macOS draws it, only exists on screen
+--                             (AVFoundation's decoders ignore the RPU), and the RPU's trims are fitted to NBCU's; mpv's
+--                             tone mapping isn't in gyroflow-export
 local function as_it_plays(args, sdr, photo)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
@@ -220,8 +225,8 @@ local function as_it_plays(args, sdr, photo)
     end
     local sdr_look = (sdr or photo) and mp.get_property_native("user-data/dlogm/sdr_look") or look
     if photo then
-        -- The photo's SDR image: NBCU's when it plays in it or chooses it, else the maker's (D-Log M) or NBCU's
-        if look == "nbcu" or (look ~= "maker" and sdr_look == "nbcu") then table.insert(args, "--nbcu") end
+        local image = look == "maker" and "maker" or (look == "hdr" and platform.macos) and "macos" or "nbcu"
+        table.insert(args, "--sdr-image"); table.insert(args, image)
     else
         if sdr_look == "maker" then table.insert(args, "--sdr") end
         if sdr_look == "nbcu" then table.insert(args, "--nbcu") end

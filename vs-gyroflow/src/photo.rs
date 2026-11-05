@@ -188,6 +188,17 @@ pub fn to_rgb8(image: &Image) -> Vec<u8> {
     image.pixels.iter().flat_map(|p| p.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).collect()
 }
 
+/// 16-bit RGB, little-endian, as write_rgb16 writes it (and macos/photo.swift's --sdr-out)
+pub fn read_rgb16(path: &std::path::Path, width: usize, height: usize) -> Result<Image, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if bytes.len() != width * height * 6 { return Err(format!("{}: not {width}x{height} 16-bit RGB", path.display())); }
+    let pixels = bytes.chunks_exact(6).map(|c| {
+        let v = |i: usize| u16::from_le_bytes([c[i], c[i + 1]]) as f32 / 65535.0;
+        [v(0), v(2), v(4)]
+    }).collect();
+    Ok(Image { width, height, pixels })
+}
+
 /// The signal (0..1) as 16-bit RGB, little-endian, for macos/photo.swift
 pub fn write_rgb16(path: &std::path::Path, image: &Image) -> Result<(), String> {
     let bytes: Vec<u8> = image.pixels.iter().flat_map(|p| p.map(|v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16))

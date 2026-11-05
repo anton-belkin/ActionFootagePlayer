@@ -90,8 +90,10 @@ video with nothing to stabilize it with is color-converted only.
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
                    SIGUSR1/SIGUSR2)
 
-Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: the SDR
-look (DJI's LUT for D-Log M, else NBCU's; --nbcu: NBCU's for D-Log M too) as the image, the HDR one (HLG) above it
+Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
+rendition as the image, the HDR one (HLG) above it
+  --sdr-image <maker|nbcu|macos>  the SDR image: DJI's LUT (D-Log M; the default for it), NBCU's conversion of the
+                   HLG (the default for the others), or the HLG as macOS shows it on an SDR screen (afp-photo)
   --radius <n>     clean it up from n frames on each side (0-7, default 5; 0: as it is), as the player's Ctrl+p
   --grain <x>      how much of its grain the clean-up keeps (0-1, default 0.25)
   --camera <yaw,pitch,roll,zoom>  the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua)
@@ -132,6 +134,7 @@ struct Options {
     crop: Option<[f64; 4]>,
     jpeg: bool,
     quality: u8,
+    sdr_image: Option<String>,
 }
 
 fn main() {
@@ -141,7 +144,7 @@ fn main() {
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None,
-                             jpeg: !cfg!(target_os = "macos"), quality: 92 };
+                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -193,6 +196,10 @@ fn main() {
                 .and_then(|v| <[f64; 4]>::try_from(v).ok())
                 .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
                 .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
+            "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
+                v @ ("maker" | "nbcu" | "macos") => v.to_string(),
+                v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
+            }),
             "--format" => opts.jpeg = match value("--format").as_str() { "jpeg" | "jpg" => true, "heic" => false, f => fail(&format!("unknown format {f} (heic, jpeg)")) },
             "--quality" => opts.quality = value("--quality").parse::<u8>().ok().filter(|q| (1..=100).contains(q)).unwrap_or_else(|| fail("--quality takes 1-100")),
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
@@ -978,6 +985,22 @@ fn exif_time(local: i64) -> String {
     format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
 }
 
+fn out_dir_for(path: &Path, opts: &Options) -> PathBuf {
+    opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"))
+}
+
+/// The HLG rendition as macOS shows it on an SDR screen: afp-photo's Core Image (macos/photo.swift)
+fn macos_sdr(helper: &Path, hdr: &vs_gyroflow::photo::Image, dir: &Path) -> Result<vs_gyroflow::photo::Image, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let id = std::process::id();
+    let (hdr_file, sdr_file) = (TempFile(dir.join(format!(".photo-{id}.hlg.rgb16"))), TempFile(dir.join(format!(".photo-{id}.sdr.rgb16"))));
+    vs_gyroflow::photo::write_rgb16(&hdr_file.0, hdr)?;
+    let out = Command::new(helper).args(["--width", &hdr.width.to_string(), "--height", &hdr.height.to_string()])
+        .arg("--hdr").arg(&hdr_file.0).arg("--sdr-out").arg(&sdr_file.0).output().map_err(|e| format!("afp-photo: {e}"))?;
+    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    vs_gyroflow::photo::read_rgb16(&sdr_file.0, hdr.width, hdr.height)
+}
+
 fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     use vs_gyroflow::photo::{ self as ph, Cube };
     use vs_gyroflow::still;
@@ -1101,28 +1124,29 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let rgb = ph::yuv420p10_to_rgb([&planes[0], &planes[1], &planes[2]], rw, rh, rect, yuv_matrix(info.matrix.as_deref()), info.full_range);
     drop(planes);
 
-    // The looks: the HDR one (HLG), and the SDR one the image is
-    let (sdr, hdr, label) = if let Some(curve) = curve {
-        let hdr = Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb);
-        let (sdr, how) = if curve == "dlogm" && !opts.nbcu {
-            (Cube::load(&lut("dji-dlogm-rec709.cube")?)?.apply(&rgb), "DJI's Rec.709")
-        } else {
-            (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&hdr), "NBCU")
-        };
-        (sdr, Some(hdr), format!("{curve}: SDR {how}, HDR HLG"))
+    // The HDR look (HLG: the curve's LUT, or the video's own), and the SDR one the image is (--sdr-image)
+    let helper = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("afp-photo"))).filter(|p| p.is_file())
+        .unwrap_or_else(|| tool("afp-photo"));
+    let (hdr, recorded) = if let Some(curve) = curve {
+        (Some(Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb)), curve.to_string())
     } else if info.transfer.as_deref() == Some("arib-std-b67") {
-        (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&rgb), Some(rgb), "HLG as recorded, SDR NBCU".to_string())
+        (Some(rgb.clone()), "HLG".to_string())
     } else {
-        (rgb, None, "SDR as recorded".to_string())
+        (None, "SDR".to_string())
     };
+    let want = opts.sdr_image.clone().unwrap_or_else(|| (if curve == Some("dlogm") && !opts.nbcu { "maker" } else { "nbcu" }).to_string());
+    let (sdr, how) = match &hdr {
+        None => (rgb, "as recorded"),
+        Some(h) if want == "macos" && cfg!(target_os = "macos") && helper.is_file() => (macos_sdr(&helper, h, &out_dir_for(&path, opts))?, "as macOS shows the HLG"),
+        Some(_) if want == "maker" && curve == Some("dlogm") => (Cube::load(&lut("dji-dlogm-rec709.cube")?)?.apply(&rgb), "DJI's Rec.709"),
+        Some(h) => (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(h), "NBCU"),
+    };
+    let label = if hdr.is_some() { format!("{recorded}: SDR {how}, HDR HLG") } else { format!("SDR {how}") };
 
-    let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
+    let out_dir = out_dir_for(&path, opts);
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     let mut jpeg = opts.jpeg;
-    // Next to this binary (the gyroflow plugin's folder), else as the other tools
-    let helper = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("afp-photo"))).filter(|p| p.is_file())
-        .unwrap_or_else(|| tool("afp-photo"));
     if !jpeg && !helper.is_file() {
         eprintln!("  no afp-photo: an Ultra HDR JPEG instead of HEIC");
         jpeg = true;
