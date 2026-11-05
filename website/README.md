@@ -74,7 +74,7 @@ Every page, English included, carries:
   `https://actionfootageplayer.ch/…` URLs;
 - the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
   page in each language.
-- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page and four of its
+- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page and three of its
   sections), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
   (Log footage, Stabilization, Library, Photos, then All features) and **Download**. The page you're on is marked
   with `aria-current`, on its link and on its dropdown's title. Each dropdown is a `<details class="navmenu">`, so it
