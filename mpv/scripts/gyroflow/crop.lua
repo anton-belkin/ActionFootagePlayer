@@ -23,7 +23,8 @@
 -- asked for, so the frame that comes is the one it says (the filter reads the file as mpv sets it up, any time after
 -- the seek's asked for); the camera since then goes with the next one.
 --
--- Keys while it's on: a / Shift+a the frame's aspect, double click or Backspace back to the start, c or Esc leaves
+-- Keys while it's on: a / Shift+a the frame's aspect, double click or Backspace back to the start, Enter saves it as a
+-- photo (export.lua's photo, with this camera and frame), c or Esc leaves
 -- (the camera as the plugin stabilizes it again). The frame's state is published as user-data/gyroflow/crop for the
 -- export.
 --
@@ -188,7 +189,7 @@ local function draw()
     else
         label = string.format("%s · zoom %.0f %%", ASPECTS[aspect].name, 100 * 2 ^ flat.zoom)
     end
-    table.insert(lines, string.format("{\\an1\\pos(%d,%d)\\fs%d\\bord1.5\\shad0\\1c&HFFFFFF&\\3c&H000000&}%s{\\1a&H60&}   a aspect · double click reset · c leave",
+    table.insert(lines, string.format("{\\an1\\pos(%d,%d)\\fs%d\\bord1.5\\shad0\\1c&HFFFFFF&\\3c&H000000&}%s{\\1a&H60&}   a aspect · Enter photo · double click reset · c leave",
                                       x0, y0 - fs * 0.4, fs, label))
     overlay.res_x, overlay.res_y = W, H
     overlay.data = table.concat(lines, "\n")
@@ -523,6 +524,8 @@ local BINDINGS = {
     { "WHEEL_RIGHT", "crop-key-wheel-right", wheel(-1, 0), { complex = true } },
     { "Ctrl+WHEEL_UP", "crop-key-pinch-in", wheel(0, 1, true), { complex = true } },
     { "Ctrl+WHEEL_DOWN", "crop-key-pinch-out", wheel(0, -1, true), { complex = true } },
+    { "ENTER", "crop-key-photo", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
+    { "KP_ENTER", "crop-key-photo-kp", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
     { "a", "crop-key-aspect", function() aspect = aspect % #ASPECTS + 1; draw(); publish() end },
     { "A", "crop-key-aspect-back", function() aspect = (aspect - 2) % #ASPECTS + 1; draw(); publish() end },
     { "ESC", "crop-key-leave", function() M.set(false) end },

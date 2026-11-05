@@ -88,7 +88,16 @@ video with nothing to stabilize it with is color-converted only.
   --progress <file>  write the progress there as JSON, twice a second
   --background     start at background priority (SIGUSR1 / SIGUSR2 switch it later)
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
-                   SIGUSR1/SIGUSR2)";
+                   SIGUSR1/SIGUSR2)
+
+Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: the SDR
+look (DJI's LUT for D-Log M, else NBCU's; --nbcu: NBCU's for D-Log M too) as the image, the HDR one (HLG) above it
+  --radius <n>     clean it up from n frames on each side (0-7, default 5; 0: as it is), as the player's Ctrl+p
+  --grain <x>      how much of its grain the clean-up keeps (0-1, default 0.25)
+  --camera <yaw,pitch,roll,zoom>  the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua)
+  --crop <x,y,w,h> the part of the frame to keep, in shares of its width and height (0-1)
+  --format <heic|jpeg>  HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere)
+  --quality <0-100>  the image's quality (default 92)";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
 const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
@@ -116,6 +125,13 @@ struct Options {
     control: Option<PathBuf>,
     dv_rpu: Option<PathBuf>,
     dv_live_l1: bool,
+    photo: Option<f64>,
+    photo_radius: usize,
+    photo_grain: f32,
+    camera: Option<vs_gyroflow::Camera>,
+    crop: Option<[f64; 4]>,
+    jpeg: bool,
+    quality: u8,
 }
 
 fn main() {
@@ -124,7 +140,8 @@ fn main() {
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
-                             dv_rpu: None, dv_live_l1: false };
+                             dv_rpu: None, dv_live_l1: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None,
+                             jpeg: !cfg!(target_os = "macos"), quality: 92 };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -166,6 +183,18 @@ fn main() {
             "--encoder" => opts.encoder = Some(value("--encoder")),
             "--progress" => opts.progress = Progress(Some(PathBuf::from(value("--progress")))),
             "--control" => opts.control = Some(PathBuf::from(value("--control"))),
+            "--photo" => opts.photo = Some(parse_time(&value("--photo"))),
+            "--radius" => opts.photo_radius = value("--radius").parse::<usize>().ok().filter(|r| *r <= vs_gyroflow::still::MAX_RADIUS)
+                .unwrap_or_else(|| fail("--radius takes 0-7")),
+            "--grain" => opts.photo_grain = value("--grain").parse::<f32>().ok().filter(|g| (0.0..=1.0).contains(g))
+                .unwrap_or_else(|| fail("--grain takes 0-1")),
+            "--camera" => opts.camera = Some(vs_gyroflow::Camera::parse(&value("--camera")).unwrap_or_else(|| fail("--camera takes yaw,pitch,roll,zoom"))),
+            "--crop" => opts.crop = Some(value("--crop").split(',').map(|v| v.trim().parse::<f64>().ok()).collect::<Option<Vec<_>>>()
+                .and_then(|v| <[f64; 4]>::try_from(v).ok())
+                .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
+                .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
+            "--format" => opts.jpeg = match value("--format").as_str() { "jpeg" | "jpg" => true, "heic" => false, f => fail(&format!("unknown format {f} (heic, jpeg)")) },
+            "--quality" => opts.quality = value("--quality").parse::<u8>().ok().filter(|q| (1..=100).contains(q)).unwrap_or_else(|| fail("--quality takes 1-100")),
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
             "-h" | "--help" => { println!("{USAGE}"); return; }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
@@ -179,7 +208,7 @@ fn main() {
     opts.progress.write(serde_json::json!({ "pid": std::process::id() }));
     let mut failed = 0;
     for file in &files {
-        match export(file, &opts) {
+        match if let Some(t) = opts.photo { photo(file, &opts, t) } else { export(file, &opts) } {
             Ok(Outcome::Done(out)) => eprintln!("  -> {}", out.display()),
             Ok(Outcome::Skipped(why)) => eprintln!("{}: skipped, {why}", file_name(file)),
             Err(_) if stopped() => {
@@ -889,5 +918,245 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
+    Ok(Outcome::Done(out_path))
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Photos (--photo): the frame at a time as a still, stabilized as the player shows it (and turned as crop mode has
+// the camera), cleaned up from its neighbours as the player's clean still frame is (still.rs), in the SDR look with
+// the HDR one as a gain map (photo.rs): HEIC through afp-photo on macOS (macos/photo.swift), else an Ultra HDR JPEG
+
+/// Days since 1970-01-01 of a date, and back (Howard Hinnant's civil calendar algorithms)
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// When the clip started, local time, as seconds since 1970 counted in local time: from a DJI file's name
+/// (DJI_YYYYMMDDHHMMSS_…, the camera's own clock), else the container's creation time (UTC) in this computer's zone
+fn clip_start_local(path: &Path) -> Option<i64> {
+    let name = path.file_name()?.to_string_lossy().to_string();
+    if let Some(digits) = name.strip_prefix("DJI_").and_then(|r| r.get(..14)).filter(|d| d.bytes().all(|b| b.is_ascii_digit())) {
+        let n = |a: usize, b: usize| digits[a..b].parse::<i64>().ok();
+        return Some(days_from_civil(n(0, 4)?, n(4, 6)?, n(6, 8)?) * 86400 + n(8, 10)? * 3600 + n(10, 12)? * 60 + n(12, 14)?);
+    }
+    let out = ffmpeg_command("ffprobe").args(["-v", "error", "-show_entries", "format_tags=creation_time", "-of", "default=nw=1:nk=1"])
+        .arg(path).output().ok()?;
+    let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let n = |a: usize, b: usize| t.get(a..b)?.parse::<i64>().ok();
+    let utc = days_from_civil(n(0, 4)?, n(5, 7)?, n(8, 10)?) * 86400 + n(11, 13)? * 3600 + n(14, 16)? * 60 + n(17, 19)?;
+    Some(utc + local_offset(utc))
+}
+
+#[cfg(unix)]
+fn local_offset(utc: i64) -> i64 {
+    let t = utc as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() { 0 } else { tm.tm_gmtoff as i64 }
+}
+#[cfg(not(unix))]
+fn local_offset(_utc: i64) -> i64 { 0 }
+
+fn exif_time(local: i64) -> String {
+    let (y, m, d) = civil_from_days(local.div_euclid(86400));
+    let s = local.rem_euclid(86400);
+    format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
+    use vs_gyroflow::photo::{ self as ph, Cube };
+    use vs_gyroflow::still;
+    let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    let source = if opts.no_stabilize { None } else { find_source(&path).ok() };
+    let info = ffprobe(&path)?;
+    if info.transfer.as_deref() == Some("smpte2084") && curve.is_none() {
+        return Err("PQ video: no photo of it yet (HLG, log and SDR video only)".into());
+    }
+    let fps = info.fps.0 as f64 / info.fps.1 as f64;
+    let total = info.frames.max(1);
+    // The frame mpv shows at `t` (its time-pos)
+    let n = ((t * fps).round().max(0.0) as u64).min(total - 1);
+    let r = opts.photo_radius as u64;
+    let (w, h) = (info.width & !1, info.height & !1);
+    let camera = opts.camera.unwrap_or_default();
+
+    let engine = match &source {
+        Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
+                                     (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2)?),
+        None => None,
+    };
+    // A turned or zoomed out camera may leave edges where the view itself never does
+    let edges = match &engine {
+        Some(e) if e.uncovered_frames.0 > 0 || !camera.is_default() => opts.edges,
+        _ => EdgeMode::Off,
+    };
+    if let Some(e) = &engine {
+        let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
+        e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
+        e.edges.set_camera(camera);
+    }
+    // Zoomed out (crop mode's camera starts so), rendered that much bigger: the frame's part keeps the pixels the
+    // view has at its own zoom
+    let (rw, rh) = match &engine {
+        Some(e) => {
+            let s = camera.zoom.clamp(1.0, 2.0);
+            (((e.render_size.0 as f64 * s) as usize) & !1, ((e.render_size.1 as f64 * s) as usize) & !1)
+        }
+        None => (w, h),
+    };
+    // The frames it's made from: the one at `t` and `r` on each side; before them, a second for the edge fill's
+    // sphere to have what was around, as it has playing
+    let pre = if engine.is_some() && edges == EdgeMode::Sphere { fps.round() as u64 } else { 0 };
+    let first = n.saturating_sub(r + pre);
+    let last = (n + r).min(total - 1);
+    eprintln!("{}: photo at {t:.2} s (frame {n}), {}x{} from frames {}-{}", file_name(file), rw, rh, n.saturating_sub(r).max(first), last);
+
+    let hwaccel = if cfg!(target_os = "macos") { Some("videotoolbox") } else if hwaccel_works(&path) { Some("auto") } else { None };
+    let mut dec_cmd = ffmpeg_command("ffmpeg");
+    dec_cmd.args(["-nostdin", "-v", "error"]);
+    if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
+    // With -ss before -i, the first frame at or after it
+    if first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", (first as f64 - 0.25) / fps)]); }
+    dec_cmd.arg("-i").arg(&path)
+        .args(["-map", "0:v:0", "-frames:v", &(last - first + 1).to_string(), "-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+    let mut dec_out = decoder.stdout.take().unwrap();
+    let plane_dims = |(w, h): (usize, usize)| [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
+    let mut window: Vec<(u64, Vec<u8>)> = Vec::new();
+    for index in first..=last {
+        if stopped() { return Err("cancelled".into()); }
+        let mut src = vec![0u8; w * h * 3];
+        if dec_out.read_exact(&mut src).is_err() { break; }
+        let frame = match &engine {
+            None => src,
+            Some(engine) => {
+                let mut dst = vec![0u8; rw * rh * 3];
+                let timestamp_us = ((index as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                let mut planes = Vec::with_capacity(3);
+                let (mut so, mut doff) = (0, 0);
+                for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((rw, rh))) {
+                    planes.push(PlaneJob {
+                        src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
+                        dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
+                    });
+                    so += sw * sh * 2;
+                    doff += dw * dh * 2;
+                }
+                engine.process(timestamp_us, planes, !info.full_range, false)?;
+                dst
+            }
+        };
+        if index + r >= n { window.push((index, frame)); }
+    }
+    let _ = decoder.kill();
+    let _ = decoder.wait();
+    let target = window.iter().position(|(i, _)| *i == n).ok_or("the frame isn't in the video")?;
+
+    // Cleaned up: the frame first, then its neighbours nearest first
+    let as_u16 = |b: &[u8]| b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<u16>>();
+    let (ysz, csz) = (rw * rh, rw * rh / 4);
+    let mut planes: Vec<Vec<u16>> = {
+        let f = &window[target].1;
+        vec![as_u16(&f[..ysz * 2]), as_u16(&f[ysz * 2..(ysz + csz) * 2]), as_u16(&f[(ysz + csz) * 2..])]
+    };
+    let mut cleaned = 0;
+    if r > 0 && window.len() > 1 {
+        let mut order: Vec<usize> = (0..window.len()).collect();
+        order.sort_by_key(|&i| ((window[i].0 as i64 - n as i64).abs(), window[i].0));
+        let frames: Vec<still::Frame> = order.iter().map(|&i| {
+            let f = &window[i].1;
+            let plane = |at: usize, len: usize, (pw, ph): (usize, usize)| still::Plane { data: &f[at..at + len], stride: pw * 2, width: pw, height: ph };
+            still::Frame { planes: vec![plane(0, ysz * 2, (rw, rh)), plane(ysz * 2, csz * 2, (rw / 2, rh / 2)), plane((ysz + csz) * 2, csz * 2, (rw / 2, rh / 2))] }
+        }).collect();
+        let settings = still::Settings { luma_keep: opts.photo_grain, ..Default::default() };
+        match still::denoise(&frames, 2, 1023, (1, 1), &settings) {
+            Ok(out) => { planes = out.planes; cleaned = frames.len(); }
+            Err(e) => eprintln!("  not cleaned up: {e}"),
+        }
+    }
+    drop(window);
+
+    // The part to keep, on even pixels
+    let [cx, cy, cw, ch] = opts.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let even = |v: f64| (v.round() as usize) & !1;
+    let (x0, y0) = (even(cx * rw as f64).min(rw - 2), even(cy * rh as f64).min(rh - 2));
+    let rect = (x0, y0, even(cw * rw as f64).clamp(2, rw - x0), even(ch * rh as f64).clamp(2, rh - y0));
+    let rgb = ph::yuv420p10_to_rgb([&planes[0], &planes[1], &planes[2]], rw, rh, rect, yuv_matrix(info.matrix.as_deref()), info.full_range);
+    drop(planes);
+
+    // The looks: the HDR one (HLG), and the SDR one the image is
+    let (sdr, hdr, label) = if let Some(curve) = curve {
+        let hdr = Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb);
+        let (sdr, how) = if curve == "dlogm" && !opts.nbcu {
+            (Cube::load(&lut("dji-dlogm-rec709.cube")?)?.apply(&rgb), "DJI's Rec.709")
+        } else {
+            (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&hdr), "NBCU")
+        };
+        (sdr, Some(hdr), format!("{curve}: SDR {how}, HDR HLG"))
+    } else if info.transfer.as_deref() == Some("arib-std-b67") {
+        (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&rgb), Some(rgb), "HLG as recorded, SDR NBCU".to_string())
+    } else {
+        (rgb, None, "SDR as recorded".to_string())
+    };
+
+    let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+    let mut jpeg = opts.jpeg;
+    // Next to this binary (the gyroflow plugin's folder), else as the other tools
+    let helper = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("afp-photo"))).filter(|p| p.is_file())
+        .unwrap_or_else(|| tool("afp-photo"));
+    if !jpeg && !helper.is_file() {
+        eprintln!("  no afp-photo: an Ultra HDR JPEG instead of HEIC");
+        jpeg = true;
+    }
+    let ext = if jpeg { "jpg" } else { "heic" };
+    // A new name for each: the same frame saved again doesn't replace the last one
+    let mut out_path = out_dir.join(format!("{stem}_{t:.2}s.{ext}"));
+    let mut k = 2;
+    while out_path.exists() && !opts.force { out_path = out_dir.join(format!("{stem}_{t:.2}s_{k}.{ext}")); k += 1; }
+
+    let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
+    let maker = probe::camera(&path.to_string_lossy());
+    let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
+    if jpeg {
+        let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref());
+        let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif))?;
+        std::fs::write(&out_path, bytes).map_err(|e| format!("{}: {e}", out_path.display()))?;
+    } else {
+        let name = out_path.file_name().unwrap().to_string_lossy().to_string();
+        let sdr_file = TempFile(out_dir.join(format!(".{name}.sdr.rgb16")));
+        ph::write_rgb16(&sdr_file.0, &sdr)?;
+        let hdr_file = match &hdr { Some(h) => { let f = TempFile(out_dir.join(format!(".{name}.hdr.rgb16"))); ph::write_rgb16(&f.0, h)?; Some(f) } None => None };
+        let mut cmd = Command::new(&helper);
+        cmd.args(["--width", &sdr.width.to_string(), "--height", &sdr.height.to_string(), "--quality", &format!("{:.2}", opts.quality as f64 / 100.0)])
+            .arg("--sdr").arg(&sdr_file.0).arg("--out").arg(&out_path);
+        if let Some(f) = &hdr_file { cmd.arg("--hdr").arg(&f.0); }
+        if let Some(t) = &taken { cmd.args(["--taken", t]); }
+        if let Some(m) = &make { cmd.args(["--make", m]); }
+        if let Some(m) = &model { cmd.args(["--model", m]); }
+        let out = cmd.output().map_err(|e| format!("afp-photo: {e}"))?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    }
+    eprintln!("  {label} · {}x{}{} · {}", sdr.width, sdr.height,
+              if cleaned > 0 { format!(" · cleaned up from {cleaned} frames") } else { String::new() },
+              if hdr.is_some() { if jpeg { "Ultra HDR JPEG" } else { "HEIC with a gain map" } } else if jpeg { "JPEG" } else { "HEIC" });
     Ok(Outcome::Done(out_path))
 }

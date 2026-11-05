@@ -8,6 +8,17 @@ use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
 use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
+/// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
+pub fn camera(path: &str) -> Option<(String, Option<String>)> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let options = InputOptions { probe_only: true, ..Default::default() };
+    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
+    let maker = input.camera_type();
+    if maker.is_empty() { return None; }
+    Some((maker, input.camera_model().map(|m| m.to_string()).filter(|m| !m.is_empty())))
+}
+
 pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;

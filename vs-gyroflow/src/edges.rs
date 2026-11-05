@@ -410,6 +410,11 @@ impl Edges {
         *self.camera.lock()
     }
 
+    /// The camera without a control file (gyroflow-export --photo): after configure, which sets it back
+    pub fn set_camera(&self, camera: crate::Camera) {
+        *self.camera.lock() = camera;
+    }
+
     /// Crop mode's mark (`crop_mark=`): the parity its preview shader tells this render's frames by (write_crop_mark)
     pub fn crop_mark(&self) -> Option<bool> {
         self.check_control(false);

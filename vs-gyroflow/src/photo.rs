@@ -36,6 +36,14 @@ impl Cube {
     pub fn apply(&self, image: &Image) -> Image {
         Image { width: image.width, height: image.height, pixels: image.pixels.iter().map(|&p| gpu_lut::tetrahedral(self.n, &self.data, p)).collect() }
     }
+    /// A Type III LUT (NBCU's): the signal's 0..1 is (64 + 876 x) / 1023 of its domain, in and out (gpu_lut::compose_nbcu)
+    pub fn apply_type3(&self, image: &Image) -> Image {
+        let (lo, span) = (64.0 / 1023.0, 876.0 / 1023.0);
+        Image { width: image.width, height: image.height, pixels: image.pixels.iter().map(|&p| {
+            let o = gpu_lut::tetrahedral(self.n, &self.data, p.map(|v| v * span + lo));
+            o.map(|v| ((v - lo) / span).clamp(0.0, 1.0))
+        }).collect() }
+    }
 }
 
 /// The YUV matrix's Kr and Kb, by gyroflow-export's names (yuv_matrix)

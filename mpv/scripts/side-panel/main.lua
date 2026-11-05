@@ -243,7 +243,12 @@ local function clip_part(u, x, w, y)
     local n, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     u:button(x, half, y, "prev", "Previous clip", "playlist-prev", { disabled = n <= 0 })
     y = u:button(x + half + 8 * s, half, y, "next", "Next clip", "playlist-next", { disabled = n >= count - 1 })
-    y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    -- A photo where the gyroflow plugin is (stabilized, cleaned up, with a gain map), else mpv's screenshot
+    if g and local_file(path) then
+        y = u:button(x, w, y, "frame", "Save the frame as a photo", "script-message-to gyroflow photo", { key = keys["script-binding gyroflow/photo"] })
+    else
+        y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    end
     return y
 end
 
@@ -671,7 +676,10 @@ local function crop_part(u, x, w, y)
         y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
         y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
     end
-    return u:button(x, w, y + 10 * s, "crop-leave", "Leave crop mode", "script-message-to gyroflow crop no", { key = "Esc" })
+    y = u:button(x, w, y + 10 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
+    y = u:caption(x, w, y, (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+                           .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
+    return u:button(x, w, y + 6 * s, "crop-leave", "Leave crop mode", "script-message-to gyroflow crop no", { key = "Esc" })
 end
 
 local PARTS = { clip = clip_part, crop = crop_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,

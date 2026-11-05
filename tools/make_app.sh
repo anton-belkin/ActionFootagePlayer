@@ -111,6 +111,8 @@ install -m 644 mpv/scripts/agent/main.lua "$agent/"
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
+# gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
+swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -128,7 +130,7 @@ fi
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" \
-         "$sdrcheck/sdr-check"; do
+         "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
     sign "$f"
 done
 sign "$app"
