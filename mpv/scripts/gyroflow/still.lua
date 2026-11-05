@@ -214,7 +214,7 @@ function M.enabled() return enabled end
 mp.add_key_binding("Ctrl+p", "still", function()
     enabled = not enabled
     publish()
-    mp.osd_message("Clean still frame: " .. (enabled and "on" or "off"), 1.5)
+    mp.osd_message("Temporal denoise of the paused frame: " .. (enabled and "on" or "off"), 1.5)
     if enabled then
         schedule()
     elseif mp.get_property_native("pause") and not pending then

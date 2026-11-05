@@ -43,6 +43,8 @@ const NAL_UNSPEC63: u8 = 63; // Dolby Vision enhancement layer
 pub struct RpuInjector {
     rpus: Vec<Vec<u8>>,
     first_frame: u64,
+    /// Each frame's own L1, in frame order, written into its RPU (`live_l1`)
+    l1: Option<std::sync::mpsc::Receiver<Option<[i32; 3]>>>,
     buf: Vec<u8>,
     /// The NALs of the access unit being gathered, and whether it has a slice yet
     au: Vec<Vec<u8>>,
@@ -53,7 +55,15 @@ pub struct RpuInjector {
 impl RpuInjector {
     /// `first_frame`: the source frame the stream starts at (an export of a part)
     pub fn new(rpus: Vec<Vec<u8>>, first_frame: u64) -> Self {
-        RpuInjector { rpus, first_frame, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
+        RpuInjector { rpus, first_frame, l1: None, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
+    }
+
+    /// Each frame's own L1 (min, avg, max in 12-bit PQ), one per access unit in order, written into the file's RPU
+    /// for it as the player does (set_l1). A frame sent None, or whose L1 doesn't come (the sender gone), keeps the
+    /// file's.
+    pub fn live_l1(mut self, l1: std::sync::mpsc::Receiver<Option<[i32; 3]>>) -> Self {
+        self.l1 = Some(l1);
+        self
     }
 
     pub fn feed(&mut self, data: &[u8], out: &mut impl Write) -> std::io::Result<()> {
@@ -102,12 +112,80 @@ impl RpuInjector {
         if self.au_has_vcl {
             let i = ((self.first_frame + self.frames) as usize).min(self.rpus.len() - 1);
             out.write_all(&[0, 0, 0, 1, 0x7c, 0x01])?;
-            out.write_all(&self.rpus[i])?;
+            let own = self.l1.as_ref().and_then(|rx| rx.recv().ok().flatten()).and_then(|l| set_l1(&self.rpus[i], l[0], l[1], l[2]));
+            out.write_all(own.as_deref().unwrap_or(&self.rpus[i]))?;
             self.frames += 1;
         }
         self.au_has_vcl = false;
         Ok(())
     }
+}
+
+/// A Dolby Vision RPU (the NAL payload from its 0x19 prefix, emulation prevention bytes in it) with its L1 replaced,
+/// as the player's mpv writes it (tools/mpv-patches/0007, video/out/mac/dovi_l1.c): clamped as dovi_tool's generator
+/// clamps L1 (min at most 12, max at least 2081, the average from 1229 to max - 1), the CRC32 written anew. None when
+/// the RPU has no L1 block (the first CM v2.9 extension block, byte-aligned: ext_block_length ue(5) and level 1, then
+/// min, max, avg in 12 bits each and 4 zero bits) or its CRC doesn't match.
+pub fn set_l1(rpu: &[u8], min_pq: i32, avg_pq: i32, max_pq: i32) -> Option<Vec<u8>> {
+    const HEADER: u32 = 0x0601;
+    if rpu.len() < 12 || rpu[0] != 0x19 { return None; }
+    // Without the emulation prevention bytes
+    let mut raw = Vec::with_capacity(rpu.len());
+    let mut zeros = 0;
+    for &b in rpu {
+        if zeros >= 2 && b == 3 { zeros = 0; continue; }
+        raw.push(b);
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+    }
+    let n = raw.len();
+    if n < 12 || raw[n - 1] != 0x80 { return None; }
+    let crc_at = n - 5;
+    if crc32_mpeg2(&raw[1..crc_at]) != u32::from_be_bytes(raw[crc_at..crc_at + 4].try_into().unwrap()) { return None; }
+    let get = |raw: &[u8], bit: usize, len: usize| (0..len).fold(0u32, |v, i| (v << 1) | ((raw[(bit + i) >> 3] >> (7 - ((bit + i) & 7))) & 1) as u32);
+    // The last place that looks like one before the CRC (the reshaping curves before it could, by chance)
+    let mut at = None;
+    let mut byte = 1;
+    while byte * 8 + 13 + 40 <= crc_at * 8 {
+        let bit = byte * 8;
+        if get(&raw, bit, 13) == HEADER {
+            let p = bit + 13;
+            let (mn, mx, avg) = (get(&raw, p, 12), get(&raw, p + 12, 12), get(&raw, p + 24, 12));
+            if get(&raw, p + 36, 4) == 0 && mn <= mx && avg <= mx { at = Some(p); }
+        }
+        byte += 1;
+    }
+    let at = at?;
+    let put = |raw: &mut [u8], bit: usize, len: usize, v: u32| {
+        for i in 0..len {
+            let (b, mask) = ((bit + i) >> 3, 1u8 << (7 - ((bit + i) & 7)));
+            if (v >> (len - 1 - i)) & 1 == 1 { raw[b] |= mask } else { raw[b] &= !mask }
+        }
+    };
+    let max_pq = max_pq.clamp(2081, 4095);
+    put(&mut raw, at, 12, min_pq.clamp(0, 12) as u32);
+    put(&mut raw, at + 12, 12, max_pq as u32);
+    put(&mut raw, at + 24, 12, avg_pq.clamp(1229, max_pq - 1) as u32);
+    let crc = crc32_mpeg2(&raw[1..crc_at]);
+    raw[crc_at..crc_at + 4].copy_from_slice(&crc.to_be_bytes());
+    // Emulation prevention again
+    let mut out = Vec::with_capacity(rpu.len() + 8);
+    zeros = 0;
+    for &b in &raw {
+        if zeros >= 2 && b <= 3 { out.push(3); zeros = 0; }
+        out.push(b);
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+    }
+    Some(out)
+}
+
+/// CRC-32/MPEG-2, the RPU's rpu_data_crc32
+fn crc32_mpeg2(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &b in data {
+        crc ^= (b as u32) << 24;
+        for _ in 0..8 { crc = if crc & 0x8000_0000 != 0 { (crc << 1) ^ 0x04c1_1db7 } else { crc << 1 }; }
+    }
+    crc
 }
 
 /// The start codes in `buf`: (position, length 3 or 4)

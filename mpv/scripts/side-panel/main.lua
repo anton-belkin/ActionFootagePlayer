@@ -1,8 +1,9 @@
 -- side-panel: the plugins' settings in a panel at the right of the window, beside the video (it's moved over for it,
--- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, its quality,
--- the telemetry, the player, the Dolby Vision trims), and the panel of the one chosen, scrolled with the wheel. What
--- the right-click menu has, as controls: it reads the same state the plugins keep in user-data/<plugin>/ and runs the
--- same commands. An mpv plugin: this folder goes into ~~/scripts/.
+-- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, performance and
+-- quality, the telemetry, the Dolby Vision trims; support at the bottom), and the panel of the one chosen, scrolled
+-- with the wheel. The plugins' settings as controls: it reads the state they keep in user-data/<plugin>/ and runs
+-- their commands. While it's loaded, footage-menu leaves the right-click menu to mpv's own (it publishes
+-- user-data/side_panel/loaded). An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- Keys (rebind with `<key> script-binding side_panel/<name>` in input.conf):
 --   TAB    toggle   the panel and its rail shown or hidden
@@ -14,7 +15,7 @@
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
 --   open=yes         and the panel beside it
---   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, player, dv
+--   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, dv, support
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
@@ -31,6 +32,8 @@ options.read_options(o, "side_panel")
 local C = ui.C
 local RAIL, PANEL, HEADER, FOOTER, PAD = 48, 292, 44, 56, 16
 local platform = mp.get_property("platform") or ""
+local WEBSITE = "https://actionfootageplayer.ch"
+local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
 local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
@@ -94,7 +97,7 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 10 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:box(cx + 5 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx, cy, 1.8 * s), color)
-    elseif name == "quality" then
+    elseif name == "telemetry" then
         -- A gauge: an arc, and its needle
         local R, r = 8, 6.4
         local k1, k2 = R * 0.5523, r * 0.5523
@@ -104,43 +107,62 @@ local function icon(u, name, cx, cy, color)
                 .. " l " .. at(-r, 3), color)
         u:shape("m " .. at(-0.9, 1.6) .. " l " .. at(3.6, -4.6) .. " " .. at(4.6, -3.8) .. " " .. at(0.9, 2.6), color)
         u:shape(ui.circle_path(cx, cy + 2.1 * s, 2 * s), color)
-    elseif name == "telemetry" then
-        for i, bar in ipairs({ { -7.5, 6 }, { -1.75, 13 }, { 4, 9 } }) do
-            u:box(cx + bar[1] * s, cy + (7 - bar[2]) * s, 3.5 * s, bar[2] * s, 1, color)
+    elseif name == "quality" then
+        -- A runner: the head, and the body, arms and legs as thick strokes with round joints
+        local function limb(points, wd)
+            u:shape(ui.circle_path(cx + points[1][1] * s, cy + points[1][2] * s, wd / 2 * s), color)
+            for i = 1, #points - 1 do
+                local p0, p1 = points[i], points[i + 1]
+                local dx, dy = p1[1] - p0[1], p1[2] - p0[2]
+                local len = math.sqrt(dx * dx + dy * dy)
+                local nx, ny = -dy / len * wd / 2, dx / len * wd / 2
+                u:shape("m " .. at(p0[1] + nx, p0[2] + ny) .. " l " .. at(p1[1] + nx, p1[2] + ny) .. " " .. at(p1[1] - nx, p1[2] - ny)
+                        .. " " .. at(p0[1] - nx, p0[2] - ny), color)
+                u:shape(ui.circle_path(cx + p1[1] * s, cy + p1[2] * s, wd / 2 * s), color)
+            end
         end
+        u:shape(ui.circle_path(cx + 3 * s, cy - 7 * s, 2.2 * s), color)
+        limb({ { 1.2, -3.6 }, { -1.2, 2 } }, 2.6)
+        limb({ { 1.2, -3.2 }, { 3.6, -0.4 }, { 6.6, -1.6 } }, 1.7)
+        limb({ { 0.6, -3.2 }, { -2.6, -2 }, { -4.6, 0.6 } }, 1.7)
+        limb({ { -1.2, 2 }, { 2.4, 4.4 }, { 1.6, 8.6 } }, 2)
+        limb({ { -1.2, 2 }, { -3.6, 5 }, { -7.6, 5.4 } }, 2)
     elseif name == "player" then
         u:box(cx - 8.5 * s, cy - 4.75 * s, 17 * s, 1.5 * s, 0, color)
         u:box(cx - 8.5 * s, cy + 3.25 * s, 17 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx - 3 * s, cy - 4 * s, 2.8 * s), color)
         u:shape(ui.circle_path(cx + 3.5 * s, cy + 4 * s, 2.8 * s), color)
     elseif name == "dv" then
-        -- Three sliders standing
-        for _, k in ipairs({ { -5.5, -2 }, { 0, 3 }, { 5.5, -4 } }) do
-            u:box(cx + (k[1] - 0.75) * s, cy - 8 * s, 1.5 * s, 16 * s, 0, color)
-            u:shape(ui.circle_path(cx + k[1] * s, cy + k[2] * s, 2.4 * s), color)
-        end
+        -- "DV" over "SDR", and a grading wheel: a circle half filled
+        u:text(cx - 2 * s, cy - 3.6 * s, "DV", { align = 5, size = 9, bold = true, color = color })
+        u:text(cx - 2 * s, cy + 5 * s, "SDR", { align = 5, size = 6.5, bold = true, color = color })
+        local gx, gy, gr = 7.2, -6.6, 2.6
+        u:shape(ui.circle_path(cx + gx * s, cy + gy * s, gr * s), color, { fill = false, border = 1 * s })
+        u:shape("m " .. at(gx, gy - gr) .. " b " .. at(gx + gr * 0.55, gy - gr) .. " " .. at(gx + gr, gy - gr * 0.55) .. " " .. at(gx + gr, gy)
+                .. " b " .. at(gx + gr, gy + gr * 0.55) .. " " .. at(gx + gr * 0.55, gy + gr) .. " " .. at(gx, gy + gr), color)
     elseif name == "keys" then
         u:shape(ui.rrect_path(cx - 9 * s, cy - 6 * s, 18 * s, 12 * s, 2.5 * s), color, stroke)
         for _, x in ipairs({ -5.5, -1, 3.5 }) do u:box(cx + x * s, cy - 3 * s, 2 * s, 2 * s, 0, color) end
         u:box(cx - 4.5 * s, cy + 1.5 * s, 9 * s, 1.6 * s, 0, color)
-    elseif name == "help" then
+    elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
     end
 end
 
+-- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 local TABS = {
-    { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Quality" },
-    { "telemetry", "Telemetry" }, { "player", "Player" }, { "dv", "Dolby Vision" },
+    { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
+    { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" },
 }
-local TAB_TITLES = {}
+local TAB_TITLES = { support = "Support" }
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
 
 -- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS)
 local function shown_tabs()
     local list, d = {}, state("dlogm")
     for _, t in ipairs(TABS) do
-        if t[1] ~= "dv" or (d and d.dv) then table.insert(list, t) end
+        if not t[3] and (t[1] ~= "dv" or (d and d.dv)) then table.insert(list, t) end
     end
     return list
 end
@@ -220,8 +242,9 @@ local function clip_part(u, x, w, y)
 end
 
 local function look_title(d, look)
-    if look == "hdr" then return platform == "windows" and "HDR" or "HDR (OS tone mapping)" end
-    if look == "dv" then return "HDR + DV (OS tone mapping)" end
+    if look == "hdr" then return (not d.log and d.hdr == "pq") and "HDR, PQ" or "HDR, HLG" end
+    if look == "dv" then return "HDR, HLG+DV" end
+    if look == "dvsdr" then return "SDR, HLG+DV" end
     if look == "tonemap" then return "SDR tone mapped from HDR by mpv" end
     if look == "nbcu" then return "SDR, NBCU" end
     if look == "maker" then return "SDR, camera maker's LUT" end
@@ -237,9 +260,15 @@ local function look_note(d, look)
     end
     if look == "dv" then
         if d.dv_own then return "HDR with the file's own Dolby Vision metadata: macOS tones it down by them, as Apple's devices do" end
-        return "HDR with Dolby Vision metadata: macOS tones it down by them for an SDR screen, as QuickTime and Apple's "
-            .. "devices show the export. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
-            or "They're picked by Action Footage Player's author to taste, fitted to DJI's LUT, and can be changed in Dolby Vision.")
+        return "HLG with Dolby Vision metadata, shown by macOS: in HDR on an HDR screen, toned down by the metadata's trims "
+            .. "on an SDR one, as QuickTime and Apple's devices show the export. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
+            or "They're picked by Action Footage Player's author, fitted to NBCU's HLG to SDR conversion, and can be changed in Dolby Vision.")
+    end
+    if look == "dvsdr" then
+        if d.dv_own then return "The file's own Dolby Vision, toned down to SDR by macOS on any screen, as an SDR screen shows it" end
+        return "The same HLG + Dolby Vision, always toned down to SDR by macOS with the trims, on an HDR screen too: "
+            .. "what an SDR screen shows. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
+            or "The trims are the author's, fitted to NBCU's conversion, and can be changed in Dolby Vision.")
     end
     if look == "tonemap" then return "mpv tones the HDR down to SDR itself, its reference white at SDR white (BT.2408): the same on every system and screen" end
     if look == "nbcu" then return "NBCUniversal's HLG to SDR conversion (LUT v1.2): neutral, the same for every camera" end
@@ -248,7 +277,8 @@ local function look_note(d, look)
     return nil
 end
 
--- The dv look's trims (12-bit codes, 2048 neutral), as DV Lab has them
+-- The dv look's trims (12-bit codes, 2048 neutral), as DV Lab has them; `scene`: the scene levels' offsets from L1,
+-- not offered while L1 is each frame's own
 local DV_TRIMS = {
     { "slope", "Slope", "Gain after the tone curve: lighter, the highlights clip sooner" },
     { "offset", "Offset", "Lifts everything, the shadows most" },
@@ -257,9 +287,9 @@ local DV_TRIMS = {
     { "clipTrim", "Highlight roll-off", "Right: highlights roll off to white; left: they clip" },
     { "saturation", "Saturation", nil },
     { "chromaWeight", "Chroma weight", "How much saturated colors are kept as brightness is compressed" },
-    { "l3Avg", "Scene average", "The scene's average brightness Dolby Vision exposes by" },
-    { "l3Max", "Scene highlights", "Right: highlights taken as brighter, given more room" },
-    { "l3Min", "Scene blacks", nil },
+    { "l3Avg", "Scene average", "The scene's average brightness Dolby Vision exposes by", scene = true },
+    { "l3Max", "Scene highlights", "Right: highlights taken as brighter, given more room", scene = true },
+    { "l3Min", "Scene blacks", nil, scene = true },
 }
 
 -- The dv look's trims (not for a file with its own Dolby Vision): as sliders, kept by dlogm as they change
@@ -269,23 +299,38 @@ local function dv_part(u, x, w, y)
     if not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
     if not d or not d.dv_trims then return u:caption(x, w, y, "Needs the dlogm plugin and the app's mpv") end
     if d.dv_own then return u:caption(x, w, y, "This file has its own Dolby Vision: the trims here are for log clips") end
-    y = u:caption(x, w, y, "The metadata macOS tones HDR + DV down by, for an SDR screen. The author's are picked to taste, "
-                  .. "fitted to DJI's LUT; exports take what's set here", { color = C.label })
-    if d.look ~= "dv" then
-        y = u:button(x, w, y + 6 * s, "show-dv", "Show HDR + DV, to see them", "script-message-to dlogm look dv", { primary = true })
+    y = u:caption(x, w, y, "The metadata macOS tones HLG+DV down to SDR by. The author's are picked to taste, "
+                  .. "fitted to NBCU's conversion; exports take what's set here", { color = C.label })
+    if d.dv_live then
+        y = u:caption(x, w, y + 4 * s, "The scene's levels (Dolby Vision's L1) are measured from every frame as it plays, "
+                      .. "so macOS maps each scene for what's in it; the trims here go on top")
+        y = u:caption(x, w, y + 4 * s, "Extreme values of some change the picture on an HDR screen too")
+    else
+        y = u:caption(x, w, y + 4 * s, "Extreme values of some, the scene levels most, change the picture on an HDR screen too")
+    end
+    if d.look ~= "dv" and d.look ~= "dvsdr" then
+        local has = {}
+        for _, l in ipairs(d.looks or {}) do has[l] = true end
+        local m = has.dvsdr and "dvsdr" or "dv"
+        y = u:button(x, w, y + 6 * s, "show-dv", "Show " .. (m == "dvsdr" and "SDR, HLG+DV" or "HDR, HLG+DV") .. ", to see them",
+                     "script-message-to dlogm look " .. m, { primary = true })
     end
     y = y + 6 * s
     for _, t in ipairs(DV_TRIMS) do
-        local v = d.dv_trims[t[1]] or 2048
-        u:text(x, y + 8 * s, t[2], { size = 12, color = C.label })
-        y = u:slider(x, w, y + 14 * s, "dv:" .. t[1], v / 4095, function(p)
-            mp.commandv("script-message-to", "dlogm", "dv-trim", t[1], tostring(math.floor(p * 4095 + 0.5)))
-        end, "", "")
-        if t[3] then y = u:caption(x, w, y, t[3]) end
-        y = y + 8 * s
+        if not (t.scene and d.dv_live) then
+            local v = d.dv_trims[t[1]] or 2048
+            u:text(x, y + 8 * s, t[2], { size = 12, color = C.label })
+            y = u:slider(x, w, y + 14 * s, "dv:" .. t[1], v / 4095, function(p)
+                mp.commandv("script-message-to", "dlogm", "dv-trim", t[1], tostring(math.floor(p * 4095 + 0.5)))
+            end, "", "")
+            if t[3] then y = u:caption(x, w, y, t[3]) end
+            y = y + 8 * s
+        end
     end
-    return u:button(x, w, y + 4 * s, "dv-reset", d.dv_custom and "Back to the author's trims" or "These are the author's trims",
-                    "script-message-to dlogm dv-reset", { disabled = not d.dv_custom })
+    y = u:button(x, w, y + 4 * s, "dv-reset", d.dv_custom and "Back to the author's trims" or "These are the author's trims",
+                 "script-message-to dlogm dv-reset", { disabled = not d.dv_custom })
+    return u:button(x, w, y + 4 * s, "dv-neutral", d.dv_neutral and "These are neutral trims" or "Neutral trims: none added",
+                    "script-message-to dlogm dv-neutral", { disabled = d.dv_neutral })
 end
 
 local function look_part(u, x, w, y)
@@ -293,7 +338,7 @@ local function look_part(u, x, w, y)
     local d = state("dlogm")
     if not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
     if not d then return u:caption(x, w, y, "Needs the dlogm plugin") end
-    y = u:heading(x, w, y, "Look", keys["script-binding dlogm/sdr"])
+    y = u:heading(x, w, y, "Video output", keys["script-binding dlogm/sdr"])
     if not d.log and (d.hdr or "") == "" then
         y = u:caption(x, w, y, "Not log, as the camera says")
     else
@@ -312,7 +357,7 @@ local function look_part(u, x, w, y)
         if note then y = u:caption(x, w, y + 6 * s, note, { color = C.label }) end
     end
 
-    if d.look == "dv" and not d.dv_own and d.dv_trims then
+    if (d.look == "dv" or d.look == "dvsdr") and not d.dv_own and d.dv_trims then
         y = u:button(x, w, y + 4 * s, "to-dv", "Dolby Vision trims…", function() tab, open = "dv", true end)
     end
 
@@ -327,10 +372,6 @@ local function look_part(u, x, w, y)
 
     y = u:heading(x, w, y + 10 * s, "Picture")
     y = u:switch(x, w, y, "denoise", "Noise reduction", d.denoise, "script-binding dlogm/denoise", keys["script-binding dlogm/denoise"])
-    local g = state("gyroflow")
-    if g and g.available then
-        y = u:switch(x, w, y, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
-    end
     return y
 end
 
@@ -415,7 +456,6 @@ local function stabilization_part(u, x, w, y)
                            or ("Auto: this camera doesn't say, so as the " .. (project and "project" or "preset")))
     y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
                  keys["script-binding gyroflow/fringes"], not g.chromatic_available or g.underwater == "no")
-    y = u:switch(x, w, y, "still", "Clean still frame on pause", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
 
     return y
 end
@@ -453,6 +493,8 @@ local function quality_part(u, x, w, y)
         { "Full size", "script-message-to gyroflow quality paused_full_size auto" },
     }, paused[tostring(g.paused_full_size or "off")])
     y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
+    y = u:switch(x, w, y, "still", "Temporal denoise", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
+    y = u:caption(x, w, y, "The paused frame rebuilt from the 5 frames on each side of it: its noise and the particles in the water go, the detail stays")
     y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
     for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
         y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])
@@ -529,8 +571,43 @@ local function player_part(u, x, w, y)
     return y
 end
 
+local function open_url(url)
+    local args = platform == "darwin" and { "open", url } or platform == "windows" and { "rundll32", "url.dll,FileProtocolHandler", url }
+                 or { "xdg-open", url }
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end)
+end
+
+-- What the right-click menu had about the app: its version, help and links (footage-menu runs the commands; the app
+-- gives it its version and setup script)
+local function support_part(u, x, w, y)
+    local s = u.s
+    local opts = mp.get_property_native("script-opts") or {}
+    local version, setup = opts["footage_menu-version"] or "", opts["footage_menu-setup"] or ""
+    local path = mp.get_property("path")
+    local menu = state("footage_menu")
+    u:text(x, y + 9 * s, "ActionFootagePlayer", { size = 14, bold = true })
+    y = y + 22 * s
+    y = u:caption(x, w, y, version ~= "" and ("Version " .. version) or "The plugins, in your own mpv")
+    y = u:caption(x, w, y, mp.get_property("mpv-version") or "mpv")
+    y = u:heading(x, w, y + 10 * s, "Help")
+    y = u:button(x, w, y, "keys", "Keys…", "script-message-to footage_menu keys", { disabled = not menu })
+    y = u:button(x, w, y, "note", "Note for the agent…", "script-binding agent/report",
+                 { disabled = not path or not state("agent"), key = keys["script-binding agent/report"] })
+    y = u:button(x, w, y, "report", "Report this camera…", "script-message-to footage_menu report",
+                 { disabled = not menu or not local_file(path) })
+    y = u:caption(x, w, y, "Opens an issue on GitHub with what the plugins found in this clip")
+    if setup ~= "" then
+        y = u:button(x, w, y + 4 * s, "setup", "Set up again…", "script-message-to footage_menu setup", { disabled = not menu })
+        y = u:caption(x, w, y, "Runs the app's first setup again")
+    end
+    y = u:heading(x, w, y + 10 * s, "Links")
+    local half = (w - 8 * s) / 2
+    u:button(x, half, y, "website", "Website", function() open_url(WEBSITE) end)
+    return u:button(x + half + 8 * s, half, y, "github", "GitHub", function() open_url(REPO) end)
+end
+
 local PARTS = { clip = clip_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
-                telemetry = telemetry_part, player = player_part }
+                telemetry = telemetry_part, player = player_part, support = support_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
                    quality = "script-message-to gyroflow remember",
@@ -612,8 +689,7 @@ local function draw(w, h, s, hovered)
     for i, t in ipairs(shown_tabs()) do
         rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], t0 + (8 + (i - 1) * 44) * s)
     end
-    rail_button(0, "keys", "Keys", "script-message-to footage_menu keys", false, h - (8 + 36 + 44) * s)
-    rail_button(0, "help", "Help", "script-message-to footage_menu help", false, h - (8 + 36) * s)
+    rail_button(0, "support", "Support", function() choose("support") end, open and tab == "support", h - (8 + 36) * s)
     return u
 end
 
@@ -781,7 +857,8 @@ mp.register_script_message("dump", function(path, w, h, s)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "osd-dimensions",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights",
+                        "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)
@@ -794,3 +871,5 @@ end)
 -- The highlight that plays now
 mp.add_periodic_timer(1, function() if shown and open and tab == "clip" then render() end end)
 read_keys()
+-- For footage-menu: right click is mpv's own menu while the panel is there
+mp.set_property_native("user-data/side_panel/loaded", true)

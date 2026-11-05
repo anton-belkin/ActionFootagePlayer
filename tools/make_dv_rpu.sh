@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_dv_rpu.sh [<look.json> [<out.rpu>]]: the Dolby Vision RPU of a look, made by afp-rpu (vs-gyroflow,
 # src/dovi.rs): one RPU, for every frame, with the constant L1 afp-rpu defaults to. Without arguments, the shipped
-# look: mpv/scripts/dlogm/dv/dji_fit.json -> dji_fit.rpu.
+# look: mpv/scripts/dlogm/dv/nbcu_fit.json -> nbcu_fit.rpu.
 #
 # With dovi_tool installed (brew install dovi_tool), it also checks that afp-rpu writes what dovi_tool does:
 #   - one frame and 48 frames of the look, from a config made here the way DV Lab makes it (DVLab.swift,
@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-look=${1:-mpv/scripts/dlogm/dv/dji_fit.json}
+look=${1:-mpv/scripts/dlogm/dv/nbcu_fit.json}
 out=${2:-${look%.json}.rpu}
 
 prefix=$(brew --prefix 2>/dev/null || echo /opt/homebrew)

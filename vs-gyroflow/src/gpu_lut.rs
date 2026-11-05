@@ -9,6 +9,11 @@
 // chroma is the average of the block's four pixels.
 //
 // Frames are planar, 16 bits per sample (ffmpeg's yuv420p10le), width a multiple of 4 and height of 2.
+//
+// With `measure` (an HLG output, for a Dolby Vision export's L1), the same pass measures the frame it writes as the
+// player's mpv (tools/mpv-patches/0007) measures what it shows: each pixel back to RGB from its written 10-bit luma
+// and its block's chroma, HLG to display light for 1000 nits by BT.2100's OOTF, max(R,G,B) in 12-bit PQ; each
+// workgroup writes the sum, count, lowest and highest of its pixels, which the CPU adds up.
 
 use std::sync::{ Arc, mpsc };
 
@@ -17,7 +22,7 @@ struct Params {
     width: u32,           // luma
     height: u32,
     lut_size: u32,
-    _pad: u32,
+    measure: u32,         // 1: measure the written frame for L1
     in_y_offset: f32,     // normalized Y' = (Y - in_y_offset) / in_y_scale, C = (C - 512) / in_c_scale
     in_y_scale: f32,
     in_c_scale: f32,
@@ -31,6 +36,37 @@ struct Params {
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read_write> frame: array<u32>;
 @group(0) @binding(2) var<storage, read> lut: array<f32>;
+@group(0) @binding(3) var<storage, read_write> parts: array<vec4<f32>>;
+
+var<workgroup> wg_sum: array<f32, 64>;
+var<workgroup> wg_count: array<f32, 64>;
+var<workgroup> wg_lo: array<f32, 64>;
+var<workgroup> wg_hi: array<f32, 64>;
+
+fn hlg_scene(e: f32) -> f32 {
+    let x = clamp(e, 0.0, 1.0);
+    return select((exp((x - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, x * x / 3.0, x <= 0.5);
+}
+
+fn pq(nits: f32) -> f32 {
+    let y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), 78.84375);
+}
+
+// A written pixel's max(R,G,B) in 12-bit PQ: its limited-range 10-bit luma and chroma back to HLG RGB in the
+// output's matrix, to display light for a 1000-nit display
+fn measured(y10: f32, cb10: f32, cr10: f32) -> f32 {
+    let yn = (y10 - 64.0) / 876.0;
+    let r = yn + 2.0 * (1.0 - p.out_kr) * (cr10 - 512.0) / 896.0;
+    let b = yn + 2.0 * (1.0 - p.out_kb) * (cb10 - 512.0) / 896.0;
+    let g = (yn - p.out_kr * r - p.out_kb * b) / (1.0 - p.out_kr - p.out_kb);
+    let e = clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0));
+    let sc = vec3<f32>(hlg_scene(e.r), hlg_scene(e.g), hlg_scene(e.b));
+    let ys = dot(sc, vec3<f32>(0.2627, 0.6780, 0.0593));
+    var nits = 0.0;
+    if (ys > 0.0) { nits = 1000.0 * pow(ys, 0.2) * max(sc.r, max(sc.g, sc.b)); }
+    return pq(nits) * 4095.0;
+}
 
 fn lut_at(i: vec3<u32>) -> vec3<f32> {
     let n = p.lut_size;
@@ -72,51 +108,91 @@ fn pack(lo: f32, hi: f32) -> u32 {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_index) li: u32,
+        @builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
     let bx = id.x; // block of 4x2 luma
     let by = id.y;
-    if (bx * 4u >= p.width || by * 2u >= p.height) { return; }
+    // No early return: the workgroup's barrier below must be reached by all of it
+    let inside = bx * 4u < p.width && by * 2u < p.height;
+    var m_sum = 0.0;
+    var m_count = 0.0;
+    var m_lo = 4096.0;
+    var m_hi = 0.0;
 
-    let wpr = p.width / 2u;            // luma words per row
-    let cw = p.width / 2u;             // chroma width
-    let cwpr = cw / 2u;                // chroma words per row
-    let u_base = p.width * p.height / 2u;
-    let v_base = u_base + cw * (p.height / 2u) / 2u;
-    let c_index = by * cwpr + bx;
+    if (inside) {
+        let wpr = p.width / 2u;            // luma words per row
+        let cw = p.width / 2u;             // chroma width
+        let cwpr = cw / 2u;                // chroma words per row
+        let u_base = p.width * p.height / 2u;
+        let v_base = u_base + cw * (p.height / 2u) / 2u;
+        let c_index = by * cwpr + bx;
 
-    let cu = frame[u_base + c_index];
-    let cv = frame[v_base + c_index];
-    let cb = array<f32, 2>((sample(cu, false) - 512.0) / p.in_c_scale, (sample(cu, true) - 512.0) / p.in_c_scale);
-    let cr = array<f32, 2>((sample(cv, false) - 512.0) / p.in_c_scale, (sample(cv, true) - 512.0) / p.in_c_scale);
+        let cu = frame[u_base + c_index];
+        let cv = frame[v_base + c_index];
+        let cb = array<f32, 2>((sample(cu, false) - 512.0) / p.in_c_scale, (sample(cu, true) - 512.0) / p.in_c_scale);
+        let cr = array<f32, 2>((sample(cv, false) - 512.0) / p.in_c_scale, (sample(cv, true) - 512.0) / p.in_c_scale);
 
-    var sum_b = array<f32, 2>(0.0, 0.0);
-    var sum_r = array<f32, 2>(0.0, 0.0);
-    for (var row = 0u; row < 2u; row++) {
-        let base = (by * 2u + row) * wpr + bx * 2u;
-        for (var w = 0u; w < 2u; w++) {
-            let word = frame[base + w];
-            var out_y = array<f32, 2>(0.0, 0.0);
-            for (var h = 0u; h < 2u; h++) {
-                let y = (sample(word, h == 1u) - p.in_y_offset) / p.in_y_scale;
-                let c = apply_lut(clamp(to_rgb(y, cb[w], cr[w]), vec3<f32>(0.0), vec3<f32>(1.0)));
-                let yo = luma(c);
-                out_y[h] = 64.0 + 876.0 * yo;
-                sum_b[w] += (c.b - yo) / (2.0 * (1.0 - p.out_kb));
-                sum_r[w] += (c.r - yo) / (2.0 * (1.0 - p.out_kr));
+        var sum_b = array<f32, 2>(0.0, 0.0);
+        var sum_r = array<f32, 2>(0.0, 0.0);
+        var written_y = array<f32, 8>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for (var row = 0u; row < 2u; row++) {
+            let base = (by * 2u + row) * wpr + bx * 2u;
+            for (var w = 0u; w < 2u; w++) {
+                let word = frame[base + w];
+                var out_y = array<f32, 2>(0.0, 0.0);
+                for (var h = 0u; h < 2u; h++) {
+                    let y = (sample(word, h == 1u) - p.in_y_offset) / p.in_y_scale;
+                    let c = apply_lut(clamp(to_rgb(y, cb[w], cr[w]), vec3<f32>(0.0), vec3<f32>(1.0)));
+                    let yo = luma(c);
+                    out_y[h] = 64.0 + 876.0 * yo;
+                    sum_b[w] += (c.b - yo) / (2.0 * (1.0 - p.out_kb));
+                    sum_r[w] += (c.r - yo) / (2.0 * (1.0 - p.out_kr));
+                }
+                let packed = pack(out_y[0], out_y[1]);
+                frame[base + w] = packed;
+                written_y[row * 4u + w * 2u] = sample(packed, false);
+                written_y[row * 4u + w * 2u + 1u] = sample(packed, true);
             }
-            frame[base + w] = pack(out_y[0], out_y[1]);
+        }
+        // Two chroma samples, each the average of its 2x2 luma pixels
+        let pu = pack(512.0 + 896.0 * sum_b[0] / 4.0, 512.0 + 896.0 * sum_b[1] / 4.0);
+        let pv = pack(512.0 + 896.0 * sum_r[0] / 4.0, 512.0 + 896.0 * sum_r[1] / 4.0);
+        frame[u_base + c_index] = pu;
+        frame[v_base + c_index] = pv;
+
+        if (p.measure != 0u) {
+            for (var i = 0u; i < 8u; i++) {
+                let hi_half = (i % 4u) >= 2u; // which of the two chroma samples: the block's left or right 2x2
+                let v = measured(written_y[i], sample(pu, hi_half), sample(pv, hi_half));
+                m_sum += v;
+                m_lo = min(m_lo, v);
+                m_hi = max(m_hi, v);
+            }
+            m_count = 8.0;
         }
     }
-    // Two chroma samples, each the average of its 2x2 luma pixels
-    frame[u_base + c_index] = pack(512.0 + 896.0 * sum_b[0] / 4.0, 512.0 + 896.0 * sum_b[1] / 4.0);
-    frame[v_base + c_index] = pack(512.0 + 896.0 * sum_r[0] / 4.0, 512.0 + 896.0 * sum_r[1] / 4.0);
+
+    if (p.measure != 0u) {
+        wg_sum[li] = m_sum;
+        wg_count[li] = m_count;
+        wg_lo[li] = m_lo;
+        wg_hi[li] = m_hi;
+        workgroupBarrier();
+        if (li == 0u) {
+            var r = vec4<f32>(0.0, 0.0, 4096.0, 0.0);
+            for (var i = 0u; i < 64u; i++) {
+                r = vec4<f32>(r.x + wg_sum[i], r.y + wg_count[i], min(r.z, wg_lo[i]), max(r.w, wg_hi[i]));
+            }
+            parts[wg.y * wgs.x + wg.x] = r;
+        }
+    }
 }
 "#;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
-    width: u32, height: u32, lut_size: u32, _pad: u32,
+    width: u32, height: u32, lut_size: u32, measure: u32,
     in_y_offset: f32, in_y_scale: f32, in_c_scale: f32, _pad2: f32,
     in_kr: f32, in_kb: f32, out_kr: f32, out_kb: f32,
 }
@@ -140,6 +216,7 @@ pub struct GpuLut {
     lut: wgpu::Buffer,
     params: Params,
     frame_size: u64,
+    parts_size: u64,
 }
 
 /// One worker's buffers: a frame is uploaded, converted in place and read back
@@ -147,6 +224,8 @@ pub struct GpuLutWorker {
     lut: Arc<GpuLut>,
     frame: wgpu::Buffer,
     staging: wgpu::Buffer,
+    parts: wgpu::Buffer,
+    parts_staging: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
@@ -224,8 +303,9 @@ fn tetrahedral(n: usize, lut: &[f32], rgb: [f32; 3]) -> [f32; 3] {
 }
 
 impl GpuLut {
-    /// `in_full_range`: the decoded frames' range; the output is always limited range
-    pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32)) -> Result<Arc<GpuLut>, String> {
+    /// `in_full_range`: the decoded frames' range; the output is always limited range. `measure`: each frame's L1
+    /// too (an HLG output), from apply
+    pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32), measure: bool) -> Result<Arc<GpuLut>, String> {
         if width % 4 != 0 || height % 2 != 0 {
             return Err(format!("{width}x{height}: the GPU LUT needs a width divisible by 4"));
         }
@@ -261,6 +341,7 @@ impl GpuLut {
                 entry(0, wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }),
                 entry(1, storage(false)),
                 entry(2, storage(true)),
+                entry(3, storage(false)),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
@@ -274,17 +355,20 @@ impl GpuLut {
 
         let (in_y_offset, in_y_scale, in_c_scale) = if in_full_range { (0.0, 1023.0, 1023.0) } else { (64.0, 876.0, 896.0) };
         let params = Params {
-            width: width as u32, height: height as u32, lut_size, _pad: 0,
+            width: width as u32, height: height as u32, lut_size, measure: measure as u32,
             in_y_offset, in_y_scale, in_c_scale, _pad2: 0.0,
             in_kr: in_matrix.0, in_kb: in_matrix.1, out_kr: out_matrix.0, out_kb: out_matrix.1,
         };
-        Ok(Arc::new(GpuLut { device, queue, pipeline, layout, lut, params, frame_size }))
+        let groups = ((width / 4) as u64).div_ceil(8) * ((height / 2) as u64).div_ceil(8);
+        Ok(Arc::new(GpuLut { device, queue, pipeline, layout, lut, params, frame_size, parts_size: groups * 16 }))
     }
 
     pub fn worker(self: &Arc<Self>) -> GpuLutWorker {
         let d = &self.device;
         let frame = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: self.frame_size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
         let staging = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: self.frame_size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let parts = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: self.parts_size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
+        let parts_staging = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: self.parts_size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let params = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<Params>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         self.queue.write_buffer(&params, 0, bytemuck::bytes_of(&self.params));
         let bind_group = d.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -294,19 +378,22 @@ impl GpuLut {
                 wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: frame.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: self.lut.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: parts.as_entire_binding() },
             ],
         });
-        GpuLutWorker { lut: self.clone(), frame, staging, bind_group }
+        GpuLutWorker { lut: self.clone(), frame, staging, parts, parts_staging, bind_group }
     }
 }
 
 impl GpuLutWorker {
-    /// Converts `frame` (planar 4:2:0, 16-bit samples) in place
-    pub fn apply(&mut self, frame: &mut [u8]) -> Result<(), String> {
+    /// Converts `frame` (planar 4:2:0, 16-bit samples) in place; measuring, also returns its L1: the lowest, average
+    /// and highest max(R,G,B) in 12-bit PQ
+    pub fn apply(&mut self, frame: &mut [u8]) -> Result<Option<[f64; 3]>, String> {
         let g = &*self.lut;
         if frame.len() as u64 != g.frame_size {
             return Err(format!("frame is {} bytes, the LUT was set up for {}", frame.len(), g.frame_size));
         }
+        let measure = g.params.measure != 0;
         g.queue.write_buffer(&self.frame, 0, frame);
         let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
@@ -316,18 +403,38 @@ impl GpuLutWorker {
             pass.dispatch_workgroups((g.params.width / 4).div_ceil(8), (g.params.height / 2).div_ceil(8), 1);
         }
         encoder.copy_buffer_to_buffer(&self.frame, 0, &self.staging, 0, g.frame_size);
+        if measure { encoder.copy_buffer_to_buffer(&self.parts, 0, &self.parts_staging, 0, g.parts_size); }
         g.queue.submit(Some(encoder.finish()));
 
         let slice = self.staging.slice(..);
         let (tx, rx) = mpsc::channel();
+        let tx2 = tx.clone();
         slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        let parts_slice = self.parts_staging.slice(..);
+        if measure { parts_slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx2.send(r); }); }
         let _ = g.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
-        rx.recv().map_err(|_| "GPU readback lost".to_string())?.map_err(|e| format!("GPU readback: {e}"))?;
+        for _ in 0..(1 + measure as usize) {
+            rx.recv().map_err(|_| "GPU readback lost".to_string())?.map_err(|e| format!("GPU readback: {e}"))?;
+        }
         {
             let data = slice.get_mapped_range().map_err(|e| format!("GPU readback: {e:?}"))?;
             frame.copy_from_slice(&data);
         }
         self.staging.unmap();
-        Ok(())
+        if !measure { return Ok(None); }
+
+        let (mut sum, mut count, mut lo, mut hi) = (0.0f64, 0.0f64, 4096.0f64, 0.0f64);
+        {
+            let data = parts_slice.get_mapped_range().map_err(|e| format!("GPU readback: {e:?}"))?;
+            for part in bytemuck::cast_slice::<u8, [f32; 4]>(&data) {
+                if part[1] <= 0.0 { continue; }
+                sum += part[0] as f64;
+                count += part[1] as f64;
+                lo = lo.min(part[2] as f64);
+                hi = hi.max(part[3] as f64);
+            }
+        }
+        self.parts_staging.unmap();
+        Ok((count > 0.0).then(|| [lo, sum / count, hi]))
     }
 }
