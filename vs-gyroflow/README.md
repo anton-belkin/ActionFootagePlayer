@@ -121,17 +121,23 @@ install -m 755 target/release/libvs_gyroflow.dylib ~/.config/mpv/scripts/gyroflo
 install -m 755 target/release/gyroflow-probe ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-project ~/.config/mpv/scripts/gyroflow/
 install -m 755 target/release/gyroflow-export ~/.config/mpv/scripts/gyroflow/
+install -m 755 target/release/afp-cut ~/.config/mpv/scripts/gyroflow/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
 stabilized with: `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
 or nothing, with the reason.
 
+`afp-cut <video> --from <t> [--to <t>]` keeps a part of a camera's MP4 without re-encoding it: every sample as it is,
+DJI's clip data (only in the first sample of its metadata track) put back in front of the new first one, the timecode
+and creation times moved on, and the key `ch.actionfootageplayer.cut`; the cut is then read back as the player reads
+the original and removed when it doesn't read the same ([docs/lossless-cut.md](../docs/lossless-cut.md)).
+
 `install` writes a new file. Copying over the existing dylib with `cp` keeps the old inode, and macOS then
 kills whatever loads it (exit 137): the kernel has the old code signature cached for that file.
 
 On Linux and Windows it builds the same way (`cargo build --release`), as `libvs_gyroflow.so` and
-`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-project(.exe)` and `gyroflow-export(.exe)`; there wgpu renders
+`vs_gyroflow.dll` with `gyroflow-probe(.exe)`, `gyroflow-project(.exe)`, `gyroflow-export(.exe)` and `afp-cut(.exe)`; there wgpu renders
 on Vulkan (Windows: DirectX 12 or Vulkan). `../tools/make_plugin_zip.sh <version>` makes the plugin's zip of them,
 and cross-compiles with a Rust target, e.g. `x86_64-pc-windows-gnu` on Linux with mingw-w64. A build where
 gyroflow-core's build script can't download the lens profiles (no network) needs

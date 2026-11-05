@@ -16,6 +16,8 @@
 #                                                       Lua, mpv 0.41 and later)
 #   mpv-side-panel-<version>.zip                        the plugins' settings in a panel beside the video, the same
 #                                                       way (plain Lua; its Clip and Keys buttons use footage-menu)
+#   mpv-workspace-<version>.zip                         the project a clip belongs to, for the other plugins (the
+#                                                       gyroflow plugin's projects), the same way (plain Lua)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
 #                                                       tools/make_plugin_zip.sh's)
@@ -46,7 +48,7 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu afp-cut; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
@@ -143,6 +145,13 @@ git archive HEAD mpv/scripts/side-panel | tar -x --strip-components 2 -C "dist/$
 (cd "dist/$panel" && zip -qr "../$panel.zip" side-panel)
 rm -rf "dist/$panel"
 
-(cd dist && shasum -a 256 "$app.dmg" "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.dmg" "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+workspace="mpv-workspace-$version"
+rm -rf "dist/$workspace" "dist/$workspace.zip"
+mkdir -p "dist/$workspace"
+git archive HEAD mpv/scripts/workspace | tar -x --strip-components 2 -C "dist/$workspace"
+(cd "dist/$workspace" && zip -qr "../$workspace.zip" workspace)
+rm -rf "dist/$workspace"
+
+(cd dist && shasum -a 256 "$app.dmg" "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$workspace.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
+ls -l "dist/$app.dmg" "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$workspace.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
 cat dist/SHA256SUMS

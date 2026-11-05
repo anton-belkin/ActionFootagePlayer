@@ -1,6 +1,7 @@
 -- side-panel: the plugins' settings in a panel at the right of the window, beside the video (it's moved over for it,
--- not covered): a rail of icons at the edge, one for each part (the clip, its look, the stabilization, performance and
--- quality, the telemetry, the Dolby Vision trims; support at the bottom), and the panel of the one chosen, scrolled
+-- not covered): a rail of icons at the edge, one for each part (the project: the trip's marks, moments and clip
+-- previews, the workspace plugin's; the clip, its look, the stabilization, performance and quality, the telemetry,
+-- the Dolby Vision trims; support at the bottom), and the panel of the one chosen, scrolled
 -- with the wheel. The plugins' settings as controls: it reads the state they keep in user-data/<plugin>/ and runs
 -- their commands. While it's loaded, footage-menu leaves the right-click menu to mpv's own (it publishes
 -- user-data/side_panel/loaded). An mpv plugin: this folder goes into ~~/scripts/.
@@ -15,7 +16,7 @@
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
 --   open=yes         and the panel beside it
---   tab=stabilization  the part it opens on: clip, look, stabilization, quality, telemetry, dv, support
+--   tab=project      the part it opens on: project, clip, look, stabilization, quality, telemetry, dv, support
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
@@ -26,7 +27,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local ui = require 'ui'
 
-local o = { shown = true, open = true, tab = "stabilization" }
+local o = { shown = true, open = true, tab = "project" }
 options.read_options(o, "side_panel")
 
 local C = ui.C
@@ -85,7 +86,12 @@ local function icon(u, name, cx, cy, color)
     local s = u.s
     local stroke = { fill = false, border = 1.5 * s }
     local function at(x, y) return string.format("%.1f %.1f", cx + x * s, cy + y * s) end
-    if name == "clip" then
+    if name == "project" then
+        -- A folder: its tab, and its body
+        u:shape("m " .. at(-9, -6) .. " l " .. at(-3.5, -6) .. " " .. at(-1.5, -4) .. " " .. at(9, -4) .. " " .. at(9, 6.5) .. " " .. at(-9, 6.5)
+                .. " " .. at(-9, -6), color, stroke)
+        u:box(cx - 9 * s, cy - 1.5 * s, 18 * s, 1.5 * s, 0, color)
+    elseif name == "clip" then
         u:shape(ui.rrect_path(cx - 8.5 * s, cy - 6.5 * s, 17 * s, 13 * s, 2.5 * s), color, stroke)
         u:shape("m " .. at(-2, -3.5) .. " l " .. at(3.5, 0) .. " " .. at(-2, 3.5), color)
     elseif name == "look" then
@@ -144,6 +150,12 @@ local function icon(u, name, cx, cy, color)
         u:shape(ui.rrect_path(cx - 9 * s, cy - 6 * s, 18 * s, 12 * s, 2.5 * s), color, stroke)
         for _, x in ipairs({ -5.5, -1, 3.5 }) do u:box(cx + x * s, cy - 3 * s, 2 * s, 2 * s, 0, color) end
         u:box(cx - 4.5 * s, cy + 1.5 * s, 9 * s, 1.6 * s, 0, color)
+    elseif name == "crop" then
+        -- A camera: the body with its viewfinder bump, the lens
+        u:shape(ui.rrect_path(cx - 9 * s, cy - 5 * s, 18 * s, 12.5 * s, 2.5 * s), color, stroke)
+        u:shape("m " .. at(-4, -5) .. " l " .. at(-2.5, -8) .. " " .. at(2.5, -8) .. " " .. at(4, -5), color)
+        u:shape(ui.circle_path(cx, cy + 1.2 * s, 3.6 * s), color, stroke)
+        u:shape(ui.circle_path(cx + 6 * s, cy - 2.4 * s, 0.9 * s), color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -152,7 +164,7 @@ end
 
 -- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 local TABS = {
-    { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
+    { "project", "Project" }, { "clip", "Clip" }, { "crop", "Save frame" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
     { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -185,7 +197,7 @@ local function passport(d, g, t, h)
     end
     if g then table.insert(parts, g.available and (g.kind == "project" and "Gyroflow project" or "gyro") or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
-    if h and h.times then table.insert(parts, #h.times == 1 and "1 highlight" or (#h.times .. " highlights")) end
+    if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return table.concat(parts, " · ")
 end
 
@@ -225,11 +237,13 @@ local function clip_part(u, x, w, y)
         y = u:button(x, w, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
     end
 
-    if h and h.times then
-        y = u:heading(x, w, y + 10 * s, "Highlights", keys["script-binding highlights/next"])
+    if h and h.times and #h.times > 0 then
+        y = u:heading(x, w, y + 10 * s, "Marks", keys["script-binding highlights/next"])
         local pos = mp.get_property_number("time-pos", 0)
         for i, time in ipairs(h.times) do
-            y = u:radio(x, w, y, "hl:" .. i, "Highlight " .. i, math.abs(pos - time) < 0.5, "script-message-to highlights go " .. i, { note = clock(time) })
+            local m = h.marks and h.marks[i] or {}
+            local label = (m.name and m.name ~= "") and m.name or (m.camera and ("Highlight " .. i) or ("Mark " .. i))
+            y = u:radio(x, w, y, "hl:" .. i, label, math.abs(pos - time) < 0.5, "script-message-to highlights go " .. i, { note = clock(time) })
         end
     end
 
@@ -237,8 +251,352 @@ local function clip_part(u, x, w, y)
     local n, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     u:button(x, half, y, "prev", "Previous clip", "playlist-prev", { disabled = n <= 0 })
     y = u:button(x + half + 8 * s, half, y, "next", "Next clip", "playlist-next", { disabled = n >= count - 1 })
-    y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    -- A photo where the gyroflow plugin is (stabilized, cleaned up, with a gain map), else mpv's screenshot
+    if g and local_file(path) then
+        y = u:button(x, w, y, "frame", "Save the frame as a photo", "script-message-to gyroflow photo", { key = keys["script-binding gyroflow/photo"] })
+    else
+        y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    end
     return y
+end
+
+-- The project tab's own state: the folder chosen to start a project in (and the list open), which "⋯" is open
+local chosen_root, choosing, card_more, moment_more = nil, false, false, nil
+
+-- A box drawn behind what was drawn since event `at`
+local function behind(u, at, x, y, w, h, color, opts)
+    u:box(x, y, w, h, 8, color, opts)
+    table.insert(u.events, at, table.remove(u.events))
+end
+
+-- The text cut to fit width, with an ellipsis
+local function fit(text, width, size, s, bold)
+    -- Room to spare: the estimate is short for some names (capitals, wide letters)
+    width = width * 0.9
+    if ui.text_width(text, size, s, bold) <= width then return text end
+    local chars = {}
+    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = ch end
+    while #chars > 1 and ui.text_width(table.concat(chars) .. "…", size, s, bold) > width do table.remove(chars) end
+    return table.concat(chars) .. "…"
+end
+
+-- The end of a text that fits width, after an ellipsis: a path's last folders
+local function fit_end(text, width, size, s)
+    width = width * 0.9
+    if ui.text_width(text, size, s) <= width then return text end
+    local chars = {}
+    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = ch end
+    while #chars > 1 and ui.text_width("…" .. table.concat(chars), size, s) > width do table.remove(chars, 1) end
+    return "…" .. table.concat(chars)
+end
+
+-- A folder's path as a line: its parts from the volume's name ("NAS › Trips › Egypt"), the home folder as "Home"
+local function folder_label(path)
+    local home = os.getenv(platform == "windows" and "USERPROFILE" or "HOME")
+    if home and path:sub(1, #home + 1) == home .. "/" then path = "Home/" .. path:sub(#home + 2) end
+    path = path:gsub("^/Volumes/", ""):gsub("^/media/[^/]+/", ""):gsub("^/run/media/[^/]+/", ""):gsub("^/mnt/", "")
+    local parts = {}
+    for p in path:gmatch("[^/\\]+") do parts[#parts + 1] = p end
+    return #parts > 0 and table.concat(parts, " › ") or path
+end
+
+-- A row of the project tab: a label, a note at the right, highlighted when on ("play": a moment playing, with its
+-- mark); a "⋯" at the right when more is given
+local function list_row(u, x, w, y, id, label, note, on, cmd, more)
+    local s = u.s
+    local h = 26 * s
+    local cy = y + h / 2
+    if on then u:box(x - 6 * s, y, w + 12 * s, h, 6, C.card)
+    elseif u:hovered(id) then u:box(x - 6 * s, y, w + 12 * s, h, 6, C.hover) end
+    local right = x + w
+    if more then
+        local mid = id .. ":more"
+        if u:hovered(mid) then u:box(right - 20 * s, y + 3 * s, 22 * s, h - 6 * s, 5, C.field) end
+        u:text(right - 9 * s, cy - 1 * s, "⋯", { align = 5, size = 15, color = C.dim })
+        u:hit(right - 20 * s, y, 22 * s, h, mid, more)
+        right = right - 26 * s
+    end
+    local nw = note and (ui.text_width(note, 12, s) + 8 * s) or 0
+    if note then u:text(right, cy, note, { align = 6, size = 12, color = C.dim }) end
+    local lx = x
+    if on == "play" then
+        u:shape(string.format("m %.1f %.1f l %.1f %.1f %.1f %.1f", x, cy - 4.5 * s, x + 7 * s, cy, x, cy + 4.5 * s), C.text)
+        lx = x + 13 * s
+    end
+    u:text(lx, cy, fit(label, right - nw - lx, 13, s), { size = 13 })
+    u:hit(x - 6 * s, y, (right - x) + 6 * s, h, id, cmd)
+    return y + h + 2 * s
+end
+
+-- Small text buttons in a row, what a "⋯" opens: { label, cmd }
+local function actions(u, x, w, y, id, list)
+    local s = u.s
+    local at = #u.events + 1
+    local top = y
+    local cx = x + 8 * s
+    local h = 24 * s
+    for i, a in ipairs(list) do
+        local tw = ui.text_width(a[1], 12, s) + 14 * s
+        if cx + tw > x + w then cx, y = x + 8 * s, y + h end
+        local aid = id .. ":" .. i
+        if u:hovered(aid) then u:box(cx - 4 * s, y + 3 * s, tw, h - 6 * s, 5, C.hover) end
+        u:text(cx + 3 * s, y + h / 2, a[1], { size = 12, color = C.label })
+        u:hit(cx - 4 * s, y + 2 * s, tw, h - 2 * s, aid, a[2])
+        cx = cx + tw + 4 * s
+    end
+    y = y + h
+    behind(u, at, x, top, w, y - top, C.field)
+    return y + 4 * s
+end
+
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    -- With a project of its own, the project is what's saved: its horizon and the switch can go into it
+    if ws.own_project then return g.horizon_lock ~= nil and g.horizon_lock ~= "project" end
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return g.level ~= st.level
+end
+
+local function project_part(u, x, w, y)
+    local s = u.s
+    local ws = state("workspace")
+    if not ws or not ws.clip then return u:caption(x, w, y, "Nothing plays") end
+    if ws.clip:find("://", 1, true) then return u:caption(x, w, y, "A project is for footage on this computer or the NAS") end
+    local h = state("highlights") or {}
+    local pad = 10 * s
+    local ix, iw = x + pad, w - 2 * pad
+
+    -- The project, or how to start one
+    local at = #u.events + 1
+    local top = y
+    y = y + pad
+    if not ws.project then
+        u:text(ix, y + 8 * s, "No project yet", { size = 14, bold = true })
+        y = y + 22 * s
+        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders _Moments, _Clips and _Exports, "
+            .. "and _ActionFootagePlayer for its own notes. A clip's own files, its marks and Gyroflow project, "
+            .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
+            .. "kept beside the clip anyway.")
+        local choices = ws.project_choices or {}
+        local known = false
+        for _, c in ipairs(choices) do if c == chosen_root then known = true end end
+        if not known then chosen_root = ws.project_new or choices[#choices] end
+        y = y + 4 * s
+        if chosen_root then
+            -- The folder chosen by its name, the path to it below; the list, a folder a line, indented by depth
+            local fh = 42 * s
+            u:box(ix, y, iw, fh, 7, C.panel, { border = 1 * s, border_color = choosing and C.accent or C.line })
+            local name = chosen_root:match("([^/\\]+)[/\\]?$") or chosen_root
+            local parent = chosen_root:match("^(.*)[/\\][^/\\]+[/\\]?$")
+            u:text(ix + 10 * s, y + 14 * s, fit(name, iw - 34 * s, 13, s, true), { size = 13, bold = true })
+            u:text(ix + 10 * s, y + 30 * s, parent and parent ~= "" and fit_end("in " .. folder_label(parent), iw - 34 * s, 11, s) or "the top of the disk",
+                   { size = 11, color = C.dim })
+            u:text(ix + iw - 13 * s, y + fh / 2, choosing and "▴" or "▾", { align = 5, size = 12, color = C.dim })
+            u:hit(ix, y, iw, fh, "choose", function() choosing = not choosing end)
+            y = y + fh + 2 * s
+            if choosing then
+                for i, c in ipairs(choices) do
+                    local id = "root:" .. i
+                    local rh = 24 * s
+                    if c == chosen_root then u:box(ix, y, iw, rh, 5, C.accent)
+                    elseif u:hovered(id) then u:box(ix, y, iw, rh, 5, C.hover) end
+                    local indent = math.min(i - 1, 6) * 10 * s
+                    local cname = c:match("([^/\\]+)[/\\]?$") or c
+                    u:text(ix + 8 * s + indent, y + rh / 2, fit(cname, iw - 16 * s - indent, 12, s), { size = 12, color = c == chosen_root and C.knob or C.label })
+                    u:hit(ix, y, iw, rh, id, function() chosen_root, choosing = c, false end)
+                    y = y + rh
+                end
+                y = y + 4 * s
+            end
+            local root = chosen_root
+            y = u:button(ix, iw, y + 4 * s, "init", "Initialize the project here", function()
+                mp.commandv("script-message-to", "workspace", "init-project", root)
+            end, { primary = true })
+        end
+    else
+        local name = ws.project:match("([^/\\]+)[/\\]?$") or ws.project
+        u:text(ix, y + 9 * s, fit(name, iw - 30 * s, 14, s, true), { size = 14, bold = true })
+        if u:hovered("card:more") then u:box(ix + iw - 22 * s, y - 2 * s, 24 * s, 22 * s, 5, C.field) end
+        u:text(ix + iw - 10 * s, y + 8 * s, "⋯", { align = 5, size = 15, color = C.dim })
+        u:hit(ix + iw - 22 * s, y - 2 * s, 24 * s, 22 * s, "card:more", function() card_more = not card_more end)
+        y = y + 22 * s
+        local st = ws.clips_stats
+        local total = ws.moments_total or 0
+        local parts = { total == 1 and "1 moment" or (total .. " moments") }
+        if st and st.total > 0 then parts[#parts + 1] = st.previews .. " of " .. st.total .. " clip previews" end
+        y = u:caption(ix, iw, y, table.concat(parts, " · "))
+        if card_more then
+            y = actions(u, ix, iw, y + 2 * s, "card", {
+                { platform == "darwin" and "Project folder in Finder" or "Project folder", "script-message-to workspace project-folder" },
+                { "Make again for removed clips", "script-message-to workspace clips-again" },
+                { (ws.moments_alone and "✓ " or "") .. "New moments stabilized on their own", "script-message-to workspace moments-alone" },
+            })
+        end
+        local where = platform == "darwin" and "Finder" or "the folder"
+        if ws.clips then
+            y = u:caption(ix, iw, y + 2 * s, "Making clip previews: " .. ws.clips.done .. " of " .. ws.clips.total, { color = C.text })
+            y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
+        elseif st and st.new > 0 then
+            y = u:button(ix, iw, y + 2 * s, "clips-make", "Make clip previews · " .. st.new .. " new", "script-message-to workspace clips-make")
+            -- All in _Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
+            y = u:switch(ix, iw, y - 2 * s, "clips-flat", "Ignore subfolders", ws.clips_flat == true, "script-message-to workspace clips-flat")
+        end
+        if ws.clips_failed and not ws.clips then
+            y = u:button(ix, iw, y, "clips-failed", ws.clips_failed .. (ws.clips_failed == 1 and " preview" or " previews") .. " couldn't be made: why",
+                         "script-message-to workspace clips-failed")
+        end
+        if st and st.previews > 0 then
+            y = u:button(ix, iw, y, "clips-show", "Show all clips in " .. where, "script-message-to workspace clips-folder")
+        end
+        if total > 0 then
+            y = u:button(ix, iw, y, "moments-show", "Show all moments in " .. where, "script-message-to workspace moments-folder")
+        end
+    end
+    behind(u, at, x, top, w, y - top + pad - 6 * s, C.card)
+    y = y + pad
+
+    -- This clip
+    y = y + 8 * s
+    u:divider(x, w, y)
+    local file = ws.clip:match("([^/\\]+)$") or ws.clip
+    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows
+    local mo = ws.moment and not ws.moment.missing and ws.offset and ws.moment or nil
+    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
+    y = y + 28 * s
+    if mo then
+        y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
+        y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
+        -- How it's stabilized: as it was made
+        if ws.snap then
+            -- Stabilized on its own or with its clip: As saved (each moment's), or one way for every moment this session
+            local f = (ws.force or {}).alone
+            y = u:heading(x, w, y + 2 * s, "Stabilized")
+            y = u:segmented(x, w, y, "alone", {
+                { "As saved", "script-message-to workspace moment-force alone saved" },
+                { "On its own", "script-message-to workspace moment-force alone yes" },
+                { "With its clip", "script-message-to workspace moment-force alone no" },
+            }, f == nil and 1 or (f and 2 or 3))
+            if f == nil then y = u:caption(x, w, y - 2 * s, "This one was saved " .. (ws.moment.alone and "on its own" or "with its clip")) end
+            -- Viewing is never saving: changed here or in the other tabs, it's kept in the moment only by this
+            if moment_changed(ws) then
+                y = u:caption(x, w, y, "Changed for viewing only: the moment is as it was saved", { color = C.text })
+                y = u:button(x, w, y, "keep", "Keep in " .. fit(mo.name, w * 0.6, 12, s, true), "script-message-to workspace moment-keep", { primary = true })
+            end
+            local g = state("gyroflow") or {}
+            y = u:caption(x, w, y - 2 * s, ws.own_project and "Its own Gyroflow project: changes to the clip's don't reach it"
+                or ("The default preset, " .. (g.view == "off" and "stabilization off" or ((g.level or "medium") .. (g.view == "wide" and ", wider view" or "")))
+                    .. ": the clip's project, if it gets one, doesn't reach it"))
+        else
+            y = u:caption(x, w, y, "Made before moments kept their stabilization: it plays with the clip's. Trim or update it to keep its own")
+        end
+        local idx
+        for i, m in ipairs(ws.moments or {}) do if m.file == mo.file then idx = i end end
+        if idx then
+            y = actions(u, x, w, y, "this-moment", {
+                { "Rename…", "script-message-to workspace moment-rename " .. idx },
+                { "Remove", "script-message-to workspace moment-remove " .. idx },
+                { REVEAL, "script-message-to workspace moment-reveal " .. idx },
+            })
+        end
+    elseif ws.playing_preview then
+        -- A clip preview playing: its own stabilization, a variant of the clip's
+        y = u:switch(x, w, y, "clip-own", "Its own stabilization", ws.own_project ~= nil, "script-message-to workspace clip-own")
+        y = u:caption(x, w, y - 2 * s, ws.own_project and "A project of this preview's own: a variant of the clip's (Ctrl+e opens it)"
+            or "The clip's, as it plays. Copy the preview in Finder for another variant")
+    elseif ws.editing then
+        y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
+            .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
+    end
+
+    local pos = mp.get_property_number("time-pos", 0)
+    y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
+    local near = nil
+    local times = h.times or {}
+    for i, t in ipairs(times) do
+        local m = h.marks and h.marks[i] or {}
+        local label = (m.name and m.name ~= "") and m.name
+            or (m.camera == "dji" and "DJI quick switch" or m.camera == "gopro" and "GoPro HiLight" or ("Mark " .. i))
+        -- Here: within half a second, or the one just jumped to (a jump lands h.before seconds ahead of it)
+        local here = math.abs(pos - t) <= 0.5 or (h.jumped == i and pos >= t - (h.before or 2) - 0.25 and pos <= t + 0.5)
+        if here and not near then near = i end
+        y = list_row(u, x, w, y, "mark:" .. i, label, clock(t), here, "script-message-to highlights go " .. i)
+    end
+    if #times == 0 then y = u:caption(x, w, y, "None yet") end
+    y = u:button(x, w, y + 4 * s, "mark", near and "Remove the mark here" or "Add a mark here", "script-binding highlights/mark",
+                 { key = keys["script-binding highlights/mark"] })
+
+    local list = mo and {} or (ws.moments or {})
+    if not mo then y = u:heading(x, w, y + 8 * s, "Moments of this clip") end
+    for i, m in ipairs(list) do
+        local playing = (ws.moment and ws.moment.file == m.file) or (ws.editing and ws.editing.file == m.file)
+        y = list_row(u, x, w, y, "moment:" .. i, m.name, clock(m["in"]) .. "–" .. clock(m.out), playing and "play" or false,
+                     "script-message-to workspace moment-play " .. i, function() moment_more = moment_more ~= i and i or nil end)
+        if moment_more == i then
+            y = actions(u, x, w, y, "moment:" .. i, {
+                { "Play", "script-message-to workspace moment-play " .. i },
+                { "In its clip", "script-message-to workspace moment-edit " .. i },
+                { "Rename…", "script-message-to workspace moment-rename " .. i },
+                { "Remove", "script-message-to workspace moment-remove " .. i },
+                { REVEAL, "script-message-to workspace moment-reveal " .. i },
+            })
+        end
+    end
+    if mo then
+        -- nothing: the moment is what plays
+    elseif not ws.project then
+        y = u:caption(x, w, y, "Moments need the project: initialize it above")
+    elseif #list == 0 then
+        y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k"))
+    end
+
+    if ws.project and not mo then
+        local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
+            or ws.clip_preview == "removed" and "Not interesting · undo" or "Make this clip's preview"
+        y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting",
+                     { key = keys["script-binding workspace/not-interesting"], disabled = ws.clips ~= nil })
+    end
+
+    -- The part marked now: it goes with the clip
+    y = y + 10 * s
+    local pat = #u.events + 1
+    local ptop = y
+    y = y + pad
+    y = u:heading(ix, iw, y, "Selected part", keys["ab-loop"])
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local ihalf = (iw - 8 * s) / 2
+    u:button(ix, ihalf, y, "part-a", a and ("Start " .. clock(a)) or "Mark start", "set ab-loop-a ${=time-pos}")
+    y = u:button(ix + ihalf + 8 * s, ihalf, y, "part-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
+    local k = keys["script-binding workspace/moment"]
+    local m = ws.moment or ws.editing
+    -- The part in the clip's time (a moment playing starts at its in)
+    local off = ws.offset or 0
+    if ws.saving then
+        y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
+    elseif a and b and b > a and not ws.project then
+        y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
+        y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
+    elseif a and b and b > a then
+        if m and not m.missing and math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
+            y = u:caption(ix, iw, y, m.name .. " as it is: move its start or end to change it")
+        elseif m and not m.missing then
+            y = u:button(ix, iw, y, "save", (mo and "Trim " or "Update ") .. fit(m.name, iw * 0.4, 12, s, true) .. " to " .. clock(a) .. "–" .. clock(b),
+                         "script-binding workspace/moment", { primary = true, key = k })
+        else
+            y = u:button(ix, iw, y, "save", "Save as moment " .. clock(a) .. "–" .. clock(b), "script-binding workspace/moment", { primary = true, key = k })
+        end
+        y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
+    else
+        local l = keys["ab-loop"] or "l"
+        y = u:caption(ix, iw, y, a and ("Now its end: " .. l) or mo and ("To trim the moment, mark the part of it to keep: " .. l .. ", then "
+            .. l .. " again. To make it longer: Open the whole clip") or ("Its start: " .. l .. ", then its end: " .. l .. " again"))
+    end
+    behind(u, pat, x, ptop, w, y - ptop + pad - 6 * s, C.panel, { border = 1 * s, border_color = C.line })
+    return y + pad
 end
 
 local function look_title(d, look)
@@ -411,32 +769,60 @@ local function stabilization_part(u, x, w, y)
     y = y + ch + 14 * s
     if not g.available then return y end
 
+    -- A moment playing: each setting As saved (every moment as it was saved), or one value for every moment this
+    -- session (the workspace plugin's force); a clip's are as they always were
+    local ws = state("workspace")
+    local moment = ws and ws.moment and ws.snap and ws.path == mp.get_property("path")
+    local force = moment and (ws.force or {}) or nil
+    -- The options with As saved first, their commands through the workspace plugin, and which is chosen
+    local function with_saved(key, options, values, current)
+        if not moment then return options, values[current] end
+        local list = { { "As saved", "script-message-to workspace moment-force " .. key .. " saved" } }
+        for _, o in ipairs(options) do
+            table.insert(list, { o[1], "script-message-to workspace moment-force " .. key .. " " .. o[4], o[3] })
+        end
+        return list, force[key] == nil and 1 or (values[force[key]] and values[force[key]] + 1)
+    end
+    if moment then y = u:caption(x, w, y, "A moment: As saved plays each moment as it was saved; a value, every moment this session") end
+
     y = u:heading(x, w, y, "View", keys["script-binding gyroflow/toggle"])
     local views = { normal = 1, wide = 2, off = 3 }
-    y = u:segmented(x, w, y, "view", {
-        { "On", "script-message-to gyroflow view normal" },
-        { "Wider", "script-message-to gyroflow view wide" },
-        { "Off", "script-message-to gyroflow view off" },
-    }, views[g.view])
+    local view_list, view_on = with_saved("view", {
+        { "On", "script-message-to gyroflow view normal", nil, "normal" },
+        { "Wider", "script-message-to gyroflow view wide", nil, "wide" },
+        { "Off", "script-message-to gyroflow view off", nil, "off" },
+    }, views, g.view)
+    y = u:segmented(x, w, y, "view", view_list, view_on)
     y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or g.view == "off" and "As recorded, for this clip" or "Zoomed in so no edge shows")
 
     local project = g.kind == "project"
     y = u:heading(x, w, y + 8 * s, "Level", keys["script-binding gyroflow/level"])
     local levels = { weak = 1, medium = 2, strong = 3 }
-    y = u:segmented(x, w, y, "level", {
-        { "Weak", "script-message-to gyroflow level weak" },
-        { "Medium", "script-message-to gyroflow level medium" },
-        { "Strong", "script-message-to gyroflow level strong" },
-    }, levels[g.level], project)
+    local level_list, level_on = with_saved("level", {
+        { "Weak", "script-message-to gyroflow level weak", nil, "weak" },
+        { "Medium", "script-message-to gyroflow level medium", nil, "medium" },
+        { "Strong", "script-message-to gyroflow level strong", nil, "strong" },
+    }, levels, g.level)
+    y = u:segmented(x, w, y, "level", level_list, level_on, project)
     y = u:caption(x, w, y, project and "This clip has its project's smoothing; the level is for clips without one" or LEVEL_NOTES[g.level] or "")
 
     y = u:heading(x, w, y + 8 * s, "Horizon")
-    local horizons = { project = 1, yes = 2, no = 3 }
-    y = u:segmented(x, w, y, "horizon", {
-        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project" },
-        { "Level", "script-message-to gyroflow horizon-lock yes" },
-        { "Free", "script-message-to gyroflow horizon-lock no" },
-    }, horizons[g.horizon_lock])
+    -- On a moment, As saved is its project's or the setting it was saved with: no As preset beside it
+    local horizons = moment and { yes = 1, no = 2 } or { project = 1, yes = 2, no = 3 }
+    local horizon_options = {
+        { "Level", "script-message-to gyroflow horizon-lock yes", nil, "yes" },
+        { "Free", "script-message-to gyroflow horizon-lock no", nil, "no" },
+    }
+    if not moment then
+        table.insert(horizon_options, 1, { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project", nil, "project" })
+    end
+    local horizon_list, horizon_on = with_saved("horizon_lock", horizon_options, horizons, g.horizon_lock)
+    y = u:segmented(x, w, y, "horizon", horizon_list, horizon_on)
+    if moment then
+        local saved = (ws.moment and ws.moment.stab or {}).horizon_lock
+        y = u:caption(x, w, y, "Saved: " .. (ws.own_project and "as its Gyroflow project" or saved == "yes" and "level"
+            or saved == "no" and "free" or "as the preset"))
+    end
 
     y = u:heading(x, w, y + 8 * s, "Lens", keys["script-binding gyroflow/lens"])
     -- A clip with a project starts with the project's lens; one without, with what sticks
@@ -606,7 +992,97 @@ local function support_part(u, x, w, y)
     return u:button(x + half + 8 * s, half, y, "github", "GitHub", function() open_url(REPO) end)
 end
 
-local PARTS = { clip = clip_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
+-- Save frame (the gyroflow plugin's crop.lua, its crop mode): a frame over the video for a photo of the frame on
+-- screen, the picture moved under it, or the camera turned where the clip is stabilized. For this frame only: the
+-- whole video's crop is Gyroflow's
+local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
+local function crop_part(u, x, w, y)
+    local s = u.s
+    local g = state("gyroflow")
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Open a clip to save a frame of it as a photo") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
+    local c = g.crop or {}
+    -- The whole video's crop, rotation and zoom are the stabilization's, in Gyroflow
+    local function whole_video(y)
+        y = u:caption(x, w, y + 10 * s, "This frames the photo only. To crop the whole video, set its crop and zoom in Gyroflow")
+        return u:button(x, w, y + 4 * s, "crop-gyroflow", g.available and "Open in Gyroflow…" or "Stabilize in Gyroflow…",
+                        "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
+    end
+    y = u:switch(x, w, y, "crop", "Frame the photo", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
+    if not c.active then
+        y = u:caption(x, w, y, "A frame over the video, for a photo of the frame on screen. Where the clip is stabilized, "
+                               .. "moving the picture turns the camera, and zoom is its angle of view")
+        return whole_video(y)
+    end
+    local function set(key, v) mp.commandv("script-message-to", "gyroflow", "crop-set", key, string.format("%.5f", v)) end
+    local function value_row(label, value)
+        u:text(x, y + 8 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 8 * s, value, { size = 12, color = C.dim, align = 6 })
+    end
+
+    y = u:heading(x, w, y + 10 * s, "Aspect", "a")
+    for r, row in ipairs(ASPECT_ROWS) do
+        local options, selected = {}, nil
+        for i, a in ipairs(row) do
+            table.insert(options, { a[2] or a[1], "script-message-to gyroflow crop-aspect " .. a[1] })
+            if a[1] == (c.aspect or "original") then selected = i end
+        end
+        y = u:segmented(x, w, y, "crop-aspect-" .. r, options, selected)
+    end
+
+    local cam = c.camera
+    if cam then
+        local zmin, zmax, margin = c.zoom_min or 0.15, c.zoom_max or 4, c.margin or 0.8
+        y = u:heading(x, w, y + 10 * s, "Camera")
+        value_row("Zoom", string.format("%.0f %%", 100 / (cam.zoom * margin)))
+        y = u:slider(x, w, y + 14 * s, "crop:zoom", math.log(zmax / cam.zoom) / math.log(zmax / zmin),
+                     function(p) set("zoom", zmax * (zmin / zmax) ^ p) end, "Wider", "Closer")
+        y = y + 6 * s
+        value_row("Horizon", string.format("%.1f°", cam.roll))
+        y = u:slider(x, w, y + 14 * s, "crop:roll", math.max(0, math.min(1, (cam.roll + 45) / 90)),
+                     function(p) set("roll", math.floor((p * 90 - 45) * 10 + 0.5) / 10) end, "−45°", "45°")
+        local function turn(v, plus, minus)
+            if math.abs(v) < 0.05 then return nil end
+            return string.format("%.1f° %s", math.abs(v), v > 0 and plus or minus)
+        end
+        local parts = {}
+        for _, t in ipairs({ turn(cam.yaw, "right", "left"), turn(cam.pitch, "down", "up") }) do table.insert(parts, t) end
+        y = u:caption(x, w, y + 4 * s, #parts > 0 and ("Turned " .. table.concat(parts, ", ")) or "Looking where the stabilization does")
+        y = u:button(x, w, y + 4 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
+        y = u:caption(x, w, y + 4 * s, "Drag, or two fingers on a trackpad: turn the camera. Wheel or pinch: zoom. "
+                                       .. "Alt+drag or turning two fingers: the horizon")
+    else
+        local f = c.flat or { zoom = 0 }
+        y = u:heading(x, w, y + 10 * s, "Picture")
+        value_row("Zoom", string.format("%.0f %%", 100 * 2 ^ (f.zoom or 0)))
+        y = u:slider(x, w, y + 14 * s, "crop:flat-zoom", ((f.zoom or 0) + 1) / 4, function(p) set("zoom", p * 4 - 1) end, "Smaller", "Closer")
+        y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
+        y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
+    end
+    -- The photo alone, or with the video around it as Apple's devices (macOS only) or Android's take it
+    local mode = g.live_photo or "no"
+    local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
+    if platform ~= "darwin" then table.remove(modes, 2) end
+    local options, selected = {}, nil
+    for i, m in ipairs(modes) do
+        table.insert(options, { m[2], "script-message-to gyroflow live-photo " .. m[1] })
+        if m[1] == mode then selected = i end
+    end
+    y = u:heading(x, w, y + 10 * s, "Photo")
+    y = u:segmented(x, w, y, "crop-live", options, selected)
+    y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
+    local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
+              or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
+              or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+    -- Where gyroflow-export puts it: the project's _Stills, else stabilized/ next to the clip
+    local ws = state("workspace")
+    local where = type(ws) == "table" and ws.project and "the project's _Stills folder" or "the stabilized folder by the clip"
+    y = u:caption(x, w, y, what .. " in " .. where .. ": the SDR look, brighter where the screen has HDR")
+    y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
+    return whole_video(y)
+end
+
+local PARTS = { project = project_part, clip = clip_part, crop = crop_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
                 telemetry = telemetry_part, player = player_part, support = support_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
@@ -857,19 +1333,37 @@ mp.register_script_message("dump", function(path, w, h, s)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
+-- Crop mode on: its part shows; off again: back to the one there was
+local crop_on, before_crop = false, nil
+mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
+    local on = type(c) == "table" and c.active == true
+    if on ~= crop_on then
+        crop_on = on
+        if on then
+            before_crop = { tab = tab, open = open, shown = shown }
+            tab, open, shown = "crop", true, true
+        elseif before_crop and tab == "crop" then
+            tab, open, shown = before_crop.tab, before_crop.open, before_crop.shown
+            before_crop = nil
+        end
+    end
+    -- The camera's numbers as it turns
+    update()
+end)
+
 mp.register_event("file-loaded", function()
     read_keys()
     scroll = {}
     update()
 end)
 -- The highlight that plays now
-mp.add_periodic_timer(1, function() if shown and open and tab == "clip" then render() end end)
+mp.add_periodic_timer(1, function() if shown and open and (tab == "clip" or tab == "project") then render() end end)
 read_keys()
 -- For footage-menu: right click is mpv's own menu while the panel is there
 mp.set_property_native("user-data/side_panel/loaded", true)

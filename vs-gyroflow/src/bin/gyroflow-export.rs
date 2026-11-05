@@ -16,8 +16,9 @@
 // as for the plugins (ActionFootagePlayer keeps your preset and DJI's LUT there, its own copy of the plugins being
 // read-only).
 //
-// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only,
-// _color instead of _stab), 10-bit
+// Output: <project>/_Exports/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only, _color
+// instead of _stab), 10-bit. The project is the one the player's workspace plugin finds (vs-gyroflow/src/workspace.rs);
+// with none, <video's folder>/stabilized/. --out and --output write elsewhere
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
 //                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
@@ -50,9 +51,12 @@ use vs_gyroflow::dv_mux::{ self, RpuInjector };
 use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
+       gyroflow-export --fingerprint <file>...  (each file's fingerprint, as a link keeps its original's: SHA-256 of
+                                                 its first and last MiB)
 
-Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it. A log
-video with nothing to stabilize it with is color-converted only.
+Renders each video stabilized (and, for log, color-converted) into the _Exports/ folder of its project (the trip
+folder with _ActionFootagePlayer/ in it above the video, as the player initializes it), else into a stabilized/
+folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
@@ -80,7 +84,17 @@ video with nothing to stabilize it with is color-converted only.
                    written, in PQ
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
-  --out <folder>   write here instead of <video's folder>/stabilized
+  --out <folder>   write here instead of <project>/Exports (or stabilized/)
+  --output <file>  write this file (one video only)
+  --alone          --from to --to stabilized on its own: its smoothing from its own motion, not the clip's around it
+                   (a moment's); with a project, its \"only within the trim range\" on, whatever it says
+  --whole          with a project, its \"only within the trim range\" off, whatever it says
+  --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
+                   written in room ffmpeg leaves after the moov, so the file isn't written twice). Its `hash`, the
+                   video's fingerprint, is added when it has none (as --fingerprint prints it)
+  --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
+                   passes the one it plays with. The video's own is <name>.gyroflow or <name.ext>.gyroflow next to
+                   it, as the player's workspace plugin finds it
   --force          replace an existing output instead of skipping the video
   --interpolation  bilinear | bicubic | lanczos (default lanczos)
   --encoder <name> ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265
@@ -88,7 +102,38 @@ video with nothing to stabilize it with is color-converted only.
   --progress <file>  write the progress there as JSON, twice a second
   --background     start at background priority (SIGUSR1 / SIGUSR2 switch it later)
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
-                   SIGUSR1/SIGUSR2)";
+                   SIGUSR1/SIGUSR2)
+
+Previews, for the player's moments (docs/moments-and-workspaces.md): small H.264 MP4s in SDR that any system
+shows and plays, the frame also their cover art (the icon)
+  --preview still  one frame, stabilized as with the options above, in SDR (the maker's LUT for D-Log M, else
+                   NBCU's conversion; HLG through NBCU's), held for --from to --to (the whole video without them);
+                   by default <name>.afplink.mp4 in --out or next to the video (the player's
+                   moments are _Moments/<moment>.afplink.mp4)
+  --preview flipbook  the whole clip at a glance, for the player's _Clips/: a frame at each --at time (the keyframe
+                   at or before it, so only keyframes are decoded), 2 a second, in SDR as for a still and not
+                   stabilized, from the low-resolution copy beside the clip when there is one (DJI's .LRF, GoPro's
+                   .LRV); without --at, about 12 frames through the clip, 10 s apart at least, after its first second
+  --at <time>      the frame's time (default: the middle of --from to --to); a flipbook's: times, comma-separated
+  --cover <time>   a flipbook's cover art (its icon): the frame nearest this time (default: the middle)
+  --link <json>    the link to the original the player keeps in it (an MP4 key, ch.actionfootageplayer.link), its
+                   `hash` added as for an export
+  --dates <time>   its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00): the MP4's creation time,
+                   QuickTime's creation date (Photos' day) and the file's dates; without it, the video's dates
+Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
+rendition as the image, the HDR one (HLG) above it
+  --sdr-image <maker|nbcu|macos>  the SDR image: DJI's LUT (D-Log M; the default for it), NBCU's conversion of the
+                   HLG (the default for the others), or the HLG as macOS shows it on an SDR screen (afp-photo)
+  --radius <n>     clean it up from n frames on each side (0-7, default 5; 0: as it is), as the player's Ctrl+p
+  --grain <x>      how much of its grain the clean-up keeps (0-1, default 0.25)
+  --camera <yaw,pitch,roll,zoom>  the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua;
+                   a video export takes it too)
+  --crop <x,y,w,h> the part of the frame to keep, in shares of its width and height (0-1; a video export's too)
+  --format <heic|jpeg>  HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere)
+  --live           with the motion around it, 1.5 s on each side, as the export plays it (--sdr, --nbcu, --dv-rpu
+                   say how; at most 1920 wide or high): a HEIC becomes a Live Photo (a .mov next to it, paired by
+                   afp-photo), a JPEG a Motion Photo (<name>.MP.jpg, the MP4 inside it, as Android's cameras write it)
+  --quality <0-100>  the image's quality (default 92)";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
 const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
@@ -109,6 +154,7 @@ struct Options {
     from: Option<f64>,
     to: Option<f64>,
     out: Option<PathBuf>,
+    project: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
     encoder: Option<String>,
@@ -116,15 +162,57 @@ struct Options {
     control: Option<PathBuf>,
     dv_rpu: Option<PathBuf>,
     dv_live_l1: bool,
+    output: Option<PathBuf>,
+    // --alone: the part stabilized on its own
+    alone: bool,
+    // --alone / --whole: a project's "only within the trim range", whatever it says (as a moment is viewed)
+    alone_project: Option<bool>,
+    preview: Option<Preview>,
+    at: Option<f64>,
+    // --at for a flipbook: its frames' times
+    at_list: Vec<f64>,
+    cover: Option<f64>,
+    link: Option<String>,
+    dates: Option<Dates>,
+    photo: Option<f64>,
+    photo_radius: usize,
+    photo_grain: f32,
+    camera: Option<vs_gyroflow::Camera>,
+    crop: Option<[f64; 4]>,
+    jpeg: bool,
+    quality: u8,
+    sdr_image: Option<String>,
+    live: bool,
 }
 
+// What --preview makes (flipbooks and video previews come later)
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Preview { Still, Flipbook }
+
+// --dates: a time and the time zone it was given in
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Dates { unix: f64, offset_min: i32 }
+
 fn main() {
+    let first = std::env::args().nth(1);
+    if first.as_deref() == Some("--fingerprint") {
+        let mut failed = false;
+        for f in std::env::args().skip(2) {
+            match vs_gyroflow::workspace::fingerprint(Path::new(&f)) {
+                Ok(h) => println!("{h}"),
+                Err(e) => { eprintln!("{f}: {e}"); println!(); failed = true; }
+            }
+        }
+        std::process::exit(if failed { 1 } else { 0 });
+    }
     vs_gyroflow::init_logging();
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
-                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
+                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
-                             dv_rpu: None, dv_live_l1: false };
+                             dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
+                             photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None,
+                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -156,6 +244,27 @@ fn main() {
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
+            "--output" => opts.output = Some(PathBuf::from(value("--output"))),
+            "--alone" => { opts.alone = true; opts.alone_project = Some(true); }
+            "--whole" => { opts.alone = false; opts.alone_project = Some(false); }
+            "--preview" => opts.preview = Some(match value("--preview").as_str() {
+                "still" => Preview::Still,
+                "flipbook" => Preview::Flipbook,
+                other => fail(&format!("unknown preview {other} (still, flipbook)")),
+            }),
+            "--at" => {
+                opts.at_list = value("--at").split(',').filter(|t| !t.trim().is_empty()).map(|t| parse_time(t.trim())).collect();
+                opts.at = opts.at_list.first().copied();
+            }
+            "--cover" => opts.cover = Some(parse_time(&value("--cover"))),
+            "--link" => {
+                let v = value("--link");
+                let json: serde_json::Value = serde_json::from_str(&v).unwrap_or_else(|e| fail(&format!("--link: not JSON, {e}")));
+                if !json.is_object() { fail("--link takes a JSON object"); }
+                opts.link = Some(json.to_string());
+            }
+            "--dates" => { let v = value("--dates"); opts.dates = Some(parse_dates(&v).unwrap_or_else(|| fail(&format!("bad date {v} (2026-10-22T15:28:42+02:00)")))); }
+            "--project" => opts.project = Some(PathBuf::from(value("--project"))),
             "--force" => opts.force = true,
             "--interpolation" => opts.interpolation = match value("--interpolation").as_str() {
                 "bilinear" => Interpolation::Bilinear,
@@ -166,6 +275,23 @@ fn main() {
             "--encoder" => opts.encoder = Some(value("--encoder")),
             "--progress" => opts.progress = Progress(Some(PathBuf::from(value("--progress")))),
             "--control" => opts.control = Some(PathBuf::from(value("--control"))),
+            "--photo" => opts.photo = Some(parse_time(&value("--photo"))),
+            "--radius" => opts.photo_radius = value("--radius").parse::<usize>().ok().filter(|r| *r <= vs_gyroflow::still::MAX_RADIUS)
+                .unwrap_or_else(|| fail("--radius takes 0-7")),
+            "--grain" => opts.photo_grain = value("--grain").parse::<f32>().ok().filter(|g| (0.0..=1.0).contains(g))
+                .unwrap_or_else(|| fail("--grain takes 0-1")),
+            "--camera" => opts.camera = Some(vs_gyroflow::Camera::parse(&value("--camera")).unwrap_or_else(|| fail("--camera takes yaw,pitch,roll,zoom"))),
+            "--crop" => opts.crop = Some(value("--crop").split(',').map(|v| v.trim().parse::<f64>().ok()).collect::<Option<Vec<_>>>()
+                .and_then(|v| <[f64; 4]>::try_from(v).ok())
+                .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
+                .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
+            "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
+                v @ ("maker" | "nbcu" | "macos") => v.to_string(),
+                v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
+            }),
+            "--format" => opts.jpeg = match value("--format").as_str() { "jpeg" | "jpg" => true, "heic" => false, f => fail(&format!("unknown format {f} (heic, jpeg)")) },
+            "--quality" => opts.quality = value("--quality").parse::<u8>().ok().filter(|q| (1..=100).contains(q)).unwrap_or_else(|| fail("--quality takes 1-100")),
+            "--live" => opts.live = true,
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
             "-h" | "--help" => { println!("{USAGE}"); return; }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
@@ -173,13 +299,24 @@ fn main() {
         }
     }
     if files.is_empty() { fail(USAGE); }
+    if opts.project.is_some() && files.len() > 1 { fail("--project is for one video"); }
+    if opts.output.is_some() && files.len() > 1 { fail("--output is for one video"); }
+    if opts.preview.is_none() && (opts.at.is_some() || opts.dates.is_some() || opts.cover.is_some()) { fail("--at, --cover and --dates are for --preview"); }
+    if opts.cover.is_some() && opts.preview != Some(Preview::Flipbook) { fail("--cover is for a flipbook: a still's cover is its frame"); }
+    if opts.preview.is_some() && (opts.prores || opts.dv_rpu.is_some()) { fail("a preview is H.264: not with --prores or --dv-rpu"); }
+    if let Some(p) = opts.project.as_ref().filter(|p| !p.is_file()) { fail(&format!("no Gyroflow project {}", p.display())); }
     if let (Some(f), Some(t)) = (opts.from, opts.to) { if t <= f { fail("--to must be after --from"); } }
 
     // The pid first: a player stops or reprioritizes it by it, from the start
     opts.progress.write(serde_json::json!({ "pid": std::process::id() }));
     let mut failed = 0;
+    let link = opts.link.clone();
     for file in &files {
-        match export(file, &opts) {
+        // The original's fingerprint in its link, to find it again once it's moved (workspace::fingerprint)
+        opts.link = link.as_deref().map(|l| vs_gyroflow::workspace::with_fingerprint(l, Path::new(file)));
+        let outcome = if let Some(t) = opts.photo { photo(file, &opts, t) }
+            else if opts.preview == Some(Preview::Flipbook) { flipbook(file, &opts) } else { export(file, &opts, None) };
+        match outcome {
             Ok(Outcome::Done(out)) => eprintln!("  -> {}", out.display()),
             Ok(Outcome::Skipped(why)) => eprintln!("{}: skipped, {why}", file_name(file)),
             Err(_) if stopped() => {
@@ -266,6 +403,106 @@ fn parse_time(s: &str) -> f64 {
         .unwrap_or_else(|_| fail(&format!("bad time {s} (seconds, or m:ss)")))
 }
 
+// Days since 1970-01-01 of a date in the proleptic Gregorian calendar, and back (Howard Hinnant's algorithms)
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468
+}
+
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+// The zone a DJI clip was recorded in, minutes from UTC: its name is the camera's local time
+// (DJI_20261024094541_0093_D), its creation_time UTC (the workspace plugin's moments.lua does the same)
+fn zone_of_name(stem: &str, created: f64) -> Option<i32> {
+    let d = stem.strip_prefix("DJI_")?.get(..14)?;
+    if !d.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let n = |a: usize, b: usize| d[a..b].parse::<i64>().unwrap();
+    let local = (days_from_civil(n(0, 4), n(4, 6), n(6, 8)) * 86400 + n(8, 10) * 3600 + n(10, 12) * 60 + n(12, 14)) as f64;
+    let offset = ((local - created) / 900.0).round() as i32 * 15;
+    (offset.abs() <= 14 * 60).then_some(offset)
+}
+
+// --dates: 2026-10-22T15:28:42[.123](Z|+02:00|+0200)
+fn parse_dates(s: &str) -> Option<Dates> {
+    let (date, time) = s.split_once(['T', ' '])?;
+    let mut d = date.splitn(3, '-').map(|x| x.parse::<i64>().ok());
+    let (y, mo, da) = (d.next()??, d.next()??, d.next()??);
+    let (clock, offset_min) = if let Some(c) = time.strip_suffix(['Z', 'z']) { (c, 0) } else {
+        let at = time.rfind(['+', '-'])?;
+        let (c, zone) = time.split_at(at);
+        let sign = if zone.starts_with('-') { -1 } else { 1 };
+        let digits: String = zone[1..].chars().filter(|c| *c != ':').collect();
+        if digits.len() != 4 { return None; }
+        let (h, m) = (digits[..2].parse::<i32>().ok()?, digits[2..].parse::<i32>().ok()?);
+        (c, sign * (h * 60 + m))
+    };
+    let mut t = clock.splitn(3, ':');
+    let (h, mi, sec) = (t.next()?.parse::<i64>().ok()?, t.next()?.parse::<i64>().ok()?, t.next()?.parse::<f64>().ok()?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || !(0..24).contains(&h) || !(0..60).contains(&mi) || !(0.0..61.0).contains(&sec) { return None; }
+    let local = (days_from_civil(y, mo, da) * 86400 + h * 3600 + mi * 60) as f64 + sec;
+    Some(Dates { unix: local - offset_min as f64 * 60.0, offset_min })
+}
+
+impl Dates {
+    // The time in its zone, or in UTC: (y, m, d, h, min, s, ms)
+    fn fields(&self, offset_min: i32) -> (i64, i64, i64, i64, i64, i64, i64) {
+        let ms = ((self.unix + offset_min as f64 * 60.0) * 1000.0).round() as i64;
+        let (secs, ms) = (ms.div_euclid(1000), ms.rem_euclid(1000));
+        let (y, m, d) = civil_from_days(secs.div_euclid(86400));
+        let s = secs.rem_euclid(86400);
+        (y, m, d, s / 3600, s / 60 % 60, s % 60, ms)
+    }
+    // The MP4's creation_time, for ffmpeg: UTC
+    fn utc(&self) -> String {
+        let (y, m, d, h, mi, s, ms) = self.fields(0);
+        format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{ms:03}000Z")
+    }
+    // QuickTime's creation date, as Apple's cameras write it: local time and its offset
+    fn quicktime(&self) -> String {
+        let (y, m, d, h, mi, s, _) = self.fields(self.offset_min);
+        let o = self.offset_min.abs();
+        format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}{}{:02}{:02}", if self.offset_min < 0 { '-' } else { '+' }, o / 60, o % 60)
+    }
+    fn system_time(&self) -> std::time::SystemTime {
+        let d = std::time::Duration::from_secs_f64(self.unix.abs());
+        if self.unix >= 0.0 { std::time::UNIX_EPOCH + d } else { std::time::UNIX_EPOCH - d }
+    }
+}
+
+// The Finder's own attributes of a file: its tags (and their colors), its label, its comment. A file replaced
+// (--force: a moment updated, an export made again) keeps them, as it would if edited in place
+#[cfg(target_os = "macos")]
+const FINDER_ATTRIBUTES: &[&str] = &["com.apple.metadata:_kMDItemUserTags", "com.apple.FinderInfo", "com.apple.metadata:kMDItemFinderComment"];
+
+#[cfg(target_os = "macos")]
+fn copy_finder_attributes(from: &Path, to: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let (Ok(from), Ok(to)) = (std::ffi::CString::new(from.as_os_str().as_bytes()), std::ffi::CString::new(to.as_os_str().as_bytes())) else { return };
+    for name in FINDER_ATTRIBUTES {
+        let name = std::ffi::CString::new(*name).unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let n = unsafe { libc::getxattr(from.as_ptr(), name.as_ptr(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0, 0) };
+        if n <= 0 { continue; }
+        unsafe { libc::setxattr(to.as_ptr(), name.as_ptr(), buf.as_ptr() as *const libc::c_void, n as usize, 0, 0); }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_finder_attributes(_from: &Path, _to: &Path) {}
+
 fn file_name(path: &str) -> String {
     Path::new(path).file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string())
 }
@@ -297,13 +534,14 @@ fn plugin_file(plugin: &str, name: &str) -> PathBuf {
     here.unwrap_or_else(|| mpv_dir().join("scripts")).join(plugin).join(name)
 }
 
-fn find_source(path: &Path) -> Result<Source, String> {
+// `project`: the one given (--project), else the video's own, as the workspace plugin finds it
+fn find_source(path: &Path, project: Option<&Path>) -> Result<Source, String> {
     let s = path.to_string_lossy().to_string();
-    let base = path.with_extension("");
-    for sidecar in [base.with_extension("gyroflow"), PathBuf::from(format!("{s}.gyroflow"))] {
-        if sidecar.is_file() {
-            return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project" });
-        }
+    if let Some(p) = project {
+        return Ok(Source { project: p.to_string_lossy().to_string(), preset: None, label: "project" });
+    }
+    if let Some(sidecar) = vs_gyroflow::workspace::gyroflow_project(path) {
+        return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project" });
     }
     let info = probe::probe(&s)?;
     match info["mode"].as_str() {
@@ -323,6 +561,8 @@ struct VideoInfo {
     duration: f64,
     bit_rate: Option<u64>,
     full_range: bool,
+    // The format's creation_time (UTC)
+    created: Option<String>,
     // Color tags, ffmpeg names
     primaries: Option<String>,
     transfer: Option<String>,
@@ -331,7 +571,7 @@ struct VideoInfo {
 
 fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
     let out = ffmpeg_command("ffprobe").args(["-v", "error", "-select_streams", "v:0", "-show_entries",
-        "stream=width,height,r_frame_rate,nb_frames,duration,bit_rate,color_range,color_primaries,color_transfer,color_space:format=duration",
+        "stream=width,height,r_frame_rate,nb_frames,duration,bit_rate,color_range,color_primaries,color_transfer,color_space:format=duration:format_tags=creation_time",
         "-of", "json"]).arg(path).output().map_err(|e| format!("ffprobe: {e}"))?;
     if !out.status.success() { return Err(format!("ffprobe: {}", String::from_utf8_lossy(&out.stderr).trim())); }
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
@@ -350,6 +590,7 @@ fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
         duration,
         bit_rate: num(&st["bit_rate"]).map(|x| x as u64),
         full_range: st["color_range"].as_str() == Some("pc"),
+        created: json["format"]["tags"]["creation_time"].as_str().map(str::to_string),
         primaries: tag("color_primaries"),
         transfer: tag("color_transfer"),
         matrix: tag("color_space"),
@@ -447,13 +688,13 @@ fn hwaccel_works(path: &Path) -> bool {
         .status().is_ok_and(|s| s.success())
 }
 
-fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
+fn pick_encoder(opts: &Options, prores: bool) -> Result<Encoder, String> {
     static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    if let Some(name) = &opts.encoder { return Ok(encoder(name, opts.prores)); }
+    if let Some(name) = &opts.encoder { return Ok(encoder(name, prores)); }
     if cfg!(target_os = "macos") {
-        return Ok(encoder(if opts.prores { "prores_videotoolbox" } else { "hevc_videotoolbox" }, opts.prores));
+        return Ok(encoder(if prores { "prores_videotoolbox" } else { "hevc_videotoolbox" }, prores));
     }
-    if opts.prores { return Ok(encoder("prores_ks", true)); }
+    if prores { return Ok(encoder("prores_ks", true)); }
     let candidates: &[&str] = if cfg!(windows) { &["hevc_nvenc", "hevc_qsv", "hevc_amf", "libx265"] }
                               else { &["hevc_nvenc", "hevc_vaapi", "hevc_qsv", "libx265"] };
     let picked = PICKED.get_or_init(|| candidates.iter().find(|&&n| encoder_works(&encoder(n, false))).map(|n| n.to_string()));
@@ -461,6 +702,80 @@ fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
         Some(name) => Ok(encoder(name, false)),
         None => Err("ffmpeg has no HEVC encoder that works here (hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265)".into()),
     }
+}
+
+// Where an export goes by default: its project's _Exports/ (docs/moments-and-workspaces.md), else stabilized/ next to
+// the video. A project is never made here: the player initializes one where its user chooses
+fn default_out_dir(video: &Path) -> PathBuf {
+    match vs_gyroflow::workspace::project_root(video) {
+        Some(root) => root.join("_Exports"),
+        None => video.parent().unwrap_or(Path::new(".")).join("stabilized"),
+    }
+}
+
+// A preview's H.264 encoder: x264 first, which spends next to nothing on a frame repeated (some 40 bytes a frame,
+// VideoToolbox some KB), then the hardware ones. One keyframe: the first frame is most of the file (100-200 KB at
+// 960x540 for a camera's frame, its noise included), and a keyframe every 10 s, x264's default, made it 1 MB for 30 s
+fn pick_h264() -> Result<Encoder, String> {
+    static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let candidates = ["libx264", "h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"];
+    let picked = PICKED.get_or_init(|| candidates.iter().copied()
+        .filter(|n| *n != "h264_videotoolbox" || cfg!(target_os = "macos"))
+        .find(|n| encoder_works(&h264(n))).map(str::to_string));
+    picked.as_deref().map(h264).ok_or_else(|| format!("ffmpeg has no H.264 encoder that works here ({})", candidates.join(", ")))
+}
+
+fn h264(name: &str) -> Encoder {
+    let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    // For the first video stream only: the cover art is the second, copied
+    let args = match name {
+        "libx264" => v(&["-preset:v:0", "medium", "-crf:v:0", "26", "-g:v:0", "100000", "-profile:v:0", "high"]),
+        _ => v(&["-b:v:0", "150k", "-g:v:0", "100000"]),
+    };
+    Encoder { name: name.to_string(), global: vec![], args, pix_fmt: "yuv420p", upload: "" }
+}
+
+// The size of a preview: the longer side 960 at most, even
+fn preview_size(w: usize, h: usize) -> (usize, usize) {
+    let scale = (960.0 / w.max(h) as f64).min(1.0);
+    let even = |x: f64| ((x / 2.0).round() as usize * 2).max(2);
+    (even(w as f64 * scale), even(h as f64 * scale))
+}
+
+// A preview's files on the way, removed with it: the frame (8-bit YUV, the preview's size) and the cover (JPEG)
+struct PreviewFiles { frame: TempFile, cover: TempFile, size: (usize, usize) }
+
+// The preview's MP4 from its frame: held for `length` seconds, the cover art its JPEG, the dates of --dates, no
+// audio and none of the video's metadata; then its keys (the link, Photos' date) added in moov/meta
+// `frames`: how many are in files.frame; one is held for `length` seconds, several play at 2 a second
+// `dates`: the file's (--dates, or a clip's own); QuickTime's creation date only with its zone known
+fn write_preview(files: &PreviewFiles, frames: usize, length: f64, tags: &[String], out: &Path, opts: &Options,
+                 dates: Option<(Dates, bool)>) -> Result<(), String> {
+    let enc = pick_h264()?;
+    let (pw, ph) = files.size;
+    let setparams = format!("setparams=color_primaries={}:color_trc={}:colorspace={}:range=tv", tags[0], tags[1], tags[2]);
+    let mut cmd = ffmpeg_command("ffmpeg");
+    cmd.args(["-nostdin", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", &format!("{pw}x{ph}"),
+              "-framerate", if frames > 1 { "2" } else { "10" }, "-i"])
+        .arg(&files.frame.0).arg("-i").arg(&files.cover.0);
+    if frames > 1 {
+        cmd.args(["-filter_complex", &format!("[0]{setparams}[v]"), "-map", "[v]", "-map", "1", "-frames:v:0", &frames.to_string()]);
+    } else {
+        cmd.args(["-filter_complex", &format!("[0]loop=loop=-1:size=1,{setparams}[v]"), "-map", "[v]", "-map", "1", "-t", &format!("{:.3}", length.max(0.04))]);
+    }
+    cmd.args(["-c:v:0", &enc.name]).args(&enc.args)
+        .args(["-c:v:1", "copy", "-disposition:v:1", "attached_pic", "-map_metadata", "-1",
+               "-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", "tv"]);
+    if let Some((d, _)) = &dates { cmd.args(["-metadata", &format!("creation_time={}", d.utc())]); }
+    cmd.args(["-movflags", "+faststart", "-f", "mp4"]).arg(out).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let result = cmd.output().map_err(|e| format!("ffmpeg: {e}"))?;
+    if !result.status.success() { return Err(format!("the preview: {}", String::from_utf8_lossy(&result.stderr).trim())); }
+    let quicktime = dates.filter(|(_, zoned)| *zoned).map(|(d, _)| d.quicktime());
+    let mut keys = Vec::new();
+    if let Some(link) = &opts.link { keys.push((vs_gyroflow::mp4meta::LINK_KEY, link.as_str())); }
+    if let Some(q) = &quicktime { keys.push((vs_gyroflow::mp4meta::CREATION_DATE_KEY, q.as_str())); }
+    if !keys.is_empty() { vs_gyroflow::mp4meta::write_keys(out, &keys)?; }
+    Ok(())
 }
 
 // NBCUniversal's HLG -> SDR conversion (Type III), in the dlogm plugin's luts/
@@ -494,33 +809,212 @@ fn filter_path(p: &Path) -> String {
     format!("'{s}'")
 }
 
-fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
+// The low-resolution copy a camera writes beside the clip, quicker to decode and far less to read from a NAS:
+// DJI's <name>.LRF (the same log curve, checked on an Osmo Action 6's D-Log M), GoPro's GL<rest>.LRV for
+// GX<rest>.MP4 or GH<rest>.MP4
+fn lowres(path: &Path) -> Option<PathBuf> {
+    let dir = path.parent()?;
+    let stem = path.file_stem()?.to_string_lossy().to_string();
+    let mut names = vec![format!("{stem}.LRF"), format!("{stem}.lrf")];
+    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) {
+        names.push(format!("GL{}.LRV", &stem[2..]));
+        names.push(format!("GL{}.lrv", &stem[2..]));
+    }
+    names.into_iter().map(|n| dir.join(n)).find(|p| p.is_file())
+}
+
+// A flipbook's times without --at: about 12 through the clip, 10 s apart at least, after its first second
+fn flipbook_times(duration: f64) -> Vec<f64> {
+    if duration <= 1.5 { return vec![duration / 2.0]; }
+    let span = duration - 1.0;
+    let n = ((span / 10.0).floor() as usize).clamp(1, 12);
+    (0..n).map(|i| 1.0 + span * (i as f64 + 0.5) / n as f64).collect()
+}
+
+// --preview flipbook: the clip at a glance (docs/moments-and-workspaces.md, "Clips"). Color only: only keyframes are
+// decoded, one per time, from the low-resolution copy when there is one, through the SDR look of a still
+fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
+    let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
+    let info = ffprobe(&path)?;
+    let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+    let video_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let out_path = opts.output.clone().unwrap_or_else(|| opts.out.clone().unwrap_or(video_dir).join(format!("{stem}.afplink.mp4")));
+    if out_path.exists() && !opts.force {
+        return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
+    }
+    let out_dir = out_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let name = out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+
+    let low = lowres(&path);
+    let source = low.clone().unwrap_or_else(|| path.clone());
+    let src = if low.is_some() { ffprobe(&source)? } else { ffprobe(&path)? };
+    let last = (info.duration - 0.05).max(0.0);
+    let times: Vec<f64> = if opts.at_list.is_empty() { flipbook_times(info.duration) } else { opts.at_list.clone() }
+        .into_iter().map(|t| t.clamp(0.0, last)).collect();
+    let cover_at = opts.cover.unwrap_or(info.duration / 2.0);
+
+    // The look, as a still's: D-Log M by the maker's LUT, another curve through NBCU's, HLG through NBCU's
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    let mut _temp_lut = None;
+    let cube = match curve {
+        Some("dlogm") if !opts.nbcu && lut("dji-dlogm-rec709.cube").is_ok() => Some(lut("dji-dlogm-rec709.cube")?),
+        Some(c) => {
+            let composed = out_dir.join(format!(".{name}.nbcu.cube"));
+            gpu_lut::compose_nbcu(&lut(&format!("{c}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+            _temp_lut = Some(TempFile(composed.clone()));
+            Some(composed)
+        }
+        None if info.transfer.as_deref() == Some("arib-std-b67") => Some(lut(NBCU_HLG)?),
+        None => None,
+    };
+    let (pw, ph) = preview_size(src.width, src.height);
+    let in_range = if src.full_range { "pc" } else { "tv" };
+    let look = match &cube {
+        Some(c) => format!(",scale=in_color_matrix={}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
+                            scale=out_color_matrix=bt709:out_range=tv", yuv_matrix(src.matrix.as_deref()), filter_path(c)),
+        None => String::new(),
+    };
+    let tags: Vec<String> = if cube.is_some() { vec!["bt709".into(), "bt709".into(), "bt709".into()] } else {
+        vec![src.primaries.clone().unwrap_or_else(|| "bt709".into()), src.transfer.clone().unwrap_or_else(|| "bt709".into()),
+             src.matrix.clone().unwrap_or_else(|| "bt709".into())]
+    };
+    // Smaller first: the LUT on 960 pixels, not 4K
+    let vf = format!("scale={pw}:{ph}:flags=lanczos{look},format=yuv420p");
+    let size = pw * ph * 3 / 2;
+    eprintln!("{}: flipbook of {} frames{} · {}", file_name(file), times.len(),
+              low.as_ref().map_or(String::new(), |l| format!(" from {}", l.file_name().unwrap_or_default().to_string_lossy())),
+              if cube.is_some() { "SDR" } else { "colors as recorded" });
+
+    let started = Instant::now();
+    let mut frames = Vec::with_capacity(size * times.len());
+    let (mut count, mut cover_frame, mut cover_gap) = (0usize, 0usize, f64::MAX);
+    // The keyframe at or before t; a clip shorter than its keyframe interval (a second or less) has none after its
+    // first frame there, which -skip_frame nokey then skips: the frame at t is decoded the usual way instead
+    let decode = |t: f64, keyframes: bool| -> Result<std::process::Output, String> {
+        let mut cmd = ffmpeg_command("ffmpeg");
+        cmd.args(["-nostdin", "-v", "error"]);
+        if keyframes { cmd.args(["-skip_frame", "nokey", "-noaccurate_seek"]); }
+        cmd.args(["-ss", &format!("{t:.3}"), "-i"]).arg(&source)
+            .args(["-map", "0:v:0", "-frames:v", "1", "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"])
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+        if BACKGROUND.load(Relaxed) { set_background(&[child.id()], true); }
+        child.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))
+    };
+    for t in &times {
+        if stopped() { return Err("cancelled".into()); }
+        if let Some(c) = &opts.control { read_control(c); }
+        let mut out = decode(*t, true)?;
+        if out.stdout.len() < size { out = decode(*t, false)?; }
+        if out.stdout.len() < size {
+            eprintln!("  no frame at {t:.1} s: {}", String::from_utf8_lossy(&out.stderr).trim());
+            continue;
+        }
+        frames.extend_from_slice(&out.stdout[..size]);
+        if (t - cover_at).abs() < cover_gap { cover_gap = (t - cover_at).abs(); cover_frame = count; }
+        count += 1;
+    }
+    if count == 0 { return Err("no frames decoded".into()); }
+
+    let files = PreviewFiles { frame: TempFile(out_dir.join(format!(".{name}.frames.yuv"))),
+                               cover: TempFile(out_dir.join(format!(".{name}.cover.jpg"))), size: (pw, ph) };
+    std::fs::write(&files.frame.0, &frames).map_err(|e| format!("{}: {e}", files.frame.0.display()))?;
+    // The cover: JPEG's BT.601 and full range
+    let mut cover = ffmpeg_command("ffmpeg");
+    cover.args(["-nostdin", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", &format!("{pw}x{ph}"),
+                "-color_range", "tv", "-colorspace", &tags[2], "-i", "-",
+                "-vf", "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p", "-frames:v", "1", "-q:v", "5", "-update", "1", "-f", "image2"])
+        .arg(&files.cover.0).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = cover.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+    let _ = child.stdin.take().unwrap().write_all(&frames[cover_frame * size..(cover_frame + 1) * size]);
+    let out = child.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))?;
+    if !out.status.success() { return Err(format!("the cover: {}", String::from_utf8_lossy(&out.stderr).trim())); }
+
+    let tmp_path = out_dir.join(format!(".{name}.partial.mp4"));
+    // The clip's own date without --dates: its creation_time, in the zone a DJI name says
+    let dates = opts.dates.map(|d| (d, true)).or_else(|| {
+        let mut d = parse_dates(info.created.as_deref()?)?;
+        match zone_of_name(&stem, d.unix) { Some(z) => { d.offset_min = z; Some((d, true)) } None => Some((d, false)) }
+    });
+    if let Err(e) = write_preview(&files, count, 0.0, &tags, &tmp_path, opts, dates) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    let modified = dates.map(|(d, _)| d.system_time()).or_else(|| std::fs::metadata(&path).and_then(|m| m.modified()).ok());
+    if let (Some(modified), Ok(f)) = (modified, std::fs::File::options().write(true).open(&tmp_path)) { let _ = f.set_modified(modified); }
+    if out_path.exists() { copy_finder_attributes(&out_path, &tmp_path); }
+    std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
+    eprintln!("  {count} frames in {:.1} s", started.elapsed().as_secs_f64());
+    Ok(Outcome::Done(out_path))
+}
+
+/// A photo's motion (a Live Photo's or Motion Photo's video): a part of the video, written to `out` as it'd export,
+/// at most `max_side` wide or high, `max_fps` frames a second (every second, third… frame: `frame_step`) and
+/// `bits_per_pixel` a pixel of each frame, as an MP4 (`mp4`), Dolby Vision as the look has it or not (`dv`)
+struct Part {
+    from: f64,
+    to: f64,
+    out: PathBuf,
+    max_side: usize,
+    bits_per_pixel: f64,
+    max_fps: f64,
+    mp4: bool,
+    dv: bool,
+}
+
+fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, String> {
+    // A photo's part: its range, not --from/--to
+    let (opt_from, opt_to) = part.map_or((opts.from, opts.to), |p| (Some(p.from), Some(p.to)));
+    let dv_rpu = if part.is_some_and(|p| !p.dv) { None } else { opts.dv_rpu.as_ref() };
+    let prores = opts.prores && part.is_none();
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
-    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path) };
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref()) };
     let source = match (source, curve) {
         (Ok(s), _) => Some(s),
         (Err(_), Some(_)) => None,
+        // A preview shows the clip as it plays, whatever there is to change
+        (Err(_), None) if opts.preview.is_some() => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
     let info = ffprobe(&path)?;
 
-    let out_dir = opts.out.clone().unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("stabilized"));
+    let preview = opts.preview;
+    let video_dir = path.parent().unwrap_or(Path::new("."));
+    let out_dir = match (&opts.output, &opts.out) {
+        (Some(file), _) => file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf(),
+        (None, Some(dir)) => dir.clone(),
+        (None, None) if preview.is_some() => video_dir.to_path_buf(),
+        // A photo's motion: next to the photo
+        (None, None) if part.is_some() => part.unwrap().out.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        (None, None) => default_out_dir(&path),
+    };
     let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     // A part of the video gets its range in the name, so it doesn't replace the whole one
-    let range = match (opts.from, opts.to) {
+    let range = match (opt_from, opt_to) {
         (None, None) => String::new(),
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
-    let stem = format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" },
-                       if opts.dv_rpu.is_some() { "_dv" } else { "" });
-    let out_path = out_dir.join(format!("{stem}.mov"));
-    if out_path.exists() && !opts.force {
+    // A preview is a link to its original: .afplink.mp4, which still opens as an MP4
+    let stem = if preview.is_some() { format!("{stem}.afplink") } else {
+        format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" }, if dv_rpu.is_some() { "_dv" } else { "" })
+    };
+    let ext = if preview.is_some() { "mp4" } else { "mov" };
+    let out_path = match part {
+        Some(p) => p.out.clone(),
+        None => opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}.{ext}"))),
+    };
+    let stem = out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or(stem);
+    if out_path.exists() && !opts.force && part.is_none() {
         return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
     }
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let tmp_path = out_dir.join(format!(".{stem}.partial.mov"));
+    let tmp_path = match part {
+        Some(p) => p.out.with_file_name(format!(".{}.partial", p.out.file_name().unwrap_or_default().to_string_lossy())),
+        None => out_dir.join(format!(".{stem}.partial.{ext}")),
+    };
 
     // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
     // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
@@ -531,14 +1025,18 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
     let mut _temp_lut = None; // kept until the export ends
+    // A preview is in SDR: D-Log M by the maker's LUT when it's there, everything else through NBCU's conversion
+    let maker_sdr = curve == Some("dlogm") && !opts.nbcu && (opts.sdr || preview.is_some())
+        && (preview.is_none() || lut("dji-dlogm-rec709.cube").is_ok());
+    let nbcu = opts.nbcu || (preview.is_some() && !maker_sdr);
     let (graph, tags, color_label) = if let Some(curve) = curve {
         let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
-        let (cube, matrix, primaries, transfer, label) = if opts.nbcu {
+        let (cube, matrix, primaries, transfer, label) = if nbcu {
             let composed = out_dir.join(format!(".{stem}.nbcu.cube"));
             gpu_lut::compose_nbcu(&lut(&format!("{curve}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
             _temp_lut = Some(TempFile(composed.clone()));
             (composed, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (NBCU)"))
-        } else if opts.sdr && curve == "dlogm" {
+        } else if maker_sdr {
             (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (DJI's LUT)"))
         } else {
             let no_sdr = if opts.sdr { " (no Rec.709 LUT for it)" } else { "" };
@@ -549,6 +1047,13 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         lut_job = Some((cube, matrix, graph));
         let space = if matrix == "bt2020" { "bt2020nc" } else { "bt709" };
         (String::new(), vec![primaries.to_string(), transfer.to_string(), space.to_string(), "tv".to_string()], label)
+    } else if preview.is_some() && info.transfer.as_deref() == Some("arib-std-b67") {
+        // HLG that isn't log (a phone's, a camera's HLG mode): NBCU's HLG -> SDR on its own
+        let cube = lut(NBCU_HLG)?;
+        let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
+                             scale=out_color_matrix=bt709:out_range=tv", filter_path(&cube));
+        lut_job = Some((cube, "bt709", graph));
+        (String::new(), vec!["bt709".to_string(), "bt709".to_string(), "bt709".to_string(), "tv".to_string()], "HLG -> Rec.709 (NBCU)".to_string())
     } else {
         let tags = vec![
             info.primaries.clone().unwrap_or_else(|| "bt709".into()),
@@ -560,10 +1065,10 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
 
     // Dolby Vision 8.4: HLG HEVC from VideoToolbox, our RPUs in place of its own
-    let dv_rpus = match &opts.dv_rpu {
+    let dv_rpus = match dv_rpu {
         None => None,
         Some(file) => {
-            if !cfg!(target_os = "macos") || opts.prores || tags[1] != "arib-std-b67" {
+            if !cfg!(target_os = "macos") || prores || tags[1] != "arib-std-b67" {
                 return Err("--dv-rpu: a Dolby Vision export is HLG in HEVC, from VideoToolbox (macOS)".into());
             }
             Some(dv_mux::read_rpu_file(file)?)
@@ -571,11 +1076,26 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     };
 
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
-    let from = opts.from.unwrap_or(0.0).max(0.0);
-    let to = opts.to.unwrap_or(info.duration).min(info.duration.max(from));
-    // With -ss before -i, ffmpeg starts at the first frame at or after `from`
-    let first_frame = (from * fps - 1e-6).ceil().max(0.0) as u64;
-    let total_frames = if opts.from.is_some() || opts.to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) };
+    let from = opt_from.unwrap_or(0.0).max(0.0);
+    let to = opt_to.unwrap_or(info.duration).min(info.duration.max(from));
+    // A still: the frame at --at, else the middle
+    let start = match preview {
+        Some(_) => opts.at.unwrap_or((from + to) / 2.0).clamp(0.0, (info.duration - 1.0 / fps).max(0.0)),
+        None => from,
+    };
+    // With -ss before -i, ffmpeg starts at the first frame at or after `start`
+    let first_frame = (start * fps - 1e-6).ceil().max(0.0) as u64;
+    // Where the decoder seeks: a quarter of a frame before that frame. ffmpeg's raw output keeps a constant frame
+    // rate, and a first frame much after the seek point (half a frame) has it repeat one to fill the gap: every
+    // frame after it then got the motion data of the one before, and the stabilized picture shook (its roll most)
+    let seek = (first_frame as f64 - 0.25).max(0.0) / fps;
+    // The audio from the first frame's time, with it
+    let video_start = first_frame as f64 / fps;
+    // A part at a lower frame rate: every `step`th frame from the first, the others not even rendered
+    let step = part.map_or(1, |p| frame_step(fps, p.max_fps));
+    let out_rate = (info.fps.0, info.fps.1 * step);
+    let total_frames = if preview.is_some() { 1 }
+        else { (if opt_from.is_some() || opt_to.is_some() { ((to - from) * fps).round().max(1.0) as u64 } else { info.frames.max(1) }).div_ceil(step) };
 
     // The engine, as the plugin sets it up for mpv: 10-bit YUV 4:2:0, the project's output size. Color only: none,
     // the frames go to the LUT as they are decoded
@@ -585,20 +1105,42 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let engine = match &source {
         // All of the motion data before it starts (look-ahead 0): an export has the time
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
-                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
+                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers,
+                                                   // --alone: --from to --to's own motion, a photo's motion too
+                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project)?)),
         None => None,
     };
     // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to
     // fill: off then, which saves the mask rendered for each frame and gives the same frames
+    // fill: off then, which saves the mask rendered for each frame and gives the same frames. A turned or zoomed out
+    // camera (--camera) may leave edges where the view itself never does
+    let camera = opts.camera.unwrap_or_default();
     let edges = match &engine {
-        Some(e) if e.uncovered_frames.0 > 0 => opts.edges,
+        Some(e) if e.uncovered_frames.0 > 0 || !camera.is_default() => opts.edges,
         _ => EdgeMode::Off,
     };
     if let Some(e) = &engine {
         let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
         e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
+        e.edges.set_camera(camera);
     }
-    let (ow, oh) = engine.as_ref().map_or((w, h), |e| (e.render_size.0 & !1, e.render_size.1 & !1));
+    // Zoomed out, rendered that much bigger, as a photo is
+    let (ow, oh) = engine.as_ref().map_or((w, h), |e| {
+        let s = camera.zoom.clamp(1.0, 2.0);
+        (((e.render_size.0 as f64 * s) as usize) & !1, ((e.render_size.1 as f64 * s) as usize) & !1)
+    });
+    // --crop's part of it, on even pixels, and a part's size at most: cut and scaled by the encoder's ffmpeg
+    let (crop, (fw, fh)) = match (opts.crop, part.map(|p| p.max_side)) {
+        (None, None) => (None, (ow, oh)),
+        (c, max) => {
+            let [cx, cy, cw, ch] = c.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+            let even = |v: f64| (v.round() as usize) & !1;
+            let (x0, y0) = (even(cx * ow as f64).min(ow - 2), even(cy * oh as f64).min(oh - 2));
+            let (cw, ch) = (even(cw * ow as f64).clamp(2, ow - x0), even(ch * oh as f64).clamp(2, oh - y0));
+            let k = max.map_or(1.0, |m| (m as f64 / cw.max(ch) as f64).min(1.0));
+            (Some((x0, y0, cw, ch)), (even(cw as f64 * k).max(2), even(ch as f64 * k).max(2)))
+        }
+    };
 
     let mut graph = graph;
     let gpu_lut = match lut_job {
@@ -626,11 +1168,12 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         _ => {}
     }
     if edges != EdgeMode::Off { source_label += &format!(", edges {}", format!("{edges:?}").to_lowercase()); }
-    eprintln!("{}: {color_label} · {source_label} · {}x{} -> {ow}x{oh} · {duration_label}", file_name(file), w, h);
+    eprintln!("{}: {color_label} · {source_label} · {}x{} -> {fw}x{fh} · {duration_label}", file_name(file), w, h);
 
     if stopped() { return Err("cancelled".into()); }
-    let enc = pick_encoder(opts)?;
-    if !cfg!(target_os = "macos") { eprintln!("  encoder: {}", enc.name); }
+    // A preview's frame goes to ffmpeg as an export's would, then to the preview's encoder (write_preview)
+    let enc = if preview.is_some() { encoder("", false) } else { pick_encoder(opts, prores)? };
+    if !cfg!(target_os = "macos") && preview.is_none() { eprintln!("  encoder: {}", enc.name); }
     if dv_rpus.is_some() && enc.name != "hevc_videotoolbox" { return Err(format!("--dv-rpu: needs hevc_videotoolbox, not {}", enc.name)); }
 
     // Decoder: raw 10-bit planar frames on stdout. Elsewhere than on macOS, whatever hardware decoder ffmpeg finds,
@@ -639,28 +1182,35 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let mut dec_cmd = ffmpeg_command("ffmpeg");
     dec_cmd.args(["-nostdin", "-v", "error"]);
     if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
-    if opts.from.is_some() { dec_cmd.args(["-ss", &format!("{from:.6}")]); }
-    if opts.to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
-    dec_cmd.arg("-i").arg(&path)
-        .args(["-map", "0:v:0", "-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
+    if preview.is_some() || opt_from.is_some() { dec_cmd.args(["-ss", &format!("{seek:.6}")]); }
+    if preview.is_none() && opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
+    dec_cmd.arg("-i").arg(&path).args(["-map", "0:v:0"]);
+    if preview.is_some() { dec_cmd.args(["-frames:v", "1"]); }
+    dec_cmd.args(["-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
 
     // Encoder: the stabilized frames, audio and metadata from the source
-    let bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (ow * oh) as f64 / (w * h) as f64;
+    // A photo's motion: the first audio track alone (a Motion Photo has one at most; DJI's cameras record two)
+    let audio = if part.is_some() { "1:a:0?" } else { "1:a?" };
+    let mut bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (fw * fh) as f64 / (w * h) as f64;
+    // A photo's motion: no more than a phone gives its own
+    if let Some(p) = part { bit_rate = bit_rate.min(p.bits_per_pixel * (fw * fh) as f64 * fps / step as f64); }
     let mut enc_cmd = ffmpeg_command("ffmpeg");
     enc_cmd.args(["-nostdin", "-v", "error", "-y"]).args(&enc.global);
     enc_cmd.args([
                   "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", &format!("{ow}x{oh}"),
-                  "-framerate", &format!("{}/{}", info.fps.0, info.fps.1),
+                  "-framerate", &format!("{}/{}", out_rate.0, out_rate.1),
                   "-color_range", in_range, "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                   "-i", "-"]);
-    // The audio and metadata from the source; for Dolby Vision, the muxer takes them
-    if dv_rpus.is_none() {
-        if opts.from.is_some() { enc_cmd.args(["-ss", &format!("{from:.6}")]); }
-        if opts.to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
+    // The audio and metadata from the source; for Dolby Vision, the muxer takes them; a preview has neither
+    let mut preview_files = None;
+    if preview.is_some() {
+    } else if dv_rpus.is_none() {
+        if opt_from.is_some() { enc_cmd.args(["-ss", &format!("{video_start:.6}")]); }
+        if opt_to.is_some() { enc_cmd.args(["-to", &format!("{to:.6}")]); }
         enc_cmd.arg("-i").arg(&path)
-            .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c:a", "copy"]);
+            .args(["-map", "0:v", "-map", audio, "-map_metadata", "1", "-c:a", "copy"]);
     } else {
         enc_cmd.args(["-map", "0:v"]);
     }
@@ -668,18 +1218,43 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     // The frames carry the input's BT.709 tags through the filters, and the encoder writes the frames' tags, not
     // the -color_* options, so the target's are set on the frames
     let setparams = format!("setparams=color_primaries={}:color_trc={}:colorspace={}:range={}", tags[0], tags[1], tags[2], tags[3]);
-    let graph = if graph.is_empty() { format!("format={pix_fmt},{setparams}") } else { format!("{graph},format={pix_fmt},{setparams}") };
-    enc_cmd.args(["-vf", &format!("{graph}{}", enc.upload)]);
-    enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
-    if opts.prores {
-        enc_cmd.args(["-tag:v", "apch"]);
-    } else {
-        enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
-    }
+    let cut = crop.map(|(x, y, cw, ch)| {
+        let scale = if (fw, fh) != (cw, ch) { format!(",scale={fw}:{fh}:flags=lanczos") } else { String::new() };
+        format!("crop={cw}:{ch}:{x}:{y}{scale},")
+    }).unwrap_or_default();
+    let graph = if graph.is_empty() { format!("{cut}format={pix_fmt},{setparams}") } else { format!("{cut}{graph},format={pix_fmt},{setparams}") };
     let color = ["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]];
-    enc_cmd.args(color);
-    if dv_rpus.is_none() {
-        enc_cmd.args(["-movflags", "+faststart", "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
+    if preview.is_some() {
+        // The frame as an export has it, then at the preview's size in 8 bits: as YUV for its video (write_preview),
+        // and as a JPEG for its cover art (BT.601 and full range, as JPEGs are read)
+        let size = preview_size(fw, fh);
+        let files = PreviewFiles { frame: TempFile(out_dir.join(format!(".{stem}.frame.yuv"))),
+                                   cover: TempFile(out_dir.join(format!(".{stem}.cover.jpg"))), size };
+        enc_cmd.args(["-filter_complex", &format!("[0:v]{graph},scale={}:{}:flags=lanczos,split[a][b];[a]format=yuv420p[f];\
+                                                   [b]scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p[c]", size.0, size.1),
+                      "-map", "[f]", "-frames:v", "1", "-f", "rawvideo"]).arg(&files.frame.0)
+            .args(["-map", "[c]", "-frames:v", "1", "-q:v", "5", "-update", "1", "-f", "image2"]).arg(&files.cover.0)
+            .stdout(Stdio::null());
+        preview_files = Some(files);
+    } else {
+        enc_cmd.args(["-vf", &format!("{graph}{}", enc.upload)]);
+        enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
+        if prores {
+            enc_cmd.args(["-tag:v", "apch"]);
+        } else {
+            enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
+        }
+        enc_cmd.args(color);
+    }
+    // With a link to write: the moov first with room after it (-moov_size, as for Dolby Vision), which the link
+    // then takes in place; else +faststart. Room for every frame's entries in each track (B-frames' ctts, the
+    // audio), as the Dolby Vision export reserves it
+    let moov_size = 512 * 1024 + total_frames * 64;
+    if preview.is_some() {
+    } else if dv_rpus.is_none() && opts.link.is_some() && part.is_none() {
+        enc_cmd.args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
+    } else if dv_rpus.is_none() {
+        enc_cmd.args(["-movflags", "+faststart", "-f", if part.is_some_and(|p| p.mp4) { "mp4" } else { "mov" }]).arg(&tmp_path).stdout(Stdio::null());
     } else {
         // No B-frames: the access units come in display order, the RPUs with them (VideoToolbox writes none anyway)
         enc_cmd.args(["-bf", "0", "-f", "hevc", "-"]).stdout(Stdio::piped());
@@ -699,21 +1274,20 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (l1_tx, l1_rx) = mpsc::channel::<Option<[i32; 3]>>();
     let mut l1_tx = live_l1.then_some(l1_tx);
     if let Some(rpus) = dv_rpus {
-        let moov_size = 256 * 1024 + total_frames * 48;
         let mut mux_cmd = ffmpeg_command("ffmpeg");
         // -r, not the demuxer's -framerate: raw HEVC has no timestamps, and with -framerate they come out wrong
-        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", info.fps.0, info.fps.1), "-i", "-"]);
-        if opts.from.is_some() { mux_cmd.args(["-ss", &format!("{from:.6}")]); }
-        if opts.to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
+        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", out_rate.0, out_rate.1), "-i", "-"]);
+        if opt_from.is_some() { mux_cmd.args(["-ss", &format!("{video_start:.6}")]); }
+        if opt_to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
         mux_cmd.arg("-i").arg(&path)
-            .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c", "copy", "-tag:v", "hvc1"]).args(color)
+            .args(["-map", "0:v", "-map", audio, "-map_metadata", "1", "-c", "copy", "-tag:v", "hvc1"]).args(color)
             .args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(&tmp_path)
             .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
         let mut mux = mux_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
         let mut mux_in = std::io::BufWriter::with_capacity(1 << 20, mux.stdin.take().unwrap());
         let mut enc_out = encoder.stdout.take().unwrap();
         rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
-            let mut injector = RpuInjector::new(rpus, first_frame);
+            let mut injector = RpuInjector::new(rpus, first_frame).step(step);
             if live_l1 { injector = injector.live_l1(l1_rx); }
             let mut buf = vec![0u8; 1 << 20];
             loop {
@@ -737,7 +1311,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (done_tx, done_rx) = mpsc::sync_channel::<(u64, Result<(Vec<u8>, Option<[f64; 3]>), String>)>(in_flight);
     let mut dec_out = decoder.stdout.take().unwrap();
     let reader = std::thread::spawn(move || -> Result<u64, String> {
-        let mut n = 0;
+        // n: the frames written; `read`, decoded (every `step`th of them is written)
+        let (mut n, mut read) = (0, 0u64);
         loop {
             let mut buf = vec![0u8; in_frame];
             match dec_out.read_exact(&mut buf) {
@@ -745,6 +1320,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(n),
                 Err(e) => return Err(format!("reading decoded frames: {e}")),
             }
+            read += 1;
+            if (read - 1) % step != 0 { continue; }
             if frame_tx.send((n, buf)).is_err() { return Ok(n); }
             n += 1;
         }
@@ -762,7 +1339,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
                     Some(engine) => {
                         let mut dst = vec![0u8; out_frame];
                         // Frame times from the start of the file, as Gyroflow and mpv count them
-                        let timestamp_us = (((first_frame + n) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                        let timestamp_us = (((first_frame + n * step) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
                         let mut planes = Vec::with_capacity(3);
                         let (mut so, mut doff) = (0, 0);
                         for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
@@ -871,23 +1448,377 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
             if frames != read { return Err(format!("Dolby Vision: {frames} pictures for {read} frames")); }
             let level = dv_mux::patch_dvvc(&tmp_path, fps)?;
             eprintln!("  Dolby Vision 8.4, level {level}: {} RPUs from {}", frames,
-                      opts.dv_rpu.as_ref().map_or(String::new(), |p| p.display().to_string()));
+                      dv_rpu.map_or(String::new(), |p| p.display().to_string()));
         }
         Ok(read)
     })();
+    // A preview: its MP4 from the frame. An export: its link
+    let result = result.and_then(|read| match (&preview_files, &opts.link) {
+        (Some(files), _) => write_preview(files, 1, (to - from).max(1.0 / fps), &tags, &tmp_path, opts, opts.dates.map(|d| (d, true))).map(|_| read),
+        (None, Some(link)) => vs_gyroflow::mp4meta::write_keys(&tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, link)]).map(|_| read),
+        (None, None) => Ok(read),
+    });
     let frames = match result {
         Ok(f) => f,
         Err(e) => { let _ = std::fs::remove_file(&tmp_path); return Err(e); }
     };
 
-    // The source's dates, so the clip sorts where it was shot
-    if let Ok(meta) = std::fs::metadata(&path) {
-        if let (Ok(modified), Ok(f)) = (meta.modified(), std::fs::File::options().write(true).open(&tmp_path)) {
-            let _ = f.set_modified(modified);
-        }
+    // The source's dates, so the clip sorts where it was shot, or --dates. On a Mac, a modification time before the
+    // file's creation time moves that back too
+    let modified = opts.dates.map(|d| d.system_time()).or_else(|| std::fs::metadata(&path).and_then(|m| m.modified()).ok());
+    if let (Some(modified), Ok(f)) = (modified, std::fs::File::options().write(true).open(&tmp_path)) {
+        let _ = f.set_modified(modified);
     }
+    if out_path.exists() { copy_finder_attributes(&out_path, &tmp_path); }
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
     Ok(Outcome::Done(out_path))
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Photos (--photo): the frame at a time as a still, stabilized as the player shows it (and turned as crop mode has
+// the camera), cleaned up from its neighbours as the player's clean still frame is (still.rs), in the SDR look with
+// the HDR one as a gain map (photo.rs): HEIC through afp-photo on macOS (macos/photo.swift), else an Ultra HDR JPEG
+
+/// When the clip started, local time, as seconds since 1970 counted in local time: from a DJI file's name
+/// (DJI_YYYYMMDDHHMMSS_…, the camera's own clock), else the container's creation time (UTC) in this computer's zone
+fn clip_start_local(path: &Path) -> Option<i64> {
+    let name = path.file_name()?.to_string_lossy().to_string();
+    if let Some(digits) = name.strip_prefix("DJI_").and_then(|r| r.get(..14)).filter(|d| d.bytes().all(|b| b.is_ascii_digit())) {
+        let n = |a: usize, b: usize| digits[a..b].parse::<i64>().ok();
+        return Some(days_from_civil(n(0, 4)?, n(4, 6)?, n(6, 8)?) * 86400 + n(8, 10)? * 3600 + n(10, 12)? * 60 + n(12, 14)?);
+    }
+    let out = ffmpeg_command("ffprobe").args(["-v", "error", "-show_entries", "format_tags=creation_time", "-of", "default=nw=1:nk=1"])
+        .arg(path).output().ok()?;
+    let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let n = |a: usize, b: usize| t.get(a..b)?.parse::<i64>().ok();
+    let utc = days_from_civil(n(0, 4)?, n(5, 7)?, n(8, 10)?) * 86400 + n(11, 13)? * 3600 + n(14, 16)? * 60 + n(17, 19)?;
+    Some(utc + local_offset(utc))
+}
+
+#[cfg(unix)]
+fn local_offset(utc: i64) -> i64 {
+    let t = utc as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() { 0 } else { tm.tm_gmtoff as i64 }
+}
+#[cfg(not(unix))]
+fn local_offset(_utc: i64) -> i64 { 0 }
+
+fn exif_time(local: i64) -> String {
+    let (y, m, d) = civil_from_days(local.div_euclid(86400));
+    let s = local.rem_euclid(86400);
+    format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+// Photos: the project's _Stills (beside its _Exports, docs/moments-and-workspaces.md), else stabilized/ next to the clip
+fn out_dir_for(path: &Path, opts: &Options) -> PathBuf {
+    opts.out.clone().unwrap_or_else(|| match vs_gyroflow::workspace::project_root(path) {
+        Some(root) => root.join("_Stills"),
+        None => path.parent().unwrap_or(Path::new(".")).join("stabilized"),
+    })
+}
+
+/// The HLG rendition as macOS shows it on an SDR screen: afp-photo's Core Image (macos/photo.swift)
+fn macos_sdr(helper: &Path, hdr: &vs_gyroflow::photo::Image, dir: &Path) -> Result<vs_gyroflow::photo::Image, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let id = std::process::id();
+    let (hdr_file, sdr_file) = (TempFile(dir.join(format!(".photo-{id}.hlg.rgb16"))), TempFile(dir.join(format!(".photo-{id}.sdr.rgb16"))));
+    vs_gyroflow::photo::write_rgb16(&hdr_file.0, hdr)?;
+    let out = Command::new(helper).args(["--width", &hdr.width.to_string(), "--height", &hdr.height.to_string()])
+        .arg("--hdr").arg(&hdr_file.0).arg("--sdr-out").arg(&sdr_file.0).output().map_err(|e| format!("afp-photo: {e}"))?;
+    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    vs_gyroflow::photo::read_rgb16(&sdr_file.0, hdr.width, hdr.height)
+}
+
+/// A Live Photo's or Motion Photo's motion: this long around the photo, as an iPhone's, and at most this wide or high
+const LIVE_SECONDS: f64 = 3.0;
+const LIVE_MAX_SIDE: usize = 1920;
+/// Its bit rate: about an iPhone's Live Photo's (1920x1440 at 30 fps in ~8 Mbit/s); 3 s of 1080p60 is ~5 MB
+const LIVE_BITS_PER_PIXEL: f64 = 0.1;
+/// And at most 30 frames a second, as an iPhone's: it's the photo's context, not a video of its own
+const LIVE_MAX_FPS: f64 = 30.0;
+
+/// Every how many frames a part at most `max_fps` takes: 59.94 and 50 fps every 2nd, 120 every 4th, 30 and less all
+fn frame_step(fps: f64, max_fps: f64) -> u64 {
+    (fps / max_fps - 0.01).ceil().max(1.0) as u64
+}
+
+/// A Live Photo's content identifier: a random UUID (version 4), as Apple's cameras write it
+fn content_id() -> Result<String, String> {
+    let mut b = [0u8; 16];
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).map_err(|e| format!("a random UUID: {e}"))?;
+    b[6] = (b[6] & 0x0F) | 0x40;
+    b[8] = (b[8] & 0x3F) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02X}")).collect();
+    Ok(format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]))
+}
+
+fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
+    use vs_gyroflow::photo::{ self as ph, Cube };
+    use vs_gyroflow::still;
+    let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref()).ok() };
+    let info = ffprobe(&path)?;
+    if info.transfer.as_deref() == Some("smpte2084") && curve.is_none() {
+        return Err("PQ video: no photo of it yet (HLG, log and SDR video only)".into());
+    }
+    let fps = info.fps.0 as f64 / info.fps.1 as f64;
+    let total = info.frames.max(1);
+    // The frame mpv shows at `t` (its time-pos)
+    let n = ((t * fps).round().max(0.0) as u64).min(total - 1);
+    let r = opts.photo_radius as u64;
+    let (w, h) = (info.width & !1, info.height & !1);
+    let camera = opts.camera.unwrap_or_default();
+
+    let engine = match &source {
+        Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
+                                     (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
+                                     // --alone: the part (--from, --to) stabilized by its own motion, as a moment plays
+                                     opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project)?),
+        None => None,
+    };
+    // A turned or zoomed out camera may leave edges where the view itself never does
+    let edges = match &engine {
+        Some(e) if e.uncovered_frames.0 > 0 || !camera.is_default() => opts.edges,
+        _ => EdgeMode::Off,
+    };
+    if let Some(e) = &engine {
+        let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
+        e.edges.configure(edges, opts.edge_settings, view, opts.level, None);
+        e.edges.set_camera(camera);
+    }
+    // Zoomed out (crop mode's camera starts so), rendered that much bigger: the frame's part keeps the pixels the
+    // view has at its own zoom
+    let (rw, rh) = match &engine {
+        Some(e) => {
+            let s = camera.zoom.clamp(1.0, 2.0);
+            (((e.render_size.0 as f64 * s) as usize) & !1, ((e.render_size.1 as f64 * s) as usize) & !1)
+        }
+        None => (w, h),
+    };
+    // The frames it's made from: the one at `t` and `r` on each side; before them, a second for the edge fill's
+    // sphere to have what was around, as it has playing
+    let pre = if engine.is_some() && edges == EdgeMode::Sphere { fps.round() as u64 } else { 0 };
+    let first = n.saturating_sub(r + pre);
+    let last = (n + r).min(total - 1);
+    eprintln!("{}: photo at {t:.2} s (frame {n}), {}x{} from frames {}-{}", file_name(file), rw, rh, n.saturating_sub(r).max(first), last);
+
+    let hwaccel = if cfg!(target_os = "macos") { Some("videotoolbox") } else if hwaccel_works(&path) { Some("auto") } else { None };
+    let mut dec_cmd = ffmpeg_command("ffmpeg");
+    dec_cmd.args(["-nostdin", "-v", "error"]);
+    if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
+    // With -ss before -i, the first frame at or after it
+    if first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", (first as f64 - 0.25) / fps)]); }
+    dec_cmd.arg("-i").arg(&path)
+        .args(["-map", "0:v:0", "-frames:v", &(last - first + 1).to_string(), "-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+    let mut dec_out = decoder.stdout.take().unwrap();
+    let plane_dims = |(w, h): (usize, usize)| [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
+    let mut window: Vec<(u64, Vec<u8>)> = Vec::new();
+    for index in first..=last {
+        if stopped() { return Err("cancelled".into()); }
+        let mut src = vec![0u8; w * h * 3];
+        if dec_out.read_exact(&mut src).is_err() { break; }
+        let frame = match &engine {
+            None => src,
+            Some(engine) => {
+                let mut dst = vec![0u8; rw * rh * 3];
+                let timestamp_us = ((index as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                let mut planes = Vec::with_capacity(3);
+                let (mut so, mut doff) = (0, 0);
+                for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((rw, rh))) {
+                    planes.push(PlaneJob {
+                        src: src[so..].as_ptr(), src_stride: sw * 2, src_w: sw, src_h: sh,
+                        dst: dst[doff..].as_mut_ptr(), dst_stride: dw * 2, dst_w: dw, dst_h: dh,
+                    });
+                    so += sw * sh * 2;
+                    doff += dw * dh * 2;
+                }
+                engine.process(timestamp_us, planes, !info.full_range, false)?;
+                dst
+            }
+        };
+        if index + r >= n { window.push((index, frame)); }
+    }
+    let _ = decoder.kill();
+    let _ = decoder.wait();
+    let target = window.iter().position(|(i, _)| *i == n).ok_or("the frame isn't in the video")?;
+
+    // Cleaned up: the frame first, then its neighbours nearest first
+    let as_u16 = |b: &[u8]| b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<u16>>();
+    let (ysz, csz) = (rw * rh, rw * rh / 4);
+    let mut planes: Vec<Vec<u16>> = {
+        let f = &window[target].1;
+        vec![as_u16(&f[..ysz * 2]), as_u16(&f[ysz * 2..(ysz + csz) * 2]), as_u16(&f[(ysz + csz) * 2..])]
+    };
+    let mut cleaned = 0;
+    if r > 0 && window.len() > 1 {
+        let mut order: Vec<usize> = (0..window.len()).collect();
+        order.sort_by_key(|&i| ((window[i].0 as i64 - n as i64).abs(), window[i].0));
+        let frames: Vec<still::Frame> = order.iter().map(|&i| {
+            let f = &window[i].1;
+            let plane = |at: usize, len: usize, (pw, ph): (usize, usize)| still::Plane { data: &f[at..at + len], stride: pw * 2, width: pw, height: ph };
+            still::Frame { planes: vec![plane(0, ysz * 2, (rw, rh)), plane(ysz * 2, csz * 2, (rw / 2, rh / 2)), plane((ysz + csz) * 2, csz * 2, (rw / 2, rh / 2))] }
+        }).collect();
+        let settings = still::Settings { luma_keep: opts.photo_grain, ..Default::default() };
+        match still::denoise(&frames, 2, 1023, (1, 1), &settings) {
+            Ok(out) => { planes = out.planes; cleaned = frames.len(); }
+            Err(e) => eprintln!("  not cleaned up: {e}"),
+        }
+    }
+    drop(window);
+
+    // The part to keep, on even pixels
+    let [cx, cy, cw, ch] = opts.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let even = |v: f64| (v.round() as usize) & !1;
+    let (x0, y0) = (even(cx * rw as f64).min(rw - 2), even(cy * rh as f64).min(rh - 2));
+    let rect = (x0, y0, even(cw * rw as f64).clamp(2, rw - x0), even(ch * rh as f64).clamp(2, rh - y0));
+    let rgb = ph::yuv420p10_to_rgb([&planes[0], &planes[1], &planes[2]], rw, rh, rect, yuv_matrix(info.matrix.as_deref()), info.full_range);
+    drop(planes);
+
+    // The HDR look (HLG: the curve's LUT, or the video's own), and the SDR one the image is (--sdr-image)
+    let helper = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("afp-photo"))).filter(|p| p.is_file())
+        .unwrap_or_else(|| tool("afp-photo"));
+    let (hdr, recorded) = if let Some(curve) = curve {
+        (Some(Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb)), curve.to_string())
+    } else if info.transfer.as_deref() == Some("arib-std-b67") {
+        (Some(rgb.clone()), "HLG".to_string())
+    } else {
+        (None, "SDR".to_string())
+    };
+    let want = opts.sdr_image.clone().unwrap_or_else(|| (if curve == Some("dlogm") && !opts.nbcu { "maker" } else { "nbcu" }).to_string());
+    let (sdr, how) = match &hdr {
+        None => (rgb, "as recorded"),
+        Some(h) if want == "macos" && cfg!(target_os = "macos") && helper.is_file() => (macos_sdr(&helper, h, &out_dir_for(&path, opts))?, "as macOS shows the HLG"),
+        Some(_) if want == "maker" && curve == Some("dlogm") => (Cube::load(&lut("dji-dlogm-rec709.cube")?)?.apply(&rgb), "DJI's Rec.709"),
+        Some(h) => (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(h), "NBCU"),
+    };
+    let label = if hdr.is_some() { format!("{recorded}: SDR {how}, HDR HLG") } else { format!("SDR {how}") };
+
+    let out_dir = out_dir_for(&path, opts);
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+    let mut jpeg = opts.jpeg;
+    if !jpeg && !helper.is_file() {
+        eprintln!("  no afp-photo: an Ultra HDR JPEG instead of HEIC");
+        jpeg = true;
+    }
+    // A Motion Photo's name ends in MP, as Android's cameras name them; a Live Photo's video has the HEIC's name
+    let ext = match (jpeg, opts.live) { (true, true) => "MP.jpg", (true, false) => "jpg", _ => "heic" };
+    // A new name for each: the same frame saved again doesn't replace the last one
+    let name = |k: usize| out_dir.join(if k < 2 { format!("{stem}_{t:.2}s.{ext}") } else { format!("{stem}_{t:.2}s_{k}.{ext}") });
+    let taken_by = |p: &Path| p.exists() || (opts.live && !jpeg && p.with_extension("mov").exists());
+    let mut k = 1;
+    while taken_by(&name(k)) && !opts.force { k += 1; }
+    let out_path = name(k);
+
+    // The motion: the part of the video around it, exported as it plays (the engine's memory given back first)
+    drop(engine);
+    let live = if opts.live {
+        let half = LIVE_SECONDS / 2.0;
+        // From a frame the photo's is a whole number of steps after, so the video has the photo's frame
+        let step = frame_step(fps, LIVE_MAX_FPS);
+        let first = ((t - half).max(0.0) * fps - 1e-6).ceil().max(0.0) as u64;
+        let first = n - (n.saturating_sub(first) / step) * step;
+        let from = first as f64 / fps;
+        let to = (t + half).min(info.duration.max(from + 1.0 / fps));
+        let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
+        let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg };
+        match export(file, opts, Some(&part)) {
+            // The photo's frame in it: the part starts at `first`
+            Ok(_) => Some((TempFile(video), (n - first) as f64 / fps)),
+            Err(e) if stopped() => return Err(e),
+            Err(e) => { eprintln!("  no motion, the photo alone: {e}"); None }
+        }
+    } else { None };
+
+    let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
+    let maker = probe::camera(&path.to_string_lossy());
+    let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
+    if jpeg {
+        let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref());
+        let video = match &live { Some((f, _)) => Some(std::fs::read(&f.0).map_err(|e| format!("{}: {e}", f.0.display()))?), None => None };
+        let motion = video.as_deref().zip(live.as_ref()).map(|(v, (_, at))| ph::Motion { video: v, presentation_us: (at * 1e6).round() as i64 });
+        let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref())?;
+        std::fs::write(&out_path, bytes).map_err(|e| format!("{}: {e}", out_path.display()))?;
+    } else {
+        let name = out_path.file_name().unwrap().to_string_lossy().to_string();
+        let sdr_file = TempFile(out_dir.join(format!(".{name}.sdr.rgb16")));
+        ph::write_rgb16(&sdr_file.0, &sdr)?;
+        let hdr_file = match &hdr { Some(h) => { let f = TempFile(out_dir.join(format!(".{name}.hdr.rgb16"))); ph::write_rgb16(&f.0, h)?; Some(f) } None => None };
+        let mut cmd = Command::new(&helper);
+        cmd.args(["--width", &sdr.width.to_string(), "--height", &sdr.height.to_string(), "--quality", &format!("{:.2}", opts.quality as f64 / 100.0)])
+            .arg("--sdr").arg(&sdr_file.0).arg("--out").arg(&out_path);
+        if let Some(f) = &hdr_file { cmd.arg("--hdr").arg(&f.0); }
+        if let Some(t) = &taken { cmd.args(["--taken", t]); }
+        if let Some(m) = &make { cmd.args(["--make", m]); }
+        if let Some(m) = &model { cmd.args(["--model", m]); }
+        // A Live Photo: the video copied next to it, the two with one content identifier
+        if let Some((video, at)) = &live {
+            cmd.arg("--live-video").arg(&video.0).arg("--live-out").arg(out_path.with_extension("mov"))
+                .args(["--content-id", &content_id()?, "--still-time", &format!("{at:.6}")]);
+        }
+        let out = cmd.output().map_err(|e| format!("afp-photo: {e}"))?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    }
+    eprintln!("  {label} · {}x{}{} · {}", sdr.width, sdr.height,
+              if cleaned > 0 { format!(" · cleaned up from {cleaned} frames") } else { String::new() },
+              if hdr.is_some() { if jpeg { "Ultra HDR JPEG" } else { "HEIC with a gain map" } } else if jpeg { "JPEG" } else { "HEIC" });
+    if live.is_some() { eprintln!("  {}", if jpeg { "Motion Photo: the video in the JPEG" } else { "Live Photo: the .mov next to it" }); }
+    Ok(Outcome::Done(out_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dates() {
+        let d = parse_dates("2026-10-22T15:28:42+02:00").unwrap();
+        assert_eq!(d.offset_min, 120);
+        assert_eq!(d.utc(), "2026-10-22T13:28:42.000000Z");
+        assert_eq!(d.quicktime(), "2026-10-22T15:28:42+0200");
+        assert_eq!(d.system_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(), 1792675722);
+        // Across midnight and the year, west of UTC, compact zone, fractions
+        let d = parse_dates("2027-01-01T01:30:00.250-0500").unwrap();
+        assert_eq!(d.utc(), "2027-01-01T06:30:00.250000Z");
+        assert_eq!(d.quicktime(), "2027-01-01T01:30:00-0500");
+        let d = parse_dates("2026-12-31T23:30:00+01:00").unwrap();
+        assert_eq!(d.utc(), "2026-12-31T22:30:00.000000Z");
+        assert_eq!(parse_dates("2024-02-29T12:00:00Z").unwrap().quicktime(), "2024-02-29T12:00:00+0000");
+        for bad in ["2026-10-22", "2026-10-22T15:28:42", "2026-13-01T00:00:00Z", "2026-10-22T25:00:00Z", "yesterday", "2026-10-22T15:28:42+2"] {
+            assert!(parse_dates(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn zones() {
+        let created = parse_dates("2026-10-24T06:45:41Z").unwrap().unix;
+        assert_eq!(zone_of_name("DJI_20261024094541_0093_D", created), Some(180));
+        assert_eq!(zone_of_name("GX011057", created), None);
+        assert_eq!(zone_of_name("DJI_2026", created), None);
+    }
+
+    #[test]
+    fn flipbook_frames() {
+        assert_eq!(flipbook_times(43.8).len(), 4);
+        assert!(flipbook_times(43.8).windows(2).all(|w| w[1] - w[0] >= 10.0));
+        assert!(flipbook_times(43.8)[0] > 1.0);
+        assert_eq!(flipbook_times(600.0).len(), 12);
+        assert_eq!(flipbook_times(5.0).len(), 1);
+        assert_eq!(flipbook_times(1.0), vec![0.5]);
+    }
+
+    #[test]
+    fn preview_sizes() {
+        assert_eq!(preview_size(3840, 2160), (960, 540));
+        assert_eq!(preview_size(2160, 3840), (540, 960));
+        assert_eq!(preview_size(4000, 3000), (960, 720));
+        assert_eq!(preview_size(640, 360), (640, 360));
+        assert_eq!(preview_size(2688, 1512), (960, 540));
+    }
 }

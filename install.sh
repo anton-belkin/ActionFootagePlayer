@@ -6,9 +6,9 @@
 #                          from vs-gyroflow/), scripts/dji-telemetry (the camera's telemetry over the video),
 #                          scripts/highlights (the moments the camera marked, on the seek bar),
 #                          scripts/footage-menu (their right-click menu, mpv 0.41 and later), scripts/side-panel
-#                          (their settings in a panel beside the video, Tab) and scripts/agent (notes for an AI
-#                          agent: areas of the frame and a comment); and mpv.conf when
-#                          there's none yet
+#                          (their settings in a panel beside the video, Tab), scripts/agent (notes for an AI
+#                          agent: areas of the frame and a comment) and scripts/workspace (the project a clip
+#                          belongs to: its trip folder); and mpv.conf when there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
 #                          ActionFootagePlayer in the applications menu instead: the system's mpv with the plugins
@@ -45,7 +45,7 @@ macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
 # The gyroflow plugin's binaries, as cargo names them here
 if [ $macos = 1 ]; then LIBRARY=libvs_gyroflow.dylib; else LIBRARY=libvs_gyroflow.so; fi
-BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-export"
+BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-export afp-cut"
 
 apps=0
 for arg in "$@"; do
@@ -121,6 +121,7 @@ HIGHLIGHTS="$MPV_DIR/scripts/highlights"
 MENU="$MPV_DIR/scripts/footage-menu"
 PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
+WORKSPACE="$MPV_DIR/scripts/workspace"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
 backup_path() {
@@ -226,9 +227,11 @@ put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
 put mpv/scripts/gyroflow/export.lua  "$GYROFLOW/export.lua" 644
 put mpv/scripts/gyroflow/platform.lua "$GYROFLOW/platform.lua" 644
 put mpv/scripts/gyroflow/still.lua   "$GYROFLOW/still.lua" 644
+put mpv/scripts/gyroflow/crop.lua    "$GYROFLOW/crop.lua" 644
 put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
+put mpv/scripts/gyroflow/crop_preview.glsl "$GYROFLOW/crop_preview.glsl" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
 if [ ! -e "$GYROFLOW/default.gyroflow" ]; then
     install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$GYROFLOW/default.gyroflow"
@@ -257,6 +260,13 @@ put mpv/scripts/side-panel/ui.lua   "$PANEL/ui.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
+
+# The project a clip belongs to (its trip folder), for the other plugins
+put mpv/scripts/workspace/main.lua      "$WORKSPACE/main.lua" 644
+put mpv/scripts/workspace/workspace.lua "$WORKSPACE/workspace.lua" 644
+put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
+put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
+put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do

@@ -45,13 +45,17 @@ impl SmoothingAlgorithm for Predictive {
         match name { "smoothness" => self.smoothness = val, "margin" => self.margin = val, _ => {} }
     }
     fn get_parameter(&self, name: &str) -> f64 {
-        match name { "smoothness" => self.smoothness, "margin" => self.margin, _ => 0.0 }
+        // Within the trim range only, when there's one: a part stabilized on its own (a moment's, Engine::load's
+        // trim); Gyroflow then smooths the frames outside it as the whole video's
+        match name { "smoothness" => self.smoothness, "margin" => self.margin, "trim_range_only" => 1.0, _ => 0.0 }
     }
     fn get_checksum(&self) -> u64 {
         self.smoothness.to_bits() ^ self.margin.to_bits().rotate_left(17)
     }
 
     fn smooth(&self, quats: &TimeQuat, _duration_ms: f64, params: &ComputeParams) -> TimeQuat {
+        // A part on its own: the motion outside it is held still at its edges, so it doesn't steer the path inside it
+        let quats = &*gyroflow_core::smoothing::Smoothing::get_trimmed_quats(quats, params.scaled_duration_ms, true, &params.trim_ranges);
         if quats.len() < 2 { return quats.clone(); }
         let ts: Vec<i64> = quats.keys().copied().collect();
         let raw: Vec<Quat64> = quats.values().copied().collect();

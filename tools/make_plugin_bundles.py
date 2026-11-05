@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """tools/make_plugin_bundles.py <dist>: all the plugins in one zip per system, from the release's zips in <dist>
 
-  mpv-plugins-<version>-macos-arm64.zip      dlogm, dji-telemetry, highlights, footage-menu, side-panel and gyroflow, each a
-  mpv-plugins-<version>-linux-x86_64.zip     folder at the zip's top, as in their own zips: unzipped into mpv's
+  mpv-plugins-<version>-macos-arm64.zip      dlogm, dji-telemetry, highlights, footage-menu, side-panel, workspace and
+  mpv-plugins-<version>-linux-x86_64.zip     gyroflow, each a folder at the zip's top, as in their own zips: unzipped into mpv's
   mpv-plugins-<version>-windows-x86_64.zip   scripts/ folder (~/.config/mpv/scripts/, %APPDATA%\\mpv\\scripts\\)
   mpv-plugins-<version>-windows-arm64.zip
 
@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 
 PLAIN = ("mpv-dlogm-{v}.zip", "mpv-dji-telemetry-{v}.zip", "mpv-highlights-{v}.zip", "mpv-footage-menu-{v}.zip",
-         "mpv-side-panel-{v}.zip")
+         "mpv-side-panel-{v}.zip", "mpv-workspace-{v}.zip")
 
 
 def main():

@@ -66,11 +66,11 @@
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
--- preset), view (normal, wide, off), level, still (Ctrl+p),
+-- preset), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
--- Gyroflow), exporting, last_export.
+-- Gyroflow), exporting, last_export, live_photo.
 --
 -- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
 -- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
@@ -128,6 +128,10 @@
 --                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
 --                re-render as the clean still frame; playing on sets the chain up for playback again, which costs a
 --                moment on a slow GPU each time (still.lua). The quality menu sets it
+--   live_photo=yes  a photo (Alt+s; Enter in crop mode) with the motion around it, as a phone's: live, a Live Photo
+--                (a .mov next to the HEIC, for Apple's devices; macOS only), motion, a Motion Photo (an Ultra HDR JPEG
+--                with the video in it, for Android's), no, the still alone; yes: Live Photos on macOS, Motion Photos
+--                elsewhere. The Save frame panel's choice sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -135,7 +139,16 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
+    return path
+end
+
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -146,6 +159,7 @@ end
 local platform = require 'platform'
 local still = require 'still'
 local quality = require 'quality'
+local crop = require 'crop'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
@@ -156,6 +170,7 @@ local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
+local CROP_SHADER = utils.join_path(DIR, "crop_preview.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -179,10 +194,26 @@ local function file_exists(path)
     return info ~= nil and info.is_file
 end
 
+-- The workspace plugin's word on the file at `path` (user-data/workspace/, published before this plugin's on_load),
+-- nil when it isn't installed or speaks of another file
+local function workspace_of(path)
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and (ws.path == path or ws.clip == path) then return ws end
+    return nil
+end
+
+-- Where the video's project may be, in the order looked at, and where a new one goes (the first): the workspace
+-- plugin's paths for it in its project, else Gyroflow's two names for it next to the video
+local function project_paths(path)
+    local ws = workspace_of(path)
+    if ws and ws.gyroflow_projects and ws.gyroflow_new then return ws.gyroflow_projects, ws.gyroflow_new end
+    local base = path:match("^(.*)%.[^./\\]+$") or path
+    return { base .. ".gyroflow", path .. ".gyroflow" }, base .. ".gyroflow"
+end
+
 local function find_project(path)
     if not path or path:find("://", 1, true) then return nil end
-    local base = path:match("^(.*)%.[^./\\]+$") or path
-    for _, candidate in ipairs({ base .. ".gyroflow", path .. ".gyroflow" }) do
+    for _, candidate in ipairs((project_paths(path))) do
         if file_exists(candidate) then return candidate end
     end
     return nil
@@ -324,7 +355,8 @@ local chromatic = o.chromatic
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate))
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate)
+            .. crop.control_words())
     f:close()
 end
 local function has_project(source)
@@ -349,6 +381,17 @@ local sticky_underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "a
 local underwater = sticky_underwater
 -- Under water, auto or the project's, before Ctrl+u took the lens out of the water
 local underwater_back = underwater ~= "no" and underwater or "auto"
+
+-- The workspace plugin's settings for the file playing, when it keeps its own (a moment's, as it was made: view,
+-- level, horizon_lock), the part stabilized on its own (trim: { in, out }, a moment's without a project), and its
+-- switch as it's viewed (alone: its project's "only within the trim range"). They don't stick for the next clips
+local function fixed()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.stab, ws.trim, ws.alone end
+    return nil, nil, nil
+end
+-- The level that sticks, while a moment plays at its own
+local level_before = nil
 
 -- The horizon lock and the lens a clip starts with: a project's own, or what sticks
 local function clip_settings(source)
@@ -375,6 +418,16 @@ if file_exists(CHROMATIC_SHADER) then
         chromatic_shader = true
     end
 end
+-- Crop mode's preview (crop_preview.glsl, crop.lua), there from the start for the same reason; it runs only in crop
+-- mode (its crop_on)
+local crop_shader = false
+if file_exists(CROP_SHADER) then
+    local vo = mp.get_property("vo") or ""
+    if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
+        mp.commandv("change-list", "glsl-shaders", "append", CROP_SHADER)
+        crop_shader = true
+    end
+end
 
 -- Faster than max_fps (when it's set): such a clip plays every other frame if its stabilized frame leaves edges
 -- anywhere and they're filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and
@@ -399,8 +452,20 @@ local function step_filter(source, enabled)
     return { name = "lavfi", label = STEP_LABEL, enabled = enabled, params = { graph = "framestep=" .. step } }
 end
 
+-- A moment playing as a video of its own (the workspace plugin's: its part of the clip, from 0): where it starts in
+-- the clip, which the filter adds to each frame's time to find its motion
+local function time_offset()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then return ws.offset end
+    return nil
+end
+
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
+    local _, trim, alone = fixed()
+    -- A project's "only within the trim range" as it's viewed: true or false, nil for the project's own
+    local project_alone = nil
+    if has_project(source) and alone ~= nil then project_alone = alone end
     return {
         name = "vapoursynth",
         label = LABEL,
@@ -410,7 +475,9 @@ local function gyroflow_filter(source, enabled)
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers,
                                                 fast = not full_size and frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
-                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
+                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL,
+                                                time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
+                                                alone = project_alone }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -432,10 +499,25 @@ still.init(o, function()
     return false
 end, function() return current_source and not stab_off and frame_step(current_source) or 1 end)
 
+-- Crop mode (c): the camera turned and zoomed by the plugin where it stabilizes the clip, mpv's own pan and zoom elsewhere
+crop.init({
+    stabilizing = function()
+        if not current_source or stab_off then return false end
+        for _, f in ipairs(mp.get_property_native("vf") or {}) do
+            if f.label == LABEL and f.enabled ~= false then return true end
+        end
+        return false
+    end,
+    write = function() write_edge_control() end,
+    control_path = function() return EDGE_CONTROL end,
+    shader = crop_shader,
+})
+
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local state = {
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
+        project = has_project(current_source) and current_source.project or "",
         view = stab_off and "off" or view, level = level,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
@@ -490,6 +572,16 @@ local function add_filter(source)
     end
     view = has_project(source) and "normal" or sticky_view
     clip_settings(source)
+    -- A moment's own settings, as it was made
+    local own = fixed()
+    local off = false
+    if type(own) == "table" then
+        if own.view == "normal" or own.view == "wide" then view = own.view elseif own.view == "off" then off = true end
+        if LEVEL_LABELS[own.level] then level_before = level_before or level; level = own.level end
+        if own.horizon_lock == "yes" or own.horizon_lock == "no" then horizon = own.horizon_lock == "yes"
+        elseif own.horizon_lock == "project" then horizon = nil end
+    end
+    stab_off = off
     write_edge_control()
 
     local sizes = render_sizes(source)
@@ -508,7 +600,7 @@ local function add_filter(source)
     local step = step_filter(source, true)
     if step then table.insert(vf, step) end
     if scale then table.insert(vf, scale) end
-    table.insert(vf, gyroflow_filter(source, true))
+    table.insert(vf, gyroflow_filter(source, not off))
     mp.set_property_native("file-local-options/vf", vf)
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
@@ -533,10 +625,12 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
+    -- Back to the level that sticks, after a moment's own
+    if level_before then level, level_before = level_before, nil end
     clip_settings(nil)
-    local path = mp.get_property("path")
-    if resume and resume.path == path and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
+    if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
+    local path = clip_path()
     if not file_exists(PLUGIN) then
         if find_project(path) then mp.msg.warn("plugin missing at " .. PLUGIN) end
         return done()
@@ -715,7 +809,7 @@ local function show(v)
     local was_on = not stab_off
     local enabled = v ~= "off"
     if enabled then view = v end
-    if enabled and not has_project(current_source) then sticky_view = v end
+    if enabled and not has_project(current_source) and not fixed() then sticky_view = v end
     stab_off = not enabled
     write_edge_control()
     -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
@@ -742,6 +836,8 @@ local function set_level(l)
     if has_project(current_source) then
         return mp.osd_message("Gyroflow: the project's own smoothing and zoom (edit them in Gyroflow, Ctrl+e)", 2)
     end
+    -- A moment's own level doesn't stick: the one before it comes back after it
+    if fixed() and not level_before then level_before = level end
     level = l
     write_edge_control()
     publish()
@@ -770,7 +866,7 @@ mp.register_script_message("horizon-lock", function(value)
     else
         return
     end
-    if not has_project(current_source) then sticky_horizon = horizon end
+    if not has_project(current_source) and not fixed() then sticky_horizon = horizon end
     rebuild_filter()
     publish()
     local says = current_source and current_source.kind == "default" and "preset" or "project"
@@ -908,9 +1004,9 @@ mp.register_script_message("remember", function()
     mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
--- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it
--- plays with, or for a video without one (its own motion data with the default preset) the same written out by
--- gyroflow-project, so Gyroflow opens it as it plays here. Gyroflow overwrites the
+-- Edit in Gyroflow. The project goes next to the video (or where the workspace plugin says), where find_project()
+-- picks it up from then on: the one it plays with, or for a video without one (its own motion data with the default
+-- preset) the same written out by gyroflow-project, so Gyroflow opens it as it plays here. Gyroflow overwrites the
 -- project it opened when it saves (Cmd+S), and the stabilization reloads with it while the video stays where it is.
 -- A video with no motion data opens as it is: Gyroflow finds the motion from the picture (optical flow), and the
 -- project it saves next to the video is waited for, then the video loads again to play with it.
@@ -1008,7 +1104,7 @@ local function open_in_gyroflow(file, project, opened_message)
         return
     end
     mp.set_property_bool("pause", true)
-    local video = mp.get_property("path")
+    local video = clip_path()
     if not (watch and watch.project == project and watch.video == video) then
         stop_watching()
         watch = { project = project, video = video, version = project and file_version(project) or nil }
@@ -1032,7 +1128,7 @@ local function edit_project(project)
 end
 
 mp.add_key_binding("Ctrl+e", "edit", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Gyroflow: not a local file", 1.5)
         return
@@ -1049,7 +1145,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         mp.osd_message("Gyroflow: gyroflow-project isn't installed", 2)
         return
     end
-    project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
+    project = select(2, project_paths(path))
     -- As it plays here: the level, the view (off: the preset's), the horizon lock, the lens
     local args = { PROJECT_WRITER, "--underwater", underwater, "--level", level }
     if view == "wide" and not stab_off then table.insert(args, "--wide") end
@@ -1058,6 +1154,12 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     end
     if current_source.preset then
         table.insert(args, "--preset"); table.insert(args, current_source.preset)
+    end
+    -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
+    local ws = workspace_of(path)
+    if ws and ws.moment and ws.moment["in"] and ws.snap then
+        table.insert(args, "--trim"); table.insert(args, string.format("%.3f,%.3f", ws.moment["in"], ws.moment.out))
+        table.insert(args, "--alone"); table.insert(args, ws.alone and "yes" or "no")
     end
     table.insert(args, path); table.insert(args, project)
     mp.osd_message("Gyroflow: writing the project...", 2)
@@ -1075,4 +1177,11 @@ end)
 
 mp.register_event("end-file", stop_watching)
 
+-- export.lua's photos read it from here, and its live-photo message sets it
+-- (no, live or motion; a Live Photo needs macOS's afp-photo)
+do
+    local v = tostring(o.live_photo)
+    if v ~= "no" and v ~= "motion" and not (v == "live" and platform.macos) then v = platform.macos and "live" or "motion" end
+    mp.set_property_native("user-data/gyroflow/live_photo", v)
+end
 require 'export'

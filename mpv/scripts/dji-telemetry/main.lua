@@ -46,6 +46,15 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
+    return path
+end
 local telemetry = require 'telemetry'
 
 local o = { fields = "", units = "metric", position = "bottom-left", font_size = 28, visible = true }
@@ -213,8 +222,16 @@ local function text_at(t)
     return table.concat(lines, "\\N")
 end
 
+-- A moment playing as a video of its own (the workspace plugin's): its time from 0, its part this far into the clip
+local function offset()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then return ws.offset end
+    return 0
+end
+
 local function update()
     local t = mp.get_property_number("time-pos")
+    if t then t = t + offset() end
     if not visible or not track or not t then
         if shown then overlay:remove(); shown = nil end
         return
@@ -286,7 +303,7 @@ local function load()
         for _, name in ipairs(FALLBACK_FIELDS) do names[#names + 1] = name end
         set_fields(names)
     end
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path or path:find("://", 1, true) or #wanted == 0 then return end
     local ext = (path:match("%.([^./]+)$") or ""):lower()
     if not PROBED_EXTENSIONS[ext] then return end

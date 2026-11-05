@@ -170,6 +170,10 @@ pub struct Edges {
     /// The share of the frames that play the sphere is written from in playback, %, as the control file says: 0, as
     /// often as a GPU worker is free (sphere_writer)
     fill_rate: AtomicU32,
+    /// Where the camera looks and how far it zooms (crop mode), as the control file says
+    camera: Mutex<crate::Camera>,
+    /// Crop mode's mark for its preview shader, as the control file says: 0 none, 1 or 2 the parity 0 or 1
+    crop_mark: AtomicU8,
     /// Playback: the sphere is written by sphere_writer, when the GPU workers leave room for it
     realtime: AtomicBool,
     writer: AtomicBool,
@@ -198,7 +202,7 @@ impl Edges {
             settings: Mutex::new(EdgeSettings::default()),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None), seeks: AtomicU32::new(0), rejoin: AtomicBool::new(false),
             expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
-            fill_rate: AtomicU32::new(0),
+            fill_rate: AtomicU32::new(0), camera: Mutex::new(crate::Camera::default()), crop_mark: AtomicU8::new(0),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), posted: AtomicU64::new(0), seeks: AtomicU32::new(0), ready: Condvar::new(), stop: AtomicBool::new(false) },
             in_flight: AtomicUsize::new(0), workers: workers.max(1), stats: Mutex::new((0.0, 0.0, 0.0, 0)),
@@ -363,6 +367,8 @@ impl Edges {
         self.level.store(level as u8, Ordering::Relaxed);
         self.chromatic.store(true, Ordering::Relaxed);
         self.fill_rate.store(0, Ordering::Relaxed);
+        *self.camera.lock() = crate::Camera::default();
+        self.crop_mark.store(0, Ordering::Relaxed);
         *self.settings.lock() = settings;
         *self.control.lock() = Control { path: control, modified: None, checked: None };
         // The sphere stays: mpv makes the filter again on every seek, the clean still frame's back to the paused frame
@@ -398,6 +404,40 @@ impl Edges {
         self.chromatic.load(Ordering::Relaxed)
     }
 
+    /// The camera turned and zoomed (crop mode), as the control file has it now
+    pub fn camera(&self) -> crate::Camera {
+        self.check_control(false);
+        *self.camera.lock()
+    }
+
+    /// The camera without a control file (gyroflow-export --photo): after configure, which sets it back
+    pub fn set_camera(&self, camera: crate::Camera) {
+        *self.camera.lock() = camera;
+    }
+
+    /// Crop mode's mark (`crop_mark=`): the parity its preview shader tells this render's frames by (write_crop_mark)
+    pub fn crop_mark(&self) -> Option<bool> {
+        self.check_control(false);
+        match self.crop_mark.load(Ordering::Relaxed) { 1 => Some(false), 2 => Some(true), _ => None }
+    }
+
+    /// For crop mode (the gyroflow plugin's crop.lua), next to the control file: the output camera's focal length at
+    /// `timestamp_us` in parameters `params` (`camera`'s), in output widths and heights, and that camera's zoom, so a drag
+    /// across the picture turns the camera by as much as the picture moves. Written when the camera changes
+    pub fn write_camera_info(&self, params: &ComputeParams, camera: &crate::Camera, timestamp_us: i64) {
+        let Some(path) = self.control.lock().path.clone() else { return };
+        let view = View::at(params, timestamp_us);
+        let (fx, fy) = view.focal();
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(".camera.tmp");
+        let mut out = path.into_os_string();
+        out.push(".camera");
+        let text = format!("{{\"fx\": {fx:.6}, \"fy\": {fy:.6}, \"zoom\": {:.6}}}", camera.zoom);
+        if std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &out)).is_err() {
+            log::warn!("Camera: can't write {out:?}");
+        }
+    }
+
     /// The share of the frames that play the sphere is written from, %; 0: as the GPU has room
     fn fill_rate(&self) -> u32 {
         self.check_control(false);
@@ -405,8 +445,9 @@ impl Edges {
     }
 
     fn check_control(&self, now: bool) {
-        // Another worker is already looking
-        let Some(mut c) = self.control.try_lock() else { return };
+        // Another worker is already looking; set up anew (now), the filter reads it for sure: the first frame after a
+        // seek has what the file says when it was asked for (crop mode's camera)
+        let mut c = if now { self.control.lock() } else { let Some(c) = self.control.try_lock() else { return }; c };
         let Some(path) = c.path.clone() else { return };
         if !now && c.checked.is_some_and(|t| t.elapsed().as_millis() < 50) { return; }
         c.checked = Some(Instant::now());
@@ -414,7 +455,8 @@ impl Edges {
         if c.modified == Some(modified) { return; }
         c.modified = Some(modified);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let ControlText { mode, blur, view, level, chromatic, fill_rate } = parse_control(&text);
+        let ControlText { mode, blur, view, level, chromatic, fill_rate, camera, crop_mark } = parse_control(&text);
+        self.crop_mark.store(crop_mark.map_or(0, |m| m as u8 + 1), Ordering::Relaxed);
         match mode {
             Some(mode) => {
                 if self.mode.swap(mode as u8, Ordering::Relaxed) != mode as u8 {
@@ -442,6 +484,14 @@ impl Edges {
             if self.fill_rate.swap(rate, Ordering::Relaxed) != rate {
                 if rate == 0 { log::info!("Edge fill rate: auto, as the GPU has room"); }
                 else { log::info!("Edge fill rate: {rate} % of the frames"); }
+            }
+        }
+        let camera = camera.unwrap_or_default();
+        {
+            let mut c = self.camera.lock();
+            if *c != camera {
+                *c = camera;
+                log::debug!("Camera: {camera:?}");
             }
         }
         if let Some(blur) = blur {
@@ -474,16 +524,17 @@ pub const VIEW_WIDE: u8 = 1;
 
 /// What the control file says (`parse_control`)
 #[derive(Debug, PartialEq, Default)]
-struct ControlText { mode: Option<EdgeMode>, blur: Option<f32>, view: Option<u8>, level: Option<crate::Level>, chromatic: Option<bool>, fill_rate: Option<u32> }
+struct ControlText { mode: Option<EdgeMode>, blur: Option<f32>, view: Option<u8>, level: Option<crate::Level>, chromatic: Option<bool>, fill_rate: Option<u32>, camera: Option<crate::Camera>, crop_mark: Option<bool> }
 
 /// The control file: the mode, then optional `key=value` settings (`blur` in % of the frame height, as the
 /// filter's `edges_blur`; `view`, normal or wide; `level`, weak, medium or strong (levels.rs); `chromatic`, yes or
 /// no: the water's color fringes taken out; `fill_rate`, auto or the % of the frames that play the sphere is written
-/// from). A file with only the mode in it leaves the settings as the filter was given them
+/// from; `camera`, yaw,pitch,roll,zoom: the camera turned, in degrees, and its FOV times zoom, for crop mode, where
+/// none is the camera as stabilized). A file with only the mode in it leaves the settings as the filter was given them
 fn parse_control(text: &str) -> ControlText {
     let mut words = text.split_whitespace();
     let mode = EdgeMode::parse(words.next().unwrap_or(""));
-    let (mut blur, mut view, mut level, mut chromatic, mut fill_rate) = (None, None, None, None, None);
+    let (mut blur, mut view, mut level, mut chromatic, mut fill_rate, mut camera, mut crop_mark) = (None, None, None, None, None, None, None);
     for w in words {
         match w.split_once('=') {
             Some(("blur", v)) => match v.parse::<f32>() {
@@ -500,10 +551,19 @@ fn parse_control(text: &str) -> ControlText {
                 Ok(v) if (1..=100).contains(&v) => fill_rate = Some(v),
                 _ => log::warn!("Edges: bad fill_rate {v:?} in the control file"),
             },
+            Some(("crop_mark", v)) => match v {
+                "0" => crop_mark = Some(false),
+                "1" => crop_mark = Some(true),
+                _ => log::warn!("Edges: bad crop_mark {v:?} in the control file"),
+            },
+            Some(("camera", v)) => match crate::Camera::parse(v) {
+                Some(c) => camera = Some(c),
+                None => log::warn!("Edges: bad camera {v:?} in the control file"),
+            },
             _ => log::warn!("Edges: unknown setting {w:?} in the control file"),
         }
     }
-    ControlText { mode, blur, view, level, chromatic, fill_rate }
+    ControlText { mode, blur, view, level, chromatic, fill_rate, camera, crop_mark }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1089,7 +1149,7 @@ mod tests {
 
     #[test]
     fn control_file() {
-        let c = |mode, blur, view, level, chromatic| ControlText { mode, blur, view, level, chromatic, fill_rate: None };
+        let c = |mode, blur, view, level, chromatic| ControlText { mode, blur, view, level, chromatic, fill_rate: None, camera: None, crop_mark: None };
         assert_eq!(parse_control("sphere"), c(Some(EdgeMode::Sphere), None, None, None, None));
         assert_eq!(parse_control("smooth\n"), c(Some(EdgeMode::Smooth), None, None, None, None));
         assert_eq!(parse_control("sphere blur=3.5"), c(Some(EdgeMode::Sphere), Some(3.5 / 100.0), None, None, None));
@@ -1104,6 +1164,16 @@ mod tests {
         assert_eq!(parse_control("off view=normal"), c(Some(EdgeMode::Off), None, Some(VIEW_NORMAL), None, None));
         assert_eq!(parse_control("off view=sideways"), c(Some(EdgeMode::Off), None, None, None, None));
         assert_eq!(parse_control("sphere blur=2 view=normal chromatic=no"), c(Some(EdgeMode::Sphere), Some(0.02), Some(VIEW_NORMAL), None, Some(false)));
+        // Crop mode's camera: yaw, pitch, roll, zoom
+        let cam = parse_control("sphere blur=2 camera=-2.5,1,0.5,1.25").camera.unwrap();
+        assert_eq!(cam, crate::Camera { yaw: -2.5, pitch: 1.0, roll: 0.5, zoom: 1.25 });
+        assert_eq!(parse_control("sphere camera=1,2,3").camera, None);
+        assert_eq!(parse_control("sphere camera=1,2,3,0").camera, None);
+        assert_eq!(parse_control("sphere camera=0,95,0,1").camera.unwrap().pitch, 90.0);
+        assert_eq!(parse_control("sphere").camera, None);
+        assert_eq!(parse_control("sphere camera=1,2,3,1 crop_mark=1").crop_mark, Some(true));
+        assert_eq!(parse_control("sphere crop_mark=0").crop_mark, Some(false));
+        assert_eq!(parse_control("sphere crop_mark=2").crop_mark, None);
         assert_eq!(parse_control("sphere view=normal level=strong"), c(Some(EdgeMode::Sphere), None, Some(VIEW_NORMAL), Some(crate::Level::Strong), None));
         assert_eq!(parse_control("sphere level=extreme"), c(Some(EdgeMode::Sphere), None, None, None, None));
         assert_eq!(parse_control("off chromatic=yes"), c(Some(EdgeMode::Off), None, None, None, Some(true)));

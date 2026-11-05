@@ -21,6 +21,15 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
+-- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
+-- user-data/workspace/clip, docs/moments-and-workspaces.md)
+local function clip_path()
+    local path = mp.get_property("path")
+    local ws = mp.get_property_native("user-data/workspace")
+    if path and type(ws) == "table" and ws.path == path and ws.redirected and ws.clip then return ws.clip end
+    return path
+end
+
 local o = { setup = "", version = "", menu = "auto" }
 options.read_options(o, "footage_menu")
 
@@ -51,8 +60,12 @@ local KEY_LABELS = {
     { "cycle pause", "Play / pause" },
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
-    { "script-binding highlights/next", "Next highlight the camera marked" },
-    { "script-binding highlights/prev", "Previous highlight" },
+    { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
+    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in _Clips/ to the Trash (again: made again)" },
+    { "script-binding workspace/cut-out", "Cut the marked part out of the clip (spoiled), without re-encoding; the original to the Trash" },
+    { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
+    { "script-binding highlights/prev", "Previous mark" },
+    { "script-binding highlights/mark", "A mark here; on one, remove it" },
     { "script-binding dlogm/sdr", "The next video output: HDR, HLG+DV in HDR and in SDR, mpv's tone mapping, NBCU's SDR, the maker's SDR" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
@@ -62,6 +75,7 @@ local KEY_LABELS = {
     { "script-binding gyroflow/edges", "What fills the edges" },
     { "script-binding gyroflow/still", "Temporal denoise of the paused frame on / off" },
     { "script-binding gyroflow/full", "The paused frame at full size" },
+    { "script-binding gyroflow/crop", "Save frame: a frame for a photo, the picture panned and zoomed under it" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
     { "playlist-prev", "Previous clip in the folder" },
@@ -139,7 +153,7 @@ local function passport(d, g, t, h)
     end
     if g then table.insert(parts, g.available and (KIND_LABELS[g.kind] or "gyro") or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
-    if h and h.times then table.insert(parts, #h.times == 1 and "1 highlight" or (#h.times .. " highlights")) end
+    if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
@@ -240,6 +254,7 @@ local function stabilization_menu(g, key)
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
         item("Temporal denoise on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
+        item("Save frame…", "script-binding gyroflow/crop", { checked = (g.crop or {}).active == true, shortcut = key["script-binding gyroflow/crop"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         item("Remember as default", "script-message-to gyroflow remember"),
@@ -324,15 +339,89 @@ local function tracks_menu(kind, command)
     return any and items or nil
 end
 
-local function highlights_menu(h, key)
+-- The clip's marks: the camera's ("DJI quick switch") and your own, by time
+local MARK_NOTES = { dji = "DJI quick switch", gopro = "GoPro HiLight" }
+local function marks_menu(h, key)
     local items = {
-        item("Next", "script-binding highlights/next", { shortcut = key["script-binding highlights/next"] }),
-        item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"] }),
+        item("Next", "script-binding highlights/next", { shortcut = key["script-binding highlights/next"], disabled = #h.times == 0 }),
+        item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"], disabled = #h.times == 0 }),
         SEPARATOR,
     }
+    local pos = mp.get_property_number("time-pos", 0)
+    local here = false
     for i, t in ipairs(h.times) do
-        table.insert(items, item(i .. "    " .. clock(t), "script-message-to highlights go " .. i))
+        local m = h.marks and h.marks[i] or {}
+        local note = (m.name and m.name ~= "") and m.name or MARK_NOTES[m.camera or ""] or ""
+        if math.abs(t - pos) <= 0.5 then here = true end
+        table.insert(items, item(string.format("%.1f s", t) .. (note ~= "" and ("    " .. note) or ""), "script-message-to highlights go " .. i))
     end
+    if #h.times > 0 then table.insert(items, SEPARATOR) end
+    table.insert(items, item(here and "Remove the mark here" or "Add a mark here", "script-binding highlights/mark", { shortcut = key["script-binding highlights/mark"] }))
+    return items
+end
+
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    -- With a project of its own, the project is what's saved: its horizon and the switch can go into it
+    if ws.own_project then return g.horizon_lock ~= nil and g.horizon_lock ~= "project" end
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return g.level ~= st.level
+end
+
+-- The clip's moments (the workspace plugin's), each with what can be done to it
+local function moments_menu(w)
+    local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
+    local items = {}
+    for i, m in ipairs(w.moments or {}) do
+        local playing = w.moment and w.moment.file == m.file
+        table.insert(items, submenu(m.name .. "    " .. clock(m["in"]) .. "–" .. clock(m.out), {
+            item("Play", "script-message-to workspace moment-play " .. i, { disabled = playing }),
+            item("Open in its whole clip", "script-message-to workspace moment-edit " .. i),
+            item("Rename…", "script-message-to workspace moment-rename " .. i),
+            item("Remove (to the Trash)", "script-message-to workspace moment-remove " .. i),
+            item(reveal, "script-message-to workspace moment-reveal " .. i),
+        }, { checked = playing }))
+    end
+    if #items > 0 then table.insert(items, SEPARATOR) end
+    table.insert(items, item(platform == "darwin" and "Show _Moments folder in Finder" or "Show _Moments folder",
+                             "script-message-to workspace moments-folder"))
+    return items
+end
+
+-- The trip's project (the workspace plugin's): its clip previews, its folder
+local function project_menu(w, key)
+    local reveal = platform == "darwin" and "Show project folder in Finder" or "Show project folder"
+    if not w.project then
+        -- Initialized in a folder of the user's choice, from the clip's up
+        local choices = {}
+        for i = #(w.project_choices or {}), 1, -1 do
+            local dir = w.project_choices[i]
+            local name = dir:match("([^/\\]+)[/\\]?$") or dir
+            local quoted = '"' .. dir:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+            table.insert(choices, item(name .. "    " .. (dir:match("^(.*)[/\\][^/\\]+[/\\]?$") or ""), "script-message-to workspace init-project " .. quoted))
+        end
+        return { info("No project yet: moments, exports and clip previews need one"), SEPARATOR,
+                 submenu("Initialize the project in", choices, { disabled = #choices == 0 }) }
+    end
+    local items = { info("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) }
+    table.insert(items, SEPARATOR)
+    if w.clips then
+        table.insert(items, info("Clip previews: " .. w.clips.done .. " of " .. w.clips.total))
+        table.insert(items, item("Stop clip previews", "script-message-to workspace clips-stop"))
+    else
+        table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
+        table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
+        table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
+        table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
+    end
+    table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
+    table.insert(items, SEPARATOR)
+    table.insert(items, item(reveal, "script-message-to workspace project-folder", { disabled = not w.project }))
     return items
 end
 
@@ -400,10 +489,47 @@ local function build()
             if g.exporting then
                 add(item("Cancel export", "script-message-to gyroflow cancel-export", { shortcut = export }))
             else
-                add(item((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip", "script-binding gyroflow/export", { shortcut = export }))
+                -- With the workspace plugin, the export asks its name
+                local asks = state("workspace") and "…" or ""
+                add(item(((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip") .. asks, "script-binding gyroflow/export", { shortcut = export }))
             end
         end
-        if h and h.times then add(submenu("Highlights (" .. #h.times .. ")", highlights_menu(h, key))) end
+        local w = state("workspace")
+        if w and w.export then
+            add(item("Open the original" .. (w.export["in"] and (" at " .. clock(w.export["in"])) or ""), "script-message-to workspace open-original",
+                     { disabled = not w.export.original }))
+        end
+        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export then
+            local moment = key["script-binding workspace/moment"]
+            if w.saving then
+                add(info("Saving " .. w.saving .. "…"))
+            elseif w.moment and a and b and (math.abs(a + (w.offset or 0) - w.moment["in"]) >= 0.001 or math.abs(b + (w.offset or 0) - w.moment.out) >= 0.001) then
+                add(item("Update " .. w.moment.name .. " to " .. clock(a) .. "–" .. clock(b) .. "…", "script-binding workspace/moment", { shortcut = moment }))
+            elseif not w.moment then
+                add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",
+                         "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
+            end
+            if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
+            if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
+            if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
+            if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
+        end
+        -- Cutting a spoiled part out: of a clip itself, not a moment, clip preview or export
+        if w and w.clip and local_file(w.clip) and not w.redirected and not w.export then
+            local cut = key["script-binding workspace/cut-out"]
+            if w.cutting then
+                add(info("Cutting " .. w.cutting.name .. "…"))
+            else
+                add(submenu("Cut out (spoiled)", {
+                    item((a and b and b > a) and ("The marked part " .. clock(a) .. "–" .. clock(b) .. "…") or "The marked part (mark it first)",
+                         "script-binding workspace/cut-out", { shortcut = cut, disabled = not (a and b and b > a) }),
+                    item("All before here…", "script-message-to workspace cut-before"),
+                    item("All after here…", "script-message-to workspace cut-after"),
+                }))
+            end
+        end
+        if w and w.clip and local_file(w.clip) then add(submenu("Project", project_menu(w, key))) end
+        if h and local_file(path) then add(submenu(h.times and #h.times > 0 and ("Marks (" .. #h.times .. ")") or "Marks", marks_menu({ times = h.times or {}, marks = h.marks }, key))) end
         add(SEPARATOR)
         if d then add(submenu("Look", look_menu(d, key))) end
         if g and local_file(path) then add(submenu("Stabilization", stabilization_menu(g, key))) end
@@ -484,7 +610,7 @@ local function open_url(url)
 end
 
 mp.register_script_message("reveal", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not local_file(path) then return end
     path = utils.join_path(mp.get_property("working-directory") or "", path)
     if platform == "darwin" then run({ "open", "-R", path })
@@ -493,7 +619,7 @@ mp.register_script_message("reveal", function()
 end)
 
 mp.register_script_message("copy-path", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not path then return end
     if local_file(path) then path = utils.join_path(mp.get_property("working-directory") or "", path) end
     -- The clipboard property is mpv 0.40's
@@ -519,7 +645,7 @@ end
 
 -- A new issue on GitHub, with what the plugins found in the clip
 mp.register_script_message("report", function()
-    local path = mp.get_property("path")
+    local path = clip_path()
     if not local_file(path) then return end
     local d, g, t, h = state("dlogm"), state("gyroflow"), state("dji_telemetry"), state("highlights")
     local camera = t and t.model ~= "" and (CAMERAS[t.model] or t.model) or "(which camera?)"

@@ -77,9 +77,9 @@ through the stabilization, a wider view of it, and off. [All keys](#keys) · [In
 
 You shot the dive in D-Log M, with EIS off because under water it doesn't hold. In the hotel, you copy the card to
 the laptop and double-click the first clip: it plays stabilized, in HDR, with the depth in the corner. You skip
-through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, and pause for
-half a minute. The fragment is in a `stabilized/` folder next to the clip, ready to AirDrop to the group the same
-evening, in HDR. The originals are untouched for proper editing later.
+through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, type "Turtle",
+and pause for half a minute. The fragment is `_Exports/Turtle.mov` in the trip's folder, ready to AirDrop to the group
+the same evening, in HDR, and the turtle is a [moment](#moments) too, to play again in full quality later. The originals are untouched for proper editing later.
 
 ## Why log, and why HDR
 
@@ -238,6 +238,14 @@ The settings are in a panel at the right of the window, beside the video (the vi
 covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of the one chosen, with
 switches and buttons, scrolled with the wheel:
 
+- **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
+  with their keys beside them. At the top, the project: with none yet, what one is and **Initialize the project here**
+  in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
+  then its counts, **Make clip previews** for clips without one, **Show all clips** and **Show all moments** in
+  Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
+  its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
+  interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
+  were moved).
 - **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
 - **Look**: the video output (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping; NBCU's and the maker's SDR),
   the log curve by hand, noise reduction.
@@ -271,7 +279,13 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
 | `Ctrl+p` | Temporal denoise of the paused frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
+| `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
+| `Alt+s` | The frame on screen as a photo, in the project's `_Stills/` folder (beside `_Exports/`; with no project, `stabilized/` next to the clip): stabilized as it plays, cleaned up from the frames around it (as `Ctrl+p` does), with Save frame's frame and camera. The SDR look is the image, with a gain map to the HDR one (HLG), so an HDR screen shows it brighter: a HEIC on macOS, an Ultra HDR JPEG elsewhere (Android, Chrome and Apple read its ISO gain map). With 3 s of the video around it, as a phone's (the Save frame panel's Still / Live Photo / Motion Photo), exported as `Shift+E` would, at most 1920 wide or high: a Live Photo for Apple's devices (macOS: a `.mov` next to the HEIC; Photos and the iPhone take the two as one) or a Motion Photo for Android's (`<name>.MP.jpg`, an Ultra HDR JPEG with the video inside it, as Android's cameras write it) | `gyroflow/photo` |
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
+| `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
+| `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
+| `X` | This clip isn't interesting: its preview in `_Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
@@ -313,6 +327,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
 | `gyroflow.conf`: `still=yes`, `still_radius=5`, `still_delay=0.4`, `still_grain=0.25` | the clean still frame (`Ctrl+p`): on or off, how many frames on each side it's made from (1-7), how long after pausing it starts (s), and how much of the brightness's grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
 | `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
@@ -488,7 +503,18 @@ plays without stabilization: after `Ctrl+g` turned it off, or with nothing to st
 of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
-Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part.
+
+It asks the export's name first, as a moment does (Enter alone takes the suggestion), and the file goes to the
+trip's **_Exports** folder: `_Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
+`Turtle (Dolby Vision).mov`), and ` 2` when the name is taken. A part that's a moment (played from its file or the
+menu, or the same part to the frame) is named after it; any other part is also saved as the moment
+`export_Turtle`, so it can be found and played in full quality after the export is deleted to make room. Inside the
+export is its link to the original: opened in the player, it plays as it is, and the menu's **Open the original**
+goes to its part of the clip. Without the workspace plugin (your own mpv with only some of the plugins) it doesn't
+ask, and the file is named as below.
+
+Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -507,7 +533,16 @@ The same from a terminal, for one clip or many:
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
-The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
+The result goes to the `_Exports/` folder of the clip's project (the trip folder with `_ActionFootagePlayer/` in it
+above the clip, as the player initializes it), or with none to a `stabilized/` folder next to the clip, as
+`<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
+names the file.
+
+**Up to 0.7, exports went to a `stabilized/` folder next to the clip.** Those folders are left as they are, and
+nothing reads them back; a script of yours that expects new exports there passes `--out stabilized` (or the
+folder's full path).
+
+What it renders:
 
 - **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
   reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,
@@ -530,6 +565,31 @@ The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov`
 - `Ctrl+C` stops it and removes the unfinished file. `--background` runs it at background priority, to keep
   working while it runs; `kill -USR1 <pid>` / `kill -USR2 <pid>` switch that later. `--progress <file>`
   writes the progress there as JSON twice a second (that's how mpv shows it).
+- `--output <file>` writes that file instead (one clip).
+
+**Previews** are what the player's moments are made of ([Moments](#moments), [docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)):
+a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the clip is.
+
+```bash
+~/.config/mpv/scripts/gyroflow/gyroflow-export --preview still --from 20 --to 30 --at 26.4 \
+    --dates 2026-10-24T09:46:07+03:00 --output _Moments/Turtle.afplink.mp4 DJI_0093_D.MP4
+```
+
+- `--preview still`: the frame at `--at` (else the middle of `--from` to `--to`), stabilized as an export would be
+  with the same options, held for `--from` to `--to` (the whole clip without them): H.264 at 960 pixels on the
+  long side, 10 fps, one keyframe, its frame also the cover art, so the frame is the file's icon. 150-350 KB for a
+  camera's frame. D-Log M goes through DJI's Rec.709 LUT, other log curves and HLG through NBCU's conversion;
+  a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>.afplink.mp4` next
+  to the clip (or in `--out`): the double extension says it's a link, and it opens as an MP4 anywhere.
+- `--preview flipbook`: the clip at a glance ([Clip previews](#clip-previews-the-trip-at-a-glance)): a frame at
+  each of `--at t1,t2,…` (else about a dozen, 10 s apart at least), the keyframe at or before it, from the `.LRF` or
+  `.LRV` beside the clip when there is one, in the same SDR look and not stabilized, 2 a second; `--cover <t>` makes
+  the nearest frame its icon. It has the clip's own date.
+- `--link <json>`: the link to the original the player keeps in it, an MP4 key (`ch.actionfootageplayer.link`)
+  that copying, renaming and tags keep, and a remux without `-map_metadata 0` loses.
+- `--dates <time>`: its date, with the time zone: the MP4's creation time, QuickTime's creation date (the day
+  Photos files it under) and the file's dates, so a folder of them sorts by when it happened. Without it, the
+  clip's file dates.
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
@@ -585,7 +645,7 @@ python3 tools/dji_meta_dump.py summary DJI_0072_D.MP4                       # ev
 python3 tools/dji_meta_dump.py timeline DJI_0072_D.MP4 3.2.13.2 3.2.13.3 -s 2  # some fields over time
 ```
 
-### Highlights
+### Highlights and marks
 
 A press of the camera's highlight button while it records marks that moment in the clip, and the highlights plugin
 reads the marks when the clip opens: they show on the seek bar as chapters ("Highlight 1", ...), `Ctrl+]` and
@@ -600,10 +660,87 @@ usually happened.
 - **GoPro HERO5 and later**: the HiLight button (the mode button, while recording), the voice command "GoPro,
   HiLight", or the remote.
 
+**Your own marks**: `M` adds one where the video is, and on a mark (within half a second) removes it, a camera's
+too. The first change writes `<clip>.marks.json` beside the clip, with the camera's marks copied in and flagged as
+the camera's; from then on that file is the clip's marks. Marks need no project. Delete it,
+and the camera's are back. The menu's **Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro
+HiLight". A marks file left from another clip with the same name (GoPro reuses them on every card) is renamed
+`.marks.json.old` rather than shown on the wrong clip.
+
 Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
-[Highlights](#highlights-1) in How it works. A clip with a few marked, and the seconds they were marked at, would
+[Highlights](#highlights) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
+
+### Moments
+
+A moment is a part of a clip you want to keep: the turtle, the jump. Mark it with `l` at its start and `l` at its
+end, press `k`, type its name (Enter alone takes the one suggested: the last name with the next number, "Turtle 2",
+or the date and time), and it's saved as a small file in a **_Moments** folder of the trip:
+`_Moments/Turtle.afplink.mp4`.
+
+- **It's a link, not a copy.** The file is one frame of the moment, in color and stabilized, held for its length,
+  some 150-350 KB. Finder shows that frame as its icon, and the double extension says it's a link (it still opens
+  as an MP4 anywhere). Inside it is where its part of the original clip is.
+- **Opening it in the player plays its part of the original as a video of its own**, in full quality, with the
+  original's stabilization, look and telemetry: the seek bar is the moment's, from 0:00 to its length, and the
+  panel shows the moment (its marks, Rename, Remove). Then the next moment in the folder, and at the last one it
+  stops. Opening the **_Moments** folder plays all of them one after another, in the order they happened.
+- **Its whole clip**: *Open the whole clip* in the panel (or a moment's `⋯`: *In its clip*) opens the clip at the
+  moment's start, its part marked but not looped, to see what came before and after. Moving its start or end
+  there and `k` updates that moment; inside the moment, marking a part of it and `k` trims it.
+- **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
+  moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
+  folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
+  `_ActionFootagePlayer` folder there, and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once
+  there's something to keep. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
+  yet.
+- **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
+  **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
+- **Stabilized as it was made**: a moment keeps the stabilization it was saved with. Over the default preset, its
+  view, level and horizon lock; a clip with a Gyroflow project gives the
+  moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the clip's project changed later doesn't change the
+  moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
+  project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
+  its own project in Gyroflow, made then from what it plays with if it has none; a trim changed there becomes the
+  moment's ends. While a moment plays, each stabilization setting has **As saved** first: every moment plays as it
+  was saved. Pick a value instead and it's for every moment this session (a playlist of moments all at Strong, say),
+  without touching how clips play; back to As saved, each moment is its own again. A moment with its own Gyroflow
+  project plays as the project says (its horizon, crop and smoothing): what it saves is the project, never settings
+  over it. None of it changes a moment: only
+  **Keep in Turtle** in the panel writes how it's viewed into it.
+- **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
+  updates it; a new name saves a new moment instead. Its Finder tags stay.
+- Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
+  order things happened, whatever their names.
+
+### Clip previews: the trip at a glance
+
+A folder of log footage is a wall of gray icons. **Project → Make clip previews** (right click) makes a small
+file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
+`_Clips/Day 1/DJI_0068_D.afplink.mp4`.
+
+- **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
+  yours, or about a dozen frames through it, 2 a second, at 960 pixels. Finder's icons are then the trip in color,
+  and Quick Look (space bar) flips through each clip. A double click in the player plays the clip itself.
+- **How long it takes**: a second or so per clip. Only keyframes are decoded, from the low-resolution copy the
+  camera writes beside the clip when there is one (DJI's `.LRF`, GoPro's `.LRV`). That's far less to read from a
+  NAS. They're made one at a time in the background, with the progress in the bottom-left corner, and never by
+  themselves: the menu item makes them for the clips that have none, new footage that is.
+- **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
+  clip previews* doesn't bring it back (`_ActionFootagePlayer/clips-made.txt` lists what was made). `X` again, or
+  *Make again for removed clips*, does.
+- **Variants**: a clip preview plays with its clip's stabilization. **Its own stabilization** (the panel, while it
+  plays) gives it a project of its own beside it (a copy of the clip's, or made from its motion data as it plays):
+  copy the preview in Finder for another, and each is a variant of the same clip.
+- **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
+  into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
+  lose them: their moments and previews point at their names.)
+- **Ignore subfolders** (next to *Make clip previews*): new previews all go in Clips itself, not in the clips'
+  folders, for a camera's folders by date that mean nothing to the trip. Two clips with the same name get their
+  folder's name in parentheses.
+- A clip under a second long has a single keyframe, at its start: its preview is made from the frames as they are.
+  If some can't be made, the panel says how many, and *why* opens the list.
 
 ### Notes for an AI agent
 
@@ -659,6 +796,8 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 
 - `mpv-side-panel-<version>.zip`, on any system: the settings in a panel beside the video (plain Lua), with
   footage-menu for its Clip buttons.
+
+- `mpv-workspace-<version>.zip`, on any system: the project a clip belongs to, for the other plugins (plain Lua).
 
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
@@ -871,6 +1010,11 @@ ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 - **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
 - **`highlights`**: the moments the camera marked (DJI, GoPro), on the seek bar and a key away. Plain Lua, any mpv
   on any system.
+- **`workspace`**: the project a clip belongs to, its trip folder, for the other plugins, and its moments (`k`,
+  [Moments](#moments)): where a clip's Gyroflow project is, and soon its marks and exports
+  ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)). Plain Lua, any mpv 0.38 or later for naming
+  moments (older ones save them with the suggested name); the moments' previews need the gyroflow plugin. Without
+  it, the gyroflow plugin looks next to the clip, which is the same place for now.
 
 None needs anything in `mpv.conf` or `input.conf`.
 
@@ -984,7 +1128,7 @@ GoPro's metadata track is the one whose samples are `gpmd`: GPMF, nested KLV ite
 `SHUT`, ...), big-endian, each scaled by the `SCAL` before it. A sample holds about a second; its values are spread
 evenly over it. GPS5 (HERO5-10) has the fix for the whole sample in `GPSF`, GPS9 (HERO11 and later) in each row.
 
-### Highlights
+### Highlights and marks
 
 `mpv/scripts/highlights/markers.lua` walks the file's boxes with seeks (mdat isn't read) and reads the few that
 hold the highlights:
@@ -1027,6 +1171,15 @@ mpv/scripts/side-panel/       the plugins' settings in a panel beside the video 
                               ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
+mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
+                              Lua; vs-gyroflow/src/workspace.rs is its twin), and link.lua, which reads the link in a
+                              moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it), and moments.lua, the moments'
+                              part with no mpv in it  →  ~/.config/mpv/scripts/workspace, and
+                              in ActionFootagePlayer
+tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
+                              `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
+                              files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export;
+                              moments_test.lua
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is
@@ -1037,7 +1190,8 @@ tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) �
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut (Rust)
+docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script

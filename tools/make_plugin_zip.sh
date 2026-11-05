@@ -29,9 +29,9 @@ arch=$(case "$target" in "") uname -m ;; *) echo "${target%%-*}" ;; esac)
 # Windows calls it arm64
 [ $os = windows ] && [ "$arch" = aarch64 ] && arch=arm64
 if [ $os = windows ]; then
-    files="vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe"
+    files="vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe afp-cut.exe"
 else
-    files="libvs_gyroflow.so gyroflow-probe gyroflow-project gyroflow-export"
+    files="libvs_gyroflow.so gyroflow-probe gyroflow-project gyroflow-export afp-cut"
 fi
 
 (cd vs-gyroflow && cargo build --release ${target:+--target "$target"})

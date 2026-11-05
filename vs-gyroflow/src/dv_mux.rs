@@ -43,6 +43,8 @@ const NAL_UNSPEC63: u8 = 63; // Dolby Vision enhancement layer
 pub struct RpuInjector {
     rpus: Vec<Vec<u8>>,
     first_frame: u64,
+    /// Source frames from one picture to the next (an export at a lower frame rate: `step`)
+    step: u64,
     /// Each frame's own L1, in frame order, written into its RPU (`live_l1`)
     l1: Option<std::sync::mpsc::Receiver<Option<[i32; 3]>>>,
     buf: Vec<u8>,
@@ -55,8 +57,11 @@ pub struct RpuInjector {
 impl RpuInjector {
     /// `first_frame`: the source frame the stream starts at (an export of a part)
     pub fn new(rpus: Vec<Vec<u8>>, first_frame: u64) -> Self {
-        RpuInjector { rpus, first_frame, l1: None, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
+        RpuInjector { rpus, first_frame, step: 1, l1: None, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
     }
+
+    /// Every `step`th source frame is a picture of the stream (an export at a lower frame rate): its RPU is that frame's
+    pub fn step(mut self, step: u64) -> Self { self.step = step.max(1); self }
 
     /// Each frame's own L1 (min, avg, max in 12-bit PQ), one per access unit in order, written into the file's RPU
     /// for it as the player does (set_l1). A frame sent None, or whose L1 doesn't come (the sender gone), keeps the
@@ -110,7 +115,7 @@ impl RpuInjector {
             out.write_all(&nal)?;
         }
         if self.au_has_vcl {
-            let i = ((self.first_frame + self.frames) as usize).min(self.rpus.len() - 1);
+            let i = ((self.first_frame + self.frames * self.step) as usize).min(self.rpus.len() - 1);
             out.write_all(&[0, 0, 0, 1, 0x7c, 0x01])?;
             let own = self.l1.as_ref().and_then(|rx| rx.recv().ok().flatten()).and_then(|l| set_l1(&self.rpus[i], l[0], l[1], l[2]));
             out.write_all(own.as_deref().unwrap_or(&self.rpus[i]))?;

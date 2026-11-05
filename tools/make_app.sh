@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu, afp-cut
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -75,7 +75,8 @@ menu="$res/plugins/footage-menu"
 panel="$res/plugins/side-panel"
 sdrcheck="$res/plugins/sdr-check"
 agent="$res/plugins/agent"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent"
+workspace="$res/plugins/workspace"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
@@ -96,10 +97,10 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
-    mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
+    mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu afp-cut; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
@@ -107,10 +108,13 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua "$workspace/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
+# gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
+swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -127,8 +131,8 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" \
-         "$sdrcheck/sdr-check"; do
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" \
+          "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
     sign "$f"
 done
 sign "$app"
