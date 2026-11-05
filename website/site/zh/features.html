@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>全部功能 · Action Footage Player</title>
+<meta name="description" content="Action Footage Player 的全部功能一览：Log 素材的色彩与 HDR，基于相机运动数据的防抖（水下也行），遥测数据，精彩时刻，精彩瞬间与标记，项目文件夹，一键导出，送到剪辑软件，静帧净化，快捷键、相机和平台。">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/features">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/features">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/features">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/features">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/features">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../features.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player，首页">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="网站">
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">功能</summary>
+        <ul>
+          <li><a href="log.html">Log 素材</a></li>
+          <li><a href="stabilization.html">防抖</a></li>
+          <li><a href="library.html">素材库</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="features.html" class="nm-all" aria-current="page">全部功能</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">下载</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html">Log 素材</a></li>
+        <li><a href="stabilization.html">防抖</a></li>
+        <li><a href="library.html">素材库</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="features.html" aria-current="page">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html">下载</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
+      <ul>
+        <li><a href="../features.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/features.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/features.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/features.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../features.html" hreflang="en">阅读英文原文</a></p>
+</div>
+
+<main id="top">
+  <section class="hero band ref-hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">参考 · 全部功能</p>
+        <h1>全部功能</h1>
+        <p class="lede">Action Footage Player 能做什么，按类别列出：每项功能一两句话说明，附上快捷键，以及目前试用到了什么程度。</p>
+        <div class="status">
+          <span><i class="dot" aria-hidden="true"></i>早期 Alpha 版</span>
+          <span>截至 2026 年 11 月</span>
+          <span>GPL-3.0</span>
+        </div>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">免费下载 Mac 版</span><span class="os-win">下载 Mac 版</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
+          </a>
+        </div>
+        <p class="legend">
+          <span><span class="pill ok">已验证</span> 已在 Mac 上的 App 中用真实素材播放过</span>
+          <span><span class="pill exp">应可用</span> 已根据厂商公开的元数据或样片实现，但尚未用真实素材试过</span>
+          <span><span class="pill part">尚不支持</span> 目前还不能用</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="band">
+    <div class="wrap ref">
+      <nav class="toc" aria-label="本页内容">
+        <p class="toc-title">本页内容</p>
+        <ol>
+          <li><a href="#opening">打开片段</a></li>
+          <li><a href="#color">Log 色彩与风格</a></li>
+          <li><a href="#hdr">任何屏幕上的 HDR</a></li>
+          <li><a href="#stabilization">防抖</a>
+            <ol>
+              <li><a href="#stab-gyro">基于相机陀螺仪</a></li>
+              <li><a href="#stab-projects">Gyroflow 项目</a></li>
+              <li><a href="#stab-underwater">水下</a></li>
+              <li><a href="#stab-edges">边缘填充</a></li>
+            </ol>
+          </li>
+          <li><a href="#telemetry">遥测数据</a></li>
+          <li><a href="#highlights">精彩时刻与选段</a></li>
+          <li><a href="#moments">精彩瞬间、标记与项目</a></li>
+          <li><a href="#export">导出与分享</a></li>
+          <li><a href="#editors">送到剪辑软件</a></li>
+          <li><a href="#still">静帧净化</a></li>
+          <li><a href="#denoise">噪点与水下色彩</a></li>
+          <li><a href="#panel">侧边面板与菜单</a></li>
+          <li><a href="#keys">快捷键</a></li>
+          <li><a href="#cameras">相机</a></li>
+          <li><a href="#platforms">平台与安装</a></li>
+          <li><a href="#options">高级用户选项</a></li>
+          <li><a href="#command-line">命令行</a></li>
+        </ol>
+      </nav>
+
+      <div class="ref-body">
+
+        <section class="group" id="opening">
+          <h2>打开片段</h2>
+          <p class="group-lede">无需导入，没有媒体库，也不必先渲染：片段在哪里，就在哪里播放。</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>双击片段</h3></div>
+              <div class="feat-text">
+                <p>Mac App 的设置会把它设为 MP4 视频的默认 App（macOS 会请你确认）：双击 MP4 即可播放，本页的所有功能都会生效。其他视频可以通过访达的“打开方式”用它打开。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>访达的快速操作</h3><p class="feat-keys"><span class="where">macOS</span></p></div>
+              <div class="feat-text">
+                <p>右键 → 快速操作：<i>Play Stabilized</i> 在播放器中打开所选视频；<i>Stabilize + LUT</i> 在后台导出它们，每完成一个都会发出通知。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>文件资源管理器的菜单</h3><p class="feat-keys"><span class="where">Windows</span></p></div>
+              <div class="feat-text">
+                <p>MP4 和 MOV 视频的“打开方式”中有 ActionFootagePlayer，文件资源管理器的菜单中有 <i>Play in ActionFootagePlayer</i> 和 <i>Stabilize + LUT</i>，后者在单独的窗口中导出并显示进度（Windows 11 上在“显示更多选项”里）。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>一个窗口，整个文件夹</h3></div>
+              <div class="feat-text">
+                <p>播放时再打开一个视频，它会取代当前视频。文件夹中的其他视频就是上一个和下一个片段，在侧边面板的 Clip 中。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>片段的信息</h3><p class="feat-keys">面板 → Clip</p></div>
+              <div class="feat-text">
+                <p>侧边面板的 Clip 中显示：相机型号、Log 曲线、是否有运动数据和遥测数据，以及有几个精彩时刻。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>原始文件保持原样</h3></div>
+              <div class="feat-text">
+                <p>你的原始文件保持原样，除非你<a class="text-link" href="#lossless-cut">剪掉其中拍坏的一段</a>：这时片段会被重写，去掉这一段，不重新编码，原始文件则移到废纸篓。Gyroflow 项目是片段旁边的 <code>.gyroflow</code> 文件，你的标记也放在片段旁边；精彩瞬间和导出的文件放在<a class="text-link" href="#projects">项目文件夹</a>里。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>直接来自相机</h3></div>
+              <div class="feat-text">
+                <p>播放从存储卡上原样拷贝的片段。经过其他 App 导出或裁剪的片段会丢失播放器读取的元数据：Log 模式、运动数据、遥测数据和精彩时刻。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="color">
+          <h2>Log 色彩与风格</h2>
+          <p class="group-lede">Log 是相机记录信息最多的模式，但片段看起来又平又灰，通常需要调色。在这里，它们直接以完整色彩播放。</p>
+          <p class="note"><a class="text-link" href="log.html">Log 素材，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>自动识别 Log</h3></div>
+              <div class="feat-text">
+                <p>判断是否为 Log 依据的是片段的元数据，而不是文件名，所以无需任何设置：Osmo Action 6 和 Osmo 360 的 D-Log M，近期 GoPro 的 GP-Log 和 GP-Log2。普通片段照常播放。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> Osmo Action 6（D-Log M）；GoPro HERO12 Black（GP-Log，固件 1.20 或更高）</span>
+                  <span><span class="pill exp">应可用</span> Osmo 360；HERO13 Black；GP-Log2（MISSION 1）</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>以 HDR 播放 Log</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>h</kbd></p></div>
+              <div class="feat-text">
+                <p>D-Log M、D-Log、GP-Log、GP-Log2 和 10-bit I-Log 会被转换为 HDR（Rec.2100 HLG）：这是固定的技术性转换，所有片段都一样，不添加任何创意风格。<kbd>Ctrl</kbd>+<kbd>h</kbd> 直接切换到 HDR。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>手动选择 Log 曲线</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>l</kbd></p></div>
+              <div class="feat-text">
+                <p>适用于元数据中没有注明的片段：依次切换 D-Log M、D-Log、GP-Log、GP-Log2 和 I-Log（10-bit），均以 HDR 显示。</p>
+                <p class="feat-status">
+                  <span><span class="pill exp">应可用</span> Insta360 单镜头，10-bit I-Log</span>
+                  <span><span class="pill part">尚不支持</span> 8-bit I-Log</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>SDR 风格</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>s</kbd></p></div>
+              <div class="feat-text">
+                <p>SDR：经 NBCUniversal 中性的 HLG → SDR 转换（所有相机都一样），经相机厂商自己的 Rec.709 LUT（D-Log M 用 DJI 的），或由 mpv 色调映射。<kbd>Ctrl</kbd>+<kbd>s</kbd> 会在它们和 <a class="text-link" href="#hdr">HDR 输出</a>之间依次切换。</p>
+                <p class="feat-status">
+                  <span><span class="pill part">尚不支持</span> D-Log M 以外曲线的厂商 Rec.709 LUT</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>DJI 的 LUT，从 DJI 获取</h3></div>
+              <div class="feat-text">
+                <p>DJI 的 Rec.709 LUT 不随本项目分发：App 的设置会从 DJI 下载并校验它。HDR 和 NBCU 的 SDR 不需要它。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>按录制原样</h3><p class="feat-keys"><kbd>L</kbd></p></div>
+              <div class="feat-text">
+                <p>对当前片段关闭 Log 处理：文件原样显示，就像相机录下的那样平淡。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>HDR 文件原样播放</h3></div>
+              <div class="feat-text">
+                <p>标记为 HDR 的文件（导出的文件，手机或运动相机拍的 HDR 视频）以 HDR 播放，不套用 LUT，也绝不会被当作 Log 再调一次色。<kbd>Ctrl</kbd>+<kbd>s</kbd> 以 SDR 显示它，经 NBCU 的转换或由 mpv 色调映射；播放器自己导出的 Dolby Vision 文件，还可以用它们自带的 trim 参数显示。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="hdr">
+          <h2>任何屏幕上的 HDR</h2>
+          <p class="group-lede">在 HDR 屏幕上，Log 只需要技术性转换，每个片段都一样，所以可以自动完成。在没有 HDR 屏幕的 Mac 上，由 macOS 针对该屏幕对 HDR 做色调映射，并用上每一帧自己的亮度信息。</p>
+          <p class="note"><a class="text-link" href="log.html">HDR、SDR 和 Dolby Vision，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>片段的起始输出</h3></div>
+              <div class="feat-text">
+                <p>在 HDR 屏幕上（例如 MacBook Pro 的屏幕），Log 片段以 HDR 开始播放。在没有 HDR 屏幕的 Mac 上（MacBook Air，大多数外接显示器），Mac App 让片段以 <i>HDR, HLG+DV</i> 开始播放：HLG 通过 macOS 自带的 Dolby Vision&reg; 显示管理呈现，由它针对该屏幕做色调映射，与 QuickTime 和 Apple 设备显示导出文件的方式相同。你用 <kbd>Ctrl</kbd>+<kbd>s</kbd> 选择的输出，就是本次会话中后续片段在同类屏幕上的起始输出。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>视频输出</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>s</kbd></p></div>
+              <div class="feat-text">
+                <p>切换到片段的下一种视频输出（只在片段具备的输出之间切换）：</p>
+                <ul>
+                  <li><i>HDR, HLG</i>：HDR；在没有 HDR 的屏幕上，由 macOS 做色调映射；</li>
+                  <li><i>HDR, HLG+DV</i>：在 HDR 屏幕上是 HDR，在没有 HDR 的屏幕上由 trim 参数做色调映射；</li>
+                  <li><i>SDR, HLG+DV</i>：在 HDR 屏幕上也由 trim 参数做色调映射，也就是 SDR 屏幕上看到的样子；</li>
+                  <li>SDR：由 mpv 色调映射，经 NBCUniversal 中性的 HLG → SDR 转换，或经相机厂商自己的 Rec.709 LUT（D-Log M 用 DJI 的）。</li>
+                </ul>
+                <p>在 HDR 屏幕上，这些 SDR 输出会以 SDR 屏幕上的样子显示。</p>
+                <p class="feat-status"><span><span class="where">Mac App</span> 两种 <i>HLG+DV</i> 输出</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>每一帧自己的亮度</h3><p class="feat-keys"><span class="where">Mac App</span></p></div>
+              <div class="feat-text">
+                <p>使用 <i>HLG+DV</i> 时，每一帧的最暗、平均和最亮亮度会随帧一起送出（Dolby Vision 的 L1），在播放时由 GPU 测得，因此 macOS 会按每个场景的实际内容做映射，而不是按一个典型场景：昏暗的潜水画面和阳光下的海滩各有各的空间。以 <i>HLG+DV</i> 风格导出的文件，也以同样的方式测量每一帧。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>trim 参数：作者的，或中性的</h3><p class="feat-keys"><span class="where">Mac App</span></p></div>
+              <div class="feat-text">
+                <p>trim 参数叠加在每帧的亮度之上：作者按个人喜好设定，贴合 NBCUniversal 的 HLG → SDR 转换，且没有场景级偏移，所以 HDR 屏幕上看到的仍是 HDR。侧边面板的 Dolby Vision 中有对应的滑块，并可以恢复为作者的设定或中性设定（Dolby Vision 自身的映射，不加任何调整）。以 <i>HLG+DV</i> 风格导出的文件采用那里的设置。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>面向 Apple 设备的导出文件</h3><p class="feat-keys"><span class="where">Mac App</span></p></div>
+              <div class="feat-text">
+                <p>以 <i>HLG+DV</i> 风格导出时（也就是 Mac App 在没有 HDR 的屏幕上的起始风格），片段会成为 HEVC Main10 HLG，并带有 Dolby Vision Profile 8.4 元数据：播放器自行写入兼容的元数据（RPU）。Apple 设备（iPhone 或 Mac）以 HDR 播放它，在标准屏幕上则应用 trim 参数，因此显示效果与播放器中一致。不支持 Dolby Vision 的设备会把它当作普通的 HLG 播放，并自行做色调映射。</p>
+                <p>以 <i>HDR, HLG</i> 导出的文件，以及 <i>Stabilize + LUT</i> 和命令行导出的文件，都是普通的 HLG。在 Windows 或 Linux 上导出的文件从不带 Dolby Vision。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>另一类屏幕</h3></div>
+              <div class="feat-text">
+                <p>片段的窗口移到另一类屏幕时，片段保持原来的风格。在 Windows 和 Linux 上，所有屏幕都视为 HDR。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>显示器显得太暗</h3><p class="feat-keys"><span class="where">macOS</span></p></div>
+              <div class="feat-text">
+                <p>连接过 HDR 显示设备（例如 HDR 电视）之后，在 Mac 重启之前，macOS 可能会把接在它原来位置上的 SDR 显示器上的 HDR 显示得暗大约一档。播放器发现这种情况时会提示你，就在 HDR 第一次在这种显示器上播放的时候。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="stabilization">
+          <h2>防抖</h2>
+          <p class="group-lede">使用 <a class="text-link" href="https://gyroflow.xyz">Gyroflow</a> 的引擎，在片段播放的同时进行，与 Log 转换同步：无需先渲染。</p>
+          <p class="note"><a class="text-link" href="stabilization.html">防抖，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat" id="stab-gyro">
+              <div><h3>基于相机自己的运动数据</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>g</kbd></p></div>
+              <div class="feat-text">
+                <p>关闭相机防抖录制的片段，无需项目即可防抖播放：DJI 需关闭 EIS 并使用 Wide 视角（只有这样它才会记录自身的运动），GoPro 关闭 HyperSmooth，Insta360 关闭 FlowState。前提是相机记录了防抖已关闭：相机已经防抖过的片段按原样播放。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> Osmo Action 6（关闭 EIS）；GoPro HERO12 Black（关闭 HyperSmooth）</span>
+                  <span><span class="pill exp">应可用</span> Osmo 360；其他 DJI 相机；其他 GoPro；Insta360 单镜头</span>
+                  <span><span class="pill part">尚不支持</span> 其他相机，在没有项目的情况下</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>无需预先渲染</h3></div>
+              <div class="feat-text">
+                <p>以前旅行的素材直接以防抖效果播放，不需要为每个片段渲染并保存一份副本：只有你导出的段落才会写出文件。</p>
+                <p>防抖本身来自 Gyroflow 的引擎；播放器在此之上加入实时播放、Log 转 HDR 和遥测数据。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>开启、更宽、关闭</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>g</kbd></p></div>
+              <div class="feat-text">
+                <p>防抖开启 → 开启并使用更宽视角 → 关闭。更宽视角不放大：防抖后的画面在窗口中覆盖的面积与原画面大致相同，边缘有时会露出，并被填充。开启（On）和更宽（Wider）会沿用到后续没有项目的片段；关闭（Off）只对当前片段有效。有项目的片段以开启状态开始，与 Gyroflow 中的设定一致。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>防抖强度</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>k</kbd></p></div>
+              <div class="feat-text">
+                <p>弱、中或强，适用于没有项目的片段：裁切 10、20 或 30 %，平滑度 50、75 或 100 %。播放中即可切换，并沿用到后续片段。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>地平线</h3><p class="feat-keys">面板 → Stabilization</p></div>
+              <div class="feat-text">
+                <p><i>As preset</i>（按预设；有项目的片段则为 <i>As project</i>，按项目）、<i>Level</i>（保持水平）或 <i>Free</i>（不锁定）。Level 需要更多放大，所以边缘露出得更多。</p>
+              </div>
+            </div>
+            <div class="feat" id="stab-projects">
+              <div><h3>Gyroflow 项目</h3></div>
+              <div class="feat-text">
+                <p>在 Gyroflow 中制作并保存在片段旁边的项目会被原样使用：片段按项目设定播放，包括其中的地平线锁定和镜头设置。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> Osmo Action 6</span>
+                  <span><span class="pill exp">应可用</span> 其他相机，以及 Gyroflow 支持的任何相机</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>在 Gyroflow 中打开</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>e</kbd></p></div>
+              <div class="feat-text">
+                <p>暂停播放，并在 Gyroflow 中打开片段的项目；如果还没有项目，会先根据你看到的效果在片段旁边写入一个：同样的镜头、平滑、放大和折射。每次在 Gyroflow 中保存，这里的防抖都会在同一位置重新加载。已存在的项目绝不会被覆盖。</p>
+                <p class="feat-status"><span><span class="where">Windows</span> 没有项目的片段需要在 <code>gyroflow.conf</code> 中设置 <code>gyroflow_app</code></span><span><span class="where">Linux</span> PATH 中要有 <code>gyroflow</code>，或者设置 <code>gyroflow_app</code></span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>没有运动数据？用 Gyroflow</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>e</kbd></p></div>
+              <div class="feat-text">
+                <p>播放器自己无法防抖的片段，会原样在 Gyroflow 中打开。没有运动数据的片段（开着 EIS 的 DJI，或根本不记录运动数据的相机）在那里从画面本身进行防抖（光流）；开着相机防抖拍摄的 GoPro 或 Insta360 片段带有运动数据，Gyroflow 会加载它。在那里保存项目后，片段就会用它防抖播放。侧边面板中对应的是 <i>Stabilize in Gyroflow…</i></p>
+              </div>
+            </div>
+            <div class="feat" id="stab-underwater">
+              <div><h3>水下</h3></div>
+              <div class="feat-text">
+                <p>相机内置防抖在水下会失效（经测试，DJI 的 EIS 如此），很可能是因为水会折射光线，镜头的表现就像一支比它所调校的焦距更长的镜头。关掉它，片段在这里就能稳定播放：默认预设专为水下素材制作，并校正了水对光线的折射。在一段测试片段上，帧间抖动从 0.16 px 降到了 0.02 px。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>镜头在水中或水外</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>u</kbd></p></div>
+              <div class="feat-text">
+                <p>切换为镜头在水上，再切回水下。默认情况下，折射会在整段片段中跟随相机记录的 <i>In water</i> / <i>Out of water</i>，在一帧之内切换。其他相机的片段按项目或预设播放（默认为水下）。</p>
+                <p class="feat-status">
+                  <span>跟随相机：仅 Osmo Action 6，它是唯一记录这一信息的相机。</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat" id="stab-edges">
+              <div><h3>边缘填充</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>b</kbd> · 面板 → Performance &amp; Quality</p></div>
+              <div class="feat-text">
+                <p>防抖后画面未覆盖的区域用什么填充，经过模糊并融合进画面：</p>
+                <ul>
+                  <li><b>Trail by direction</b>（按方向留下的轨迹），默认：在真实世界中这个方向上最后一次看到的内容，所以平移镜头时也能与画面吻合；尚未看到过的地方，用周围的颜色向内扩散；</li>
+                  <li><b>Frame's edge spread out</b>（画面边缘向外扩散）：只用画面自身的颜色，从边缘向外扩散；</li>
+                  <li><b>Background color</b>（背景色）：项目的背景色，与 Gyroflow 渲染的一样。</li>
+                </ul>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>立即开始播放</h3></div>
+              <div class="feat-text">
+                <p>没有项目的片段读完开头几秒的运动数据就开始播放，其余部分边播边读：从 NAS 播放约一秒即可开始，而先读完全部数据需要 5-10 秒。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>在较慢的电脑上</h3><p class="feat-keys">面板 → Performance &amp; Quality</p></div>
+              <div class="feat-text">
+                <p>当防抖持续掉帧超过 2 秒时，播放会暂停，并建议降低帧率、分辨率或边缘填充，或者让水下的色边保持录制原样。侧边面板的 Performance &amp; Quality 中可以设置这些。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="telemetry">
+          <h2>遥测数据</h2>
+          <p class="group-lede">相机测得的数据，叠加在视频上，在片段打开时从中读取。</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>屏幕显示</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>t</kbd></p></div>
+              <div class="feat-text">
+                <p>片段有哪项数据就显示哪项：DJI 片段显示深度和 <i>In water</i> / <i>Out of water</i>；GoPro 片段在 GPS 定位后显示位置和速度，没有 GPS 的则显示曝光。<kbd>Ctrl</kbd>+<kbd>t</kbd> 关闭或打开显示，并沿用到后续片段。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> Osmo Action 6 在水中的深度</span>
+                  <span><span class="pill exp">应可用</span> 它的其他字段（尚未见过 GPS 定位）；Osmo 360；GoPro 的 GPS、速度和曝光</span>
+                  <span><span class="pill part">尚不支持</span> 其他相机</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>深度</h3></div>
+              <div class="feat-text">
+                <p>在水下，来自气压计，精度 0.1 m，大约每秒一次。在潜水壳中不会记录深度（气压计测的是壳内的空气），但 <i>In water</i> 仍会显示，依据的是画面。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>更多字段</h3><p class="feat-keys">面板 → Telemetry</p></div>
+              <div class="feat-text">
+                <p>按需显示：气压，水上的海拔（相对值，仅供粗略参考），曝光（ISO、快门、光圈、白平衡），以及 Osmo 360 的图像传感器温度和配对设备的心率。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>位置与单位</h3></div>
+              <div class="feat-text">
+                <p>视频的任意一角（默认左下角），公制或英制（英尺、mph、°F），可在菜单或侧边面板中设置。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="highlights">
+          <h2>精彩时刻与选段</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>相机的精彩时刻</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></p></div>
+              <div class="feat-text">
+                <p>录制时按下相机的精彩时刻按键：标记会显示在进度条上，快捷键可跳到下一个或上一个，落在标记前两秒处，因为按下按键时，那一刻通常已经发生了。<kbd>Page Up</kbd> / <kbd>Page Down</kbd> 跳到标记本身。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> DJI Osmo Action 6（快捷切换按键，或 GPS 蓝牙遥控器）</span>
+                  <span><span class="pill exp">应可用</span> DJI Osmo Action 4 和 Action 5 Pro；GoPro HERO5 及更新机型（HiLight 按键、“GoPro, HiLight”语音指令或遥控器）</span>
+                  <span>Osmo 360 和 Pocket 3 不会标记精彩时刻。</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>全部精彩时刻，按时间排列</h3><p class="feat-keys">面板 → Clip</p></div>
+              <div class="feat-text">
+                <p>侧边面板的 Clip 中有全部精彩时刻；没有面板时，插件菜单会按时间列出它们。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>标记一段</h3><p class="feat-keys">按两次 <kbd>l</kbd></p></div>
+              <div class="feat-text">
+                <p>在这一段的开头和结尾各按一次（mpv 的 A-B 循环）：随后 <kbd>Shift</kbd>+<kbd>E</kbd> 导出的就是这一段，<kbd>k</kbd> 则把它保存为<a class="text-link" href="#moments">精彩瞬间</a>。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="moments">
+          <h2>精彩瞬间、标记与项目</h2>
+          <p class="group-lede">你从一次旅行中留下的东西，都是它文件夹里的普通文件：<span class="os-mac">访达能直接显示</span><span class="os-win">文件资源管理器能直接显示</span>，<a class="text-link" href="#editors">剪辑软件</a>能直接导入。从存储卡到剪辑的完整故事：<a class="text-link" href="moments.html">精彩瞬间与标记</a>。</p>
+          <p class="note"><a class="text-link" href="library.html">项目、精彩瞬间与标记，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>保存精彩瞬间</h3><p class="feat-keys"><kbd>k</kbd></p></div>
+              <div class="feat-text">
+                <p>按两次 <kbd>l</kbd> 标记一段，再按 <kbd>k</kbd>，播放器先询问名称，再把这一段保存为精彩瞬间。输入框是空的，旁边显示一个建议名称：<kbd>Enter</kbd> 采用它，直接输入则替换它，<kbd>Esc</kbd> 取消。没有起名的精彩瞬间以它的日期和时间命名。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>一个精彩瞬间就是一个小文件</h3></div>
+              <div class="feat-text">
+                <p>每个精彩瞬间都是项目 <code>_Moments/</code> 文件夹里的一个小 MP4，以它的名称命名：<code>&lt;name&gt;.afplink.mp4</code>。<span class="os-mac">访达的缩略图和快速查看</span><span class="os-win">文件资源管理器的缩略图和预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）</span>都以正常色彩显示它，而不是 Log 的灰色。在播放器中打开，它会以完整画质播放原始文件中的这一段，防抖效果与你保存时一样。</p>
+                <p>它的图标是其中的第一个标记，没有标记时则是中间那一帧。文件日期就是这一刻真实发生的时间，所以按日期排序时，精彩瞬间会按发生的先后排列。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>像普通文件一样整理</h3></div>
+              <div class="feat-text">
+                <p>删掉文件，就删掉了这个精彩瞬间。<code>_Moments/</code> 里的子文件夹由你安排，用来给精彩瞬间分类；重命名文件，就重命名了精彩瞬间。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>标记</h3><p class="feat-keys"><kbd>M</kbd></p></div>
+              <div class="feat-text">
+                <p>片段中的时间点，显示在进度条上。<kbd>M</kbd> 在视频当前位置添加一个标记；在标记上按则删除它。在你改动任何一个之前，标记就是相机的精彩时刻：第一次改动会把它们全部保存到这个片段专属的小标记文件 <code>&lt;clip&gt;.marks.json</code> 中。删掉这个文件，相机的标记就回来了。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>整个旅程一目了然</h3><p class="feat-keys">面板 → Project</p></div>
+              <div class="feat-text">
+                <p>在你需要时生成：在侧边面板的 Project 标签页中点 <i>Make clip previews</i>（生成片段预览），就会得到一个 <code>_Clips/</code> 文件夹，每个片段一个小 MP4，即该片段的彩色翻页预览。<span class="os-mac">在图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；快速查看几秒钟就能翻完一个片段。</span><span class="os-win">在大图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）几秒钟就能翻完一个片段。</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>把片段放到一边</h3><p class="feat-keys"><kbd>X</kbd></p></div>
+              <div class="feat-text">
+                <p>不感兴趣：在播放器里按 <kbd>X</kbd>，或者从 <code>_Clips/</code> 删掉这个片段的翻页预览，两者效果相同。片段本身原地不动。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>收藏与评分 <span class="soon">即将推出</span></h3><p class="feat-keys"><kbd>K</kbd></p></div>
+              <div class="feat-text">
+                <p>还在的精彩瞬间或片段翻页预览就是保留的，删掉的就是不要的。<kbd>K</kbd> 把正在播放的精彩瞬间（没有时则是当前片段）设为收藏，再按一次取消：<span class="os-mac">在访达中是绿色的 <i>Favorite</i> 标签</span><span class="os-win">在文件资源管理器中是 4 星及以上评分</span>。剪辑软件也会收到这些信息。</p>
+              </div>
+            </div>
+            <div class="feat" id="lossless-cut">
+              <div><h3>剪掉拍坏的一段</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>x</kbd></p></div>
+              <div class="feat-text">
+                <p>按两次 <kbd>l</kbd> 标记这一段，按 <kbd>Ctrl</kbd>+<kbd>x</kbd> 并确认。片段会被重写，去掉这一段，不重新编码：保留的部分按原样复制，并在替换任何文件之前先做检查。如果这一段在中间，会留下两个片段；第二个从剪切终点处或之前的关键帧开始，所以拍坏的部分最多可能留下约一秒。</p>
+                <p>原始文件连同它的标记文件、Gyroflow 项目和片段预览一起移到废纸篓。标记和精彩瞬间会转到新的片段上；导出的文件不受影响。播放器中无法撤销。不需要项目。</p>
+                <p class="feat-status"><span>DJI 片段；GoPro 片段在检查通过时可以。不支持 Insta360 或 iPhone 片段、精彩瞬间、片段预览或导出的文件。</span></p>
+              </div>
+            </div>
+            <div class="feat" id="projects">
+              <div><h3>项目文件夹</h3><p class="feat-keys">面板 → Project</p></div>
+              <div class="feat-text">
+                <p>项目就是一次旅行的文件夹，只需设置一次：第一次保存精彩瞬间、导出或生成片段预览时，侧边面板的 Project 标签页会问你用哪个文件夹，是片段所在的文件夹还是它上面的某一层，然后 <i>Initialize the project here</i>（在此初始化项目）会创建项目。其中的每个文件夹都属于这个项目。里面放着 <code>_Moments/</code>、<code>_Clips/</code> 和 <code>_Exports/</code>，以及存放播放器自己笔记的 <code>_ActionFootagePlayer/</code>。标记和 Gyroflow 项目留在各自的片段旁边。当那个文件夹无法写入时（锁定的存储卡、只读的共享文件夹），播放器会询问一个名称，在“文稿”中它自己的文件夹里（<code>Documents/ActionFootagePlayer/</code>）新建一个项目文件夹，其中的 <code>Sources.txt</code> 指向素材所在的位置。 <span class="soon">即将推出</span></p>
+                <p>你的原始文件保持原样，除非你<a class="text-link" href="#lossless-cut">剪掉其中拍坏的一段</a>。</p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="moments.html">精彩瞬间与标记</a>
+          </div>
+        </section>
+
+        <section class="group" id="export">
+          <h2>导出与分享</h2>
+          <p class="note"><a class="text-link" href="log.html">每种风格导出什么，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>所见即所导</h3><p class="feat-keys"><kbd>Shift</kbd>+<kbd>E</kbd></p></div>
+              <div class="feat-text">
+                <p>按片段正在播放的样子一次导出：防抖与否、同样的视角、边缘、地平线和镜头，同样的风格。标记了一段时，只导出这一段。对正在导出的片段按两次 <kbd>Shift</kbd>+<kbd>E</kbd> 可取消导出。</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">已验证</span> Osmo Action 6 的 HDR 导出</span>
+                  <span><span class="pill exp">应可用</span> Rec.709 导出；其他相机（Gyroflow 支持的任何相机：需要项目）</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>适合手机的文件</h3></div>
+              <div class="feat-text">
+                <p>Log 片段导出为 HDR 的 10-bit HEVC（Rec.2100 HLG），并带有相应的标签，让 macOS、iOS 和 YouTube 以 HDR 显示。在 Mac 上以 <i>HLG+DV</i> 风格导出时，还带有供 Apple 设备使用的 Dolby Vision 元数据（见<a class="text-link" href="#hdr">任何屏幕上的 HDR</a>）。NBCU 和相机厂商的 SDR 风格则导出 Rec.709，侧边面板 Clip 中的 <i>Export in SDR</i> 也是如此，无论当前播放的是什么。由 mpv 色调映射的 SDR 导出为 HLG，<i>SDR, HLG+DV</i> 导出为带 Dolby Vision 的 HLG。10-bit 素材始终保持 10-bit。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>文件存放位置</h3></div>
+              <div class="feat-text">
+                <p>项目的 <code>_Exports/</code> 文件夹，文件名是你在与精彩瞬间相同的对话框中起的名字；除非导出的是 <i>HDR, HLG</i>，否则风格会写在括号里：<code>Turtle.mov</code>、<code>Turtle (SDR).mov</code>、<code>Turtle (Dolby Vision).mov</code>。文件带有指向原始文件的链接：没有侧边面板时，右键菜单中的 <i>Open the original</i> 会播放原始片段中的这一段。音频原样复制，文件保留片段的日期。通知会告诉你文件的位置，侧边面板的 Clip 可以在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中显示最近一次导出的文件。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>导出时照常观看</h3></div>
+              <div class="feat-text">
+                <p>导出期间播放继续进行，进度显示在右上角；可以同时导出多个片段。在 Mac 上，视频播放时导出以后台优先级运行，几乎停止：暂停后，导出就全速进行。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>一次导出多个片段</h3></div>
+              <div class="feat-text">
+                <p><i>Stabilize + LUT</i>（位于<span class="os-mac">访达的快速操作</span><span class="os-win">文件资源管理器的右键菜单</span>中）会导出所选视频，Log 导出为 HDR（HLG），放进项目的 <code>_Exports/</code> 文件夹；没有项目时，放进片段旁边的 <code>stabilized/</code> 文件夹。<a class="text-link" href="#command-line">命令行</a>也可以，还能写出供剪辑用的 ProRes 422 HQ。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>在 Windows 上</h3><p class="feat-keys"><span class="where">Windows</span></p></div>
+              <div class="feat-text">
+                <p>导出使用 NVENC、Quick Sync 和 AMF 中第一个可用的编码器，否则用处理器上的 x265（慢得多；在 Windows on ARM 上总是如此）。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="editors">
+          <h2>送到剪辑软件 <span class="soon">即将推出</span></h2>
+          <p class="group-lede">选好之后，精彩瞬间和标记就会送到你的剪辑软件，作用于原始文件：导入一次，无需渲染。</p>
+          <p class="note"><a class="text-link" href="library.html">送到剪辑软件，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>给剪辑软件的标记</h3><p class="feat-keys">菜单 → Marks for the editor</p></div>
+              <div class="feat-text">
+                <p>选择剪辑软件，播放器就会把这次旅行的文件写到项目文件夹中，以项目名称命名，并告诉你它在哪里。文件包含你没有放到一边的所有片段，或者只包含有精彩瞬间或标记的片段。<span class="os-mac">精彩瞬间的文件夹变成素材箱，访达标签变成关键词，收藏仍是收藏。</span><span class="os-win">精彩瞬间的文件夹变成素材箱，收藏仍是收藏。</span>时间按片段自身的时间码计算，所以每个标记点都落在它对应的那一帧上。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Final Cut Pro</h3></div>
+              <div class="feat-text">
+                <p>一个包含片段的事件，标记作为标记点；精彩瞬间作为关键词范围，带有收藏和拒绝；另有一个把精彩瞬间依次排列的项目。</p>
+                <p class="feat-status"><span>FCPXML 1.10：文件 → 导入 → XML。</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>DaVinci Resolve</h3><p class="feat-keys">免费版也可以</p></div>
+              <div class="feat-text">
+                <p>基于原始文件的时间线：精彩瞬间（每个精彩瞬间文件夹一条）和片段。标记作为时间线标记点导入，收藏、拒绝和关键词则成为片段颜色、旗标和关键词。</p>
+                <p class="feat-status"><span>FCPXML，外加一个标记点 EDL 和一个元数据 CSV。</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Premiere Pro</h3></div>
+              <div class="feat-text">
+                <p>与你的文件夹对应的素材箱、带标记点的片段、每个精彩瞬间作为带入点和出点的命名片段，以及一个由精彩瞬间组成的序列。</p>
+                <p class="feat-status"><span>FCP7 XML：文件 → 导入。</span></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="still">
+          <h2>静帧净化</h2>
+          <p class="note"><a class="text-link" href="photos.html">从视频中取照片，一步步讲清楚 →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>暂停帧的时域降噪</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
+              <div class="feat-text">
+                <p>视频暂停片刻后，用这一帧及其前后各 5 帧重建画面，每一帧都按它们之间的运动对齐到这一帧上：光线昏暗时传感器产生的噪点大多消失（时域降噪），细节保留。4K 大约需要一秒；必须开启防抖。它默认开启，所以只要暂停就行；<kbd>Ctrl</kbd>+<kbd>p</kbd> 关闭它，再按一次重新开启，对后续片段同样有效。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>全尺寸暂停帧</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>f</kbd></p></div>
+              <div class="feat-text">
+                <p>以素材本身的分辨率显示暂停的帧，不受播放设置影响；开启 <kbd>Ctrl</kbd>+<kbd>p</kbd> 时在同一次处理中一并净化。在侧边面板中，Performance &amp; Quality → Paused frame → <i>Full size</i> 会在每次暂停后自动这样做。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="denoise">
+          <h2>降噪与水下色彩</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>降噪</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>n</kbd></p></div>
+              <div class="feat-text">
+                <p>暗部和水下的彩色斑块大多消失，细节保留。适用于任何片段，Log 或非 Log，在 GPU 上运行。这一设置会沿用到后续片段。仅用于播放：导出的文件不降噪。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>水下色边</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>a</kbd></p></div>
+              <div class="feat-text">
+                <p>水对蓝光的折射比对红光强，所以在相机平面玻璃后面，红色和蓝色越靠近画面边缘就分得越开。凡是镜头在水下的地方，每种颜色都会被移回它自己的光线落点，完全依据物理计算，不针对素材拟合；在水上则不做任何改变。<kbd>Ctrl</kbd>+<kbd>a</kbd> 保留录制时的色边，再按一次则重新去除。仅用于播放。</p>
+                <p class="feat-status">
+                  <span>在 Osmo Action 6 的潜水片段上，画面边缘红色 3-7 px 的色边缩小到约一个像素以内。</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="panel">
+          <h2>侧边面板与菜单</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>侧边面板</h3><p class="feat-keys"><kbd>Tab</kbd></p></div>
+              <div class="feat-text">
+                <p>各项设置都在窗口右侧、视频旁边的面板中，视频会为它让出位置；快捷键标在对应功能旁边。<kbd>Tab</kbd> 隐藏或显示面板。</p>
+                <ul>
+                  <li><b>Project</b>，面板打开时所在的部分：这次旅行的项目文件夹（<i>Initialize the project here</i>）、片段预览、这个片段的标记和精彩瞬间、标记一段并把它保存为精彩瞬间；</li>
+                  <li><b>Clip</b>：片段的信息、<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>和路径、它的精彩时刻、导出片段或标记的一段、<i>Export in SDR</i>、上一个和下一个片段；</li>
+                  <li><b>Look</b>：视频输出、手动选择 Log 曲线、降噪；</li>
+                  <li><b>Stabilization</b>：Gyroflow、视角、强度、地平线、镜头及其色边；</li>
+                  <li><b>Performance &amp; Quality</b>：防抖时的帧率和尺寸、暂停的帧、边缘填充、GPU 跟不上时是否询问；</li>
+                  <li><b>Telemetry</b>：是否显示、所在角落、单位、字段；</li>
+                  <li><b>Dolby Vision</b>（Mac App）：trim 参数滑块；</li>
+                  <li><b>Support</b>：版本号、Keys…、Note for the agent…、Report this camera…、Set up again…，以及网站和 GitHub 的链接。</li>
+                </ul>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>菜单</h3><p class="feat-keys">右键</p></div>
+              <div class="feat-text">
+                <p>有侧边面板时（App 和插件 zip 包），右键打开的是 mpv 自己的菜单。没有侧边面板时，右键打开插件菜单：快捷键能做的一切都在这里，旁边标着快捷键，还有没有快捷键的功能。需要 mpv 0.41 或更高版本。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Make these the defaults</h3></div>
+              <div class="feat-text">
+                <p>在 Look、Stabilization、Quality 和 Telemetry 的底部（菜单中为 Remember as default）：把当前设置保留到下次启动。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Report this camera…</h3><p class="feat-keys">面板 → Support</p></div>
+              <div class="feat-text">
+                <p>在 GitHub 上新建一个 issue，附上插件在片段中找到的信息。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" id="keys">
+          <h2>快捷键</h2>
+          <p class="group-lede">几乎每个操作也都在侧边面板中，旁边标着它的快捷键。</p>
+          <div class="compare-wrap">
+            <table class="keytable">
+              <thead><tr><th scope="col">按键</th><th scope="col">作用</th><th scope="col">用于 <code>input.conf</code> 的名称</th></tr></thead>
+              <tbody>
+                <tr><td>按两次 <kbd>l</kbd></td><td>标记一段：先是开头，再是结尾（mpv 的 A-B 循环）</td><td></td></tr>
+                <tr><td><kbd>k</kbd></td><td>把标记的一段保存为精彩瞬间（先询问名称）</td><td></td></tr>
+                <tr><td><kbd>M</kbd></td><td>在此处添加标记；在标记上：删除它</td><td></td></tr>
+                <tr><td><kbd>X</kbd></td><td>把片段放到一边：不感兴趣</td><td></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>x</kbd></td><td>把标记的一段从片段中剪掉（先询问）；原始文件移到废纸篓</td><td></td></tr>
+                <tr><td><kbd>K</kbd></td><td>收藏：正在播放的精彩瞬间，否则是当前片段；再按一次：取消</td><td></td></tr>
+                <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>按播放的样子导出片段或标记的一段（先询问名称）；按两次：取消</td><td><code>gyroflow/export</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>g</kbd></td><td>防抖开启 → 更宽视角 → 关闭</td><td><code>gyroflow/toggle</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>k</kbd></td><td>防抖强度：弱 → 中 → 强</td><td><code>gyroflow/level</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>b</kbd></td><td>边缘填充方式：按方向留下的轨迹、画面边缘向外扩散、背景色</td><td><code>gyroflow/edges</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>u</kbd></td><td>镜头在水上，再切回</td><td><code>gyroflow/lens</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>a</kbd></td><td>去除水下色边，或保留录制原样</td><td><code>gyroflow/fringes</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>e</kbd></td><td>在 Gyroflow 中打开片段</td><td><code>gyroflow/edit</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>暂停帧的时域降噪（静帧净化），开（默认）或关</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>f</kbd></td><td>全尺寸显示暂停的帧</td><td><code>gyroflow/full</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>s</kbd></td><td>下一种视频输出：HDR、<i>HLG+DV</i>（Mac App）和各种 SDR 风格</td><td><code>dlogm/sdr</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>h</kbd></td><td>直接切换到 HDR</td><td><code>dlogm/hdr</code></td></tr>
+                <tr><td><kbd>L</kbd></td><td>关闭 Log 处理：按录制原样显示片段</td><td><code>dlogm/off</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>l</kbd></td><td>手动选择 Log 曲线</td><td><code>dlogm/curve</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>n</kbd></td><td>降噪开或关</td><td><code>dlogm/denoise</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>t</kbd></td><td>遥测数据关或开</td><td><code>dji_telemetry/toggle</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></td><td>下一个、上一个精彩时刻（落在它前面两秒左右）</td><td><code>highlights/next</code>, <code>highlights/prev</code></td></tr>
+                <tr><td><kbd>Page Up</kbd> / <kbd>Page Down</kbd></td><td>同样跳到精彩时刻，落在标记本身（mpv 的章节键）</td><td></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>r</kbd></td><td>给 AI 智能体的笔记</td><td><code>agent/report</code></td></tr>
+                <tr><td>右键</td><td>没有侧边面板时为插件菜单（有面板时为 mpv 自己的菜单）</td><td><code>footage_menu/menu</code></td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>侧边面板，隐藏或显示</td><td><code>side_panel/toggle</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">换用其他按键：在 <code>input.conf</code> 中绑定这些名称，例如 <code>Ctrl+d script-binding dlogm/sdr</code>。</p>
+        </section>
+
+        <section class="group" id="cameras">
+          <h2>相机</h2>
+          <p class="group-lede">日常配合 DJI Osmo Action 6 使用，并在 GoPro HERO12 Black 上试过。其他 DJI 相机、其他 GoPro 和 Insta360 已在代码中支持，但尚未用真实素材试过。</p>
+          <div class="btns">
+            <a class="btn" href="index.html#cameras">逐台相机的支持情况</a>
+            <a class="btn" href="https://github.com/anton-belkin/ActionFootagePlayer#other-cameras-and-how-to-help">帮它支持你的相机</a>
+          </div>
+          <p class="note">在 GitHub issue 中附上几秒直接从存储卡拷出的素材，是让一台相机变为“已验证”的最快方式。</p>
+        </section>
+
+        <section class="group" id="platforms">
+          <h2>平台与安装</h2>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Apple Silicon Mac</h3><p class="feat-keys"><span class="pill ok">日常使用中</span></p></div>
+              <div class="feat-text">
+                <p>macOS 15 或更高版本。App 自带 mpv 和 ffmpeg：无需另装任何东西。它采用 ad hoc 签名，所以第一次打开时：系统设置 → 隐私与安全性 → 仍要打开。它的设置会把它设为 MP4 视频的播放器，添加快速操作，并下载 DJI 的 LUT。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Windows 10 或 11</h3><p class="feat-keys"><span class="pill exp">Alpha</span></p></div>
+              <div class="feat-text">
+                <p>独立的 App，有 x86-64 版和 Windows 11 on ARM 版，所需的一切都已包含在内。x86-64 版已试用且可正常工作，但测试还不多；ARM 版只经过构建检查。它只为你自己安装，无需管理员权限；第一次运行时 SmartScreen 会发出警告：更多信息 → 仍要运行。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Linux</h3><p class="feat-keys"><span class="pill exp">未试用</span></p></div>
+              <div class="feat-text">
+                <p>插件，装进你自己的 mpv：每个发布版本都会构建，但尚未试用。防抖需要带 VapourSynth 构建的 mpv。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>在你自己的 mpv 中使用插件</h3></div>
+              <div class="feat-text">
+                <p>适用于任何系统：Log 色彩、遥测数据、精彩时刻和菜单都是纯 Lua 加 GPU 着色器。防抖和导出需要带 VapourSynth 构建的 mpv，并提供适用于 Apple Silicon 上的 macOS、Linux x86-64 和 Windows 的构建。<code>mpv.conf</code> 和 <code>input.conf</code> 中无需添加任何内容。</p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn primary" href="download.html">下载与安装步骤</a>
+          </div>
+        </section>
+
+        <section class="group" id="options">
+          <h2>高级用户选项</h2>
+          <p class="group-lede">每个插件读取 App 的 <code>mpv/script-opts/</code> 文件夹中的 <code>&lt;plugin&gt;.conf</code>，位于 <code>~/Library/Application Support/ActionFootagePlayer/</code>（Windows：<code>%LOCALAPPDATA%\ActionFootagePlayer\</code>）。Remember as default 会替你写入这些文件。其中几项：</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>设置文件</h3></div>
+              <div class="feat-text">
+                <dl class="optlist">
+                  <dt><code>dlogm.conf</code></dt><dd><code>hdr_screen=hdr</code> 和 <code>sdr_screen=dv</code>：Log 片段在 HDR 屏幕和没有 HDR 的屏幕上的起始风格（<code>hdr</code>、<code>dv</code>、<code>dvsdr</code>、<code>tonemap</code>、<code>nbcu</code> 或 <code>maker</code>）；<code>denoise=yes</code>：一开始就开启降噪；<code>dv_live_l1=no</code>（Mac App）：使用 trim 参数的固定亮度信息，而不是每一帧的</dd>
+                  <dt><code>gyroflow.conf</code></dt><dd><code>view</code>、<code>level</code>、<code>horizon_lock</code>、<code>underwater</code>：没有项目的片段的起始设置；<code>chromatic</code>、<code>edges</code>：适用于每个片段；<code>resolution</code>、<code>fps_limit</code>、<code>edge_fill_rate</code>、<code>ask_when_slow</code>：用于较慢的电脑；<code>still_radius</code>、<code>paused_full_size</code>：静帧净化；<code>gyroflow_app</code>：要打开的 Gyroflow App（Windows、Linux）</dd>
+                  <dt><code>dji_telemetry.conf</code></dt><dd><code>fields</code>、<code>units</code>、<code>position</code>、<code>font_size</code>、<code>visible</code></dd>
+                  <dt><code>highlights.conf</code></dt><dd><code>before=2</code>：跳转落在精彩时刻前几秒；<code>chapters</code>：进度条上的标记</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>你自己的默认预设</h3></div>
+              <div class="feat-text">
+                <p>没有项目的片段使用 Gyroflow 的默认预设，然后是你放在 App 的 <code>gyroflow/</code> 文件夹中的 <code>default.gyroflow</code>。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>给 AI 智能体的笔记</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>r</kbd></p></div>
+              <div class="feat-text">
+                <p>用于和 AI 智能体一起改进播放器：在你所指的地方拖出一个矩形，写一行说明，笔记就会连同屏幕画面、这一帧和播放器当时的状态一起保存，供智能体读取。</p>
+              </div>
+            </div>
+          </div>
+          <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#options">全部选项，见 GitHub 上的 README</a></p>
+        </section>
+
+        <section class="group" id="command-line">
+          <h2>命令行</h2>
+          <p class="group-lede">在终端中导出一个或多个片段：与 <kbd>Shift</kbd>+<kbd>E</kbd> 相同，位于插件的文件夹中。</p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3><code>gyroflow-export</code></h3></div>
+              <div class="feat-text">
+                <pre class="cmd"><code>~/.config/mpv/scripts/gyroflow/gyroflow-export DJI_0007_D.MP4 DJI_0008_D.MP4
+~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4</code></pre>
+                <dl class="optlist">
+                  <dt><code>--prores</code></dt><dd>用 ProRes 422 HQ 代替 HEVC，用于剪辑</dd>
+                  <dt><code>--sdr</code>, <code>--nbcu</code></dt><dd>Rec.709：D-Log M 经 DJI 的 LUT，或任何曲线经 NBCU 的转换</dd>
+                  <dt><code>--level</code>, <code>--wide</code>, <code>--edges</code>, <code>--underwater</code></dt><dd>防抖设置，与快捷键和菜单的设置相同</dd>
+                  <dt><code>--no-stabilize</code></dt><dd>只做色彩转换</dd>
+                  <dt><code>--background</code></dt><dd>以后台优先级运行，导出时可以继续工作</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>mpv 自己的选项</h3></div>
+              <div class="feat-text">
+                <p>插件的选项也可以在 mpv 的命令行中使用：<code>--script-opts=dlogm-sdr_screen=nbcu</code>。</p>
+              </div>
+            </div>
+          </div>
+          <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#exporting">导出，见 GitHub 上的 README</a></p>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
+      <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
+      <a href="download.html">下载</a>
+      <a href="features.html">全部功能</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+    </div>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本应用内置 mpv 和 ffmpeg，二者遵循各自的许可证。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p class="tm">Dolby、Dolby Vision 和双 D 标志是 Dolby Laboratories Licensing Corporation 的商标。Action Footage Player 与 Dolby 无关联，也未获 Dolby 认可。播放器借助开源库 <code>dolby_vision</code>（MIT）自行写入 Dolby Vision 元数据，其中不包含任何 Dolby 软件。</p>
+    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../features.html" hreflang="en">阅读英文原文</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

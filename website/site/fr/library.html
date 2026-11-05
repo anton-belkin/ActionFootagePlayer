@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bibliothèque : organiser vos vidéos · Action Footage Player</title>
+<meta name="description" content="Gardez les meilleurs passages d’un voyage en moments visibles dans le Finder ou l’Explorateur de fichiers, marquez des clips, mettez de côté ceux sans intérêt, exportez dans un seul dossier, coupez une minute filmée par erreur, et emmenez le tout dans Final Cut Pro, DaVinci Resolve ou Premiere Pro. Le tout en simples fichiers dans le dossier du voyage.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/library">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/library">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/library">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/library">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/library">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../library.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, accueil">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Site">
+      <details class="navmenu"><summary>Accueil</summary>
+        <ul>
+          <li><a href="index.html">Page d&rsquo;accueil</a></li>
+          <li><a href="index.html#features">Ce qu&rsquo;il fait</a></li>
+          <li><a href="index.html#how">Comment ça marche</a></li>
+          <li><a href="index.html#faq">Questions</a></li>
+          <li><a href="about.html">À propos de l&rsquo;auteur</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Pour qui</summary>
+        <ul>
+          <li><a href="divers.html">Plongée et snorkeling</a></li>
+          <li><a href="moments.html">Voyageurs actifs</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Fonctions</summary>
+        <ul>
+          <li><a href="log.html">Images log</a></li>
+          <li><a href="stabilization.html">Stabilisation</a></li>
+          <li><a href="library.html" aria-current="page">Bibliothèque</a></li>
+          <li><a href="photos.html">Photos</a></li>
+          <li><a href="features.html" class="nm-all">Toutes les fonctions</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Télécharger</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Accueil</li>
+        <li><a href="index.html">Page d&rsquo;accueil</a></li>
+        <li><a href="index.html#features">Ce qu&rsquo;il fait</a></li>
+        <li><a href="index.html#how">Comment ça marche</a></li>
+        <li><a href="index.html#faq">Questions</a></li>
+        <li><a href="about.html">À propos de l&rsquo;auteur</a></li>
+        <li class="sm-group">Pour qui</li>
+        <li><a href="divers.html">Plongée et snorkeling</a></li>
+        <li><a href="moments.html">Voyageurs actifs</a></li>
+        <li class="sm-group">Fonctions</li>
+        <li><a href="log.html">Images log</a></li>
+        <li><a href="stabilization.html">Stabilisation</a></li>
+        <li><a href="library.html" aria-current="page">Bibliothèque</a></li>
+        <li><a href="photos.html">Photos</a></li>
+        <li><a href="features.html">Toutes les fonctions</a></li>
+        <li class="sm-dl"><a href="download.html">Télécharger</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Langue : français"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>FR</summary>
+      <ul>
+        <li><a href="../library.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/library.html" hreflang="fr" lang="fr" aria-current="page">Français</a></li>
+        <li><a href="../ru/library.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/library.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Cette page a été traduite automatiquement de l’anglais et peut contenir des erreurs. <a href="../library.html" hreflang="en">Lire l’original en anglais</a></p>
+</div>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band lib-hero" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Bibliothèque</p>
+        <h1>Organiser vos vidéos, en simples fichiers.</h1>
+        <p class="lede">Gardez les meilleurs passages d’un voyage en moments, marquez ce qui compte, mettez de côté les clips sans intérêt, et exportez dans un seul dossier. Quand vient le moment du vrai montage, Final Cut Pro, DaVinci Resolve ou Premiere Pro reçoit tout cela, sur vos clips originaux.</p>
+        <ul class="lib-gets">
+          <li><strong>Aucune bibliothèque où importer.</strong> Tout est un fichier dans le dossier du voyage, que <span class="os-mac">le Finder</span><span class="os-win">l’Explorateur de fichiers</span> affiche comme n’importe quel autre.</li>
+          <li><strong>Regarder n’est jamais enregistrer.</strong> Ouvrir et regarder un clip n’écrit rien. Le lecteur n’écrit que lorsque vous appuyez sur une touche ou un bouton prévu pour cela.</li>
+          <li><strong>Aucun fichier caché.</strong> Chaque fichier que crée le lecteur est un fichier que vous pouvez voir, déplacer et supprimer.</li>
+        </ul>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Télécharger gratuitement pour Mac</span><span class="os-win">Télécharger pour Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Télécharger pour Windows</span><span class="os-win">Télécharger gratuitement pour Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The folder -->
+  <section class="section band" id="folder">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Le dossier du voyage</p>
+        <h2>Un dossier par voyage. Vous en voyez tout le contenu.</h2>
+        <p class="lede">Le dossier d’un voyage, après une soirée avec le lecteur. Ses propres dossiers commencent par un tiret bas : ils sont donc triés en premier, au-dessus de vos vidéos.</p>
+        <p>Les tailles à droite racontent l’histoire : les originaux et les exports sont gros, les moments et les flip-books des clips sont minuscules. Gardez-en des centaines, et copiez-les où vous voulez.</p>
+        <p>Supprimez le fichier d’un moment, et le moment disparaît. Supprimez l’aperçu d’un clip, et le clip est mis de côté. Créez des sous-dossiers dans <code>_Moments</code> pour classer vos moments : ils sont à vous, et votre logiciel de montage les reçoit comme chutiers.</p>
+      </div>
+      <div class="stack">
+      <ul class="lib-tree" aria-label="Le dossier d’un voyage après une soirée avec le lecteur">
+        <li><span class="dir">2026-10 Egypt</span><span class="c">le dossier où vous avez créé le projet</span>
+          <ul>
+            <li><span class="sz">quelques Ko</span><span class="dir">_ActionFootagePlayer</span><span class="c">les notes du lecteur pour ce projet : les noms que vous avez tapés, les clips qui ont un aperçu, ses réglages</span></li>
+            <li><span class="dir">_Moments</span>
+              <ul>
+                <li><span class="sz">0,3 Mo</span>Turtle.afplink.mp4<span class="c">un moment : une image à voir, avec un lien vers l’original à l’intérieur</span></li>
+                <li><span class="sz">2 Mo</span>Turtle.gyroflow<span class="c">son propre projet Gyroflow, quand le clip en avait un</span></li>
+                <li><span class="dir">Reef</span><span class="c">un sous-dossier à vous</span>
+                  <ul><li><span class="sz">0,3 Mo</span>Moray eel.afplink.mp4</li></ul>
+                </li>
+                <li><span class="sz">0,3 Mo</span>export_2026-10-22 15.28.52.afplink.mp4<span class="c">enregistré par l’export d’un passage qui n’était pas encore un moment</span></li>
+              </ul>
+            </li>
+            <li><span class="dir">_Clips</span>
+              <ul>
+                <li><span class="dir">Day 1</span>
+                  <ul><li><span class="sz">0,4 Mo</span>DJI_20261022152841_0068_D.afplink.mp4<span class="c">un flip-book du clip, en couleur</span></li></ul>
+                </li>
+              </ul>
+            </li>
+            <li><span class="dir">_Exports</span>
+              <ul><li><span class="sz big">115 Mo</span>Turtle.mov<span class="c">et Turtle (SDR).mov, Turtle (Dolby Vision).mov</span></li></ul>
+            </li>
+            <li><span class="dir">_Stills</span>
+              <ul><li><span class="sz">3 Mo</span>DJI_20261022152841_0068_D_8.00s.heic<span class="c">une photo tirée du clip, voir <a class="text-link" href="photos.html">Photos</a></span></li></ul>
+            </li>
+            <li><span class="sz">quelques Ko</span>2026-10 Egypt (Final Cut Pro).fcpxml<span class="c">écrit par Marks for the editor</span> <span class="soon">Bientôt</span></li>
+            <li><span class="dir">Day 1</span><span class="c">vos vidéos</span>
+              <ul>
+                <li><span class="sz big">500 Mo</span>DJI_20261022152841_0068_D.MP4</li>
+                <li><span class="sz big">50 Mo</span>DJI_20261022152841_0068_D.LRF<span class="c">le petit proxy de la caméra</span></li>
+                <li><span class="sz">1 Ko</span>DJI_20261022152841_0068_D.marks.json<span class="c">vos repères, dès que vous en changez un</span></li>
+                <li><span class="sz">2 Mo</span>DJI_20261022152841_0068_D.gyroflow<span class="c">le projet Gyroflow du clip, s’il en a un</span></li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <p class="note lib-tree-note">La taille approximative de chaque fichier, comme sur notre voyage de test : un clip 4K de 45 secondes d’une Osmo Action 6, et un moment de 10 secondes de ce clip, exporté en HDR.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works: a project -->
+  <section class="section band tight-top" id="project">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Un projet</p>
+        <h2>Un projet, c’est simplement l’endroit où sont les choses.</h2>
+        <p>Un projet dit deux choses. Où sont les clips originaux du voyage, que le lecteur ne modifie jamais. Et où il met ce que vous en faites : les moments dans <code>_Moments</code>, les flip-books des clips dans <code>_Clips</code>, les exports dans <code>_Exports</code>, les photos dans <code>_Stills</code>. C’est tout ce qu’est un projet. Tout le reste, ce sont des fichiers à part dans ces dossiers, et les sections ci-dessous les passent en revue.</p>
+        <p>Par défaut, le projet est le dossier du voyage lui-même, et tout ce qu’il contient retrouve les clips par leur emplacement dans ce dossier. Copiez ou déplacez le dossier entier, vidéos et projet ensemble, sur un autre disque ou un NAS, et tout fonctionne comme avant.</p>
+        <p>Le lecteur ne crée jamais de projet de lui-même. La première fois que vous enregistrez un moment, exportez, créez des aperçus de clips ou appuyez sur <kbd>X</kbd>, le panneau latéral s’ouvre sur son onglet <strong>Project</strong> et affiche <strong>No project yet</strong> (pas encore de projet). Choisissez le dossier dans la liste, qui va du dossier du clip jusqu’en haut du disque (pour une carte, le dossier au-dessus de <code>DCIM</code> est choisi pour vous), et appuyez sur <strong>Initialize the project here</strong> (créer le projet ici). Cela crée un seul dossier, <code>_ActionFootagePlayer</code>, pour les notes du lecteur. Les autres apparaissent quand quelque chose y entre.</p>
+        <p class="honest">Choisissez le dossier du voyage, au-dessus des dossiers de chaque jour, pour que tout le voyage forme un seul projet. Les repères n’ont besoin d’aucun projet.</p>
+        <p class="note">Le panneau latéral s’affiche et se masque avec <kbd>Tab</kbd>.</p>
+      </div>
+      <figure class="media" id="shot-library-1">
+        <img src="../media/library-1.jpg" alt="L’onglet Project du panneau latéral sans projet : la liste des dossiers ouverte sur Trips, 2026-10 Egypt et Day 1, 2026-10 Egypt sélectionné, et Initialize the project here." width="570" height="815" loading="lazy">
+        <figcaption>No project yet : choisissez le dossier du voyage, puis Initialize the project here.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Marks -->
+  <section class="section band tight-top" id="marks">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Repères</p>
+        <h2>Les temps forts de la caméra, puis vos propres repères.</h2>
+        <p>Un repère est un point dans un clip. Vous avez appuyé sur le bouton de temps fort pendant l’enregistrement ? Ces repères sont déjà sur la barre de lecture : le bouton de changement rapide ou la télécommande sur une DJI Osmo Action 4, Action 5 Pro ou Action 6, HiLight sur une GoPro HERO5 ou plus récente. <kbd>Ctrl</kbd>+<kbd>]</kbd> et <kbd>Ctrl</kbd>+<kbd>[</kbd> sautent au suivant et au précédent, 2 secondes avant lui.</p>
+        <p><kbd>M</kbd> ajoute un repère là où en est la vidéo. Sur un repère (à une demi-seconde près), <kbd>M</kbd> le supprime, y compris ceux de la caméra.</p>
+        <p>Le premier changement écrit <code>&lt;clip&gt;.marks.json</code> à côté du clip, avec les repères de la caméra copiés dedans. Dès lors, ce fichier constitue les repères du clip. Supprimez-le, et les temps forts de la caméra reviennent tels qu’ils étaient. Le clip lui-même n’est jamais modifié.</p>
+        <p>Les repères n’ont besoin d’aucun projet. Dans le panneau latéral, <strong>Marks of this clip</strong> les liste : « DJI quick switch » ou « GoPro HiLight » pour ceux de la caméra, « Mark 3 » pour les vôtres. Cliquez sur l’un d’eux pour y sauter.</p>
+      </div>
+      <figure class="media" id="shot-library-2">
+        <img src="../media/library-2.jpg" alt="Le bas du lecteur : la barre de lecture avec des traits pour les temps forts de la caméra, deux repères et deux moments, le pointeur sur le trait de Turtle affichant Chapter: Turtle." width="1600" height="300" loading="lazy">
+        <figcaption>Les temps forts de la caméra, vos repères et un moment, sur la barre de lecture.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Moments -->
+  <section class="section band dive" id="moments">
+    <div class="wrap dive-grid">
+      <div class="stack kbd-dark">
+        <p class="eyebrow">Moments</p>
+        <h2>Un moment est un petit fichier. Ouvrez-le, et c’est l’original qui se lit.</h2>
+        <p class="lede">Appuyez sur <kbd>l</kbd> au début d’un passage, sur <kbd>l</kbd> à sa fin, puis sur <kbd>k</kbd>, et tapez un nom.</p>
+        <div class="dive-points">
+          <div>
+            <h3>Le nom</h3>
+            <p>Le lecteur demande « Moment 0:20–0:30 name (Enter: Turtle 2): ». Enter seul prend la suggestion : votre dernier nom avec le numéro suivant, ou, avant que vous en ayez tapé un, la date et l’heure du tournage. <kbd>Tab</kbd> met la suggestion dans le champ pour la modifier, <kbd>↑</kbd> rappelle les noms précédents, <kbd>Esc</kbd> n’enregistre rien.</p>
+          </div>
+          <div>
+            <h3>Le fichier</h3>
+            <p>Il devient <code>_Moments/Turtle.afplink.mp4</code> : un petit MP4 qui montre une image en couleur du passage (le premier repère qu’il contient, sinon son milieu), avec un lien vers l’original à l’intérieur. <span class="os-mac">Le Finder et Coup d’œil</span><span class="os-win">L’Explorateur de fichiers</span> affichent cette image. Les dates du fichier sont celles du tournage : triés par date, les moments sont dans l’ordre où ils se sont produits.</p>
+          </div>
+          <div>
+            <h3>Le lire</h3>
+            <p>Ouvert dans le lecteur, il lit son passage de l’original, en pleine qualité, puis le moment suivant du dossier. Ouvrez le dossier <code>_Moments</code> lui-même, et ils se lisent tous dans l’ordre où ils se sont produits. Un double-clic le fait quand Action Footage Player est l’app qui ouvre les fichiers MP4<span class="os-mac"> (Lire les informations → Ouvrir avec → Tout modifier…)</span> ; sinon, le système lit l’aperçu d’une image.</p>
+          </div>
+          <div>
+            <h3>Supprimer le fichier supprime le moment</h3>
+            <p>Il n’y a pas de liste à tenir à jour. Renommez-le, déplacez-le dans un sous-dossier, mettez-lui un tag : il reste un moment. Dans le panneau latéral, <strong>Moments of this clip</strong> propose <strong>Rename…</strong> et <strong>Remove</strong>, qui le met à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>.</p>
+          </div>
+          <div>
+            <h3>Changer ses bornes</h3>
+            <p>Lisez le moment, déplacez son début ou sa fin avec <kbd>l</kbd>, puis <kbd>k</kbd>. Le lecteur demande « Update Turtle to …? Enter, or a new name for a new one » (mettre à jour Turtle ? Enter, ou un nouveau nom pour un nouveau moment). <span class="os-mac">Ses tags du Finder restent.</span></p>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <figure class="media" id="shot-library-3">
+          <img src="../media/library-3.jpg" alt="Une image d’épave en pause avec la question Moment 0:24–0:34 name (Enter: Turtle 2) en bas, et le panneau latéral à côté." width="1600" height="900" loading="lazy">
+          <figcaption>Enter seul garde le nom suggéré.</figcaption>
+        </figure>
+        <div class="lib-snap">
+          <h3>Stabilisé comme au moment de l’enregistrement</h3>
+          <p>Un moment garde la façon dont il était stabilisé : soit sa propre copie du projet Gyroflow du clip, raccourcie au passage, soit les réglages avec lesquels il se lisait. Changer plus tard le projet du clip ne change pas le moment.</p>
+          <p>Pendant la lecture d’un moment, le panneau latéral affiche <strong>Stabilized: As saved / On its own / With its clip</strong>. Changez quoi que ce soit, et ce n’est que pour regarder : le panneau indique « Changed for viewing only: the moment is as it was saved » (changé seulement pour regarder : le moment reste tel qu’enregistré). <strong>Keep in Turtle</strong> l’écrit dans le moment.</p>
+        </div>
+        <figure class="media" id="shot-library-4">
+          <img src="../media/library-4.jpg" alt="Le panneau latéral pendant la lecture du moment Turtle après un changement : Open the whole clip at 0:24, Stabilized As saved, Changed for viewing only, et Keep in Turtle." width="584" height="1120" loading="lazy">
+          <figcaption>Regarder n’est jamais enregistrer : Keep in Turtle est le seul bouton qui écrit.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Clip previews -->
+  <section class="section band" id="clip-previews">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Aperçus des clips</p>
+        <h2>Tout le voyage en couleur, et <kbd>X</kbd> pour les clips dont vous n’avez pas besoin.</h2>
+        <p class="lede">Des vidéos en log (un mode d’enregistrement qui garde davantage de la lumière, et qui paraît plat et gris tant qu’il n’est pas converti), c’est un mur d’icônes grises. Les aperçus des clips en font le voyage en couleur.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Make clip previews</h3>
+          <p>Dans l’onglet Project, <strong>Make clip previews</strong> (créer les aperçus des clips) remplit <code>_Clips</code> d’un petit MP4 par clip : un flip-book des images marquées du clip, ou d’environ 12 images réparties sur sa durée. Ils sont créés un par un en arrière-plan, avec « Clip previews: 5 of 40 » dans le coin. Jamais d’eux-mêmes : seulement quand vous appuyez sur le bouton.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Parcourir dans <span class="os-mac">le Finder</span><span class="os-win">l’Explorateur de fichiers</span></h3>
+          <p><code>_Clips</code> reprend vos dossiers de chaque jour. <span class="os-mac">En présentation par icônes, c’est le voyage en couleur, et Coup d’œil (la barre d’espace) feuillette un clip en quelques secondes.</span><span class="os-win">En grandes icônes, c’est le voyage en couleur.</span> Ouvrez un aperçu dans le lecteur, et c’est le clip entier qui se lit.</p>
+          <p>Ce sont des fichiers : copiez-les, classez-les dans vos propres dossiers, renommez-les comme vous voulez. Chacun reste un lien vers son clip original.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Mettre un clip de côté</h3>
+          <p><kbd>X</kbd> met l’aperçu du clip à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span> : « Not interesting » (sans intérêt). Le clip lui-même reste. Supprimer l’aperçu à la main fait la même chose. <kbd>X</kbd> de nouveau le recrée.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Supprimé reste supprimé</h3>
+          <p>Make clip previews ne crée d’aperçus que pour les clips qui n’en ont jamais eu : les nouvelles vidéos reçoivent leur aperçu, et un clip mis de côté ne revient pas. <strong>Make again for removed clips</strong> (recréer pour les clips retirés) les fait tous revenir.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Favorites -->
+  <section class="section band tight-top" id="favorites">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Favoris</p>
+        <h2><kbd>K</kbd> pour un favori. <span class="soon">Bientôt</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p class="os-mac"><kbd>K</kbd> fait du moment en cours de lecture un favori, ou, sur un clip, de son aperçu dans <code>_Clips</code>. C’est un tag vert <strong>Favorite</strong> dans le Finder. <kbd>K</kbd> de nouveau le retire. Mettre à la main un tag vert sur un fichier dans le Finder compte aussi.</p>
+        <p class="os-win"><kbd>K</kbd> fait du moment en cours de lecture un favori, ou, sur un clip, de son aperçu dans <code>_Clips</code>. C’est une note de 5 étoiles dans l’Explorateur de fichiers (Propriétés → Détails). <kbd>K</kbd> de nouveau le retire. Une note de 4 ou 5 étoiles donnée à la main compte aussi.</p>
+        <p><span class="os-mac">Vos autres tags du Finder vont aux logiciels de montage comme mots-clés, et les favoris comme favoris.</span><span class="os-win">Les favoris vont aux logiciels de montage comme favoris.</span> Un moment ou un clip qui existe est gardé ; un que vous avez supprimé ne l’est pas. C’est tout le système de notation.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exports -->
+  <section class="section band tight-top" id="exports">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Exports</p>
+        <h2>Les exports vont dans <code>_Exports</code>, avec un lien vers l’original.</h2>
+      </div>
+      <div class="lib-cols">
+        <p><kbd>Shift</kbd>+<kbd>E</kbd> exporte le passage marqué, ou le clip entier, tel qu’il se lit : stable et en couleur. Il demande un nom de la même façon que pour un moment, en suggérant le nom du moment quand le passage en est un : « Export 0:20–0:30 (SDR) as (Enter: Turtle): ». <kbd>Shift</kbd>+<kbd>E</kbd> de nouveau pendant l’export l’annule.</p>
+        <p>Le fichier est <code>_Exports/Turtle.mov</code>. Un nom simple, c’est du HDR (des hautes lumières éclatantes sur les écrans qui peuvent les afficher) ; les autres looks le disent : <code>Turtle (SDR).mov</code>, <code>Turtle (Dolby Vision).mov</code>. Chaque export porte un lien vers son original. Un passage qui n’était pas encore un moment est aussi enregistré comme moment, <code>export_Turtle</code> : vous pouvez ainsi supprimer des exports pour faire de la place et lire quand même le passage en pleine qualité plus tard.</p>
+        <p>L’onglet <strong>Clip</strong> du panneau latéral propose la même chose : <strong>Export the part</strong> ou <strong>Export the clip</strong>, <strong>Export in SDR</strong>, <strong>Show the last export</strong>. Les anciens dossiers <code>stabilized</code> des versions précédentes restent où ils sont. Les looks et les formats sont expliqués sur la page <a class="text-link" href="log.html">Vidéos en log</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cutting out a spoiled part -->
+  <section class="section band" id="cut">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Couper</p>
+        <h2>Coupez la minute filmée dans votre poche.</h2>
+        <p>Marquez le passage raté avec <kbd>l</kbd> et <kbd>l</kbd>, appuyez sur <kbd>Ctrl</kbd>+<kbd>x</kbd>, et confirmez. Le clip est réécrit sans ce passage, sans réencodage : chaque image gardée est copiée à l’identique. Aucun projet n’est nécessaire.</p>
+        <p>Le lecteur demande d’abord : « Cut 0:05–0:20 out of DJI_20261024094541_0093_D.MP4? Kept: 0:00–0:05 and 0:20–end (two clips; the second from the keyframe at or before 0:20), without re-encoding. The original goes to the Trash. » (couper ce passage ? ce qui est gardé, en deux clips, sans réencodage ; l’original va à la Corbeille). <strong>Cut it out</strong> (le couper) ou <strong>Keep the clip as it is</strong> (garder le clip tel quel).</p>
+        <h3>Ce qu’il garde</h3>
+        <ul class="lib-list">
+          <li>Un passage au milieu laisse <strong>deux clips</strong>. Le premier garde le nom de l’original. Le second est nommé d’après sa propre heure d’enregistrement, comme <code>DJI_20261024094600_0093_D.MP4</code>.</li>
+          <li>Le second clip commence à l’image clé (une image complète à partir de laquelle les autres sont construites) située à la fin de la coupe ou juste avant, si bien que jusqu’à environ une seconde du passage raté peut rester.</li>
+          <li>Moins d’une demi-seconde restante d’un côté est abandonnée.</li>
+          <li>Les données de la caméra restent : objectif, mode couleur, données de mouvement pour la stabilisation, timecode, son. Chaque nouveau clip est relu et vérifié avant que quoi que ce soit ne soit remplacé ; s’il ne correspond pas, rien ne change.</li>
+          <li>Les repères et les moments suivent le clip où ils se trouvent. Un moment entièrement compris dans le passage coupé va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>.</li>
+        </ul>
+        <h3>Ce qu’il change</h3>
+        <ul class="lib-list">
+          <li><strong>L’original va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span></strong>, avec ses fichiers annexes : le <code>.LRF</code>, son projet Gyroflow, son fichier de repères et l’aperçu du clip.</li>
+          <li><strong>Il n’y a pas d’annulation dans le lecteur.</strong> Vous pouvez ressortir l’original de la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span> à la main, mais le premier nouveau clip porte maintenant son nom.</li>
+          <li><strong>Seuls les clips DJI sont pris en charge pour l’instant.</strong> Nous travaillons sur les autres. D’ici là, un clip GoPro n’est coupé que s’il passe d’abord une vérification, et les clips Insta360 et iPhone sont refusés.</li>
+          <li>Les exports ne sont pas touchés, et leurs liens pointent toujours vers l’original. Les aperçus des clips demandent de relancer <strong>Make clip previews</strong>.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="media lib-diagram">
+          <svg class="cut-svg" viewBox="0 0 480 236" role="img" aria-labelledby="cut-svg-title">
+            <title id="cut-svg-title">Un clip avec un passage raté de 0:05 à 0:20. Après Ctrl+x : le clip 1 de 0:00 à 0:05, qui garde le nom, et le clip 2 de l’image clé juste avant 0:20 jusqu’à la fin, avec son propre nom. L’original va à la Corbeille.</title>
+            <text class="lbl" x="10" y="20">Le clip</text>
+            <rect class="kept" x="10" y="30" width="60" height="30" rx="4"/>
+            <rect class="spoiled" x="70" y="30" width="140" height="30"/>
+            <rect class="kept" x="210" y="30" width="260" height="30" rx="4"/>
+            <text class="in" x="140" y="50" text-anchor="middle">raté</text>
+            <text class="t" x="10" y="78">0:00</text>
+            <text class="t" x="70" y="78" text-anchor="middle">0:05</text>
+            <text class="t" x="210" y="78" text-anchor="middle">0:20</text>
+            <text class="t" x="470" y="78" text-anchor="end">fin</text>
+            <path class="arrow" d="M240 92v22m-6-7 6 7 6-7"/>
+            <text class="lbl" x="10" y="136">Après Ctrl+x</text>
+            <rect class="kept" x="10" y="146" width="60" height="30" rx="4"/>
+            <text class="in" x="40" y="166" text-anchor="middle">1</text>
+            <rect class="kf" x="196" y="146" width="14" height="30"/>
+            <rect class="kept" x="210" y="146" width="260" height="30" rx="4"/>
+            <text class="in" x="340" y="166" text-anchor="middle">2</text>
+            <text class="t" x="10" y="200">1 : 0:00–0:05, nom de l’original</text>
+            <text class="t" x="10" y="222">2 : de l’image clé à la fin, son propre nom</text>
+          </svg>
+          <figcaption>La fine bande plus sombre avant le clip 2 est le bout du passage raté gardé jusqu’à l’image clé. L’original va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>.</figcaption>
+        </figure>
+        <figure class="media" id="shot-library-5">
+          <img src="../media/library-5.jpg" alt="Une image d’épave en pause avec la question Cut 0:05–0:20 out of the clip, et les choix Cut it out et Keep the clip as it is." width="1600" height="900" loading="lazy">
+          <figcaption>Rien n’est coupé tant que vous n’avez pas choisi Cut it out.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Into your editor -->
+  <section class="section band" id="editors">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Vers votre logiciel de montage</p>
+        <h2>Vos moments et vos repères, dans Final Cut Pro, DaVinci Resolve ou Premiere Pro. <span class="soon">Bientôt</span></h2>
+        <p class="lede">Une fois vos choix faits, emmenez le voyage au montage. Le logiciel reçoit vos clips originaux, à leur propre timecode, avec vos moments, repères, favoris et dossiers dessus. Rien à retrouver, rien à marquer deux fois.</p>
+      </div>
+      <ol class="checklist lib-steps">
+        <li>
+          <h3>Choisissez le logiciel</h3>
+          <p>Dans l’onglet Project, <strong>Marks for the editor</strong>, puis <strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong> ou <strong>Premiere Pro…</strong>. Par défaut, tous les clips y vont, sauf ceux que vous avez mis de côté avec <kbd>X</kbd> ; <strong>With moments or marks</strong> ne prend que les clips qui en ont.</p>
+        </li>
+        <li>
+          <h3>Le lecteur écrit le fichier</h3>
+          <p>Il va dans le dossier du projet, au nom du projet : « Final Cut Pro: 14 clips, 23 moments, 41 marks → 2026-10 Egypt (Final Cut Pro).fcpxml », et <span class="os-mac">le Finder l’affiche</span><span class="os-win">son dossier s’ouvre</span>.</p>
+        </li>
+        <li>
+          <h3>Importez-le, une fois</h3>
+          <p>Les logiciels de montage importent une fois et ne fusionnent pas un second import. Faites-le donc quand vous avez fini de choisir. L’écrire de nouveau remplace le fichier.</p>
+        </li>
+      </ol>
+      <div class="compare-wrap lib-editors-wrap">
+        <table class="lib-editors">
+          <thead><tr><th scope="col">Logiciel</th><th scope="col">Comment importer</th><th scope="col">Ce qu’il reçoit</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">Final Cut Pro<br><span class="cam-sub">10.6 ou plus récent, Mac</span></th>
+              <td data-label="Comment importer"><code>… (Final Cut Pro).fcpxml</code> : Fichier → Importer → XML, ou double-cliquez dessus. Avec « Laisser les fichiers à leur emplacement », les clips restent où ils sont, sur la carte ou le NAS.</td>
+              <td data-label="Ce qu’il reçoit">Un événement au nom du voyage, avec chaque clip à son timecode. Vos repères comme marqueurs (ceux de la caméra notés « DJI quick switch » ou « GoPro HiLight »). Chaque moment comme plage nommée, dans une collection de mots-clés par dossier et par tag. Les favoris et les clips mis de côté comme favoris et rejets. Un projet « 2026-10 Egypt – moments » avec tous les moments à la suite, nommés.</td>
+            </tr>
+            <tr>
+              <th scope="row">DaVinci Resolve<br><span class="cam-sub">la version gratuite aussi</span></th>
+              <td data-label="Comment importer">Trois fichiers, car la version gratuite n’exécute pas de scripts :<br><code>… (Resolve).fcpxml</code> : File → Import → Timeline, avec « Automatically import source clips into media pool ».<br><code>… (Resolve markers).edl</code> : clic droit sur la timeline « clips » → Timelines → Import → Timeline Markers from EDL.<br><code>… (Resolve metadata).csv</code> : File → Import Metadata To → Media Pool.</td>
+              <td data-label="Ce qu’il reçoit">Des timelines sur les clips originaux : tous les moments à la suite, une par dossier de moments, et chaque clip que vous avez gardé, entier. Des marqueurs sur la timeline des clips : ceux de la caméra en bleu, les vôtres en cyan, les moments en vert avec leur nom et leur durée. Dans le media pool : les favoris en vert, les clips mis de côté en rouge, vos dossiers et tags comme mots-clés, les moments listés dans les commentaires de chaque clip.</td>
+            </tr>
+            <tr>
+              <th scope="row">Premiere Pro</th>
+              <td data-label="Comment importer"><code>… (Premiere).xml</code> : Fichier → Importer.</td>
+              <td data-label="Ce qu’il reçoit">Des chutiers à l’image de vos dossiers. Chaque clip avec ses marqueurs. Chaque moment comme clip avec son entrée et sa sortie, dans le chutier de son dossier. Une séquence des moments, nommée. Les favoris comme couleur de libellé, les tags dans un commentaire. Les clips mis de côté sont laissés de côté.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Pour Final Cut Pro, une option, désactivée par défaut, fait aussi de chaque moment un clip à part entière, pour que les noms apparaissent dans le navigateur : <strong>Moments as clips of their own</strong>. Elle double le nombre de clips dans l’événement.</p>
+    </div>
+  </section>
+
+  <!-- Read-only cards -->
+  <section class="section band tight-top" id="read-only">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Cartes en lecture seule</p>
+        <h2>Une carte verrouillée reçoit un projet dans Documents. <span class="soon">Bientôt</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p>Une carte verrouillée, ou un partage que vous ne pouvez que lire, ne peut pas accueillir de projet. Quand le dossier choisi n’est pas accessible en écriture, le projet va plutôt dans <span class="os-mac"><code>Documents/ActionFootagePlayer/</code></span><span class="os-win"><code>Documents\ActionFootagePlayer\</code></span>, et le lecteur demande son nom : « The card is read-only. Project name (Enter: OSMO ACTION 2026-10-22): » (la carte est en lecture seule ; nom du projet).</p>
+        <p>Ce dossier contient ce que contiendrait le dossier du voyage : <code>_Moments</code>, <code>_Clips</code>, <code>_Exports</code>, et les fichiers de repères aux chemins des clips eux-mêmes. Plus <code>Sources.txt</code>, un simple fichier texte qui dit où sont les vidéos. Il note aussi l’identifiant de la carte : le voyage du mois prochain sur la même carte, une fois formatée, reçoit ainsi son propre projet.</p>
+        <p>Vous avez copié la carte sur votre NAS ? Ajoutez le nouveau chemin en première ligne de <code>Sources.txt</code>. Les liens à l’intérieur des moments et des aperçus sont relatifs : ils suivent tous. Une carte qui reste verrouillée ne peut pas être coupée avec <kbd>Ctrl</kbd>+<kbd>x</kbd> : déverrouillez-la, ou coupez la copie.</p>
+      </div>
+      <pre class="lib-pre" aria-label="Un exemple de Sources.txt"># Where this project's footage is. The first path that exists is used; edit it if the footage moves.
+/Volumes/video/2026-10 Egypt
+Z:\2026-10 Egypt</pre>
+    </div>
+  </section>
+
+  <!-- Settings: the Project tab -->
+  <section class="section band" id="project-tab">
+    <div class="wrap lib-two lib-two-wide">
+      <div class="stack">
+        <div class="section-head">
+          <p class="eyebrow">L’onglet Project</p>
+          <h2>Chaque commande, de haut en bas.</h2>
+          <p class="lede">Le premier onglet du panneau latéral. Il affiche ce qui convient sur le moment : le projet, puis ce clip, puis le passage que vous avez marqué.</p>
+        </div>
+        <div class="lib-settings-wrap">
+          <table class="settings">
+            <thead><tr><th scope="col">Libellé</th><th scope="col">Ce qu’il fait</th></tr></thead>
+            <tbody>
+              <tr class="grp"><th colspan="2" scope="colgroup">Avant qu’il y ait un projet</th></tr>
+              <tr><th scope="row">No project yet</th><td>Explique ce qu’est un projet. En dessous, le dossier choisi et son emplacement ; cliquez dessus pour la liste des dossiers, de celui du clip jusqu’en haut du disque.</td></tr>
+              <tr><th scope="row">Initialize the project here</th><td>Crée le projet dans le dossier choisi.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Le projet</th></tr>
+              <tr><th scope="row">Le nom du projet ⋯</th><td><strong><span class="os-mac">Project folder in Finder</span><span class="os-win">Project folder</span></strong> ; <strong>Make again for removed clips</strong> ; <strong>New moments stabilized on their own</strong> : les nouveaux moments sont lissés sur leur propre passage, pas comme partie du clip entier. Désactivé par défaut.</td></tr>
+              <tr><th scope="row">3 moments · 12 of 40 clip previews</th><td>Les comptes.</td></tr>
+              <tr><th scope="row">Make clip previews · 28 new</th><td>Crée les aperçus que les clips n’ont pas encore. Pendant ce temps : « Making clip previews: 5 of 40 » et <strong>Stop</strong>. Si certains échouent, une ligne dit combien et ouvre la raison.</td></tr>
+              <tr><th scope="row">Ignore subfolders</th><td>Tous les aperçus dans <code>_Clips</code> lui-même, pas dans des dossiers comme vos dossiers de chaque jour. Désactivé par défaut.</td></tr>
+              <tr><th scope="row">Show all clips <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Ouvre <code>_Clips</code>.</td></tr>
+              <tr><th scope="row">Show all moments <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Ouvre <code>_Moments</code>.</td></tr>
+              <tr><th scope="row">Marks for the editor <span class="soon">Bientôt</span></th><td><strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong>, <strong>Premiere Pro…</strong> ; quels clips : <strong>All but rejects</strong> (tous sauf les rejets, par défaut) ou <strong>With moments or marks</strong> (avec des moments ou des repères).</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Ce clip</th></tr>
+              <tr><th scope="row">Marks of this clip <kbd>M</kbd></th><td>Les repères du clip avec leurs instants ; celui où en est la vidéo, mis en évidence. Cliquez pour y sauter. <strong>Add a mark here</strong> / <strong>Remove the mark here</strong>.</td></tr>
+              <tr><th scope="row">Moments of this clip</th><td>Nom et passage ; cliquez pour lire. ⋯ propose <strong>Play</strong>, <strong>In its clip</strong> (le clip entier, avec le passage marqué), <strong>Rename…</strong>, <strong>Remove</strong>, <strong><span class="os-mac">Show in Finder</span><span class="os-win">Show in Explorer</span></strong>.</td></tr>
+              <tr><th scope="row">Mark this clip as not interesting <kbd>X</kbd></th><td>Met son aperçu à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>. Ensuite <strong>Not interesting · undo</strong> ; pour un clip sans aperçu, <strong>Make this clip's preview</strong>.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Passage sélectionné <kbd>l</kbd></th></tr>
+              <tr><th scope="row">Mark start · Mark end</th><td>Délimitent le passage, comme <kbd>l</kbd> ; ils affichent ensuite ses instants, « Start 0:20 », « End 0:30 ».</td></tr>
+              <tr><th scope="row">Save as moment 0:20–0:30 <kbd>k</kbd></th><td>Demande le nom et l’enregistre. Sur un moment ouvert dans son clip : <strong>Update Turtle to …</strong> ; à l’intérieur d’un moment en cours de lecture : <strong>Trim Turtle to …</strong>.</td></tr>
+              <tr><th scope="row">Clear the part</th><td>Oublie le début et la fin.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Pendant la lecture d’un moment</th></tr>
+              <tr><th scope="row">Open the whole clip at 0:20</th><td>L’original, à partir du début du moment.</td></tr>
+              <tr><th scope="row">Stabilized</th><td><strong>As saved</strong> (par défaut), <strong>On its own</strong> ou <strong>With its clip</strong>, pour chaque moment que vous lisez pendant cette session. Seulement pour regarder.</td></tr>
+              <tr><th scope="row">Keep in Turtle</th><td>Apparaît dès que vous avez changé quelque chose ; l’écrit dans le moment.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Pendant la lecture d’un aperçu de clip</th></tr>
+              <tr><th scope="row">Its own stabilization</th><td>Un interrupteur. Activé : l’aperçu reçoit son propre projet Gyroflow à côté de lui, une copie de la façon dont le clip se lit maintenant, à modifier sans toucher à celui du clip (<kbd>Ctrl</kbd>+<kbd>e</kbd> l’ouvre dans Gyroflow). Désactivé : cette copie va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span> et celui du clip s’applique de nouveau. Désactivé par défaut.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <figure class="media lib-tall" id="shot-library-6">
+        <img src="../media/library-6.jpg" alt="L’onglet Project du panneau latéral : 2026-10 Egypt, 3 moments et 12 of 40 clip previews, les repères et les moments du clip avec un menu ouvert, et Save as moment 0:28–0:32." width="584" height="1560" loading="lazy">
+        <figcaption>L’onglet Project d’un voyage avec quelques moments.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Touches</p>
+        <h2>Les touches de votre bibliothèque.</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Marquer un passage : son début, puis sa fin</span><span><kbd>l</kbd> deux fois</span></div>
+        <div class="key"><span>Enregistrer le passage comme moment ; sur un moment : le mettre à jour</span><span><kbd>k</kbd></span></div>
+        <div class="key"><span>Un repère ici ; sur un repère : le supprimer</span><span><kbd>M</kbd></span></div>
+        <div class="key"><span>Repère suivant · repère précédent</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> · <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
+        <div class="key"><span>Sans intérêt : l’aperçu du clip à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span> ; à nouveau : retour</span><span><kbd>X</kbd></span></div>
+        <div class="key"><span>Favori : le moment en cours de lecture, sinon le clip ; à nouveau : retiré <span class="soon">Bientôt</span></span><span><kbd>K</kbd></span></div>
+        <div class="key"><span>Exporter le passage ou le clip ; à nouveau : annuler</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>Couper le passage marqué du clip, après confirmation</span><span><kbd>Ctrl</kbd>+<kbd>x</kbd></span></div>
+        <div class="key"><span>Afficher ou masquer le panneau latéral</span><span><kbd>Tab</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Limites</p>
+        <h2>Ce qu’il faut savoir avant de compter dessus.</h2>
+      </div>
+      <ul class="lib-limits">
+        <li><strong>Un moment est un lien.</strong> Il a besoin de son original au même endroit dans le projet, inchangé. Déplacer tout le dossier du voyage ne pose pas de problème ; renommer ou réencoder un original casse ses moments et son aperçu.</li>
+        <li><strong>Un fichier de moment n’est pas fait pour être envoyé.</strong> Ailleurs, c’est une seule image fixe, et les messageries et le réencodage suppriment le lien. Envoyez un export.</li>
+        <li><strong>Le fichier d’un moment montre une image</strong>, pas une vidéo du passage.</li>
+        <li><strong>Les aperçus des clips ne sont pas stabilisés</strong>, et leurs images sont les images clés les plus proches, jusqu’à environ une seconde du repère.</li>
+        <li><strong>Les repères n’ont pas encore de nom que vous pouvez taper</strong> : ce sont « Mark 1 », « Mark 2 », ou ceux de la caméra.</li>
+        <li><strong>Couper remplace le clip.</strong> L’original va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>, il n’y a pas d’annulation dans le lecteur, les exports pointent toujours vers l’ancien original, et c’est fait pour les clips DJI.</li>
+        <li><strong>Le fichier pour le logiciel de montage, c’est une fois pour toutes.</strong> Final Cut Pro et Resolve ne fusionnent pas un second import des mêmes clips. Créez-le donc une fois que vous avez marqué ce que vous voulez.</li>
+        <li><strong>Sous Windows</strong>, les projets, les moments et les aperçus sont encore peu testés.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Questions</p>
+        <h2>Avant de commencer.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Est-ce que le lecteur modifie mes vidéos ?</summary>
+          <div class="a"><p>Seulement quand vous coupez un passage avec <kbd>Ctrl</kbd>+<kbd>x</kbd> et confirmez : le clip est alors remplacé par les parties gardées, et l’original va à la <span class="os-mac">Corbeille</span><span class="os-win">Corbeille</span>. Sinon, il ne fait que lire vos clips. À côté d’eux, il écrit un fichier de repères dès que vous changez un repère, et un projet Gyroflow quand vous en faites un ; tout le reste va dans les dossiers propres au projet.</p></div>
+        </details>
+        <details>
+          <summary>Faut-il un projet pour les repères ?</summary>
+          <div class="a"><p>Non. Les repères sont gardés à côté du clip, avec ou sans projet. Les moments, les aperçus des clips, les exports et <kbd>X</kbd> en demandent un.</p></div>
+        </details>
+        <details>
+          <summary>J’ai déplacé le voyage sur mon NAS. Mes moments sont-ils perdus ?</summary>
+          <div class="a"><p>Non, tant que le dossier du voyage est déplacé en entier, vidéos et projet ensemble. Les liens sont relatifs au projet : ils retrouvent donc leurs clips. Un projet dans Documents reçoit le nouveau chemin comme ligne dans son <code>Sources.txt</code>.</p></div>
+        </details>
+        <details>
+          <summary>Puis-je envoyer un moment à un ami ?</summary>
+          <div class="a"><p>Envoyez plutôt un export : <kbd>Shift</kbd>+<kbd>E</kbd> sur le moment. Le fichier du moment lui-même n’est qu’une image et un lien vers un clip que vous seul avez.</p></div>
+        </details>
+        <details>
+          <summary>Est-ce que ça marche avec la version gratuite de DaVinci Resolve ?</summary>
+          <div class="a"><p>Oui. La version gratuite n’exécute pas de scripts : le lecteur écrit donc trois fichiers qu’elle importe à la main, un fichier de timeline, une liste de marqueurs et une table de métadonnées.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Essayez</p>
+        <h2>Ouvrez un voyage, gardez ce qui mérite de l’être.</h2>
+        <p class="lede">Gratuit, sans compte, et tout ce qu’il garde est un fichier que vous voyez.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Télécharger gratuitement pour Mac</span><span class="os-win">Télécharger pour Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Télécharger pour Windows</span><span class="os-win">Télécharger gratuitement pour Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Vidéos en log</h3>
+          <p>Le log en couleur, les looks, le HDR, et l’aspect de chaque export.</p>
+          <a href="log.html">Vidéos en log</a>
+        </div>
+        <div class="help-card">
+          <h3>Stabilisation</h3>
+          <p>Comment les clips se lisent stables, et les projets Gyroflow que gardent les moments.</p>
+          <a href="stabilization.html">Stabilisation</a>
+        </div>
+        <div class="help-card">
+          <h3>Tout ce qu’il fait</h3>
+          <p>Chaque touche et chaque option, et les caméras une par une.</p>
+          <a href="features.html">Toutes les fonctions</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · <a href="about.html">Créé par un plongeur à Genève, en Suisse</a></span>
+      <a href="index.html">Accueil</a>
+      <a href="about.html">À propos</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">Toutes les fonctions</a>
+      <a href="download.html">Téléchargements</a>
+    </div>
+    <p>Bâti sur le moteur de stabilisation de Gyroflow et le telemetry-parser d’Adrian Eddy, que nous remercions, avec les LUT HDR D-Log M et GP-Log dérivées des LUT shaper de Zeb Gardner (utilisées avec son autorisation), et les courbes log publiées par DJI, GoPro et Insta360. Sans affiliation avec DJI, GoPro ou Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision et le symbole double-D sont des marques de commerce de Dolby Laboratories Licensing Corporation. Action Footage Player n’est pas affilié à Dolby ni cautionné par Dolby. Le lecteur écrit lui-même les métadonnées Dolby Vision, avec la bibliothèque open source <code>dolby_vision</code> (MIT) ; aucun logiciel Dolby n’est inclus.</p>
+    <p class="mt-foot">Cette page a été traduite automatiquement de l’anglais et peut contenir des erreurs. <a href="../library.html" hreflang="en">Lire l’original en anglais</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

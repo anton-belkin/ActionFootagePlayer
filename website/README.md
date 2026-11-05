@@ -18,10 +18,22 @@ Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 202
 site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
+  moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
+  log.html, stabilization.html, library.html, photos.html
+                 the four guides, one feature set each, from what you get to every setting
+  about.html     who makes it and why: Anton's story, a timeline with links
+  features.html  every feature on one page, the reference the other pages link to (footer: All features)
+  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css, about.css
+                 each page's own styles, next to the shared styles.css
+  media/         real footage from an Osmo Action 6: stab-underwater.mp4 (+ .jpg poster; as recorded | as it
+                 plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
+                 seek bar). No people's faces in them
   download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
   download.js    fills download.html in from latest.json: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
-  top.js         measures the sticky header, so links to #anchors land below it with the heading in view
+  top.js         measures the sticky header, so links to #anchors land below it with the heading in view; opens a
+                 FAQ <details> a link points to; and sets <html data-os="mac|win"> for the visitor's own words
+                 (Finder or File Explorer, …) and download order: see "The visitor's system" below
   scene.js       the drawn before/after illustration in the hero (no real footage yet)
   icon.svg       the icon in the header and the tab: macos/icon/AppIcon.svg cropped to the icon itself
   favicon.ico, apple-touch-icon.png
@@ -53,7 +65,7 @@ A new release needs no change here, unless an asset's name changes: then its pat
 French, Russian and Simplified Chinese live in `site/fr/`, `site/ru/` and `site/zh/`, under the same file names as the
 English pages at the root, and use the shared `styles.css`, `scene.js`, `download.js` and icons through `../`. They are
 served at `/fr/`, `/ru/`, `/zh/` (and `/fr/divers`, `/fr/download` …). English is the original; the translations are **machine translations**
-(made with Claude, 2026-11-03) and each translated page says so in its own language, in a slim banner under the header
+(made with Claude, 2026-11-03; all pages translated again from the proofread English on 2026-11-05) and each translated page says so in its own language, in a slim banner under the header
 and again in the footer, with a link to the English page.
 
 Every page, English included, carries:
@@ -63,6 +75,14 @@ Every page, English included, carries:
   `https://actionfootageplayer.ch/…` URLs;
 - the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
   page in each language.
+- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page, three of its
+  sections and About the maker), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
+  (Log footage, Stabilization, Library, Photos, then All features) and **Download**. The page you're on is marked
+  with `aria-current`, on its link and on its dropdown's title. Each dropdown is a `<details class="navmenu">`, so it
+  works without script. Below 900px they take a second row; below 520px they're hidden and the same links, grouped
+  the same way, are in one ☰ menu (`<details class="sitemenu">`) beside the language. top.js closes any of these
+  menus when a link is chosen, on a click outside or on Escape. The header is written into each page by a hand-run
+  script, not at build time, in all four languages (its labels per language are in the script).
 
 Fonts: Archivo, the display face, covers Latin only. Russian pages load Roboto Flex (Cyrillic, with a width axis like
 Archivo's) for headings; IBM Plex Sans and Mono cover Cyrillic. Chinese uses the system's CJK face after the Latin
@@ -70,7 +90,10 @@ ones (PingFang SC, Hiragino Sans GB, Noto Sans SC, Microsoft YaHei); nothing CJK
 `styles.css` with `:lang()` rules.
 
 Kept in English everywhere: product, camera and format names (D-Log M, GP-Log, I-Log, HDR, EIS, Gyroflow, …), keyboard
-shortcuts, file names, and the player's on-screen telemetry in the illustration.
+shortcuts, file names, and the player's on-screen telemetry in the illustration. The player's own on-screen labels and buttons stay in English as
+the app shows them, with a short translation the first time. The system's own names are translated as the system
+shows them in that language: File Explorer is Explorateur de fichiers, Проводник, 文件资源管理器; Quick Look is Coup d'œil,
+Быстрый просмотр, 快速查看; Finder is 访达 in Chinese.
 
 `download.js` writes a few words of its own (the release's title, file sizes, dates): it takes them from its `LANGS`
 table by the page's `<html lang>`, and dates come from the browser in that language. The first paragraph of the
@@ -102,3 +125,13 @@ after it landed. Nothing to do by hand; the HTML in the repository keeps the pla
 
 The release workflow runs on every pull request, so a site-only pull request also triggers a full build; a
 `paths-ignore: ['website/**']` on its `pull_request` trigger would avoid that.
+
+## The visitor's system
+
+Where a page names something of the desktop (Finder or File Explorer, Quick Look or the preview pane, Finder tags
+or star ratings), it has both, side by side: `<span class="os-mac">Finder</span><span class="os-win">File
+Explorer</span>` (or a pair of `<p>`s). `top.js` sets `<html data-os>`: `mac` on a Mac, iPhone or iPad, `win`
+anywhere else (Windows; Android and Linux visitors are taken to use Windows). `styles.css` hides the other one;
+without script, the Mac's shows. A pair of download buttons in a container marked `data-os-swap`, with `.dl-mac` and
+`.dl-win`, gets the visitor's first and primary. Facts that are Apple's only (Dolby Vision on iPhones, iPads and
+Macs, the Mac app's own features) are the same for everyone. Translations carry both variants too.

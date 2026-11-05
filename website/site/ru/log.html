@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Log-записи в цвете и HDR: Action Footage Player</title>
+<meta name="description" content="Клипы в D-Log M, GP-Log и I-Log воспроизводятся в цвете прямо с карты: в HDR на HDR-экране, приглушённые на ваш вкус на обычном, с Dolby Vision на Mac. А потом экспортируйте то, что видите, в HDR или SDR. Бесплатный плеер для Mac и Windows.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/log">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/log">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/log">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/log">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/log">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Roboto+Flex:wdth,wght@100..125,500..900&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../log.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, на главную">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Сайт">
+      <details class="navmenu"><summary>Главная</summary>
+        <ul>
+          <li><a href="index.html">Главная страница</a></li>
+          <li><a href="index.html#features">Что он умеет</a></li>
+          <li><a href="index.html#how">Как это работает</a></li>
+          <li><a href="index.html#faq">Вопросы</a></li>
+          <li><a href="about.html">Об авторе</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Для кого</summary>
+        <ul>
+          <li><a href="divers.html">Дайверам и снорклерам</a></li>
+          <li><a href="moments.html">Активным путешественникам</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Функции</summary>
+        <ul>
+          <li><a href="log.html" aria-current="page">Log-записи</a></li>
+          <li><a href="stabilization.html">Стабилизация</a></li>
+          <li><a href="library.html">Библиотека</a></li>
+          <li><a href="photos.html">Фото</a></li>
+          <li><a href="features.html" class="nm-all">Все функции</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Скачать</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Меню"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Главная</li>
+        <li><a href="index.html">Главная страница</a></li>
+        <li><a href="index.html#features">Что он умеет</a></li>
+        <li><a href="index.html#how">Как это работает</a></li>
+        <li><a href="index.html#faq">Вопросы</a></li>
+        <li><a href="about.html">Об авторе</a></li>
+        <li class="sm-group">Для кого</li>
+        <li><a href="divers.html">Дайверам и снорклерам</a></li>
+        <li><a href="moments.html">Активным путешественникам</a></li>
+        <li class="sm-group">Функции</li>
+        <li><a href="log.html" aria-current="page">Log-записи</a></li>
+        <li><a href="stabilization.html">Стабилизация</a></li>
+        <li><a href="library.html">Библиотека</a></li>
+        <li><a href="photos.html">Фото</a></li>
+        <li><a href="features.html">Все функции</a></li>
+        <li class="sm-dl"><a href="download.html">Скачать</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Язык: русский"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>RU</summary>
+      <ul>
+        <li><a href="../log.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/log.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/log.html" hreflang="ru" lang="ru" aria-current="page">Русский</a></li>
+        <li><a href="../zh/log.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../log.html" hreflang="en">Читать оригинал на английском</a></p>
+</div>
+
+<main id="top">
+  <!-- Hero: what you get, the download, one real frame -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Log-записи</p>
+        <h1>Снимаете в log? Здесь он в цвете.</h1>
+        <p class="lede">В других приложениях клипы в D-Log M, GP-Log и I-Log выглядят серыми. Откройте такой клип здесь двойным щелчком: он воспроизводится в цвете, на HDR-экране — в HDR, без всякой цветокоррекции. Отметьте фрагмент, нажмите <kbd>Shift</kbd>+<kbd>E</kbd> — и он экспортируется таким, каким выглядит.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>Бесплатно, с открытым кодом</span>
+          <span>Без учётной записи</span>
+          <span>Оригиналы не меняются, пока вы сами не попросите</span>
+        </div>
+      </div>
+
+      <figure class="media">
+        <div class="halves"><span>Как в других приложениях</span><span>Как здесь</span></div>
+        <img src="../media/log-grey-color.jpg" width="1600" height="900" fetchpriority="high" alt="Один кадр клипа в log, разделённый пополам: слева плоский и серый, справа в полном цвете.">
+        <figcaption>Один кадр одного и того же клипа. Эта картинка не в HDR: на HDR-экране плеер показывает его ярче.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- What you get -->
+  <section class="section band" id="what">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Что вы получаете</p>
+        <h2>Цвет и HDR без цветокоррекции.</h2>
+        <p class="lede">Log — режим записи, который сохраняет больше всего деталей в светах и тенях. Цена — плоская серая картинка, которой обычно нужна цветокоррекция: настройка цвета и контраста в монтажной программе, часто с LUT (таблицей, которая переводит один набор цветов в другой). Здесь это преобразование делает за вас плеер.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Сразу в цвете</h3>
+          <p>Плеер читает метаданные самой камеры, видит, что клип снят в log, и преобразует его по ходу воспроизведения. Обычные клипы воспроизводятся как есть.</p>
+        </div>
+        <div class="gap-item">
+          <h3>HDR там, где экран его умеет</h3>
+          <p>Экраны HDR (расширенный динамический диапазон) показывают более яркие света и более глубокие тени: это последние MacBook Pro, iPhone, HDR-мониторы и телевизоры. На таком экране log воспроизводится в HDR.</p>
+        </div>
+        <div class="gap-item">
+          <h3>На других экранах — на ваш выбор</h3>
+          <p>Обычному экрану (SDR, стандартный динамический диапазон) HDR нужно приглушить. Сделать это можно несколькими способами, и вы выбираете тот, что вам нравится.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Экспорт того, что вы видите</h3>
+          <p>Одна клавиша превращает отмеченный фрагмент в один файл, ровный и в том же стиле, в HDR или SDR.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band tight-top" id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Как это работает</p>
+        <h2>С карты на ваш экран, в четыре шага.</h2>
+      </div>
+      <ol class="checklist">
+        <li>
+          <h3>Клип сам сообщает, что он в log</h3>
+          <p>Плеер читает метаданные камеры, а не имя файла. DJI называет <code>_D</code> и обычные клипы, так что по имени этого не понять. Для камер, чьи метаданные он прочитать не может, <kbd>Ctrl</kbd>+<kbd>l</kbd> выбирает кривую log вручную. Копируйте клипы прямо с карты: приложение, которое их экспортирует или обрезает, теряет метаданные.</p>
+        </li>
+        <li>
+          <h3>Log становится HDR</h3>
+          <p>Клип преобразуется в HDR-видео в HLG (Rec.2100 HLG, 1000 нит) — формате HDR, которым пользуются телефоны и телевизоры. Это техническое преобразование, одинаковое для всех клипов, без добавленного творческого стиля и с экспозицией, какой вы её сняли. Поэтому оно и может происходить само.</p>
+        </li>
+        <li>
+          <h3>Остальное решает экран</h3>
+          <p>HDR-экран показывает HDR как есть. На обычном экране он приглушается. В приложении для Mac по умолчанию это делает Dolby Vision — так, как экспорт показывают QuickTime, iPhone и iPad. Другие способы — собственная тональная компрессия mpv, нейтральное преобразование от NBCUniversal и LUT производителя камеры: <kbd>Ctrl</kbd>+<kbd>s</kbd> перебирает их.</p>
+        </li>
+        <li>
+          <h3>Ваш выбор запоминается</h3>
+          <p>То, что вы выберете клавишами <kbd>Ctrl</kbd>+<kbd>s</kbd>, становится стартовым для следующих клипов на экране того же типа, пока вы не закроете плеер. <b>Make these the defaults</b> (сделать настройками по умолчанию) в боковой панели сохраняет это насовсем.</p>
+        </li>
+      </ol>
+
+      <figure class="media lg-flow-fig">
+        <div class="lg-flow" role="img" aria-label="Клип в log преобразуется в HDR в HLG. HDR-экран показывает его как есть; SDR-экран получает его приглушённым — через Dolby Vision в приложении для Mac, через mpv, преобразование NBCU или LUT производителя камеры.">
+          <div class="lg-node"><b>Клип в log</b><span>серый и плоский, прямо с карты</span></div>
+          <div class="lg-arrow" aria-hidden="true"></div>
+          <div class="lg-node lg-hl"><b>HDR, HLG</b><span>фиксированное преобразование, без стиля</span></div>
+          <div class="lg-arrow" aria-hidden="true"></div>
+          <div class="lg-split">
+            <div class="lg-node"><b>HDR-экран</b><span>показывает как есть</span></div>
+            <div class="lg-node"><b>SDR-экран</b><span>приглушённый: Dolby Vision (Mac), mpv, NBCU или LUT производителя</span></div>
+          </div>
+        </div>
+        <figcaption>Преобразование в HDR одинаково для всех клипов. Дело вкуса — только то, как его приглушить для обычного экрана.</figcaption>
+      </figure>
+
+      <h3 class="lg-sub">Какие клипы распознаются</h3>
+      <div class="compare-wrap">
+        <table class="settings lg-cams">
+          <thead><tr><th scope="col">Камера</th><th scope="col">Log</th><th scope="col">Как</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">DJI Osmo Action 6, Osmo 360</th><td data-label="Log">D-Log M, D-Log</td><td data-label="Как">Сам. <span class="pill ok">Проверено</span> D-Log M на Osmo Action 6</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black (прошивка 1.20 или новее), HERO13 Black</th><td data-label="Log">GP-Log</td><td data-label="Как">Сам. <span class="pill ok">Проверено</span> на HERO12 Black</td></tr>
+            <tr><th scope="row">GoPro MISSION 1</th><td data-label="Log">GP-Log2</td><td data-label="Как">Сам</td></tr>
+            <tr><th scope="row">Другие камеры и дроны DJI</th><td data-label="Log">D-Log M, D-Log</td><td data-label="Как">Вручную: <kbd>Ctrl</kbd>+<kbd>l</kbd></td></tr>
+            <tr><th scope="row">Insta360 (X6, Luna)</th><td data-label="Log">10-битный I-Log</td><td data-label="Как">Вручную: <kbd>Ctrl</kbd>+<kbd>l</kbd>. 8-битный I-Log не поддерживается</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black с прошивкой до 1.20, MAX2</th><td data-label="Log">GP-Log</td><td data-label="Как">Воспроизводятся как есть: их GP-Log экспонирован иначе (на 2 ступени темнее, а на MAX2 — на 2 ступени светлее). <kbd>Ctrl</kbd>+<kbd>l</kbd> всё равно его применяет</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Кривые без отметки «Проверено» построены по формулам, опубликованным производителями, и на реальных записях не проверялись. Короткий клип с вашей камеры в <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">issue на GitHub</a> — и её проверят.</p>
+    </div>
+  </section>
+
+  <!-- The looks -->
+  <section class="section band" id="looks">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Стили</p>
+        <h2>Один клип, несколько способов его показать.</h2>
+        <p class="lede">Плеер называет их видеовыходами. <kbd>Ctrl</kbd>+<kbd>s</kbd> переключает на следующий из тех, что есть у клипа, а раздел Look боковой панели перечисляет их все. Они идут в том порядке, в каком их перебирает <kbd>Ctrl</kbd>+<kbd>s</kbd>.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="settings lg-looks">
+          <thead><tr><th scope="col">Стиль</th><th scope="col">Что вы видите</th><th scope="col">Где</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">HDR, HLG</th><td data-label="Что вы видите">HDR-картинка как есть. <span class="os-mac">На обычном экране её приглушает macOS.</span><span class="os-win">Решает собственная настройка Windows <b>Use HDR</b> («Использовать HDR»): когда она выключена, картинку для экрана приглушает mpv.</span> <kbd>Ctrl</kbd>+<kbd>h</kbd> переключает прямо на него.</td><td data-label="Где">Везде</td></tr>
+            <tr><th scope="row">HDR, HLG+DV</th><td data-label="Что вы видите">HLG с метаданными Dolby Vision на каждом кадре, показанный macOS: HDR на HDR-экране, приглушённый трим-настройками из метаданных на обычном. Так экспорт показывают QuickTime, iPhone и iPad.</td><td data-label="Где">Приложение для Mac</td></tr>
+            <tr><th scope="row">SDR, HLG+DV</th><td data-label="Что вы видите">То же самое, но всегда приглушённое, и на HDR-экране тоже: то, что показывает обычный экран.</td><td data-label="Где">Приложение для Mac</td></tr>
+            <tr><th scope="row">SDR tone mapped from HDR by mpv (SDR, тональная компрессия mpv)</th><td data-label="Что вы видите">Приглушено самим mpv, с его опорным белым на уровне белого SDR: одинаково в любой системе и на любом экране.</td><td data-label="Где">Везде</td></tr>
+            <tr><th scope="row">SDR, NBCU</th><td data-label="Что вы видите">Преобразование HLG в SDR от NBCUniversal: нейтральное, одинаковое для всех камер.</td><td data-label="Где">Везде</td></tr>
+            <tr><th scope="row">SDR, camera maker's LUT (LUT производителя камеры)</th><td data-label="Что вы видите">Собственный LUT от DJI для перевода D-Log M в Rec.709, сделанный для Osmo Action 6 и скачанный с сайта DJI при настройке. Только для D-Log M и только после того, как LUT скачан.</td><td data-label="Где">Везде</td></tr>
+            <tr><th scope="row">As recorded, log (как записано, log)</th><td data-label="Что вы видите">Файл как есть, плоский. <kbd>L</kbd> переключает на него, только для этого клипа; <kbd>Ctrl</kbd>+<kbd>s</kbd> его не перебирает.</td><td data-label="Где">Везде</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Rec.709 — цветовой стандарт обычных экранов, который любое устройство воспроизводит одинаково. LUT от DJI не обязателен: без него все остальные стили работают.</p>
+
+      <div class="lg-two">
+        <div class="stack">
+          <h3>В чём открываются клипы</h3>
+          <ul class="lg-list">
+            <li><b>На HDR-экране:</b> HDR, HLG.</li>
+            <li class="os-mac"><b>На обычном экране, в приложении для Mac:</b> HDR, HLG+DV. С плагинами в вашем собственном mpv — SDR tone mapped from HDR by mpv.</li>
+            <li class="os-win"><b>На Mac с обычным экраном:</b> HDR, HLG+DV в приложении для Mac.</li>
+            <li><b>В Windows и Linux:</b> тип экрана не определяется, поэтому любой экран считается HDR и клипы открываются в HDR, HLG.</li>
+            <li>Клип сохраняет свой стиль, когда вы переносите его окно на экран другого типа.</li>
+          </ul>
+          <h3>Файлы, уже снятые в HDR</h3>
+          <p class="lg-p">Экспорт плеера, видео с телефона и HDR-режимы камер воспроизводятся как есть, в HDR, и никогда не принимаются за log и не преобразуются повторно. <kbd>Ctrl</kbd>+<kbd>s</kbd> показывает их в SDR через mpv или NBCU. Собственный экспорт плеера в Dolby Vision воспроизводится ещё и со своим Dolby Vision.</p>
+        </div>
+        <figure class="media" id="shot-log-1">
+          <img src="../media/log-1.jpg" alt="Один кадр с рифом в трёх полосах: как записано в log, плоский и серый; SDR с преобразованием NBCU; SDR с LUT от DJI." width="1600" height="900" loading="lazy">
+          <figcaption>Как записано и два SDR-стиля на одном кадре. У NBCU средние тона светлее и цвета насыщеннее, чем у LUT от DJI.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dolby Vision -->
+  <section class="section band tight-top" id="dolby-vision">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Dolby Vision</p>
+        <h2>На Mac — приглушено так, как это делают устройства Apple.</h2>
+        <p class="lede">Dolby Vision — это метаданные, которые идут с каждым кадром HDR-видео: насколько ярка сцена, и трим-настройки — поправки, которые экран применяет, когда приглушает HDR. В стиле HLG+DV macOS приглушает картинку с их помощью, как iPhone, когда воспроизводит ваш экспорт. <span class="pill exp lg-where">Только приложение для Mac</span></p>
+      </div>
+      <div class="lg-two">
+        <div class="gap-grid lg-dv-points">
+          <div class="gap-item">
+            <h3>Каждый кадр измерен</h3>
+            <p>Самый тёмный, средний и самый яркий уровни каждого кадра измеряются по ходу воспроизведения, так что macOS отображает каждую сцену по тому, что в ней есть: и тёмному погружению, и солнечному пляжу достаётся своё пространство. Экспорт точно так же измеряет свои кадры.</p>
+          </div>
+          <div class="gap-item">
+            <h3>Трим-настройки на вкус — и их можно менять</h3>
+            <p>Трим-настройки, которые идут с плеером, — авторские: подобраны на вкус и подогнаны под преобразование NBCU. В разделе Dolby Vision боковой панели они есть в виде ползунков, и можно вернуться к авторским или к нейтральным: собственное отображение Dolby, ничего не добавлено. Экспорт берёт то, что там выставлено.</p>
+          </div>
+          <div class="gap-item">
+            <h3>Два стиля, один файл</h3>
+            <p>HDR, HLG+DV и SDR, HLG+DV — это одно и то же видео. Второй стиль всегда приглушён, так что на HDR-экране вы видите то, что показывает обычный. Оба экспортируют один и тот же HDR-файл с Dolby Vision.</p>
+          </div>
+          <div class="gap-item">
+            <h3>Не в Windows и не в Linux</h3>
+            <p>Стилям и экспорту с Dolby Vision нужен собственный mpv приложения для Mac. В Windows и Linux, а также с плагинами в вашем собственном mpv на Mac стилей HLG+DV и экспорта с Dolby Vision нет.</p>
+          </div>
+        </div>
+        <figure class="media lg-panel" id="shot-log-2">
+          <img src="../media/log-2.jpg" alt="Раздел Dolby Vision боковой панели: семь ползунков трим-настроек, от Slope до Chroma weight, и кнопки These are the author's trims и Neutral trims: none added." width="584" height="1716" loading="lazy">
+          <figcaption>Раздел Dolby Vision боковой панели, с авторскими трим-настройками.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exporting -->
+  <section class="section band" id="export">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Экспорт</p>
+        <h2>Экспорт того, что вы видите.</h2>
+        <p class="lede">Один 10-битный файл HEVC, сделанный по ходу воспроизведения клипа: в стиле, который на экране, со стабилизацией, как при воспроизведении, и со звуком клипа.</p>
+      </div>
+      <div class="lg-two">
+        <ol class="checklist">
+          <li>
+            <h3>Отметьте фрагмент</h3>
+            <p>Нажмите <kbd>l</kbd> в начале и <kbd>l</kbd> в конце. Ничего не отмечайте, чтобы экспортировать весь клип.</p>
+          </li>
+          <li>
+            <h3>Нажмите <kbd>Shift</kbd>+<kbd>E</kbd> и дайте название</h3>
+            <p>Введите название или нажмите <kbd>Enter</kbd>, чтобы взять предложенное. В первый раз в поездке открывается вкладка Project боковой панели: выберите папку поездки и нажмите <b>Initialize the project here</b> (создать проект здесь). <a class="text-link" href="library.html">О проектах</a></p>
+          </li>
+          <li>
+            <h3>Поставьте на паузу — и будет быстрее</h3>
+            <p>Ход экспорта виден справа вверху. На паузе экспорт идёт на полной скорости, около 35 кадров в секунду для 4K при 60 fps на Mac с M1 Pro. Пока видео играет, он почти останавливается, чтобы воспроизведение оставалось плавным. <span class="os-mac">Уведомление сообщает, куда сохранён файл.</span><span class="os-win">Сообщение поверх видео говорит, куда сохранён файл.</span></p>
+          </li>
+        </ol>
+        <figure class="media lg-panel" id="shot-log-3">
+          <img src="../media/log-3.jpg" alt="Раздел Clip боковой панели с отмеченным фрагментом 1:05–1:30: Export the part, Export in SDR и Show the last export." width="584" height="1010" loading="lazy">
+          <figcaption>Раздел Clip боковой панели с отмеченным фрагментом.</figcaption>
+        </figure>
+      </div>
+
+      <h3 class="lg-sub">Стиль на экране определяет файл</h3>
+      <div class="compare-wrap">
+        <table class="settings lg-out">
+          <thead><tr><th scope="col">Стиль на экране</th><th scope="col">Что получается при экспорте</th><th scope="col">Имя файла</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">HDR, HLG</th><td data-label="Экспорт">HDR (HLG), без Dolby Vision. На обычном экране каждое устройство приглушает его само; устройства Apple делают его темнее, чем SDR от NBCU.</td><td data-label="Имя файла"><code>Turtle.mov</code></td></tr>
+            <tr><th scope="row">HDR, HLG+DV <span class="lg-mac">Mac</span></th><td data-label="Экспорт">HDR (HLG) с Dolby Vision. iPhone, iPad и Mac показывают его так же, как плеер, на любом экране.</td><td data-label="Имя файла"><code>Turtle (Dolby Vision).mov</code></td></tr>
+            <tr><th scope="row">SDR, HLG+DV <span class="lg-mac">Mac</span></th><td data-label="Экспорт">Тот же HDR-файл с Dolby Vision. <b>Не SDR-файл.</b></td><td data-label="Имя файла"><code>Turtle (Dolby Vision).mov</code></td></tr>
+            <tr><th scope="row">SDR tone mapped from HDR by mpv</th><td data-label="Экспорт">HDR (HLG). <b>Не SDR-файл.</b></td><td data-label="Имя файла"><code>Turtle.mov</code></td></tr>
+            <tr><th scope="row">SDR, NBCU</th><td data-label="Экспорт">SDR (Rec.709), через преобразование NBCU</td><td data-label="Имя файла"><code>Turtle (SDR).mov</code></td></tr>
+            <tr><th scope="row">SDR, camera maker's LUT</th><td data-label="Экспорт">SDR (Rec.709), через LUT от DJI</td><td data-label="Имя файла"><code>Turtle (SDR).mov</code></td></tr>
+            <tr><th scope="row">As recorded, log, или клип не в log</th><td data-label="Экспорт">Собственные цвета клипа, со стабилизацией</td><td data-label="Имя файла"><code>Turtle.mov</code></td></tr>
+            <tr class="lg-row-alt"><th scope="row"><b>Export in SDR</b>, что бы ни воспроизводилось</th><td data-label="Экспорт">SDR (Rec.709), через SDR-стиль, который воспроизводится, а иначе — через тот, что вы выбрали последним: NBCU или LUT от DJI. Для клипов в log.</td><td data-label="Имя файла"><code>Turtle (SDR).mov</code></td></tr>
+            <tr class="lg-row-alt"><th scope="row">Пакетный экспорт, что бы ни воспроизводилось</th><td data-label="Экспорт">HDR (HLG): без Dolby Vision, без SDR. <a class="text-link" href="#batch">Пакетный экспорт и ProRes</a></td><td data-label="Имя файла">имя клипа с добавленным <code>_stab</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="honest lg-honest">Файл с Dolby Vision дают только стили HLG+DV, а они есть только в приложении для Mac. На Mac с HDR-экраном клипы открываются в HDR, HLG, экспорт которого Dolby Vision не содержит: для iPhone и iPad переключитесь на HDR, HLG+DV перед <kbd>Shift</kbd>+<kbd>E</kbd>. Для любого другого экрана, любого плеера или соцсети SDR, NBCU, LUT производителя или <b>Export in SDR</b> дают файл, который везде выглядит одинаково.</p>
+
+      <div class="gap-grid lg-export-facts">
+        <div class="gap-item">
+          <h3>Куда он попадает</h3>
+          <p>В папку проекта <code>_Exports</code>, под названием, которое вы дали: <code>Turtle.mov</code>, <code>Turtle (SDR).mov</code> или <code>Turtle (Dolby Vision).mov</code>. Если имя уже занято, добавляется номер: <code>Turtle 2.mov</code>. Пакетный экспорт клипа, который не входит в проект, попадает в папку <code>stabilized</code> рядом с ним.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Что он берёт из воспроизведения</h3>
+          <p>Стиль и стабилизацию, как вы её настроили: вкл. или выкл., широкий вид, уровень, края, фиксацию горизонта, поправку на воду. Шумоподавление (<kbd>Ctrl</kbd>+<kbd>n</kbd>) и другие улучшения при воспроизведении в экспорт не попадают. <a class="text-link" href="stabilization.html">Стабилизация</a></p>
+        </div>
+        <div class="gap-item">
+          <h3>Несколько сразу или отмена</h3>
+          <p>Начните экспорт другого клипа, пока идёт текущий. <kbd>Shift</kbd>+<kbd>E</kbd> дважды в течение 3 секунд или <b>Cancel export</b> (отменить экспорт) останавливает экспорт клипа, который сейчас играет.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Batch and ProRes -->
+  <section class="section band tight-top" id="batch">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Пакетный экспорт и ProRes</p>
+        <h2>Много клипов сразу или ProRes для монтажа.</h2>
+      </div>
+      <div class="lg-two">
+        <div class="stack">
+          <h3>Целая папка — из <span class="os-mac">Finder</span><span class="os-win">Проводника</span></h3>
+          <p class="lg-p os-mac">Выберите клипы в Finder, щёлкните правой кнопкой и выберите <b>Быстрые действия → Stabilize + LUT</b>. Они экспортируются один за другим в фоне, с уведомлением для каждого. Журнал этого — в <code>~/Library/Logs/gyroflow-export.log</code>.</p>
+          <p class="lg-p os-win">Выберите клипы в Проводнике, щёлкните правой кнопкой и выберите <b>Stabilize + LUT</b> (в Windows 11 — в разделе <b>Показать дополнительные параметры</b>). Окно консоли показывает ход работы, а клипы, которые вы отправите, пока оно работает, встают в очередь.</p>
+          <p class="lg-p">Что бы ни показывал плеер, пакетный экспорт делает из клипов в log HDR (HLG), без Dolby Vision и без SDR. Клип не в log, которому нечего стабилизировать, пропускается.</p>
+        </div>
+        <div class="stack">
+          <h3>Командная строка и ProRes</h3>
+          <p class="lg-p"><code>gyroflow-export</code> — программа, которая стоит за каждым экспортом, и она идёт вместе с плеером. <span class="os-mac">В приложении это <code class="lg-path">ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/gyroflow-export</code>.</span> Это единственный способ получить ProRes 422 HQ — для монтажных программ, которые предпочитают его HEVC.</p>
+          <pre class="lg-cmd"><code>gyroflow-export --prores --nbcu --from 1:20 --to 1:45 DJI_0007_D.MP4</code></pre>
+        </div>
+      </div>
+      <div class="compare-wrap">
+        <table class="settings lg-cli">
+          <thead><tr><th scope="col">Параметр</th><th scope="col">Что делает</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>--curve dlogm|dlog|gplog|gplog2|ilog|none</code></th><td data-label="Что делает">Кривая log для нераспознанных клипов; <code>none</code> оставляет цвета как записано</td></tr>
+            <tr><th scope="row"><code>--sdr</code></th><td data-label="Что делает">SDR (Rec.709) через LUT от DJI. Только D-Log M: другие кривые остаются в HLG</td></tr>
+            <tr><th scope="row"><code>--nbcu</code></th><td data-label="Что делает">SDR (Rec.709) через преобразование NBCU, для любой кривой</td></tr>
+            <tr><th scope="row"><code>--prores</code></th><td data-label="Что делает">ProRes 422 HQ вместо HEVC. Не с Dolby Vision</td></tr>
+            <tr><th scope="row"><code>--no-stabilize</code></th><td data-label="Что делает">Только цвет</td></tr>
+            <tr><th scope="row"><code>--from</code>, <code>--to</code></th><td data-label="Что делает">Фрагмент, в секундах или в формате м:сс</td></tr>
+            <tr><th scope="row"><code>--out &lt;folder&gt;</code></th><td data-label="Что делает">Куда сохранять файлы</td></tr>
+            <tr><th scope="row"><code>--force</code></th><td data-label="Что делает">Заменить существующий экспорт; без этого параметра уже экспортированный клип пропускается</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note"><code>gyroflow-export --help</code> показывает и параметры стабилизации. <kbd>Ctrl</kbd>+<kbd>C</kbd> останавливает его и удаляет незаконченный файл. Экспорт сохраняет звук клипа и его даты.</p>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="section band" id="settings">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Настройки</p>
+        <h2>Раздел Look боковой панели.</h2>
+        <p class="lede"><kbd>Tab</kbd> показывает боковую панель рядом с видео. Она открывается на разделе Project: щёлкните <b>Look</b> на её боковой полосе.</p>
+      </div>
+      <div class="lg-two lg-settings-grid">
+        <dl class="lg-dl">
+          <div>
+            <dt>Video output (видеовыход) <kbd>Ctrl</kbd>+<kbd>s</kbd></dt>
+            <dd><a class="text-link" href="#looks">Стили</a>, которые есть у клипа, затем <b>As recorded, log</b> (<kbd>L</kbd>), а под ними — несколько слов о выбранном. На HDR-экране строка поясняет, что SDR-стили показаны так, как их показал бы обычный экран. В стиле HLG+DV кнопка <b>Dolby Vision trims…</b> открывает раздел Dolby Vision. По умолчанию: зависит от экрана, см. <a class="text-link" href="#looks">В чём открываются клипы</a>.</dd>
+          </div>
+          <div>
+            <dt>Log curve (кривая log) <kbd>Ctrl</kbd>+<kbd>l</kbd></dt>
+            <dd><b>From the clip: D-Log M</b> (из клипа; или <b>None, not log</b> — не log), затем D-Log M, D-Log, GP-Log, GP-Log2 и I-Log (10-bit), чтобы выбрать вручную. Стиль при этом не меняется. По умолчанию: из клипа.</dd>
+          </div>
+          <div>
+            <dt>Picture: Noise reduction (шумоподавление) <kbd>Ctrl</kbd>+<kbd>n</kbd></dt>
+            <dd>Меньше шума при воспроизведении, на любом клипе, и для следующих клипов тоже. Не в экспорте. По умолчанию: выключено.</dd>
+          </div>
+          <div>
+            <dt>Make these the defaults</dt>
+            <dd>Сохраняет стиль для HDR-экранов, стиль для обычных экранов и шумоподавление как стартовые для клипов — отныне и впредь.</dd>
+          </div>
+        </dl>
+        <div class="lg-shots">
+          <figure class="media lg-panel" id="shot-log-4">
+            <img src="../media/log-4.jpg" alt="Раздел Look боковой панели на SDR-экране: семь стилей, выбран HDR, HLG+DV, его пояснение, кнопка трим-настроек Dolby Vision, кривая log и шумоподавление." width="584" height="1518" loading="lazy">
+            <figcaption>На обычном экране: все семь стилей клипа в D-Log M.</figcaption>
+          </figure>
+          <figure class="media lg-panel" id="shot-log-5">
+            <img src="../media/log-5.jpg" alt="Раздел Look боковой панели на HDR-экране с кривой GP-Log: выбран HDR, HLG, LUT производителя камеры нет, и строка No maker's LUT for GP-Log yet." width="584" height="1302" loading="lazy">
+            <figcaption>На HDR-экране, с кривой GP-Log: стиля производителя нет.</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <h3 class="lg-sub">Раздел Dolby Vision <span class="pill exp">Только приложение для Mac</span></h3>
+      <p class="lg-p lg-measure">Есть на боковой полосе, только где существуют стили HLG+DV. Когда воспроизводится другой стиль, кнопка включает <b>SDR, HLG+DV</b>, чтобы увидеть трим-настройки в работе. Крайние значения некоторых из них меняют картинку и на HDR-экране.</p>
+      <div class="compare-wrap">
+        <table class="settings lg-trims">
+          <thead><tr><th scope="col">Ползунок</th><th scope="col">Что делает</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Slope</th><td data-label="Что делает">Усиление после тональной кривой: светлее, света обрезаются раньше</td></tr>
+            <tr><th scope="row">Offset</th><td data-label="Что делает">Поднимает всё, больше всего тени</td></tr>
+            <tr><th scope="row">Power</th><td data-label="Что делает">Средние тона темнее (вправо) или светлее (влево)</td></tr>
+            <tr><th scope="row">Mid contrast</th><td data-label="Что делает">Контраст вокруг средних тонов</td></tr>
+            <tr><th scope="row">Highlight roll-off</th><td data-label="Что делает">Вправо: света плавно уходят в белый; влево: обрезаются</td></tr>
+            <tr><th scope="row">Saturation</th><td data-label="Что делает">Насколько красочна приглушённая картинка</td></tr>
+            <tr><th scope="row">Chroma weight</th><td data-label="Что делает">Сколько насыщенных цветов сохраняется при сжатии яркости</td></tr>
+            <tr><th scope="row">Scene average, Scene highlights, Scene blacks</th><td data-label="Что делает">Показываются, только когда кадры не измеряются (<code>dv_live_l1=no</code>): уровни сцены вручную</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note"><b>Back to the author's trims</b> (вернуть авторские) и <b>Neutral trims: none added</b> (нейтральные, ничего не добавлено) под ползунками сбрасывают их. По умолчанию: авторские трим-настройки. Экспорт берёт то, что выставлено здесь.</p>
+
+      <h3 class="lg-sub">Раздел Clip: экспорт</h3>
+      <dl class="lg-dl lg-dl-wide">
+        <div><dt>Export the clip или Export the part 1:20–1:45</dt><dd>То же, что <kbd>Shift</kbd>+<kbd>E</kbd>. Пока экспорт идёт: <b>Cancel export</b>.</dd></div>
+        <div><dt>Export in SDR</dt><dd>Rec.709, что бы ни воспроизводилось. Для клипов в log.</dd></div>
+        <div><dt>Show the last export</dt><dd>Показывает последний экспорт в <span class="os-mac">Finder</span><span class="os-win">Проводнике</span>.</dd></div>
+      </dl>
+
+      <h3 class="lg-sub">В файле настроек</h3>
+      <p class="lg-p lg-measure"><b>Make these the defaults</b> записывает <code>dlogm.conf</code> в <span class="os-mac"><code class="lg-path">~/Library/Application Support/ActionFootagePlayer/mpv/script-opts/</code></span><span class="os-win"><code class="lg-path">%LOCALAPPDATA%\ActionFootagePlayer\mpv\script-opts\</code></span>. Его можно править и вручную:</p>
+      <div class="compare-wrap">
+        <table class="settings lg-conf">
+          <thead><tr><th scope="col">Строка</th><th scope="col">Что задаёт</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>hdr_screen=hdr</code></th><td data-label="Что задаёт">Стиль, в котором клипы в log открываются на HDR-экранах: <code>hdr</code>, <code>dv</code>, <code>dvsdr</code>, <code>tonemap</code>, <code>nbcu</code> или <code>maker</code></td></tr>
+            <tr><th scope="row"><code>sdr_screen=dv</code></th><td data-label="Что задаёт">То же для обычных экранов (<code>tonemap</code>, где нет Dolby Vision)</td></tr>
+            <tr><th scope="row"><code>dv_live_l1=yes</code></th><td data-label="Что задаёт">Уровни каждого кадра измеряются по ходу воспроизведения, для стилей HLG+DV</td></tr>
+            <tr><th scope="row"><code>denoise=no</code></th><td data-label="Что задаёт">Шумоподавление при открытии клипа</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Клавиши</p>
+        <h2>Клавиши для log и экспорта.</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Показать или скрыть боковую панель</span><span><kbd>Tab</kbd></span></div>
+        <div class="key"><span>Следующий стиль</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd></span></div>
+        <div class="key"><span>Сразу в HDR</span><span><kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>Как записано, только этот клип</span><span><kbd>L</kbd></span></div>
+        <div class="key"><span>Следующая кривая log, вручную</span><span><kbd>Ctrl</kbd>+<kbd>l</kbd></span></div>
+        <div class="key"><span>Шумоподавление вкл. или выкл.</span><span><kbd>Ctrl</kbd>+<kbd>n</kbd></span></div>
+        <div class="key"><span>Начало, затем конец фрагмента</span><span><kbd>l</kbd></span></div>
+        <div class="key"><span>Экспорт; дважды за 3 с — отмена</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Ограничения</p>
+        <h2>Полезно знать.</h2>
+      </div>
+      <ul class="lg-limits">
+        <li><b>Распознаются сами:</b> только DJI Osmo Action 6 и Osmo 360, GoPro HERO12 Black (прошивка 1.20 или новее), HERO13 Black и MISSION 1. Для всего остального нужен <kbd>Ctrl</kbd>+<kbd>l</kbd>.</li>
+        <li><b>Проверено на реальных записях:</b> D-Log M на Osmo Action 6 и GP-Log на HERO12 Black. D-Log, GP-Log2 и 10-битный I-Log построены только по формулам производителей. 8-битный I-Log не поддерживается. GP-Log камеры MAX2, применённый вручную, примерно на 2 ступени слишком светлый.</li>
+        <li><b>Собственный SDR-стиль производителя — только для D-Log M:</b> LUT от DJI для Osmo Action 6, который используется для всех клипов в D-Log M и скачивается с сайта DJI при настройке. Клипы GoPro и Insta360 получают SDR от NBCU или mpv.</li>
+        <li><b>Dolby Vision — только в приложении для Mac.</b> И содержит его только экспорт, сделанный в стиле HLG+DV; пакетный экспорт — нет.</li>
+        <li><b>Два «SDR»-стиля экспортируют HDR:</b> SDR, HLG+DV и SDR tone mapped from HDR by mpv. Для SDR-файла используйте NBCU, LUT производителя или <b>Export in SDR</b>.</li>
+        <li><b>Трим-настройки — дело вкуса:</b> авторские, подогнанные под NBCU. Нейтральные — одна кнопка.</li>
+        <li><b>Монитор, на месте которого раньше был HDR-экран:</b> macOS может показывать на нём HDR примерно на ступень темнее, чем нужно, до перезагрузки Mac. Плеер сообщает об этом раз за сеанс и исправить это не может; SDR-стили это не затрагивает.</li>
+        <li><b>Пока клип играет, его экспорт почти останавливается.</b> Поставьте на паузу, чтобы он шёл. <span class="os-win">В Windows, пока вы смотрите, он идёт со скоростью несколько кадров в секунду.</span></li>
+        <li><b>Картинки на этой странице не в HDR.</b> Снимок экрана не может передать то, что показывает HDR-экран, поэтому они в SDR-стилях.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Вопросы</p>
+        <h2>О log, HDR и экспорте.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Нужен ли мне HDR-экран?</summary>
+          <div class="a"><p>Нет. На обычном экране клип приглушается в выбранном вами стиле. HDR-экран показывает больше: более яркие света, и тени при этом сохраняются.</p></div>
+        </details>
+        <details>
+          <summary>Экспортировать в HDR или в SDR?</summary>
+          <div class="a"><p>Для iPhone, iPad и Mac экспортируйте из HDR, HLG+DV на Mac: файл правильно выглядит на их экранах, с HDR или без. Для всего остального (других телефонов, телевизоров, соцсетей, ноутбука друга) надёжнее SDR: SDR, NBCU, LUT производителя или <b>Export in SDR</b>. Такие файлы везде выглядят одинаково.</p></div>
+        </details>
+        <details>
+          <summary>Почему «SDR, HLG+DV» дал мне HDR-файл?</summary>
+          <div class="a"><p>Это то же видео, что и HDR, HLG+DV, только всегда показанное приглушённым, чтобы вы видели, что получит обычный экран. Экспорт — это HDR-файл с Dolby Vision, который устройства Apple приглушают точно так же. Для обычного SDR-файла используйте <b>Export in SDR</b>.</p></div>
+        </details>
+        <details>
+          <summary>Я делаю цветокоррекцию в монтажной программе. Мне это подходит?</summary>
+          <div class="a"><p>Да, как шаг перед ней: просмотрите клипы в цвете, выберите удачные и сохраните оригиналы для монтажа. Когда файл всё же нужен, командная строка делает ProRes 422 HQ, в HLG или в Rec.709. Преобразование в HLG не добавляет стиля, так что цветокоррекцию можно делать и дальше.</p></div>
+        </details>
+        <details>
+          <summary>Мой клип в log воспроизводится серым. Что делать?</summary>
+          <div class="a"><p>Проверьте, что он взят прямо с карты: приложения, которые копируют, обрезают или экспортируют клипы, теряют метаданные, которые читает плеер. Если ваша камера не из тех, что он распознаёт, нажимайте <kbd>Ctrl</kbd>+<kbd>l</kbd>, пока не появится нужная кривая. Короткий пример в <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">issue на GitHub</a> поможет научить плеер распознавать вашу камеру.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Попробуйте</p>
+        <h2>Дважды щёлкните по клипу в log.</h2>
+        <p class="lede">Бесплатно, без учётной записи, а ваши записи остаются как есть.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Стабилизация</h3>
+          <p>Как клипы, снятые с выключенной стабилизацией камеры, воспроизводятся ровно и что можно настроить.</p>
+          <a href="stabilization.html">Стабилизация</a>
+        </div>
+        <div class="help-card">
+          <h3>Всё, что он умеет</h3>
+          <p>Все клавиши и настройки, и камеры по одной.</p>
+          <a href="features.html">Все функции</a>
+        </div>
+        <div class="help-card">
+          <h3>Пришлите клип со своей камеры</h3>
+          <p>Несколько секунд прямо с карты помогут плееру правильно читать log вашей камеры.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">Открыть issue на GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · <a href="about.html">Сделано дайвером из Женевы, Швейцария</a></span>
+      <a href="index.html">Главная</a>
+      <a href="about.html">Об авторе</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">Все функции</a>
+      <a href="download.html">Загрузки</a>
+    </div>
+    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M и GP-Log, построенными на shaper LUT от Zeb Gardner (используются с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision и символ двойного D являются товарными знаками Dolby Laboratories Licensing Corporation. Action Footage Player не связан с Dolby и не одобрен ею. Плеер сам записывает метаданные Dolby Vision с помощью открытой библиотеки <code>dolby_vision</code> (MIT); никакого ПО Dolby в его составе нет.</p>
+    <p class="mt-foot">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../log.html" hreflang="en">Читать оригинал на английском</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>
