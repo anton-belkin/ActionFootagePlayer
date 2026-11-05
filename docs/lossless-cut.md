@@ -5,8 +5,8 @@ The footage is never changed, but for one case: a clip spoiled in part, the reco
 in part keeps its good part, **without re-encoding and with everything the camera recorded in it**, and reads in
 the player exactly as the original did.
 
-Written 2026-11-05, from tests on Osmo Action 6 clips (0068, 0069, their LRFs, a 4K clip on the NAS). Step 1
-(`afp-cut`, below) is built; step 2 (the player's side) is a plan.
+Written 2026-11-05, from tests on Osmo Action 6 clips (0068, 0069, 0093, their LRFs, a 4K clip on the NAS). Both
+steps are built: `afp-cut` (step 1) and the player's side (step 2).
 
 ## What goes wrong with the usual tools
 
@@ -86,15 +86,34 @@ frames before the cut's start (or after its end), and Gyroflow's static zoom (`a
 out over the clip it has. In the middle of a cut the player's render is the original's within 46 dB; near its
 ends it's another clip's start. The same render twice is identical, the motion data is.
 
-## In the player (step 2, planned)
+## In the player (step 2)
 
-- Mark the spoiled part (two points, or "from here to the end" / "from the start to here"), then cut. A part in
-  the middle makes two clips (`_a`, `_b`): joining them would make the timecode and the motion data lie about the
-  seam.
-- The cut takes the original's place: the original goes to the Trash (recoverable) only once the cut is checked;
-  the cut gets the original's name (a middle: the two parts `<name>_a`, `<name>_b`).
-- What goes with the clip: the LRF cut the same; `<clip>.marks.json` moved by the time cut off (marks in the part
-  cut off dropped); moments and clip previews relinked (their link's time moved, or dropped with the part); the
-  Gyroflow project (`.gyroflow`) made again, never edited.
-- The player reads `read_as` from the key for what the file itself no longer tells (a camera without an adapter).
-- A camera without an adapter: cut only when the check passes, with a warning.
+- **Mark the spoiled part** with A-B (`l` at its start, `l` at its end) and press **`Ctrl+x`**; or from the menu,
+  *Cut out (spoiled)*: the marked part, all before where it plays, all after it. It asks first, saying what's
+  kept. Less than 0.5 s left on a side isn't kept; nothing left at all: it says to move the clip to the Trash.
+- **A part in the middle makes two clips**: joining them would make the timecode and the motion data lie about the
+  seam. The second starts at the keyframe at or before the part's end (up to 1 s of it kept).
+- **afp-cut writes each part hidden** (`.<name>.cut1.MP4`) and reads it back as the original. Only when all are
+  checked does mpv let go of the file (Windows can't move an open one) and the original go to the Trash, with its
+  LRF, its Gyroflow project, its clip preview in `Clips/` and its marks file. Not checked: the parts are removed,
+  the clip is as it was, and it says why (an iPhone clip: B-frames). The Trash refusing: the parts stay beside it as
+  `<name> (cut 1)`, the original as it was.
+- **Names**: the first part takes the original's name; a second one its own recording time the camera's way
+  (`DJI_20261024094541_0093_D.MP4` cut from 19 s on: `DJI_20261024094600_0093_D.MP4`), sorting as it happened;
+  other cameras' `<name> 2`. Their LRFs alike. Finder's tags, label and comment come along (extended attributes).
+- **What follows the clip**: each part gets its marks file with the marks in it at its time (camera marks too,
+  matching its moved highlights; none in it: none written). Each moment goes to the part it overlaps most, its
+  link rewritten (`afp-cut --set-key`: the part's path, size, created, in and out at its time); one all in the part
+  cut out goes to the Trash with the original, since its link would name the first part. The Gyroflow project
+  isn't made again by itself: `Ctrl+e` makes one. Clip previews are made again by *Make clip previews* (a new size
+  is a new clip to it). Exports aren't touched.
+- It plays on in the part that has where it played, at the same frame.
+
+Checked headless (the built app's mpv with its plugins, driven over IPC with its own keys and dialog) on 0093 in a
+project, with a mark of mine and two moments: 5–20 s cut out made `..._0093_D.MP4` (0–5 s) and
+`DJI_20261024094600_0093_D.MP4` (from 19.019 s), playing on at 8.99 s where it was at 28 s; the marks at 7.357,
+10.981, 21.868 s (camera, mine, camera); Turtle relinked to 7.981–9.981 s; Pocket (10–12 s) and the original, its
+LRF and marks file in the Trash; ~1 s for a 500 MB clip on the SSD. An iPhone clip: refused, untouched.
+
+Not done: `read_as` isn't used by the player yet. No camera needs it: what DJI's way can't carry would make the check
+fail, and such a cut isn't kept. It's there for an adapter that will.

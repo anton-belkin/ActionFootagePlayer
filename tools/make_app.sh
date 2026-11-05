@@ -108,7 +108,7 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
-install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua "$workspace/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua "$workspace/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"

@@ -9,6 +9,7 @@ use std::process::ExitCode;
 use vs_gyroflow::cut;
 
 const USAGE: &str = "usage: afp-cut <video> --from <time> [--to <time>] [--out <file>] [--lrf] [--json]
+       afp-cut --set-key <mp4> <key> <value>
 
 Keeps the video's part from --from (back to the keyframe at or before it) to --to (the frame at or after it is the
 first not kept; the end when left out), without re-encoding: every sample of every track as it is, the camera's clip
@@ -20,6 +21,8 @@ samples, the stabilization's verdict, log curve, lens, the motion data); one tha
   --lrf         the camera's low-resolution proxy next to it (DJI's .LRF) cut the same, next to the output
   --json        the outcome as JSON on stdout
   times         seconds, or m:ss
+
+--set-key writes a text key into an MP4's moov/meta, its other keys kept (the player relinks moments with it).
 
 Exit status: 0 cut and checked, 1 an error, 2 not cut (a file it can't cut), 3 cut but not the same: removed.
 A camera without an adapter here (only DJI has one) is cut only when the check passes; it's said in the outcome.";
@@ -40,6 +43,18 @@ fn default_out(video: &Path, from: f64, to: Option<f64>) -> PathBuf {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(|s| s.as_str()) == Some("--set-key") {
+        let [_, file, key, value] = args.as_slice() else { eprintln!("{USAGE}"); return ExitCode::from(1) };
+        let path = Path::new(file);
+        let mut keys = match vs_gyroflow::mp4meta::read_keys(path) { Ok(k) => k, Err(e) => { eprintln!("afp-cut: {file}: {e}"); return ExitCode::from(1); } };
+        keys.retain(|(k, _)| k != key);
+        keys.push((key.clone(), value.clone()));
+        let refs: Vec<(&str, &str)> = keys.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        return match vs_gyroflow::mp4meta::write_keys(path, &refs) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => { eprintln!("afp-cut: {file}: {e}"); ExitCode::from(1) }
+        };
+    }
     let (mut video, mut from, mut to, mut out, mut lrf, mut json) = (None, None, None, None, false, false);
     let mut i = 0;
     while i < args.len() {
@@ -121,6 +136,7 @@ fn cut_one(src: &Path, dst: &Path, from: f64, to: Option<f64>, as_played: bool) 
         let times = { use std::os::windows::fs::FileTimesExt; match m.created() { Ok(t) => times.set_created(t + shift), _ => times } };
         if let Ok(f) = std::fs::File::options().write(true).open(dst) { let _ = f.set_times(times); }
     }
+    copy_xattrs(src, dst);
     serde_json::json!({ "video": src, "out": dst, "status": 0, "known_camera": plan.adapter != "unknown", "plan": plan, "verified": verified })
 }
 
@@ -142,3 +158,31 @@ fn report(r: &serde_json::Value) {
         _ => eprintln!("{video}: {}", r["error"].as_str().unwrap_or("failed")),
     }
 }
+
+/// The original's extended attributes on the cut: Finder's tags, color label, rating, comment. Not where it came from
+/// (quarantine, provenance) nor the system's own
+#[cfg(target_os = "macos")]
+fn copy_xattrs(src: &Path, dst: &Path) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    const SKIP: &[&str] = &["com.apple.quarantine", "com.apple.provenance", "com.apple.macl", "com.apple.rootless", "com.apple.ResourceFork"];
+    let (Ok(s), Ok(d)) = (CString::new(src.as_os_str().as_bytes()), CString::new(dst.as_os_str().as_bytes())) else { return };
+    unsafe {
+        let n = libc::listxattr(s.as_ptr(), std::ptr::null_mut(), 0, 0);
+        if n <= 0 { return; }
+        let mut names = vec![0u8; n as usize];
+        if libc::listxattr(s.as_ptr(), names.as_mut_ptr() as *mut libc::c_char, names.len(), 0) <= 0 { return; }
+        for name in names.split(|&c| c == 0).filter(|x| !x.is_empty()) {
+            if SKIP.contains(&String::from_utf8_lossy(name).as_ref()) { continue; }
+            let Ok(cn) = CString::new(name) else { continue };
+            let len = libc::getxattr(s.as_ptr(), cn.as_ptr(), std::ptr::null_mut(), 0, 0, 0);
+            if len < 0 { continue; }
+            let mut v = vec![0u8; len as usize];
+            if libc::getxattr(s.as_ptr(), cn.as_ptr(), v.as_mut_ptr() as *mut libc::c_void, v.len(), 0, 0) < 0 { continue; }
+            libc::setxattr(d.as_ptr(), cn.as_ptr(), v.as_ptr() as *const libc::c_void, v.len(), 0, 0);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_xattrs(_src: &Path, _dst: &Path) {}

@@ -283,6 +283,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
 | `X` | This clip isn't interesting: its preview in `Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
