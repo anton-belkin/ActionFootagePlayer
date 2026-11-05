@@ -150,6 +150,12 @@ local function icon(u, name, cx, cy, color)
         u:shape(ui.rrect_path(cx - 9 * s, cy - 6 * s, 18 * s, 12 * s, 2.5 * s), color, stroke)
         for _, x in ipairs({ -5.5, -1, 3.5 }) do u:box(cx + x * s, cy - 3 * s, 2 * s, 2 * s, 0, color) end
         u:box(cx - 4.5 * s, cy + 1.5 * s, 9 * s, 1.6 * s, 0, color)
+    elseif name == "crop" then
+        -- A camera: the body with its viewfinder bump, the lens
+        u:shape(ui.rrect_path(cx - 9 * s, cy - 5 * s, 18 * s, 12.5 * s, 2.5 * s), color, stroke)
+        u:shape("m " .. at(-4, -5) .. " l " .. at(-2.5, -8) .. " " .. at(2.5, -8) .. " " .. at(4, -5), color)
+        u:shape(ui.circle_path(cx, cy + 1.2 * s, 3.6 * s), color, stroke)
+        u:shape(ui.circle_path(cx + 6 * s, cy - 2.4 * s, 0.9 * s), color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -158,7 +164,7 @@ end
 
 -- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 local TABS = {
-    { "project", "Project" }, { "clip", "Clip" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
+    { "project", "Project" }, { "clip", "Clip" }, { "crop", "Save frame" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
     { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -245,7 +251,12 @@ local function clip_part(u, x, w, y)
     local n, count = mp.get_property_number("playlist-pos", 0), mp.get_property_number("playlist-count", 0)
     u:button(x, half, y, "prev", "Previous clip", "playlist-prev", { disabled = n <= 0 })
     y = u:button(x + half + 8 * s, half, y, "next", "Next clip", "playlist-next", { disabled = n >= count - 1 })
-    y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    -- A photo where the gyroflow plugin is (stabilized, cleaned up, with a gain map), else mpv's screenshot
+    if g and local_file(path) then
+        y = u:button(x, w, y, "frame", "Save the frame as a photo", "script-message-to gyroflow photo", { key = keys["script-binding gyroflow/photo"] })
+    else
+        y = u:button(x, w, y, "frame", "Save the frame as an image", "screenshot", { key = keys["screenshot"] })
+    end
     return y
 end
 
@@ -981,7 +992,94 @@ local function support_part(u, x, w, y)
     return u:button(x + half + 8 * s, half, y, "github", "GitHub", function() open_url(REPO) end)
 end
 
-local PARTS = { project = project_part, clip = clip_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
+-- Save frame (the gyroflow plugin's crop.lua, its crop mode): a frame over the video for a photo of the frame on
+-- screen, the picture moved under it, or the camera turned where the clip is stabilized. For this frame only: the
+-- whole video's crop is Gyroflow's
+local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
+local function crop_part(u, x, w, y)
+    local s = u.s
+    local g = state("gyroflow")
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Open a clip to save a frame of it as a photo") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
+    local c = g.crop or {}
+    -- The whole video's crop, rotation and zoom are the stabilization's, in Gyroflow
+    local function whole_video(y)
+        y = u:caption(x, w, y + 10 * s, "This frames the photo only. To crop the whole video, set its crop and zoom in Gyroflow")
+        return u:button(x, w, y + 4 * s, "crop-gyroflow", g.available and "Open in Gyroflow…" or "Stabilize in Gyroflow…",
+                        "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
+    end
+    y = u:switch(x, w, y, "crop", "Frame the photo", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
+    if not c.active then
+        y = u:caption(x, w, y, "A frame over the video, for a photo of the frame on screen. Where the clip is stabilized, "
+                               .. "moving the picture turns the camera, and zoom is its angle of view")
+        return whole_video(y)
+    end
+    local function set(key, v) mp.commandv("script-message-to", "gyroflow", "crop-set", key, string.format("%.5f", v)) end
+    local function value_row(label, value)
+        u:text(x, y + 8 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 8 * s, value, { size = 12, color = C.dim, align = 6 })
+    end
+
+    y = u:heading(x, w, y + 10 * s, "Aspect", "a")
+    for r, row in ipairs(ASPECT_ROWS) do
+        local options, selected = {}, nil
+        for i, a in ipairs(row) do
+            table.insert(options, { a[2] or a[1], "script-message-to gyroflow crop-aspect " .. a[1] })
+            if a[1] == (c.aspect or "original") then selected = i end
+        end
+        y = u:segmented(x, w, y, "crop-aspect-" .. r, options, selected)
+    end
+
+    local cam = c.camera
+    if cam then
+        local zmin, zmax, margin = c.zoom_min or 0.15, c.zoom_max or 4, c.margin or 0.8
+        y = u:heading(x, w, y + 10 * s, "Camera")
+        value_row("Zoom", string.format("%.0f %%", 100 / (cam.zoom * margin)))
+        y = u:slider(x, w, y + 14 * s, "crop:zoom", math.log(zmax / cam.zoom) / math.log(zmax / zmin),
+                     function(p) set("zoom", zmax * (zmin / zmax) ^ p) end, "Wider", "Closer")
+        y = y + 6 * s
+        value_row("Horizon", string.format("%.1f°", cam.roll))
+        y = u:slider(x, w, y + 14 * s, "crop:roll", math.max(0, math.min(1, (cam.roll + 45) / 90)),
+                     function(p) set("roll", math.floor((p * 90 - 45) * 10 + 0.5) / 10) end, "−45°", "45°")
+        local function turn(v, plus, minus)
+            if math.abs(v) < 0.05 then return nil end
+            return string.format("%.1f° %s", math.abs(v), v > 0 and plus or minus)
+        end
+        local parts = {}
+        for _, t in ipairs({ turn(cam.yaw, "right", "left"), turn(cam.pitch, "down", "up") }) do table.insert(parts, t) end
+        y = u:caption(x, w, y + 4 * s, #parts > 0 and ("Turned " .. table.concat(parts, ", ")) or "Looking where the stabilization does")
+        y = u:button(x, w, y + 4 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
+        y = u:caption(x, w, y + 4 * s, "Drag, or two fingers on a trackpad: turn the camera. Wheel or pinch: zoom. "
+                                       .. "Alt+drag or turning two fingers: the horizon")
+    else
+        local f = c.flat or { zoom = 0 }
+        y = u:heading(x, w, y + 10 * s, "Picture")
+        value_row("Zoom", string.format("%.0f %%", 100 * 2 ^ (f.zoom or 0)))
+        y = u:slider(x, w, y + 14 * s, "crop:flat-zoom", ((f.zoom or 0) + 1) / 4, function(p) set("zoom", p * 4 - 1) end, "Smaller", "Closer")
+        y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
+        y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
+    end
+    -- The photo alone, or with the video around it as Apple's devices (macOS only) or Android's take it
+    local mode = g.live_photo or "no"
+    local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
+    if platform ~= "darwin" then table.remove(modes, 2) end
+    local options, selected = {}, nil
+    for i, m in ipairs(modes) do
+        table.insert(options, { m[2], "script-message-to gyroflow live-photo " .. m[1] })
+        if m[1] == mode then selected = i end
+    end
+    y = u:heading(x, w, y + 10 * s, "Photo")
+    y = u:segmented(x, w, y, "crop-live", options, selected)
+    y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
+    local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
+              or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
+              or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+    y = u:caption(x, w, y, what .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
+    y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
+    return whole_video(y)
+end
+
+local PARTS = { project = project_part, clip = clip_part, crop = crop_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
                 telemetry = telemetry_part, player = player_part, support = support_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
@@ -1238,6 +1336,24 @@ for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
+-- Crop mode on: its part shows; off again: back to the one there was
+local crop_on, before_crop = false, nil
+mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
+    local on = type(c) == "table" and c.active == true
+    if on ~= crop_on then
+        crop_on = on
+        if on then
+            before_crop = { tab = tab, open = open, shown = shown }
+            tab, open, shown = "crop", true, true
+        elseif before_crop and tab == "crop" then
+            tab, open, shown = before_crop.tab, before_crop.open, before_crop.shown
+            before_crop = nil
+        end
+    end
+    -- The camera's numbers as it turns
+    update()
+end)
+
 mp.register_event("file-loaded", function()
     read_keys()
     scroll = {}

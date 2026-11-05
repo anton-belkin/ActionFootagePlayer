@@ -70,7 +70,7 @@
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
--- Gyroflow), exporting, last_export.
+-- Gyroflow), exporting, last_export, live_photo.
 --
 -- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
 -- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
@@ -128,6 +128,10 @@
 --                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
 --                re-render as the clean still frame; playing on sets the chain up for playback again, which costs a
 --                moment on a slow GPU each time (still.lua). The quality menu sets it
+--   live_photo=yes  a photo (Alt+s; Enter in crop mode) with the motion around it, as a phone's: live, a Live Photo
+--                (a .mov next to the HEIC, for Apple's devices; macOS only), motion, a Motion Photo (an Ultra HDR JPEG
+--                with the video in it, for Android's), no, the still alone; yes: Live Photos on macOS, Motion Photos
+--                elsewhere. The Save frame panel's choice sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -144,7 +148,7 @@ local function clip_path()
     return path
 end
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -155,6 +159,7 @@ end
 local platform = require 'platform'
 local still = require 'still'
 local quality = require 'quality'
+local crop = require 'crop'
 
 local LABEL = "gyroflow"
 local SCALE_LABEL = "gyroflow-scale"
@@ -165,6 +170,7 @@ local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
+local CROP_SHADER = utils.join_path(DIR, "crop_preview.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -349,7 +355,8 @@ local chromatic = o.chromatic
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate))
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate)
+            .. crop.control_words())
     f:close()
 end
 local function has_project(source)
@@ -409,6 +416,16 @@ if file_exists(CHROMATIC_SHADER) then
     if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
         mp.commandv("change-list", "glsl-shaders", "append", CHROMATIC_SHADER)
         chromatic_shader = true
+    end
+end
+-- Crop mode's preview (crop_preview.glsl, crop.lua), there from the start for the same reason; it runs only in crop
+-- mode (its crop_on)
+local crop_shader = false
+if file_exists(CROP_SHADER) then
+    local vo = mp.get_property("vo") or ""
+    if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
+        mp.commandv("change-list", "glsl-shaders", "append", CROP_SHADER)
+        crop_shader = true
     end
 end
 
@@ -481,6 +498,20 @@ still.init(o, function()
     end
     return false
 end, function() return current_source and not stab_off and frame_step(current_source) or 1 end)
+
+-- Crop mode (c): the camera turned and zoomed by the plugin where it stabilizes the clip, mpv's own pan and zoom elsewhere
+crop.init({
+    stabilizing = function()
+        if not current_source or stab_off then return false end
+        for _, f in ipairs(mp.get_property_native("vf") or {}) do
+            if f.label == LABEL and f.enabled ~= false then return true end
+        end
+        return false
+    end,
+    write = function() write_edge_control() end,
+    control_path = function() return EDGE_CONTROL end,
+    shader = crop_shader,
+})
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
@@ -1146,4 +1177,11 @@ end)
 
 mp.register_event("end-file", stop_watching)
 
+-- export.lua's photos read it from here, and its live-photo message sets it
+-- (no, live or motion; a Live Photo needs macOS's afp-photo)
+do
+    local v = tostring(o.live_photo)
+    if v ~= "no" and v ~= "motion" and not (v == "live" and platform.macos) then v = platform.macos and "live" or "motion" end
+    mp.set_property_native("user-data/gyroflow/live_photo", v)
+end
 require 'export'

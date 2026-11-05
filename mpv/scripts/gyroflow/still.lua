@@ -28,6 +28,8 @@
 -- full size (full_size).
 
 local mp = require 'mp'
+-- Not in crop mode: each turn of the camera renders the frame again, and the cleaned one would come after it
+local crop = require 'crop'
 local utils = require 'mp.utils'
 local platform = require 'platform'
 
@@ -103,7 +105,7 @@ end
 -- full_now: Ctrl+f, at full size whatever paused_full_size is
 local function start(full_now)
     timer = nil
-    if pending or resuming or failed or not shown or not mp.get_property_native("pause") or not stabilizing() then return end
+    if pending or resuming or failed or not shown or not mp.get_property_native("pause") or not stabilizing() or crop.active() then return end
     local bigger = full and (full_now or full.auto()) and full.needed()
     local t = mp.get_property_number("time-pos")
     local fps = mp.get_property_number("container-fps") or mp.get_property_number("estimated-vf-fps")

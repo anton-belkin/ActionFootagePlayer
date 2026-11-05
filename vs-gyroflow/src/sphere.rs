@@ -73,7 +73,8 @@ impl View {
 
         let sm = {
             let gyro = params.gyro.read();
-            gyro.org_quat_at_timestamp(timestamp_ms) * gyro.smoothed_quat_at_timestamp(timestamp_ms).inverse()
+            // As FrameTransform turns it: the camera of crop mode on top of the smoothing
+            gyro.org_quat_at_timestamp(timestamp_ms) * FrameTransform::smoothed_with_view(&gyro, params, timestamp_ms).inverse()
         };
         let d = if params.framebuffer_inverted { Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, -1.0)) }
                 else { Matrix3::from_diagonal(&Vector3::new(1.0, -1.0, -1.0)) };
@@ -85,6 +86,11 @@ impl View {
             c: (size.0 / 2.0 - kp.translation2d[0], size.1 / 2.0 - kp.translation2d[1]),
             size, projection: kp.output_projection,
         }
+    }
+
+    /// The focal length at the middle, in output widths and heights
+    pub fn focal(&self) -> (f32, f32) {
+        (self.f.0 / self.size.0, self.f.1 / self.size.1)
     }
 
     /// Output cells per radian at the middle, for a grid `cells` wide

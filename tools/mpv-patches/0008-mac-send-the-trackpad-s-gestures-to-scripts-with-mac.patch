@@ -1,0 +1,132 @@
+From cdfd067c93ab373eeed6027e07304a4a05177ec8 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Thu, 5 Nov 2026 01:22:52 +0100
+Subject: [PATCH] mac: send the trackpad's gestures to scripts with
+ --macos-gesture-messages
+
+With it, a pinch, a rotation and a two-finger scroll on the trackpad
+become script messages (gesture magnify/rotate/scroll, with the amount
+and the gesture's phase) instead of resizing the window and WHEEL_*
+keys, so a script can turn them into its own pan, zoom and rotation,
+for example to frame a still while a mouse wheel's clicks still zoom.
+It can be changed at runtime: a script takes the gestures only while
+it needs them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../macos-gesture-messages.txt                |  1 +
+ DOCS/man/options.rst                          | 10 ++++++
+ osdep/mac/app_bridge.h                        |  1 +
+ osdep/mac/app_bridge.m                        |  1 +
+ video/out/mac/view.swift                      | 33 +++++++++++++++++++
+ 5 files changed, 46 insertions(+)
+ create mode 100644 DOCS/interface-changes/macos-gesture-messages.txt
+
+diff --git a/DOCS/interface-changes/macos-gesture-messages.txt b/DOCS/interface-changes/macos-gesture-messages.txt
+new file mode 100644
+index 000000000..c1a04b84c
+--- /dev/null
++++ b/DOCS/interface-changes/macos-gesture-messages.txt
+@@ -0,0 +1 @@
++add `--macos-gesture-messages`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 7e0cce1c2..1ee6dbe7c 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7282,6 +7282,16 @@ them.
+     precedence over any other shortcuts, they are not propagated to the mpv core and they can't be
+     used in config files like ``input.conf`` or script bindings.
+ 
++``--macos-gesture-messages=<yes|no>``
++    Sends the trackpad's gestures to scripts instead of acting on them (default: no). A pinch then
++    sends ``script-message gesture magnify <amount> <phase>`` instead of resizing the window, a
++    rotation ``gesture rotate <degrees> <phase>``, and a two-finger scroll (any scroll with precise
++    deltas, a Magic Mouse's too) ``gesture scroll <dx> <dy> <phase>`` in points as the content
++    moves, instead of ``WHEEL_*`` keys. A mouse wheel's clicks stay ``WHEEL_*`` keys. ``<phase>``
++    is ``began``, ``changed``, ``ended``, ``cancelled``, ``momentum`` (the scroll going on after
++    the fingers left) or ``none``. Can be changed at runtime, so a script can take the gestures
++    only while it needs them.
++
+ ``--macos-bundle-path=path1,path2,...``
+     App Bundles operate in their own shell environment that is different from the one in the
+     terminal. The default PATH variable for all Bundles is ``/usr/bin:/bin:/usr/sbin:/sbin``.
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index d91b1481b..dff914984 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -100,6 +100,7 @@ struct macos_opts {
+     bool macos_dovi_live_l1;
+     bool macos_sample_buffer_edr;
+     bool macos_menu_shortcuts;
++    bool macos_gesture_messages;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+     bool cocoa_cb_10bit_context;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index 30e388ae6..bceec2b03 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -73,6 +73,7 @@ const struct m_sub_options macos_conf = {
+         {"macos-dovi-live-l1", OPT_BOOL(macos_dovi_live_l1)},
+         {"macos-sample-buffer-edr", OPT_BOOL(macos_sample_buffer_edr)},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
++        {"macos-gesture-messages", OPT_BOOL(macos_gesture_messages)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+             {"auto", -1}, {"no", 0}, {"yes", 1})},
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index f8cc6254a..bf8c138e7 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -164,7 +164,27 @@ class View: NSView, CALayerDelegate {
+         input?.processMouse(event: event)
+     }
+ 
++    // --macos-gesture-messages: the trackpad's gestures as script messages, phase last
++    var gestureMessages: Bool { common.option.mac.macos_gesture_messages }
++
++    func gestureMessage(_ kind: String, _ values: [Double], _ event: NSEvent) {
++        var phase = "none"
++        switch event.phase {
++        case .began, .mayBegin: phase = "began"
++        case .changed: phase = "changed"
++        case .ended: phase = "ended"
++        case .cancelled: phase = "cancelled"
++        default: if event.momentumPhase != [] { phase = "momentum" }
++        }
++        let args = values.map { String(format: "%.4f", $0) }.joined(separator: " ")
++        input?.command("script-message gesture \(kind) \(args) \(phase)")
++    }
++
+     override func magnify(with event: NSEvent) {
++        if gestureMessages {
++            gestureMessage("magnify", [Double(event.magnification)], event)
++            return
++        }
+         common.window?.isAnimating = event.phase != .ended
+         event.phase == .ended ? common.windowDidEndLiveResize() : common.windowWillStartLiveResize()
+         common.window?.addWindowScale(Double(event.magnification))
+@@ -180,7 +200,20 @@ class View: NSView, CALayerDelegate {
+         }
+     }
+ 
++    override func rotate(with event: NSEvent) {
++        if gestureMessages {
++            gestureMessage("rotate", [Double(event.rotation)], event)
++            return
++        }
++        super.rotate(with: event)
++    }
++
+     override func scrollWheel(with event: NSEvent) {
++        // A trackpad's (or a Magic Mouse's) two-finger scroll, in points as the content moves; a wheel's clicks stay keys
++        if gestureMessages && event.hasPreciseScrollingDeltas {
++            gestureMessage("scroll", [Double(event.scrollingDeltaX), Double(event.scrollingDeltaY)], event)
++            return
++        }
+         input?.processWheel(event: event)
+     }
+ 
+-- 
+2.42.0
+

@@ -97,8 +97,8 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
-    mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
+    mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu afp-cut; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
@@ -113,6 +113,8 @@ install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lu
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
+# gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
+swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -130,7 +132,7 @@ fi
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" \
-         "$sdrcheck/sdr-check"; do
+          "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
     sign "$f"
 done
 sign "$app"

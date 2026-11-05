@@ -1077,7 +1077,7 @@ dependencies = [
 [[package]]
 name = "gyroflow-core"
 version = "1.6.3"
-source = "git+https://github.com/anton-belkin/gyroflow.git?rev=1e7f531#1e7f5313b2bb2720baafbe2c874d0f7ba52d3b27"
+source = "git+https://github.com/anton-belkin/gyroflow.git?rev=f42a7dd#f42a7dd120cd2fe831d9a3a0e24b4d29388beefa"
 dependencies = [
  "ahrs",
  "akaze",
@@ -1489,6 +1489,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6"
 
 [[package]]
 name = "js-sys"
@@ -2900,7 +2906,7 @@ source = "git+https://github.com/Rust-GPU/rust-gpu?rev=854e9ba#854e9ba7da26d52ca
 [[package]]
 name = "stabilize_spirv"
 version = "0.0.0"
-source = "git+https://github.com/anton-belkin/gyroflow.git?rev=1e7f531#1e7f5313b2bb2720baafbe2c874d0f7ba52d3b27"
+source = "git+https://github.com/anton-belkin/gyroflow.git?rev=f42a7dd#f42a7dd120cd2fe831d9a3a0e24b4d29388beefa"
 dependencies = [
  "spirv-std",
 ]
@@ -3301,6 +3307,7 @@ dependencies = [
  "bytemuck",
  "dolby_vision",
  "gyroflow-core",
+ "jpeg-encoder",
  "libc",
  "log",
  "mp4parse-patched",

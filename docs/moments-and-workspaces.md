@@ -30,7 +30,8 @@ Those are marked **(to try)**.
   linked to the whole clip. The grid of icons is in color, not log gray, and the space bar flips through a clip
   in seconds. Deleting one says "not interesting".
 - **Exports** go to `_Exports/` (now `stabilized/`), named in the same dialog as moments, with the same link
-  inside. Old `stabilized/` folders stay where they are; new exports go to `_Exports/`.
+  inside. Old `stabilized/` folders stay where they are; new exports go to `_Exports/`. **Photos** (`Alt+s`: stills,
+  Live Photos, Motion Photos) go to `_Stills/`, so that the pictures are apart from the videos.
 - **Rating is the file system**: a moment or clip that exists is kept, a deleted one is not. Finder tags (and
   Explorer's stars, on Windows) go further: favorite, and keywords for the editors.
 - **The previews are rendered by gyroflow-export**, which already renders a clip the way the player shows it
@@ -60,7 +61,9 @@ player writes). By default they're the same folder:
     Day 2/GX011057.afplink.mp4
   _Exports/
     Turtle.mov
-  _ActionFootagePlayer/               the player's state for this project (hidden)
+  _Stills/
+    DJI_20261022152841_0068_D_20.4s.heic
+  _ActionFootagePlayer/               the player's state for this project
 ```
 
 A separate project folder holds the same things, minus the footage, plus `Sources.txt`:
@@ -70,7 +73,7 @@ A separate project folder holds the same things, minus the footage, plus `Source
   Sources.txt
   Day 1/DJI_20261022152841_0068_D.marks.json
   Day 1/DJI_20261022152841_0068_D.gyroflow
-  _Moments/  _Clips/  _Exports/  _ActionFootagePlayer/
+  _Moments/  _Clips/  _Exports/  _Stills/  _ActionFootagePlayer/
 ```
 
 The per-clip files sit at the clip's path relative to the sources root, so the tree repeats the footage's
