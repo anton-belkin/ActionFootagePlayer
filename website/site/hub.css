@@ -46,3 +46,9 @@
 /* Each card of What it does links to its guide page */
 .feature .feature-more { justify-self: start; font-size: var(--step--1); }
 .hub-guides { line-height: 1.9; }
+
+/* Who makes it: a short note and a photo, linking to about.html */
+.hub-maker { display: grid; gap: 28px; align-items: center; }
+.hub-maker .section-head { margin-bottom: 0; }
+@media (min-width: 900px) { .hub-maker { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); } }
+.hub-maker-photo { aspect-ratio: 4 / 5; max-width: 340px; width: 100%; justify-self: center; display: grid; place-items: center; border: 2px dashed var(--line); border-radius: var(--radius); color: var(--muted); font-family: var(--f-mono); font-size: var(--step--1); background: var(--surface); }

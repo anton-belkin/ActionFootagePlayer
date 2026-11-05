@@ -21,8 +21,9 @@ site/            what is served, as is
   moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
   log.html, stabilization.html, library.html, photos.html
                  the four guides, one feature set each, from what you get to every setting (English only so far)
+  about.html     who makes it and why: Anton's story, a timeline with links (English only so far)
   features.html  every feature on one page, the reference the other pages link to (footer: All features)
-  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css
+  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css, about.css
                  each page's own styles, next to the shared styles.css
   media/         real footage from an Osmo Action 6: stab-underwater.mp4 (+ .jpg poster; as recorded | as it
                  plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
@@ -74,8 +75,8 @@ Every page, English included, carries:
   `https://actionfootageplayer.ch/…` URLs;
 - the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
   page in each language.
-- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page and three of its
-  sections), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
+- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page, three of its
+  sections and About the maker), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
   (Log footage, Stabilization, Library, Photos, then All features) and **Download**. The page you're on is marked
   with `aria-current`, on its link and on its dropdown's title. Each dropdown is a `<details class="navmenu">`, so it
   works without script. Below 900px they take a second row; below 520px they're hidden and the same links, grouped
