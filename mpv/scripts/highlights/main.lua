@@ -26,8 +26,7 @@
 -- offset: where it starts in the clip.
 --
 -- Options (~~/script-opts/highlights.conf):
---   before=2       seconds before each of the camera's marks a jump lands: its button is pressed once the moment has
---                  happened. Your own marks (M) are where you put them: a jump lands on them
+--   before=2       seconds before each mark a jump lands: the button is pressed once the moment has happened
 --   chapters=yes   the marks as chapters, which mpv's seek bar shows (next to the file's own, if any)
 
 local mp = require 'mp'
@@ -65,8 +64,7 @@ local CAMERA_NOTES = { dji = "DJI quick switch", gopro = "GoPro HiLight" }
 -- The clip's: { path, camera, marks = { {t, camera, name} }, file (the marks file), doc (what it holds, unknown
 -- fields kept) }
 local found = nil
--- The mark last jumped to: a jump lands `before` seconds ahead of a camera's mark, and until it's passed that's the
--- mark "here"
+-- The mark last jumped to: a jump lands `before` seconds ahead of it, and until it's passed that's the mark "here"
 local jumped = nil
 -- The chapters this put in chapter-list
 local ours = {}
@@ -93,13 +91,8 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
--- How far ahead of a mark a jump lands: the camera's are marked once the moment has happened, yours where you want them
-local function lead(m)
-    return m.camera and o.before or 0
-end
-
 local function landing(i)
-    return math.max(0, found.marks[i].t - lead(found.marks[i]))
+    return math.max(0, found.marks[i].t - o.before)
 end
 
 local function title(i, m)
@@ -278,7 +271,7 @@ local function mark()
     end
     local j = jumped and found.marks[jumped]
     local jt = j and j.t + found.offset
-    if not near and jt and pos >= jt - lead(j) - 0.25 and pos <= jt + NEAR then
+    if not near and jt and pos >= jt - o.before - 0.25 and pos <= jt + NEAR then
         for i, m in ipairs(doc.marks) do if math.abs(m.t - jt) < 0.002 then near = i end end
     end
     jumped = nil

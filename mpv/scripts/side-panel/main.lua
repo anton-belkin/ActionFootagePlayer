@@ -521,10 +521,8 @@ local function project_part(u, x, w, y)
         local m = h.marks and h.marks[i] or {}
         local label = (m.name and m.name ~= "") and m.name
             or (m.camera == "dji" and "DJI quick switch" or m.camera == "gopro" and "GoPro HiLight" or ("Mark " .. i))
-        -- Here: within half a second, or the one just jumped to (a jump lands h.before seconds ahead of a camera's mark,
-        -- on one of yours)
-        local lead = m.camera and (h.before or 2) or 0
-        local here = math.abs(pos - t) <= 0.5 or (h.jumped == i and pos >= t - lead - 0.25 and pos <= t + 0.5)
+        -- Here: within half a second, or the one just jumped to (a jump lands h.before seconds ahead of it)
+        local here = math.abs(pos - t) <= 0.5 or (h.jumped == i and pos >= t - (h.before or 2) - 0.25 and pos <= t + 0.5)
         if here and not near then near = i end
         y = list_row(u, x, w, y, "mark:" .. i, label, clock(t), here, "script-message-to highlights go " .. i)
     end
