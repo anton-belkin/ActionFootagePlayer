@@ -738,6 +738,11 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
   **Keep in Turtle** in the panel writes how it's viewed into it.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
+- **All the marks at once** (the Project tab): **Moments for marks in none** makes a moment of each mark of the
+  trip's clips that is in no moment yet, 2 s on each side (marks closer together share one), named by the time it
+  happened, each with its clip's saved view; **Photos of all marks** saves a photo at each mark into `_Stills/` (a
+  still, Live or Motion Photo, as Save frame says), once: `_ActionFootagePlayer/stills-made.txt` keeps which, so a
+  photo deleted isn't made again. Both run in the background, one at a time, with **Stop**.
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 

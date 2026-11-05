@@ -564,6 +564,34 @@ end
 mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
 
+-- A photo of any clip at a time, with its saved view, for the workspace plugin (the Project tab's photos of marks):
+-- { id, clip, t, view, reply }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
+-- frame on or off; into the project's _Stills. The answer: photo-done (or req.done) <id> { ok, error, out }
+mp.register_script_message("photo-at", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or not req.clip or not req.t or not req.reply then return end
+    local function reply(ok, err, out)
+        mp.commandv("script-message-to", req.reply, req.done or "photo-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err, out = out }))
+    end
+    local info = utils.file_info(EXPORT)
+    if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
+    local args = { EXPORT, "--photo", string.format("%.4f", req.t) }
+    local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
+    if mode == "live" or mode == "motion" then table.insert(args, "--live") end
+    if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
+    view_args(args, type(req.view) == "table" and req.view or {})
+    if mp.get_property_native("user-data/gyroflow/still") == false then table.insert(args, "--radius"); table.insert(args, "0") end
+    table.insert(args, req.clip)
+    mp.msg.info("photo: " .. table.concat(args, " "))
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        local err = r and r.stderr or ""
+        local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
+        if r and r.status == 0 and out then return reply(true, nil, out) end
+        mp.msg.warn("photo: " .. err)
+        reply(false, last_line(err) or "gyroflow-export failed")
+    end)
+end)
+
 -- Live Photos need afp-photo (macOS)
 local MODES = platform.macos and { "no", "live", "motion" } or { "no", "motion" }
 local MODE_NAMES = { no = "stills", live = "Live Photos, with 3 s of video for Apple's devices",

@@ -521,6 +521,18 @@ local function project_part(u, x, w, y)
         if total > 0 then
             y = u:button(ix, iw, y, "moments-show", "Show all moments in " .. where, "script-message-to workspace moments-folder")
         end
+        -- The project's marks, all at once: moments for those in none, photos of each (with each clip's saved view)
+        local job = ws.marks_job
+        if job then
+            y = u:caption(ix, iw, y + 2 * s, (job.kind == "moments" and "Making moments of the marks: " or "Saving photos of the marks: ")
+                .. job.done .. " of " .. job.total .. ((job.failed or 0) > 0 and (", " .. job.failed .. " failed") or ""), { color = C.text })
+            y = u:button(ix, iw, y, "marks-stop", "Stop", "script-message-to workspace marks-stop")
+        else
+            y = u:button(ix, iw, y + 2 * s, "marks-moments", "Moments for marks in none", "script-message-to workspace marks-moments")
+            y = u:caption(ix, iw, y - 2 * s, "Every clip's marks that are in no moment: 2 s on each side, those close together joined")
+            y = u:button(ix, iw, y, "marks-photos", "Photos of all marks", "script-message-to workspace marks-photos")
+            y = u:caption(ix, iw, y - 2 * s, "A photo at each mark into _Stills, as Save frame's Photo says; once each, a deleted one stays deleted")
+        end
     end
     behind(u, at, x, top, w, y - top + pad - 6 * s, C.card)
     y = y + pad

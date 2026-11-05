@@ -1794,3 +1794,180 @@ adopt_gyroflow_trim = function()
         save(m.name, m, nil, true, { range = { a, b } })
     end
 end
+
+-- The project's marks, all at once (the Project tab's): a moment for each mark in no moment yet, 2 s on each side,
+-- those that overlap joined into one (the clip's marks: its own file's, else the camera's); or a photo of each mark,
+-- into _Stills, except those made before (_ActionFootagePlayer/stills-made.txt: a line per clip and mark, so a photo
+-- deleted stays deleted). One at a time in the background, each with its clip's saved view (else the defaults); a
+-- moment with settings of its own, as one saved with k: a copy of the clip's Gyroflow project when it has one. While it
+-- runs: user-data/workspace/marks_job { kind (moments, photos), done, total, failed }
+local MOMENT_AROUND = 2
+local marks_job = nil
+
+local function stills_made_file() return state_file("stills-made.txt") end
+local function stills_line(relative, size, t) return relative .. "\t" .. tostring(size) .. "\t" .. string.format("%.3f", t) end
+local function read_stills_made()
+    local made = {}
+    local f = stills_made_file() and io.open(stills_made_file(), "r")
+    if not f then return made end
+    for line in f:lines() do made[line] = true end
+    f:close()
+    return made
+end
+
+-- A clip's saved view for what's made of it (its own file's), without what its Gyroflow project has
+local function clip_view_of(file)
+    local doc = sidecar.read(file)
+    local v = copy(doc and doc.view)
+    if ws.gyroflow_project(file) then for k in pairs(PROJECT_KEYS) do v[k] = nil end end
+    return v
+end
+
+local function job_progress()
+    local j = marks_job
+    state.marks_job = j and { kind = j.kind, done = j.done, total = #j.queue, failed = j.failed } or nil
+    publish()
+end
+
+local function job_finish(message)
+    local j = marks_job
+    marks_job = nil
+    job_progress()
+    if message then mp.osd_message(message, 5) end
+    if j and j.kind == "moments" then refresh() end
+end
+
+local job_next
+mp.register_script_message("job-done", function(id, json)
+    local j = marks_job
+    if not j or tostring(j.id) ~= id then return end
+    local r = utils.parse_json(json or "") or {}
+    local item = j.queue[j.done + 1]
+    if r.ok then
+        if j.kind == "photos" and item then
+            local f = stills_made_file() and io.open(stills_made_file(), "a")
+            if f then f:write(stills_line(item.relative, item.size, item.t), "\n"); f:close() end
+        end
+    else
+        j.failed = j.failed + 1
+        mp.msg.warn((j.kind == "moments" and "moment " or "photo ") .. tostring(item and item.name or "") .. ": " .. tostring(r.error))
+    end
+    j.done = j.done + 1
+    job_progress()
+    job_next()
+end)
+
+job_next = function()
+    local j = marks_job
+    if not j then return end
+    if j.stopping or j.done >= #j.queue then
+        local made = j.done - j.failed
+        local what = j.kind == "moments" and (made == 1 and "1 moment" or (made .. " moments")) or (made == 1 and "1 photo" or (made .. " photos"))
+        return job_finish((j.stopping and "Stopped: " or "Made ") .. what .. (j.failed > 0 and (", " .. j.failed .. " failed (see the log)") or ""))
+    end
+    local item = j.queue[j.done + 1]
+    j.id = j.id + 1
+    local id = tostring(j.id)
+    if j.kind == "photos" then
+        mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
+            id = id, clip = item.clip, t = item.t, view = item.view, reply = mp.get_script_name(), done = "job-done" }))
+        return
+    end
+    -- A moment, as k saves one: its link, its own settings (and project), its preview
+    local root = j.root
+    local file, final = moments.unique_file(ws.join(root, moments_lib.FOLDER), item.name)
+    local l = { v = 1, kind = "moment", clip = item.relative, size = item.size, created = item.created_text,
+                ["in"] = moments_lib.ms(item.a), out = moments_lib.ms(item.b), name = final, roots = { root },
+                snap = 1, alone = j.alone, stab = item.view }
+    local project = false
+    local clip_project = ws.gyroflow_project(item.clip)
+    local tool = project_tool()
+    if clip_project and tool then
+        local own = own_project(file)
+        if run_tool({ tool, "--trim", string.format("%.3f,%.3f", item.a, item.b), "--alone", j.alone and "yes" or "no",
+                      "--copy", clip_project, item.clip, own }) then
+            project = own
+        end
+    end
+    local dates
+    if item.created then
+        local t = item.created + item.a
+        dates = moments_lib.format_time(t, moments_lib.zone_of_name(ws.name(item.clip), item.created) or moments_lib.local_zone(t))
+    end
+    item.name = final
+    mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
+        id = id, clip = item.clip, from = item.a, to = item.b, at = item.at, link = utils.format_json(l), dates = dates, output = file,
+        reply = mp.get_script_name(), project = project, alone = j.alone and project == false, view = item.view,
+        done = "job-done",
+    }))
+end
+
+-- What there is to make, over the project's clips (their headers read: a second or so per hundred clips)
+local function marks_queue(kind, root)
+    local queue = {}
+    local made = kind == "photos" and read_stills_made() or nil
+    local all = kind == "moments" and moments.scan(root, nil).list or nil
+    local taken_names = {}
+    for _, c in ipairs(moments.footage(root)) do
+        local times = marks_of(c.file)
+        if times then
+            local info = utils.file_info(c.file)
+            local size = info and info.size
+            local movie = markers and markers.movie and markers.movie(c.file) or nil
+            local view = clip_view_of(c.file)
+            if kind == "photos" then
+                for _, t in ipairs(times) do
+                    if not made[stills_line(c.relative, size, t)] then
+                        queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, t = t, view = view, name = ws.name(c.file) .. " " .. clock(t) }
+                    end
+                end
+            else
+                local taken = {}
+                for _, m in ipairs(moments.of_clip(all, { relative = c.relative, size = size })) do
+                    taken[#taken + 1] = { m.link["in"], m.link.out }
+                end
+                for _, p in ipairs(moments_lib.loose_parts(times, taken, movie and movie.duration, MOMENT_AROUND)) do
+                    local created = movie and movie.created
+                    local name
+                    if created then
+                        local t = created + p.a
+                        name = moments_lib.time_name(t, moments_lib.zone_of_name(ws.name(c.file), created) or moments_lib.local_zone(t))
+                    else
+                        name = (ws.name(c.file):gsub("%.[^.]*$", "")) .. " " .. clock(p.a):gsub(":", ".")
+                    end
+                    name = moments_lib.safe_name(name) or "Moment"
+                    -- Two parts of one name (the same second in two clips): kept apart here, the folder checked as each is made
+                    local base, n = name, 1
+                    while taken_names[name:lower()] do n = n + 1; name = base .. " " .. n end
+                    taken_names[name:lower()] = true
+                    queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, a = p.a, b = p.b, at = p.marks[1],
+                                          created = created, created_text = created and os.date("!%Y-%m-%dT%H:%M:%S.000000Z", created) or nil,
+                                          view = view, name = name }
+                end
+            end
+        end
+    end
+    return queue
+end
+
+local function start_marks_job(kind)
+    if marks_job then return mp.osd_message("Already making " .. marks_job.kind .. ": " .. marks_job.done .. " of " .. #marks_job.queue, 3) end
+    local root = need_project(kind == "moments" and "Moments of the marks" or "Photos of the marks")
+    if not root then return end
+    if not markers then return mp.osd_message("This needs the highlights plugin", 3) end
+    mp.osd_message("Looking for the marks in the project's clips…", 30)
+    local queue = marks_queue(kind, root)
+    if #queue == 0 then
+        return mp.osd_message(kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)", 4)
+    end
+    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, id = 0, root = root, alone = settings().moments_alone == true }
+    mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
+    job_progress()
+    job_next()
+end
+
+mp.register_script_message("marks-moments", function() start_marks_job("moments") end)
+mp.register_script_message("marks-photos", function() start_marks_job("photos") end)
+mp.register_script_message("marks-stop", function()
+    if marks_job then marks_job.stopping = true; mp.osd_message("Stopping after this one…", 2) end
+end)
