@@ -8,7 +8,7 @@
 -- and flagged ("camera": "dji"), and from then on that file is the marks: a camera mark removed is gone from it.
 -- Delete the file, and the camera's are the marks again. A marks file for a clip of another size (GoPro's GX010123
 -- names come back on every card) is renamed .marks.json.old rather than applied. The workspace plugin says where the
--- file is (user-data/workspace/marks_file), and makes the clip's project when it's first written.
+-- file is (user-data/workspace/marks_file). Marks need no project: the file is beside the clip.
 --
 -- Keys (rebind with `<key> script-binding highlights/<name>` in input.conf):
 --   Ctrl+]  next   the next mark
@@ -241,8 +241,6 @@ local function mark()
     if not ok then return mp.osd_message("Couldn't write the marks: " .. tostring(err), 4) end
     found.doc, found.marks = doc, doc.marks
     mp.osd_message(message .. " (" .. (#doc.marks == 1 and "1 mark" or (#doc.marks .. " marks")) .. ")", 2)
-    -- The clip belongs to a project from now on
-    mp.commandv("script-message-to", "workspace", "make-project")
     apply_chapters()
     publish()
 end

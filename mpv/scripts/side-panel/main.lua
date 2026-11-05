@@ -260,6 +260,8 @@ end
 
 -- The text cut to fit width, with an ellipsis
 local function fit(text, width, size, s, bold)
+    -- Room to spare: the estimate is short for some names (capitals, wide letters)
+    width = width * 0.9
     if ui.text_width(text, size, s, bold) <= width then return text end
     local chars = {}
     for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = ch end
@@ -269,6 +271,7 @@ end
 
 -- The end of a text that fits width, after an ellipsis: a path's last folders
 local function fit_end(text, width, size, s)
+    width = width * 0.9
     if ui.text_width(text, size, s) <= width then return text end
     local chars = {}
     for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = ch end
@@ -353,17 +356,23 @@ local function project_part(u, x, w, y)
         y = y + 22 * s
         y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders Moments, Clips and Exports, "
             .. "and a hidden .actionfootageplayer for its own notes. A clip's own files, its marks and Gyroflow project, "
-            .. "stay beside the clip. Every folder inside the project is part of it.")
+            .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
+            .. "kept beside the clip anyway.")
         local choices = ws.project_choices or {}
         local known = false
         for _, c in ipairs(choices) do if c == chosen_root then known = true end end
         if not known then chosen_root = ws.project_new or choices[#choices] end
         y = y + 4 * s
         if chosen_root then
-            local fh = 28 * s
+            -- The folder chosen by its name, the path to it below; the list, a folder a line, indented by depth
+            local fh = 42 * s
             u:box(ix, y, iw, fh, 7, C.panel, { border = 1 * s, border_color = choosing and C.accent or C.line })
-            u:text(ix + 8 * s, y + fh / 2, fit_end(folder_label(chosen_root), iw - 30 * s, 12, s), { size = 12 })
-            u:text(ix + iw - 12 * s, y + fh / 2, choosing and "▴" or "▾", { align = 5, size = 12, color = C.dim })
+            local name = chosen_root:match("([^/\\]+)[/\\]?$") or chosen_root
+            local parent = chosen_root:match("^(.*)[/\\][^/\\]+[/\\]?$")
+            u:text(ix + 10 * s, y + 14 * s, fit(name, iw - 34 * s, 13, s, true), { size = 13, bold = true })
+            u:text(ix + 10 * s, y + 30 * s, parent and parent ~= "" and fit_end("in " .. folder_label(parent), iw - 34 * s, 11, s) or "the top of the disk",
+                   { size = 11, color = C.dim })
+            u:text(ix + iw - 13 * s, y + fh / 2, choosing and "▴" or "▾", { align = 5, size = 12, color = C.dim })
             u:hit(ix, y, iw, fh, "choose", function() choosing = not choosing end)
             y = y + fh + 2 * s
             if choosing then
@@ -372,15 +381,17 @@ local function project_part(u, x, w, y)
                     local rh = 24 * s
                     if c == chosen_root then u:box(ix, y, iw, rh, 5, C.accent)
                     elseif u:hovered(id) then u:box(ix, y, iw, rh, 5, C.hover) end
-                    u:text(ix + 8 * s, y + rh / 2, fit_end(folder_label(c), iw - 16 * s, 12, s), { size = 12, color = c == chosen_root and C.knob or C.label })
+                    local indent = math.min(i - 1, 6) * 10 * s
+                    local cname = c:match("([^/\\]+)[/\\]?$") or c
+                    u:text(ix + 8 * s + indent, y + rh / 2, fit(cname, iw - 16 * s - indent, 12, s), { size = 12, color = c == chosen_root and C.knob or C.label })
                     u:hit(ix, y, iw, rh, id, function() chosen_root, choosing = c, false end)
                     y = y + rh
                 end
                 y = y + 4 * s
             end
             local root = chosen_root
-            y = u:button(ix, iw, y + 4 * s, "start", "Start the project here", function()
-                mp.commandv("script-message-to", "workspace", "start-project", root)
+            y = u:button(ix, iw, y + 4 * s, "init", "Initialize the project here", function()
+                mp.commandv("script-message-to", "workspace", "init-project", root)
             end, { primary = true })
         end
     else
@@ -417,23 +428,6 @@ local function project_part(u, x, w, y)
     end
     behind(u, at, x, top, w, y - top + pad - 6 * s, C.card)
     y = y + pad
-
-    -- Where to start, while there's no project
-    if not ws.project then
-        y = u:heading(x, w, y + 8 * s, "Start here")
-        local steps = { { "Mark what matters as you watch", { keys["script-binding highlights/mark"] or "M" } },
-                        { "Mark a part, keep it as a moment", { keys["ab-loop"] or "l", keys["script-binding workspace/moment"] or "k" } },
-                        { "Start the project, then make clip previews: every clip in color", {} } }
-        for i, step in ipairs(steps) do
-            local right = x + w
-            for j = #step[2], 1, -1 do right = right - u:kbd(right, y + 10 * s, step[2][j]) - 4 * s end
-            u:box(x, y + 2 * s, 16 * s, 16 * s, 8, C.field)
-            u:text(x + 8 * s, y + 10 * s, tostring(i), { align = 5, size = 10, color = C.dim })
-            local lines = ui.wrap(step[1], right - x - 24 * s, 12, s)
-            for k, l in ipairs(lines) do u:text(x + 24 * s, y + 10 * s + (k - 1) * 16 * s, l, { size = 12 }) end
-            y = y + math.max(1, #lines) * 16 * s + 8 * s
-        end
-    end
 
     -- This clip
     y = y + 8 * s
@@ -473,7 +467,11 @@ local function project_part(u, x, w, y)
             })
         end
     end
-    if #list == 0 then y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k")) end
+    if not ws.project then
+        y = u:caption(x, w, y, "Moments need the project: initialize it above")
+    elseif #list == 0 then
+        y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k"))
+    end
 
     if ws.project then
         local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
@@ -496,6 +494,9 @@ local function project_part(u, x, w, y)
     local m = ws.moment
     if ws.saving then
         y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
+    elseif a and b and b > a and not ws.project then
+        y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
+        y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
     elseif a and b and b > a then
         if m and not m.missing and math.abs(a - m["in"]) < 0.001 and math.abs(b - m.out) < 0.001 then
             y = u:caption(ix, iw, y, m.name .. " as it is: move its start or end to change it")

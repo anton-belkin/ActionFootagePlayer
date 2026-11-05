@@ -379,7 +379,19 @@ end
 -- The trip's project (the workspace plugin's): its clip previews, its folder
 local function project_menu(w, key)
     local reveal = platform == "darwin" and "Show project folder in Finder" or "Show project folder"
-    local items = { info(w.project and ("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) or "No project yet: the first moment, mark or clip preview makes one") }
+    if not w.project then
+        -- Initialized in a folder of the user's choice, from the clip's up
+        local choices = {}
+        for i = #(w.project_choices or {}), 1, -1 do
+            local dir = w.project_choices[i]
+            local name = dir:match("([^/\\]+)[/\\]?$") or dir
+            local quoted = '"' .. dir:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+            table.insert(choices, item(name .. "    " .. (dir:match("^(.*)[/\\][^/\\]+[/\\]?$") or ""), "script-message-to workspace init-project " .. quoted))
+        end
+        return { info("No project yet: moments, exports and clip previews need one"), SEPARATOR,
+                 submenu("Initialize the project in", choices, { disabled = #choices == 0 }) }
+    end
+    local items = { info("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) }
     table.insert(items, SEPARATOR)
     if w.clips then
         table.insert(items, info("Clip previews: " .. w.clips.done .. " of " .. w.clips.total))

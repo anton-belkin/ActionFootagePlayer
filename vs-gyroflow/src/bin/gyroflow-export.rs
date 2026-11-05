@@ -17,8 +17,8 @@
 // read-only).
 //
 // Output: <project>/Exports/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only, _color
-// instead of _stab), 10-bit. The project is the one the player's workspace plugin finds (vs-gyroflow/src/workspace.rs),
-// made when there's none; --out and --output write elsewhere
+// instead of _stab), 10-bit. The project is the one the player's workspace plugin finds (vs-gyroflow/src/workspace.rs);
+// with none, <video's folder>/stabilized/. --out and --output write elsewhere
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
 //                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
@@ -52,9 +52,9 @@ use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Unde
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for log, color-converted) into the Exports/ folder of its project: the trip
-folder with .actionfootageplayer/ in it above the video, else a new one in its folder (above DCIM for a camera's
-own tree), as the player makes it. A log video with nothing to stabilize it with is color-converted only.
+Renders each video stabilized (and, for log, color-converted) into the Exports/ folder of its project (the trip
+folder with .actionfootageplayer/ in it above the video, as the player initializes it), else into a stabilized/
+folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
@@ -82,7 +82,7 @@ own tree), as the player makes it. A log video with nothing to stabilize it with
                    written, in PQ
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
-  --out <folder>   write here instead of <project>/Exports
+  --out <folder>   write here instead of <project>/Exports (or stabilized/)
   --output <file>  write this file (one video only)
   --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
                    written in room ffmpeg leaves after the moov, so the file isn't written twice)
@@ -634,18 +634,13 @@ fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
     }
 }
 
-// The video's project (docs/moments-and-workspaces.md), where its exports go: the one it's in, else one made in its
-// folder (above DCIM for a camera's own tree), as the player's first save makes it
-fn project_dir(video: &Path) -> Result<PathBuf, String> {
-    use vs_gyroflow::workspace;
-    if let Some(root) = workspace::project_root(video) { return Ok(root); }
-    let root = workspace::new_project_root(video);
-    let state = root.join(workspace::STATE_DIR);
-    std::fs::create_dir_all(&state).map_err(|e| format!("can't make the project in {}: {e} (--out writes elsewhere)", root.display()))?;
-    #[cfg(windows)]
-    { let _ = Command::new("attrib").arg("+h").arg(&state).status(); }
-    eprintln!("  a new project: {}", root.display());
-    Ok(root)
+// Where an export goes by default: its project's Exports/ (docs/moments-and-workspaces.md), else stabilized/ next to
+// the video. A project is never made here: the player initializes one where its user chooses
+fn default_out_dir(video: &Path) -> PathBuf {
+    match vs_gyroflow::workspace::project_root(video) {
+        Some(root) => root.join("Exports"),
+        None => video.parent().unwrap_or(Path::new(".")).join("stabilized"),
+    }
 }
 
 // A preview's H.264 encoder: x264 first, which spends next to nothing on a frame repeated (some 40 bytes a frame,
@@ -896,7 +891,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (Some(file), _) => file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf(),
         (None, Some(dir)) => dir.clone(),
         (None, None) if preview.is_some() => video_dir.to_path_buf(),
-        (None, None) => project_dir(&path)?.join("Exports"),
+        (None, None) => default_out_dir(&path),
     };
     let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     // A part of the video gets its range in the name, so it doesn't replace the whole one

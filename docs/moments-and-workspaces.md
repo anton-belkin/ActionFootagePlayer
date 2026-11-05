@@ -121,7 +121,13 @@ When a clip opens, from wherever, the player looks for its project in this order
 The first match is the only one read. A clip whose separate project exists is never also read from files next
 to it. Reading two places would make "where is my moment" a question with two answers.
 
-**Where a new project goes** (at the first save: a moment, a mark, an export, clip previews):
+**A project is never made by itself** (Anton, 2026-11-05: not silently, wherever). The first time something needs
+one (a moment, an export, clip previews, `X`), the side panel's Project tab opens and asks for it to be initialized,
+in a folder chosen among those above the clip, from its own up to the volume's top (the home folder and above
+aren't offered); the right-click menu's *Project → Initialize the project in* has the same list. Marks need none:
+their file is beside the clip. gyroflow-export alone never makes one either.
+
+**Where it's suggested:**
 
 - Its folder is the clip's folder, or the folder above `DCIM` when the clip is in a camera's own tree
   (`DCIM/100MEDIA`, `DCIM/DJI_001`), since that's the card or the copy of one. For a trip folder with day
@@ -459,8 +465,9 @@ right within the trip, on the wrong day.
 
 ### From `stabilized/` to `Exports/`
 
-- **New exports go to `Exports/`**, from the player, the Finder quick action and the command line. With no
-  project yet, the first export makes one, as any save does.
+- **New exports go to `Exports/`**, from the player, the Finder quick action and the command line. The player
+  asks for the project to be initialized first; without the player, a video in no project exports to
+  `stabilized/` next to it as before.
 - **Old `stabilized/` folders are left alone.** The player never reads them back: "Show the last export" is
   only the last one this session, and the skip-if-it-exists check looks where the new export would go. So
   nothing breaks, and nothing of anyone's is moved without asking.
@@ -545,8 +552,8 @@ Project                          ▸  2026-10 Egypt (in the trip folder)
 
 The side panel has a **Project** tab of its own, the first, where it opens (built 2026-11-05 from Anton's review of two
 mockups):
-- the project at the top: with none yet, what a project is and *Start the project here* in a folder chosen from
-  the clip's folder up to the volume's top (`project_choices`, `start-project`); then its counts and the project-wide
+- the project at the top: with none yet, what a project is and *Initialize the project here* in a folder chosen from
+  the clip's folder up to the volume's top (`project_choices`, `init-project`); then its counts and the project-wide
   actions (*Make clip previews* while some are new, *Show all clips*, *Show all moments* in Finder; `⋯`: the
   project folder, *Make again for removed clips*);
 - this clip below a line: *Marks of this clip* (the one playing at highlighted, *Add* / *Remove the mark here*),
@@ -634,8 +641,8 @@ first".
    - `M` adds a mark, or removes the one within half a second, the camera's too.
    - The first change writes `<clip>.marks.json` beside the clip (`user-data/workspace/marks_file`;
      `workspace.lua`'s `marks_file`, with its Rust twin for the editors' export, in the shared cases), with the
-     camera's copied in and flagged (`"camera": "dji"`). Then the workspace plugin makes the project
-     (`make-project`).
+     camera's copied in and flagged (`"camera": "dji"`). It needs no project (at first the workspace plugin made
+     one then; since Anton's review of the Project tab, nothing makes one by itself).
    - The file is read when there is one; a file whose clip has another size becomes `.marks.json.old`. It's
      written whole through a temporary file, and fields it doesn't know are kept.
    - The marks are the chapters ("Highlight 2" for the camera's, "Mark 1" for yours, a name when it has one), and

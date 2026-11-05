@@ -2,8 +2,10 @@
 -- (docs/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- A project is a trip folder with `.actionfootageplayer/` in it: the nearest such folder above the clip, up to the
--- volume's top folder, and never the home folder itself. A clip in none has no project, and plays as before, until
--- its first moment makes one in its folder (above DCIM for a camera's own tree).
+-- volume's top folder, and never the home folder itself. A clip in none has no project, and plays as before. One is
+-- never made by itself: the side panel's Project tab (or the menu's Project) initializes it, in the folder chosen
+-- among those above the clip, and what needs one (k, exports, clip previews, X) opens that tab when there's none.
+-- Marks need none: they're beside the clip.
 --
 -- Moments are parts of a clip kept as small MP4s, `<project>/Moments/<name>.afplink.mp4` (subfolders too): one frame
 -- in color, held for the part's length, with the link to the original inside (link.lua reads it, gyroflow-export
@@ -35,7 +37,7 @@
 --   clip_preview    when a clip preview plays: { file }
 --   clips           while clip previews are made: { done, total }
 --   project_choices with no project: the folders one can be started in, from the top down; project_new: the one the
---                   first save would take (start-project <folder> starts it in another)
+--                   panel suggests (init-project <folder> initializes it)
 --   moments_total   the project's moments; clips_stats: { total (clips), previews (made, there), new (never made) }
 --   clip_preview    this clip's preview: made, removed (made, then deleted: not interesting) or none
 --   project         the project's folder, absent for none
@@ -52,7 +54,7 @@
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
--- project-folder, clips-folder (show them), start-project <folder>. open-original: an export's original, at its part. For the
+-- project-folder, clips-folder (show them), init-project <folder>. open-original: an export's original, at its part. For the
 -- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
 -- link }).
 --
@@ -431,22 +433,14 @@ local function mkdir(dir)
     return fs.is_dir(dir)
 end
 
--- The clip's project, made at the first save: in its folder, or above DCIM
-local function make_project()
+-- The clip's project, for what needs one (moments, exports, clip previews). None is made by itself: the side panel's
+-- Project tab opens, where one is initialized in a folder of the user's choice (init-project). Marks need none
+local function need_project(what)
     if state.project then return state.project end
-    local root = ws.new_project_root(state.clip)
-    local dir = ws.join(root, workspace.STATE_DIR)
-    if not fs.is_dir(dir) and not mkdir(dir) then
-        mp.osd_message("Can't write in " .. root .. "\n(a project kept elsewhere, for a card or a read-only folder, comes later)", 6)
-        return nil
-    end
-    if windows then run({ "attrib", "+h", dir }) end
-    state.project = root
-    state.relative = ws.relative(state.clip, root)
-    state.moments_folder = ws.join(root, moments_lib.FOLDER)
-    state.project_choices, state.project_new = nil, nil
-    publish()
-    return root
+    mp.commandv("script-message-to", "side_panel", "tab", "project")
+    mp.osd_message(what .. " needs the project: initialize it first, in the folder of your choice\n"
+        .. "(the side panel's Project tab, or right click: Project)", 5)
+    return nil
 end
 
 -- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
@@ -459,8 +453,8 @@ local function save(name, update, typed, quiet)
         mp.osd_message("Moment: that name has nothing a file name can have", 3)
         return
     end
-    local first = state.project == nil
-    local root = make_project()
+    local first = false
+    local root = need_project("Saving a moment")
     if not root then return end
     local file, final
     if update then
@@ -537,6 +531,8 @@ local function save_key(given)
     if not mp.get_property_native("user-data/gyroflow") then
         return mp.osd_message("Saving a moment needs the gyroflow plugin (it makes the preview)", 4)
     end
+    -- Asked before the name: there's nowhere to save it yet
+    if not need_project("Saving a moment") then return end
     local m = state.moment
     if given and given ~= "" then return save(given, nil, given) end
     if m then
@@ -646,6 +642,7 @@ mp.register_script_message("export-name", function(json)
         return mp.osd_message(state.moment.name .. ": its original isn't found", 3)
     end
     if not state.loaded then return mp.osd_message("The clip is still loading", 2) end
+    if not need_project("Exporting") then return end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local part = a and b and b > a
     if not part then a, b = nil, nil end
@@ -671,8 +668,8 @@ mp.register_script_message("export-name", function(json)
         if text ~= "" then last_typed = text end
         local safe = moments_lib.safe_name(text ~= "" and text or suggested)
         if not safe then return mp.osd_message("Export: that name has nothing a file name can have", 3) end
-        local first = state.project == nil
-        local root = make_project()
+        local first = false
+        local root = need_project("Exporting")
         if not root then return end
         local output, final = moments.unique_file(ws.join(root, moments_lib.EXPORTS), safe, label .. ".mov")
         local info = utils.file_info(state.clip)
@@ -691,11 +688,6 @@ mp.register_script_message("export-name", function(json)
         -- Every export can be found from a moment, and played in full quality after it's deleted
         if part and not same then save("export_" .. final, nil, nil, true) end
     end)
-end)
-
--- The highlights plugin wrote the clip's marks: the clip belongs to a project from then on
-mp.register_script_message("make-project", function()
-    if state.clip and not state.clip:find("://", 1, true) and not state.moment then make_project() end
 end)
 
 -- An export's original, at its part
@@ -833,7 +825,7 @@ end
 local function make_clips(again)
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
     if not state.clip or state.clip:find("://", 1, true) then return end
-    local root = state.project or make_project()
+    local root = need_project("Making clip previews")
     if not root then return end
     local made = read_made()
     local queue = {}
@@ -865,9 +857,8 @@ end)
 -- X: this clip isn't interesting, its preview to the Trash; without one, it's made (again)
 mp.add_key_binding("X", "not-interesting", function()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return end
-    if not state.relative and not state.project then
-        -- No project: nothing removed; the preview is made, in a new project
-    elseif state.project then
+    if not need_project("Marking a clip not interesting") then return end
+    do
         local preview = preview_of(state.project, state.relative)
         if fs.is_file(preview) then
             return trash(preview, function(ok)
@@ -877,8 +868,7 @@ mp.add_key_binding("X", "not-interesting", function()
         end
     end
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
-    local root = state.project or make_project()
-    if not root then return end
+    local root = state.project
     local info = utils.file_info(state.clip)
     local c = { file = state.clip, relative = ws.relative(state.clip, root), size = info and info.size }
     start_clips(root, { c }, "Making this clip's preview again")
@@ -927,8 +917,8 @@ mp.register_script_message("clips-folder", function()
     if dir and fs.is_dir(dir) then reveal(dir, true) end
 end)
 
--- The side panel's Start the project here: in one of the folders above the clip
-mp.register_script_message("start-project", function(dir)
+-- The side panel's Initialize the project here (and the menu's): in one of the folders above the clip
+mp.register_script_message("init-project", function(dir)
     if not state.clip or state.project or not dir then return end
     local allowed = false
     for _, d in ipairs(ws.project_choices(state.clip)) do if d == dir then allowed = true end end
@@ -942,6 +932,6 @@ mp.register_script_message("start-project", function(dir)
     state.relative = ws.relative(state.clip, dir)
     state.moments_folder = ws.join(dir, moments_lib.FOLDER)
     state.project_choices, state.project_new = nil, nil
-    mp.osd_message("Project started: " .. ws.name(dir), 3)
+    mp.osd_message("Project initialized: " .. ws.name(dir), 3)
     refresh()
 end)

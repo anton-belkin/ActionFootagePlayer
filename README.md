@@ -239,7 +239,7 @@ covered), as in a photo editor: a rail of icons at the edge, one for each part, 
 switches and buttons, scrolled with the wheel:
 
 - **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
-  with their keys beside them. At the top, the project: with none yet, what one is and **Start the project here**
+  with their keys beside them. At the top, the project: with none yet, what one is and **Initialize the project here**
   in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
   then its counts, **Make clip previews** for clips without one, **Show all clips** and **Show all moments** in
   Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
@@ -530,7 +530,7 @@ The same from a terminal, for one clip or many:
 ```
 
 The result goes to the `Exports/` folder of the clip's project (the trip folder with `.actionfootageplayer/` in it
-above the clip; with none, one is made in the clip's folder, above `DCIM` for a camera's own folders), as
+above the clip, as the player initializes it), or with none to a `stabilized/` folder next to the clip, as
 `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
 names the file.
 
@@ -658,7 +658,7 @@ usually happened.
 
 **Your own marks**: `M` adds one where the video is, and on a mark (within half a second) removes it, a camera's
 too. The first change writes `<clip>.marks.json` beside the clip, with the camera's marks copied in and flagged as
-the camera's, and makes the trip's project as a moment does; from then on that file is the clip's marks. Delete it,
+the camera's; from then on that file is the clip's marks. Marks need no project. Delete it,
 and the camera's are back. The menu's **Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro
 HiLight". A marks file left from another clip with the same name (GoPro reuses them on every card) is renamed
 `.marks.json.old` rather than shown on the wrong clip.
@@ -681,9 +681,12 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
 - **Opening it in the player plays the original**, in full quality, from the moment's start, looping its part,
   with the original's stabilization, look and telemetry. The moments beside it are the next and previous files.
   Opening the **Moments** folder plays all of them one after another, in the order they happened.
-- **Where**: the first moment of a clip makes the trip's project in the clip's folder (above `DCIM` for a camera's
-  own folders): a hidden `.actionfootageplayer` folder and `Moments/` beside the footage. A clip under a folder
-  that already has one belongs to it. A card or folder that can't be written isn't supported yet.
+- **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
+  moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
+  folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
+  hidden `.actionfootageplayer` folder there, and `Moments/`, `Clips/` and `Exports/` once there's something to
+  keep. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
+  yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
 - **Changing one**: play it, move its start or end with `l`, press `k`, and Enter updates it; a new name saves a new
