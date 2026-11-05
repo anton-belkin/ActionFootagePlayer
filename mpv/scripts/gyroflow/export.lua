@@ -20,11 +20,12 @@
 --   photo                the frame on screen as a photo (Alt+s; Enter in crop mode): gyroflow-export --photo, as it
 --                        plays (the same stabilization, the frame cleaned up from its neighbours as Ctrl+p does, crop
 --                        mode's camera and frame), as an SDR screen shows the look (as_it_plays) with a gain map to the
---                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder. Live (the
---                        default, gyroflow.conf's live_photo): with 3 s of the video around it (--live), exported as
---                        Shift+E would, at most 1920 wide or high: a Live Photo on macOS (a .mov next to the HEIC),
---                        a Motion Photo elsewhere (<name>.MP.jpg, the video in it)
---   live-photo yes|no|toggle  photos with their motion or without, kept in gyroflow.conf at once
+--                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder. With 3 s of the
+--                        video around it (--live; gyroflow.conf's live_photo), exported as Shift+E would, at most 1920
+--                        wide or high: a Live Photo (macOS: a .mov next to the HEIC) or a Motion Photo (--format jpeg:
+--                        <name>.MP.jpg, the video in it)
+--   live-photo no|live|motion|next  photos alone, as Live Photos (macOS) or as Motion Photos, kept in gyroflow.conf
+--                        at once; next: the next of them
 --
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
@@ -371,8 +372,11 @@ local function photo()
     local t = mp.get_property_number("time-pos")
     if not t then return end
     local args = { EXPORT, "--photo", string.format("%.4f", t) }
-    local live = mp.get_property_native("user-data/gyroflow/live_photo") ~= false
+    local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
+    local live = mode == "live" or mode == "motion"
     if live then table.insert(args, "--live") end
+    -- A Motion Photo is a JPEG (the default off macOS)
+    if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     as_it_plays(args, false, true, live)
     local still = mp.get_property_native("user-data/gyroflow/still")
     if still == false then table.insert(args, "--radius"); table.insert(args, "0") end
@@ -395,7 +399,7 @@ local function photo()
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
-    local kind = not live and "photo" or platform.macos and "Live Photo" or "Motion Photo"
+    local kind = mode == "live" and "Live Photo" or mode == "motion" and "Motion Photo" or "photo"
     mp.osd_message("Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…", 60)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
@@ -420,10 +424,17 @@ end
 mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
 
+-- Live Photos need afp-photo (macOS)
+local MODES = platform.macos and { "no", "live", "motion" } or { "no", "motion" }
+local MODE_NAMES = { no = "stills", live = "Live Photos, with 3 s of video for Apple's devices",
+                     motion = "Motion Photos, with 3 s of video for Android's" }
 mp.register_script_message("live-photo", function(how)
-    local on = mp.get_property_native("user-data/gyroflow/live_photo") ~= false
-    if how == "yes" then on = true elseif how == "no" then on = false else on = not on end
-    mp.set_property_native("user-data/gyroflow/live_photo", on)
-    platform.save_options("gyroflow", { { "live_photo", on and "yes" or "no" } })
-    mp.osd_message("Photos: " .. (on and (platform.macos and "Live Photos, with 3 s of motion" or "Motion Photos, with 3 s of video") or "stills"), 2)
+    local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
+    if how == "next" then
+        for i, m in ipairs(MODES) do if m == mode then how = MODES[i % #MODES + 1] break end end
+    end
+    if not MODE_NAMES[how] or (how == "live" and not platform.macos) then return end
+    mp.set_property_native("user-data/gyroflow/live_photo", how)
+    platform.save_options("gyroflow", { { "live_photo", how } })
+    mp.osd_message("Photos: " .. MODE_NAMES[how], 2)
 end)

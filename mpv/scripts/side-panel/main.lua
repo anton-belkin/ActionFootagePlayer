@@ -676,14 +676,22 @@ local function crop_part(u, x, w, y)
         y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
         y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
     end
-    local live = g.live_photo ~= false
-    y = u:switch(x, w, y + 10 * s, "crop-live", platform == "darwin" and "Live Photo" or "Motion Photo", live,
-                 "script-message-to gyroflow live-photo toggle")
+    -- The photo alone, or with the video around it as Apple's devices (macOS only) or Android's take it
+    local mode = g.live_photo or "no"
+    local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
+    if platform ~= "darwin" then table.remove(modes, 2) end
+    local options, selected = {}, nil
+    for i, m in ipairs(modes) do
+        table.insert(options, { m[2], "script-message-to gyroflow live-photo " .. m[1] })
+        if m[1] == mode then selected = i end
+    end
+    y = u:heading(x, w, y + 10 * s, "Photo")
+    y = u:segmented(x, w, y, "crop-live", options, selected)
     y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
-    y = u:caption(x, w, y, (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-                           .. " in the stabilized folder: the SDR look, brighter where the screen has HDR"
-                           .. (not live and "" or platform == "darwin" and ". Live: 3 s of the video around it as a .mov next to it, one Live Photo in Photos"
-                                                  or ". Motion: 3 s of the video around it inside the JPEG, as Android's cameras do"))
+    local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
+              or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
+              or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+    y = u:caption(x, w, y, what .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
     return u:button(x, w, y + 6 * s, "crop-leave", "Leave crop mode", "script-message-to gyroflow crop no", { key = "Esc" })
 end
 
