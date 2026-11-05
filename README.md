@@ -34,7 +34,7 @@ ready for your phone.
 - **What the camera measured, on screen**: depth under water, GPS and speed, exposure.
 - **The moments you marked, a key away.** Press the camera's highlight button while it records (GoPro's HiLight; on
   a DJI Osmo Action, the quick switch button or the remote): the marks show on the seek bar, and `Ctrl+]` /
-  `Ctrl+[` jump to the next one and back, a couple of seconds before it.
+  `Ctrl+[` jump to the next one and back, a couple of seconds before a camera's (yours, `M`, right on them).
 - **One key to share**: mark the moment, press `Shift+E`, and get a file as it plays, stabilized or not, that an
   iPhone, a Mac or YouTube shows in HDR.
 
@@ -288,7 +288,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
-| `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
+| `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`; on your own marks, `M`, right on them); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | right click | The plugins' menu, when there's no side panel (mpv's own menu with it) | `footage_menu/menu` |
 | `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
@@ -336,7 +336,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `dji_telemetry.conf`: `position=bottom-left` | `top-left`, `top-right`, `bottom-right` (top left has mpv's messages, top right the exports' progress) |
 | `dji_telemetry.conf`: `font_size=28` | at a 720-pixel-high window; it scales with the window |
 | `dji_telemetry.conf`: `visible=yes` | `no`: shown only after `Ctrl+t` |
-| `highlights.conf`: `before=2` | seconds before each highlight a jump lands: the button is pressed once the moment has happened |
+| `highlights.conf`: `before=2` | seconds before each of the camera's highlights a jump lands: the button is pressed once the moment has happened (your own marks: right on them) |
 | `highlights.conf`: `chapters=yes` | the highlights as chapters too, which mpv's seek bar shows as marks; `no`: only the keys and the menu |
 | `footage_menu.conf`: `setup=` | a setup script the menu offers to run again (ActionFootagePlayer sets its own) |
 | `footage_menu.conf`: `version=` | the version the menu shows beside the app's name (ActionFootagePlayer sets its own) |
@@ -651,7 +651,7 @@ A press of the camera's highlight button while it records marks that moment in t
 reads the marks when the clip opens: they show on the seek bar as chapters ("Highlight 1", ...), `Ctrl+]` and
 `Ctrl+[` jump to the next and the previous one, and the menu's **Highlights** lists them all by time. A jump lands
 two seconds before the mark (`before=` in `highlights.conf`): by the time the button is pressed, the moment has
-usually happened.
+usually happened. A mark of your own (`M`) is where you put it, and a jump lands right on it.
 
 - **DJI Osmo Action 4, Action 5 Pro and Action 6**: the quick switch button, or the GPS Bluetooth remote, while
   recording (in video, slow motion and hyperlapse; 190 at most). DJI's other cameras (Osmo 360, Pocket 3, the
