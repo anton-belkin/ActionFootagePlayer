@@ -141,6 +141,8 @@ struct Job {
     marker: bool,
     /// Crop mode's parity for its preview shader (write_crop_mark)
     crop_mark: Option<bool>,
+    /// Only the sphere written from the frame, nothing rendered (Engine::write_sphere)
+    sphere_only: bool,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -453,6 +455,51 @@ impl Engine {
         })
     }
 
+    /// Whether any of `frames` leaves part of the output uncovered in `view` (edges::VIEW_*) through `camera`: the
+    /// measure `leaves_edges` makes for the whole clip, for these frames alone, so an export of a part of it (a photo,
+    /// its motion) fills edges only where they show. Zoomed out, the camera widens the view by its zoom; turned, it
+    /// may show past the frame anywhere, and a clip without a project has its frames measured as they play: yes
+    pub fn leaves_edges_in(&self, view: u8, frames: std::ops::RangeInclusive<usize>, fps: f64, camera: &Camera) -> bool {
+        if self.views.levels || (camera.yaw, camera.pitch, camera.roll) != (0.0, 0.0, 0.0) { return true; }
+        let p = &self.views.params[self.views.index(view, Level::Medium)];
+        let measured = p.fovs.len().min(p.minimal_fovs.len());
+        if *frames.end() >= measured { return true; }
+        frames.into_iter().any(|i| {
+            let ts = gyroflow_core::timestamp_at_frame(i as i32, fps.max(1.0));
+            let scale = p.keyframes.value_at_video_timestamp(&gyroflow_core::keyframes::KeyframeType::Fov, ts).unwrap_or(p.fov_scale);
+            p.fovs[i] * scale * camera.zoom > p.minimal_fovs[i] * 1.001
+        })
+    }
+
+    /// Whether the frame at `timestamp_us` leaves part of the output uncovered, in the view and through the camera the
+    /// edges have now: its mask alone rendered, as the edge fill renders it for each frame (a few ms at 4K), nothing
+    /// else. Exact where `leaves_edges_in` can't tell (a clip without a project, a turned camera). For one caller at a
+    /// time, before its frames: it counts on Edges::filled
+    pub fn leaves_edges_at(&self, timestamp_us: i64, limited_range: bool) -> Result<bool, String> {
+        if let Some(m) = &self.motion { m.asked(timestamp_us); }
+        let view = self.views.index(self.edges.view(), self.edges.level().or(self.level).unwrap_or(Level::Medium)) as u8;
+        let before = self.edges.filled();
+        let (reply, result) = mpsc::sync_channel(1);
+        self.tx.send(Job { timestamp_us, planes: Vec::new(), limited_range, edges: None, view, camera: self.edges.camera(), marker: false, crop_mark: None, sphere_only: false, reply })
+            .map_err(|_| "Gyroflow worker is gone".to_string())?;
+        result.recv().map_err(|_| "Gyroflow worker is gone".to_string())??;
+        Ok(self.edges.filled() > before)
+    }
+
+    /// The sphere written from the frame, as `process` writes it, and nothing rendered: for the frames before a photo's,
+    /// which only fill the sphere around it. `planes`' sources alone are read. Nothing to do unless the edges are the
+    /// sphere's
+    pub fn write_sphere(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
+        if self.edges.mode() != edges::EdgeMode::Sphere { return Ok(()); }
+        if let Some(m) = &self.motion { m.asked(timestamp_us); }
+        let view = self.views.index(self.edges.view(), self.edges.level().or(self.level).unwrap_or(Level::Medium)) as u8;
+        let job = self.edges.prepare(edges::EdgeMode::Sphere, &planes);
+        let (reply, result) = mpsc::sync_channel(1);
+        self.tx.send(Job { timestamp_us, planes, limited_range, edges: Some(job), view, camera: self.edges.camera(), marker: false, crop_mark: None, sphere_only: true, reply })
+            .map_err(|_| "Gyroflow worker is gone".to_string())?;
+        result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?
+    }
+
     /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
     pub fn process(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool, marker: bool) -> Result<(), String> {
         let (reply, result) = mpsc::sync_channel(1);
@@ -475,7 +522,7 @@ impl Engine {
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, crop_mark, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, crop_mark, sphere_only: false, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -742,6 +789,17 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
             }
             edge_worker.set_view(&base, cfg, limited_range);
             edges.write_camera_info(&base, &camera, job.timestamp_us);
+        }
+        // Only the sphere written from it (Engine::write_sphere)
+        if job.sphere_only {
+            let result = match &job.edges { Some(e) => edge_worker.write_sphere(edges, cfg, e, job.timestamp_us), None => Ok(()) };
+            let _ = job.reply.send(result);
+            continue;
+        }
+        // No planes: the frame's mask alone (Engine::leaves_edges_at)
+        if job.planes.is_empty() {
+            let _ = job.reply.send(edge_worker.probe(edges, job.timestamp_us));
+            continue;
         }
         let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
         let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
