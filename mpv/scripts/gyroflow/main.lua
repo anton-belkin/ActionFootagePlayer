@@ -376,12 +376,12 @@ local underwater = sticky_underwater
 local underwater_back = underwater ~= "no" and underwater or "auto"
 
 -- The workspace plugin's settings for the file playing, when it keeps its own (a moment's, as it was made: view,
--- level, horizon_lock), and the part stabilized on its own (trim: { in, out }, a moment's without a project). They
--- don't stick for the next clips
+-- level, horizon_lock), the part stabilized on its own (trim: { in, out }, a moment's without a project), and its
+-- switch as it's viewed (alone: its project's "only within the trim range"). They don't stick for the next clips
 local function fixed()
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.stab, ws.trim end
-    return nil, nil
+    if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.stab, ws.trim, ws.alone end
+    return nil, nil, nil
 end
 -- The level that sticks, while a moment plays at its own
 local level_before = nil
@@ -445,7 +445,10 @@ end
 
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
-    local _, trim = fixed()
+    local _, trim, alone = fixed()
+    -- A project's "only within the trim range" as it's viewed: true or false, nil for the project's own
+    local project_alone = nil
+    if has_project(source) and alone ~= nil then project_alone = alone end
     return {
         name = "vapoursynth",
         label = LABEL,
@@ -456,7 +459,8 @@ local function gyroflow_filter(source, enabled)
                                                 fast = not full_size and frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
                                                 chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL,
-                                                time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out }),
+                                                time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
+                                                alone = project_alone }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",

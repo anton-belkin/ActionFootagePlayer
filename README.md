@@ -694,12 +694,13 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
 - **Stabilized as it was made**: a moment keeps the stabilization it was saved with. Over the default preset, its
-  view, level and horizon lock (changed while it plays, they're kept in it); a clip with a Gyroflow project gives the
+  view, level and horizon lock; a clip with a Gyroflow project gives the
   moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the clip's project changed later doesn't change the
   moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
   project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
   its own project in Gyroflow, made then from what it plays with if it has none; a trim changed there becomes the
-  moment's ends.
+  moment's ends. Changing the view, level, horizon lock or the switch while a moment plays is for viewing only: the
+  moment stays as it was saved until **Keep in Turtle** in the panel.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the

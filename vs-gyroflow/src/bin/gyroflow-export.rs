@@ -84,8 +84,9 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --to <time>      end at this time
   --out <folder>   write here instead of <project>/Exports (or stabilized/)
   --output <file>  write this file (one video only)
-  --alone          --from to --to stabilized on its own, for a video without a project: its smoothing from its own
-                   motion, not the clip's around it (a moment's; a project of its own keeps that in its trim range)
+  --alone          --from to --to stabilized on its own: its smoothing from its own motion, not the clip's around it
+                   (a moment's); with a project, its \"only within the trim range\" on, whatever it says
+  --whole          with a project, its \"only within the trim range\" off, whatever it says
   --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
                    written in room ffmpeg leaves after the moov, so the file isn't written twice)
   --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
@@ -146,6 +147,8 @@ struct Options {
     output: Option<PathBuf>,
     // --alone: the part stabilized on its own
     alone: bool,
+    // --alone / --whole: a project's "only within the trim range", whatever it says (as a moment is viewed)
+    alone_project: Option<bool>,
     preview: Option<Preview>,
     at: Option<f64>,
     // --at for a flipbook: its frames' times
@@ -169,7 +172,7 @@ fn main() {
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
-                             dv_rpu: None, dv_live_l1: false, output: None, alone: false, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None };
+                             dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -202,7 +205,8 @@ fn main() {
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
             "--output" => opts.output = Some(PathBuf::from(value("--output"))),
-            "--alone" => opts.alone = true,
+            "--alone" => { opts.alone = true; opts.alone_project = Some(true); }
+            "--whole" => { opts.alone = false; opts.alone_project = Some(false); }
             "--preview" => opts.preview = Some(match value("--preview").as_str() {
                 "still" => Preview::Still,
                 "flipbook" => Preview::Flipbook,
@@ -1006,7 +1010,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         // All of the motion data before it starts (look-ahead 0): an export has the time
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers,
-                                                   opts.alone.then_some((from, to)))?)),
+                                                   opts.alone.then_some((from, to)), opts.alone_project)?)),
         None => None,
     };
     // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to

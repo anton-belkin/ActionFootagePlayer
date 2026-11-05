@@ -357,6 +357,17 @@ local function marks_menu(h, key)
     return items
 end
 
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return not ws.own_project and g.level ~= st.level
+end
+
 -- The clip's moments (the workspace plugin's), each with what can be done to it
 local function moments_menu(w)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -494,6 +505,7 @@ local function build()
                          "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
             end
             if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
+            if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
             if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end

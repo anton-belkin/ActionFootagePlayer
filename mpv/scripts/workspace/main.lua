@@ -135,6 +135,9 @@ local extras = nil
 local settings
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
+-- How moments are viewed this session, by file, where it differs from how they were saved: { alone, stab }. Viewing is
+-- never saving: only Keep writes it into the moment
+local viewing = {}
 
 local function clock(s)
     s = math.floor(s + 0.5)
@@ -341,7 +344,12 @@ local function open_moment(path)
     -- own (trim) when alone. A moment from before plays with the clip's
     if l.snap == 1 then
         local own = own_project(file)
-        state.snap, state.alone, state.stab = true, l.alone == true, type(l.stab) == "table" and l.stab or nil
+        local v = viewing[file] or {}
+        state.snap = true
+        -- As it's viewed (this session's changes), else as it was saved
+        state.alone = v.alone
+        if state.alone == nil then state.alone = l.alone == true end
+        state.stab = v.stab or (type(l.stab) == "table" and l.stab or nil)
         state.gyroflow_projects, state.gyroflow_new = { own }, own
         state.own_project = fs.is_file(own) and own or nil
         if state.alone and not state.own_project then state.trim = { ["in"] = a, out = b } end
@@ -568,7 +576,7 @@ local function save(name, update, typed, quiet, opts)
     next_id = next_id + 1
     local id = tostring(next_id)
     pending[id] = { name = final, file = file, update = update, typed = typed, a = a, b = b, history = typed and not update and first, quiet = quiet,
-                    keep_playing = opts.keep_playing, alone = l.alone }
+                    keep_playing = opts.keep_playing, alone = l.alone, stab = l.stab }
     state.saving = final
     publish()
     if not quiet then mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30) end
@@ -600,6 +608,9 @@ mp.register_script_message("preview-done", function(id, json)
     if p.update and edited and edited.file == p.file then
         edited["in"], edited.out = p.a, p.b
         if p.alone ~= nil then edited.alone = p.alone end
+        if p.stab then edited.stab = p.stab end
+        -- Saved: viewed as it is now
+        viewing[p.file] = nil
         -- A moment playing as a video of its own: again, with its new ends (not for its settings remembered)
         if state.moment and state.offset and not p.keep_playing then
             mp.osd_message("Updated " .. p.name, 3)
@@ -802,7 +813,7 @@ mp.register_script_message("export-name", function(json)
             clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
             from = a, to = b,
             -- A moment stabilized on its own, without a project: its part (or the part of it) on its own
-            alone = state.alone == true and state.own_project == nil and state.snap == true,
+            alone = state.snap == true and state.alone or nil,
         }))
         if first and text ~= "" and history_file() then
             local f = io.open(history_file(), "a")
@@ -1172,35 +1183,35 @@ mp.register_script_message("clips-failed", function()
     if macos then run({ "open", "-t", file }) elseif windows then run({ "notepad", file }) else run({ "xdg-open", file }) end
 end)
 
--- A moment's switch: its part stabilized on its own, or as part of the clip. Its own project (if it has one) is
--- changed with it, and the moment's file written again; then it plays again
-local function set_alone(m, alone)
-    if not m or not m.snap then
+-- A moment's switch as it's viewed: its part stabilized on its own, or as part of the clip. Not saved: Keep does
+local function view_alone()
+    local m = state.moment
+    if not m then return end
+    if not m.snap then
         return mp.osd_message("This moment is from before moments kept their stabilization: save it again (k) to have one", 4)
     end
-    save(m.name, m, nil, false, { range = { m["in"], m.out }, alone = alone })
+    viewing[m.file] = { alone = not state.alone, stab = current_stab() }
+    mp.commandv("playlist-play-index", "current")
 end
+mp.register_script_message("moment-alone", view_alone)
 
-mp.register_script_message("moment-alone", function()
-    local m = state.moment or state.editing
-    if m then set_alone(m, not m.alone) end
-end)
-
--- What a moment plays with, changed while it plays (the view, the level, the horizon lock): kept in it, a moment on
-local remember_timer = nil
+-- The view, level and horizon lock changed while a moment plays: as it's viewed this session, not saved
 mp.observe_property("user-data/gyroflow", "native", function(_, g)
     local m = state.moment
     if not (m and m.snap and state.loaded and type(g) == "table" and g.available) then return end
     local now = { view = g.view, level = g.level, horizon_lock = g.horizon_lock }
-    local was = m.stab or {}
-    if now.view == was.view and now.level == was.level and now.horizon_lock == was.horizon_lock then return end
-    if remember_timer then remember_timer:kill() end
-    remember_timer = mp.add_timeout(1.5, function()
-        remember_timer = nil
-        if state.moment ~= m or state.saving then return end
-        m.stab = now
-        save(m.name, m, nil, true, { range = { m["in"], m.out }, stab = now, keep_playing = true })
-    end)
+    local v = viewing[m.file] or {}
+    v.stab = now
+    if v.alone == nil then v.alone = state.alone end
+    viewing[m.file] = v
+end)
+
+-- Keep: how the moment is viewed now (its view, level, horizon lock, its switch) written into it, and into its own
+-- Gyroflow project
+mp.register_script_message("moment-keep", function()
+    local m = state.moment
+    if not (m and m.snap) then return end
+    save(m.name, m, nil, false, { range = { m["in"], m.out }, stab = current_stab(), alone = state.alone, keep_playing = true })
 end)
 
 -- A clip preview's own stabilization, a variant of the clip's: a project of its own beside it (a copy of the clip's,

@@ -338,6 +338,17 @@ local function actions(u, x, w, y, id, list)
     return y + 4 * s
 end
 
+
+-- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+local function moment_changed(ws)
+    local m = ws and ws.moment
+    if not (m and ws.snap) then return false end
+    if (ws.alone == true) ~= (m.alone == true) then return true end
+    local g, st = state("gyroflow") or {}, m.stab or {}
+    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
+    return not ws.own_project and g.level ~= st.level
+end
+
 local function project_part(u, x, w, y)
     local s = u.s
     local ws = state("workspace")
@@ -450,6 +461,11 @@ local function project_part(u, x, w, y)
         -- How it's stabilized: as it was made
         if ws.snap then
             y = u:switch(x, w, y, "alone", "Stabilize on its own", ws.alone == true, "script-message-to workspace moment-alone")
+            -- Viewing is never saving: changed here or in the other tabs, it's kept in the moment only by this
+            if moment_changed(ws) then
+                y = u:caption(x, w, y, "Changed for viewing only: the moment is as it was saved", { color = C.text })
+                y = u:button(x, w, y, "keep", "Keep in " .. fit(mo.name, w * 0.6, 12, s, true), "script-message-to workspace moment-keep", { primary = true })
+            end
             local g = state("gyroflow") or {}
             y = u:caption(x, w, y - 2 * s, ws.own_project and "Its own Gyroflow project: changes to the clip's don't reach it"
                 or ("The default preset, " .. (g.view == "off" and "stabilization off" or ((g.level or "medium") .. (g.view == "wide" and ", wider view" or "")))

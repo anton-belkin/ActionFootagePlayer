@@ -248,7 +248,7 @@ local function start(path, sdr, named)
         table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
         range = " " .. clock(a) .. "-" .. clock(b)
     end
-    if named and named.alone then table.insert(args, "--alone") end
+    if named and named.alone == true then table.insert(args, "--alone") elseif named and named.alone == false then table.insert(args, "--whole") end
     if named and named.output then
         table.insert(args, "--output"); table.insert(args, named.output)
         if named.link then table.insert(args, "--link"); table.insert(args, named.link) end
@@ -417,7 +417,7 @@ mp.register_script_message("preview", function(json)
         end
         if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
     end
-    if req.alone then table.insert(args, "--alone") end
+    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
     add("--from", req.from and string.format("%.3f", req.from))
     add("--to", req.to and string.format("%.3f", req.to))
