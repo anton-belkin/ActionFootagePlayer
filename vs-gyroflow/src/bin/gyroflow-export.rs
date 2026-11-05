@@ -16,7 +16,7 @@
 // as for the plugins (ActionFootagePlayer keeps your preset and DJI's LUT there, its own copy of the plugins being
 // read-only).
 //
-// Output: <project>/Exports/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only, _color
+// Output: <project>/_Exports/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only, _color
 // instead of _stab), 10-bit. The project is the one the player's workspace plugin finds (vs-gyroflow/src/workspace.rs);
 // with none, <video's folder>/stabilized/. --out and --output write elsewhere
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
@@ -52,8 +52,8 @@ use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Unde
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for log, color-converted) into the Exports/ folder of its project (the trip
-folder with .actionfootageplayer/ in it above the video, as the player initializes it), else into a stabilized/
+Renders each video stabilized (and, for log, color-converted) into the _Exports/ folder of its project (the trip
+folder with _ActionFootagePlayer/ in it above the video, as the player initializes it), else into a stabilized/
 folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
@@ -84,6 +84,8 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --to <time>      end at this time
   --out <folder>   write here instead of <project>/Exports (or stabilized/)
   --output <file>  write this file (one video only)
+  --alone          --from to --to stabilized on its own, for a video without a project: its smoothing from its own
+                   motion, not the clip's around it (a moment's; a project of its own keeps that in its trim range)
   --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
                    written in room ffmpeg leaves after the moov, so the file isn't written twice)
   --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
@@ -103,8 +105,8 @@ shows and plays, the frame also their cover art (the icon)
   --preview still  one frame, stabilized as with the options above, in SDR (the maker's LUT for D-Log M, else
                    NBCU's conversion; HLG through NBCU's), held for --from to --to (the whole video without them);
                    by default <name>.afplink.mp4 in --out or next to the video (the player's
-                   moments are Moments/<moment>.afplink.mp4)
-  --preview flipbook  the whole clip at a glance, for the player's Clips/: a frame at each --at time (the keyframe
+                   moments are _Moments/<moment>.afplink.mp4)
+  --preview flipbook  the whole clip at a glance, for the player's _Clips/: a frame at each --at time (the keyframe
                    at or before it, so only keyframes are decoded), 2 a second, in SDR as for a still and not
                    stabilized, from the low-resolution copy beside the clip when there is one (DJI's .LRF, GoPro's
                    .LRV); without --at, about 12 frames through the clip, 10 s apart at least, after its first second
@@ -142,6 +144,8 @@ struct Options {
     dv_rpu: Option<PathBuf>,
     dv_live_l1: bool,
     output: Option<PathBuf>,
+    // --alone: the part stabilized on its own
+    alone: bool,
     preview: Option<Preview>,
     at: Option<f64>,
     // --at for a flipbook: its frames' times
@@ -165,7 +169,7 @@ fn main() {
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
-                             dv_rpu: None, dv_live_l1: false, output: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None };
+                             dv_rpu: None, dv_live_l1: false, output: None, alone: false, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -198,6 +202,7 @@ fn main() {
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
             "--output" => opts.output = Some(PathBuf::from(value("--output"))),
+            "--alone" => opts.alone = true,
             "--preview" => opts.preview = Some(match value("--preview").as_str() {
                 "still" => Preview::Still,
                 "flipbook" => Preview::Flipbook,
@@ -634,11 +639,11 @@ fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
     }
 }
 
-// Where an export goes by default: its project's Exports/ (docs/moments-and-workspaces.md), else stabilized/ next to
+// Where an export goes by default: its project's _Exports/ (docs/moments-and-workspaces.md), else stabilized/ next to
 // the video. A project is never made here: the player initializes one where its user chooses
 fn default_out_dir(video: &Path) -> PathBuf {
     match vs_gyroflow::workspace::project_root(video) {
-        Some(root) => root.join("Exports"),
+        Some(root) => root.join("_Exports"),
         None => video.parent().unwrap_or(Path::new(".")).join("stabilized"),
     }
 }
@@ -1000,7 +1005,8 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let engine = match &source {
         // All of the motion data before it starts (look-ahead 0): an export has the time
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
-                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers)?)),
+                                                   SampleKind::U16, 1023.0, true, opts.interpolation, workers,
+                                                   opts.alone.then_some((from, to)))?)),
         None => None,
     };
     // The edge fill, as playback has it. A clip whose stabilized frame covers the output throughout has nothing to

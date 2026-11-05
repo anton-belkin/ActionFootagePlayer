@@ -61,7 +61,7 @@ local KEY_LABELS = {
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
-    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in Clips/ to the Trash (again: made again)" },
+    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in _Clips/ to the Trash (again: made again)" },
     { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
     { "script-binding highlights/prev", "Previous mark" },
     { "script-binding highlights/mark", "A mark here; on one, remove it" },
@@ -372,7 +372,7 @@ local function moments_menu(w)
         }, { checked = playing }))
     end
     if #items > 0 then table.insert(items, SEPARATOR) end
-    table.insert(items, item(platform == "darwin" and "Show Moments folder in Finder" or "Show Moments folder",
+    table.insert(items, item(platform == "darwin" and "Show _Moments folder in Finder" or "Show _Moments folder",
                              "script-message-to workspace moments-folder"))
     return items
 end
@@ -401,6 +401,7 @@ local function project_menu(w, key)
         table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
         table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
         table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
+        table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
     end
     table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
     table.insert(items, SEPARATOR)
@@ -492,6 +493,8 @@ local function build()
                 add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",
                          "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
             end
+            if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
+            if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
         if w and w.clip and local_file(w.clip) then add(submenu("Project", project_menu(w, key))) end

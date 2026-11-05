@@ -1,13 +1,13 @@
 -- workspace: which project the clip that plays belongs to, where that project's files for it are, and its moments
 -- (docs/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
 --
--- A project is a trip folder with `.actionfootageplayer/` in it: the nearest such folder above the clip, up to the
+-- A project is a trip folder with `_ActionFootagePlayer/` in it: the nearest such folder above the clip, up to the
 -- volume's top folder, and never the home folder itself. A clip in none has no project, and plays as before. One is
 -- never made by itself: the side panel's Project tab (or the menu's Project) initializes it, in the folder chosen
 -- among those above the clip, and what needs one (k, exports, clip previews, X) opens that tab when there's none.
 -- Marks need none: they're beside the clip.
 --
--- Moments are parts of a clip kept as small MP4s, `<project>/Moments/<name>.afplink.mp4` (subfolders too): one frame
+-- Moments are parts of a clip kept as small MP4s, `<project>/_Moments/<name>.afplink.mp4` (subfolders too): one frame
 -- in color, held for the part's length, with the link to the original inside (link.lua reads it, gyroflow-export
 -- writes it, the gyroflow plugin asks it to). Finder shows the frame; the player plays the original:
 --   k                   save the A-B part (l) as a moment, asking its name; on a moment playing whose part was moved:
@@ -15,16 +15,16 @@
 --   a moment's file     plays its original instead, from its in, looping its part, titled with its name; the
 --                       original's stabilization, look, highlights and telemetry with it. Not found: the preview
 --                       plays, and the OSD says where the original was looked for
---   Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
+--   _Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
--- Clip previews: Clips/<the clip's path>.afplink.mp4, a flipbook of the clip in color (its marks, else a dozen
+-- Clip previews: _Clips/<the clip's path>.afplink.mp4, a flipbook of the clip in color (its marks, else a dozen
 -- frames), made from the menu (Project -> Make clip previews), one at a time in the background, only for clips not
--- in .actionfootageplayer/clips-made.txt, so that one deleted (X, or in Finder: not interesting) stays deleted.
+-- in _ActionFootagePlayer/clips-made.txt, so that one deleted (X, or in Finder: not interesting) stays deleted.
 --   X                   this clip isn't interesting: its preview to the Trash; again: made again
 -- A clip preview's file plays its original, all of it.
 --
--- Exports (Shift+E, the gyroflow plugin's) go to <project>/Exports/, named in the same dialog: <name>.mov, with the
+-- Exports (Shift+E, the gyroflow plugin's) go to <project>/_Exports/, named in the same dialog: <name>.mov, with the
 -- look in parentheses unless it's HDR ("Turtle (SDR).mov"), the link inside (kind export). A part that isn't a
 -- moment yet is saved as the moment export_<name> beside it; one that is (played, or equal to one to the frame)
 -- names the export. An export opened plays as it is; the menu offers its original.
@@ -37,7 +37,7 @@
 --   redirected      yes when the file playing is a link (a moment, a clip preview) and mpv plays `clip` instead
 --   offset, length  a moment plays as a video of its own, its part of the clip: the time playing plus offset is the
 --                   clip's (stabilization, telemetry, marks, exports, moments saved take it)
---   clip_preview    when a clip preview plays: { file }
+--   playing_preview when a clip preview plays: { file }
 --   clips           while clip previews are made: { done, total }
 --   project_choices with no project: the folders one can be started in, from the top down; project_new: the one the
 --                   panel suggests (init-project <folder> initializes it)
@@ -49,7 +49,7 @@
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
 --   marks_file      where its marks are once changed (the highlights plugin's M)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
---   moments_folder  the project's Moments/ folder
+--   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
 --   export          when an export plays: { name, original (nil: not found), in, out }
 -- Without this plugin, the gyroflow plugin looks next to the clip itself, which is the same place for now.
@@ -77,7 +77,7 @@ local platform = mp.get_property("platform") or ""
 local windows = platform == "windows" or package.config:sub(1, 1) == "\\"
 local macos = platform == "darwin"
 
--- How often the Moments/ folders are looked at for files added, removed or renamed in Finder
+-- How often the _Moments/ folders are looked at for files added, removed or renamed in Finder
 local WATCH_SECONDS = 5
 
 local fs = {
@@ -103,7 +103,7 @@ local ws = workspace.new(fs)
 local moments = moments_lib.new(ws, fs)
 
 local state = {}
--- The project's Moments/ as last read: every moment in it, and its folders' times
+-- The project's _Moments/ as last read: every moment in it, and its folders' times
 local found = { list = {}, dirs = {} }
 local scanned_project = nil
 local watch_timer = nil
@@ -131,6 +131,10 @@ end
 
 -- The project's counts and this clip's preview, for the side panel (set further down, with the clip previews)
 local extras = nil
+-- The project's settings (further down)
+local settings
+-- A moment's ends from its project's trim changed in Gyroflow (further down)
+local adopt_gyroflow_trim
 
 local function clock(s)
     s = math.floor(s + 0.5)
@@ -191,6 +195,12 @@ local function describe(path)
     }
 end
 
+-- A moment's or clip preview's own Gyroflow project: beside it, its name with .gyroflow (Turtle.gyroflow beside
+-- Turtle.afplink.mp4)
+local function own_project(file)
+    return ws.join(ws.parent(file), moments_lib.display_name(file) .. ".gyroflow")
+end
+
 -- Chapters: the moments' ins and outs, put in beside what's there (the file's own, the highlights plugin's)
 local function same_chapter(a, b) return a.title == b.title and math.abs(a.time - b.time) < 0.001 end
 
@@ -236,7 +246,8 @@ local function refresh()
     local mine = moments.of_clip(found.list, { relative = state.relative, size = info and info.size, created = state.created })
     local list, chapters = {}, {}
     for _, m in ipairs(mine) do
-        list[#list + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out }
+        list[#list + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out,
+                            snap = m.link.snap == 1, alone = m.link.alone == true, stab = m.link.stab }
         -- A moment playing is a video of its own: the clip's moments aren't on its seek bar
         if not state.offset then
             chapters[#chapters + 1] = { title = m.name, time = m.link["in"] }
@@ -250,7 +261,7 @@ local function refresh()
     publish()
 end
 
--- A folder of Moments/ changed (a file added, removed or renamed in it), or Moments/ was made
+-- A folder of _Moments/ changed (a file added, removed or renamed in it), or _Moments/ was made
 local function watch()
     if not scanned_project or scanned_project ~= state.project then return end
     local root = ws.join(scanned_project, moments_lib.FOLDER)
@@ -289,7 +300,12 @@ local function open_moment(path)
         state = describe(original)
         state.path = path
         state.redirected = true
-        state.clip_preview = { file = file }
+        state.playing_preview = { file = file }
+        -- A variant of the clip's stabilization: a project of its own beside the preview; else the clip's
+        local own = own_project(file)
+        if fs.is_file(own) then
+            state.gyroflow_projects, state.gyroflow_new, state.own_project = { own }, own, own
+        end
         return
     end
     if type(l) ~= "table" or l.v ~= 1 or l.kind ~= "moment" or type(l["in"]) ~= "number" or type(l.out) ~= "number" then
@@ -319,13 +335,22 @@ local function open_moment(path)
     state = describe(original)
     state.path = path
     state.redirected = true
-    state.moment = { file = file, name = name, ["in"] = a, out = b }
+    state.moment = { file = file, name = name, ["in"] = a, out = b, snap = l.snap == 1, alone = l.alone == true, stab = l.stab }
     state.offset, state.length = a, b - a
+    -- Stabilized as it was made (snap): its own project, else the preset with its settings (stab), its part on its
+    -- own (trim) when alone. A moment from before plays with the clip's
+    if l.snap == 1 then
+        local own = own_project(file)
+        state.snap, state.alone, state.stab = true, l.alone == true, type(l.stab) == "table" and l.stab or nil
+        state.gyroflow_projects, state.gyroflow_new = { own }, own
+        state.own_project = fs.is_file(own) and own or nil
+        if state.alone and not state.own_project then state.trim = { ["in"] = a, out = b } end
+    end
     -- An EDL has no metadata of its own: the original's creation time from the link
     state.created = l.created
 end
 
--- Moments/ or a folder in it: its moments, in the order they happened, as the playlist
+-- _Moments/ or a folder in it: its moments, in the order they happened, as the playlist
 local function open_folder(dir)
     local project = moments.project_of(ws.join(dir, "x"))
     if not project then return end
@@ -371,6 +396,7 @@ end)
 mp.register_event("file-loaded", function()
     state.created = mp.get_property("metadata/by-key/creation_time") or state.created
     state.loaded = true
+    if adopt_gyroflow_trim then adopt_gyroflow_trim() end
     refresh()
     if not watch_timer then watch_timer = mp.add_periodic_timer(WATCH_SECONDS, watch) end
 end)
@@ -437,6 +463,29 @@ local function mkdir(dir)
     return fs.is_dir(dir)
 end
 
+-- gyroflow-project, beside the gyroflow plugin's gyroflow-export
+local function project_tool()
+    local exporter = mp.get_property_native("user-data/gyroflow/exporter")
+    if type(exporter) ~= "string" then return nil end
+    return (exporter:gsub("gyroflow%-export(%.?%a*)$", "gyroflow-project%1"))
+end
+
+local function run_tool(args)
+    local r = mp.command_native({ name = "subprocess", args = args, playback_only = false, capture_stderr = true })
+    if not r or r.status ~= 0 then
+        mp.msg.warn(table.concat(args, " ") .. ": " .. tostring(r and r.stderr))
+        return false
+    end
+    return true
+end
+
+-- The stabilization's settings as it plays, over the preset: what a moment keeps
+local function current_stab()
+    local g = mp.get_property_native("user-data/gyroflow")
+    if type(g) ~= "table" then return nil end
+    return { view = g.view, level = g.level, horizon_lock = g.horizon_lock }
+end
+
 -- The clip's project, for what needs one (moments, exports, clip previews). None is made by itself: the side panel's
 -- Project tab opens, where one is initialized in a folder of the user's choice (init-project). Marks need none
 local function need_project(what)
@@ -449,11 +498,18 @@ end
 
 -- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
 -- nothing on screen unless it fails (the moment that comes with an export)
-local function save(name, update, typed, quiet)
-    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-    if not (a and b and b > a) then return end
-    -- In the clip's time (a moment playing starts at its in)
-    a, b = a + (state.offset or 0), b + (state.offset or 0)
+-- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own)
+local function save(name, update, typed, quiet, opts)
+    opts = opts or {}
+    local a, b
+    if opts.range then
+        a, b = opts.range[1], opts.range[2]
+    else
+        a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+        if not (a and b and b > a) then return end
+        -- In the clip's time (a moment playing starts at its in)
+        a, b = a + (state.offset or 0), b + (state.offset or 0)
+    end
     local safe = moments_lib.safe_name(name)
     if not safe then
         mp.osd_message("Moment: that name has nothing a file name can have", 3)
@@ -473,6 +529,29 @@ local function save(name, update, typed, quiet)
         v = 1, kind = "moment", clip = ws.relative(state.clip, root), size = info and info.size,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
+    -- How it's stabilized, fixed as it's made (snap): the settings it plays with over the preset (stab), its part on
+    -- its own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
+    -- clip's project changed later doesn't change it. An update keeps them; a moment from before keeps the clip's
+    local preview_project = nil
+    if not update or update.snap then
+        local alone = opts.alone
+        if alone == nil then alone = update and update.alone or (not update and settings().moments_alone == true) or false end
+        l.snap, l.alone, l.stab = 1, alone, opts.stab or (update and update.stab) or current_stab()
+        local own = own_project(file)
+        local tool = project_tool()
+        local trim = string.format("%.3f,%.3f", a, b)
+        if fs.is_file(own) then
+            if tool then run_tool({ tool, "--edit", "--trim", trim, "--alone", alone and "yes" or "no", own }) end
+            preview_project = own
+        elseif not update then
+            local g = mp.get_property_native("user-data/gyroflow")
+            if tool and type(g) == "table" and g.kind == "project" and (g.project or "") ~= ""
+               and run_tool({ tool, "--copy", g.project, "--trim", trim, "--alone", alone and "yes" or "no", state.clip, own }) then
+                preview_project = own
+            end
+        end
+        if not preview_project then preview_project = false end
+    end
     -- The preview's frame: the first highlight inside the part, else its middle
     local at
     local h = mp.get_property_native("user-data/highlights")
@@ -488,13 +567,16 @@ local function save(name, update, typed, quiet)
     end
     next_id = next_id + 1
     local id = tostring(next_id)
-    pending[id] = { name = final, file = file, update = update, typed = typed, a = a, b = b, history = typed and not update and first, quiet = quiet }
+    pending[id] = { name = final, file = file, update = update, typed = typed, a = a, b = b, history = typed and not update and first, quiet = quiet,
+                    keep_playing = opts.keep_playing, alone = l.alone }
     state.saving = final
     publish()
     if not quiet then mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30) end
     mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
         id = id, clip = state.clip, from = a, to = b, at = at, link = utils.format_json(l), dates = dates, output = file,
         force = update ~= nil, reply = mp.get_script_name(),
+        -- Its own project, or none (the preset: false); nil: the clip's, as it plays (a moment from before)
+        project = preview_project, alone = l.alone == true and preview_project == false,
     }))
 end
 
@@ -517,8 +599,9 @@ mp.register_script_message("preview-done", function(id, json)
     local edited = state.moment or state.editing
     if p.update and edited and edited.file == p.file then
         edited["in"], edited.out = p.a, p.b
-        -- A moment playing as a video of its own: again, with its new ends
-        if state.moment and state.offset then
+        if p.alone ~= nil then edited.alone = p.alone end
+        -- A moment playing as a video of its own: again, with its new ends (not for its settings remembered)
+        if state.moment and state.offset and not p.keep_playing then
             mp.osd_message("Updated " .. p.name, 3)
             return mp.commandv("playlist-play-index", "current")
         end
@@ -611,7 +694,8 @@ end)
 mp.register_script_message("moment-edit", function(i)
     local m = moment_at(i)
     if not m or not state.clip then return end
-    wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out } }
+    wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out,
+                                                                             snap = m.snap, alone = m.alone, stab = m.stab } }
     mp.commandv("loadfile", state.clip, "replace")
 end)
 
@@ -629,6 +713,9 @@ mp.register_script_message("moment-remove", function(i)
     if not m then return end
     trash(m.file, function(ok)
         mp.osd_message(ok and (m.name .. " is in the Trash") or ("Couldn't move " .. m.name .. " to the Trash"), 3)
+        -- Its own Gyroflow project goes with it
+        local own = own_project(m.file)
+        if ok and fs.is_file(own) then trash(own, function() end) end
         refresh()
     end)
 end)
@@ -643,8 +730,11 @@ mp.register_script_message("moment-rename", function(i)
         if fs.is_file(target) or fs.is_dir(target) then
             return mp.osd_message(safe .. " is taken", 3)
         end
+        local own = own_project(m.file)
         local ok, err = os.rename(m.file, target)
         if not ok then return mp.osd_message("Couldn't rename " .. m.name .. ": " .. tostring(err), 4) end
+        -- Its own Gyroflow project, renamed with it (Gyroflow finds the clip by its own path inside)
+        if fs.is_file(own) then os.rename(own, own_project(target)) end
         if state.moment and state.moment.file == m.file then
             state.moment.file, state.moment.name = target, safe
             mp.set_property("file-local-options/force-media-title", safe)
@@ -711,6 +801,8 @@ mp.register_script_message("export-name", function(json)
         mp.commandv("script-message-to", req.reply, "export-start", utils.format_json({
             clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
             from = a, to = b,
+            -- A moment stabilized on its own, without a project: its part (or the part of it) on its own
+            alone = state.alone == true and state.own_project == nil and state.snap == true,
         }))
         if first and text ~= "" and history_file() then
             local f = io.open(history_file(), "a")
@@ -735,12 +827,13 @@ mp.register_script_message("open-original", function()
     end
     local m = state.moment
     if m and not m.missing and state.clip then
-        wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out } }
+        wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out,
+                                                                                 snap = m.snap, alone = m.alone, stab = m.stab } }
         return mp.commandv("loadfile", state.clip, "replace")
     end
 end)
 
--- Clip previews (Clips/): one at a time, in the background, from the menu or X
+-- Clip previews (_Clips/): one at a time, in the background, from the menu or X
 local clips_job = nil
 local recount
 local overlay = mp.create_osd_overlay("ass-events")
@@ -789,8 +882,8 @@ end
 
 local function native(rel) return windows and rel:gsub("/", "\\") or rel end
 
--- The project's settings, .actionfootageplayer/settings.json: clips_flat (clip previews all in Clips/ itself)
-local function settings()
+-- The project's settings, _ActionFootagePlayer/settings.json: clips_flat (clip previews all in _Clips/ itself)
+settings = function()
     local f = state_file("settings.json") and io.open(state_file("settings.json"), "r")
     if not f then return {} end
     local t = utils.parse_json(f:read("*a") or "")
@@ -809,7 +902,7 @@ local function save_settings(t)
 end
 
 -- The clip previews there are, found by the link inside each: renamed, or moved into folders of one's own within
--- Clips/, they're still the clip's. { [the clip's path in the project] = { file, size } }, read again a minute on
+-- _Clips/, they're still the clip's. { [the clip's path in the project] = { file, size } }, read again a minute on
 local previews_cache = { time = -1e9, index = {} }
 local function previews(force)
     local project = state.project
@@ -831,7 +924,7 @@ local function preview_for(relative, size)
     return nil
 end
 
--- Where a new preview goes: at the clip's path in Clips/ (flat: in Clips/ itself). A name another clip's preview has
+-- Where a new preview goes: at the clip's path in _Clips/ (flat: in _Clips/ itself). A name another clip's preview has
 -- gets the clip's folder in parentheses ("GX010123 (100GOPRO)"), then a number
 local function new_preview_path(root, c, flat)
     local file = ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(c.relative, flat)))
@@ -1016,6 +1109,7 @@ extras = function(force)
     state.clips_stats = cached.stats
     local info = utils.file_info(state.clip)
     state.clips_flat = settings().clips_flat == true
+    state.moments_alone = settings().moments_alone == true
     local failed = io.open(ws.join(ws.join(project, workspace.STATE_DIR), "clips-failed.txt"), "r")
     state.clips_failed = nil
     if failed then
@@ -1051,7 +1145,6 @@ mp.register_script_message("init-project", function(dir)
     if not fs.is_dir(sd) and not mkdir(sd) then
         return mp.osd_message("Can't write in " .. dir, 4)
     end
-    if windows then run({ "attrib", "+h", sd }) end
     state.project = dir
     state.relative = ws.relative(state.clip, dir)
     state.moments_folder = ws.join(dir, moments_lib.FOLDER)
@@ -1060,7 +1153,7 @@ mp.register_script_message("init-project", function(dir)
     refresh()
 end)
 
--- Clip previews all in Clips/ itself, or in the footage's folders (a project's setting)
+-- Clip previews all in _Clips/ itself, or in the footage's folders (a project's setting)
 mp.register_script_message("clips-flat", function()
     if not state.project then return end
     local t = settings()
@@ -1068,8 +1161,8 @@ mp.register_script_message("clips-flat", function()
     save_settings(t)
     state.clips_flat = t.clips_flat
     publish()
-    mp.osd_message(t.clips_flat and "New clip previews: all in Clips/, the clips' folders left out"
-        or "New clip previews: in the clips' folders, within Clips/", 3)
+    mp.osd_message(t.clips_flat and "New clip previews: all in _Clips/, the clips' folders left out"
+        or "New clip previews: in the clips' folders, within _Clips/", 3)
 end)
 
 -- Why the last clip previews that failed did
@@ -1078,3 +1171,94 @@ mp.register_script_message("clips-failed", function()
     if not file or not fs.is_file(file) then return end
     if macos then run({ "open", "-t", file }) elseif windows then run({ "notepad", file }) else run({ "xdg-open", file }) end
 end)
+
+-- A moment's switch: its part stabilized on its own, or as part of the clip. Its own project (if it has one) is
+-- changed with it, and the moment's file written again; then it plays again
+local function set_alone(m, alone)
+    if not m or not m.snap then
+        return mp.osd_message("This moment is from before moments kept their stabilization: save it again (k) to have one", 4)
+    end
+    save(m.name, m, nil, false, { range = { m["in"], m.out }, alone = alone })
+end
+
+mp.register_script_message("moment-alone", function()
+    local m = state.moment or state.editing
+    if m then set_alone(m, not m.alone) end
+end)
+
+-- What a moment plays with, changed while it plays (the view, the level, the horizon lock): kept in it, a moment on
+local remember_timer = nil
+mp.observe_property("user-data/gyroflow", "native", function(_, g)
+    local m = state.moment
+    if not (m and m.snap and state.loaded and type(g) == "table" and g.available) then return end
+    local now = { view = g.view, level = g.level, horizon_lock = g.horizon_lock }
+    local was = m.stab or {}
+    if now.view == was.view and now.level == was.level and now.horizon_lock == was.horizon_lock then return end
+    if remember_timer then remember_timer:kill() end
+    remember_timer = mp.add_timeout(1.5, function()
+        remember_timer = nil
+        if state.moment ~= m or state.saving then return end
+        m.stab = now
+        save(m.name, m, nil, true, { range = { m["in"], m.out }, stab = now, keep_playing = true })
+    end)
+end)
+
+-- A clip preview's own stabilization, a variant of the clip's: a project of its own beside it (a copy of the clip's,
+-- or made from its motion data as it plays now); off, it goes to the Trash and the clip's is back
+mp.register_script_message("clip-own", function()
+    local cp = state.playing_preview
+    if not cp then return mp.osd_message("Its own stabilization is for a clip preview playing (_Clips/)", 3) end
+    local own = own_project(cp.file)
+    local function again() mp.commandv("playlist-play-index", "current") end
+    if fs.is_file(own) then
+        return trash(own, function(ok)
+            mp.osd_message(ok and "The clip's own stabilization again" or "Couldn't move its project to the Trash", 3)
+            if ok then again() end
+        end)
+    end
+    local tool = project_tool()
+    if not tool then return mp.osd_message("Its own stabilization needs the gyroflow plugin", 3) end
+    local g = mp.get_property_native("user-data/gyroflow") or {}
+    local args
+    if g.kind == "project" and (g.project or "") ~= "" then
+        args = { tool, "--copy", g.project, state.clip, own }
+    else
+        args = { tool, "--level", g.level or "medium" }
+        if g.view == "wide" then table.insert(args, "--wide") end
+        if g.horizon_lock == "yes" or g.horizon_lock == "no" then
+            table.insert(args, "--horizon-lock"); table.insert(args, g.horizon_lock == "yes" and "100" or "0")
+        end
+        table.insert(args, state.clip); table.insert(args, own)
+    end
+    if run_tool(args) then
+        mp.osd_message("Its own stabilization: " .. ws.name(own) .. " (Ctrl+e opens it in Gyroflow)", 4)
+        again()
+    else
+        mp.osd_message("Couldn't make its project", 3)
+    end
+end)
+
+-- New moments stabilized on their own (a project's setting)
+mp.register_script_message("moments-alone", function()
+    if not state.project then return end
+    local t = settings()
+    t.moments_alone = not (t.moments_alone == true)
+    save_settings(t)
+    state.moments_alone = t.moments_alone
+    publish()
+    mp.osd_message(t.moments_alone and "New moments: stabilized on their own" or "New moments: stabilized as part of their clip", 3)
+end)
+
+-- A moment's own project whose trim was changed in Gyroflow: its ends from there, as it loads (the last change wins)
+adopt_gyroflow_trim = function()
+    local m = state.moment
+    local tool = state.own_project and m and m.snap and project_tool()
+    if not tool then return end
+    local r = mp.command_native({ name = "subprocess", args = { tool, "--print-trim", state.own_project }, playback_only = false, capture_stdout = true })
+    local a, b = (r and r.stdout or ""):match("^([%d%.]+),([%d%.]+)")
+    a, b = tonumber(a), tonumber(b)
+    if a and b and (math.abs(a - m["in"]) > 0.01 or math.abs(b - m.out) > 0.01) then
+        mp.osd_message(m.name .. ": its ends from Gyroflow, " .. clock(a) .. "–" .. clock(b), 3)
+        save(m.name, m, nil, true, { range = { a, b } })
+    end
+end

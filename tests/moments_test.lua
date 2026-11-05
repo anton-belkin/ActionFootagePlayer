@@ -99,22 +99,22 @@ local m = moments_lib.new(ws, fs)
 local function link(clip, a, b, extra)
     return ('{"v":1,"kind":"moment","clip":"%s","size":100,"created":"2026-10-24T06:45:41Z","in":%s,"out":%s%s}'):format(clip, a, b, extra or "")
 end
-dir("/T/Egypt/.actionfootageplayer")
+dir("/T/Egypt/_ActionFootagePlayer")
 file("/T/Egypt/Day 1/A.MP4", 100)
 file("/T/Egypt/Day 1/B.MP4", 100)
-file("/T/Egypt/Moments/Turtle.afplink.mp4", 10, 1, link("Day 1/A.MP4", 20, 30))
-file("/T/Egypt/Moments/Reef/Moray.afplink.mp4", 10, 1, link("Day 1/A.MP4", 5, 8))
-file("/T/Egypt/Moments/Other.afplink.mp4", 10, 1, link("Day 1/B.MP4", 1, 2))
-file("/T/Egypt/Moments/Wrong size.afplink.mp4", 10, 1, ('{"v":1,"kind":"moment","clip":"Day 1/A.MP4","size":999,"in":1,"out":2}'))
-file("/T/Egypt/Moments/Clip preview.afplink.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/A.MP4"}')
-file("/T/Egypt/Moments/plain video.mp4", 10, 1, nil)
-file("/T/Egypt/Moments/.hidden.mp4", 10, 1, link("Day 1/A.MP4", 1, 2))
-file("/T/Egypt/Moments/notes.txt", 10, 1, nil)
+file("/T/Egypt/_Moments/Turtle.afplink.mp4", 10, 1, link("Day 1/A.MP4", 20, 30))
+file("/T/Egypt/_Moments/Reef/Moray.afplink.mp4", 10, 1, link("Day 1/A.MP4", 5, 8))
+file("/T/Egypt/_Moments/Other.afplink.mp4", 10, 1, link("Day 1/B.MP4", 1, 2))
+file("/T/Egypt/_Moments/Wrong size.afplink.mp4", 10, 1, ('{"v":1,"kind":"moment","clip":"Day 1/A.MP4","size":999,"in":1,"out":2}'))
+file("/T/Egypt/_Moments/Clip preview.afplink.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/A.MP4"}')
+file("/T/Egypt/_Moments/plain video.mp4", 10, 1, nil)
+file("/T/Egypt/_Moments/.hidden.mp4", 10, 1, link("Day 1/A.MP4", 1, 2))
+file("/T/Egypt/_Moments/notes.txt", 10, 1, nil)
 
 local cache = {}
 local found = m.scan("/T/Egypt", cache)
 expect("scan: moments only", #found.list, 4)
-expect("scan: dirs watched", found.dirs["/T/Egypt/Moments/Reef"], 7)
+expect("scan: dirs watched", found.dirs["/T/Egypt/_Moments/Reef"], 7)
 local mine = m.of_clip(found.list, { relative = "Day 1/A.MP4", size = 100, created = "2026-10-24T09:45:41+03:00" })
 expect("of clip", #mine, 2)
 expect("of clip: by in", mine[1].name, "Moray")
@@ -124,13 +124,13 @@ expect("of clip: unknown size", #m.of_clip(found.list, { relative = "Day 1/A.MP4
 local before = reads
 m.scan("/T/Egypt", cache)
 expect("cache: nothing read again", reads, before)
-files["/T/Egypt/Moments/Turtle.afplink.mp4"].mtime = 2
+files["/T/Egypt/_Moments/Turtle.afplink.mp4"].mtime = 2
 m.scan("/T/Egypt", cache)
 expect("cache: a changed file read again", reads, before + 1)
 expect("by time", m.by_time(found.list)[1].name, "Other")
 
 -- Where a moment's original is
-expect("project of", m.project_of("/T/Egypt/Moments/Reef/Moray.afplink.mp4"), "/T/Egypt")
+expect("project of", m.project_of("/T/Egypt/_Moments/Reef/Moray.afplink.mp4"), "/T/Egypt")
 expect("project of: not in Moments", m.project_of("/T/Egypt/Day 1/A.MP4"), nil)
 expect("project of: copied out", m.project_of("/Users/me/Desktop/Turtle.afplink.mp4"), nil)
 local l = fs.parse_json(link("Day 1/A.MP4", 20, 30, ',"roots":["/Old/Egypt","/T/Egypt"]'))
@@ -140,14 +140,14 @@ expect("original: size differs", m.original(fs.parse_json('{"v":1,"clip":"Day 1/
 expect("original: missing", m.original(fs.parse_json('{"v":1,"clip":"Day 9/X.MP4"}'), "/T/Egypt"), nil)
 
 -- Unique files
-local f, n = m.unique_file("/T/Egypt/Moments", "Turtle")
-expect("unique file", f, "/T/Egypt/Moments/Turtle 2.afplink.mp4")
+local f, n = m.unique_file("/T/Egypt/_Moments", "Turtle")
+expect("unique file", f, "/T/Egypt/_Moments/Turtle 2.afplink.mp4")
 expect("unique name", n, "Turtle 2")
-expect("free file", (m.unique_file("/T/Egypt/Moments", "Dolphin")), "/T/Egypt/Moments/Dolphin.afplink.mp4")
-file("/T/Egypt/Exports/Turtle (SDR).mov", 10)
-expect("unique export", (m.unique_file("/T/Egypt/Exports", "Turtle", " (SDR).mov")), "/T/Egypt/Exports/Turtle 2 (SDR).mov")
-expect("export's project", m.project_of("/T/Egypt/Exports/Turtle (SDR).mov", "Exports"), "/T/Egypt")
-expect("not a moment's", m.project_of("/T/Egypt/Exports/Turtle (SDR).mov"), nil)
+expect("free file", (m.unique_file("/T/Egypt/_Moments", "Dolphin")), "/T/Egypt/_Moments/Dolphin.afplink.mp4")
+file("/T/Egypt/_Exports/Turtle (SDR).mov", 10)
+expect("unique export", (m.unique_file("/T/Egypt/_Exports", "Turtle", " (SDR).mov")), "/T/Egypt/_Exports/Turtle 2 (SDR).mov")
+expect("export's project", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov", "_Exports"), "/T/Egypt")
+expect("not a moment's", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov"), nil)
 
 -- Clip previews
 expect("clip preview", moments_lib.clip_preview_relative("Day 1/DJI_0068_D.MP4"), "Day 1/DJI_0068_D.afplink.mp4")
@@ -161,15 +161,15 @@ expect("made, other size", made["Day 1/A.MP4\t101"], nil)
 expect("made, CRLF", made["B.MP4\t7"], true)
 file("/T/Egypt/Day 1/A.LRF", 10)
 file("/T/Egypt/.hidden/C.MP4", 10)
-file("/T/Egypt/Exports/x.mov", 10)
-file("/T/Egypt/Clips/Day 1/A.afplink.mp4", 10)
+file("/T/Egypt/_Exports/x.mov", 10)
+file("/T/Egypt/_Clips/Day 1/A.afplink.mp4", 10)
 local clips = m.footage("/T/Egypt")
 local rels = {}
 for _, c in ipairs(clips) do rels[#rels + 1] = c.relative end
 expect("footage", table.concat(rels, ","), "Day 1/A.MP4,Day 1/B.MP4")
 -- Clip previews found by their link, whatever their name
-file("/T/Egypt/Clips/Reef/my favourite.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/B.MP4","size":100}')
-local previews = m.scan("/T/Egypt", {}, "Clips", "clip").list
+file("/T/Egypt/_Clips/Reef/my favourite.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/B.MP4","size":100}')
+local previews = m.scan("/T/Egypt", {}, "_Clips", "clip").list
 expect("clip previews by link", #previews, 1)
 expect("a renamed one", previews[1] and previews[1].link.clip, "Day 1/B.MP4")
 

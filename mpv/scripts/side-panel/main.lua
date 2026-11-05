@@ -354,8 +354,8 @@ local function project_part(u, x, w, y)
     if not ws.project then
         u:text(ix, y + 8 * s, "No project yet", { size = 14, bold = true })
         y = y + 22 * s
-        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders Moments, Clips and Exports, "
-            .. "and a hidden .actionfootageplayer for its own notes. A clip's own files, its marks and Gyroflow project, "
+        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders _Moments, _Clips and _Exports, "
+            .. "and _ActionFootagePlayer for its own notes. A clip's own files, its marks and Gyroflow project, "
             .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
             .. "kept beside the clip anyway.")
         local choices = ws.project_choices or {}
@@ -410,6 +410,7 @@ local function project_part(u, x, w, y)
             y = actions(u, ix, iw, y + 2 * s, "card", {
                 { platform == "darwin" and "Project folder in Finder" or "Project folder", "script-message-to workspace project-folder" },
                 { "Make again for removed clips", "script-message-to workspace clips-again" },
+                { (ws.moments_alone and "✓ " or "") .. "New moments stabilized on their own", "script-message-to workspace moments-alone" },
             })
         end
         local where = platform == "darwin" and "Finder" or "the folder"
@@ -418,7 +419,7 @@ local function project_part(u, x, w, y)
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
         elseif st and st.new > 0 then
             y = u:button(ix, iw, y + 2 * s, "clips-make", "Make clip previews · " .. st.new .. " new", "script-message-to workspace clips-make")
-            -- All in Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
+            -- All in _Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
             y = u:switch(ix, iw, y - 2 * s, "clips-flat", "Ignore subfolders", ws.clips_flat == true, "script-message-to workspace clips-flat")
         end
         if ws.clips_failed and not ws.clips then
@@ -446,6 +447,16 @@ local function project_part(u, x, w, y)
     if mo then
         y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
+        -- How it's stabilized: as it was made
+        if ws.snap then
+            y = u:switch(x, w, y, "alone", "Stabilize on its own", ws.alone == true, "script-message-to workspace moment-alone")
+            local g = state("gyroflow") or {}
+            y = u:caption(x, w, y - 2 * s, ws.own_project and "Its own Gyroflow project: changes to the clip's don't reach it"
+                or ("The default preset, " .. (g.view == "off" and "stabilization off" or ((g.level or "medium") .. (g.view == "wide" and ", wider view" or "")))
+                    .. ": the clip's project, if it gets one, doesn't reach it"))
+        else
+            y = u:caption(x, w, y, "Made before moments kept their stabilization: it plays with the clip's. Trim or update it to keep its own")
+        end
         local idx
         for i, m in ipairs(ws.moments or {}) do if m.file == mo.file then idx = i end end
         if idx then
@@ -455,6 +466,11 @@ local function project_part(u, x, w, y)
                 { REVEAL, "script-message-to workspace moment-reveal " .. idx },
             })
         end
+    elseif ws.playing_preview then
+        -- A clip preview playing: its own stabilization, a variant of the clip's
+        y = u:switch(x, w, y, "clip-own", "Its own stabilization", ws.own_project ~= nil, "script-message-to workspace clip-own")
+        y = u:caption(x, w, y - 2 * s, ws.own_project and "A project of this preview's own: a variant of the clip's (Ctrl+e opens it)"
+            or "The clip's, as it plays. Copy the preview in Finder for another variant")
     elseif ws.editing then
         y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
