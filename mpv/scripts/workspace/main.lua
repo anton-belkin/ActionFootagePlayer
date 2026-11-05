@@ -24,6 +24,11 @@
 --   X                   this clip isn't interesting: its preview to the Trash; again: made again
 -- A clip preview's file plays its original, all of it.
 --
+-- A clip spoiled in part (docs/lossless-cut.md): Ctrl+x cuts the A-B part out, the menu also all before or after
+-- where it plays. Asked first; afp-cut writes what's kept without re-encoding and reads it back as the original,
+-- then the original goes to the Trash (with its LRF, Gyroflow project, clip preview, marks file), the first part
+-- takes its name and a second one its own recording time (DJI's names), and the marks and moments follow.
+--
 -- Exports (Shift+E, the gyroflow plugin's) go to <project>/_Exports/, named in the same dialog: <name>.mov, with the
 -- look in parentheses unless it's HDR ("Turtle (SDR).mov"), the link inside (kind export). A part that isn't a
 -- moment yet is saved as the moment export_<name> beside it; one that is (played, or equal to one to the frame)
@@ -51,13 +56,15 @@
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
+--   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
 -- Without this plugin, the gyroflow plugin looks next to the clip itself, which is the same place for now.
 --
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
--- project-folder, clips-folder (show them), init-project <folder>. open-original: an export's original, at its part. For the
+-- project-folder, clips-folder (show them), init-project <folder>. cut-before, cut-after (all before or after where it
+-- plays cut out; Ctrl+x: the A-B part). open-original: an export's original, at its part. For the
 -- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
 -- link }).
 --
@@ -1184,6 +1191,269 @@ mp.register_script_message("clips-failed", function()
     local file = state.project and ws.join(ws.join(state.project, workspace.STATE_DIR), "clips-failed.txt")
     if not file or not fs.is_file(file) then return end
     if macos then run({ "open", "-t", file }) elseif windows then run({ "notepad", file }) else run({ "xdg-open", file }) end
+end)
+
+-- Cutting a spoiled part out of the clip (docs/lossless-cut.md): Ctrl+x cuts the A-B part out (the menu: also all
+-- before or after where it is). afp-cut (the gyroflow plugin's) writes the parts kept, hidden, each read back as
+-- the original; only then does the original go to the Trash (with its LRF, Gyroflow project, clip preview and marks
+-- file), the first part taking its name and a later one its own recording time, and its marks and moments follow.
+local cut_lib = require 'cut'
+local cutting = nil
+
+-- A tool of the gyroflow plugin beside this one (the app has both)
+local function plugin_tool(name)
+    local dir = mp.get_script_directory()
+    local plugins = dir and dir:match("^(.*)[/\\][^/\\]+[/\\]?$")
+    if not plugins then return nil end
+    local exe = utils.join_path(utils.join_path(plugins, "gyroflow"), name .. (windows and ".exe" or ""))
+    return fs.is_file(exe) and exe or nil
+end
+
+local function split_name(name)
+    local stem, ext = name:match("^(.*)(%.[^.]*)$")
+    return stem or name, ext or ""
+end
+
+local function write_json(file, t)
+    local f = io.open(file .. ".tmp", "w")
+    if not f then return false end
+    f:write(utils.format_json(t) or "{}", "\n")
+    f:close()
+    os.remove(file)
+    return os.rename(file .. ".tmp", file) ~= nil
+end
+
+-- Files to the Trash one after another; done(the ones that couldn't go)
+local function trash_all(files, done, failed)
+    failed = failed or {}
+    local file = table.remove(files, 1)
+    if not file then return done(failed) end
+    trash(file, function(ok)
+        if not ok then failed[#failed + 1] = file end
+        trash_all(files, done, failed)
+    end)
+end
+
+local function cut_failed(msg)
+    for _, p in ipairs(cutting and cutting.parts or {}) do
+        if p.out then os.remove(p.out) end
+        if p.lrf_out then os.remove(p.lrf_out) end
+    end
+    cutting = nil
+    state.cutting = nil
+    publish()
+    mp.msg.warn(msg)
+    mp.osd_message(msg, 8)
+end
+
+-- The parts written and checked: the original to the Trash, the parts in its place, what follows the clip
+local function cut_finish()
+    local c = cutting
+    local doc
+    local marks_file = ws.marks_file(c.clip)
+    do
+        local f = io.open(marks_file, "r")
+        if f then doc = utils.parse_json(f:read("*a") or ""); f:close() end
+        if type(doc) ~= "table" then doc = nil end
+    end
+    -- mpv lets go of the file first (Windows can't move an open file), idle meanwhile
+    c.idle = mp.get_property("idle")
+    mp.set_property("idle", "yes")
+    mp.commandv("stop", "keep-playlist")
+    local originals = { c.clip }
+    if c.lrf then originals[#originals + 1] = c.lrf end
+    local project_file = ws.gyroflow_project(c.clip)
+    if project_file then originals[#originals + 1] = project_file end
+    local preview = c.relative and preview_for(c.relative, c.size)
+    if preview then
+        originals[#originals + 1] = preview
+        if fs.is_file(own_project(preview)) then originals[#originals + 1] = own_project(preview) end
+    end
+    if fs.is_file(marks_file) then originals[#originals + 1] = marks_file end
+    trash(c.clip, function(ok)
+        local function restore_idle() if c.idle then mp.set_property("idle", c.idle) end end
+        if not ok then
+            -- The parts are kept next to it, visible, the original as it was
+            for i, p in ipairs(c.parts) do
+                local final = ws.join(c.dir, c.stem .. " (cut " .. i .. ")" .. c.ext)
+                os.rename(p.out, final)
+                if p.lrf_out then os.rename(p.lrf_out, ws.join(c.dir, c.stem .. " (cut " .. i .. ").LRF")) end
+            end
+            cutting = nil
+            state.cutting = nil
+            restore_idle()
+            mp.commandv("loadfile", c.clip, "replace")
+            return mp.osd_message("The original couldn't go to the Trash: it's as it was, the parts beside it as " .. c.stem .. " (cut 1)…", 8)
+        end
+        table.remove(originals, 1)
+        trash_all(originals, function(left)
+            -- The parts take their names: the first the original's, a later one its own recording time
+            local taken = function(n) return fs.is_file(ws.join(c.dir, n)) end
+            for i, p in ipairs(c.parts) do
+                p.name = i == 1 and c.name or (cut_lib.part_name(c.name, p.from, taken) or (c.stem .. " (cut " .. i .. ")" .. c.ext))
+                p.file = ws.join(c.dir, p.name)
+                os.rename(p.out, p.file)
+                if p.lrf_out then os.rename(p.lrf_out, ws.join(c.dir, split_name(p.name) .. ".LRF")) end
+                local info = utils.file_info(p.file)
+                p.size = info and info.size
+                p.created = cut_lib.later(c.created, p.from)
+                p.relative = c.project and ws.relative(p.file, c.project) or nil
+            end
+            -- Marks: each part's own, at its time
+            local marks_kept = 0
+            if doc then
+                for _, p in ipairs(c.parts) do
+                    local d = cut_lib.part_marks(doc, p.from, p.to, { file = p.name, size = p.size, duration = moments_lib.ms(p.to - p.from), created = p.created })
+                    if d then
+                        write_json(ws.marks_file(p.file), d)
+                        marks_kept = marks_kept + #d.marks
+                    end
+                end
+            end
+            -- Moments: relinked to the part they're in, at its time
+            local spans = {}
+            for i, p in ipairs(c.parts) do spans[i] = { from = p.from, to = p.to } end
+            -- One all in the part cut out goes to the Trash with the original: its link would name the first part
+            -- A moment's own Gyroflow project (its sync, trim and video are the original's, in its time) goes too: the
+            -- moment then plays with its saved settings over the preset
+            local relinked, orphans, orphan_files, own_gone = 0, {}, {}, {}
+            local exe = c.exe
+            for _, m in ipairs(c.moments) do
+                local i, a, b = cut_lib.moment_part(m["in"], m.out, spans)
+                local raw = i and c.parts[i].relative and fs.read_link(m.file)
+                local l = raw and utils.parse_json(raw)
+                if type(l) == "table" then
+                    local p = c.parts[i]
+                    l.clip, l.size, l.created, l["in"], l.out = p.relative, p.size, p.created, a, b
+                    local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                        args = { exe, "--set-key", m.file, link.KEY, utils.format_json(l) } })
+                    if r and r.status == 0 then relinked = relinked + 1 else orphans[#orphans + 1] = m.name; orphan_files[#orphan_files + 1] = m.file end
+                    if r and r.status == 0 and fs.is_file(own_project(m.file)) then
+                        own_gone[#own_gone + 1] = m.name
+                        orphan_files[#orphan_files + 1] = own_project(m.file)
+                    end
+                else
+                    orphans[#orphans + 1] = m.name
+                    orphan_files[#orphan_files + 1] = m.file
+                    if fs.is_file(own_project(m.file)) then orphan_files[#orphan_files + 1] = own_project(m.file) end
+                end
+            end
+            trash_all(orphan_files, function(left2)
+            for _, f in ipairs(left2) do left[#left + 1] = f end
+            -- The part that has where it played, there
+            local pos = c.pos or 0
+            local at = c.parts[1]
+            for _, p in ipairs(c.parts) do if pos >= p.from and pos < p.to then at = p end end
+            wanted = { file = at.file, ["in"] = math.max(0, math.min(pos, at.to) - at.from) }
+            cutting = nil
+            state.cutting = nil
+            restore_idle()
+            mp.commandv("loadfile", at.file, "replace")
+            local lines = { #c.parts == 1 and ("Cut out: " .. at.name .. " is the part kept")
+                or ("Cut out: " .. c.parts[1].name .. " and " .. c.parts[2].name .. " are the parts kept"),
+                "The original is in the Trash" }
+            if doc then lines[#lines + 1] = marks_kept .. " marks kept" end
+            if #c.moments > 0 then lines[#lines + 1] = relinked .. " moments relinked" end
+            if #orphans > 0 then lines[#lines + 1] = "Moments in the part cut out, to the Trash with it: " .. table.concat(orphans, ", ") end
+            if project_file then lines[#lines + 1] = "Its Gyroflow project is in the Trash too: Ctrl+e makes one again" end
+            if #own_gone > 0 then lines[#lines + 1] = "Their own Gyroflow projects to the Trash (made for the original), they play with their settings: " .. table.concat(own_gone, ", ") end
+            if #left > 0 then lines[#lines + 1] = "Not moved to the Trash: " .. table.concat(left, ", ") end
+            mp.msg.info(table.concat(lines, "; "))
+            mp.osd_message(table.concat(lines, "\n"), 8)
+            end)
+        end)
+    end)
+end
+
+-- Each part cut and checked by afp-cut, one after another
+local function cut_next(i)
+    local c = cutting
+    local p = c.parts[i]
+    if not p then return cut_finish() end
+    p.out = ws.join(c.dir, "." .. c.stem .. ".cut" .. i .. c.ext)
+    local args = { c.exe, c.clip, "--from", string.format("%.3f", p.from), "--out", p.out, "--json" }
+    if p.to then args[#args + 1] = "--to"; args[#args + 1] = string.format("%.3f", p.to) end
+    if c.lrf then args[#args + 1] = "--lrf" end
+    state.cutting = { name = c.name, part = i, parts = #c.parts }
+    publish()
+    mp.osd_message("Cutting " .. c.name .. (#c.parts > 1 and (", part " .. i .. " of " .. #c.parts) or "") .. "…", 30)
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stdout = true, capture_stderr = true }, function(_, r)
+        local out = r and utils.parse_json(r.stdout or "")
+        local results = type(out) == "table" and out.results or {}
+        local main = results[1]
+        if not (r and r.status == 0 and type(main) == "table" and main.status == 0) then
+            local why = type(main) == "table" and (main.error or (main.verified and table.concat(main.verified.problems or {}, "; "))) or (r and r.stderr) or "afp-cut failed"
+            return cut_failed("Not cut, the clip is as it was: " .. tostring(why))
+        end
+        p.from, p.to = main.plan.start, main.plan["end"]
+        if c.lrf then p.lrf_out = p.out:gsub("%.[^.]*$", ".LRF") end
+        p.unknown = main.known_camera == false
+        cut_next(i + 1)
+    end)
+end
+
+-- [a, b) of the clip cut out, after asking
+local function cut_out(a, b)
+    if cutting then return mp.osd_message("Already cutting " .. cutting.name, 2) end
+    if not state.clip or state.redirected or state.moment or state.export or state.offset or state.path ~= mp.get_property("path") then
+        return mp.osd_message("Cutting works on a clip itself, not on a moment, a clip preview or an export", 4)
+    end
+    if not (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
+        return mp.osd_message("Only MP4 and MOV clips are cut", 3)
+    end
+    local exe = plugin_tool("afp-cut")
+    if not exe then return mp.osd_message("afp-cut isn't installed (the gyroflow plugin's)", 4) end
+    if not (input and input.select) then return mp.osd_message("Cutting needs mpv's console (mpv 0.39 and later)", 4) end
+    local duration = mp.get_property_number("duration")
+    if not duration then return end
+    a, b = math.max(0, a), math.min(duration, b)
+    local parts = cut_lib.parts(a, b, duration)
+    if #parts == 0 then
+        return mp.osd_message("Nothing would be left of the clip: to remove it all, move it to the Trash", 4)
+    end
+    for _, p in ipairs(parts) do p.to = p.to or duration end
+    local name = ws.name(state.clip)
+    local kept = {}
+    for _, p in ipairs(parts) do
+        kept[#kept + 1] = clock(p.from) .. "–" .. (p.to >= duration - 0.001 and "end" or clock(p.to))
+    end
+    local base = state.clip:match("^(.*)%.[^./\\]+$") or state.clip
+    local lrf = fs.is_file(base .. ".LRF") and base .. ".LRF" or (fs.is_file(base .. ".lrf") and base .. ".lrf") or nil
+    local info = utils.file_info(state.clip)
+    local stem, ext = split_name(name)
+    local snapshot = {
+        clip = state.clip, name = name, stem = stem, ext = ext, dir = ws.parent(state.clip), exe = exe, lrf = lrf,
+        size = info and info.size, created = state.created, project = state.project, relative = state.relative,
+        moments = state.moments or {}, pos = mp.get_property_number("time-pos"), parts = parts,
+    }
+    input.select({
+        prompt = "Cut " .. clock(a) .. "–" .. (b >= duration - 0.001 and "end" or clock(b)) .. " out of " .. name .. "? Kept: "
+            .. table.concat(kept, " and ") .. (#parts > 1 and " (two clips; the second from the keyframe at or before " .. clock(b) .. ")" or "")
+            .. ", without re-encoding. The original goes to the Trash.",
+        items = { "Cut it out", "Keep the clip as it is" },
+        submit = function(i)
+            if i ~= 1 then return end
+            cutting = snapshot
+            mp.set_property_bool("pause", true)
+            cut_next(1)
+        end,
+    })
+end
+
+mp.add_key_binding("Ctrl+x", "cut-out", function()
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    if not (a and b and b > a) then
+        return mp.osd_message("Mark the spoiled part first (l at its start, l at its end), then Ctrl+x cuts it out", 4)
+    end
+    cut_out(a, b)
+end)
+mp.register_script_message("cut-before", function()
+    local t = mp.get_property_number("time-pos")
+    if t then cut_out(0, t) end
+end)
+mp.register_script_message("cut-after", function()
+    local t = mp.get_property_number("time-pos")
+    if t then cut_out(t, mp.get_property_number("duration") or t) end
 end)
 
 -- A setting for every moment this session (moment-force <view|level|horizon_lock|alone> <value>), or back to each

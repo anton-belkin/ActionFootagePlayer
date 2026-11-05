@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_app.sh <out.app> <binaries> <dlogm_hlg.glsl> [<version>]: builds ActionFootagePlayer.app, with the mpv
 # plugins in it. install.sh --apps and tools/make_release.sh use it.
-#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu
+#   <binaries>       a folder with libvs_gyroflow.dylib, gyroflow-probe, gyroflow-project, gyroflow-export, afp-rpu, afp-cut
 #   <dlogm_hlg.glsl> the HDR shader, baked by tools/cube_to_glsl.py
 #
 #   Contents/MacOS/ActionFootagePlayer   the app: mpv with the plugins (macos/player.sh), offering the setup at
@@ -100,7 +100,7 @@ install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
     mpv/scripts/gyroflow/chromatic.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export afp-rpu afp-cut; do
     install -m 755 "$bin/$f" "$gyroflow/$f"
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
@@ -108,7 +108,7 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
-install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua "$workspace/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua "$workspace/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
@@ -129,7 +129,7 @@ fi
 # Inside out: the binaries, then the app, which seals the rest. codesign's errors shown, not its "replacing
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
-for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" \
+for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" \
          "$sdrcheck/sdr-check"; do
     sign "$f"
 done

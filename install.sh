@@ -45,7 +45,7 @@ macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
 # The gyroflow plugin's binaries, as cargo names them here
 if [ $macos = 1 ]; then LIBRARY=libvs_gyroflow.dylib; else LIBRARY=libvs_gyroflow.so; fi
-BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-export"
+BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-export afp-cut"
 
 apps=0
 for arg in "$@"; do
@@ -264,6 +264,7 @@ put mpv/scripts/workspace/main.lua      "$WORKSPACE/main.lua" 644
 put mpv/scripts/workspace/workspace.lua "$WORKSPACE/workspace.lua" 644
 put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
+put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do

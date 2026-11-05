@@ -60,13 +60,15 @@ jobs:
         run: tools/build_mpv.sh --no-deps
 
       # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
-      # reader over files made here and by ffmpeg, and the MP4 keys' writer; LuaJIT is one of mpv's dependencies
+      # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
+      # LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
           luajit tests/link_test.lua
           luajit tests/moments_test.lua
-          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones)
+          luajit tests/cut_test.lua
+          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut::)
 
       - name: Build
         run: |

@@ -283,6 +283,7 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
 | `X` | This clip isn't interesting: its preview in `_Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
@@ -1184,7 +1185,8 @@ tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) â
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export (Rust)
+vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut (Rust)
+docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script

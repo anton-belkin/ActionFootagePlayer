@@ -85,6 +85,7 @@ local function civil_from_days(z)
     return yoe + era * 400 + (m <= 2 and 1 or 0), m, d
 end
 M.days_from_civil = days_from_civil
+M.civil_from_days = civil_from_days
 
 -- An ISO 8601 time: seconds since 1970 (UTC), and the zone's offset in minutes (nil when it has none: then it's
 -- taken as UTC, as ffmpeg's creation_time is)

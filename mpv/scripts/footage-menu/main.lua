@@ -62,6 +62,7 @@ local KEY_LABELS = {
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
     { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in _Clips/ to the Trash (again: made again)" },
+    { "script-binding workspace/cut-out", "Cut the marked part out of the clip (spoiled), without re-encoding; the original to the Trash" },
     { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
     { "script-binding highlights/prev", "Previous mark" },
     { "script-binding highlights/mark", "A mark here; on one, remove it" },
@@ -508,6 +509,20 @@ local function build()
             if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
             if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
+        end
+        -- Cutting a spoiled part out: of a clip itself, not a moment, clip preview or export
+        if w and w.clip and local_file(w.clip) and not w.redirected and not w.export then
+            local cut = key["script-binding workspace/cut-out"]
+            if w.cutting then
+                add(info("Cutting " .. w.cutting.name .. "…"))
+            else
+                add(submenu("Cut out (spoiled)", {
+                    item((a and b and b > a) and ("The marked part " .. clock(a) .. "–" .. clock(b) .. "…") or "The marked part (mark it first)",
+                         "script-binding workspace/cut-out", { shortcut = cut, disabled = not (a and b and b > a) }),
+                    item("All before here…", "script-message-to workspace cut-before"),
+                    item("All after here…", "script-message-to workspace cut-after"),
+                }))
+            end
         end
         if w and w.clip and local_file(w.clip) then add(submenu("Project", project_menu(w, key))) end
         if h and local_file(path) then add(submenu(h.times and #h.times > 0 and ("Marks (" .. #h.times .. ")") or "Marks", marks_menu({ times = h.times or {}, marks = h.marks }, key))) end
