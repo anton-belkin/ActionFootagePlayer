@@ -7,17 +7,26 @@
 -- the video, with what's around it dimmed, so the view is rendered that much wider than the frame (zoom 1 / MARGIN to
 -- start with: the frame shows what the screen showed). Elsewhere it's mpv's video-zoom and video-pan.
 --
+-- The camera is on a tripod: yaw about the vertical, pitch about its own horizontal axis, roll about where it looks
+-- (gyroflow-core's view_rotation), so the horizon stays as stabilized whatever way it's turned. A drag turns it by as
+-- much as the picture moves under the mouse (in the middle), along the picture's horizon when it's rolled.
+--
 -- The camera goes to the plugin through the edges control file (main.lua's write_edge_control, `camera=`), which it
 -- reads within 50 ms while playing. Paused, mpv seeks to the frame on screen again to have it rendered anew; until
 -- that's through, mpv's video-zoom and video-pan move the frame that's there by about as much (exact in the middle),
--- from the focal length the plugin writes next to the control file (Edges::write_camera_info).
+-- from the focal length the plugin writes next to the control file (Edges::write_camera_info), and the frame drawn
+-- over it turns the other way for a roll. While a seek's under way the control file stays as it was when it was
+-- asked for, so the frame that comes is the one it says (the filter reads the file as mpv sets it up, any time after
+-- the seek's asked for); the camera since then goes with the next one.
 --
 -- Keys while it's on: a / Shift+a the frame's aspect, double click or Backspace back to the start, c or Esc leaves
 -- (the camera as the plugin stabilizes it again). The frame's state is published as user-data/gyroflow/crop for the
 -- export.
 --
 -- On macOS the app's mpv sends the trackpad's gestures as script messages while it's on (--macos-gesture-messages,
--- tools/mpv-patches/0008), so a two-finger scroll pans and a mouse wheel zooms. Elsewhere a wheel's whole clicks zoom
+-- tools/mpv-patches/0008), so a two-finger scroll pans and a mouse wheel zooms. A trackpad's scroll comes in phases
+-- (fingers on, moving, off); a mouse's wheel smoothed into fine steps (Logitech's Options+) comes without, and zooms.
+-- The coasting after the fingers are off is left out: the picture stops where they did. Elsewhere a wheel's whole clicks zoom
 -- and the fractions a touchpad sends pan, and Ctrl+wheel (a pinch, on Windows) zooms.
 --
 -- Loaded by main.lua, which says whether the plugin stabilizes the clip and writes the control file (init).
@@ -43,8 +52,11 @@ local WHEEL_ZOOM = 1.1
 local ZOOM_MIN, ZOOM_MAX = 0.15, 4
 -- A touchpad scroll's unit (mpv's wheel scale), in screen pixels, off macOS
 local SCROLL_PX = 40
--- How the camera turns for the picture to move: view_rotation's yaw moves it left, pitch up, roll counterclockwise
-local YAW_SIGN, PITCH_SIGN, ROLL_SIGN = -1, -1, 1
+-- A smooth wheel's points (macOS) for one click's zoom
+local SMOOTH_WHEEL_PT = 10
+-- How the picture moves as the camera turns: view_rotation's yaw (looking right) moves it left, pitch (looking down)
+-- up, roll counterclockwise (ROLL_SIGN); the camera model below (rotation) has the same
+local ROLL_SIGN = 1
 -- The control file at most this often while dragging, s
 local WRITE_EVERY = 1 / 30
 -- Before the plugin has said, a focal length for a 90° wide picture
@@ -53,8 +65,9 @@ local DEFAULT_FX = 0.5
 local hooks = nil
 local active = false
 local aspect = 1
--- The camera asked for, and the one the paused frame on screen was rendered with
+-- The camera asked for, the one in the control file, and the one the paused frame on screen was rendered with
 local cam = nil
+local written = nil
 local shown = nil
 -- Without the plugin: mpv's own zoom (log2) and pan
 local flat = nil
@@ -70,6 +83,10 @@ local saved = {}
 
 local function default_camera()
     return { yaw = 0, pitch = 0, roll = 0, zoom = 1 / MARGIN }
+end
+
+local function copy(c)
+    return c and { yaw = c.yaw, pitch = c.pitch, roll = c.roll, zoom = c.zoom }
 end
 
 local function stabilizing()
@@ -123,19 +140,30 @@ local function draw()
     local r = frame_rect(v)
     local W, H = v.osd_w, v.osd_h
     local x0, y0, x1, y1 = r.x, r.y, r.x + r.w, r.y + r.h
-    local dim = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H000000&\\1a&H50&\\p1}"
+    -- Not over the side panel; turned about the frame's middle the other way from a roll the paused frame doesn't
+    -- have yet (what's in it is then what the frame rendered with the roll will show)
+    local right = W * (1 - (mp.get_property_number("video-margin-ratio-right") or 0))
+    local turn = 0
+    if cam and shown and mp.get_property_native("pause") then turn = -ROLL_SIGN * (cam.roll - shown.roll) end
+    local function style(color, alpha)
+        return string.format("{\\an7\\pos(0,0)\\org(%d,%d)\\frz%.2f\\clip(0,0,%d,%d)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}",
+                             (x0 + x1) / 2, (y0 + y1) / 2, turn, right, H, color, alpha)
+    end
+    local dim = style("000000", "50")
+    -- Far enough out to cover the window turned
+    local B = W + H
     local lines = {
-        dim .. rect_path(0, 0, W, y0),
-        dim .. rect_path(0, y1, W, H),
-        dim .. rect_path(0, y0, x0, y1),
-        dim .. rect_path(x1, y0, W, y1),
+        dim .. rect_path(x0 - B, y0 - B, x1 + B, y0),
+        dim .. rect_path(x0 - B, y1, x1 + B, y1 + B),
+        dim .. rect_path(x0 - B, y0, x0, y1),
+        dim .. rect_path(x1, y0, x1 + B, y1),
     }
     -- The frame, and its thirds
-    local edge = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&HFFFFFF&\\1a&H20&\\p1}"
+    local edge = style("FFFFFF", "20")
     local t = math.max(1, math.floor(H / 600 + 0.5))
     table.insert(lines, edge .. rect_path(x0 - t, y0 - t, x1 + t, y0) .. " " .. rect_path(x0 - t, y1, x1 + t, y1 + t) .. " "
         .. rect_path(x0 - t, y0, x0, y1) .. " " .. rect_path(x1, y0, x1 + t, y1))
-    local third = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&HFFFFFF&\\1a&HA0&\\p1}"
+    local third = style("FFFFFF", "A0")
     local parts = {}
     for i = 1, 2 do
         local x = x0 + r.w * i / 3
@@ -172,9 +200,52 @@ local function publish()
         active = true, aspect = ASPECTS[aspect].name,
         -- The frame in the video, as shares of its width and height
         frame = r and { x = (r.x - v.x) / v.w, y = (r.y - v.y) / v.h, w = r.w / v.w, h = r.h / v.h } or nil,
-        camera = cam, flat = flat,
+        camera = cam, flat = flat, zoom_min = ZOOM_MIN, zoom_max = ZOOM_MAX, margin = MARGIN,
     })
 end
+
+-- The camera model: x right, y down, z where it looks. Its rotation (to the world) on a tripod: yaw about the vertical,
+-- then pitch about its own horizontal axis, then roll about where it looks, as gyroflow-core's view_rotation
+local function rotation(c)
+    local y, p, r = math.rad(c.yaw), math.rad(c.pitch), math.rad(c.roll)
+    local cy, sy, cp, sp, cr, sr = math.cos(y), math.sin(y), math.cos(p), math.sin(p), math.cos(r), math.sin(r)
+    local Y = { { cy, 0, sy }, { 0, 1, 0 }, { -sy, 0, cy } }
+    local P = { { 1, 0, 0 }, { 0, cp, sp }, { 0, -sp, cp } }
+    local R = { { cr, -sr, 0 }, { sr, cr, 0 }, { 0, 0, 1 } }
+    local function mul(A, B)
+        local M = {}
+        for i = 1, 3 do
+            M[i] = {}
+            for j = 1, 3 do M[i][j] = A[i][1] * B[1][j] + A[i][2] * B[2][j] + A[i][3] * B[3][j] end
+        end
+        return M
+    end
+    return mul(mul(Y, P), R)
+end
+
+-- Where the point at a, b (from the view's middle, in its widths and heights) looks, in the world
+local function look(c, a, b)
+    local fx, fy = focal()
+    fx, fy = fx / c.zoom, fy / c.zoom
+    local M, v = rotation(c), { a / fx, b / fy, 1 }
+    return { M[1][1] * v[1] + M[1][2] * v[2] + M[1][3] * v[3], M[2][1] * v[1] + M[2][2] * v[2] + M[2][3] * v[3],
+             M[3][1] * v[1] + M[3][2] * v[2] + M[3][3] * v[3] }
+end
+
+-- Where the world's direction w is in the view (nil: behind it)
+local function place(c, w)
+    local fx, fy = focal()
+    fx, fy = fx / c.zoom, fy / c.zoom
+    local M = rotation(c)
+    local x = M[1][1] * w[1] + M[2][1] * w[2] + M[3][1] * w[3]
+    local y = M[1][2] * w[1] + M[2][2] * w[2] + M[3][2] * w[3]
+    local z = M[1][3] * w[1] + M[2][3] * w[2] + M[3][3] * w[3]
+    if z <= 1e-6 then return nil end
+    return fx * x / z, fy * y / z
+end
+
+-- The point the preview keeps where it should be: where the mouse took the picture last (nil: the middle)
+local anchor = nil
 
 -- The paused frame moved by mpv to about where the camera asked for puts it, from the one it was rendered with
 local function preview()
@@ -186,35 +257,39 @@ local function preview()
         mp.set_property_number("video-pan-y", 0)
         return
     end
-    local fx, fy = focal()
+    local v = video_rect()
+    if not v then return end
+    -- The frame on screen scaled by r and moved so that the anchor's point in the view asked for (a, b) shows where
+    -- it's in the frame on screen (as, bs): mpv puts that at the middle + (as + pan) * r * the video's size
     local r = shown.zoom / cam.zoom
-    fx, fy = fx / cam.zoom, fy / cam.zoom
+    local a, b = 0, 0
+    if anchor then a, b = (anchor.x - (v.x + v.w / 2)) / v.w, (anchor.y - (v.y + v.h / 2)) / v.h end
+    local as, bs = place(shown, look(cam, a, b))
     mp.set_property_number("video-zoom", math.log(r) / math.log(2))
-    mp.set_property_number("video-pan-x", YAW_SIGN * fx * math.tan(math.rad(cam.yaw - shown.yaw)))
-    mp.set_property_number("video-pan-y", PITCH_SIGN * fy * math.tan(math.rad(cam.pitch - shown.pitch)))
+    if not as then return end
+    mp.set_property_number("video-pan-x", a / r - as)
+    mp.set_property_number("video-pan-y", b / r - bs)
 end
 
 local function same(a, b)
     return a and b and a.yaw == b.yaw and a.pitch == b.pitch and a.roll == b.roll and a.zoom == b.zoom
 end
 
--- Paused: mpv seeks to the frame again, which sets the filter up again, which reads the control file
-local function refresh()
-    if not mp.get_property_native("pause") or same(cam, shown) then return end
-    if refreshing then dirty = true; return end
-    local t = mp.get_property_number("time-pos")
-    if not t then return end
-    refreshing = { yaw = cam.yaw, pitch = cam.pitch, roll = cam.roll, zoom = cam.zoom }
-    dirty = false
-    mp.msg.debug(string.format("refresh: yaw %.3f pitch %.3f zoom %.3f", cam.yaw, cam.pitch, cam.zoom))
-    mp.commandv("seek", tostring(t), "absolute+exact")
-end
-
+-- The camera into the control file, and paused, mpv seeks to the frame again, which sets the filter up again, which
+-- reads it. Not while such a seek is under way: the frame it brings would be rendered with this camera or that one
 local function write_now()
     if write_timer then write_timer:kill(); write_timer = nil end
+    local paused = mp.get_property_native("pause")
+    if paused and refreshing then dirty = true; return end
     last_write = mp.get_time()
+    written = copy(cam)
     hooks.write()
-    refresh()
+    if not paused or same(written, shown) then return end
+    local t = mp.get_property_number("time-pos")
+    if not t then return end
+    refreshing, dirty = copy(written), false
+    mp.msg.debug(string.format("refresh: yaw %.3f pitch %.3f roll %.3f zoom %.3f", cam.yaw, cam.pitch, cam.roll, cam.zoom))
+    mp.commandv("seek", tostring(t), "absolute+exact")
 end
 
 -- The camera changed: the preview at once, the control file at most every WRITE_EVERY
@@ -233,17 +308,43 @@ local function changed()
     publish()
 end
 
--- The picture moved by dx, dy screen pixels
-local function pan(dx, dy)
+-- The picture moved by dx, dy screen pixels, the point at x, y (where the mouse is; the middle when nil) taken there
+-- from x - dx, y - dy: the camera turns so that what's under the mouse stays under it, in the middle as anywhere
+local function pan(dx, dy, x, y)
     local v = video_rect()
     if not v then return end
-    local u, w = dx / v.w, dy / v.h
     if cam then
-        local fx, fy = focal()
-        fx, fy = fx / cam.zoom, fy / cam.zoom
-        cam.yaw = math.max(-180, math.min(180, cam.yaw + YAW_SIGN * math.deg(math.atan(u / fx))))
-        cam.pitch = math.max(-89, math.min(89, cam.pitch + PITCH_SIGN * math.deg(math.atan(w / fy))))
+        local cx, cy = v.x + v.w / 2, v.y + v.h / 2
+        x, y = x or cx, y or cy
+        local a1, b1 = (x - cx) / v.w, (y - cy) / v.h
+        -- What was under the mouse, in the world: the yaw and pitch that put it at a1, b1 (Newton's method, from where
+        -- the camera is)
+        local w = look(cam, (x - dx - cx) / v.w, (y - dy - cy) / v.h)
+        local c = copy(cam)
+        local function miss(yaw, pitch)
+            c.yaw, c.pitch = yaw, pitch
+            local a, b = place(c, w)
+            if not a then return nil end
+            return a - a1, b - b1
+        end
+        local yaw, pitch, h = cam.yaw, cam.pitch, 1e-3
+        for _ = 1, 6 do
+            local e1, e2 = miss(yaw, pitch)
+            if not e1 or math.abs(e1) + math.abs(e2) < 1e-7 then break end
+            local y1, y2 = miss(yaw + h, pitch)
+            local p1, p2 = miss(yaw, pitch + h)
+            if not y1 or not p1 then break end
+            local j11, j21, j12, j22 = (y1 - e1) / h, (y2 - e2) / h, (p1 - e1) / h, (p2 - e2) / h
+            local det = j11 * j22 - j12 * j21
+            if math.abs(det) < 1e-12 then break end
+            yaw = yaw - (j22 * e1 - j12 * e2) / det
+            pitch = pitch - (-j21 * e1 + j11 * e2) / det
+        end
+        if yaw > 180 then yaw = yaw - 360 elseif yaw < -180 then yaw = yaw + 360 end
+        cam.yaw, cam.pitch = yaw, math.max(-89, math.min(89, pitch))
+        anchor = { x = x, y = y }
     else
+        local u, w = dx / v.w, dy / v.h
         local s = 2 ^ flat.zoom
         flat.x, flat.y = flat.x + u / s, flat.y + w / s
     end
@@ -252,6 +353,7 @@ end
 
 -- Zoomed in by `factor` (above 1: closer)
 local function zoom(factor)
+    anchor = nil
     if cam then
         cam.zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, cam.zoom / factor))
     else
@@ -262,12 +364,14 @@ end
 
 local function roll(degrees)
     if not cam then return end
+    anchor = nil
     cam.roll = cam.roll + ROLL_SIGN * degrees
     if cam.roll > 180 then cam.roll = cam.roll - 360 elseif cam.roll < -180 then cam.roll = cam.roll + 360 end
     changed()
 end
 
 local function reset()
+    anchor = nil
     if cam then cam = default_camera() else flat = { zoom = 0, x = 0, y = 0 } end
     changed()
 end
@@ -294,7 +398,7 @@ local function on_mouse(_, pos)
         -- To the right: clockwise
         if v then roll(-dx / v.w * 90) end
     else
-        pan(dx, dy)
+        pan(dx, dy, pos.x, pos.y)
     end
 end
 
@@ -319,8 +423,17 @@ end
 mp.register_script_message("gesture", function(kind, a, b, c)
     if not active then return end
     if kind == "scroll" then
+        local phase = c
+        if phase == "momentum" then return end
+        local dx, dy = tonumber(a) or 0, tonumber(b) or 0
+        -- A mouse's wheel, in fine steps: up zooms in
+        if phase == "none" then
+            if dy ~= 0 then zoom(WHEEL_ZOOM ^ (dy / SMOOTH_WHEEL_PT)) end
+            return
+        end
         local s = mp.get_property_number("display-hidpi-scale") or 1
-        pan((tonumber(a) or 0) * s, (tonumber(b) or 0) * s)
+        local pos = mp.get_property_native("mouse-pos") or {}
+        pan(dx * s, dy * s, pos.x and pos.x + dx * s, pos.y and pos.y + dy * s)
     elseif kind == "magnify" then
         zoom(1 + (tonumber(a) or 0))
     elseif kind == "rotate" then
@@ -349,6 +462,7 @@ local BINDINGS = {
 function M.set(on)
     if on == active then return end
     active = on
+    refreshing, dirty, written = nil, false, nil
     if on then
         if stabilizing() then
             cam, flat = default_camera(), nil
@@ -368,6 +482,7 @@ function M.set(on)
         if gestures then mp.set_property_native("macos-gesture-messages", false) end
         gestures, drag = false, nil
         local had_camera = cam ~= nil
+        if write_timer then write_timer:kill(); write_timer = nil end
         cam, flat, shown = nil, nil, nil
         mp.set_property_number("video-zoom", 0)
         mp.set_property_number("video-pan-x", 0)
@@ -386,31 +501,33 @@ end
 
 function M.active() return active end
 
--- For the control file: the camera, while there's one
+-- For the control file: the camera written last (write_now), while there's one
 function M.control_words()
-    if not cam then return "" end
-    return string.format(" camera=%.4f,%.4f,%.4f,%.5f", cam.yaw, cam.pitch, cam.roll, cam.zoom)
+    if not cam or not written then return "" end
+    return string.format(" camera=%.4f,%.4f,%.4f,%.5f", written.yaw, written.pitch, written.roll, written.zoom)
 end
 
 -- A frame through after a seek: paused, it's the one asked for
 mp.register_event("playback-restart", function()
     if not active or not cam then return end
     mp.msg.debug(string.format("restart: refreshing %s, dirty %s", tostring(refreshing ~= nil), tostring(dirty)))
-    if refreshing then
-        shown, refreshing = refreshing, nil
-    else
-        -- A seek of the user's, or the chain set up again: rendered with the camera the file has now
-        shown = { yaw = cam.yaw, pitch = cam.pitch, roll = cam.roll, zoom = cam.zoom }
-    end
+    -- Ours, or a seek of the user's, or the chain set up again: rendered with the camera the file has
+    shown, refreshing = copy(written) or default_camera(), nil
     preview()
-    if dirty then refresh() end
+    draw()
+    if dirty then write_now() end
 end)
 
 -- Playing, frames come with the camera asked for; paused, the one on screen is the one rendered last
 mp.observe_property("pause", "bool", function(_, paused)
     if not active or not cam then return end
-    if paused then shown = { yaw = cam.yaw, pitch = cam.pitch, roll = cam.roll, zoom = cam.zoom } end
+    if paused then
+        -- Playing, the frames came with the camera written
+        shown = copy(written) or default_camera()
+        write_now()
+    end
     preview()
+    draw()
 end)
 
 mp.observe_property("mouse-pos", "native", on_mouse)
@@ -450,6 +567,21 @@ mp.register_script_message("crop-aspect", function(v)
     end
     draw(); publish()
 end)
+
+-- For the side panel: crop-set zoom|roll|yaw|pitch <value>, crop-reset
+mp.register_script_message("crop-set", function(key, value)
+    value = tonumber(value)
+    if not active or not value then return end
+    anchor = nil
+    if cam and key == "zoom" then cam.zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, value))
+    elseif cam and key == "roll" then cam.roll = math.max(-180, math.min(180, value))
+    elseif cam and key == "yaw" then cam.yaw = math.max(-180, math.min(180, value))
+    elseif cam and key == "pitch" then cam.pitch = math.max(-89, math.min(89, value))
+    elseif flat and key == "zoom" then flat.zoom = math.max(-1, math.min(3, value))
+    else return end
+    changed()
+end)
+mp.register_script_message("crop-reset", function() if active then reset() end end)
 
 mp.register_script_message("crop", function(v)
     if v == "toggle" then M.set(not active) elseif v == "yes" or v == "no" then M.set(v == "yes") end

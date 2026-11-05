@@ -74,7 +74,7 @@ impl View {
         let sm = {
             let gyro = params.gyro.read();
             // As FrameTransform turns it: the camera of crop mode on top of the smoothing
-            gyro.org_quat_at_timestamp(timestamp_ms) * (gyro.smoothed_quat_at_timestamp(timestamp_ms) * FrameTransform::view_rotation(params)).inverse()
+            gyro.org_quat_at_timestamp(timestamp_ms) * FrameTransform::smoothed_with_view(&gyro, params, timestamp_ms).inverse()
         };
         let d = if params.framebuffer_inverted { Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, -1.0)) }
                 else { Matrix3::from_diagonal(&Vector3::new(1.0, -1.0, -1.0)) };

@@ -431,8 +431,9 @@ impl Edges {
     }
 
     fn check_control(&self, now: bool) {
-        // Another worker is already looking
-        let Some(mut c) = self.control.try_lock() else { return };
+        // Another worker is already looking; set up anew (now), the filter reads it for sure: the first frame after a
+        // seek has what the file says when it was asked for (crop mode's camera)
+        let mut c = if now { self.control.lock() } else { let Some(c) = self.control.try_lock() else { return }; c };
         let Some(path) = c.path.clone() else { return };
         if !now && c.checked.is_some_and(|t| t.elapsed().as_millis() < 50) { return; }
         c.checked = Some(Instant::now());
