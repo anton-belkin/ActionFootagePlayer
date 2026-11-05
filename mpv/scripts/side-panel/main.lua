@@ -260,7 +260,7 @@ local function frame_part(u, x, w, y, g)
     end
     y = u:caption(x, w, y, stabilized and "A fisheye for Wide footage above water: linear squeezes its center and thins its edges"
         or "Only where it's stabilized")
-    return u:caption(x, w, y, g.kind == "project" and (g.aspect == "original" and (g.rotation or 0) == 0)
+    return u:caption(x, w, y + 6 * s, g.kind == "project" and (g.aspect == "original" and (g.rotation or 0) == 0)
         and "Original: as its Gyroflow project's output. Exports, moments and photos are made in this frame"
         or "Exports, moments and photos are made in this frame")
 end
