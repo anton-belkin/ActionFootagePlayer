@@ -19,8 +19,10 @@ site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
   moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
+  log.html, stabilization.html, library.html, photos.html
+                 the four guides, one feature set each, from what you get to every setting (English only so far)
   features.html  every feature on one page, the reference the other pages link to (footer: All features)
-  hub.css, divers.css, moments.css, features.css
+  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css
                  each page's own styles, next to the shared styles.css
   media/         real footage from an Osmo Action 6: stab-underwater.mp4 (+ .jpg poster; as recorded | as it
                  plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
@@ -72,13 +74,16 @@ Every page, English included, carries:
   `https://actionfootageplayer.ch/…` URLs;
 - the language switcher in the header: a `<details>` disclosure, so it works without script, linking to the same
   page in each language.
-- the header's links are the same on every page and in every language: Home, Under water (divers), Hours of
-  clips (moments), All features, Download, with the page you're on marked by `aria-current`. Beside them, an
-  "On this page" menu (`<details class="pagemenu">`, like the language switcher) lists the page's own sections.
-  Below 900px the links take a second row; below 520px they go into that menu, above the sections, so the
-  header stays one row on a phone. top.js closes either menu when a link is chosen, on a click outside or on
-  Escape. The menus are written into each page by hand-run script, not at build time: a new section with an
-  `id` needs adding to the menu in all four languages.
+- the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page and four of its
+  sections), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
+  (Log footage, Stabilization, Library, Photos, then All features) and **Download**. The page you're on is marked
+  with `aria-current`, on its link and on its dropdown's title. Each dropdown is a `<details class="navmenu">`, so it
+  works without script. Below 900px they take a second row; below 520px they're hidden and the same links, grouped
+  the same way, are in one ☰ menu (`<details class="sitemenu">`) beside the language. top.js closes any of these
+  menus when a link is chosen, on a click outside or on Escape. The header is written into each page by a hand-run
+  script, not at build time. So far only the English pages have it: the translations still have the earlier header
+  (Home, Under water, Hours of clips, Features ▾, Download, and an "On this page" menu, `.pagemenu`) until they're
+  translated again from the English.
 
 Fonts: Archivo, the display face, covers Latin only. Russian pages load Roboto Flex (Cyrillic, with a width axis like
 Archivo's) for headings; IBM Plex Sans and Mono cover Cyrillic. Chinese uses the system's CJK face after the Latin

@@ -34,9 +34,21 @@
       Action Footage Player
     </a>
     <nav class="nav" aria-label="Site">
-      <a href="index.html">Home</a>
-      <a href="divers.html">Under water</a>
-      <a href="moments.html">Hours of clips</a>
+      <details class="navmenu"><summary>Home</summary>
+        <ul>
+          <li><a href="index.html">Home page</a></li>
+          <li><a href="index.html#features">What it does</a></li>
+          <li><a href="index.html#how">How it works</a></li>
+          <li><a href="index.html#cameras">Cameras</a></li>
+          <li><a href="index.html#faq">Questions</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Who it&rsquo;s for</summary>
+        <ul>
+          <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+          <li><a href="moments.html">Active travelers</a></li>
+        </ul>
+      </details>
       <details class="navmenu"><summary aria-current="true">Features</summary>
         <ul>
           <li><a href="log.html">Log footage</a></li>
@@ -48,36 +60,26 @@
       </details>
       <a href="download.html" class="nav-dl">Download</a>
     </nav>
-    <details class="pagemenu">
-      <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/></svg><span class="pm-label">On this page</span></summary>
-      <div class="pm">
-      <ul class="pm-site">
-        <li><a href="index.html">Home</a></li>
-        <li><a href="divers.html">Under water</a></li>
-        <li><a href="moments.html">Hours of clips</a></li>
-        <li class="pm-group">Features</li>
-        <li><a href="log.html" class="pm-sub">Log footage</a></li>
-        <li><a href="stabilization.html" class="pm-sub" aria-current="page">Stabilization</a></li>
-        <li><a href="library.html" class="pm-sub">Library</a></li>
-        <li><a href="photos.html" class="pm-sub">Photos</a></li>
-        <li><a href="features.html" class="pm-sub">All features</a></li>
-        <li><a href="download.html">Download</a></li>
-      </ul>
-      <p class="pm-title">On this page</p>
+    <details class="sitemenu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
       <ul>
-        <li><a href="#intro">Stabilization</a></li>
-        <li><a href="#camera">Before you shoot</a></li>
-        <li><a href="#gyroflow">Gyroflow projects</a></li>
-        <li><a href="#panel">The Stabilization part</a></li>
-        <li><a href="#edges">Edges</a></li>
-        <li><a href="#quality">Performance &amp; Quality</a></li>
-        <li><a href="#moments">Moments</a></li>
-        <li><a href="#keys">Keys</a></li>
-        <li><a href="#limits">Limits</a></li>
-        <li><a href="#faq">Questions</a></li>
-        <li><a href="#start">Try it</a></li>
+        <li class="sm-group">Home</li>
+        <li><a href="index.html">Home page</a></li>
+        <li><a href="index.html#features">What it does</a></li>
+        <li><a href="index.html#how">How it works</a></li>
+        <li><a href="index.html#cameras">Cameras</a></li>
+        <li><a href="index.html#faq">Questions</a></li>
+        <li class="sm-group">Who it&rsquo;s for</li>
+        <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+        <li><a href="moments.html">Active travelers</a></li>
+        <li class="sm-group">Features</li>
+        <li><a href="log.html">Log footage</a></li>
+        <li><a href="stabilization.html" aria-current="page">Stabilization</a></li>
+        <li><a href="library.html">Library</a></li>
+        <li><a href="photos.html">Photos</a></li>
+        <li><a href="features.html">All features</a></li>
+        <li class="sm-dl"><a href="download.html">Download</a></li>
       </ul>
-      </div>
     </details>
     <details class="lang">
       <summary aria-label="Language: English"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>EN</summary>
@@ -99,7 +101,16 @@
         <p class="eyebrow">Stabilization</p>
         <h1>Shaky clips play steady. Nothing to render first.</h1>
         <p class="lede">Shot with the camera's own stabilization off? Double-click the clip, and it plays steady from the motion the camera recorded, while you watch. Stabilizing never changes the original file.</p>
-        <p class="st-def">The camera's gyroscope records how the camera turned during the clip: that's its <strong>gyro data</strong>, or motion data. The player uses it with the engine of Gyroflow, the open-source stabilization app, so the picture turns back by as much as the camera turned.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download free for Mac</span><span class="os-win">Download for Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download for Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
         <div class="status">
           <span>Steady as it plays</span>
           <span>No import, no render</span>
@@ -115,94 +126,32 @@
     </div>
   </section>
 
-  <!-- The logic, in order -->
-  <section class="section band" id="decides">
+  <!-- Gyroflow on its own, before how the player uses it -->
+  <section class="section band" id="what-gyroflow">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">How it decides</p>
-        <h2>Three questions, in this order, each time a clip opens.</h2>
-        <p class="lede">The player never guesses. It stabilizes a clip only when it knows how, and otherwise plays it as it was recorded.</p>
+        <p class="eyebrow">Gyroflow</p>
+        <h2>First, what Gyroflow is.</h2>
+        <p class="lede"><a class="text-link" href="https://gyroflow.xyz" rel="noopener">Gyroflow</a> is a free, open-source app that steadies video from the motion the camera recorded. It's a separate project, made by its own developers. Action Footage Player is built on its engine.</p>
       </div>
-      <div class="st-logic">
-        <ol class="checklist st-order">
-          <li>
-            <h3>A Gyroflow project next to the clip wins</h3>
-            <p>A Gyroflow project is a small <code>.gyroflow</code> file with everything Gyroflow needs to steady one clip. The player looks for one beside the video with the same name: <code>DJI_0007_D.gyroflow</code> or <code>DJI_0007_D.MP4.gyroflow</code>. If it finds one, the clip plays as Gyroflow renders it: the project's smoothing, zoom, lens, output size, horizon lock and correction for water. The player's Level doesn't apply.</p>
-          </li>
-          <li>
-            <h3>Else, the camera's gyro data, if the camera's stabilization was off</h3>
-            <p>Before the clip plays, the player reads what the camera wrote into the file. It steadies the clip only when the file has gyro data <em>and</em> the camera recorded that its own stabilization was off: EIS off on DJI (and the Wide FOV, the field of view), HyperSmooth off on GoPro, FlowState off on Insta360. GoPro and Insta360 clips also need their lens in Gyroflow's lens database. The clip then plays with the preset that comes with the player and your settings in the panel: <a class="text-link" href="#panel">Level, View, Horizon and Lens</a>.</p>
-          </li>
-          <li>
-            <h3>Else, it plays as recorded, and <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow</h3>
-            <p>A clip with no usable gyro data plays as it is. Press <kbd>Ctrl</kbd>+<kbd>e</kbd>, and the video opens in Gyroflow, which can find the motion in the picture itself (optical flow). Save the project there, next to the clip, and the clip loads again where it was, stabilized: it's now a clip with a project, case 1.</p>
-          </li>
-        </ol>
-        <figure class="media st-flow" id="shot-stabilization-1">
-          <svg class="flow" viewBox="0 0 480 540" role="img" aria-labelledby="flow-title flow-desc">
-            <title id="flow-title">What decides how a clip is stabilized</title>
-            <desc id="flow-desc">You open a clip. Is there a Gyroflow project next to it? Yes: it plays as the project says. No: did the camera record gyro data with its own stabilization off (on DJI, EIS off and the Wide FOV)? Yes: it plays steadied from its gyro data, with the shipped preset and your panel settings. No: it plays as recorded, and Ctrl+e opens it in Gyroflow. Saving the project there, next to the clip, brings it back to the first question, and it plays stabilized.</desc>
-            <defs>
-              <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-                <path d="M0 0 L8 4 L0 8 z" class="flow-head"/>
-              </marker>
-            </defs>
-
-            <rect class="flow-start" x="58" y="6" width="160" height="36" rx="18"/>
-            <text class="flow-t" x="138" y="29" text-anchor="middle">You open a clip</text>
-            <line class="flow-line" x1="138" y1="42" x2="138" y2="68" marker-end="url(#flow-arrow)"/>
-
-            <rect class="flow-q" x="36" y="70" width="204" height="84" rx="10"/>
-            <text class="flow-t" x="138" y="98" text-anchor="middle">Is there a Gyroflow</text>
-            <text class="flow-t" x="138" y="118" text-anchor="middle">project next to it?</text>
-            <text class="flow-s" x="138" y="140" text-anchor="middle">name.gyroflow</text>
-            <line class="flow-line" x1="240" y1="112" x2="266" y2="112" marker-end="url(#flow-arrow)"/>
-            <text class="flow-l" x="253" y="104" text-anchor="middle">yes</text>
-
-            <rect class="flow-ok" x="268" y="70" width="204" height="84" rx="10"/>
-            <text class="flow-t" x="370" y="97" text-anchor="middle">As the project says</text>
-            <text class="flow-s" x="370" y="119" text-anchor="middle">its smoothing, zoom,</text>
-            <text class="flow-s" x="370" y="137" text-anchor="middle">lens and horizon</text>
-
-            <line class="flow-line" x1="138" y1="154" x2="138" y2="184" marker-end="url(#flow-arrow)"/>
-            <text class="flow-l" x="146" y="174">no</text>
-
-            <rect class="flow-q" x="36" y="186" width="204" height="108" rx="10"/>
-            <text class="flow-t" x="138" y="212" text-anchor="middle">Did the camera record</text>
-            <text class="flow-t" x="138" y="232" text-anchor="middle">gyro data with its own</text>
-            <text class="flow-t" x="138" y="252" text-anchor="middle">stabilization off?</text>
-            <text class="flow-s" x="138" y="276" text-anchor="middle">DJI: EIS off, Wide FOV</text>
-            <line class="flow-line" x1="240" y1="240" x2="266" y2="240" marker-end="url(#flow-arrow)"/>
-            <text class="flow-l" x="253" y="232" text-anchor="middle">yes</text>
-
-            <rect class="flow-ok" x="268" y="186" width="204" height="108" rx="10"/>
-            <text class="flow-t" x="370" y="213" text-anchor="middle">From its gyro data</text>
-            <text class="flow-s" x="370" y="236" text-anchor="middle">the shipped preset, with</text>
-            <text class="flow-s" x="370" y="254" text-anchor="middle">your Level, View,</text>
-            <text class="flow-s" x="370" y="272" text-anchor="middle">Horizon and Lens</text>
-
-            <line class="flow-line" x1="138" y1="294" x2="138" y2="324" marker-end="url(#flow-arrow)"/>
-            <text class="flow-l" x="146" y="314">no</text>
-
-            <rect class="flow-plain" x="36" y="326" width="204" height="72" rx="10"/>
-            <text class="flow-t" x="138" y="354" text-anchor="middle">Plays as recorded</text>
-            <text class="flow-s" x="138" y="378" text-anchor="middle">Ctrl+e opens it in Gyroflow</text>
-
-            <line class="flow-line" x1="138" y1="398" x2="138" y2="428" marker-end="url(#flow-arrow)"/>
-
-            <rect class="flow-step" x="36" y="430" width="204" height="90" rx="10"/>
-            <text class="flow-t" x="138" y="456" text-anchor="middle">In Gyroflow</text>
-            <text class="flow-s" x="138" y="478" text-anchor="middle">it finds the motion in the</text>
-            <text class="flow-s" x="138" y="496" text-anchor="middle">picture; save the project</text>
-            <text class="flow-s" x="138" y="514" text-anchor="middle">next to the clip</text>
-
-            <path class="flow-line" d="M36 475 H20 V112 H34" fill="none" marker-end="url(#flow-arrow)"/>
-            <text class="flow-l" transform="translate(13 294) rotate(-90)" text-anchor="middle">plays stabilized from then on</text>
-          </svg>
-          <figcaption>What decides, from the top. A project made in Gyroflow takes the clip back to the first question.</figcaption>
-        </figure>
+      <div class="gap-grid st-gf">
+        <div class="gap-item">
+          <h3>The gyroscope</h3>
+          <p>Most action cameras have a gyroscope: a sensor that records, hundreds of times a second, how the camera turned. That's the clip's <strong>gyro data</strong>, or motion data, written into the video file. Gyroflow reads it and turns each frame back by as much as the camera turned, keeping a smoothed version of the movement you meant.</p>
+        </div>
+        <div class="gap-item">
+          <h3>The lens</h3>
+          <p>An action camera's wide lens bends the picture, more toward the edges. Gyroflow knows each camera's lens, from its database of lens profiles or from what the camera writes into the file. So it turns the picture as the lens actually saw it, and straight lines stay straight instead of wobbling at the edges.</p>
+        </div>
+        <div class="gap-item">
+          <h3>On its own</h3>
+          <p>Gyroflow is an app you load a clip into. You choose how smooth, how much zoom, whether to lock the horizon, then render a new, steady video file. What you chose for a clip can be saved as a small project file, <code>.gyroflow</code>, next to the clip.</p>
+        </div>
+        <div class="gap-item">
+          <h3>In this player</h3>
+          <p>The player runs Gyroflow's engine while the clip plays, so the same stabilization happens with nothing to render first. It also reads Gyroflow's project files: a clip you tuned in Gyroflow plays the way you tuned it. And when you want Gyroflow's own controls, <kbd>Ctrl</kbd>+<kbd>e</kbd> opens the clip in it.</p>
+        </div>
       </div>
-      <p class="honest">Why so strict: footage the camera has already steadied gets worse when it's stabilized a second time. So a clip whose camera says its stabilization was on, or doesn't say, plays as recorded. A wrong guess about a camera means its clips play as they are, not worse.</p>
     </div>
   </section>
 
@@ -253,8 +202,8 @@
             <p>Its project opens in Gyroflow as it is.</p>
           </div>
           <div>
-            <h3>A clip with no usable gyro data</h3>
-            <p>The video itself opens in Gyroflow, which can find the motion in the picture (optical flow). The panel shows “Waiting for the project from Gyroflow…”. Save the project next to the clip, and the clip loads again where it was, stabilized.</p>
+            <h3>No gyro data? No problem</h3>
+            <p>The video itself opens in Gyroflow, which stabilizes it optically: it finds the motion in the picture itself (optical flow). The panel shows “Waiting for the project from Gyroflow…”. Save the project next to the clip, and the clip loads again where it was, stabilized.</p>
             <p class="os-win">On Windows, opening a video that has no project needs Gyroflow's path in <code>gyroflow_app=</code> in <code>gyroflow.conf</code>.</p>
           </div>
           <div>
@@ -271,7 +220,7 @@
         </figure>
         <figure class="media" id="shot-stabilization-5">
           <img src="media/stabilization-5.jpg" alt="The side panel's Stabilization part on a clip without motion data: No motion data in this clip, and the button Stabilize in Gyroflow." width="584" height="356" loading="lazy">
-          <figcaption>No gyro data: one button opens the video in Gyroflow.</figcaption>
+          <figcaption>No gyro data? One button opens the video in Gyroflow, to stabilize it from the picture.</figcaption>
         </figure>
       </div>
     </div>
@@ -402,7 +351,7 @@
         </div>
         <div>
           <dt>Temporal denoise <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
-          <dd>The paused frame rebuilt from the 5 frames on each side of it, so its noise and the particles in the water go. Needs the stabilization on. More in <a class="text-link" href="photos.html">Photos</a>.</dd>
+          <dd>The paused frame rebuilt from the 5 frames on each side of it, so the sensor's noise from dim light mostly goes. Needs the stabilization on. More in <a class="text-link" href="photos.html">Photos</a>.</dd>
         </div>
         <div>
           <dt>Edges <span class="st-def-val">default Trail by direction</span> <kbd>Ctrl</kbd>+<kbd>b</kbd></dt>
@@ -446,8 +395,99 @@
     </div>
   </section>
 
+  <!-- The logic, in order -->
+  <section class="section band" id="decides">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How it decides</p>
+        <h2>Three questions, in this order, each time a clip opens.</h2>
+        <p class="lede">The player never guesses. It stabilizes a clip only when it knows how, and otherwise plays it as it was recorded.</p>
+      </div>
+      <div class="st-logic">
+        <ol class="checklist st-order">
+          <li>
+            <h3>A Gyroflow project next to the clip wins</h3>
+            <p>A Gyroflow project is a small <code>.gyroflow</code> file with everything Gyroflow needs to steady one clip. The player looks for one beside the video with the same name: <code>DJI_0007_D.gyroflow</code> or <code>DJI_0007_D.MP4.gyroflow</code>. If it finds one, the clip plays as Gyroflow renders it: the project's smoothing, zoom, lens, output size, horizon lock and correction for water. The player's Level doesn't apply.</p>
+          </li>
+          <li>
+            <h3>Else, the camera's gyro data, if the camera's stabilization was off</h3>
+            <p>Before the clip plays, the player reads what the camera wrote into the file. It steadies the clip only when the file has gyro data <em>and</em> the camera recorded that its own stabilization was off: EIS off on DJI (and the Wide FOV, the field of view), HyperSmooth off on GoPro, FlowState off on Insta360. GoPro and Insta360 clips also need their lens in Gyroflow's lens database. The clip then plays with the preset that comes with the player and your settings in the panel: <a class="text-link" href="#panel">Level, View, Horizon and Lens</a>.</p>
+          </li>
+          <li>
+            <h3>Else, no gyro data? No problem: <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow</h3>
+            <p>Until then the clip plays as it was recorded. Press <kbd>Ctrl</kbd>+<kbd>e</kbd>, and the video opens in Gyroflow, which stabilizes it optically, from the motion in the picture itself (optical flow). Save the project there, next to the clip, and the clip loads again where it was, stabilized: it's now a clip with a project, case 1.</p>
+          </li>
+        </ol>
+        <figure class="media st-flow" id="shot-stabilization-1">
+          <svg class="flow" viewBox="0 0 480 540" role="img" aria-labelledby="flow-title flow-desc">
+            <title id="flow-title">What decides how a clip is stabilized</title>
+            <desc id="flow-desc">You open a clip. Is there a Gyroflow project next to it? Yes: it plays as the project says. No: did the camera record gyro data with its own stabilization off (on DJI, EIS off and the Wide FOV)? Yes: it plays steadied from its gyro data, with the shipped preset and your panel settings. No: no problem, Ctrl+e opens it in Gyroflow, which stabilizes it from the picture. Saving the project there, next to the clip, brings it back to the first question, and it plays stabilized.</desc>
+            <defs>
+              <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M0 0 L8 4 L0 8 z" class="flow-head"/>
+              </marker>
+            </defs>
+
+            <rect class="flow-start" x="58" y="6" width="160" height="36" rx="18"/>
+            <text class="flow-t" x="138" y="29" text-anchor="middle">You open a clip</text>
+            <line class="flow-line" x1="138" y1="42" x2="138" y2="68" marker-end="url(#flow-arrow)"/>
+
+            <rect class="flow-q" x="36" y="70" width="204" height="84" rx="10"/>
+            <text class="flow-t" x="138" y="98" text-anchor="middle">Is there a Gyroflow</text>
+            <text class="flow-t" x="138" y="118" text-anchor="middle">project next to it?</text>
+            <text class="flow-s" x="138" y="140" text-anchor="middle">name.gyroflow</text>
+            <line class="flow-line" x1="240" y1="112" x2="266" y2="112" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="253" y="104" text-anchor="middle">yes</text>
+
+            <rect class="flow-ok" x="268" y="70" width="204" height="84" rx="10"/>
+            <text class="flow-t" x="370" y="97" text-anchor="middle">As the project says</text>
+            <text class="flow-s" x="370" y="119" text-anchor="middle">its smoothing, zoom,</text>
+            <text class="flow-s" x="370" y="137" text-anchor="middle">lens and horizon</text>
+
+            <line class="flow-line" x1="138" y1="154" x2="138" y2="184" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="146" y="174">no</text>
+
+            <rect class="flow-q" x="36" y="186" width="204" height="108" rx="10"/>
+            <text class="flow-t" x="138" y="212" text-anchor="middle">Did the camera record</text>
+            <text class="flow-t" x="138" y="232" text-anchor="middle">gyro data with its own</text>
+            <text class="flow-t" x="138" y="252" text-anchor="middle">stabilization off?</text>
+            <text class="flow-s" x="138" y="276" text-anchor="middle">DJI: EIS off, Wide FOV</text>
+            <line class="flow-line" x1="240" y1="240" x2="266" y2="240" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="253" y="232" text-anchor="middle">yes</text>
+
+            <rect class="flow-ok" x="268" y="186" width="204" height="108" rx="10"/>
+            <text class="flow-t" x="370" y="213" text-anchor="middle">From its gyro data</text>
+            <text class="flow-s" x="370" y="236" text-anchor="middle">the shipped preset, with</text>
+            <text class="flow-s" x="370" y="254" text-anchor="middle">your Level, View,</text>
+            <text class="flow-s" x="370" y="272" text-anchor="middle">Horizon and Lens</text>
+
+            <line class="flow-line" x1="138" y1="294" x2="138" y2="324" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="146" y="314">no</text>
+
+            <rect class="flow-plain" x="36" y="326" width="204" height="72" rx="10"/>
+            <text class="flow-t" x="138" y="354" text-anchor="middle">No problem</text>
+            <text class="flow-s" x="138" y="378" text-anchor="middle">Ctrl+e opens it in Gyroflow</text>
+
+            <line class="flow-line" x1="138" y1="398" x2="138" y2="428" marker-end="url(#flow-arrow)"/>
+
+            <rect class="flow-step" x="36" y="430" width="204" height="90" rx="10"/>
+            <text class="flow-t" x="138" y="456" text-anchor="middle">In Gyroflow</text>
+            <text class="flow-s" x="138" y="478" text-anchor="middle">it finds the motion in the</text>
+            <text class="flow-s" x="138" y="496" text-anchor="middle">picture; save the project</text>
+            <text class="flow-s" x="138" y="514" text-anchor="middle">next to the clip</text>
+
+            <path class="flow-line" d="M36 475 H20 V112 H34" fill="none" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" transform="translate(13 294) rotate(-90)" text-anchor="middle">plays stabilized from then on</text>
+          </svg>
+          <figcaption>What decides, from the top. A project made in Gyroflow takes the clip back to the first question.</figcaption>
+        </figure>
+      </div>
+      <p class="honest">Why so strict: footage the camera has already steadied gets worse when it's stabilized a second time. So a clip whose camera says its stabilization was on, or doesn't say, plays as recorded. A wrong guess about a camera means its clips play as they are, not worse.</p>
+    </div>
+  </section>
+
   <!-- Keys -->
-  <section class="section band" id="keys">
+  <section class="section band tight-top" id="keys">
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">Keys</p>
@@ -477,7 +517,7 @@
         <h2>What it doesn't do.</h2>
       </div>
       <ul class="st-limits">
-        <li><b>No gyro data, no stabilization without Gyroflow.</b> A DJI clip shot with EIS on, or in another FOV than Wide, may have none. It needs a project made in Gyroflow.</li>
+        <li><b>No gyro data? Gyroflow stabilizes it optically.</b> A DJI clip shot with EIS on, or in another FOV than Wide, may have none. <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow; save the project there, and it plays steady here.</li>
         <li><b>Camera stabilization on means as recorded,</b> GoPro HyperSmooth and Insta360 FlowState included, even though those cameras record gyro data anyway.</li>
         <li><b>The panel says “No motion data in this clip” for any clip it doesn't stabilize,</b> also a GoPro clip with HyperSmooth on that has gyro data. Gyroflow may then use that gyro data rather than optical flow.</li>
         <li><b>Checked on two cameras:</b> the Osmo Action 6 and the GoPro HERO12 Black. GoPro and Insta360 clips need their lens in Gyroflow's lens database.</li>

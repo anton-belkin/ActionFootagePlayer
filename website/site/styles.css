@@ -92,8 +92,9 @@ code { font-family: var(--f-mono); font-size: 0.92em; }
 .top .wrap { display: flex; align-items: center; gap: 24px; padding-block: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-family: var(--f-display); font-weight: 800; font-stretch: 110%; font-size: 1.05rem; letter-spacing: -0.01em; }
 .brand-mark { width: 26px; height: 26px; flex: none; }
-/* The same five links on every page, in every language; the page you're on is marked. Below 900px they move
-   to a second row of the header; on phones, into the menu beside the language (see .pagemenu). */
+/* The same header on every page: Home ▾, Who it's for ▾, Features ▾ and Download; the page you're on is marked.
+   Below 900px they move to a second row of the header; on phones, into one menu beside the language (.sitemenu).
+   The translations still have the older header with the On this page menu (.pagemenu) until they're redone. */
 .top .wrap { flex-wrap: wrap; row-gap: 6px; }
 .nav { display: flex; align-items: center; gap: 20px; margin-left: auto; font-size: var(--step--1); }
 .nav a { text-decoration: none; color: var(--muted); white-space: nowrap; padding-block: 4px; border-bottom: 2px solid transparent; }
@@ -102,7 +103,7 @@ code { font-family: var(--f-mono); font-size: 0.92em; }
 .nav .nav-dl { color: var(--accent-ink); font-weight: 600; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 999px; }
 .nav .nav-dl:hover { color: var(--ink); }
 .nav .nav-dl[aria-current] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-/* Features ▾: the topic pages and the full list, a dropdown among the header's links */
+/* The dropdowns among the header's links */
 .navmenu { position: relative; }
 .navmenu summary { list-style: none; cursor: pointer; color: var(--muted); white-space: nowrap; padding-block: 4px; border-bottom: 2px solid transparent; }
 .navmenu summary::-webkit-details-marker { display: none; }
@@ -116,19 +117,19 @@ code { font-family: var(--f-mono); font-size: 0.92em; }
 .navmenu .nm-all { margin-top: 4px; padding-top: 9px; border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; color: var(--muted); }
 @media (max-width: 900px) {
   .top .wrap { padding-block: 10px 6px; }
-  .top .pagemenu { margin-left: auto; }
+  .top .pagemenu, .top .sitemenu ~ .lang { margin-left: auto; }
   .nav { order: 3; flex-basis: 100%; margin-left: 0; gap: 18px; }
 }
 
 /* Language switcher: a disclosure, so it works without script */
-.lang, .pagemenu { position: relative; flex: none; font-size: var(--step--1); }
-.lang summary, .pagemenu summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font-family: var(--f-mono); color: var(--muted); }
-.lang summary::-webkit-details-marker, .pagemenu summary::-webkit-details-marker { display: none; }
-.lang summary:hover, .lang[open] summary, .pagemenu summary:hover, .pagemenu[open] summary { color: var(--ink); border-color: var(--muted); }
-.lang summary svg, .pagemenu summary svg { width: 15px; height: 15px; flex: none; }
-.lang ul, .pagemenu .pm { position: absolute; right: 0; top: calc(100% + 8px); margin: 0; padding: 6px; list-style: none; min-width: 10.5rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(6, 22, 31, 0.18); }
-.lang a, .pagemenu a { display: block; padding: 7px 10px; border-radius: 5px; text-decoration: none; color: var(--ink); }
-.lang a:hover, .pagemenu a:hover { background: var(--bg); }
+.lang, .pagemenu, .sitemenu { position: relative; flex: none; font-size: var(--step--1); }
+.lang summary, .pagemenu summary, .sitemenu summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font-family: var(--f-mono); color: var(--muted); }
+.lang summary::-webkit-details-marker, .pagemenu summary::-webkit-details-marker, .sitemenu summary::-webkit-details-marker { display: none; }
+.lang summary:hover, .lang[open] summary, .pagemenu summary:hover, .pagemenu[open] summary, .sitemenu summary:hover, .sitemenu[open] summary { color: var(--ink); border-color: var(--muted); }
+.lang summary svg, .pagemenu summary svg, .sitemenu summary svg { width: 15px; height: 15px; flex: none; }
+.lang ul, .pagemenu .pm, .sitemenu ul { position: absolute; right: 0; top: calc(100% + 8px); margin: 0; padding: 6px; list-style: none; min-width: 10.5rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(6, 22, 31, 0.18); }
+.lang a, .pagemenu a, .sitemenu a { display: block; padding: 7px 10px; border-radius: 5px; text-decoration: none; color: var(--ink); }
+.lang a:hover, .pagemenu a:hover, .sitemenu a:hover { background: var(--bg); }
 .lang a[aria-current] { color: var(--accent-ink); font-weight: 600; }
 /* The page's own sections, in a menu beside the language: its words show on wide screens, its icon alone on narrower
    ones. On phones the header's links don't fit beside the name, so they go into this menu too, above the sections. */
@@ -144,10 +145,21 @@ code { font-family: var(--f-mono); font-size: 0.92em; }
   .pagemenu summary { padding-inline: 7px; }
   .pm-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
+/* Phones: the header's links in one menu (.sitemenu), grouped as in the dropdowns; hidden on wider screens */
+.sitemenu { display: none; }
+.sitemenu ul { min-width: 15rem; max-width: min(22rem, calc(100vw - 32px)); max-height: calc(100vh - var(--top-h) - 24px); overflow-y: auto; }
+.sitemenu a { line-height: 1.35; padding-left: 20px; }
+.sitemenu a[aria-current] { color: var(--accent-ink); font-weight: 600; }
+.sitemenu .sm-group { margin: 8px 10px 2px; font-family: var(--f-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-ink); }
+.sitemenu .sm-group:first-child { margin-top: 4px; }
+.sitemenu .sm-dl { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.sitemenu .sm-dl a { padding-left: 10px; font-weight: 600; color: var(--accent-ink); }
 /* Phones: one row, the name, the menu (with the header's links in it) and the language */
 @media (max-width: 520px) {
   .top .wrap { column-gap: 8px; padding-block: 10px; }
-  .lang summary, .pagemenu summary { padding-inline: 6px; }
+  .lang summary, .pagemenu summary, .sitemenu summary { padding-inline: 6px; }
+  .top .sitemenu { display: block; margin-left: auto; }
+  .top .sitemenu ~ .lang { margin-left: 0; }
   .brand { font-size: 0.95rem; gap: 8px; }
   .top .nav { display: none; }
   .pagemenu .pm-site { display: block; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }

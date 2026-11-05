@@ -1,7 +1,7 @@
 /* Stabilization page: the decision flow, the settings lists, the limits. Builds on styles.css. */
 
-.st-def { color: var(--muted); max-width: 60ch; }
-.st-def strong { color: var(--ink); font-weight: 600; }
+/* What Gyroflow is: four short parts, two by two */
+@media (min-width: 700px) { .st-gf { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* How it decides: the ordered steps beside the flow diagram */
 .st-logic { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); align-items: start; margin-bottom: 28px; }
