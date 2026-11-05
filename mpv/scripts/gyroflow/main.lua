@@ -157,6 +157,7 @@ local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
+local CROP_SHADER = utils.join_path(DIR, "crop_preview.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -377,6 +378,16 @@ if file_exists(CHROMATIC_SHADER) then
         chromatic_shader = true
     end
 end
+-- Crop mode's preview (crop_preview.glsl, crop.lua), there from the start for the same reason; it runs only in crop
+-- mode (its crop_on)
+local crop_shader = false
+if file_exists(CROP_SHADER) then
+    local vo = mp.get_property("vo") or ""
+    if vo == "" or vo:find("gpu", 1, true) or vo:find("libmpv", 1, true) then
+        mp.commandv("change-list", "glsl-shaders", "append", CROP_SHADER)
+        crop_shader = true
+    end
+end
 
 -- Faster than max_fps (when it's set): such a clip plays every other frame if its stabilized frame leaves edges
 -- anywhere and they're filled (gyroflow.vpy asks the plugin, which measures it with Gyroflow's zoom for any project and
@@ -445,6 +456,7 @@ crop.init({
     end,
     write = function() write_edge_control() end,
     control_path = function() return EDGE_CONTROL end,
+    shader = crop_shader,
 })
 
 -- For the right-click menu (mpv/menu.conf)

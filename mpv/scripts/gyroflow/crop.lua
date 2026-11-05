@@ -14,8 +14,12 @@
 -- The camera goes to the plugin through the edges control file (main.lua's write_edge_control, `camera=`), which it
 -- reads within 50 ms while playing. Paused, mpv seeks to the frame on screen again to have it rendered anew; until
 -- that's through, mpv's video-zoom and video-pan move the frame that's there by about as much (exact in the middle),
--- from the focal length the plugin writes next to the control file (Edges::write_camera_info), and the frame drawn
--- over it turns the other way for a roll. While a seek's under way the control file stays as it was when it was
+-- from the focal length the plugin writes next to the control file (Edges::write_camera_info). With mpv's GPU video
+-- outputs it's crop_preview.glsl that moves it, exactly (a turn, a roll, a zoom): each render of the paused frame
+-- carries a parity (the control file's crop_mark), and the shader has the mapping for each, so a new frame shows moved
+-- by its own from the moment it's there (mpv shows it before a script hears of it). Elsewhere mpv's video-zoom and
+-- video-pan move it, and the frame drawn over it turns the other way for a roll. While a seek's under way the control
+-- file stays as it was when it was
 -- asked for, so the frame that comes is the one it says (the filter reads the file as mpv sets it up, any time after
 -- the seek's asked for); the camera since then goes with the next one.
 --
@@ -69,6 +73,9 @@ local aspect = 1
 local cam = nil
 local written = nil
 local shown = nil
+-- The parity of the render the control file asks for (crop_mark), and each parity's camera (crop_preview.glsl)
+local mark = 0
+local renders = {}
 -- Without the plugin: mpv's own zoom (log2) and pan
 local flat = nil
 local overlay = mp.create_osd_overlay("ass-events")
@@ -144,7 +151,7 @@ local function draw()
     -- have yet (what's in it is then what the frame rendered with the roll will show)
     local right = W * (1 - (mp.get_property_number("video-margin-ratio-right") or 0))
     local turn = 0
-    if cam and shown and mp.get_property_native("pause") then turn = -ROLL_SIGN * (cam.roll - shown.roll) end
+    if cam and shown and not hooks.shader and mp.get_property_native("pause") then turn = -ROLL_SIGN * (cam.roll - shown.roll) end
     local function style(color, alpha)
         return string.format("{\\an7\\pos(0,0)\\org(%d,%d)\\frz%.2f\\clip(0,0,%d,%d)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}",
                              (x0 + x1) / 2, (y0 + y1) / 2, turn, right, H, color, alpha)
@@ -244,6 +251,55 @@ local function place(c, w)
     return fx * x / z, fy * y / z
 end
 
+local function mul(A, B)
+    local M = {}
+    for i = 1, 3 do
+        M[i] = {}
+        for j = 1, 3 do M[i][j] = A[i][1] * B[1][j] + A[i][2] * B[2][j] + A[i][3] * B[3][j] end
+    end
+    return M
+end
+
+-- From the view asked for to the frame rendered with camera c, in texture coordinates (0-1, y down): both turn about
+-- the same point, so it's a homography, K_c · R_c^T · R_cam · K_cam^-1
+local function homography(c)
+    local fx, fy = focal()
+    local fa, ga, fb, gb = fx / cam.zoom, fy / cam.zoom, fx / c.zoom, fy / c.zoom
+    local Ra, Rb = rotation(cam), rotation(c)
+    local M = {}
+    for i = 1, 3 do
+        M[i] = {}
+        for j = 1, 3 do M[i][j] = Rb[1][i] * Ra[1][j] + Rb[2][i] * Ra[2][j] + Rb[3][i] * Ra[3][j] end
+    end
+    local unproject = { { 1 / fa, 0, -0.5 / fa }, { 0, 1 / ga, -0.5 / ga }, { 0, 0, 1 } }
+    local project = { { fb, 0, 0.5 }, { 0, gb, 0.5 }, { 0, 0, 1 } }
+    return mul(project, mul(M, unproject))
+end
+
+local IDENTITY = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }
+local shader_set = nil
+-- crop_preview.glsl's parameters, with whatever else glsl-shader-opts has; nil: off
+local function set_shader(a, b)
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    for k in pairs(opts) do if k:match("^crop_") then opts[k] = nil end end
+    local key = "off"
+    if a then
+        opts.crop_on = "1"
+        for i = 1, 3 do
+            for j = 1, 3 do
+                opts["crop_a" .. ((i - 1) * 3 + j - 1)] = string.format("%.7g", a[i][j])
+                opts["crop_b" .. ((i - 1) * 3 + j - 1)] = string.format("%.7g", b[i][j])
+            end
+        end
+        local parts = {}
+        for i = 0, 8 do table.insert(parts, opts["crop_a" .. i] .. "," .. opts["crop_b" .. i]) end
+        key = table.concat(parts, ";")
+    end
+    if key == shader_set then return end
+    shader_set = key
+    mp.set_property_native("glsl-shader-opts", opts)
+end
+
 -- The point the preview keeps where it should be: where the mouse took the picture last (nil: the middle)
 local anchor = nil
 
@@ -251,6 +307,15 @@ local anchor = nil
 local function preview()
     if not cam then return end
     local paused = mp.get_property_native("pause")
+    if hooks.shader then
+        mp.set_property_number("video-zoom", 0)
+        mp.set_property_number("video-pan-x", 0)
+        mp.set_property_number("video-pan-y", 0)
+        -- Playing, the frames come with the camera asked for (a moment later)
+        local function h(c) return (paused and c) and homography(c) or IDENTITY end
+        set_shader(h(renders[0]), h(renders[1]))
+        return
+    end
     if not paused or not shown then
         mp.set_property_number("video-zoom", 0)
         mp.set_property_number("video-pan-x", 0)
@@ -283,9 +348,11 @@ local function write_now()
     if paused and refreshing then dirty = true; return end
     last_write = mp.get_time()
     written = copy(cam)
+    local t = paused and not same(written, shown) and mp.get_property_number("time-pos")
+    -- A render of the paused frame: the other parity (crop_preview.glsl)
+    if t then mark = 1 - mark end
+    renders[mark] = copy(written)
     hooks.write()
-    if not paused or same(written, shown) then return end
-    local t = mp.get_property_number("time-pos")
     if not t then return end
     refreshing, dirty = copy(written), false
     mp.msg.debug(string.format("refresh: yaw %.3f pitch %.3f roll %.3f zoom %.3f", cam.yaw, cam.pitch, cam.roll, cam.zoom))
@@ -462,7 +529,7 @@ local BINDINGS = {
 function M.set(on)
     if on == active then return end
     active = on
-    refreshing, dirty, written = nil, false, nil
+    refreshing, dirty, written, renders = nil, false, nil, {}
     if on then
         if stabilizing() then
             cam, flat = default_camera(), nil
@@ -484,6 +551,7 @@ function M.set(on)
         local had_camera = cam ~= nil
         if write_timer then write_timer:kill(); write_timer = nil end
         cam, flat, shown = nil, nil, nil
+        if hooks.shader then set_shader(nil) end
         mp.set_property_number("video-zoom", 0)
         mp.set_property_number("video-pan-x", 0)
         mp.set_property_number("video-pan-y", 0)
@@ -504,7 +572,7 @@ function M.active() return active end
 -- For the control file: the camera written last (write_now), while there's one
 function M.control_words()
     if not cam or not written then return "" end
-    return string.format(" camera=%.4f,%.4f,%.4f,%.5f", written.yaw, written.pitch, written.roll, written.zoom)
+    return string.format(" camera=%.4f,%.4f,%.4f,%.5f crop_mark=%d", written.yaw, written.pitch, written.roll, written.zoom, mark)
 end
 
 -- A frame through after a seek: paused, it's the one asked for

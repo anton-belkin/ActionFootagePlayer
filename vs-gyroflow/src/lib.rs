@@ -138,6 +138,8 @@ struct Job {
     camera: Camera,
     /// The frame's lens geometry written into its luma for mpv's chromatic.glsl (dispersion.rs)
     marker: bool,
+    /// Crop mode's parity for its preview shader (write_crop_mark)
+    crop_mark: Option<bool>,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -462,6 +464,7 @@ impl Engine {
         // Turned or zoomed out, the frame may leave edges where the view itself never does
         let camera = self.edges.camera();
         if !camera.is_default() { self.edges.set_expected(true); }
+        let crop_mark = self.edges.crop_mark();
         let edges = match self.edges.mode() {
             edges::EdgeMode::Off => None,
             // No frame of the clip leaves edges (uncovered_frames): nothing to fill, nor the source scaled down and the
@@ -471,7 +474,7 @@ impl Engine {
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, crop_mark, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -754,6 +757,9 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
             if job.edges.is_none() && edges.expected() { m.background = Some(background); }
             m.write(luma, cfg.kind, cfg.max_value);
         }
+        if let (Ok(()), Some(bit), Some(luma)) = (&result, job.crop_mark, job.planes.first()) {
+            write_crop_mark(luma, cfg.kind, cfg.max_value, bit);
+        }
         let _ = job.reply.send(result);
 
         frames += 1;
@@ -764,6 +770,32 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
         }
     }
     log::debug!("Worker finished");
+}
+
+/// Crop mode's mark, for its preview shader (mpv/scripts/gyroflow/crop_preview.glsl): which of two renders of the paused
+/// frame this is, so the shader moves each by its own camera the moment it's on screen (mpv shows a new frame before a
+/// script hears of it, and moving it from there flashed). The last CROP_MARK_PIXELS of the luma's last row (the start
+/// has dispersion.rs's marker): four nibbles 10, 5, 10, 5, then four of the parity, 0 or 15, each one of 17 levels
+/// from black to white as dispersion.rs writes them. The shader paints them over with the row above
+pub const CROP_MARK_PIXELS: usize = 8;
+fn write_crop_mark(plane: &PlaneJob, kind: SampleKind, max_value: f32, parity: bool) {
+    if plane.dst_w < CROP_MARK_PIXELS + dispersion::PIXELS || plane.dst_h == 0 { return; }
+    let p = if parity { 15 } else { 0 };
+    let nibbles = [10u16, 5, 10, 5, p, p, p, p];
+    let codes = nibbles.map(|n| ((n as f32 + 1.0) * max_value / 17.0).round());
+    unsafe {
+        let row = plane.dst.add((plane.dst_h - 1) * plane.dst_stride);
+        match kind {
+            SampleKind::U8 => {
+                let px = std::slice::from_raw_parts_mut(row.add(plane.dst_w - CROP_MARK_PIXELS), CROP_MARK_PIXELS);
+                for (p, c) in px.iter_mut().zip(codes) { *p = c as u8; }
+            }
+            SampleKind::U16 => {
+                let px = std::slice::from_raw_parts_mut((row as *mut u16).add(plane.dst_w - CROP_MARK_PIXELS), CROP_MARK_PIXELS);
+                for (p, c) in px.iter_mut().zip(codes) { *p = c as u16; }
+            }
+        }
+    }
 }
 
 /// The backend, and the plane's geometry for the marker (dispersion.rs)
