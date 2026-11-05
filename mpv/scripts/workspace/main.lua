@@ -34,6 +34,10 @@
 --   redirected      yes when the file playing is a link (a moment, a clip preview) and mpv plays `clip` instead
 --   clip_preview    when a clip preview plays: { file }
 --   clips           while clip previews are made: { done, total }
+--   project_choices with no project: the folders one can be started in, from the top down; project_new: the one the
+--                   first save would take (start-project <folder> starts it in another)
+--   moments_total   the project's moments; clips_stats: { total (clips), previews (made, there), new (never made) }
+--   clip_preview    this clip's preview: made, removed (made, then deleted: not interesting) or none
 --   project         the project's folder, absent for none
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
@@ -48,7 +52,7 @@
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
--- project-folder (show it). open-original: an export's original, at its part. For the
+-- project-folder, clips-folder (show them), start-project <folder>. open-original: an export's original, at its part. For the
 -- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
 -- link }).
 --
@@ -122,6 +126,9 @@ local function publish()
     mp.set_property_native("user-data/workspace", state)
 end
 
+-- The project's counts and this clip's preview, for the side panel (set further down, with the clip previews)
+local extras = nil
+
 local function clock(s)
     s = math.floor(s + 0.5)
     if s >= 3600 then return string.format("%d:%02d:%02d", math.floor(s / 3600), math.floor(s % 3600 / 60), s % 60) end
@@ -176,6 +183,8 @@ local function describe(path)
         gyroflow_new = ws.gyroflow_new(clip),
         marks_file = ws.marks_file(clip),
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
+        project_choices = not root and ws.project_choices(clip) or nil,
+        project_new = not root and ws.new_project_root(clip) or nil,
     }
 end
 
@@ -229,7 +238,9 @@ local function refresh()
         chapters[#chapters + 1] = { title = m.name .. " end", time = m.link.out }
     end
     state.moments = list
+    state.moments_total = #found.list
     apply_chapters(chapters)
+    if extras then extras() end
     publish()
 end
 
@@ -433,6 +444,7 @@ local function make_project()
     state.project = root
     state.relative = ws.relative(state.clip, root)
     state.moments_folder = ws.join(root, moments_lib.FOLDER)
+    state.project_choices, state.project_new = nil, nil
     publish()
     return root
 end
@@ -698,6 +710,7 @@ end)
 
 -- Clip previews (Clips/): one at a time, in the background, from the menu or X
 local clips_job = nil
+local recount
 local overlay = mp.create_osd_overlay("ass-events")
 
 -- The highlights plugin's reader of the camera's marks, when it's beside this one (the app has both)
@@ -766,6 +779,7 @@ local function next_clip()
         state.clips = nil
         publish()
         draw_progress()
+        recount()
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
         mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " failed") or ""), 4)
         return
@@ -858,6 +872,7 @@ mp.add_key_binding("X", "not-interesting", function()
         if fs.is_file(preview) then
             return trash(preview, function(ok)
                 mp.osd_message(ok and "Not interesting: its preview is in the Trash (X again: made again)" or "Couldn't move the preview to the Trash", 3)
+                recount()
             end)
         end
     end
@@ -871,4 +886,62 @@ end)
 
 mp.register_event("shutdown", function()
     if clips_job and clips_job.id then clips_job.stopping = true; mp.abort_async_command(clips_job.id) end
+end)
+
+-- The project's clips counted (a walk of its folders, kept a minute), and this clip's preview
+local stats_cache = {}
+extras = function(force)
+    local project = state.project
+    if not project or not state.clip then
+        state.clips_stats, state.clip_preview = nil, nil
+        return
+    end
+    local made = read_made()
+    local cached = stats_cache[project]
+    if force or not cached or mp.get_time() - cached.time > 60 then
+        local total, previews, new = 0, 0, 0
+        for _, c in ipairs(moments.footage(project)) do
+            total = total + 1
+            if fs.is_file(preview_of(project, c.relative)) then previews = previews + 1 end
+            local info = utils.file_info(c.file)
+            if not made[moments_lib.made_line(c.relative, info and info.size)] then new = new + 1 end
+        end
+        cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
+        stats_cache[project] = cached
+    end
+    state.clips_stats = cached.stats
+    local info = utils.file_info(state.clip)
+    if state.relative and fs.is_file(preview_of(project, state.relative)) then state.clip_preview = "made"
+    elseif state.relative and made[moments_lib.made_line(state.relative, info and info.size)] then state.clip_preview = "removed"
+    else state.clip_preview = "none" end
+end
+
+-- Counted again after clip previews are made or removed
+recount = function()
+    extras(true)
+    publish()
+end
+
+mp.register_script_message("clips-folder", function()
+    local dir = state.project and ws.join(state.project, moments_lib.CLIPS)
+    if dir and fs.is_dir(dir) then reveal(dir, true) end
+end)
+
+-- The side panel's Start the project here: in one of the folders above the clip
+mp.register_script_message("start-project", function(dir)
+    if not state.clip or state.project or not dir then return end
+    local allowed = false
+    for _, d in ipairs(ws.project_choices(state.clip)) do if d == dir then allowed = true end end
+    if not allowed then return end
+    local sd = ws.join(dir, workspace.STATE_DIR)
+    if not fs.is_dir(sd) and not mkdir(sd) then
+        return mp.osd_message("Can't write in " .. dir, 4)
+    end
+    if windows then run({ "attrib", "+h", sd }) end
+    state.project = dir
+    state.relative = ws.relative(state.clip, dir)
+    state.moments_folder = ws.join(dir, moments_lib.FOLDER)
+    state.project_choices, state.project_new = nil, nil
+    mp.osd_message("Project started: " .. ws.name(dir), 3)
+    refresh()
 end)

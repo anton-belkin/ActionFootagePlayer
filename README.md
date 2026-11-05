@@ -238,6 +238,14 @@ The settings are in a panel at the right of the window, beside the video (the vi
 covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of the one chosen, with
 switches and buttons, scrolled with the wheel:
 
+- **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
+  with their keys beside them. At the top, the project: with none yet, what one is and **Start the project here**
+  in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
+  then its counts, **Make clip previews** for clips without one, **Show all clips** and **Show all moments** in
+  Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
+  its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
+  interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
+  were moved).
 - **Clip**: what it is, Finder and its path, marking a part, exporting it, the highlights, the next and previous clip.
 - **Look**: the video output (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping; NBCU's and the maker's SDR),
   the log curve by hand, noise reduction.

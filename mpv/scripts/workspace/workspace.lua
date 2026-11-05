@@ -122,6 +122,21 @@ function M.new(fs)
         return nil
     end
 
+    -- The folders a project for the clip can be started in, from the top down: the volume's top folder (or the
+    -- folder below the home folder) to the clip's own. A project there covers every folder in it
+    function ws.project_choices(clip)
+        local list = {}
+        local home = fs.home and ws.normalize(fs.home)
+        local dir = ws.parent(clip)
+        while dir do
+            if home and same(dir, home) then break end
+            table.insert(list, 1, dir)
+            if ws.is_volume_root(dir) then break end
+            dir = ws.parent(dir)
+        end
+        return list
+    end
+
     -- Where a project for the clip would be made at the first save: the clip's folder, or the folder above DCIM
     -- for a clip in a camera's own tree (DCIM/100GOPRO, DCIM/DJI_001), the card or a copy of it
     function ws.new_project_root(clip)

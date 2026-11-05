@@ -135,5 +135,12 @@ expect("windows card project", w.project_root("E:\\DCIM\\100GOPRO\\GX01.MP4"), "
 expect("windows card relative", w.relative("E:\\DCIM\\100GOPRO\\GX01.MP4", "E:\\"), "DCIM/100GOPRO/GX01.MP4")
 expect("windows home stops", w.project_root("c:\\users\\me\\Videos\\A.MP4"), nil)
 
+-- Where a project can be started: the volume's top down to the clip's folder, the home folder and above left out
+local pc = workspace.new({ is_dir = function() return false end, is_file = function() return false end, home = "/Users/me" })
+expect("choices on a volume", table.concat(pc.project_choices("/Volumes/NAS/Trips/Egypt/Day 1/A.MP4"), "|"),
+       "/Volumes/NAS|/Volumes/NAS/Trips|/Volumes/NAS/Trips/Egypt|/Volumes/NAS/Trips/Egypt/Day 1")
+expect("choices under home", table.concat(pc.project_choices("/Users/me/Movies/Egypt/A.MP4"), "|"), "/Users/me/Movies|/Users/me/Movies/Egypt")
+expect("choices on a drive", table.concat(win.project_choices("E:\\DCIM\\100GOPRO\\GX01.MP4"), "|"), "E:\\|E:\\DCIM|E:\\DCIM\\100GOPRO")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

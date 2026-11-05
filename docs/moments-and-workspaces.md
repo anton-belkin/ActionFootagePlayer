@@ -543,7 +543,19 @@ Project                          ▸  2026-10 Egypt (in the trip folder)
                                      Show project folder
 ```
 
-The panel's Clip section gets the moments and marks as lists, the same as the menu.
+The side panel has a **Project** tab of its own, the first, where it opens (built 2026-11-05 from Anton's review of two
+mockups):
+- the project at the top: with none yet, what a project is and *Start the project here* in a folder chosen from
+  the clip's folder up to the volume's top (`project_choices`, `start-project`); then its counts and the project-wide
+  actions (*Make clip previews* while some are new, *Show all clips*, *Show all moments* in Finder; `⋯`: the
+  project folder, *Make again for removed clips*);
+- this clip below a line: *Marks of this clip* (the one playing at highlighted, *Add* / *Remove the mark here*),
+  *Moments of this clip* (a click plays one, `⋯` opens play, rename, remove, show), *Mark this clip as not
+  interesting* (`X`; *undo* once its preview is gone);
+- the selected part last, in a box of its own since it goes with the clip: its start and end, *Save as moment* or
+  *Update <name>* (`k`).
+Exporting stays in the Clip tab. Playing all of a trip's moments is the Finder's: open any one, and the ones beside
+it are the playlist.
 
 ## The plan
 
