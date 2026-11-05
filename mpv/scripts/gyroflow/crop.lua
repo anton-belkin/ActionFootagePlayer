@@ -352,6 +352,8 @@ local function write_now()
     -- A render of the paused frame: the other parity (crop_preview.glsl)
     if t then mark = 1 - mark end
     renders[mark] = copy(written)
+    -- The shader's mapping for this render's parity before it can come (it may well come before the mouse moves on)
+    preview()
     hooks.write()
     if not t then return end
     refreshing, dirty = copy(written), false
