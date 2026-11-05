@@ -150,6 +150,39 @@ local function hglg(f, a, b, times)
     return true
 end
 
+-- The movie's own header (moov/mvhd): its length in seconds and when it was made (seconds since 1970, UTC; nil when
+-- the camera left it 0), or nil. As FFmpeg reads them (mpv's duration and creation_time)
+function M.movie(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    f:setvbuf("full", BUFFER)
+    local size = f:seek("end")
+    local out = nil
+    for typ, a, b in boxes(f, 0, size) do
+        if typ == "moov" then
+            for mt, ma, mb in boxes(f, a, b) do
+                if mt == "mvhd" and mb - ma >= 32 then
+                    local h = read_at(f, ma, 32)
+                    local created, scale, duration
+                    if h:byte(1) == 1 then
+                        created, scale, duration = u64(h, 5), u32(h, 21), u64(h, 25)
+                    else
+                        created, scale, duration = u32(h, 5), u32(h, 13), u32(h, 17)
+                    end
+                    if scale and scale > 0 and duration then
+                        -- 1904-01-01 to 1970-01-01
+                        local unix = created and created > 2082844800 and created - 2082844800 or nil
+                        out = { duration = duration / scale, created = unix }
+                    end
+                end
+            end
+            break
+        end
+    end
+    f:close()
+    return out
+end
+
 function M.read(path)
     local f = io.open(path, "rb")
     if not f then return nil end

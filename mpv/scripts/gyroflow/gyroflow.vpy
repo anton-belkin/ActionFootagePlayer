@@ -1,7 +1,7 @@
 # mpv vf=vapoursynth script, set up by main.lua (the gyroflow plugin).
 #
 # Stabilizes mpv's video_in with the Gyroflow project given in user_data (JSON: plugin, project,
-# preset, interpolation, workers, fast, wide, level, lookahead, horizon_lock, underwater, width, height, edges*, chromatic, still_control). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
+# preset, interpolation, workers, fast, wide, level, lookahead, horizon_lock, underwater, rotation, aspect, projection, width, height, edges*, chromatic, still_control). The project can be the video itself (its own motion data). mpv reloads this script on every seek; the plugin keeps the loaded project and
 # its GPU setup between reloads, so that's cheap.
 import json
 import vapoursynth as vs
@@ -40,6 +40,16 @@ if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 if args.get('underwater'):
     stab['underwater'] = args['underwater']
+# The output frame (the side panel's): turned clockwise by 0, 90, 180 or 270 degrees, then cut to an aspect ratio
+# (W:H, or original), in place of the project's own output size and rotation (vs-gyroflow/src/lib.rs, Frame)
+if args.get('rotation') is not None:
+    stab['rotation'] = int(args['rotation'])
+if args.get('aspect'):
+    stab['aspect'] = str(args['aspect'])
+# Gyroflow's output projection (0 rectilinear, 1 stereographic, 2 equidistant, 3 equisolid, 4 orthographic), in place
+# of the project's or preset's
+if args.get('projection') is not None:
+    stab['projection'] = int(args['projection'])
 # The size to render at, for the display (main.lua); the project's or the input's without it
 if args.get('width') and args.get('height'):
     stab['width'] = int(args['width'])

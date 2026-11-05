@@ -362,15 +362,13 @@ end
 
 
 -- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
+-- A moment playing whose view was changed from how it was saved: its switch, or the settings (the workspace plugin's
+-- view_status)
 local function moment_changed(ws)
     local m = ws and ws.moment
     if not (m and ws.snap) then return false end
     if (ws.alone == true) ~= (m.alone == true) then return true end
-    local g, st = state("gyroflow") or {}, m.stab or {}
-    -- With a project of its own, the project is what's saved: its horizon and the switch can go into it
-    if ws.own_project then return g.horizon_lock ~= nil and g.horizon_lock ~= "project" end
-    if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
-    return g.level ~= st.level
+    return ws.view_status == "changed" and ws.view_saved_in == "moment"
 end
 
 -- The clip's moments (the workspace plugin's), each with what can be done to it
@@ -511,7 +509,10 @@ local function build()
             end
             if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
             if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
-            if w.playing_preview then add(item("This clip preview's own stabilization", "script-message-to workspace clip-own", { checked = w.own_project ~= nil })) end
+            if w.link then add(item("Settings of its own", "script-message-to workspace view-own", { checked = w.link.own == true })) end
+            if w.view_saved_in and w.view_saved_in ~= "moment" and w.view_status ~= "saved" then
+                add(item(w.view_saved_in == "clip" and "Save the view in this clip" or "Save the view in this clip preview", "script-message-to workspace view-save"))
+            end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end
         -- Cutting a spoiled part out: of a clip itself, not a moment, clip preview or export

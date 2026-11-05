@@ -144,6 +144,8 @@ struct Job {
     marker: bool,
     /// Crop mode's parity for its preview shader (write_crop_mark)
     crop_mark: Option<bool>,
+    /// Only the sphere written from the frame, nothing rendered (Engine::write_sphere)
+    sphere_only: bool,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 // The frame buffers stay alive until the reply arrives: get_frame blocks on it
@@ -183,6 +185,136 @@ impl Camera {
         p.view_rotation = (self.yaw, self.pitch, self.roll);
         p.fov_scale *= self.zoom;
         p
+    }
+}
+
+/// The output frame chosen for a clip (the player's side panel): the picture turned clockwise, as the viewer sees it,
+/// by 0, 90, 180 or 270 degrees, for footage shot with the camera on its side; then cut to an aspect ratio, W:H, the
+/// largest centered rectangle of it in the turned frame (none: the turned frame as it is). Given, it takes the place of
+/// a project's own output size and rotation; the default is no frame of its own, everything as the project has it.
+/// And its projection: Gyroflow's output projection (OutputProjection: 0 rectilinear, 1 stereographic, 2
+/// equidistant, 3 equisolid, 4 orthographic), in place of the project's or preset's; none: theirs (rectilinear
+/// without one)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Frame {
+    pub rotation: u16,
+    pub aspect: Option<(u32, u32)>,
+    pub projection: Option<i32>,
+}
+
+impl Frame {
+    /// `rotation` in degrees, a multiple of 90 (-90 is 270); `aspect` W:H, or original (or nothing) for none;
+    /// `projection` Gyroflow's output projection, 0-4
+    pub fn new(rotation: i64, aspect: Option<&str>, projection: Option<i64>) -> Result<Frame, String> {
+        let rotation = Frame::parse_rotation(rotation).ok_or_else(|| format!("rotation {rotation}: 0, 90, 180 or 270"))?;
+        let aspect = match aspect {
+            None => None,
+            Some(a) => Frame::parse_aspect(a).ok_or_else(|| format!("aspect {a}: original or W:H, such as 16:9 or 9:16"))?,
+        };
+        let projection = match projection {
+            None => None,
+            Some(v) => Some((0..=4).contains(&v).then_some(v as i32)
+                .ok_or_else(|| format!("projection {v}: 0 rectilinear, 1 stereographic, 2 equidistant, 3 equisolid, 4 orthographic"))?),
+        };
+        Ok(Frame { rotation, aspect, projection })
+    }
+
+    /// An output projection by its name, as Gyroflow's projects store it (rectilinear, stereographic, equidistant,
+    /// equisolid, orthographic), or its number
+    pub fn parse_projection(v: &str) -> Option<i32> {
+        use gyroflow_core::stabilization::projection::OutputProjection;
+        let v = v.trim().to_ascii_lowercase();
+        match v.parse::<i32>() {
+            Ok(n) => (0..=4).contains(&n).then_some(n),
+            Err(_) => OutputProjection::from_name(&v).map(|p| p as i32),
+        }
+    }
+
+    /// Degrees, a multiple of 90, as 0, 90, 180 or 270
+    pub fn parse_rotation(v: i64) -> Option<u16> {
+        (v % 90 == 0).then(|| v.rem_euclid(360) as u16)
+    }
+
+    /// `original` (or empty): none; `W:H` (or W/H, W x H) with both from 1 to 1000
+    pub fn parse_aspect(v: &str) -> Option<Option<(u32, u32)>> {
+        let v = v.trim();
+        if v.is_empty() || v.eq_ignore_ascii_case("original") || v.eq_ignore_ascii_case("none") { return Some(None); }
+        let (w, h) = v.split_once([':', '/', 'x'])?;
+        let (w, h) = (w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?);
+        ((1..=1000).contains(&w) && (1..=1000).contains(&h)).then_some(Some((w, h)))
+    }
+
+    /// The frame a video renders in, its file's own turn counted (`display_rotation`, mp4meta.rs: what a player turns
+    /// it by to show it upright; the plugin's frames are the sensor's, unturned): this one's rotation on top of it. A
+    /// project (`project_rotation`, its video_rotation, Gyroflow's) without a frame of its own keeps its own rotation and
+    /// size, unless it has none (0) for a turned file, as the player's projects had before it turned them: the file's
+    /// turn then
+    pub fn for_video(self, display_rotation: u16, project_rotation: Option<f64>) -> Frame {
+        let on_top = Frame { rotation: (display_rotation + self.rotation) % 360, ..self };
+        match project_rotation {
+            Some(r) if self.is_none() => if r == 0.0 && display_rotation != 0 { on_top } else { self },
+            _ => on_top,
+        }
+    }
+
+    /// No size or rotation of its own: the project's output size and rotation, as without a frame (the projection apart)
+    pub fn is_none(&self) -> bool { self.rotation == 0 && self.aspect.is_none() }
+
+    /// Turned a quarter turn either way: width and height swap
+    pub fn turned(&self) -> bool { self.rotation == 90 || self.rotation == 270 }
+
+    /// `size` turned: (h, w) at 90 and 270 degrees
+    pub fn rotated(&self, (w, h): (usize, usize)) -> (usize, usize) {
+        if self.turned() { (h, w) } else { (w, h) }
+    }
+
+    /// The output's size for a video of `size`: the size turned (90, 270: width and height swapped), then the largest
+    /// rectangle of the aspect W:H inside it, its other side W/H (or H/W) of the full one, rounded down; both sides then
+    /// rounded down to even, for the subsampled chroma, and 2 at least. 3840x2160 at 90 degrees: 2160x3840; at 9:16
+    /// unturned: 2160 · 9/16 = 1215 -> 1214x2160
+    pub fn size(&self, size: (usize, usize)) -> (usize, usize) {
+        let (rw, rh) = self.rotated(size);
+        let (w, h) = match self.aspect {
+            None => (rw, rh),
+            Some((aw, ah)) => {
+                let (aw, ah) = (aw as u64, ah as u64);
+                // Wider than the aspect: the full height, else the full width
+                if rw as u64 * ah > rh as u64 * aw { ((rh as u64 * aw / ah) as usize, rh) } else { (rw, (rw as u64 * ah / aw) as usize) }
+            }
+        };
+        ((w & !1).max(2), (h & !1).max(2))
+    }
+
+    /// Where the output's rectangle is in the turned frame (`rotated`): x and y, rounded down to even
+    pub fn offset(&self, size: (usize, usize)) -> (usize, usize) {
+        let (rw, rh) = self.rotated(size);
+        let (w, h) = self.size(size);
+        ((rw.saturating_sub(w) / 2) & !1, (rh.saturating_sub(h) / 2) & !1)
+    }
+
+    /// gyroflow-core's `video_rotation`: degrees counterclockwise as the viewer sees it (FrameTransform's
+    /// `image_rotation`; plane_tests' `a_quarter_turn_is_clockwise`), 0-360 as Gyroflow's own Rotation: 90 clockwise
+    /// is 270
+    pub fn gyroflow_rotation(&self) -> f64 {
+        ((360 - self.rotation as u32) % 360) as f64
+    }
+
+    /// The same frame in ffmpeg's filters, for a video of `size` that isn't stabilized: turned (transpose, or both
+    /// flips for 180), then cropped to the centered rectangle. Empty without a frame of its own
+    pub fn ffmpeg_filter(&self, size: (usize, usize)) -> String {
+        let mut filters = Vec::new();
+        match self.rotation {
+            90 => filters.push("transpose=clock".to_string()),
+            180 => filters.push("hflip,vflip".to_string()),
+            270 => filters.push("transpose=cclock".to_string()),
+            _ => {}
+        }
+        let (w, h) = self.size(size);
+        if (w, h) != self.rotated(size) {
+            let (x, y) = self.offset(size);
+            filters.push(format!("crop={w}:{h}:{x}:{y}"));
+        }
+        filters.join(",")
     }
 }
 
@@ -238,10 +370,13 @@ pub struct Engine {
     tx: mpsc::Sender<Job>,
     /// The size it was loaded for (render_size_for); a filter may ask for another
     pub render_size: (usize, usize),
-    /// The project's output size; nil for a clip without a project, which renders the frame at the input's scale
+    /// The project's output size; nil for a clip without a project, which renders the frame at the input's scale, and
+    /// for one with a frame of its own (Frame)
     project_size: Option<(usize, usize)>,
     /// The output frame at the video's scale: its aspect
     frame_size: (usize, usize),
+    /// The frame turned and cut of its own (Frame), when it has one: it renders at the input's
+    frame: Frame,
     pub frame_offset_us: i64,
     /// What fills the parts the frame doesn't cover; off unless set
     pub edges: Arc<edges::Edges>,
@@ -324,9 +459,21 @@ impl Engine {
     /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
     /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
     /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>) -> Result<Engine, String> {
+    /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
+    /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead)?;
+        // The frame's rotation on top of the file's own turn: the frames come unturned (mpv's video-rotate off)
+        let frame = {
+            let video = if project_json.is_some() { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+            let turn = mp4meta::display_rotation(std::path::Path::new(&video)).unwrap_or(0);
+            let frame = frame.for_video(turn, project_json.as_ref().map(|_| stab.params.read().video_rotation));
+            if turn != 0 { log::info!("{video}: turned {turn}° to show it upright"); }
+            frame
+        };
+        // The frame's projection, before anything measures the frame (the zoom, the levels, the wider view)
+        if let Some(projection) = frame.projection { stab.set_output_projection(projection); }
         if let (Some(alone), None) = (alone, motion.as_ref()) {
             stab.smoothing.write().current_mut().set_parameter("trim_range_only", if alone { 1.0 } else { 0.0 });
         }
@@ -342,8 +489,14 @@ impl Engine {
         // In plugin mode the core leaves the output size to the host; the host here is a player, so render at
         // the project's output size (`output.output_width/height`), unless the script asks for another.
         // The core's own output_size is only the aspect, at the input's scale; the buffer sets the resolution.
-        // Without a project there's no output size to keep: render at the size mpv hands over (scaled down from 8K)
-        let render_size = output_override.or_else(|| match project_json.as_ref() {
+        // Without a project there's no output size to keep: render at the size mpv hands over (scaled down from 8K).
+        // A frame of its own (Frame) is the input's turned and cut to its aspect, whatever the project says: the
+        // rotation first, which the core's output size is fitted into (set_output_size)
+        let frame_size = (!frame.is_none()).then(|| {
+            stab.set_video_rotation(frame.gyroflow_rotation());
+            frame.size(input_size)
+        });
+        let render_size = output_override.or(frame_size).or_else(|| match project_json.as_ref() {
             Some(json) => project_output_size(json),
             None => {
                 let out = stab.params.read().output_size;
@@ -412,8 +565,11 @@ impl Engine {
             return Err(format!("{project} has no video size, is it a Gyroflow project?"));
         }
         let render_size = render_size.unwrap_or(output_size);
-        let project_size = project_json.as_ref().map(|json| project_output_size(json).unwrap_or(output_size));
-        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
+        let project_size = project_json.as_ref().filter(|_| frame.is_none()).map(|json| project_output_size(json).unwrap_or(output_size));
+        let turned = format!("{}{}{}", if frame.rotation > 0 { format!(", turned {}°", frame.rotation) } else { String::new() },
+                             frame.aspect.map(|(w, h)| format!(", {w}:{h}")).unwrap_or_default(),
+                             frame.projection.map(|p| format!(", {}", gyroflow_core::stabilization::projection::setting_name(p))).unwrap_or_default());
+        log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}{turned}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
 
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
@@ -453,20 +609,66 @@ impl Engine {
                 .spawn(move || m.run(stab, g, level, move || edges.level().unwrap_or(level))).map_err(|e| e.to_string())?;
         }
         let level = motion.is_some().then_some(level);
-        Ok(Engine { key, tx, render_size, project_size, frame_size: output_size, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Engine { key, tx, render_size, project_size, frame_size: output_size, frame, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
     /// The size frames of `input_size` render at: `output_override` when the script asks for one, else the project's
     /// output size, else the frame at the input's scale (a clip without a project, as mpv hands it over: scaled down
-    /// from 8K, or for the display). Any size, from the same engine: gyroflow-core stretches the frame to the buffers
-    /// it's given, the edge fill samples its coarse grids by position, and each GPU worker sets its planes up for
-    /// another size as its frames come (process_plane)
+    /// from 8K, or for the display; a frame of its own: the input turned and cut, Frame::size). Any size, from the same
+    /// engine: gyroflow-core stretches the frame to the buffers it's given, the edge fill samples its coarse grids by
+    /// position, and each GPU worker sets its planes up for another size as its frames come (process_plane)
     pub fn render_size_for(&self, input_size: (usize, usize), output_override: Option<(usize, usize)>) -> (usize, usize) {
+        if !self.frame.is_none() { return output_override.unwrap_or_else(|| self.frame.size(input_size)); }
         output_override.or(self.project_size).unwrap_or_else(|| {
             let out = self.frame_size;
             let scale = (input_size.0 as f64 / out.0.max(1) as f64).min(input_size.1 as f64 / out.1.max(1) as f64).min(1.0);
             (((out.0 as f64 * scale) as usize) & !1, ((out.1 as f64 * scale) as usize) & !1)
         })
+    }
+
+    /// Whether any of `frames` leaves part of the output uncovered in `view` (edges::VIEW_*) through `camera`: the
+    /// measure `leaves_edges` makes for the whole clip, for these frames alone, so an export of a part of it (a photo,
+    /// its motion) fills edges only where they show. Zoomed out, the camera widens the view by its zoom; turned, it
+    /// may show past the frame anywhere, and a clip without a project has its frames measured as they play: yes
+    pub fn leaves_edges_in(&self, view: u8, frames: std::ops::RangeInclusive<usize>, fps: f64, camera: &Camera) -> bool {
+        if self.views.levels || (camera.yaw, camera.pitch, camera.roll) != (0.0, 0.0, 0.0) { return true; }
+        let p = &self.views.params[self.views.index(view, Level::Medium)];
+        let measured = p.fovs.len().min(p.minimal_fovs.len());
+        if *frames.end() >= measured { return true; }
+        frames.into_iter().any(|i| {
+            let ts = gyroflow_core::timestamp_at_frame(i as i32, fps.max(1.0));
+            let scale = p.keyframes.value_at_video_timestamp(&gyroflow_core::keyframes::KeyframeType::Fov, ts).unwrap_or(p.fov_scale);
+            p.fovs[i] * scale * camera.zoom > p.minimal_fovs[i] * 1.001
+        })
+    }
+
+    /// Whether the frame at `timestamp_us` leaves part of the output uncovered, in the view and through the camera the
+    /// edges have now: its mask alone rendered, as the edge fill renders it for each frame (a few ms at 4K), nothing
+    /// else. Exact where `leaves_edges_in` can't tell (a clip without a project, a turned camera). For one caller at a
+    /// time, before its frames: it counts on Edges::filled
+    pub fn leaves_edges_at(&self, timestamp_us: i64, limited_range: bool) -> Result<bool, String> {
+        if let Some(m) = &self.motion { m.asked(timestamp_us); }
+        let view = self.views.index(self.edges.view(), self.edges.level().or(self.level).unwrap_or(Level::Medium)) as u8;
+        let before = self.edges.filled();
+        let (reply, result) = mpsc::sync_channel(1);
+        self.tx.send(Job { timestamp_us, planes: Vec::new(), limited_range, edges: None, view, camera: self.edges.camera(), marker: false, crop_mark: None, sphere_only: false, reply })
+            .map_err(|_| "Gyroflow worker is gone".to_string())?;
+        result.recv().map_err(|_| "Gyroflow worker is gone".to_string())??;
+        Ok(self.edges.filled() > before)
+    }
+
+    /// The sphere written from the frame, as `process` writes it, and nothing rendered: for the frames before a photo's,
+    /// which only fill the sphere around it. `planes`' sources alone are read. Nothing to do unless the edges are the
+    /// sphere's
+    pub fn write_sphere(&self, timestamp_us: i64, planes: Vec<PlaneJob>, limited_range: bool) -> Result<(), String> {
+        if self.edges.mode() != edges::EdgeMode::Sphere { return Ok(()); }
+        if let Some(m) = &self.motion { m.asked(timestamp_us); }
+        let view = self.views.index(self.edges.view(), self.edges.level().or(self.level).unwrap_or(Level::Medium)) as u8;
+        let job = self.edges.prepare(edges::EdgeMode::Sphere, &planes);
+        let (reply, result) = mpsc::sync_channel(1);
+        self.tx.send(Job { timestamp_us, planes, limited_range, edges: Some(job), view, camera: self.edges.camera(), marker: false, crop_mark: None, sphere_only: true, reply })
+            .map_err(|_| "Gyroflow worker is gone".to_string())?;
+        result.recv().map_err(|_| "Gyroflow worker is gone".to_string())?
     }
 
     /// `marker`: the frame's lens geometry written into its luma, for mpv's chromatic.glsl (dispersion.rs)
@@ -491,7 +693,7 @@ impl Engine {
         };
         // The sphere writer waits while every worker has a frame
         self.edges.in_flight.fetch_add(1, Ordering::Relaxed);
-        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, crop_mark, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
+        let sent = self.tx.send(Job { timestamp_us, planes, limited_range, edges, view, camera, marker, crop_mark, sphere_only: false, reply }).map_err(|_| "Gyroflow worker is gone".to_string())
             .and_then(|_| result.recv().map_err(|_| "Gyroflow worker is gone".to_string()));
         self.edges.in_flight.fetch_sub(1, Ordering::Relaxed);
         let result = sent?;
@@ -758,6 +960,17 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
             }
             edge_worker.set_view(&base, cfg, limited_range);
             edges.write_camera_info(&base, &camera, job.timestamp_us);
+        }
+        // Only the sphere written from it (Engine::write_sphere)
+        if job.sphere_only {
+            let result = match &job.edges { Some(e) => edge_worker.write_sphere(edges, cfg, e, job.timestamp_us), None => Ok(()) };
+            let _ = job.reply.send(result);
+            continue;
+        }
+        // No planes: the frame's mask alone (Engine::leaves_edges_at)
+        if job.planes.is_empty() {
+            let _ = job.reply.send(edge_worker.probe(edges, job.timestamp_us));
+            continue;
         }
         let processed = process_planes(&mut planes, cfg, job.timestamp_us, &job.planes);
         let marker = processed.as_ref().ok().and_then(|(_, m)| *m);
@@ -1137,6 +1350,9 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
         (Some(a), Some(b)) if b > a => Some((a, b)),
         _ => None,
     };
+    // The output frame turned and cut to an aspect, and its projection (Frame), in place of the project's
+    let frame = Frame::new(unsafe { map_get_i64(api, input, c"rotation") }.unwrap_or(0), unsafe { map_get_str(api, input, c"aspect") }.as_deref(),
+                           unsafe { map_get_i64(api, input, c"projection") })?;
     // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
@@ -1145,9 +1361,9 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     // The level isn't either: the control file switches it. Nor the sizes, in or out (render_size_for): the paused frame
     // at full size (still.lua) and another display's size cost no other engine, only the GPU workers set up again for
     // them. A second engine for a 4K clip ran a 2 GB integrated GPU out of memory
-    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{frame:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
     let input_size = (vi.width as usize, vi.height as usize);
-    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone))?;
+    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone, frame))?;
     let size = engine.render_size_for(input_size, output_override);
     Ok((engine, size))
 }
@@ -1274,10 +1490,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
@@ -1370,6 +1586,42 @@ mod plane_tests {
     }
 
     #[test]
+    fn a_quarter_turn_is_clockwise() {
+        // The source's top half bright: turned clockwise, it's the output's right half
+        let src: Vec<u16> = (0..SIZE.1).flat_map(|y| (0..SIZE.0).map(move |_| if y < SIZE.1 / 2 { 60000 } else { 5000 })).collect();
+        let cfg = WorkerConfig { kind: SampleKind::U16, max_value: 65535.0, is_yuv: true, interpolation: Interpolation::Bicubic };
+        for rotation in [90, 180, 270] {
+            let frame = Frame { rotation, ..Default::default() };
+            let out = frame.size(SIZE);
+            let mgr = manager(SIZE);
+            mgr.set_video_rotation(frame.gyroflow_rotation());
+            mgr.set_output_size(out.0, out.1);
+            mgr.recompute_blocking();
+            assert_eq!(mgr.params.read().output_size, out, "the core's output is the turned frame");
+            let mut planes = create_planes(&mgr, &ComputeParams::from_manager(&mgr), cfg, 1, false);
+            let mut dst = vec![0u16; out.0 * out.1];
+            let job = PlaneJob { src: src.as_ptr() as *const u8, src_stride: SIZE.0 * 2, src_w: SIZE.0, src_h: SIZE.1,
+                                 dst: dst.as_mut_ptr() as *mut u8, dst_stride: out.0 * 2, dst_w: out.0, dst_h: out.1 };
+            process_plane::<Luma16>(&mut planes[0], 1_000_000, 65535.0, &job).unwrap();
+            // The mean of a band a fifth of the way in from each side
+            let mean = |xs: std::ops::Range<usize>, ys: std::ops::Range<usize>| {
+                let n = (xs.len() * ys.len()) as f64;
+                ys.flat_map(|y| xs.clone().map(move |x| (x, y))).map(|(x, y)| dst[y * out.0 + x] as f64).sum::<f64>() / n
+            };
+            let (w, h) = out;
+            let (left, right) = (mean(w / 10..w / 4, h / 4..3 * h / 4), mean(3 * w / 4..9 * w / 10, h / 4..3 * h / 4));
+            let (top, bottom) = (mean(w / 4..3 * w / 4, h / 10..h / 4), mean(w / 4..3 * w / 4, 3 * h / 4..9 * h / 10));
+            let bright = |v: f64| v > 40000.0;
+            let dark = |v: f64| v < 20000.0;
+            match rotation {
+                90 => assert!(bright(right) && dark(left), "90: left {left}, right {right}"),
+                180 => assert!(bright(bottom) && dark(top), "180: top {top}, bottom {bottom}"),
+                _ => assert!(bright(left) && dark(right), "270: left {left}, right {right}"),
+            }
+        }
+    }
+
+    #[test]
     fn chroma_lands_with_the_luma_at_another_output_size_and_stride() {
         // The output smaller than the input (the display's size), its chroma rows 3024 bytes: VapourSynth pads them
         let out = (1512, 850);
@@ -1381,5 +1633,80 @@ mod plane_tests {
         let padded = chroma_vs_luma(&mut planes, out, 64);
         assert!(tight < 600.0 && padded < 600.0, "chroma off the luma by {tight} (rows as wide as the picture), {padded} (padded)");
         assert_eq!(planes[1].buffers, ((SIZE.0 / 2 + 32) * 2 * SIZE.1 / 2, (out.0 / 2 + 32) * 2 * out.1 / 2));
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use crate::Frame;
+
+    const UHD: (usize, usize) = (3840, 2160);
+
+    fn frame(rotation: i64, aspect: &str) -> Frame { Frame::new(rotation, Some(aspect), None).unwrap() }
+
+    #[test]
+    fn as_given() {
+        assert_eq!(Frame::new(0, None, None).unwrap(), Frame::default());
+        assert_eq!(Frame::new(0, None, Some(1)).unwrap().projection, Some(1));
+        assert!(Frame::new(0, None, Some(2)).unwrap().is_none(), "the projection isn't a size of its own");
+        assert!(Frame::new(0, None, Some(5)).is_err() && Frame::new(0, None, Some(-1)).is_err());
+        assert_eq!(Frame::parse_projection("Equisolid"), Some(3));
+        assert_eq!(Frame::parse_projection("rectilinear"), Some(0));
+        assert_eq!(Frame::parse_projection("4"), Some(4));
+        assert_eq!(Frame::parse_projection("fisheye"), None);
+        assert!(frame(0, "original").is_none() && frame(360, "").is_none());
+        assert_eq!(frame(-90, "9:16"), Frame { rotation: 270, aspect: Some((9, 16)), projection: None });
+        assert_eq!(frame(450, "4/5").rotation, 90);
+        assert_eq!(Frame::parse_aspect("16x9"), Some(Some((16, 9))));
+        assert!(Frame::new(45, None, None).is_err() && Frame::new(0, Some("wide"), None).is_err() && Frame::new(0, Some("0:9"), None).is_err());
+    }
+
+    #[test]
+    fn turned_then_cut_to_the_aspect_on_even_pixels() {
+        assert_eq!(frame(0, "original").size(UHD), UHD);
+        assert_eq!(frame(90, "original").size(UHD), (2160, 3840));
+        assert_eq!(frame(180, "original").size(UHD), UHD);
+        assert_eq!(frame(270, "original").size(UHD), (2160, 3840));
+        // 2160 · 9/16 = 1215, rounded down to even
+        assert_eq!(frame(0, "9:16").size(UHD), (1214, 2160));
+        assert_eq!(frame(90, "9:16").size(UHD), (2160, 3840));
+        assert_eq!(frame(0, "16:9").size(UHD), UHD);
+        assert_eq!(frame(0, "4:3").size(UHD), (2880, 2160));
+        assert_eq!(frame(0, "1:1").size(UHD), (2160, 2160));
+        assert_eq!(frame(90, "1:1").size(UHD), (2160, 2160));
+        // The turned frame's 2160 · 5/4 = 2700 high
+        assert_eq!(frame(90, "4:5").size(UHD), (2160, 2700));
+        assert_eq!(frame(90, "3:4").size(UHD), (2160, 2880));
+        assert_eq!(frame(90, "16:9").size(UHD), (2160, 1214));
+        // Osmo Action's 4:3 and 2.7K
+        assert_eq!(frame(0, "16:9").size((3840, 2880)), (3840, 2160));
+        assert_eq!(frame(0, "4:5").size((2688, 1512)), (1208, 1512));
+        assert_eq!(frame(0, "3:4").size((1920, 1080)), (810, 1080));
+        assert_eq!(frame(0, "9:16").size((1920, 1080)), (606, 1080));
+    }
+
+    #[test]
+    fn on_top_of_the_files_turn() {
+        let user = frame(90, "original");
+        // A video: the file's turn, the frame's on top of it
+        assert_eq!(Frame::default().for_video(90, None).size(UHD), (2160, 3840));
+        assert_eq!(user.for_video(90, None).rotation, 180);
+        assert_eq!(frame(270, "9:16").for_video(90, None), Frame { rotation: 0, aspect: Some((9, 16)), projection: None });
+        assert!(Frame::default().for_video(0, None).is_none());
+        // A project: its own rotation kept without a frame of its own, the file's where it has none
+        assert_eq!(Frame::default().for_video(90, Some(270.0)), Frame::default());
+        assert_eq!(Frame::default().for_video(90, Some(0.0)).rotation, 90);
+        assert!(Frame::default().for_video(0, Some(0.0)).is_none());
+        assert_eq!(user.for_video(90, Some(270.0)).rotation, 180);
+    }
+
+    #[test]
+    fn ffmpeg_turns_then_crops_in_the_middle() {
+        assert_eq!(Frame::default().ffmpeg_filter(UHD), "");
+        assert_eq!(frame(90, "original").ffmpeg_filter(UHD), "transpose=clock");
+        assert_eq!(frame(180, "original").ffmpeg_filter(UHD), "hflip,vflip");
+        assert_eq!(frame(270, "9:16").ffmpeg_filter(UHD), "transpose=cclock");
+        assert_eq!(frame(0, "9:16").ffmpeg_filter(UHD), "crop=1214:2160:1312:0");
+        assert_eq!(frame(90, "1:1").ffmpeg_filter(UHD), "transpose=clock,crop=2160:2160:0:840");
     }
 }

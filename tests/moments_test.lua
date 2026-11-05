@@ -173,5 +173,23 @@ local previews = m.scan("/T/Egypt", {}, "_Clips", "clip").list
 expect("clip previews by link", #previews, 1)
 expect("a renamed one", previews[1] and previews[1].link.clip, "Day 1/B.MP4")
 
+-- Parts for the marks in no moment
+do
+    local lp = moments_lib.loose_parts
+    local p = lp({ 10, 30 }, {}, 60, 2)
+    expect("loose: two", #p, 2)
+    expect("loose: first a", p[1].a, 8); expect("loose: first b", p[1].b, 12)
+    p = lp({ 10, 13 }, {}, 60, 2)
+    expect("loose: joined", #p, 1)
+    expect("loose: joined a", p[1].a, 8); expect("loose: joined b", p[1].b, 15); expect("loose: joined marks", #p[1].marks, 2)
+    p = lp({ 1, 59 }, {}, 60, 2)
+    expect("loose: clip start", p[1].a, 0); expect("loose: clip end", p[2].b, 60)
+    p = lp({ 10, 30 }, { { 9, 11 } }, 60, 2)
+    expect("loose: one in a moment", #p, 1); expect("loose: the other", p[1].marks[1], 30)
+    p = lp({ 30, 10 }, {}, nil, 2)
+    expect("loose: sorted, no duration", p[1].marks[1], 10)
+    expect("loose: none", #lp({ 10 }, { { 0, 60 } }, 60, 2), 0)
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

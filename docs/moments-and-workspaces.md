@@ -20,7 +20,7 @@ Those are marked **(to try)**.
   (Windows: `Documents\ActionFootagePlayer\`), named when it's made. It repeats the footage's folder tree and has a `Sources.txt` saying
   where the footage is. You can fix that file by hand, and it can list several paths, one per computer.
 - **Marks** (points in a clip): the camera's highlights, until you change one. The first change (adding a mark,
-  removing a camera one) writes `<clip>.marks.json` with all of them, the camera's flagged as such. Delete
+  removing a camera one) writes `<clip>.afp.json` with all of them, the camera's flagged as such. Delete
   the file, and it's the camera's again. Nothing is ever written into a Gyroflow project.
 - **Moments** (parts of a clip) are files: `_Moments/Turtle.afplink.mp4`, a small real MP4 with a color preview, and
   inside it a link to the part of the original. Finder and Explorer show the frame, Quick Look plays it, and a
@@ -49,7 +49,7 @@ player writes). By default they're the same folder:
   Day 1/
     DJI_20261022152841_0068_D.MP4
     DJI_20261022152841_0068_D.gyroflow        the clip's Gyroflow project, as now
-    DJI_20261022152841_0068_D.marks.json      its marks, once edited
+    DJI_20261022152841_0068_D.afp.json        its marks and saved view, once changed
   Day 2/
     GX011057.MP4
   _Moments/
@@ -71,7 +71,7 @@ A separate project folder holds the same things, minus the footage, plus `Source
 ```
 ~/Documents/ActionFootagePlayer/2026-10 Egypt/
   Sources.txt
-  Day 1/DJI_20261022152841_0068_D.marks.json
+  Day 1/DJI_20261022152841_0068_D.afp.json
   Day 1/DJI_20261022152841_0068_D.gyroflow
   _Moments/  _Clips/  _Exports/  _Stills/  _ActionFootagePlayer/
 ```
@@ -190,15 +190,15 @@ A mark is a point in a clip: a camera highlight (DJI's quick switch, GoPro's HiL
 
 - **While you've changed nothing**, the marks are the ones in the clip, read when it opens, as the highlights
   plugin does now.
-- **The first change** writes `<clip>.marks.json` in the project, with every camera mark copied in. From then
-  on, the file is the truth. A camera mark you remove is simply gone from it, with no list of hidden ones.
-- **Delete the file**, and the clip's own highlights are the marks again.
+- **The first change** writes them into the clip's own file, `<clip>.afp.json` beside it, with every camera mark
+  copied in. From then on, its `marks` are the truth (absent: the camera's). A camera mark you remove is simply gone from it, with no list of hidden ones.
+- **Delete the file** (or its `marks`), and the clip's own highlights are the marks again.
 - **A camera mark stays flagged** (`"camera"`), so the player can draw it differently from yours, and the editors
   get "DJI quick switch" as its note.
 
 ```json
 {
-  "format": "actionfootageplayer-marks",
+  "format": "actionfootageplayer-clip",
   "version": 1,
   "clip": {
     "file": "DJI_20261022152841_0068_D.MP4",
@@ -210,15 +210,33 @@ A mark is a point in a clip: a camera highlight (DJI's quick switch, GoPro's HiL
   "marks": [
     { "t": 10.010, "camera": "dji" },
     { "t": 33.400, "name": "Dolphin" }
-  ]
+  ],
+  "view": {
+    "curve": "auto", "view": "normal", "level": "medium", "horizon_lock": "yes", "underwater": "auto",
+    "chromatic": true, "aspect": "9:16", "rotation": 90, "projection": "stereographic"
+  }
 }
 ```
 
 - Times are seconds of the clip, to the millisecond.
-- `clip` says which file the marks are for. A marks file whose clip now has another size is renamed
-  `.marks.json.old` rather than applied to the wrong clip, which happens with GoPro's `GX010123` names, reused on
+- `clip` says which file the marks are for. A file whose clip now has another size is renamed
+  `.afp.json.old` rather than applied to the wrong clip, which happens with GoPro's `GX010123` names, reused on
   every card. `hash` is the clip's fingerprint, as a link has it (below).
 - The file is written whole, to a temporary file renamed over the old one, and fields it doesn't know are kept.
+  Its two parts are written apart (`mpv/scripts/workspace/sidecar.lua`): the highlights plugin's `marks`, the
+  workspace plugin's `view`, each read fresh and replaced, the other kept. Neither left: the file goes.
+- Before 0.9 it was `<clip>.marks.json` (`"format": "actionfootageplayer-marks"`), marks only: read when there's
+  no `.afp.json`, and moved over at the next write.
+- `view`, the clip's saved view (Anton, 2026-11-05): the log curve (`auto`, or a curve picked by hand), the
+  stabilization (`normal`, `wide`, `off`), its `level`, `horizon_lock` (`yes`, `no`, `project`: the preset's),
+  `underwater` (`auto`, `yes`, `no`), the water's color fringes (`chromatic`), and the output's frame: `aspect`
+  (`original` or W:H), `rotation` (0, 90, 180, 270, clockwise) and `projection` (Gyroflow's output projection:
+  `linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`). Written by Save in the Clip tab, or
+  with every change while Auto save is on (a session's switch). Not kept: the video output (it depends on the
+  screen), the noise reduction, the quality settings (the computer's).
+- **A Gyroflow project wins** (Anton): what it has (the smoothing, horizon, lens under water, output size, rotation,
+  projection) isn't kept beside it. Changed in the panel it's for viewing only; a value kept from before the clip
+  got its project is left out as it loads.
 
 **Gyroflow's project is never written to.** Gyroflow rebuilds the whole project when it saves
 (`export_gyroflow_data` in `core/lib.rs` builds it with `json!` and `merge_json`), so keys of ours would be lost
@@ -380,9 +398,11 @@ Opening a moment's file (a double click, the player being the default app for MP
   --trim --alone`). Its ends and its project's trim follow each other: `k` edits the trim (`--edit`); a trim changed
   in Gyroflow becomes its ends as it loads (`--print-trim`). Rename and Remove take the project with it.
 - Moments made before have no `snap` and play with the clip's.
-- A clip preview has none of this: it plays with its clip's, unless *Its own stabilization* gives it a project
-  beside it (a copy of the clip's, or from its motion data), a variant; copies of the preview, each with its own,
-  are variants of one clip.
+- A clip preview is the same kind of link with the switch the other way (Anton, 2026-11-05: moments and clips
+  mixed freely): *Settings of its own* off by default, it plays as its clip is saved to (the clip's `.afp.json`);
+  on, its link has `"own": 1` and the view in `stab` (written in place, `afp-cut --set-key`), with a copy of the
+  clip's Gyroflow project beside it when it has one. Copies of the preview, each with its own, are variants of one
+  clip. A moment switched off loses `snap`, `stab` and its own project (to the Trash) and plays as its clip is saved.
 
 A moment plays its part once, then the next one in the playlist (the folder's), and pauses at its end when it's the
 last (Anton, 2026-11-05: no looping). And it plays **as a video of its own** (Anton, the same day: the seek bar and
@@ -694,8 +714,8 @@ first".
    - gyroflow-export alone: the project made, the key written in place (the file's length the same).
 6. **Marks** (**done**, but naming a mark): in the highlights plugin.
    - `M` adds a mark, or removes the one within half a second, the camera's too.
-   - The first change writes `<clip>.marks.json` beside the clip (`user-data/workspace/marks_file`;
-     `workspace.lua`'s `marks_file`, with its Rust twin for the editors' export, in the shared cases), with the
+   - The first change writes `<clip>.marks.json` beside the clip (since 0.9 `<clip>.afp.json`,
+     `user-data/workspace/sidecar_file`; `workspace.lua`'s `sidecar_file`, with its Rust twin for the editors' export, in the shared cases), with the
      camera's copied in and flagged (`"camera": "dji"`). It needs no project (at first the workspace plugin made
      one then; since Anton's review of the Project tab, nothing makes one by itself).
    - The file is read when there is one; a file whose clip has another size becomes `.marks.json.old`. It's

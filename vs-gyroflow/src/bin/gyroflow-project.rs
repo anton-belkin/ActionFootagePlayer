@@ -15,18 +15,26 @@
 //   --print-trim        <project.gyroflow>: its first trim range, "<in>,<out>" in seconds (nothing without one): a
 //                       moment's ends changed in Gyroflow, which the player takes
 //
+// The output frame as the player has it (vs_gyroflow::Frame), new, copied or edited alike; without them, the project's
+// (a new one: upright as the file's display matrix says, a camera held vertical):
+//   --rotation <deg>    the picture turned clockwise by 0, 90, 180 or 270 degrees, on top of the file's own turn:
+//                       Gyroflow's video rotation
+//   --aspect <W:H>      the output cut to this aspect after the rotation (original: the whole frame): its output size,
+//                       the largest centered rectangle of it in the turned video, sides rounded down to even
+//   --projection <p>    Gyroflow's output projection: rectilinear, stereographic, equidistant, equisolid, orthographic
+//
 // The project goes next to the video by default, and an existing one is never overwritten. With the lens under water
 // as --underwater says (default auto: as the camera says, where it records it; project: as the preset says), the horizon lock's amount (0-100,
 // 0 off) instead of the preset's, at the level it plays in (--level, default medium: its crop and smoothness), and
 // with --wide in the plugin's wider view: no zoom, at its FOV. The motion data goes into the project.
 
 use std::path::{ Path, PathBuf };
-use vs_gyroflow::{ project as motion_project, Level, Underwater };
+use vs_gyroflow::{ project as motion_project, Frame, Level, Underwater };
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto|project] [--horizon-lock <%>] [--level weak|medium|strong] [--wide] [--trim <in>,<out>] [--alone yes|no] [--copy <project>] <video> [project.gyroflow]\n       gyroflow-project --edit [--trim <in>,<out>] [--alone yes|no] <project.gyroflow>");
+        eprintln!("usage: gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto|project] [--horizon-lock <%>] [--level weak|medium|strong] [--wide] [--trim <in>,<out>] [--alone yes|no] [--rotation 0|90|180|270] [--aspect original|W:H] [--projection <p>] [--copy <project>] <video> [project.gyroflow]\n       gyroflow-project --edit [--trim <in>,<out>] [--alone yes|no] [--horizon-lock <%>] [--rotation <deg>] [--aspect <W:H>] [--projection <p>] <project.gyroflow>");
         std::process::exit(2);
     };
     let mut value = |name: &str| -> Option<String> {
@@ -58,6 +66,25 @@ fn main() {
         _ => { eprintln!("--alone takes yes or no"); std::process::exit(2); }
     });
     let copy = value("--copy");
+    let mut frame = Frame::default();
+    if let Some(v) = value("--rotation") {
+        frame.rotation = v.trim().parse::<i64>().ok().and_then(Frame::parse_rotation).unwrap_or_else(|| {
+            eprintln!("--rotation takes 0, 90, 180 or 270");
+            std::process::exit(2);
+        });
+    }
+    if let Some(v) = value("--aspect") {
+        frame.aspect = Frame::parse_aspect(&v).unwrap_or_else(|| {
+            eprintln!("--aspect takes original or W:H, such as 16:9 or 9:16");
+            std::process::exit(2);
+        });
+    }
+    if let Some(v) = value("--projection") {
+        frame.projection = Some(Frame::parse_projection(&v).unwrap_or_else(|| {
+            eprintln!("--projection takes rectilinear, stereographic, equidistant, equisolid or orthographic");
+            std::process::exit(2);
+        }));
+    }
     let mut flag = |name: &str| match args.iter().position(|a| a == name) {
         Some(i) => { args.remove(i); true },
         None => false,
@@ -79,7 +106,7 @@ fn main() {
         if args.len() != 1 || args[0].starts_with("--") { usage(); }
         let project = PathBuf::from(&args[0]);
         let result = std::fs::read_to_string(&project).map_err(|e| format!("{}: {e}", project.display()))
-            .and_then(|text| adjust(&text, trim, alone, horizon_lock))
+            .and_then(|text| { let frame = on_top_of_the_file(frame, project_video(&text, &project).as_deref()); adjust(&text, trim, alone, horizon_lock, frame) })
             .and_then(|text| write_whole(&project, &text));
         if let Err(e) = result {
             eprintln!("gyroflow-project: {e}");
@@ -96,10 +123,10 @@ fn main() {
         // The video's own project, copied with the moment's trim: it then lives apart from it
         Some(src) => if project.exists() { Err(format!("{} already exists", project.display())) } else {
             std::fs::read_to_string(src).map_err(|e| format!("{src}: {e}"))
-                .and_then(|text| adjust(&text, trim, alone, horizon_lock))
+                .and_then(|text| adjust(&text, trim, alone, horizon_lock, on_top_of_the_file(frame, Some(&video))))
                 .and_then(|text| write_whole(&project, &text))
         },
-        None => run(&video, &project, preset.as_deref(), underwater, horizon_lock, level, wide, trim, alone),
+        None => run(&video, &project, preset.as_deref(), underwater, horizon_lock, level, wide, trim, alone, frame),
     };
     if let Err(e) = result {
         eprintln!("gyroflow-project: {e}");
@@ -107,12 +134,44 @@ fn main() {
     }
 }
 
-// A project's JSON with a trim range (seconds of the video), "only within it" and the horizon lock's amount set; the
-// rest as it is
-fn adjust(text: &str, trim: Option<(f64, f64)>, alone: Option<bool>, horizon_lock: Option<f64>) -> Result<String, String> {
-    if trim.is_none() && alone.is_none() && horizon_lock.is_none() { return Ok(text.to_string()); }
+// The frame flags on top of the video's own turn (its display matrix); none given: none, the project's as it is
+fn on_top_of_the_file(frame: Frame, video: Option<&Path>) -> Frame {
+    if frame.is_none() { return frame; }
+    frame.for_video(video.and_then(|v| vs_gyroflow::mp4meta::display_rotation(v).ok()).unwrap_or(0), None)
+}
+
+// A project's video, as Gyroflow finds it: its videofile (a URL or a path), else next to the project
+fn project_video(text: &str, project: &Path) -> Option<PathBuf> {
+    let json: serde_json::Value = serde_json::from_str(text).ok()?;
+    let v = json.get("videofile")?.as_str()?;
+    let path = PathBuf::from(if v.contains("://") { gyroflow_core::filesystem::url_to_path(v) } else { v.to_string() });
+    if path.exists() { return Some(path); }
+    let beside = project.parent()?.join(path.file_name()?);
+    beside.exists().then_some(beside)
+}
+
+// A project's JSON with a trim range (seconds of the video), "only within it", the horizon lock's amount and the
+// output frame (its rotation, output size and projection, as Gyroflow's own Save writes them) set; the rest as it is
+fn adjust(text: &str, trim: Option<(f64, f64)>, alone: Option<bool>, horizon_lock: Option<f64>, frame: Frame) -> Result<String, String> {
+    if trim.is_none() && alone.is_none() && horizon_lock.is_none() && frame == Frame::default() { return Ok(text.to_string()); }
     let mut json: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not a Gyroflow project: {e}"))?;
     let obj = json.as_object_mut().ok_or("not a Gyroflow project")?;
+    if !frame.is_none() {
+        let info = obj.entry("video_info").or_insert_with(|| serde_json::json!({}));
+        let size = (info.get("width").and_then(|v| v.as_u64()), info.get("height").and_then(|v| v.as_u64()));
+        let (Some(w), Some(h)) = size else { return Err("the project has no video size (video_info)".into()) };
+        info.as_object_mut().ok_or("a broken video_info")?.insert("rotation".into(), serde_json::json!(frame.gyroflow_rotation()));
+        let (ow, oh) = frame.size((w as usize, h as usize));
+        let output = obj.entry("output").or_insert_with(|| serde_json::json!({}));
+        let output = output.as_object_mut().ok_or("a broken output")?;
+        output.insert("output_width".into(), serde_json::json!(ow));
+        output.insert("output_height".into(), serde_json::json!(oh));
+    }
+    if let Some(projection) = frame.projection {
+        let stab = obj.entry("stabilization").or_insert_with(|| serde_json::json!({}));
+        stab.as_object_mut().ok_or("a broken stabilization")?
+            .insert("output_projection".into(), serde_json::json!(gyroflow_core::stabilization::projection::setting_name(projection)));
+    }
     if let Some((a, b)) = trim {
         obj.remove("trim_start");
         obj.remove("trim_end");
@@ -146,19 +205,19 @@ fn write_whole(path: &Path, text: &str) -> Result<(), String> {
 }
 
 fn run(video: &Path, project: &Path, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool,
-       trim: Option<(f64, f64)>, alone: Option<bool>) -> Result<(), String> {
+       trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame) -> Result<(), String> {
     if project.exists() {
         return Err(format!("{} already exists", project.display()));
     }
     let video = vs_gyroflow::canonicalize(video).map_err(|e| format!("{}: {e}", video.display()))?;
     let project_path = std::path::absolute(project).map_err(|e| format!("{}: {e}", project.display()))?;
     let preset = preset.map(|p| vs_gyroflow::canonicalize(p).map_err(|e| format!("{p}: {e}"))).transpose()?;
-    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, horizon_lock, level, wide, &project_path.to_string_lossy());
+    let data = motion_project::from_motion_data(&video.to_string_lossy(), preset.as_ref().map(|p| p.to_string_lossy()).as_deref(), underwater, horizon_lock, level, wide, &project_path.to_string_lossy(), frame);
     // On macOS the core makes the project file, empty, to bookmark the video relative to it
     if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {
         let _ = std::fs::remove_file(project);
     }
-    let data = adjust(&data?, trim, alone, None)?;
+    let data = adjust(&data?, trim, alone, None, Frame::default())?;
     std::fs::write(project, data).map_err(|e| format!("{}: {e}", project.display()))?;
     println!("Wrote {}", project.display());
     Ok(())

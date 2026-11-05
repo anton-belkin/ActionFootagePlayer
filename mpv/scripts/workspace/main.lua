@@ -52,7 +52,7 @@
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
---   marks_file      where its marks are once changed (the highlights plugin's M)
+--   sidecar_file    the clip's own file beside it, its marks and saved view (sidecar.lua)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
@@ -77,6 +77,7 @@ local utils = require 'mp.utils'
 local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'
+local sidecar_lib = require 'sidecar'
 local has_input, input = pcall(require, 'mp.input')
 if not has_input then input = nil end
 
@@ -108,6 +109,7 @@ local fs = {
 }
 local ws = workspace.new(fs)
 local moments = moments_lib.new(ws, fs)
+local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows })
 
 local state = {}
 -- The project's _Moments/ as last read: every moment in it, and its folders' times
@@ -146,6 +148,19 @@ local adopt_gyroflow_trim
 -- every moment (view, level, horizon_lock, alone). Viewing is never saving: only Keep writes it into a moment. It
 -- doesn't touch the settings clips keep between them, nor they it
 local force = {}
+-- The view settings a clip, a moment or a clip preview keeps (sidecar.lua's `view`, a link's `stab`): the log curve,
+-- the stabilization (on, wider, off), its level, the horizon lock, the lens under water or not, the water's color
+-- fringes, the output's aspect, rotation and lens projection. Those a Gyroflow project has (the smoothing, horizon,
+-- lens, output size, rotation and lens correction) aren't kept beside one: the project decides them, and they change only for viewing
+local VIEW_KEYS = { "curve", "view", "level", "horizon_lock", "underwater", "chromatic", "aspect", "rotation", "projection" }
+local PROJECT_KEYS = { level = true, horizon_lock = true, underwater = true, aspect = true, rotation = true, projection = true }
+-- Changes written as they're made (the side panel's Auto save): this session only
+local auto_save = false
+local function copy(t)
+    local out = {}
+    for k, v in pairs(type(t) == "table" and t or {}) do out[k] = v end
+    return out
+end
 
 local function clock(s)
     s = math.floor(s + 0.5)
@@ -199,7 +214,7 @@ local function describe(path)
         relative = root and ws.relative(clip, root) or nil,
         gyroflow_projects = ws.gyroflow_projects(clip),
         gyroflow_new = ws.gyroflow_new(clip),
-        marks_file = ws.marks_file(clip),
+        sidecar_file = sidecar.path(clip),
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
         project_choices = not root and ws.project_choices(clip) or nil,
         project_new = not root and ws.new_project_root(clip) or nil,
@@ -312,10 +327,17 @@ local function open_moment(path)
         state.path = path
         state.redirected = true
         state.playing_preview = { file = file }
-        -- A variant of the clip's stabilization: a project of its own beside the preview; else the clip's
+        -- A variant of the clip's: its own settings (own), and a Gyroflow project of its own beside it; else the clip's
         local own = own_project(file)
         if fs.is_file(own) then
             state.gyroflow_projects, state.gyroflow_new, state.own_project = { own }, own, own
+        end
+        if l.own == 1 then
+            state.link = { file = file, own = true, saved = type(l.stab) == "table" and l.stab or {} }
+            state.view = copy(state.link.saved)
+            if state.own_project then for k in pairs(PROJECT_KEYS) do state.view[k] = nil end end
+        else
+            state.link = { file = file, own = false }
         end
         return
     end
@@ -347,6 +369,7 @@ local function open_moment(path)
     state.path = path
     state.redirected = true
     state.moment = { file = file, name = name, ["in"] = a, out = b, snap = l.snap == 1, alone = l.alone == true, stab = l.stab }
+    state.link = { file = file, own = l.snap == 1, saved = l.snap == 1 and (type(l.stab) == "table" and l.stab or {}) or nil, moment = true }
     state.offset, state.length = a, b - a
     -- Stabilized as it was made (snap): its own project, else the preset with its settings (stab), its part on its
     -- own (trim) when alone. A moment from before plays with the clip's
@@ -356,15 +379,14 @@ local function open_moment(path)
         -- As it was saved, but what's forced this session
         state.alone = force.alone
         if state.alone == nil then state.alone = l.alone == true end
-        -- One thing saved: its own Gyroflow project, which then decides (its horizon, crop, smoothing), or the
-        -- settings over the preset. Then what's forced this session
-        -- (with a project: on, its horizon; its level is the project's smoothing, none of the player's)
+        -- Its settings over the preset; with its own Gyroflow project, what the project has is the project's (its
+        -- horizon, smoothing, lens, frame), the rest its settings. Then what's forced this session
         local stab = { view = "normal", horizon_lock = "project" }
-        if not fs.is_file(own) then
-            for k, v in pairs(type(l.stab) == "table" and l.stab or {}) do stab[k] = v end
+        for k, v in pairs(type(l.stab) == "table" and l.stab or {}) do
+            if not (fs.is_file(own) and PROJECT_KEYS[k]) then stab[k] = v end
         end
         for _, k in ipairs({ "view", "level", "horizon_lock" }) do if force[k] ~= nil then stab[k] = force[k] end end
-        state.stab = stab
+        state.view = stab
         state.force = force
         state.gyroflow_projects, state.gyroflow_new = { own }, own
         state.own_project = fs.is_file(own) and own or nil
@@ -399,6 +421,19 @@ mp.add_hook("on_load", 10, function()
             open_folder(state.clip)
         elseif info and (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
             open_moment(path)
+        end
+    end
+    -- Not a link with settings of its own: the clip's, from its own file beside it
+    if state.clip and not state.view and not state.export and not state.clip:find("://", 1, true) then
+        local doc, _, problem = sidecar.read(state.clip)
+        if problem then mp.msg.warn(problem) end
+        if doc and type(doc.view) == "table" then
+            state.view = copy(doc.view)
+            state.clip_view = copy(doc.view)
+            -- A Gyroflow project the clip got since: what it has is the project's
+            if ws.gyroflow_project(state.clip) then
+                for k in pairs(PROJECT_KEYS) do state.view[k] = nil end
+            end
         end
     end
     -- An export's original, at its part
@@ -503,11 +538,24 @@ local function run_tool(args)
     return true
 end
 
--- The stabilization's settings as it plays, over the preset: what a moment keeps
-local function current_stab()
-    local g = mp.get_property_native("user-data/gyroflow")
-    if type(g) ~= "table" then return nil end
-    return { view = g.view, level = g.level, horizon_lock = g.horizon_lock }
+-- The view settings as it plays (the gyroflow and dlogm plugins'): what a moment, a clip preview or the clip keeps.
+-- `project`: it plays with a Gyroflow project, whose settings aren't kept (nil: as it plays now)
+local function current_view(project)
+    local g, d = mp.get_property_native("user-data/gyroflow"), mp.get_property_native("user-data/dlogm")
+    local v = {}
+    if type(g) == "table" then
+        if g.available then
+            v.view, v.level, v.horizon_lock, v.underwater = g.view, g.level, g.horizon_lock, g.underwater
+            if g.chromatic ~= nil then v.chromatic = g.chromatic end
+        end
+        v.aspect, v.rotation, v.projection = g.aspect, g.rotation, g.projection
+        if project == nil then project = g.kind == "project" end
+    end
+    if type(d) == "table" and d.recorded ~= nil then
+        v.curve = (d.curve == d.recorded) and "auto" or (d.curve ~= "" and d.curve or "auto")
+    end
+    if project then for k in pairs(PROJECT_KEYS) do v[k] = nil end end
+    return v
 end
 
 -- The clip's project, for what needs one (moments, exports, clip previews). None is made by itself: the side panel's
@@ -557,10 +605,10 @@ local function save(name, update, typed, quiet, opts)
     -- its own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
     -- clip's project changed later doesn't change it. An update keeps them; a moment from before keeps the clip's
     local preview_project = nil
-    if not update or update.snap then
+    if not update or update.snap or opts.own then
         local alone = opts.alone
         if alone == nil then alone = update and update.alone or (not update and settings().moments_alone == true) or false end
-        local stab = opts.stab or (update and update.stab) or current_stab()
+        local stab = opts.stab or (update and update.stab) or current_view()
         l.snap, l.alone, l.stab = 1, alone, stab
         local own = own_project(file)
         local tool = project_tool()
@@ -577,15 +625,22 @@ local function save(name, update, typed, quiet, opts)
         if fs.is_file(own) then
             if tool then run_tool(with({ tool, "--edit", own })) end
             preview_project = own
-        elseif not update then
+        elseif not update or opts.own then
             local g = mp.get_property_native("user-data/gyroflow")
             if tool and type(g) == "table" and g.kind == "project" and (g.project or "") ~= ""
                and run_tool(with({ tool, "--copy", g.project, state.clip, own })) then
                 preview_project = own
             end
         end
-        -- One thing saved: with a project of its own, the project; without, the settings over the preset
-        if preview_project then l.stab = nil else preview_project = false end
+        -- With a project of its own, what it has is the project's; the rest (and without one, all) the settings over
+        -- the preset
+        if preview_project then
+            local kept = {}
+            for k, v in pairs(type(l.stab) == "table" and l.stab or {}) do if not PROJECT_KEYS[k] then kept[k] = v end end
+            l.stab = kept
+        else
+            preview_project = false
+        end
     end
     -- The preview's frame: the first highlight inside the part, else its middle
     local at
@@ -899,16 +954,14 @@ end
 
 -- A clip's marks: its marks file's, else the camera's; nil for none
 local function marks_of(clip)
-    local f = io.open(ws.marks_file(clip), "r")
-    if f then
-        local doc = utils.parse_json(f:read("*a") or "")
-        f:close()
+    local doc = sidecar.read(clip)
+    if doc and type(doc.marks) == "table" then
         local times = {}
-        for _, m in ipairs(type(doc) == "table" and type(doc.marks) == "table" and doc.marks or {}) do
+        for _, m in ipairs(doc.marks) do
             if type(m) == "table" and type(m.t) == "number" then times[#times + 1] = m.t end
         end
         table.sort(times)
-        if #times > 0 then return times end
+        return #times > 0 and times or nil
     end
     if markers then
         local ok, m = pcall(markers.read, clip)
@@ -1295,12 +1348,8 @@ end
 local function cut_finish()
     local c = cutting
     local doc
-    local marks_file = ws.marks_file(c.clip)
-    do
-        local f = io.open(marks_file, "r")
-        if f then doc = utils.parse_json(f:read("*a") or ""); f:close() end
-        if type(doc) ~= "table" then doc = nil end
-    end
+    local marks_file
+    doc, marks_file = sidecar.read(c.clip)
     -- mpv lets go of the file first (Windows can't move an open file), idle meanwhile
     c.idle = mp.get_property("idle")
     mp.set_property("idle", "yes")
@@ -1314,7 +1363,7 @@ local function cut_finish()
         originals[#originals + 1] = preview
         if fs.is_file(own_project(preview)) then originals[#originals + 1] = own_project(preview) end
     end
-    if fs.is_file(marks_file) then originals[#originals + 1] = marks_file end
+    if marks_file and fs.is_file(marks_file) then originals[#originals + 1] = marks_file end
     trash(c.clip, function(ok)
         local function restore_idle() if c.idle then mp.set_property("idle", c.idle) end end
         if not ok then
@@ -1352,8 +1401,9 @@ local function cut_finish()
                     local d = cut_lib.part_marks(doc, p.from, p.to, { file = p.name, size = p.size, duration = moments_lib.ms(p.to - p.from), created = p.created })
                     if d then
                         d.clip.hash = p.hash
-                        write_json(ws.marks_file(p.file), d)
-                        marks_kept = marks_kept + #d.marks
+                        d.format = sidecar_lib.FORMAT
+                        write_json(sidecar.path(p.file), d)
+                        marks_kept = marks_kept + #(d.marks or {})
                     end
                 end
             end
@@ -1520,8 +1570,8 @@ mp.register_script_message("moment-force", function(key, value)
     local saved = m.stab or {}
     local v = force[key]
     if v == nil then v = saved[key] end
-    state.stab = state.stab or {}
-    state.stab[key] = v
+    state.view = state.view or {}
+    state.view[key] = v
     publish()
     if v ~= nil then mp.commandv("script-message-to", "gyroflow", SETTING_COMMANDS[key], v) end
 end)
@@ -1536,11 +1586,11 @@ end)
 -- A key pressed while a moment plays (Ctrl+g, Ctrl+k, the horizon): that value for every moment this session
 mp.observe_property("user-data/gyroflow", "native", function(_, g)
     local m = state.moment
-    if not (m and m.snap and state.loaded and type(g) == "table" and g.available and state.stab) then return end
+    if not (m and m.snap and state.loaded and type(g) == "table" and g.available and state.view) then return end
     for _, k in ipairs({ "view", "level", "horizon_lock" }) do
         -- A project's moment has no level of the player's to force
-        if g[k] ~= nil and g[k] ~= state.stab[k] and not (k == "level" and state.own_project) then
-            force[k], state.stab[k] = g[k], g[k]
+        if g[k] ~= nil and g[k] ~= state.view[k] and not (k == "level" and state.own_project) and not auto_save then
+            force[k], state.view[k] = g[k], g[k]
             state.force = force
             publish()
         end
@@ -1552,43 +1602,173 @@ end)
 mp.register_script_message("moment-keep", function()
     local m = state.moment
     if not (m and m.snap) then return end
-    save(m.name, m, nil, false, { range = { m["in"], m.out }, stab = current_stab(), alone = state.alone, keep_playing = true })
+    save(m.name, m, nil, false, { range = { m["in"], m.out }, stab = current_view(), alone = state.alone, keep_playing = true })
 end)
 
--- A clip preview's own stabilization, a variant of the clip's: a project of its own beside it (a copy of the clip's,
--- or made from its motion data as it plays now); off, it goes to the Trash and the clip's is back
-mp.register_script_message("clip-own", function()
-    local cp = state.playing_preview
-    if not cp then return mp.osd_message("Its own stabilization is for a clip preview playing (_Clips/)", 3) end
-    local own = own_project(cp.file)
+-- View settings saved (docs/moments-and-workspaces.md, "Saved view"): where Save writes them, a moment's or a clip
+-- preview's link when it has settings of its own, else the clip's own file (sidecar.lua); nil: nowhere (a stream)
+local function view_target()
+    local l = state.link
+    if l and l.own then return l.moment and "moment" or "preview" end
+    if state.clip and not state.clip:find("://", 1, true) and not state.export and not (state.moment and state.moment.missing) then return "clip" end
+    return nil
+end
+
+-- What's saved there (nil: nothing yet, the defaults)
+local function saved_view()
+    local t = view_target()
+    if t == "clip" then return state.clip_view end
+    if t then return state.link.saved end
+    return nil
+end
+
+-- saved, changed (differs from what's saved: for viewing only), or none (nothing saved: the defaults); a key a
+-- link saved before it had it isn't a change
+local function view_status()
+    local saved = saved_view()
+    if not saved then return "none" end
+    local now = current_view()
+    for _, k in ipairs(VIEW_KEYS) do
+        if saved[k] ~= nil and now[k] ~= nil and now[k] ~= saved[k] then return "changed" end
+        if saved[k] == nil and now[k] ~= nil and view_target() == "clip" then return "changed" end
+    end
+    return "saved"
+end
+
+local function publish_view()
+    local status = state.loaded and view_status() or nil
+    if status ~= state.view_status or state.view_saved_in ~= view_target() or state.auto_save ~= auto_save then
+        state.view_status, state.view_saved_in, state.auto_save = status, view_target(), auto_save
+        publish()
+    end
+end
+
+-- A link's JSON rewritten in place (afp-cut --set-key), fn changing it; true when written
+local function rewrite_link(file, fn)
+    local exe = plugin_tool("afp-cut")
+    local raw = exe and fs.read_link(file)
+    local l = raw and utils.parse_json(raw)
+    if type(l) ~= "table" then return false end
+    fn(l)
+    local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                  args = { exe, "--set-key", file, link.KEY, utils.format_json(l) } })
+    if not (r and r.status == 0) then mp.msg.warn("couldn't write the link of " .. file .. ": " .. tostring(r and r.stderr)) end
+    return r and r.status == 0
+end
+
+-- The view as it plays written where it belongs. quick: a moment's settings into its link only (Auto save), not
+-- made again with its preview
+local function save_view(quick)
+    local t = view_target()
+    if not t or not state.loaded then return false end
+    local v = current_view()
+    if t == "clip" then
+        local info = utils.file_info(state.clip)
+        local ok, err = sidecar.update(state.clip, function(d)
+            d.view = v
+            if type(d.clip) ~= "table" then
+                d.clip = { file = ws.name(state.clip), size = info and info.size, created = state.created }
+            end
+            if d.clip.hash == nil then d.clip.hash = state.hash end
+        end)
+        if not ok then mp.osd_message("Couldn't save the view: " .. tostring(err), 4); return false end
+        state.clip_view = v
+    elseif t == "moment" and not quick then
+        local m = state.moment
+        save(m.name, m, nil, false, { range = { m["in"], m.out }, stab = v, alone = state.alone, keep_playing = true })
+        state.link.saved = v
+    else
+        if not rewrite_link(state.link.file, function(l) l.stab = v end) then
+            mp.osd_message("Couldn't save the view into " .. moments_lib.display_name(state.link.file), 4)
+            return false
+        end
+        state.link.saved = v
+        if state.moment then state.moment.stab = v end
+    end
+    publish_view()
+    return true
+end
+
+local VIEW_PLACES = { clip = "this clip's file", moment = "the moment", preview = "the clip preview" }
+mp.register_script_message("view-save", function()
+    local t = view_target()
+    if not t then return mp.osd_message("Nothing to save the view into", 2) end
+    if save_view(false) and t ~= "moment" then mp.osd_message("View saved in " .. VIEW_PLACES[t], 2) end
+end)
+
+-- Auto save: each change written as it's made, this session
+mp.register_script_message("view-auto", function()
+    auto_save = not auto_save
+    if auto_save and view_target() and view_status() ~= "saved" then save_view(true) end
+    publish_view()
+    mp.osd_message(auto_save and "Auto save on: view changes are saved as they're made, this session" or "Auto save off", 3)
+end)
+
+-- The clip's saved view forgotten: its defaults from the next time it plays
+mp.register_script_message("view-forget", function()
+    if view_target() ~= "clip" or not state.clip_view then return end
+    local ok, err = sidecar.update(state.clip, function(d) d.view = nil end)
+    if not ok then return mp.osd_message("Couldn't change the clip's file: " .. tostring(err), 4) end
+    state.clip_view = nil
+    publish_view()
+    mp.osd_message("Saved view removed: the clip plays with the defaults from the next time", 3)
+end)
+
+-- Settings of its own for the moment or clip preview playing, or the clip's: on, what plays now is written into it
+-- (with a copy of the clip's Gyroflow project, if it has one); off, they're taken out (its own project to the
+-- Trash) and it plays with the clip's
+mp.register_script_message("view-own", function()
+    local l = state.link
+    if not l then return mp.osd_message("Settings of its own are for a moment or a clip preview playing", 3) end
     local function again() mp.commandv("playlist-play-index", "current") end
-    if fs.is_file(own) then
-        return trash(own, function(ok)
-            mp.osd_message(ok and "The clip's own stabilization again" or "Couldn't move its project to the Trash", 3)
-            if ok then again() end
+    local own = own_project(l.file)
+    if l.own then
+        if not rewrite_link(l.file, function(x) x.stab, x.own = nil, nil; if l.moment then x.snap, x.alone = nil, nil end end) then
+            return mp.osd_message("Couldn't change " .. moments_lib.display_name(l.file), 4)
+        end
+        local function done()
+            mp.osd_message(moments_lib.display_name(l.file) .. ": the clip's settings, as the clip plays", 3)
+            again()
+        end
+        if fs.is_file(own) then return trash(own, function() done() end) end
+        return done()
+    end
+    if l.moment then
+        local m = state.moment
+        save(m.name, m, nil, false, { range = { m["in"], m.out }, stab = current_view(), own = true })
+        return
+    end
+    -- A clip preview: its settings, and a copy of the clip's project when it plays with one
+    local v = current_view()
+    local g = mp.get_property_native("user-data/gyroflow") or {}
+    local tool = project_tool()
+    if tool and g.kind == "project" and (g.project or "") ~= "" and not fs.is_file(own) then
+        run_tool({ tool, "--copy", g.project, state.clip, own })
+    end
+    if not rewrite_link(l.file, function(x) x.own, x.stab = 1, v end) then
+        return mp.osd_message("Couldn't change " .. moments_lib.display_name(l.file), 4)
+    end
+    mp.osd_message(moments_lib.display_name(l.file) .. ": settings of its own" .. (fs.is_file(own) and ", and a Gyroflow project (Ctrl+e opens it)" or ""), 3)
+    again()
+end)
+
+-- What it plays in changed: the panel's Saved / Changed, and Auto save writes it (a moment playing: unless the
+-- change is for every moment this session, which Keep doesn't save either)
+local auto_timer = nil
+local function view_changed()
+    if not state.loaded then return end
+    if auto_save and view_target() and view_status() == "changed" then
+        if auto_timer then auto_timer:kill() end
+        auto_timer = mp.add_timeout(0.7, function()
+            auto_timer = nil
+            if auto_save and view_target() and view_status() == "changed" then save_view(true) end
         end)
     end
-    local tool = project_tool()
-    if not tool then return mp.osd_message("Its own stabilization needs the gyroflow plugin", 3) end
-    local g = mp.get_property_native("user-data/gyroflow") or {}
-    local args
-    if g.kind == "project" and (g.project or "") ~= "" then
-        args = { tool, "--copy", g.project, state.clip, own }
-    else
-        args = { tool, "--level", g.level or "medium" }
-        if g.view == "wide" then table.insert(args, "--wide") end
-        if g.horizon_lock == "yes" or g.horizon_lock == "no" then
-            table.insert(args, "--horizon-lock"); table.insert(args, g.horizon_lock == "yes" and "100" or "0")
-        end
-        table.insert(args, state.clip); table.insert(args, own)
-    end
-    if run_tool(args) then
-        mp.osd_message("Its own stabilization: " .. ws.name(own) .. " (Ctrl+e opens it in Gyroflow)", 4)
-        again()
-    else
-        mp.osd_message("Couldn't make its project", 3)
-    end
-end)
+    publish_view()
+end
+mp.observe_property("user-data/gyroflow", "native", view_changed)
+mp.observe_property("user-data/dlogm", "native", view_changed)
+mp.register_event("file-loaded", function() publish_view() end)
 
 -- New moments stabilized on their own (a project's setting)
 mp.register_script_message("moments-alone", function()
@@ -1614,3 +1794,180 @@ adopt_gyroflow_trim = function()
         save(m.name, m, nil, true, { range = { a, b } })
     end
 end
+
+-- The project's marks, all at once (the Project tab's): a moment for each mark in no moment yet, 2 s on each side,
+-- those that overlap joined into one (the clip's marks: its own file's, else the camera's); or a photo of each mark,
+-- into _Stills, except those made before (_ActionFootagePlayer/stills-made.txt: a line per clip and mark, so a photo
+-- deleted stays deleted). One at a time in the background, each with its clip's saved view (else the defaults); a
+-- moment with settings of its own, as one saved with k: a copy of the clip's Gyroflow project when it has one. While it
+-- runs: user-data/workspace/marks_job { kind (moments, photos), done, total, failed }
+local MOMENT_AROUND = 2
+local marks_job = nil
+
+local function stills_made_file() return state_file("stills-made.txt") end
+local function stills_line(relative, size, t) return relative .. "\t" .. tostring(size) .. "\t" .. string.format("%.3f", t) end
+local function read_stills_made()
+    local made = {}
+    local f = stills_made_file() and io.open(stills_made_file(), "r")
+    if not f then return made end
+    for line in f:lines() do made[line] = true end
+    f:close()
+    return made
+end
+
+-- A clip's saved view for what's made of it (its own file's), without what its Gyroflow project has
+local function clip_view_of(file)
+    local doc = sidecar.read(file)
+    local v = copy(doc and doc.view)
+    if ws.gyroflow_project(file) then for k in pairs(PROJECT_KEYS) do v[k] = nil end end
+    return v
+end
+
+local function job_progress()
+    local j = marks_job
+    state.marks_job = j and { kind = j.kind, done = j.done, total = #j.queue, failed = j.failed } or nil
+    publish()
+end
+
+local function job_finish(message)
+    local j = marks_job
+    marks_job = nil
+    job_progress()
+    if message then mp.osd_message(message, 5) end
+    if j and j.kind == "moments" then refresh() end
+end
+
+local job_next
+mp.register_script_message("job-done", function(id, json)
+    local j = marks_job
+    if not j or tostring(j.id) ~= id then return end
+    local r = utils.parse_json(json or "") or {}
+    local item = j.queue[j.done + 1]
+    if r.ok then
+        if j.kind == "photos" and item then
+            local f = stills_made_file() and io.open(stills_made_file(), "a")
+            if f then f:write(stills_line(item.relative, item.size, item.t), "\n"); f:close() end
+        end
+    else
+        j.failed = j.failed + 1
+        mp.msg.warn((j.kind == "moments" and "moment " or "photo ") .. tostring(item and item.name or "") .. ": " .. tostring(r.error))
+    end
+    j.done = j.done + 1
+    job_progress()
+    job_next()
+end)
+
+job_next = function()
+    local j = marks_job
+    if not j then return end
+    if j.stopping or j.done >= #j.queue then
+        local made = j.done - j.failed
+        local what = j.kind == "moments" and (made == 1 and "1 moment" or (made .. " moments")) or (made == 1 and "1 photo" or (made .. " photos"))
+        return job_finish((j.stopping and "Stopped: " or "Made ") .. what .. (j.failed > 0 and (", " .. j.failed .. " failed (see the log)") or ""))
+    end
+    local item = j.queue[j.done + 1]
+    j.id = j.id + 1
+    local id = tostring(j.id)
+    if j.kind == "photos" then
+        mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
+            id = id, clip = item.clip, t = item.t, view = item.view, reply = mp.get_script_name(), done = "job-done" }))
+        return
+    end
+    -- A moment, as k saves one: its link, its own settings (and project), its preview
+    local root = j.root
+    local file, final = moments.unique_file(ws.join(root, moments_lib.FOLDER), item.name)
+    local l = { v = 1, kind = "moment", clip = item.relative, size = item.size, created = item.created_text,
+                ["in"] = moments_lib.ms(item.a), out = moments_lib.ms(item.b), name = final, roots = { root },
+                snap = 1, alone = j.alone, stab = item.view }
+    local project = false
+    local clip_project = ws.gyroflow_project(item.clip)
+    local tool = project_tool()
+    if clip_project and tool then
+        local own = own_project(file)
+        if run_tool({ tool, "--trim", string.format("%.3f,%.3f", item.a, item.b), "--alone", j.alone and "yes" or "no",
+                      "--copy", clip_project, item.clip, own }) then
+            project = own
+        end
+    end
+    local dates
+    if item.created then
+        local t = item.created + item.a
+        dates = moments_lib.format_time(t, moments_lib.zone_of_name(ws.name(item.clip), item.created) or moments_lib.local_zone(t))
+    end
+    item.name = final
+    mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
+        id = id, clip = item.clip, from = item.a, to = item.b, at = item.at, link = utils.format_json(l), dates = dates, output = file,
+        reply = mp.get_script_name(), project = project, alone = j.alone and project == false, view = item.view,
+        done = "job-done",
+    }))
+end
+
+-- What there is to make, over the project's clips (their headers read: a second or so per hundred clips)
+local function marks_queue(kind, root)
+    local queue = {}
+    local made = kind == "photos" and read_stills_made() or nil
+    local all = kind == "moments" and moments.scan(root, nil).list or nil
+    local taken_names = {}
+    for _, c in ipairs(moments.footage(root)) do
+        local times = marks_of(c.file)
+        if times then
+            local info = utils.file_info(c.file)
+            local size = info and info.size
+            local movie = markers and markers.movie and markers.movie(c.file) or nil
+            local view = clip_view_of(c.file)
+            if kind == "photos" then
+                for _, t in ipairs(times) do
+                    if not made[stills_line(c.relative, size, t)] then
+                        queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, t = t, view = view, name = ws.name(c.file) .. " " .. clock(t) }
+                    end
+                end
+            else
+                local taken = {}
+                for _, m in ipairs(moments.of_clip(all, { relative = c.relative, size = size })) do
+                    taken[#taken + 1] = { m.link["in"], m.link.out }
+                end
+                for _, p in ipairs(moments_lib.loose_parts(times, taken, movie and movie.duration, MOMENT_AROUND)) do
+                    local created = movie and movie.created
+                    local name
+                    if created then
+                        local t = created + p.a
+                        name = moments_lib.time_name(t, moments_lib.zone_of_name(ws.name(c.file), created) or moments_lib.local_zone(t))
+                    else
+                        name = (ws.name(c.file):gsub("%.[^.]*$", "")) .. " " .. clock(p.a):gsub(":", ".")
+                    end
+                    name = moments_lib.safe_name(name) or "Moment"
+                    -- Two parts of one name (the same second in two clips): kept apart here, the folder checked as each is made
+                    local base, n = name, 1
+                    while taken_names[name:lower()] do n = n + 1; name = base .. " " .. n end
+                    taken_names[name:lower()] = true
+                    queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, a = p.a, b = p.b, at = p.marks[1],
+                                          created = created, created_text = created and os.date("!%Y-%m-%dT%H:%M:%S.000000Z", created) or nil,
+                                          view = view, name = name }
+                end
+            end
+        end
+    end
+    return queue
+end
+
+local function start_marks_job(kind)
+    if marks_job then return mp.osd_message("Already making " .. marks_job.kind .. ": " .. marks_job.done .. " of " .. #marks_job.queue, 3) end
+    local root = need_project(kind == "moments" and "Moments of the marks" or "Photos of the marks")
+    if not root then return end
+    if not markers then return mp.osd_message("This needs the highlights plugin", 3) end
+    mp.osd_message("Looking for the marks in the project's clips…", 30)
+    local queue = marks_queue(kind, root)
+    if #queue == 0 then
+        return mp.osd_message(kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)", 4)
+    end
+    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, id = 0, root = root, alone = settings().moments_alone == true }
+    mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
+    job_progress()
+    job_next()
+end
+
+mp.register_script_message("marks-moments", function() start_marks_job("moments") end)
+mp.register_script_message("marks-photos", function() start_marks_job("photos") end)
+mp.register_script_message("marks-stop", function()
+    if marks_job then marks_job.stopping = true; mp.osd_message("Stopping after this one…", 2) end
+end)

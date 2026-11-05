@@ -81,8 +81,8 @@ for _, c in ipairs(cases) do
                 expect(what, ws.gyroflow_project(path), in_base(value))
             elseif key == "gyroflow-new" then
                 expect(what, ws.gyroflow_new(path), in_base(value))
-            elseif key == "marks" then
-                expect(what, ws.marks_file(path), in_base(value))
+            elseif key == "sidecar" then
+                expect(what, ws.sidecar_file(path), in_base(value))
             else
                 error("unknown expectation " .. key)
             end
@@ -124,7 +124,7 @@ expect("windows parent of unc", win.parent("\\\\nas\\video\\"), nil)
 expect("windows relative", win.relative("Z:\\Egypt\\Day 1\\A.MP4", "z:\\egypt"), "Day 1/A.MP4")
 expect("windows new above DCIM", win.new_project_root("E:\\DCIM\\100GOPRO\\GX01.MP4"), "E:\\")
 expect("windows gyroflow", win.gyroflow_new("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.gyroflow")
-expect("windows marks", win.marks_file("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.marks.json")
+expect("windows sidecar", win.sidecar_file("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.afp.json")
 
 -- The project search on Windows: the drive's top is looked at, the home folder isn't
 local wdirs = { ["E:\\_ActionFootagePlayer"] = true, ["C:\\Users\\me\\_ActionFootagePlayer"] = true }
