@@ -11,7 +11,8 @@
 // - DJI (a `djmd` track): the clip's own data (product, lens, readout time, IMU rate, the color mode) is only in the
 //   first sample of the metadata tracks (djmd, dbgi). Its top-level protobuf fields the new first sample lacks are put
 //   in front of it, where a protobuf reader merges them. Without them Gyroflow takes the clip for an unknown DJI
-//   camera (no lens profile), and the player neither stabilizes it nor converts its log.
+//   camera (no lens profile), and the player neither stabilizes it nor converts its log. Its highlights (a free box
+//   with hglg, times from the clip's start) are moved to the cut's time, the ones cut off dropped.
 // For every camera: the timecode sample moves on by the frames cut off, the audio is kept from the packet that holds
 // the first frame's moment and lined up with an edit list, the creation times move on by the time cut off. And the
 // cut gets our own key, ch.actionfootageplayer.cut: where it comes from (the original, its first frame) and how the
@@ -402,14 +403,34 @@ pub fn cut(src: &Path, dst: &Path, from: f64, to: Option<f64>, key: serde_json::
     order.sort();
     let size_of = |ti: usize, si: usize| replaced.get(&(ti, si)).map(|b| b.len() as u64).unwrap_or(tracks[ti].samples[si].size as u64);
     let total: u64 = order.iter().map(|&(_, ti, si)| size_of(ti, si)).sum();
-    // Before the mdat: the top-level boxes but the moov and mdats, as they were (ftyp, free, uuid...)
-    let mut pre = Vec::new();
-    for &(at, _, size, kind) in &top {
+    // The top-level boxes but the moov and mdats, as they were (ftyp, free, uuid...), where they were: before the
+    // first mdat, or after the last one and the moov. DJI's highlights (a free box with hglg) moved to the cut's time
+    let (t0_ms, t1_ms) = ((t0 * 1000.0).round() as i64, (t1 * 1000.0).round() as i64);
+    let mut highlights = None;
+    let first_mdat = top.iter().position(|b| &b.3 == b"mdat").unwrap_or(top.len());
+    let (mut pre, mut post) = (Vec::new(), Vec::new());
+    for (i, &(at, _, size, kind)) in top.iter().enumerate() {
         if matches!(&kind, b"moov" | b"mdat") { continue; }
         let mut b = vec![0u8; size as usize];
         f.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
         f.read_exact(&mut b).map_err(|e| e.to_string())?;
-        pre.extend(b);
+        if adapter == Adapter::Dji && let Some((nb, kept, dropped)) = moved_highlights(&b, t0_ms, t1_ms) {
+            highlights = Some(serde_json::json!({ "kept": kept, "dropped": dropped }));
+            b = nb;
+        }
+        if i < first_mdat { pre.extend(b) } else { post.extend(b) }
+    }
+    if adapter == Adapter::Dji && let Some(udta) = moov.child_mut(b"udta") {
+        let mut body = Vec::new();
+        for n in parse_boxes(&udta.body)? {
+            let mut b = n.bytes();
+            if let Some((nb, kept, dropped)) = moved_highlights(&b, t0_ms, t1_ms) {
+                highlights = Some(serde_json::json!({ "kept": kept, "dropped": dropped }));
+                b = nb;
+            }
+            body.extend(b);
+        }
+        udta.body = body;
     }
     let big = total + 8 > u32::MAX as u64;
     let mdat_head: Vec<u8> = if big {
@@ -510,6 +531,7 @@ pub fn cut(src: &Path, dst: &Path, from: f64, to: Option<f64>, key: serde_json::
         "start": round6(t0), "end": round6(t1), "source_duration": round6(plan.source_duration),
         "adapter": plan.adapter, "carried": carried,
     });
+    if let Some(h) = highlights { value["highlights"] = h; }
     // A cut of a cut: where it is in the very first original
     let (origin, origin_start) = match &previous {
         Some(p) => (p["origin"].as_str().or(p["source"].as_str()).map(String::from), p["origin_start"].as_f64().or(p["start"].as_f64()).unwrap_or(0.0) + t0),
@@ -550,6 +572,7 @@ pub fn cut(src: &Path, dst: &Path, from: f64, to: Option<f64>, key: serde_json::
         i = j;
     }
     out.write_all(&moov.bytes()).map_err(werr)?;
+    out.write_all(&post).map_err(werr)?;
     out.flush().map_err(werr)?;
     Ok(plan)
 }
@@ -573,6 +596,55 @@ fn slice_sbgp(b: &[u8], first: usize, count: usize) -> Result<Vec<u8>, String> {
     let mut out = b[..head].to_vec();
     out.extend((runs.len() as u32).to_be_bytes());
     for (c, g) in runs { out.extend(c.to_be_bytes()); out.extend(g.to_be_bytes()); }
+    Ok(out)
+}
+
+// DJI's highlights (Osmo Action 4 and later; the highlights plugin's markers.lua reads them): a free box holding
+// "data", then a box hglg (32-bit big-endian size, its type, 5 bytes of which the last is the count), then 5 bytes per
+// highlight: one byte, and its time (ms), 32-bit little-endian
+
+/// The highlights' times (ms) in a box (header included), when it's DJI's
+fn highlights_in(b: &[u8]) -> Option<(Vec<(u8, u32)>, [u8; 5])> {
+    if b.len() < 8 + 17 || !matches!(&b[4..8], b"free" | b"skip") || &b[8..12] != b"data" || &b[16..20] != b"hglg" { return None; }
+    let len = be32(b, 12) as usize;
+    if len < 13 || 12 + len > b.len() { return None; }
+    let head: [u8; 5] = b[20..25].try_into().unwrap();
+    let list = (0..(len - 13) / 5).map(|k| { let e = &b[25 + 5 * k..30 + 5 * k]; (e[0], u32::from_le_bytes(e[1..5].try_into().unwrap())) }).collect();
+    Some((list, head))
+}
+
+/// A box with DJI's highlights, the ones in [t0, t1) kept and moved to the cut's time: (the box, kept, dropped)
+fn moved_highlights(b: &[u8], t0_ms: i64, t1_ms: i64) -> Option<(Vec<u8>, usize, usize)> {
+    let (list, mut head) = highlights_in(b)?;
+    let kept: Vec<(u8, u32)> = list.iter().filter(|h| (h.1 as i64) >= t0_ms && (h.1 as i64) < t1_ms).map(|h| (h.0, (h.1 as i64 - t0_ms) as u32)).collect();
+    head[4] = kept.len().min(255) as u8;
+    let len = 13 + 5 * kept.len();
+    let mut out = ((8 + 4 + len) as u32).to_be_bytes().to_vec();
+    out.extend_from_slice(&b[4..8]);
+    out.extend_from_slice(b"data");
+    out.extend((len as u32).to_be_bytes());
+    out.extend_from_slice(b"hglg");
+    out.extend_from_slice(&head);
+    for (flag, ms) in &kept { out.push(*flag); out.extend(ms.to_le_bytes()); }
+    Some((out, kept.len(), list.len() - kept.len()))
+}
+
+/// A file's DJI highlights (ms), from its top-level boxes and moov/udta, as markers.lua finds them
+fn dji_highlights(f: &mut File) -> Result<Vec<u32>, String> {
+    let (top, moov) = read_moov(f)?;
+    let mut out = Vec::new();
+    for &(at, _, size, kind) in &top {
+        if !matches!(&kind, b"free" | b"skip") || size > 1 << 20 { continue; }
+        let mut b = vec![0u8; size as usize];
+        f.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+        f.read_exact(&mut b).map_err(|e| e.to_string())?;
+        if let Some((l, _)) = highlights_in(&b) { out.extend(l.iter().map(|h| h.1)); }
+    }
+    if let Some(udta) = moov.child(b"udta") {
+        for n in parse_boxes(&udta.body)? {
+            if let Some((l, _)) = highlights_in(&n.bytes()) { out.extend(l.iter().map(|h| h.1)); }
+        }
+    }
     Ok(out)
 }
 
@@ -676,6 +748,12 @@ pub fn verify(src: &Path, dst: &Path, plan: &Plan, original: Reading, as_played:
         notes.push(if unreadable { "not a format the player's telemetry reader opens: its samples compared only" } else { "its samples compared only (not a file the player plays)" }.into());
         return Ok(Verified { ok: problems.is_empty(), problems, notes, cut: original.clone(), original });
     }
+    // DJI's highlights: the original's in the cut's span, at the cut's time
+    let (ha, hb) = (dji_highlights(&mut fs)?, dji_highlights(&mut fd)?);
+    let (t0_ms, t1_ms) = ((plan.start * 1000.0).round() as i64, (plan.end * 1000.0).round() as i64);
+    let want: Vec<u32> = ha.iter().filter(|&&t| (t as i64) >= t0_ms && (t as i64) < t1_ms).map(|&t| (t as i64 - t0_ms) as u32).collect();
+    if hb != want { problems.push(format!("highlights {hb:?}, meant {want:?}")); }
+    else if !ha.is_empty() { notes.push(format!("highlights: {} of {} kept, at the cut's time", hb.len(), ha.len())); }
     let cut = reading(dst);
     if cut != original {
         problems.push(format!("read differently: {} (the original: {})", serde_json::to_string(&cut).unwrap(), serde_json::to_string(&original).unwrap()));
@@ -711,6 +789,18 @@ mod tests {
         assert_eq!(f[1].1, &[0x18, 0x96, 0x01]);
         assert!(pb_fields(&[0x0a, 5, 1]).is_none());
         assert!(pb_fields(b"DJIMETA1").is_none() || pb_fields(b"DJIMETA1").unwrap().iter().all(|x| x.0 > 0));
+    }
+
+    #[test]
+    fn highlights_moved() {
+        // 0093's: two highlights, at 26.376 and 40.887 s
+        let b = [0, 0, 0, 0x23, b'f', b'r', b'e', b'e', b'd', b'a', b't', b'a', 0, 0, 0, 0x17, b'h', b'g', b'l', b'g', 1, 0, 5, 0, 2,
+                 0, 0x08, 0x67, 0, 0, 0, 0xb7, 0x9f, 0, 0];
+        assert_eq!(highlights_in(&b).unwrap().0, vec![(0, 26376), (0, 40887)]);
+        let (n, kept, dropped) = moved_highlights(&b, 20_000, 30_000).unwrap();
+        assert_eq!((kept, dropped, n.len(), be32(&n, 0) as usize), (1, 1, 30, 30));
+        assert_eq!(highlights_in(&n).unwrap(), (vec![(0, 6376)], [1, 0, 5, 0, 1]));
+        assert!(highlights_in(b"\0\0\0\x10freecovr\0\0\0\0").is_none());
     }
 
     #[test]

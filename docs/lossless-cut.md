@@ -35,7 +35,10 @@ Written 2026-11-05, from tests on Osmo Action 6 clips (0068, 0069, their LRFs, a
 3. **An adapter per camera** puts back, the camera's own way, what it keeps for the whole clip in the part cut off,
    so the cut reads as the camera wrote it, in the player and in other tools:
    - **DJI** (a `djmd` track): the top-level protobuf fields of the clip's first `djmd`/`dbgi` sample that the new
-     first sample lacks (ClipMeta, StreamMeta) are put in front of it. Protobuf readers merge them.
+     first sample lacks (ClipMeta, StreamMeta) are put in front of it. Protobuf readers merge them. And the
+     camera's highlights (the quick switch: a top-level `free` box with `hglg`, times in ms from the clip's start)
+     are moved to the cut's time; the ones in the part cut off are dropped. Copied as they were, they'd be off by
+     the time cut off (0093: 26.376 s became 7.357 s of a cut from 19.019 s, on the same frame).
    - **GoPro, Insta360, others:** not yet. GoPro's GPMF comes in self-contained 1 s payloads and its settings are
      in `udta`, so it may need nothing; Insta360 keeps the clip's motion data in a trailer after the boxes, which
      isn't cut (an error) until it has an adapter.
@@ -45,6 +48,7 @@ Written 2026-11-05, from tests on Osmo Action 6 clips (0068, 0069, their LRFs, a
    {"version":1, "source":"DJI_..._0068_D.MP4", "first_frame":540, "frames":659, "source_frames":2852,
     "start":9.009, "end":20.003333, "source_duration":47.580867, "adapter":"DJI",
     "carried":[{"track":"djmd","fields":[1,2],"bytes":212}, {"track":"dbgi","fields":[1],"bytes":575}],
+    "highlights":{"kept":1,"dropped":1},
     "origin":"DJI_..._0068_D.MP4", "origin_start":9.009,
     "read_as":{"stabilization":"ok","log_curve":"dlogm","camera":"DJI OsmoAction6","lens":"in the file"},
     "tool":"afp-cut 0.2.0"}
@@ -54,7 +58,7 @@ Written 2026-11-05, from tests on Osmo Action 6 clips (0068, 0069, their LRFs, a
    The camera's own mdta keys stay as they were.
 5. **The check.** The cut is read back before it's kept: every sample against the original's (the replaced ones:
    what they must hold), and the cut read as the player reads the original: gyroflow-probe's verdict, the log
-   curve, the camera, the lens, and the motion data through telemetry-parser (the cut's readings must be a run of
+   curve, the camera, the lens, DJI's highlights, and the motion data through telemetry-parser (the cut's readings must be a run of
    the original's, the same values at the same moments). A cut that doesn't read the same isn't kept. A camera
    without an adapter is cut only when it passes, and the outcome says so: what else such a camera keeps isn't
    known.
