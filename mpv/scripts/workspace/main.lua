@@ -16,6 +16,11 @@
 --   Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
+-- Exports (Shift+E, the gyroflow plugin's) go to <project>/Exports/, named in the same dialog: <name>.mov, with the
+-- look in parentheses unless it's HDR ("Turtle (SDR).mov"), the link inside (kind export). A part that isn't a
+-- moment yet is saved as the moment export_<name> beside it; one that is (played, or equal to one to the frame)
+-- names the export. An export opened plays as it is; the menu offers its original.
+--
 -- Before the other plugins load the clip (on_load, early), it's published in user-data/workspace/:
 --   path            what mpv plays (its `path`): the rest is for this file only, so a plugin checks it's its own
 --   clip            the clip itself, as an absolute path: the original when a moment's file plays
@@ -27,11 +32,14 @@
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's Moments/ folder
 --   saving          a moment's name while it's being saved
+--   export          when an export plays: { name, original (nil: not found), in, out }
 -- Without this plugin, the gyroflow plugin looks next to the clip itself, which is the same place for now.
 --
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
--- moment's place in user-data/workspace/moments, from 1.
+-- moment's place in user-data/workspace/moments, from 1. open-original: an export's original, at its part. For the
+-- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
+-- link }).
 --
 -- workspace.lua is the lookup itself (plain Lua; tests/workspace_test.lua), and gyroflow-export has its twin
 -- (vs-gyroflow/src/workspace.rs) for the Finder quick action and the command line. moments.lua is the moments'
@@ -89,6 +97,15 @@ local next_id = 0
 local last_typed = nil
 -- The moments of a folder opened (Moments/): played one after another, not each looped
 local sequence = {}
+-- An export's original asked for (open-original): its part, set when it loads
+local wanted = nil
+
+-- Whether this load is mpv's first of a file opened on its own, which it then loads again from the playlist of the
+-- files beside it (autocreate-playlist, the app's setting). Options set now are lost then
+local function before_autocreate()
+    return mp.get_property("autocreate-playlist", "no") ~= "no" and (mp.get_property_number("playlist-count", 1) or 1) <= 1
+       and (mp.get_property("playlist-path") or "") == ""
+end
 
 local function publish()
     mp.set_property_native("user-data/workspace", state)
@@ -223,16 +240,20 @@ local function open_moment(path)
     local raw = fs.read_link(state.clip)
     if not raw then return end
     local l = utils.parse_json(raw)
+    if type(l) == "table" and l.v == 1 and l.kind == "export" then
+        -- It plays as it is (stabilized, in its look already); its original is a menu item
+        local original = moments.original(l, moments.project_of(state.clip, moments_lib.EXPORTS))
+        state.export = { name = moments_lib.display_name(state.clip), original = original,
+                         ["in"] = l["in"], out = l.out }
+        return
+    end
     if type(l) ~= "table" or l.v ~= 1 or l.kind ~= "moment" or type(l["in"]) ~= "number" or type(l.out) ~= "number" then
         return
     end
     -- Opened on its own, mpv first makes the playlist of the files beside it (autocreate-playlist, the app's
     -- setting), then loads it again from there: redirected then. Redirected now, the playlist would be the
     -- original's folder
-    if mp.get_property("autocreate-playlist", "no") ~= "no" and (mp.get_property_number("playlist-count", 1) or 1) <= 1
-       and (mp.get_property("playlist-path") or "") == "" then
-        return
-    end
+    if before_autocreate() then return end
     local file = state.clip
     local name = moments_lib.display_name(file)
     local project = moments.project_of(file)
@@ -285,9 +306,18 @@ mp.add_hook("on_load", 10, function()
         local info = utils.file_info(state.clip)
         if info and info.is_dir then
             open_folder(state.clip)
-        elseif info and state.clip:lower():match("%.mp4$") then
+        elseif info and (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
             open_moment(path)
         end
+    end
+    -- An export's original, at its part
+    if wanted and state.clip == wanted.file then
+        if wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted["in"])) end
+        if wanted["in"] and wanted.out then
+            mp.set_property("file-local-options/ab-loop-a", string.format("%.3f", wanted["in"]))
+            mp.set_property("file-local-options/ab-loop-b", string.format("%.3f", wanted.out))
+        end
+        if not before_autocreate() then wanted = nil end
     end
     publish()
 end)
@@ -378,8 +408,9 @@ local function make_project()
     return root
 end
 
--- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it
-local function save(name, update, typed)
+-- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
+-- nothing on screen unless it fails (the moment that comes with an export)
+local function save(name, update, typed, quiet)
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     if not (a and b and b > a) then return end
     local safe = moments_lib.safe_name(name)
@@ -415,10 +446,10 @@ local function save(name, update, typed)
     end
     next_id = next_id + 1
     local id = tostring(next_id)
-    pending[id] = { name = final, file = file, update = update, typed = typed, a = a, b = b, history = typed and not update and first }
+    pending[id] = { name = final, file = file, update = update, typed = typed, a = a, b = b, history = typed and not update and first, quiet = quiet }
     state.saving = final
     publish()
-    mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30)
+    if not quiet then mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30) end
     mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
         id = id, clip = state.clip, from = a, to = b, at = at, link = utils.format_json(l), dates = dates, output = file,
         force = update ~= nil, reply = mp.get_script_name(),
@@ -444,7 +475,7 @@ mp.register_script_message("preview-done", function(id, json)
     if p.update and state.moment and state.moment.file == p.file then
         state.moment["in"], state.moment.out = p.a, p.b
     end
-    mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3)
+    if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
     refresh()
 end)
 
@@ -562,4 +593,71 @@ mp.register_script_message("moment-rename", function(i)
         mp.osd_message("Renamed to " .. safe, 2)
         refresh()
     end)
+end)
+
+-- Shift+E (the gyroflow plugin asks): the export's name, in the dialog moments have. req: { sdr, label (" (SDR)"),
+-- look, stabilized, reply }. The answer: export-start { clip, sdr, output, link }
+mp.register_script_message("export-name", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or not req.reply then return end
+    if not state.clip or state.clip:find("://", 1, true) then return end
+    if state.moment and state.moment.missing then
+        return mp.osd_message(state.moment.name .. ": its original isn't found", 3)
+    end
+    if not state.loaded then return mp.osd_message("The clip is still loading", 2) end
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local part = a and b and b > a
+    if not part then a, b = nil, nil end
+    -- The part a moment: the one playing, or one of the clip's, to the frame
+    local frame = 0.5 / (mp.get_property_number("container-fps") or 30)
+    local same
+    if part then
+        local candidates = {}
+        if state.moment then candidates[1] = state.moment end
+        for _, m in ipairs(state.moments or {}) do candidates[#candidates + 1] = m end
+        -- A moment of the user's before one an earlier export made
+        for _, m in ipairs(candidates) do
+            if math.abs(m["in"] - a) <= frame and math.abs(m.out - b) <= frame
+               and (not same or (same.name:match("^export_") and not m.name:match("^export_"))) then same = m end
+        end
+    end
+    local label = type(req.label) == "string" and req.label or ""
+    -- An earlier export's moment: the name it was exported with
+    local suggested = same and (same.name:gsub("^export_", "")) or suggestion(a or 0)
+    local what = part and ("Export " .. clock(a) .. "–" .. clock(b)) or "Export the clip"
+    ask({ prompt = what .. label .. " as (Enter: " .. suggested .. "): ", suggestion = suggested, history = history_file(),
+          id = "workspace-export" }, function(text)
+        if text ~= "" then last_typed = text end
+        local safe = moments_lib.safe_name(text ~= "" and text or suggested)
+        if not safe then return mp.osd_message("Export: that name has nothing a file name can have", 3) end
+        local first = state.project == nil
+        local root = make_project()
+        if not root then return end
+        local output, final = moments.unique_file(ws.join(root, moments_lib.EXPORTS), safe, label .. ".mov")
+        local info = utils.file_info(state.clip)
+        local l = {
+            v = 1, kind = "export", clip = ws.relative(state.clip, root), size = info and info.size,
+            created = state.created, ["in"] = a and moments_lib.ms(a), out = b and moments_lib.ms(b), name = final,
+            look = req.look, stabilized = req.stabilized == true, roots = { root },
+        }
+        mp.commandv("script-message-to", req.reply, "export-start", utils.format_json({
+            clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
+        }))
+        if first and text ~= "" and history_file() then
+            local f = io.open(history_file(), "a")
+            if f then f:write(text, "\n"); f:close() end
+        end
+        -- Every export can be found from a moment, and played in full quality after it's deleted
+        if part and not same then save("export_" .. final, nil, nil, true) end
+    end)
+end)
+
+-- An export's original, at its part
+mp.register_script_message("open-original", function()
+    local e = state.export
+    if not e or not e.original then return mp.osd_message("The original isn't found", 2) end
+    -- Its part is set as it loads (on_load): options given to loadfile are lost when mpv loads it again from the
+    -- playlist it makes of its folder
+    wanted = { file = e.original, ["in"] = e["in"], out = e.out }
+    mp.commandv("loadfile", e.original, "replace")
 end)

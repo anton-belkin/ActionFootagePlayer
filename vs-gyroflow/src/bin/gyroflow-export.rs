@@ -16,8 +16,9 @@
 // as for the plugins (ActionFootagePlayer keeps your preset and DJI's LUT there, its own copy of the plugins being
 // read-only).
 //
-// Output: <video's folder>/stabilized/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only,
-// _color instead of _stab), 10-bit
+// Output: <project>/Exports/<name>_stab.mov (with --from/--to, <name>_stab_<from>-<to>s.mov; color only, _color
+// instead of _stab), 10-bit. The project is the one the player's workspace plugin finds (vs-gyroflow/src/workspace.rs),
+// made when there's none; --out and --output write elsewhere
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
 //                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
@@ -51,8 +52,9 @@ use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Unde
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
 
-Renders each video stabilized (and, for log, color-converted) into a stabilized/ folder next to it. A log
-video with nothing to stabilize it with is color-converted only.
+Renders each video stabilized (and, for log, color-converted) into the Exports/ folder of its project: the trip
+folder with .actionfootageplayer/ in it above the video, else a new one in its folder (above DCIM for a camera's
+own tree), as the player makes it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
@@ -80,8 +82,10 @@ video with nothing to stabilize it with is color-converted only.
                    written, in PQ
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
-  --out <folder>   write here instead of <video's folder>/stabilized
+  --out <folder>   write here instead of <project>/Exports
   --output <file>  write this file (one video only)
+  --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
+                   written in room ffmpeg leaves after the moov, so the file isn't written twice)
   --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
                    passes the one it plays with. The video's own is <name>.gyroflow or <name.ext>.gyroflow next to
                    it, as the player's workspace plugin finds it
@@ -218,9 +222,7 @@ fn main() {
     if files.is_empty() { fail(USAGE); }
     if opts.project.is_some() && files.len() > 1 { fail("--project is for one video"); }
     if opts.output.is_some() && files.len() > 1 { fail("--output is for one video"); }
-    if opts.preview.is_none() && (opts.at.is_some() || opts.link.is_some() || opts.dates.is_some()) {
-        fail("--at, --link and --dates are for --preview");
-    }
+    if opts.preview.is_none() && (opts.at.is_some() || opts.dates.is_some()) { fail("--at and --dates are for --preview"); }
     if opts.preview.is_some() && (opts.prores || opts.dv_rpu.is_some()) { fail("a preview is H.264: not with --prores or --dv-rpu"); }
     if let Some(p) = opts.project.as_ref().filter(|p| !p.is_file()) { fail(&format!("no Gyroflow project {}", p.display())); }
     if let (Some(f), Some(t)) = (opts.from, opts.to) { if t <= f { fail("--to must be after --from"); } }
@@ -603,6 +605,20 @@ fn pick_encoder(opts: &Options) -> Result<Encoder, String> {
     }
 }
 
+// The video's project (docs/moments-and-workspaces.md), where its exports go: the one it's in, else one made in its
+// folder (above DCIM for a camera's own tree), as the player's first save makes it
+fn project_dir(video: &Path) -> Result<PathBuf, String> {
+    use vs_gyroflow::workspace;
+    if let Some(root) = workspace::project_root(video) { return Ok(root); }
+    let root = workspace::new_project_root(video);
+    let state = root.join(workspace::STATE_DIR);
+    std::fs::create_dir_all(&state).map_err(|e| format!("can't make the project in {}: {e} (--out writes elsewhere)", root.display()))?;
+    #[cfg(windows)]
+    { let _ = Command::new("attrib").arg("+h").arg(&state).status(); }
+    eprintln!("  a new project: {}", root.display());
+    Ok(root)
+}
+
 // A preview's H.264 encoder: x264 first, which spends next to nothing on a frame repeated (some 40 bytes a frame,
 // VideoToolbox some KB), then the hardware ones. One keyframe: the first frame is most of the file (100-200 KB at
 // 960x540 for a camera's frame, its noise included), and a keyframe every 10 s, x264's default, made it 1 MB for 30 s
@@ -710,7 +726,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         (Some(file), _) => file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf(),
         (None, Some(dir)) => dir.clone(),
         (None, None) if preview.is_some() => video_dir.to_path_buf(),
-        (None, None) => video_dir.join("stabilized"),
+        (None, None) => project_dir(&path)?.join("Exports"),
     };
     let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     // A part of the video gets its range in the name, so it doesn't replace the whole one
@@ -926,7 +942,13 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
         enc_cmd.args(color);
     }
+    // With a link to write: the moov first with room after it (-moov_size, as for Dolby Vision), which the link
+    // then takes in place; else +faststart. Room for every frame's entries in each track (B-frames' ctts, the
+    // audio), as the Dolby Vision export reserves it
+    let moov_size = 512 * 1024 + total_frames * 64;
     if preview.is_some() {
+    } else if dv_rpus.is_none() && opts.link.is_some() {
+        enc_cmd.args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
     } else if dv_rpus.is_none() {
         enc_cmd.args(["-movflags", "+faststart", "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
     } else {
@@ -948,7 +970,6 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let (l1_tx, l1_rx) = mpsc::channel::<Option<[i32; 3]>>();
     let mut l1_tx = live_l1.then_some(l1_tx);
     if let Some(rpus) = dv_rpus {
-        let moov_size = 256 * 1024 + total_frames * 48;
         let mut mux_cmd = ffmpeg_command("ffmpeg");
         // -r, not the demuxer's -framerate: raw HEVC has no timestamps, and with -framerate they come out wrong
         mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", info.fps.0, info.fps.1), "-i", "-"]);
@@ -1124,10 +1145,11 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
         }
         Ok(read)
     })();
-    // A preview: its MP4 from the frame
-    let result = result.and_then(|read| match &preview_files {
-        Some(files) => write_preview(files, (to - from).max(1.0 / fps), &tags, &tmp_path, opts).map(|_| read),
-        None => Ok(read),
+    // A preview: its MP4 from the frame. An export: its link
+    let result = result.and_then(|read| match (&preview_files, &opts.link) {
+        (Some(files), _) => write_preview(files, (to - from).max(1.0 / fps), &tags, &tmp_path, opts).map(|_| read),
+        (None, Some(link)) => vs_gyroflow::mp4meta::write_keys(&tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, link)]).map(|_| read),
+        (None, None) => Ok(read),
     });
     let frames = match result {
         Ok(f) => f,

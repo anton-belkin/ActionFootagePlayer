@@ -429,11 +429,17 @@ local function build()
             if g.exporting then
                 add(item("Cancel export", "script-message-to gyroflow cancel-export", { shortcut = export }))
             else
-                add(item((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip", "script-binding gyroflow/export", { shortcut = export }))
+                -- With the workspace plugin, the export asks its name
+                local asks = state("workspace") and "…" or ""
+                add(item(((a and b and b > a) and ("Export part " .. clock(a) .. "–" .. clock(b)) or "Export clip") .. asks, "script-binding gyroflow/export", { shortcut = export }))
             end
         end
         local w = state("workspace")
-        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) then
+        if w and w.export then
+            add(item("Open the original" .. (w.export["in"] and (" at " .. clock(w.export["in"])) or ""), "script-message-to workspace open-original",
+                     { disabled = not w.export.original }))
+        end
+        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export then
             local moment = key["script-binding workspace/moment"]
             if w.saving then
                 add(info("Saving " .. w.saving .. "…"))

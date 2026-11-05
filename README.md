@@ -77,9 +77,9 @@ through the stabilization, a wider view of it, and off. [All keys](#keys) · [In
 
 You shot the dive in D-Log M, with EIS off because under water it doesn't hold. In the hotel, you copy the card to
 the laptop and double-click the first clip: it plays stabilized, in HDR, with the depth in the corner. You skip
-through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, and pause for
-half a minute. The fragment is in a `stabilized/` folder next to the clip, ready to AirDrop to the group the same
-evening, in HDR. The originals are untouched for proper editing later.
+through the hour to the 15 seconds with the turtle, press `l` at the start, `l` at the end, `Shift+E`, type "Turtle",
+and pause for half a minute. The fragment is `Exports/Turtle.mov` in the trip's folder, ready to AirDrop to the group
+the same evening, in HDR, and the turtle is a [moment](#moments) too, to play again in full quality later. The originals are untouched for proper editing later.
 
 ## Why log, and why HDR
 
@@ -489,7 +489,18 @@ plays without stabilization: after `Ctrl+g` turned it off, or with nothing to st
 of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not and the lens under water or not as
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
-Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part. Playback goes on meanwhile, with the
+Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part.
+
+It asks the export's name first, as a moment does (Enter alone takes the suggestion), and the file goes to the
+trip's **Exports** folder: `Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
+`Turtle (Dolby Vision).mov`), and ` 2` when the name is taken. A part that's a moment (played from its file or the
+menu, or the same part to the frame) is named after it; any other part is also saved as the moment
+`export_Turtle`, so it can be found and played in full quality after the export is deleted to make room. Inside the
+export is its link to the original: opened in the player, it plays as it is, and the menu's **Open the original**
+goes to its part of the clip. Without the workspace plugin (your own mpv with only some of the plugins) it doesn't
+ask, and the file is named as below.
+
+Playback goes on meanwhile, with the
 progress in the top right corner (several clips can export at once, a line each); a notification says where
 the file went. `Shift+E` twice on a clip being exported cancels it: the export stops and the unfinished file is
 removed. Quitting mpv cancels the exports too.
@@ -508,7 +519,16 @@ The same from a terminal, for one clip or many:
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
-The result goes to a `stabilized/` folder next to the clip, as `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`):
+The result goes to the `Exports/` folder of the clip's project (the trip folder with `.actionfootageplayer/` in it
+above the clip; with none, one is made in the clip's folder, above `DCIM` for a camera's own folders), as
+`<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
+names the file.
+
+**Up to 0.7, exports went to a `stabilized/` folder next to the clip.** Those folders are left as they are, and
+nothing reads them back; a script of yours that expects new exports there passes `--out stabilized` (or the
+folder's full path).
+
+What it renders:
 
 - **Log** (D-Log M, D-Log, GP-Log, GP-Log2, 10-bit I-Log: the curve the camera's metadata says, as the dlogm plugin
   reads it, or `--curve dlogm|dlog|gplog|gplog2|ilog`): HEVC Main10, Rec.2100 HLG (the same LUTs as playback,

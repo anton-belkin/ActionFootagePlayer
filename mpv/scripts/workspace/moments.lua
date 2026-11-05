@@ -17,6 +17,8 @@ local M = {}
 M.FOLDER = "Moments"
 -- The double extension says what the file is, and it still opens as an MP4
 M.EXT = ".afplink.mp4"
+-- Exports, videos of their own: Exports/<name>[ (SDR)].mov
+M.EXPORTS = "Exports"
 
 -- Characters a file name can't have on Windows or macOS, and Windows' reserved names
 local RESERVED = { CON = true, PRN = true, AUX = true, NUL = true }
@@ -164,11 +166,12 @@ function M.new(ws, fs)
         return a == b
     end
 
-    -- dir/<name>.afplink.mp4, or "<name> 2" and on when it's taken: the file and its name
-    function self.unique_file(dir, name)
+    -- dir/<name>.afplink.mp4 (or <name><suffix>), or "<name> 2" and on when it's taken: the file and its name
+    function self.unique_file(dir, name, suffix)
+        suffix = suffix or M.EXT
         local file, n, try = nil, 1, name
         while true do
-            file = ws.join(dir, try .. M.EXT)
+            file = ws.join(dir, try .. suffix)
             if not fs.is_file(file) and not fs.is_dir(file) then return file, try end
             n = n + 1
             try = name .. " " .. n
@@ -236,13 +239,14 @@ function M.new(ws, fs)
     end
 
     -- The project a moment's file is in: the folder above the Moments/ it's in (subfolders too), with the state
-    -- folder in it. nil: none (a moment copied out, to the Desktop say)
-    function self.project_of(file)
+    -- folder in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
+    function self.project_of(file, folder)
+        folder = (folder or M.FOLDER):lower()
         local dir = ws.parent(file)
         while dir do
             local up = ws.parent(dir)
             if not up then return nil end
-            if ws.name(dir):lower() == M.FOLDER:lower() and fs.is_dir(ws.join(up, STATE_DIR)) then return up end
+            if ws.name(dir):lower() == folder and fs.is_dir(ws.join(up, STATE_DIR)) then return up end
             dir = up
         end
         return nil

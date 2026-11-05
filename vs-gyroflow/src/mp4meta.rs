@@ -181,9 +181,10 @@ fn shift_chunks(b: &mut [u8], from: usize, to: usize, after: u64, delta: i64) ->
     Ok(())
 }
 
-/// Writes these keys into the file's `moov/meta`, in place of the mdta keys it had there. The file is written anew
-/// next to it and renamed over it: the moov grows, and the media after it (with `+faststart`) moves, so the tracks'
-/// chunk offsets are moved with it
+/// Writes these keys into the file's `moov/meta`, in place of the mdta keys it had there. With room after the moov
+/// (a `free` box, as ffmpeg's `-moov_size` leaves), the moov grows into it in place, and nothing else moves: what a
+/// large export does. Else the file is written anew next to it and renamed over it: the moov grows, and the media
+/// after it (with `+faststart`) moves, so the tracks' chunk offsets are moved with it
 pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
     let err = |e: std::io::Error| format!("{}: {e}", path.display());
     let mut f = File::open(path).map_err(err)?;
@@ -205,17 +206,42 @@ pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
     let body_len: usize = kept.iter().map(|k| k.size).sum::<usize>() + meta.len();
     let new_size = 8 + body_len;
     let delta = new_size as i64 - moov_size as i64;
-    // What's after the moov moves by delta
     let moov_end = moov_at + moov_size;
-    let mut new_moov = Vec::with_capacity(new_size);
-    new_moov.extend_from_slice(&u32::try_from(new_size).map_err(|_| "a moov over 4 GB")?.to_be_bytes());
-    new_moov.extend_from_slice(b"moov");
-    for kid in &kept {
-        let mut b = moov[kid.at..kid.at + kid.size].to_vec();
-        if &kid.kind == b"trak" { shift_chunks(&mut b, kid.header, kid.size, moov_end, delta)?; }
-        new_moov.extend(b);
+    // `shift`: what the media after the moov moves by
+    let build = |shift: i64| -> Result<Vec<u8>, String> {
+        let mut new_moov = Vec::with_capacity(new_size);
+        new_moov.extend_from_slice(&u32::try_from(new_size).map_err(|_| "a moov over 4 GB")?.to_be_bytes());
+        new_moov.extend_from_slice(b"moov");
+        for kid in &kept {
+            let mut b = moov[kid.at..kid.at + kid.size].to_vec();
+            if &kid.kind == b"trak" && shift != 0 { shift_chunks(&mut b, kid.header, kid.size, moov_end, shift)?; }
+            new_moov.extend(b);
+        }
+        new_moov.extend_from_slice(&meta);
+        Ok(new_moov)
+    };
+
+    // In place: the free box right after the moov takes the difference, and keeps 8 bytes at least to stay a box
+    // (or is taken whole)
+    if let Some(&(free_at, free_size, _)) = top.iter().find(|b| b.0 == moov_end && matches!(&b.2, b"free" | b"skip")) {
+        let room = moov_size + free_size;
+        let left = room as i64 - new_size as i64;
+        if left == 0 || left >= 8 {
+            let new_moov = build(0)?;
+            let mut out = File::options().write(true).open(path).map_err(err)?;
+            out.seek(SeekFrom::Start(moov_at)).map_err(err)?;
+            out.write_all(&new_moov).map_err(err)?;
+            if left >= 8 {
+                let mut free = Vec::with_capacity(8);
+                free.extend_from_slice(&(u32::try_from(left).map_err(|_| "a free box over 4 GB")?).to_be_bytes());
+                free.extend_from_slice(b"free");
+                out.write_all(&free).map_err(err)?;
+            }
+            debug_assert!(free_at == moov_end);
+            return out.flush().map_err(err);
+        }
     }
-    new_moov.extend(meta);
+    let new_moov = build(delta)?;
 
     let tmp = PathBuf::from(format!("{}.keys.tmp", path.display()));
     let result = (|| -> Result<(), String> {
@@ -337,6 +363,43 @@ mod tests {
             assert_eq!(chunks(&std::fs::read(&p).unwrap()).len(), 2);
             let _ = std::fs::remove_file(&p);
         }
+    }
+
+    #[test]
+    fn in_place_with_room() {
+        // ftyp, moov, free (ffmpeg's -moov_size), mdat: the moov grows into the free box, the media stays put
+        let (bytes, payload) = file(true, false, &[]);
+        let top = boxes(&bytes, 0, bytes.len()).unwrap();
+        let moov = top.iter().find(|b| &b.kind == b"moov").unwrap();
+        let mut with_room = bytes[..moov.at + moov.size].to_vec();
+        let room = 4096;
+        with_room.extend(make_box(b"free", &vec![0u8; room - 8]));
+        // The chunk offsets now point past the free box
+        let mdat_at = with_room.len() as u64;
+        let mut fixed = with_room.clone();
+        let m = boxes(&fixed, 0, fixed.len()).unwrap().into_iter().find(|b| &b.kind == b"moov").unwrap();
+        shift_chunks(&mut fixed, m.at + 8, m.at + m.size, 0, room as i64).unwrap();
+        fixed.extend(make_box(b"mdat", &payload));
+        let p = temp("inplace", &fixed);
+        let len = fixed.len();
+        write_keys(&p, &[(LINK_KEY, "{\"v\":1}")]).unwrap();
+        let out = std::fs::read(&p).unwrap();
+        assert_eq!(out.len(), len, "the file keeps its length");
+        assert_eq!(&out[mdat_at as usize..], &fixed[mdat_at as usize..], "the media isn't moved");
+        assert_eq!(chunks(&out), vec![payload[..32].to_vec(), payload[32..].to_vec()]);
+        assert_eq!(read_key(&p, LINK_KEY).unwrap().as_deref(), Some("{\"v\":1}"));
+        let _ = std::fs::remove_file(&p);
+        // Too little room: written anew, the media moved
+        let mut tight = with_room[..moov.at + moov.size].to_vec();
+        tight.extend(make_box(b"free", &[0u8; 4]));
+        let mut fixed = tight.clone();
+        let m = boxes(&fixed, 0, fixed.len()).unwrap().into_iter().find(|b| &b.kind == b"moov").unwrap();
+        shift_chunks(&mut fixed, m.at + 8, m.at + m.size, 0, 12).unwrap();
+        fixed.extend(make_box(b"mdat", &payload));
+        let p = temp("tight", &fixed);
+        write_keys(&p, &[(LINK_KEY, "{}")]).unwrap();
+        assert_eq!(chunks(&std::fs::read(&p).unwrap()), vec![payload[..32].to_vec(), payload[32..].to_vec()]);
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]

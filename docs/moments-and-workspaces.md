@@ -597,8 +597,27 @@ first".
    stabilized, 20–30 s looped, titled; the update (out 30 → 31) and a Finder tag kept through it; rename by typing
    in the console; remove; the folder in time order. Not checked: typing other alphabets and input methods, the
    OSD and the console as they look, Windows and Linux.
-5. **Exports to `Exports/`**: the dialog, the names, the link, the moment that comes with it, gyroflow-export's
-   new default, the README's note on `stabilized/`.
+5. **Exports to `Exports/`** (**done**):
+   - `Shift+E` asks the workspace plugin for the name (`export-name`, answered with `export-start`), in the
+     moments' dialog. The file is `Exports/<name>[ (SDR| Dolby Vision)].mov`, ` 2` when taken.
+   - The part when it's a moment names it. A moment of the user's comes before one an earlier export made, whose
+     `export_` is left out of the name. Otherwise the moment `export_<name>` is saved with it, quietly.
+   - The link (`kind: "export"`, `look`: `hdr`, `maker`, `nbcu`, `dv` or `recorded`, `stabilized`) goes in with
+     `--link`. gyroflow-export then reserves room after the `moov` (`-moov_size`, as for Dolby Vision, in place of
+     `+faststart`), and `mp4meta.rs` writes the key into it in place: a 4K export isn't written twice.
+   - gyroflow-export's default is `<project>/Exports/`, and it makes the project when there's none, as the
+     player's first save does.
+   - An export opened plays as it is. The menu's *Open the original* sets its part as the original loads: options
+     given to `loadfile` are lost when mpv loads it again from the playlist of its folder.
+   - The README says where old `stabilized/` folders stand.
+
+   Checked headless on clip 0093:
+   - a part named by date and time (Dolby Vision, the look playing) with its `export_` moment;
+   - a moment's part named after it, in Dolby Vision and SDR, with no second moment;
+   - an earlier export's part named without `export_`;
+   - the links' look and range;
+   - an export opened, then its original at 30–32 s;
+   - gyroflow-export alone: the project made, the key written in place (the file's length the same).
 6. **Marks**: the marks file on the first change, `M`, the camera flag, the highlights plugin reading the file
    when there is one.
 7. **Clips**: `--preview flipbook` (keyframes, LRF/LRV), the background queue, `clips-made.txt`, the menu, `X`.

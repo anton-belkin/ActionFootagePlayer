@@ -1,6 +1,8 @@
 -- Shift+E: export the current video the way it plays, stabilized and with the log curve's LUT (the dlogm plugin's),
--- with gyroflow-export (one pass, into a stabilized/ folder next to the video). With an A-B loop set (the `l`
--- key), only that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
+-- with gyroflow-export (one pass). With the workspace plugin, it asks the name and the export goes to the project's
+-- Exports/ with its link inside (and the part, when it isn't a moment yet, is saved as one: workspace/main.lua);
+-- without it, gyroflow-export's own default (the project's Exports/). With an A-B loop set (the `l` key), only
+-- that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
 -- as a notification. Shift+E again on a video being exported, twice, cancels it.
 --
 -- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
@@ -221,8 +223,8 @@ end
 
 local look_args, run_export
 
--- `sdr`: in SDR whatever plays
-local function start(path, sdr)
+-- `sdr`: in SDR whatever plays. `named`: the workspace plugin's answer, { output, link }
+local function start(path, sdr, named)
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then
         mp.osd_message("Export: gyroflow-export isn't installed", 2)
@@ -241,6 +243,10 @@ local function start(path, sdr)
         table.insert(args, "--from"); table.insert(args, string.format("%.3f", a))
         table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
         range = " " .. clock(a) .. "-" .. clock(b)
+    end
+    if named and named.output then
+        table.insert(args, "--output"); table.insert(args, named.output)
+        if named.link then table.insert(args, "--link"); table.insert(args, named.link) end
     end
     table.insert(args, path)
     return run_export(path, args, range, progress, control)
@@ -316,11 +322,36 @@ function run_export(path, args, range, progress, control)
     publish()
 end
 
+-- With the workspace plugin: it asks the name, and answers export-start. The look and whether it's stabilized go
+-- into the name and the link: " (SDR)", " (Dolby Vision)", nothing for HDR
+local function begin(path, sdr)
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, sdr) end
+    local args = {}
+    look_args(args, sdr)
+    local has = {}
+    for i, v in ipairs(args) do has[v] = true; if v == "--curve" and args[i + 1] == "none" then has.none = true end end
+    local label = has["--dv-rpu"] and " (Dolby Vision)" or (has["--sdr"] or has["--nbcu"]) and " (SDR)" or ""
+    local look = has["--dv-rpu"] and "dv" or has["--sdr"] and "maker" or has["--nbcu"] and "nbcu" or has.none and "recorded" or "hdr"
+    local g = mp.get_property_native("user-data/gyroflow") or {}
+    mp.commandv("script-message-to", "workspace", "export-name", utils.format_json({
+        sdr = sdr, label = label, look = look, stabilized = g.available == true and g.view ~= "off", reply = mp.get_script_name(),
+    }))
+end
+
+mp.register_script_message("export-start", function(json)
+    local r = utils.parse_json(json or "")
+    local path = local_path()
+    -- Still the clip it was asked for
+    if type(r) ~= "table" or not path or r.clip ~= mp.get_property_native("user-data/workspace/clip") or running[path] then return end
+    start(path, r.sdr == true, r)
+end)
+
 mp.add_key_binding("E", "export", function()
     local path = local_path()
     if not path then return end
     local job = running[path]
-    if not job then return start(path, false) end
+    if not job then return begin(path, false) end
     if job.cancelling then return end
     if confirm and confirm.path == path and mp.get_time() < confirm.time + CONFIRM_SECONDS then
         confirm = nil
@@ -338,7 +369,7 @@ mp.register_script_message("export", function(how)
         mp.osd_message("Exporting " .. running[path].name .. running[path].range .. " already", 2)
         return
     end
-    start(path, how == "sdr")
+    begin(path, how == "sdr")
 end)
 
 mp.register_script_message("cancel-export", function()
