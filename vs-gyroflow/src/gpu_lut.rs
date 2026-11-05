@@ -229,7 +229,7 @@ pub struct GpuLutWorker {
     bind_group: wgpu::BindGroup,
 }
 
-fn read_cube(path: &std::path::Path) -> Result<(u32, Vec<f32>), String> {
+pub(crate) fn read_cube(path: &std::path::Path) -> Result<(u32, Vec<f32>), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut size = 0u32;
     let mut data = Vec::new();
@@ -279,7 +279,7 @@ fn file_name(p: &std::path::Path) -> String {
 }
 
 /// A 3D LUT (red fastest) at `rgb` (0..1), by tetrahedral interpolation
-fn tetrahedral(n: usize, lut: &[f32], rgb: [f32; 3]) -> [f32; 3] {
+pub(crate) fn tetrahedral(n: usize, lut: &[f32], rgb: [f32; 3]) -> [f32; 3] {
     let p = rgb.map(|v| v.clamp(0.0, 1.0) * (n - 1) as f32);
     let i = p.map(|x| (x as usize).min(n - 2));
     let f = [p[0] - i[0] as f32, p[1] - i[1] as f32, p[2] - i[2] as f32];

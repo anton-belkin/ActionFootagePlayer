@@ -38,6 +38,7 @@ nalgebra = "0.34"
 # dovi_tool 2.3.4 has, whose output tools/make_dv_rpu.sh compares with. Only afp-rpu uses it, the others don't link it
 dolby_vision = { version = "=3.4.0", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
+jpeg-encoder = "0.7"
 
 [profile.release]
 debug = 1
