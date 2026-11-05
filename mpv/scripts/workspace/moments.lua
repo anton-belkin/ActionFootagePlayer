@@ -26,8 +26,12 @@ M.FOOTAGE = { mp4 = true, mov = true }
 local OWN_FOLDERS = { moments = true, clips = true, exports = true, stabilized = true }
 
 -- A clip preview's path in Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
--- a camera's own folders (DCIM and the one in it)
-function M.clip_preview_relative(relative)
+-- a camera's own folders (DCIM and the one in it). `flat`: all in Clips/ itself ("A.afplink.mp4")
+function M.clip_preview_relative(relative, flat)
+    if flat then
+        local name = relative:match("([^/]+)$") or relative
+        return (name:gsub("%.[^.]*$", "")) .. M.EXT
+    end
     local parts = {}
     for p in relative:gmatch("[^/]+") do parts[#parts + 1] = p end
     local out, i = {}, 1
@@ -211,11 +215,13 @@ function M.new(ws, fs)
         end
     end
 
-    -- Every .mp4 under <project>/Moments/, subfolders included, with its link. cache[file] = { size, mtime, raw }
-    -- keeps what was read of a file, read again only when its size or time changes. dirs: each folder's
-    -- modification time, which a file added, removed or renamed in it changes
-    function self.scan(project, cache)
-        local root = ws.join(project, M.FOLDER)
+    -- Every .mp4 under <project>/Moments/ (or `folder`), subfolders included, with its link (of `kind`: moment, or
+    -- clip for Clips/). cache[file] = { size, mtime, raw } keeps what was read of a file, read again only when its
+    -- size or time changes. dirs: each folder's modification time, which a file added, removed or renamed in it
+    -- changes. A link file renamed or moved is found all the same: by what's inside it
+    function self.scan(project, cache, folder, kind)
+        kind = kind or "moment"
+        local root = ws.join(project, folder or M.FOLDER)
         local list, dirs = {}, {}
         local function walk(dir, depth)
             local info = fs.info(dir)
@@ -235,7 +241,7 @@ function M.new(ws, fs)
                             if cache then cache[file] = { size = fi.size, mtime = fi.mtime, raw = raw } end
                         end
                         local link = raw and fs.parse_json(raw)
-                        if type(link) == "table" and link.v == 1 and link.kind == "moment" then
+                        if type(link) == "table" and link.v == 1 and link.kind == kind then
                             list[#list + 1] = { file = file, name = M.display_name(file), link = link, raw = raw }
                         end
                     end

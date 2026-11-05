@@ -678,9 +678,12 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
 - **It's a link, not a copy.** The file is one frame of the moment, in color and stabilized, held for its length,
   some 150-350 KB. Finder shows that frame as its icon, and the double extension says it's a link (it still opens
   as an MP4 anywhere). Inside it is where its part of the original clip is.
-- **Opening it in the player plays the original**, in full quality, from the moment's start, looping its part,
-  with the original's stabilization, look and telemetry. The moments beside it are the next and previous files.
-  Opening the **Moments** folder plays all of them one after another, in the order they happened.
+- **Opening it in the player plays the original**, in full quality, its part once, with the original's
+  stabilization, look and telemetry; then the next moment in the folder, and at the last one it stops. Opening the
+  **Moments** folder plays all of them one after another, in the order they happened.
+- **Its whole clip**: *Open the whole clip* in the panel (or a moment's `⋯`: *In its clip*) opens the clip at the
+  moment's start, its part marked but not looped, to see what came before and after. Moving its start or end
+  there and `k` updates that moment.
 - **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
   moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
@@ -689,8 +692,8 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
-- **Changing one**: play it, move its start or end with `l`, press `k`, and Enter updates it; a new name saves a new
-  moment instead. Its Finder tags stay.
+- **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
+  updates it; a new name saves a new moment instead. Its Finder tags stay.
 - Sort a Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 
@@ -710,6 +713,14 @@ file for each clip of the trip in a **Clips** folder, beside the footage's own f
 - **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
   clip previews* doesn't bring it back (`.actionfootageplayer/clips-made.txt` lists what was made). `X` again, or
   *Make again for removed clips*, does.
+- **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
+  into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
+  lose them: their moments and previews point at their names.)
+- **Ignore subfolders** (next to *Make clip previews*): new previews all go in Clips itself, not in the clips'
+  folders, for a camera's folders by date that mean nothing to the trip. Two clips with the same name get their
+  folder's name in parentheses.
+- A clip under a second long has a single keyframe, at its start: its preview is made from the frames as they are.
+  If some can't be made, the panel says how many, and *why* opens the list.
 
 ### Notes for an AI agent
 

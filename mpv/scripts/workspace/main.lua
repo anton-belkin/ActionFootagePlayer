@@ -33,6 +33,7 @@
 --   path            what mpv plays (its `path`): the rest is for this file only, so a plugin checks it's its own
 --   clip            the clip itself, as an absolute path: the original when a moment's file plays
 --   moment          when a moment's file plays: { file, name, in, out } (missing = true: no original found)
+--   editing         a moment opened in its whole clip (open-original): { file, name, in, out }; k updates it
 --   redirected      yes when the file playing is a link (a moment, a clip preview) and mpv plays `clip` instead
 --   clip_preview    when a clip preview plays: { file }
 --   clips           while clip previews are made: { done, total }
@@ -112,8 +113,6 @@ local pending = {}
 local next_id = 0
 -- The name last typed this session
 local last_typed = nil
--- The moments of a folder opened (Moments/): played one after another, not each looped
-local sequence = {}
 -- An export's original asked for (open-original): its part, set when it loads
 local wanted = nil
 
@@ -307,13 +306,14 @@ local function open_moment(path)
     end
     mp.set_property("stream-open-filename", original)
     local a, b = l["in"], l.out
+    -- Its part, once: from its in to its out, then the next moment in the playlist (the folder's), or paused at its
+    -- out when it's the last. Its part is the A-B points too, not looped, for moving its ends (k updates it)
     mp.set_property("file-local-options/start", string.format("%.3f", a))
-    if not sequence[file] then
-        mp.set_property("file-local-options/ab-loop-a", string.format("%.3f", a))
-        mp.set_property("file-local-options/ab-loop-b", string.format("%.3f", b))
-    else
-        mp.set_property("file-local-options/end", string.format("%.3f", b))
-    end
+    mp.set_property("file-local-options/end", string.format("%.3f", b))
+    mp.set_property("file-local-options/keep-open", "yes")
+    mp.set_property("file-local-options/ab-loop-count", "0")
+    mp.set_property("file-local-options/ab-loop-a", string.format("%.3f", a))
+    mp.set_property("file-local-options/ab-loop-b", string.format("%.3f", b))
     mp.set_property("file-local-options/force-media-title", name)
     state = describe(original)
     state.path = path
@@ -329,12 +329,8 @@ local function open_folder(dir)
     save_cache()
     local prefix = dir:sub(-1):match("[/\\]") and dir or (dir .. (windows and "\\" or "/"))
     local lines = { "#EXTM3U" }
-    sequence = {}
     for _, m in ipairs(moments.by_time(all)) do
-        if m.file:sub(1, #prefix) == prefix then
-            lines[#lines + 1] = m.file
-            sequence[m.file] = true
-        end
+        if m.file:sub(1, #prefix) == prefix then lines[#lines + 1] = m.file end
     end
     if #lines == 1 then return end
     mp.set_property("stream-open-filename", "memory://" .. table.concat(lines, "\n") .. "\n")
@@ -356,9 +352,13 @@ mp.add_hook("on_load", 10, function()
     if wanted and state.clip == wanted.file then
         if wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted["in"])) end
         if wanted["in"] and wanted.out then
+            -- The part marked, not looped: the whole clip plays on, before and after it
+            mp.set_property("file-local-options/ab-loop-count", "0")
             mp.set_property("file-local-options/ab-loop-a", string.format("%.3f", wanted["in"]))
             mp.set_property("file-local-options/ab-loop-b", string.format("%.3f", wanted.out))
         end
+        -- A moment opened in its clip: k updates it
+        if wanted.moment then state.editing = wanted.moment end
         if not before_autocreate() then wanted = nil end
     end
     publish()
@@ -507,8 +507,9 @@ mp.register_script_message("preview-done", function(id, json)
         local f = io.open(history_file(), "a")
         if f then f:write(p.typed, "\n"); f:close() end
     end
-    if p.update and state.moment and state.moment.file == p.file then
-        state.moment["in"], state.moment.out = p.a, p.b
+    local edited = state.moment or state.editing
+    if p.update and edited and edited.file == p.file then
+        edited["in"], edited.out = p.a, p.b
     end
     if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
     refresh()
@@ -533,7 +534,7 @@ local function save_key(given)
     end
     -- Asked before the name: there's nowhere to save it yet
     if not need_project("Saving a moment") then return end
-    local m = state.moment
+    local m = state.moment or state.editing
     if given and given ~= "" then return save(given, nil, given) end
     if m then
         if math.abs(a - m["in"]) < 0.001 and math.abs(b - m.out) < 0.001 then
@@ -591,6 +592,14 @@ end
 mp.register_script_message("moment-play", function(i)
     local m = moment_at(i)
     if m then mp.commandv("loadfile", m.file, "replace") end
+end)
+
+-- A moment of the clip in the whole clip, at its part, to edit it (k updates it)
+mp.register_script_message("moment-edit", function(i)
+    local m = moment_at(i)
+    if not m or not state.clip then return end
+    wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out } }
+    mp.commandv("loadfile", state.clip, "replace")
 end)
 
 mp.register_script_message("moment-reveal", function(i)
@@ -652,6 +661,7 @@ mp.register_script_message("export-name", function(json)
     if part then
         local candidates = {}
         if state.moment then candidates[1] = state.moment end
+        if state.editing then candidates[#candidates + 1] = state.editing end
         for _, m in ipairs(state.moments or {}) do candidates[#candidates + 1] = m end
         -- A moment of the user's before one an earlier export made
         for _, m in ipairs(candidates) do
@@ -691,13 +701,22 @@ mp.register_script_message("export-name", function(json)
 end)
 
 -- An export's original, at its part
+-- An export's or a moment's whole clip, at its part (marked, not looped). A moment's is then the moment being edited:
+-- k updates it
 mp.register_script_message("open-original", function()
     local e = state.export
-    if not e or not e.original then return mp.osd_message("The original isn't found", 2) end
-    -- Its part is set as it loads (on_load): options given to loadfile are lost when mpv loads it again from the
-    -- playlist it makes of its folder
-    wanted = { file = e.original, ["in"] = e["in"], out = e.out }
-    mp.commandv("loadfile", e.original, "replace")
+    if e then
+        if not e.original then return mp.osd_message("The original isn't found", 2) end
+        -- Its part is set as it loads (on_load): options given to loadfile are lost when mpv loads it again from the
+        -- playlist it makes of its folder
+        wanted = { file = e.original, ["in"] = e["in"], out = e.out }
+        return mp.commandv("loadfile", e.original, "replace")
+    end
+    local m = state.moment
+    if m and not m.missing and state.clip then
+        wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out } }
+        return mp.commandv("loadfile", state.clip, "replace")
+    end
 end)
 
 -- Clip previews (Clips/): one at a time, in the background, from the menu or X
@@ -749,8 +768,64 @@ end
 
 local function native(rel) return windows and rel:gsub("/", "\\") or rel end
 
-local function preview_of(root, relative)
-    return ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(relative)))
+-- The project's settings, .actionfootageplayer/settings.json: clips_flat (clip previews all in Clips/ itself)
+local function settings()
+    local f = state_file("settings.json") and io.open(state_file("settings.json"), "r")
+    if not f then return {} end
+    local t = utils.parse_json(f:read("*a") or "")
+    f:close()
+    return type(t) == "table" and t or {}
+end
+
+local function save_settings(t)
+    local file = state_file("settings.json")
+    local f = file and io.open(file .. ".tmp", "w")
+    if not f then return end
+    f:write(utils.format_json(t) or "{}", "\n")
+    f:close()
+    os.remove(file)
+    os.rename(file .. ".tmp", file)
+end
+
+-- The clip previews there are, found by the link inside each: renamed, or moved into folders of one's own within
+-- Clips/, they're still the clip's. { [the clip's path in the project] = { file, size } }, read again a minute on
+local previews_cache = { time = -1e9, index = {} }
+local function previews(force)
+    local project = state.project
+    if not project then return {} end
+    if not force and previews_cache.project == project and mp.get_time() - previews_cache.time < 60 then return previews_cache.index end
+    local index = {}
+    for _, p in ipairs(moments.scan(project, tracked_cache, moments_lib.CLIPS, "clip").list) do
+        if type(p.link.clip) == "string" then index[p.link.clip] = { file = p.file, size = p.link.size } end
+    end
+    save_cache()
+    previews_cache = { project = project, time = mp.get_time(), index = index }
+    return index
+end
+
+-- A clip's preview file, nil for none
+local function preview_for(relative, size)
+    local p = relative and previews()[relative]
+    if p and (p.size == nil or size == nil or p.size == size) and fs.is_file(p.file) then return p.file end
+    return nil
+end
+
+-- Where a new preview goes: at the clip's path in Clips/ (flat: in Clips/ itself). A name another clip's preview has
+-- gets the clip's folder in parentheses ("GX010123 (100GOPRO)"), then a number
+local function new_preview_path(root, c, flat)
+    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(c.relative, flat)))
+    if not fs.is_file(file) then return file end
+    local raw = fs.read_link(file)
+    local l = raw and utils.parse_json(raw)
+    if type(l) == "table" and l.clip == c.relative then return file end
+    local dir, stem = ws.parent(file), moments_lib.display_name(file)
+    local folder = c.relative:match("([^/]+)/[^/]+$")
+    if folder then
+        local alt = ws.join(dir, stem .. " (" .. folder .. ")" .. moments_lib.EXT)
+        if not fs.is_file(alt) then return alt end
+        stem = stem .. " (" .. folder .. ")"
+    end
+    return (moments.unique_file(dir, stem))
 end
 
 local function draw_progress()
@@ -771,13 +846,25 @@ local function next_clip()
         state.clips = nil
         publish()
         draw_progress()
+        -- Why the ones that failed did, in a file the panel opens
+        local failed = ws.join(ws.join(job.project, workspace.STATE_DIR), "clips-failed.txt")
+        if #job.failures > 0 then
+            local f = io.open(failed, "w")
+            if f then
+                for _, x in ipairs(job.failures) do f:write(x[1], "\t", x[2], "\n") end
+                f:close()
+            end
+        elseif not job.stopping then
+            os.remove(failed)
+        end
         recount()
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
-        mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " failed") or ""), 4)
+        mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " couldn't be made: "
+            .. job.failures[1][2]) or ""), job.failed > 0 and 6 or 4)
         return
     end
     local exporter = mp.get_property_native("user-data/gyroflow/exporter")
-    local out = preview_of(job.project, c.relative)
+    local out = new_preview_path(job.project, c, job.flat)
     local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
     -- At background priority while a video plays
     if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
@@ -799,7 +886,11 @@ local function next_clip()
             if f then f:write(moments_lib.made_line(c.relative, c.size), "\n"); f:close() end
         elseif not job.stopping then
             job.failed = job.failed + 1
-            mp.msg.warn("clip preview of " .. c.relative .. ": " .. tostring(r and r.stderr or r and r.error_string))
+            local err = r and r.stderr or ""
+            local last
+            for line in err:gmatch("[^\r\n]+") do if line:match("%S") then last = line:gsub("^%s+", "") end end
+            table.insert(job.failures, { c.relative, last or (r and r.error_string) or "gyroflow-export failed" })
+            mp.msg.warn("clip preview of " .. c.relative .. ": " .. err)
         end
         job.done = job.done + 1
         state.clips = { done = job.done, total = job.total }
@@ -813,7 +904,8 @@ local function start_clips(root, queue, what)
     if not mp.get_property_native("user-data/gyroflow/exporter") then
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
-    clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0 }
+    clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
+                  flat = settings().clips_flat == true }
     state.clips = { done = 0, total = #queue }
     publish()
     draw_progress()
@@ -833,7 +925,7 @@ local function make_clips(again)
         local info = utils.file_info(c.file)
         c.size = info and info.size
         local listed = made[moments_lib.made_line(c.relative, c.size)]
-        if (again and listed and not fs.is_file(preview_of(root, c.relative))) or (not again and not listed) then
+        if (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
             queue[#queue + 1] = c
         end
     end
@@ -859,7 +951,8 @@ mp.add_key_binding("X", "not-interesting", function()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return end
     if not need_project("Marking a clip not interesting") then return end
     do
-        local preview = preview_of(state.project, state.relative)
+        local info = utils.file_info(state.clip)
+        local preview = preview_for(state.relative, info and info.size)
         if fs.is_file(preview) then
             return trash(preview, function(ok)
                 mp.osd_message(ok and "Not interesting: its preview is in the Trash (X again: made again)" or "Couldn't move the preview to the Trash", 3)
@@ -892,8 +985,8 @@ extras = function(force)
         local total, previews, new = 0, 0, 0
         for _, c in ipairs(moments.footage(project)) do
             total = total + 1
-            if fs.is_file(preview_of(project, c.relative)) then previews = previews + 1 end
             local info = utils.file_info(c.file)
+            if preview_for(c.relative, info and info.size) then previews = previews + 1 end
             if not made[moments_lib.made_line(c.relative, info and info.size)] then new = new + 1 end
         end
         cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
@@ -901,13 +994,23 @@ extras = function(force)
     end
     state.clips_stats = cached.stats
     local info = utils.file_info(state.clip)
-    if state.relative and fs.is_file(preview_of(project, state.relative)) then state.clip_preview = "made"
+    state.clips_flat = settings().clips_flat == true
+    local failed = io.open(ws.join(ws.join(project, workspace.STATE_DIR), "clips-failed.txt"), "r")
+    state.clips_failed = nil
+    if failed then
+        local n = 0
+        for _ in failed:lines() do n = n + 1 end
+        failed:close()
+        state.clips_failed = n > 0 and n or nil
+    end
+    if state.relative and preview_for(state.relative, info and info.size) then state.clip_preview = "made"
     elseif state.relative and made[moments_lib.made_line(state.relative, info and info.size)] then state.clip_preview = "removed"
     else state.clip_preview = "none" end
 end
 
 -- Counted again after clip previews are made or removed
 recount = function()
+    previews(true)
     extras(true)
     publish()
 end
@@ -934,4 +1037,23 @@ mp.register_script_message("init-project", function(dir)
     state.project_choices, state.project_new = nil, nil
     mp.osd_message("Project initialized: " .. ws.name(dir), 3)
     refresh()
+end)
+
+-- Clip previews all in Clips/ itself, or in the footage's folders (a project's setting)
+mp.register_script_message("clips-flat", function()
+    if not state.project then return end
+    local t = settings()
+    t.clips_flat = not (t.clips_flat == true)
+    save_settings(t)
+    state.clips_flat = t.clips_flat
+    publish()
+    mp.osd_message(t.clips_flat and "New clip previews: all in Clips/, the clips' folders left out"
+        or "New clip previews: in the clips' folders, within Clips/", 3)
+end)
+
+-- Why the last clip previews that failed did
+mp.register_script_message("clips-failed", function()
+    local file = state.project and ws.join(ws.join(state.project, workspace.STATE_DIR), "clips-failed.txt")
+    if not file or not fs.is_file(file) then return end
+    if macos then run({ "open", "-t", file }) elseif windows then run({ "notepad", file }) else run({ "xdg-open", file }) end
 end)

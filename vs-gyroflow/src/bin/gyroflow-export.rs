@@ -819,16 +819,24 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
     let started = Instant::now();
     let mut frames = Vec::with_capacity(size * times.len());
     let (mut count, mut cover_frame, mut cover_gap) = (0usize, 0usize, f64::MAX);
-    for t in &times {
-        if stopped() { return Err("cancelled".into()); }
-        if let Some(c) = &opts.control { read_control(c); }
+    // The keyframe at or before t; a clip shorter than its keyframe interval (a second or less) has none after its
+    // first frame there, which -skip_frame nokey then skips: the frame at t is decoded the usual way instead
+    let decode = |t: f64, keyframes: bool| -> Result<std::process::Output, String> {
         let mut cmd = ffmpeg_command("ffmpeg");
-        cmd.args(["-nostdin", "-v", "error", "-skip_frame", "nokey", "-noaccurate_seek", "-ss", &format!("{t:.3}"), "-i"]).arg(&source)
+        cmd.args(["-nostdin", "-v", "error"]);
+        if keyframes { cmd.args(["-skip_frame", "nokey", "-noaccurate_seek"]); }
+        cmd.args(["-ss", &format!("{t:.3}"), "-i"]).arg(&source)
             .args(["-map", "0:v:0", "-frames:v", "1", "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"])
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
         if BACKGROUND.load(Relaxed) { set_background(&[child.id()], true); }
-        let out = child.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))?;
+        child.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))
+    };
+    for t in &times {
+        if stopped() { return Err("cancelled".into()); }
+        if let Some(c) = &opts.control { read_control(c); }
+        let mut out = decode(*t, true)?;
+        if out.stdout.len() < size { out = decode(*t, false)?; }
         if out.stdout.len() < size {
             eprintln!("  no frame at {t:.1} s: {}", String::from_utf8_lossy(&out.stderr).trim());
             continue;

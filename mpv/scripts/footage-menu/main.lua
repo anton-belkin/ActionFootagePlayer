@@ -365,6 +365,7 @@ local function moments_menu(w)
         local playing = w.moment and w.moment.file == m.file
         table.insert(items, submenu(m.name .. "    " .. clock(m["in"]) .. "–" .. clock(m.out), {
             item("Play", "script-message-to workspace moment-play " .. i, { disabled = playing }),
+            item("Open in its whole clip", "script-message-to workspace moment-edit " .. i),
             item("Rename…", "script-message-to workspace moment-rename " .. i),
             item("Remove (to the Trash)", "script-message-to workspace moment-remove " .. i),
             item(reveal, "script-message-to workspace moment-reveal " .. i),
@@ -399,6 +400,7 @@ local function project_menu(w, key)
     else
         table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
         table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
+        table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
     end
     table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
     table.insert(items, SEPARATOR)

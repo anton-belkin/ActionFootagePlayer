@@ -418,6 +418,12 @@ local function project_part(u, x, w, y)
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
         elseif st and st.new > 0 then
             y = u:button(ix, iw, y + 2 * s, "clips-make", "Make clip previews · " .. st.new .. " new", "script-message-to workspace clips-make")
+            -- All in Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
+            y = u:switch(ix, iw, y - 2 * s, "clips-flat", "Ignore subfolders", ws.clips_flat == true, "script-message-to workspace clips-flat")
+        end
+        if ws.clips_failed and not ws.clips then
+            y = u:button(ix, iw, y, "clips-failed", ws.clips_failed .. (ws.clips_failed == 1 and " preview" or " previews") .. " couldn't be made: why",
+                         "script-message-to workspace clips-failed")
         end
         if st and st.previews > 0 then
             y = u:button(ix, iw, y, "clips-show", "Show all clips in " .. where, "script-message-to workspace clips-folder")
@@ -435,6 +441,13 @@ local function project_part(u, x, w, y)
     local file = ws.clip:match("([^/\\]+)$") or ws.clip
     u:text(x, y + 14 * s, fit("THIS CLIP · " .. file, w, 11, s, true), { size = 11, bold = true, color = C.dim })
     y = y + 28 * s
+    -- A moment plays only its part: its whole clip, to see before and after it and move its ends
+    if ws.moment and not ws.moment.missing then
+        y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
+    elseif ws.editing then
+        y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
+            .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
+    end
 
     local pos = mp.get_property_number("time-pos", 0)
     y = u:heading(x, w, y, "Marks of this clip", keys["script-binding highlights/mark"])
@@ -444,8 +457,9 @@ local function project_part(u, x, w, y)
         local m = h.marks and h.marks[i] or {}
         local label = (m.name and m.name ~= "") and m.name
             or (m.camera == "dji" and "DJI quick switch" or m.camera == "gopro" and "GoPro HiLight" or ("Mark " .. i))
-        local here = math.abs(pos - t) <= 0.5
-        if here then near = i end
+        -- Here: within half a second, or the one just jumped to (a jump lands h.before seconds ahead of it)
+        local here = math.abs(pos - t) <= 0.5 or (h.jumped == i and pos >= t - (h.before or 2) - 0.25 and pos <= t + 0.5)
+        if here and not near then near = i end
         y = list_row(u, x, w, y, "mark:" .. i, label, clock(t), here, "script-message-to highlights go " .. i)
     end
     if #times == 0 then y = u:caption(x, w, y, "None yet") end
@@ -455,12 +469,13 @@ local function project_part(u, x, w, y)
     y = u:heading(x, w, y + 8 * s, "Moments of this clip")
     local list = ws.moments or {}
     for i, m in ipairs(list) do
-        local playing = ws.moment and ws.moment.file == m.file
+        local playing = (ws.moment and ws.moment.file == m.file) or (ws.editing and ws.editing.file == m.file)
         y = list_row(u, x, w, y, "moment:" .. i, m.name, clock(m["in"]) .. "–" .. clock(m.out), playing and "play" or false,
                      "script-message-to workspace moment-play " .. i, function() moment_more = moment_more ~= i and i or nil end)
         if moment_more == i then
             y = actions(u, x, w, y, "moment:" .. i, {
                 { "Play", "script-message-to workspace moment-play " .. i },
+                { "In its clip", "script-message-to workspace moment-edit " .. i },
                 { "Rename…", "script-message-to workspace moment-rename " .. i },
                 { "Remove", "script-message-to workspace moment-remove " .. i },
                 { REVEAL, "script-message-to workspace moment-reveal " .. i },
@@ -491,7 +506,7 @@ local function project_part(u, x, w, y)
     u:button(ix, ihalf, y, "part-a", a and ("Start " .. clock(a)) or "Mark start", "set ab-loop-a ${=time-pos}")
     y = u:button(ix + ihalf + 8 * s, ihalf, y, "part-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
     local k = keys["script-binding workspace/moment"]
-    local m = ws.moment
+    local m = ws.moment or ws.editing
     if ws.saving then
         y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
     elseif a and b and b > a and not ws.project then

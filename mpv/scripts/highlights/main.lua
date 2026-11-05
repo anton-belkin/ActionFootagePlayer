@@ -55,6 +55,8 @@ local CAMERA_NOTES = { dji = "DJI quick switch", gopro = "GoPro HiLight" }
 -- The clip's: { path, camera, marks = { {t, camera, name} }, file (the marks file), doc (what it holds, unknown
 -- fields kept) }
 local found = nil
+-- The mark last jumped to: a jump lands `before` seconds ahead of it, and until it's passed that's the mark "here"
+local jumped = nil
 -- The chapters this put in chapter-list
 local ours = {}
 local applying = false
@@ -70,7 +72,8 @@ local function publish()
         mp.set_property_native("user-data/highlights", found and found.doc and { marks = {}, times = {}, edited = true } or {})
         return
     end
-    mp.set_property_native("user-data/highlights", { camera = found.camera, times = times(), marks = found.marks, edited = found.doc ~= nil })
+    mp.set_property_native("user-data/highlights", { camera = found.camera, times = times(), marks = found.marks, edited = found.doc ~= nil,
+                                                    jumped = jumped, before = o.before })
 end
 
 local function clock(s)
@@ -89,6 +92,8 @@ local function title(i, m)
 end
 
 local function go(i)
+    jumped = i
+    publish()
     mp.commandv("seek", landing(i), "absolute")
     mp.osd_message(string.format("%s, %d of %d  %s", title(i, found.marks[i]), i, #found.marks, clock(found.marks[i].t)), 1.5)
 end
@@ -223,10 +228,16 @@ local function mark()
             marks = copy,
         }
     end
+    -- The mark here: within half a second, or the one just jumped to, from its landing to just after it
     local near, best = nil, NEAR
     for i, m in ipairs(doc.marks) do
         if math.abs(m.t - pos) <= best then near, best = i, math.abs(m.t - pos) end
     end
+    local j = jumped and found.marks[jumped]
+    if not near and j and pos >= j.t - o.before - 0.25 and pos <= j.t + NEAR then
+        for i, m in ipairs(doc.marks) do if math.abs(m.t - j.t) < 0.001 then near = i end end
+    end
+    jumped = nil
     local message
     if near then
         local m = table.remove(doc.marks, near)
@@ -252,6 +263,7 @@ end)
 
 mp.register_event("end-file", function()
     found = nil
+    jumped = nil
     ours = {}
     publish()
 end)

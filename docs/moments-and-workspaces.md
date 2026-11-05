@@ -338,7 +338,10 @@ Opening a moment's file (a double click, the player being the default app for MP
 4. Not found: the OSD says so ("Turtle: the original isn't at …/Day 1/DJI_…_D.MP4"), and the preview plays.
    The menu offers *Project → Footage moved…*.
 
-A single moment loops, as an A-B part does now. **Opening the `Moments/` folder** plays them all, one after
+A moment plays its part once, then the next one in the playlist (the folder's), and pauses at its out when it's the
+last (Anton, 2026-11-05: no looping). Its part is still the A-B points, not looped (`ab-loop-count=0`), so its ends
+can be moved and `k` updates it; *Open the whole clip* opens the clip at the moment's start, the moment being edited
+there. **Opening the `Moments/` folder** plays them all, one after
 another, each part of its original in full quality, sorted by the time of the moment (not by name). That's a
 highlight reel of the trip, with no rendering.
 
