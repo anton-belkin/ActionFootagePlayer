@@ -26,6 +26,9 @@ if args.get('level'):
     stab['level'] = args['level']
 if args.get('lookahead') is not None:
     stab['lookahead'] = float(args['lookahead'])
+# A moment played as a video of its own: its frames' times from 0, its part starting this far into the clip
+if args.get('time_offset'):
+    stab['time_offset'] = float(args['time_offset'])
 if args.get('horizon_lock') is not None:
     stab['horizon_lock'] = float(args['horizon_lock'])
 if args.get('underwater'):

@@ -439,18 +439,29 @@ local function project_part(u, x, w, y)
     y = y + 8 * s
     u:divider(x, w, y)
     local file = ws.clip:match("([^/\\]+)$") or ws.clip
-    u:text(x, y + 14 * s, fit("THIS CLIP · " .. file, w, 11, s, true), { size = 11, bold = true, color = C.dim })
+    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows
+    local mo = ws.moment and not ws.moment.missing and ws.offset and ws.moment or nil
+    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
     y = y + 28 * s
-    -- A moment plays only its part: its whole clip, to see before and after it and move its ends
-    if ws.moment and not ws.moment.missing then
-        y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
+    if mo then
+        y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
+        y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
+        local idx
+        for i, m in ipairs(ws.moments or {}) do if m.file == mo.file then idx = i end end
+        if idx then
+            y = actions(u, x, w, y, "this-moment", {
+                { "Rename…", "script-message-to workspace moment-rename " .. idx },
+                { "Remove", "script-message-to workspace moment-remove " .. idx },
+                { REVEAL, "script-message-to workspace moment-reveal " .. idx },
+            })
+        end
     elseif ws.editing then
         y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
     end
 
     local pos = mp.get_property_number("time-pos", 0)
-    y = u:heading(x, w, y, "Marks of this clip", keys["script-binding highlights/mark"])
+    y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
     local times = h.times or {}
     for i, t in ipairs(times) do
@@ -466,8 +477,8 @@ local function project_part(u, x, w, y)
     y = u:button(x, w, y + 4 * s, "mark", near and "Remove the mark here" or "Add a mark here", "script-binding highlights/mark",
                  { key = keys["script-binding highlights/mark"] })
 
-    y = u:heading(x, w, y + 8 * s, "Moments of this clip")
-    local list = ws.moments or {}
+    local list = mo and {} or (ws.moments or {})
+    if not mo then y = u:heading(x, w, y + 8 * s, "Moments of this clip") end
     for i, m in ipairs(list) do
         local playing = (ws.moment and ws.moment.file == m.file) or (ws.editing and ws.editing.file == m.file)
         y = list_row(u, x, w, y, "moment:" .. i, m.name, clock(m["in"]) .. "–" .. clock(m.out), playing and "play" or false,
@@ -482,13 +493,15 @@ local function project_part(u, x, w, y)
             })
         end
     end
-    if not ws.project then
+    if mo then
+        -- nothing: the moment is what plays
+    elseif not ws.project then
         y = u:caption(x, w, y, "Moments need the project: initialize it above")
     elseif #list == 0 then
         y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k"))
     end
 
-    if ws.project then
+    if ws.project and not mo then
         local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
             or ws.clip_preview == "removed" and "Not interesting · undo" or "Make this clip's preview"
         y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting",
@@ -507,16 +520,18 @@ local function project_part(u, x, w, y)
     y = u:button(ix + ihalf + 8 * s, ihalf, y, "part-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
     local k = keys["script-binding workspace/moment"]
     local m = ws.moment or ws.editing
+    -- The part in the clip's time (a moment playing starts at its in)
+    local off = ws.offset or 0
     if ws.saving then
         y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
     elseif a and b and b > a and not ws.project then
         y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
         y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
     elseif a and b and b > a then
-        if m and not m.missing and math.abs(a - m["in"]) < 0.001 and math.abs(b - m.out) < 0.001 then
+        if m and not m.missing and math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
             y = u:caption(ix, iw, y, m.name .. " as it is: move its start or end to change it")
         elseif m and not m.missing then
-            y = u:button(ix, iw, y, "save", "Update " .. fit(m.name, iw * 0.4, 12, s, true) .. " to " .. clock(a) .. "–" .. clock(b),
+            y = u:button(ix, iw, y, "save", (mo and "Trim " or "Update ") .. fit(m.name, iw * 0.4, 12, s, true) .. " to " .. clock(a) .. "–" .. clock(b),
                          "script-binding workspace/moment", { primary = true, key = k })
         else
             y = u:button(ix, iw, y, "save", "Save as moment " .. clock(a) .. "–" .. clock(b), "script-binding workspace/moment", { primary = true, key = k })
@@ -524,7 +539,8 @@ local function project_part(u, x, w, y)
         y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
     else
         local l = keys["ab-loop"] or "l"
-        y = u:caption(ix, iw, y, a and ("Now its end: " .. l) or ("Its start: " .. l .. ", then its end: " .. l .. " again"))
+        y = u:caption(ix, iw, y, a and ("Now its end: " .. l) or mo and ("To trim the moment, mark the part of it to keep: " .. l .. ", then "
+            .. l .. " again. To make it longer: Open the whole clip") or ("Its start: " .. l .. ", then its end: " .. l .. " again"))
     end
     behind(u, pat, x, ptop, w, y - ptop + pad - 6 * s, C.panel, { border = 1 * s, border_color = C.line })
     return y + pad

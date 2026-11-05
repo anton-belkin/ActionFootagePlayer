@@ -338,10 +338,16 @@ Opening a moment's file (a double click, the player being the default app for MP
 4. Not found: the OSD says so ("Turtle: the original isn't at …/Day 1/DJI_…_D.MP4"), and the preview plays.
    The menu offers *Project → Footage moved…*.
 
-A moment plays its part once, then the next one in the playlist (the folder's), and pauses at its out when it's the
-last (Anton, 2026-11-05: no looping). Its part is still the A-B points, not looped (`ab-loop-count=0`), so its ends
-can be moved and `k` updates it; *Open the whole clip* opens the clip at the moment's start, the moment being edited
-there. **Opening the `Moments/` folder** plays them all, one after
+A moment plays its part once, then the next one in the playlist (the folder's), and pauses at its end when it's the
+last (Anton, 2026-11-05: no looping). And it plays **as a video of its own** (Anton, the same day: the seek bar and
+the panel were the whole clip's): mpv opens an EDL of its part of the original
+(`edl://!no_chapters;%<n>%<clip>,start=<in>,length=<out-in>`), whose time runs from 0. The workspace plugin
+publishes `offset` (its in) and `length`, and every plugin that times the clip adds the offset: the stabilization
+(the filter's `time_offset`: a frame 5 s into the moment matched the clip's at 25 s, PSNR 49 dB, against 22 dB for
+the next frame), the telemetry, the marks (only those inside it, in its time; `M` writes clip times), exports (its
+part, or the moment itself when nothing's marked) and moments saved (a part of it marked and `k` trims it). The
+panel shows the moment: its marks, Rename, Remove, *Open the whole clip*, which opens the clip at the moment's start,
+its part marked but not looped (`ab-loop-count=0`), the moment being edited there (`k` updates it). **Opening the `Moments/` folder** plays them all, one after
 another, each part of its original in full quality, sorted by the time of the moment (not by name). That's a
 highlight reel of the trip, with no rendering.
 

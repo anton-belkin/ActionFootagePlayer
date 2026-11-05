@@ -35,6 +35,8 @@
 --   moment          when a moment's file plays: { file, name, in, out } (missing = true: no original found)
 --   editing         a moment opened in its whole clip (open-original): { file, name, in, out }; k updates it
 --   redirected      yes when the file playing is a link (a moment, a clip preview) and mpv plays `clip` instead
+--   offset, length  a moment plays as a video of its own, its part of the clip: the time playing plus offset is the
+--                   clip's (stabilization, telemetry, marks, exports, moments saved take it)
 --   clip_preview    when a clip preview plays: { file }
 --   clips           while clip previews are made: { done, total }
 --   project_choices with no project: the folders one can be started in, from the top down; project_new: the one the
@@ -235,8 +237,11 @@ local function refresh()
     local list, chapters = {}, {}
     for _, m in ipairs(mine) do
         list[#list + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out }
-        chapters[#chapters + 1] = { title = m.name, time = m.link["in"] }
-        chapters[#chapters + 1] = { title = m.name .. " end", time = m.link.out }
+        -- A moment playing is a video of its own: the clip's moments aren't on its seek bar
+        if not state.offset then
+            chapters[#chapters + 1] = { title = m.name, time = m.link["in"] }
+            chapters[#chapters + 1] = { title = m.name .. " end", time = m.link.out }
+        end
     end
     state.moments = list
     state.moments_total = #found.list
@@ -304,21 +309,20 @@ local function open_moment(path)
         state.moment = { file = file, name = name, missing = true }
         return
     end
-    mp.set_property("stream-open-filename", original)
     local a, b = l["in"], l.out
-    -- Its part, once: from its in to its out, then the next moment in the playlist (the folder's), or paused at its
-    -- out when it's the last. Its part is the A-B points too, not looped, for moving its ends (k updates it)
-    mp.set_property("file-local-options/start", string.format("%.3f", a))
-    mp.set_property("file-local-options/end", string.format("%.3f", b))
+    -- Its part as a video of its own (mpv's EDL: that part of the original, its time from 0): the seek bar is the
+    -- moment's. Then the next moment in the playlist (the folder's), or paused at its end when it's the last. The
+    -- other plugins add `offset` to the time to get the clip's (stabilization, telemetry, marks, exports)
+    mp.set_property("stream-open-filename", string.format("edl://!no_chapters;%%%d%%%s,start=%.3f,length=%.3f", #original, original, a, b - a))
     mp.set_property("file-local-options/keep-open", "yes")
-    mp.set_property("file-local-options/ab-loop-count", "0")
-    mp.set_property("file-local-options/ab-loop-a", string.format("%.3f", a))
-    mp.set_property("file-local-options/ab-loop-b", string.format("%.3f", b))
     mp.set_property("file-local-options/force-media-title", name)
     state = describe(original)
     state.path = path
     state.redirected = true
     state.moment = { file = file, name = name, ["in"] = a, out = b }
+    state.offset, state.length = a, b - a
+    -- An EDL has no metadata of its own: the original's creation time from the link
+    state.created = l.created
 end
 
 -- Moments/ or a folder in it: its moments, in the order they happened, as the playlist
@@ -365,7 +369,7 @@ mp.add_hook("on_load", 10, function()
 end)
 
 mp.register_event("file-loaded", function()
-    state.created = mp.get_property("metadata/by-key/creation_time")
+    state.created = mp.get_property("metadata/by-key/creation_time") or state.created
     state.loaded = true
     refresh()
     if not watch_timer then watch_timer = mp.add_periodic_timer(WATCH_SECONDS, watch) end
@@ -448,6 +452,8 @@ end
 local function save(name, update, typed, quiet)
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     if not (a and b and b > a) then return end
+    -- In the clip's time (a moment playing starts at its in)
+    a, b = a + (state.offset or 0), b + (state.offset or 0)
     local safe = moments_lib.safe_name(name)
     if not safe then
         mp.osd_message("Moment: that name has nothing a file name can have", 3)
@@ -471,6 +477,7 @@ local function save(name, update, typed, quiet)
     local at
     local h = mp.get_property_native("user-data/highlights")
     for _, t in ipairs(type(h) == "table" and h.times or {}) do
+        t = t + (type(h) == "table" and h.offset or 0)
         if t >= a and t <= b then at = t; break end
     end
     local dates
@@ -510,6 +517,11 @@ mp.register_script_message("preview-done", function(id, json)
     local edited = state.moment or state.editing
     if p.update and edited and edited.file == p.file then
         edited["in"], edited.out = p.a, p.b
+        -- A moment playing as a video of its own: again, with its new ends
+        if state.moment and state.offset then
+            mp.osd_message("Updated " .. p.name, 3)
+            return mp.commandv("playlist-play-index", "current")
+        end
     end
     if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
     refresh()
@@ -536,11 +548,12 @@ local function save_key(given)
     if not need_project("Saving a moment") then return end
     local m = state.moment or state.editing
     if given and given ~= "" then return save(given, nil, given) end
+    local off = state.offset or 0
     if m then
-        if math.abs(a - m["in"]) < 0.001 and math.abs(b - m.out) < 0.001 then
+        if math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
             return mp.osd_message(m.name .. " is saved as it is: move its start or end with l, then k", 4)
         end
-        return ask({ prompt = "Update " .. m.name .. " to " .. clock(a) .. "–" .. clock(b) .. "? Enter, or a new name for a new one: ",
+        return ask({ prompt = "Update " .. m.name .. " to " .. clock(a + off) .. "–" .. clock(b + off) .. "? Enter, or a new name for a new one: ",
                      id = "workspace-update" }, function(text)
             if text == "" then save(m.name, m) else last_typed = text; save(text, nil, text) end
         end)
@@ -654,7 +667,14 @@ mp.register_script_message("export-name", function(json)
     if not need_project("Exporting") then return end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local part = a and b and b > a
-    if not part then a, b = nil, nil end
+    if part then
+        a, b = a + (state.offset or 0), b + (state.offset or 0)
+    elseif state.offset and state.moment then
+        -- A moment playing, nothing marked in it: the moment
+        a, b, part = state.moment["in"], state.moment.out, true
+    else
+        a, b = nil, nil
+    end
     -- The part a moment: the one playing, or one of the clip's, to the frame
     local frame = 0.5 / (mp.get_property_number("container-fps") or 30)
     local same
@@ -690,6 +710,7 @@ mp.register_script_message("export-name", function(json)
         }
         mp.commandv("script-message-to", req.reply, "export-start", utils.format_json({
             clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
+            from = a, to = b,
         }))
         if first and text ~= "" and history_file() then
             local f = io.open(history_file(), "a")

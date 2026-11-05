@@ -21,7 +21,9 @@
 --   go <n>     the n-th mark
 --   mark       as M
 -- The state is in user-data/highlights/ for the menu: camera (GoPro, DJI: the clip's own), times (seconds, in order),
--- marks ({ t, camera (dji, gopro: one of the camera's), name }, in order), edited (yes: from the marks file).
+-- marks ({ t, camera (dji, gopro: one of the camera's), name }, in order), edited (yes: from the marks file). A moment
+-- playing as a video of its own (the workspace plugin's offset and length): only the marks inside it, in its time;
+-- offset: where it starts in the clip.
 --
 -- Options (~~/script-opts/highlights.conf):
 --   before=2       seconds before each mark a jump lands: the button is pressed once the moment has happened
@@ -73,7 +75,7 @@ local function publish()
         return
     end
     mp.set_property_native("user-data/highlights", { camera = found.camera, times = times(), marks = found.marks, edited = found.doc ~= nil,
-                                                    jumped = jumped, before = o.before })
+                                                    jumped = jumped, before = o.before, offset = found.offset })
 end
 
 local function clock(s)
@@ -162,6 +164,24 @@ local function read_doc(file, size)
     return doc
 end
 
+-- A moment playing as a video of its own (the workspace plugin's): where its part starts in the clip, and how long
+-- it is; 0 and nil for a clip
+local function window()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then return ws.offset, ws.length end
+    return 0, nil
+end
+
+-- The marks that show: inside the part, in its time
+local function visible(all, off, len)
+    local out = {}
+    for _, m in ipairs(all) do
+        local t = m.t - off
+        if t >= -0.001 and (not len or t <= len + 0.001) then out[#out + 1] = { t = math.max(0, t), camera = m.camera, name = m.name } end
+    end
+    return out
+end
+
 local function load()
     found = nil
     local path = clip_path()
@@ -174,7 +194,7 @@ local function load()
     if not ok then mp.msg.warn("couldn't read the highlights: " .. tostring(m)) end
     if ok and m then
         -- Past the end: not this file's (a recording split into several files)
-        local duration = mp.get_property_number("duration")
+        local duration = window() == 0 and mp.get_property_number("duration") or nil
         for _, t in ipairs(m.times) do
             if not duration or t <= duration then
                 marks[#marks + 1] = { t = t, camera = m.camera:lower() }
@@ -185,8 +205,11 @@ local function load()
     end
     local file = marks_file(path)
     local doc = read_doc(file, info and info.size)
-    found = { path = path, camera = camera, marks = doc and doc.marks or marks, file = file, doc = doc,
-              camera_times = camera_times, size = info and info.size }
+    local off, len = window()
+    local all = doc and doc.marks or marks
+    -- all: in the clip's time; marks: what shows (a moment playing: those inside it, in its time)
+    found = { path = path, camera = camera, all = all, marks = visible(all, off, len), offset = off, length = len, file = file,
+              doc = doc, camera_times = camera_times, size = info and info.size }
     mp.msg.verbose(#found.marks .. " marks" .. (doc and (" from " .. file) or (camera and (" from the " .. camera) or "")))
     if #found.marks > 0 or #ours > 0 then apply_chapters() end
 end
@@ -217,14 +240,18 @@ local function mark()
     end
     local pos = mp.get_property_number("time-pos")
     if not pos then return end
+    -- In the clip's time
+    pos = pos + found.offset
     local doc = found.doc
     if not doc then
         local copy = {}
-        for _, m in ipairs(found.marks) do copy[#copy + 1] = { t = math.floor(m.t * 1000 + 0.5) / 1000, camera = m.camera } end
+        for _, m in ipairs(found.all) do copy[#copy + 1] = { t = math.floor(m.t * 1000 + 0.5) / 1000, camera = m.camera } end
+        local ws = mp.get_property_native("user-data/workspace")
         doc = {
             format = FORMAT, version = 1,
-            clip = { file = found.path:match("([^/\\]+)$"), size = found.size, duration = mp.get_property_number("duration"),
-                     created = mp.get_property("metadata/by-key/creation_time") },
+            clip = { file = found.path:match("([^/\\]+)$"), size = found.size,
+                     duration = found.offset == 0 and mp.get_property_number("duration") or nil,
+                     created = mp.get_property("metadata/by-key/creation_time") or (type(ws) == "table" and ws.created) or nil },
             marks = copy,
         }
     end
@@ -234,8 +261,9 @@ local function mark()
         if math.abs(m.t - pos) <= best then near, best = i, math.abs(m.t - pos) end
     end
     local j = jumped and found.marks[jumped]
-    if not near and j and pos >= j.t - o.before - 0.25 and pos <= j.t + NEAR then
-        for i, m in ipairs(doc.marks) do if math.abs(m.t - j.t) < 0.001 then near = i end end
+    local jt = j and j.t + found.offset
+    if not near and jt and pos >= jt - o.before - 0.25 and pos <= jt + NEAR then
+        for i, m in ipairs(doc.marks) do if math.abs(m.t - jt) < 0.002 then near = i end end
     end
     jumped = nil
     local message
@@ -250,7 +278,7 @@ local function mark()
     end
     local ok, err = write(doc)
     if not ok then return mp.osd_message("Couldn't write the marks: " .. tostring(err), 4) end
-    found.doc, found.marks = doc, doc.marks
+    found.doc, found.all, found.marks = doc, doc.marks, visible(doc.marks, found.offset, found.length)
     mp.osd_message(message .. " (" .. (#doc.marks == 1 and "1 mark" or (#doc.marks .. " marks")) .. ")", 2)
     apply_chapters()
     publish()

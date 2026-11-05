@@ -424,6 +424,14 @@ local function step_filter(source, enabled)
     return { name = "lavfi", label = STEP_LABEL, enabled = enabled, params = { graph = "framestep=" .. step } }
 end
 
+-- A moment playing as a video of its own (the workspace plugin's: its part of the clip, from 0): where it starts in
+-- the clip, which the filter adds to each frame's time to find its motion
+local function time_offset()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then return ws.offset end
+    return nil
+end
+
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
     return {
@@ -435,7 +443,8 @@ local function gyroflow_filter(source, enabled)
             ["user-data"] = utils.format_json({ plugin = PLUGIN, project = source.project, preset = source.preset, interpolation = interpolation(source), workers = o.workers,
                                                 fast = not full_size and frame_step(source) == 1 and fast(source),
                                                 wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur, edges_control = EDGE_CONTROL,
-                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL }),
+                                                chromatic = chromatic_shader or nil, width = output and output[1], height = output and output[2], still_control = still.CONTROL,
+                                                time_offset = time_offset() }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",

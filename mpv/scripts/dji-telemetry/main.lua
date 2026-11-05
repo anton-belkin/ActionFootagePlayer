@@ -222,8 +222,16 @@ local function text_at(t)
     return table.concat(lines, "\\N")
 end
 
+-- A moment playing as a video of its own (the workspace plugin's): its time from 0, its part this far into the clip
+local function offset()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then return ws.offset end
+    return 0
+end
+
 local function update()
     local t = mp.get_property_number("time-pos")
+    if t then t = t + offset() end
     if not visible or not track or not t then
         if shown then overlay:remove(); shown = nil end
         return

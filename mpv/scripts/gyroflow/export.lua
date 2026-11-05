@@ -240,6 +240,8 @@ local function start(path, sdr, named)
     if playing then table.insert(args, "--background") end
     look_args(args, sdr)
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
+    if named and named.from and named.to then a, b = named.from, named.to end
     local range = ""
     if a and b and b > a then
         table.insert(args, "--from"); table.insert(args, string.format("%.3f", a))

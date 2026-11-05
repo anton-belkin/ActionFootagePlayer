@@ -486,7 +486,7 @@ local function build()
             local moment = key["script-binding workspace/moment"]
             if w.saving then
                 add(info("Saving " .. w.saving .. "…"))
-            elseif w.moment and a and b and (math.abs(a - w.moment["in"]) >= 0.001 or math.abs(b - w.moment.out) >= 0.001) then
+            elseif w.moment and a and b and (math.abs(a + (w.offset or 0) - w.moment["in"]) >= 0.001 or math.abs(b + (w.offset or 0) - w.moment.out) >= 0.001) then
                 add(item("Update " .. w.moment.name .. " to " .. clock(a) .. "–" .. clock(b) .. "…", "script-binding workspace/moment", { shortcut = moment }))
             elseif not w.moment then
                 add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",

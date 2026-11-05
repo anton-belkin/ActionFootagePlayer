@@ -678,12 +678,13 @@ or the date and time), and it's saved as a small file in a **Moments** folder of
 - **It's a link, not a copy.** The file is one frame of the moment, in color and stabilized, held for its length,
   some 150-350 KB. Finder shows that frame as its icon, and the double extension says it's a link (it still opens
   as an MP4 anywhere). Inside it is where its part of the original clip is.
-- **Opening it in the player plays the original**, in full quality, its part once, with the original's
-  stabilization, look and telemetry; then the next moment in the folder, and at the last one it stops. Opening the
-  **Moments** folder plays all of them one after another, in the order they happened.
+- **Opening it in the player plays its part of the original as a video of its own**, in full quality, with the
+  original's stabilization, look and telemetry: the seek bar is the moment's, from 0:00 to its length, and the
+  panel shows the moment (its marks, Rename, Remove). Then the next moment in the folder, and at the last one it
+  stops. Opening the **Moments** folder plays all of them one after another, in the order they happened.
 - **Its whole clip**: *Open the whole clip* in the panel (or a moment's `⋯`: *In its clip*) opens the clip at the
   moment's start, its part marked but not looped, to see what came before and after. Moving its start or end
-  there and `k` updates that moment.
+  there and `k` updates that moment; inside the moment, marking a part of it and `k` trims it.
 - **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
   moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
