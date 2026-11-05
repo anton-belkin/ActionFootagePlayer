@@ -20,8 +20,8 @@ site/            what is served, as is
   divers.html    the landing for divers and snorkelers
   moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
   log.html, stabilization.html, library.html, photos.html
-                 the four guides, one feature set each, from what you get to every setting (English only so far)
-  about.html     who makes it and why: Anton's story, a timeline with links (English only so far)
+                 the four guides, one feature set each, from what you get to every setting
+  about.html     who makes it and why: Anton's story, a timeline with links
   features.html  every feature on one page, the reference the other pages link to (footer: All features)
   hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css, about.css
                  each page's own styles, next to the shared styles.css
@@ -65,7 +65,7 @@ A new release needs no change here, unless an asset's name changes: then its pat
 French, Russian and Simplified Chinese live in `site/fr/`, `site/ru/` and `site/zh/`, under the same file names as the
 English pages at the root, and use the shared `styles.css`, `scene.js`, `download.js` and icons through `../`. They are
 served at `/fr/`, `/ru/`, `/zh/` (and `/fr/divers`, `/fr/download` …). English is the original; the translations are **machine translations**
-(made with Claude, 2026-11-03) and each translated page says so in its own language, in a slim banner under the header
+(made with Claude, 2026-11-03; all pages translated again from the proofread English on 2026-11-05) and each translated page says so in its own language, in a slim banner under the header
 and again in the footer, with a link to the English page.
 
 Every page, English included, carries:
@@ -82,9 +82,7 @@ Every page, English included, carries:
   works without script. Below 900px they take a second row; below 520px they're hidden and the same links, grouped
   the same way, are in one ☰ menu (`<details class="sitemenu">`) beside the language. top.js closes any of these
   menus when a link is chosen, on a click outside or on Escape. The header is written into each page by a hand-run
-  script, not at build time. So far only the English pages have it: the translations still have the earlier header
-  (Home, Under water, Hours of clips, Features ▾, Download, and an "On this page" menu, `.pagemenu`) until they're
-  translated again from the English.
+  script, not at build time, in all four languages (its labels per language are in the script).
 
 Fonts: Archivo, the display face, covers Latin only. Russian pages load Roboto Flex (Cyrillic, with a width axis like
 Archivo's) for headings; IBM Plex Sans and Mono cover Cyrillic. Chinese uses the system's CJK face after the Latin
@@ -92,7 +90,10 @@ ones (PingFang SC, Hiragino Sans GB, Noto Sans SC, Microsoft YaHei); nothing CJK
 `styles.css` with `:lang()` rules.
 
 Kept in English everywhere: product, camera and format names (D-Log M, GP-Log, I-Log, HDR, EIS, Gyroflow, …), keyboard
-shortcuts, file names, and the player's on-screen telemetry in the illustration.
+shortcuts, file names, and the player's on-screen telemetry in the illustration. The player's own on-screen labels and buttons stay in English as
+the app shows them, with a short translation the first time. The system's own names are translated as the system
+shows them in that language: File Explorer is Explorateur de fichiers, Проводник, 文件资源管理器; Quick Look is Coup d'œil,
+Быстрый просмотр, 快速查看; Finder is 访达 in Chinese.
 
 `download.js` writes a few words of its own (the release's title, file sizes, dates): it takes them from its `LANGS`
 table by the page's `<html lang>`, and dates come from the browser in that language. The first paragraph of the

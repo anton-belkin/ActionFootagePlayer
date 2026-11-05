@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Action Footage Player: часы видео, лучшие минуты — уже сегодня вечером</title>
-<meta name="description" content="Вернулись с часами видео с экшн-камеры? Дважды щёлкните по клипу: log воспроизводится в цвете, дрожащие клипы — без тряски, а хайлайты, отмеченные камерой, уже на шкале воспроизведения. Сохраняйте лучшие фрагменты как файлы, которые видно в папке, отправьте один на телефон сегодня же вечером, а позже передайте их в Final Cut Pro, DaVinci Resolve или Premiere Pro. Бесплатный плеер для Mac и Windows.">
+<title>Action Footage Player: часы видео, лучшие минуты — сегодня вечером</title>
+<meta name="description" content="Вернулись с часами видео с экшн-камеры? Дважды щёлкните по клипу: log воспроизводится в цвете, трясущиеся клипы — ровно, а хайлайты, отмеченные камерой, видны на шкале воспроизведения. Сохраняйте лучшие фрагменты как файлы, которые видно, отправьте один на телефон уже сегодня, а потом передайте их в Final Cut Pro, DaVinci Resolve или Premiere Pro. Бесплатный плеер для Mac и Windows.">
 <link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/moments">
 <link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/moments">
 <link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/moments">
@@ -34,32 +34,52 @@
       Action Footage Player
     </a>
     <nav class="nav" aria-label="Сайт">
-      <a href="index.html">Главная</a>
-      <a href="divers.html">Под водой</a>
-      <a href="moments.html" aria-current="page">Часы записей</a>
-      <a href="features.html">Все функции</a>
+      <details class="navmenu"><summary>Главная</summary>
+        <ul>
+          <li><a href="index.html">Главная страница</a></li>
+          <li><a href="index.html#features">Что он умеет</a></li>
+          <li><a href="index.html#how">Как это работает</a></li>
+          <li><a href="index.html#faq">Вопросы</a></li>
+          <li><a href="about.html">Об авторе</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Для кого</summary>
+        <ul>
+          <li><a href="divers.html">Дайверам и снорклерам</a></li>
+          <li><a href="moments.html" aria-current="page">Активным путешественникам</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Функции</summary>
+        <ul>
+          <li><a href="log.html">Log-записи</a></li>
+          <li><a href="stabilization.html">Стабилизация</a></li>
+          <li><a href="library.html">Библиотека</a></li>
+          <li><a href="photos.html">Фото</a></li>
+          <li><a href="features.html" class="nm-all">Все функции</a></li>
+        </ul>
+      </details>
       <a href="download.html" class="nav-dl">Скачать</a>
     </nav>
-    <details class="pagemenu">
-      <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/></svg><span class="pm-label">На этой странице</span></summary>
-      <div class="pm">
-      <ul class="pm-site">
-        <li><a href="index.html">Главная</a></li>
-        <li><a href="divers.html">Под водой</a></li>
-        <li><a href="moments.html" aria-current="page">Часы записей</a></li>
-        <li><a href="features.html">Все функции</a></li>
-        <li><a href="download.html">Скачать</a></li>
-      </ul>
-      <p class="pm-title">На этой странице</p>
+    <details class="sitemenu">
+      <summary aria-label="Меню"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
       <ul>
-        <li><a href="#problem">После поездки</a></li>
-        <li><a href="#fix">С Action Footage Player</a></li>
-        <li><a href="#moments">Моменты</a></li>
-        <li><a href="#share">Поделиться и смонтировать</a></li>
-        <li><a href="#proof">Посмотрите сами</a></li>
-        <li><a href="#faq">Вопросы</a></li>
+        <li class="sm-group">Главная</li>
+        <li><a href="index.html">Главная страница</a></li>
+        <li><a href="index.html#features">Что он умеет</a></li>
+        <li><a href="index.html#how">Как это работает</a></li>
+        <li><a href="index.html#faq">Вопросы</a></li>
+        <li><a href="about.html">Об авторе</a></li>
+        <li class="sm-group">Для кого</li>
+        <li><a href="divers.html">Дайверам и снорклерам</a></li>
+        <li><a href="moments.html" aria-current="page">Активным путешественникам</a></li>
+        <li class="sm-group">Функции</li>
+        <li><a href="log.html">Log-записи</a></li>
+        <li><a href="stabilization.html">Стабилизация</a></li>
+        <li><a href="library.html">Библиотека</a></li>
+        <li><a href="photos.html">Фото</a></li>
+        <li><a href="features.html">Все функции</a></li>
+        <li class="sm-dl"><a href="download.html">Скачать</a></li>
       </ul>
-      </div>
     </details>
     <details class="lang">
       <summary aria-label="Язык: русский"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>RU</summary>
@@ -97,7 +117,7 @@
         <div class="status">
           <span>Бесплатно, открытый код</span>
           <span>Без аккаунта</span>
-          <span>Исходные файлы никогда не изменяются</span>
+          <span>Исходные файлы меняются, только если вы попросите</span>
         </div>
       </div>
 
@@ -120,7 +140,7 @@
       <ul class="mo-pains">
         <li>
           <h3>Серое повсюду</h3>
-          <p class="os-mac">Снимали в log? Каждый клип плоский и серый в Finder, в Quick Look и в монтажной программе, так что по миниатюрам не понять, какой из них был удачным.</p>
+          <p class="os-mac">Снимали в log? Каждый клип плоский и серый в Finder, в Быстром просмотре и в монтажной программе, так что по миниатюрам не понять, какой из них был удачным.</p>
           <p class="os-win">Снимали в log? Каждый клип плоский и серый в Проводнике, в его области просмотра (<kbd>Alt</kbd>+<kbd>P</kbd>) и в монтажной программе, так что по миниатюрам не понять, какой из них был удачным.</p>
         </li>
         <li>
@@ -151,7 +171,7 @@
       <ul class="mo-answers">
         <li>
           <h3>В цвете, даже в log</h3>
-          <p>D-Log M, GP-Log и I-Log воспроизводятся в цвете и в HDR, без цветокоррекции. Обычные клипы воспроизводятся как обычно.</p>
+          <p>D-Log M с Osmo Action 6 и Osmo 360 и GP-Log с HERO12 Black (прошивка 1.20 или новее) и HERO13 Black воспроизводятся в цвете и в HDR, без цветокоррекции. Другим клипам в log, включая I-Log 10 бит, нужна одна клавиша: <kbd>Ctrl</kbd>+<kbd>l</kbd>. Обычные клипы воспроизводятся как обычно.</p>
         </li>
         <li>
           <h3>Без тряски прямо при воспроизведении</h3>
@@ -172,7 +192,7 @@
       <div class="stack">
         <p class="eyebrow">Моменты</p>
         <h2>Сохраняйте лучшие минуты как файлы, которые видно.</h2>
-        <p class="lede kbd-dark">Отметьте фрагмент и нажмите <kbd>k</kbd>: он станет моментом — небольшим видео в папке Moments этой поездки, которое <span class="os-mac">Finder и Quick Look показывают</span><span class="os-win">Проводник и его область просмотра показывают</span> в цвете. Дважды щёлкните по нему, и воспроизведётся оригинал в полном качестве.</p>
+        <p class="lede kbd-dark">Отметьте фрагмент и нажмите <kbd>k</kbd>: он станет моментом — небольшим видео в папке <code>_Moments</code> этой поездки, которое <span class="os-mac">Finder и Быстрый просмотр показывают</span><span class="os-win">Проводник и его область просмотра показывают</span> в цвете. Если открыть его в плеере, воспроизводится этот фрагмент оригинала в полном качестве. В первый раз выберите папку поездки на вкладке Project боковой панели: <i>Initialize the project here</i> («создать проект здесь»).</p>
         <div class="dive-points kbd-dark">
           <div>
             <h3>Свои метки</h3>
@@ -185,7 +205,7 @@
           </div>
           <div>
             <h3>Вся поездка с одного взгляда</h3>
-            <p>Из меню плеер заполняет папку Clips: для каждого клипа — цветной флипбук вместо стены серых миниатюр.</p>
+            <p>С вкладки Project боковой панели плеер заполняет папку <code>_Clips</code>: для каждого клипа — цветной флипбук вместо стены серых миниатюр.</p>
           </div>
           <div>
             <h3>Никакой медиатеки, за которой надо следить</h3>
@@ -195,18 +215,19 @@
       </div>
       <div class="stack">
         <ul class="mo-tree" aria-label="Папка поездки после вечера с плеером">
-          <li><span class="dir">Доломиты 2026</span><span class="c">папка вашей поездки</span>
+          <li><span class="dir">Доломиты 2026</span><span class="c">папка вашей поездки: это и есть проект</span>
             <ul>
-              <li><span class="dir">День 1</span><span class="c">видео, которые только читаются</span></li>
-              <li><span class="dir">Moments</span>
+              <li><span class="dir">День 1</span><span class="c">видео, рядом с каждым клипом — ваши метки</span></li>
+              <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>Гребень у вершины.mp4</li>
-                  <li>2026-07-14 16.02.11.mp4<span class="c">момент, которому вы не дали имени</span></li>
+                  <li>Гребень у вершины.afplink.mp4</li>
+                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">момент, которому вы не дали имени</span></li>
                   <li><span class="dir">Байк-парк</span><span class="c">ваша собственная подпапка</span></li>
                 </ul>
               </li>
-              <li><span class="dir">Clips</span><span class="c">цветной флипбук для каждого клипа</span></li>
-              <li><span class="dir">Exports</span><span class="c">то, что вы экспортировали</span></li>
+              <li><span class="dir">_Clips</span><span class="c">цветной флипбук для каждого клипа</span></li>
+              <li><span class="dir">_Exports</span><span class="c">то, что вы экспортировали</span></li>
+              <li><span class="dir">_ActionFootagePlayer</span><span class="c">собственные заметки плеера</span></li>
             </ul>
           </li>
         </ul>
@@ -224,8 +245,8 @@
       <div class="mo-share">
         <div>
           <h3>Сегодня вечером</h3>
-          <p><kbd>Shift</kbd>+<kbd>E</kbd> экспортирует отмеченный фрагмент так, как он воспроизводится, без тряски и в цвете, в папку Exports этой поездки. Это HDR-видео с информацией Dolby Vision, которую iPhone, iPad и Mac используют при воспроизведении.</p>
-          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · Exports</span>
+          <p><kbd>Shift</kbd>+<kbd>E</kbd> экспортирует отмеченный фрагмент так, как он воспроизводится, без тряски и в цвете, в папку <code>_Exports</code> этой поездки. Это HDR-видео, которое телефоны, Mac и телевизоры показывают как HDR. Если экспортировать его на Mac в стиле <i>HLG+DV</i> — том, что включается сразу на экране Mac без HDR, — в нём будет ещё и информация Dolby Vision, по которой iPhone, iPad и Mac хорошо показывают его на экранах без HDR.</p>
+          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · _Exports</span>
         </div>
         <div>
           <h3>Монтаж начинается там, где вы остановились</h3>
@@ -256,14 +277,14 @@
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
-          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">Окно Finder с папками Moments и Clips</span><span class="os-win">Окно Проводника с папками Moments и Clips</span></div>
-          <figcaption><span class="os-mac">Ваши папки Moments и Clips в Finder — в цвете.</span><span class="os-win">Ваши папки Moments и Clips в Проводнике — в цвете.</span></figcaption>
+          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">Окно Finder с папками _Moments и _Clips</span><span class="os-win">Окно Проводника с папками _Moments и _Clips</span></div>
+          <figcaption><span class="os-mac">Ваши папки <code>_Moments</code> и <code>_Clips</code> в Finder — в цвете.</span><span class="os-win">Ваши папки <code>_Moments</code> и <code>_Clips</code> в Проводнике — в цвете.</span></figcaption>
         </figure>
       </div>
       <dl class="mo-fit">
         <div>
           <dt>Log в цвете</dt>
-          <dd>D-Log M от DJI, GP-Log и GP-Log2 от GoPro, 10-битный I-Log от Insta360</dd>
+          <dd>D-Log M от DJI, GP-Log и GP-Log2 от GoPro, I-Log 10 бит от Insta360 (вручную, <kbd>Ctrl</kbd>+<kbd>l</kbd>)</dd>
         </div>
         <div>
           <dt>Метки хайлайтов</dt>
@@ -271,10 +292,10 @@
         </div>
         <div>
           <dt>Без тряски при воспроизведении</dt>
-          <dd>DJI с выключенным EIS, GoPro с выключенным HyperSmooth, Insta360 с выключенным FlowState</dd>
+          <dd>DJI с выключенным EIS и углом обзора Wide, GoPro с выключенным HyperSmooth, Insta360 с выключенным FlowState</dd>
         </div>
       </dl>
-      <p class="mo-trust">Бесплатно, открытый код (GPL-3.0) · Без аккаунта · Исходники только читаются · Стабилизация на движке Gyroflow</p>
+      <p class="mo-trust">Бесплатно, открытый код (GPL-3.0) · Без аккаунта · Исходные файлы меняются, только если вы попросите · Стабилизация на движке Gyroflow</p>
       <div class="btns" data-os-swap>
         <a class="btn primary dl-mac" href="download.html#mac">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -302,15 +323,15 @@
         </details>
         <details>
           <summary>Нужно ли что-то настраивать в камере?</summary>
-          <div class="a"><p>Для цвета снимайте в режиме log, а можно и без него: обычные клипы воспроизводятся как обычно. Для воспроизведения без тряски выключите стабилизацию самой камеры (EIS у DJI, HyperSmooth у GoPro, FlowState у Insta360): тогда камера записывает движение, по которому плеер стабилизирует картинку. Копируйте клипы прямо с карты: приложение, которое их экспортирует или обрезает, теряет то, что читает плеер.</p></div>
+          <div class="a"><p>Для цвета снимайте в режиме log, а можно и без него: обычные клипы воспроизводятся как обычно. Для воспроизведения без тряски выключите стабилизацию самой камеры (EIS у DJI, HyperSmooth у GoPro, FlowState у Insta360): тогда камера записывает движение, по которому плеер выравнивает картинку. Камеры DJI записывают его только с углом обзора Wide. Копируйте клипы прямо с карты: приложение, которое их экспортирует или обрезает, теряет то, что читает плеер.</p></div>
         </details>
         <details>
           <summary>Он изменяет мои исходные файлы?</summary>
-          <div class="a"><p>Нет. Action Footage Player их только читает. Моменты, превью клипов и экспорт — это отдельные новые файлы.</p></div>
+          <div class="a"><p>Только если вы попросите. Чтобы вырезать из клипа испорченный кусок (<kbd>Ctrl</kbd>+<kbd>x</kbd>), плеер перезаписывает клип без него, ничего не перекодируя, а оригинал отправляется в Корзину. В остальном ваши исходные файлы остаются как есть: моменты, превью клипов и экспорт — это отдельные новые файлы, а ваши метки — маленький файл рядом с клипом.</p></div>
         </details>
         <details>
           <summary>Где хранятся мои моменты? А на заблокированной карте?</summary>
-          <div class="a"><p>Папки Moments, Clips и Exports создаются в папке самой поездки, рядом с вашим видео. На заблокированной карте или в сетевой папке только для чтения плеер спрашивает имя и хранит их в своей папке в «Документах».</p></div>
+          <div class="a"><p>Папки <code>_Moments</code>, <code>_Clips</code> и <code>_Exports</code> создаются в папке проекта — папке поездки, которую вы один раз выбираете на вкладке Project боковой панели (<i>Initialize the project here</i>). Это может быть папка с самими клипами или папка уровнем выше. На заблокированной карте или в сетевой папке только для чтения плеер спрашивает имя и хранит их в своей папке в «Документах».</p></div>
         </details>
         <details>
           <summary>Mac или Windows?</summary>
@@ -330,7 +351,7 @@
       <div class="section-head">
         <p class="eyebrow">Попробуйте</p>
         <h2>Вставьте карту, дважды щёлкните по клипу.</h2>
-        <p class="lede">Бесплатно, без аккаунта, а ваше видео остаётся как есть.</p>
+        <p class="lede">Бесплатно, без аккаунта, а ваше видео меняется, только если вы сами попросите.</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -345,7 +366,7 @@
       <div class="help">
         <div class="help-card">
           <h3>Всё, что он умеет</h3>
-          <p>Все клавиши и настройки, варианты изображения, параметры стабилизации и камеры по отдельности.</p>
+          <p>Все клавиши и настройки, стили, параметры стабилизации и камеры по отдельности.</p>
           <a href="features.html">Все функции</a>
         </div>
         <div class="help-card">
@@ -366,8 +387,9 @@
 <footer class="band">
   <div class="wrap">
     <div class="row">
-      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · Сделано дайвером из Женевы, Швейцария</span>
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · <a href="about.html">Сделано дайвером из Женевы, Швейцария</a></span>
       <a href="index.html">Главная</a>
+      <a href="about.html">Об авторе</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="features.html">Все функции</a>
       <a href="download.html">Загрузки</a>

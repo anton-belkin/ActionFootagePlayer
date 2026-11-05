@@ -33,32 +33,52 @@
       Action Footage Player
     </a>
     <nav class="nav" aria-label="网站">
-      <a href="index.html">首页</a>
-      <a href="divers.html">水下拍摄</a>
-      <a href="moments.html">海量素材</a>
-      <a href="features.html">全部功能</a>
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>功能</summary>
+        <ul>
+          <li><a href="log.html">Log 素材</a></li>
+          <li><a href="stabilization.html">防抖</a></li>
+          <li><a href="library.html">素材库</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="features.html" class="nm-all">全部功能</a></li>
+        </ul>
+      </details>
       <a href="download.html" class="nav-dl" aria-current="page">下载</a>
     </nav>
-    <details class="pagemenu">
-      <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/></svg><span class="pm-label">本页内容</span></summary>
-      <div class="pm">
-      <ul class="pm-site">
-        <li><a href="index.html">首页</a></li>
-        <li><a href="divers.html">水下拍摄</a></li>
-        <li><a href="moments.html">海量素材</a></li>
-        <li><a href="features.html">全部功能</a></li>
-        <li><a href="download.html" aria-current="page">下载</a></li>
-      </ul>
-      <p class="pm-title">本页内容</p>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
       <ul>
-        <li><a href="#apps">macOS</a></li>
-        <li><a href="#windows">Windows</a></li>
-        <li><a href="#windows-arm">Windows ARM 版</a></li>
-        <li><a href="#linux">Linux</a></li>
-        <li><a href="#plugins">已经在用 mpv？</a></li>
-        <li><a href="#release">本次发布</a></li>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html">Log 素材</a></li>
+        <li><a href="stabilization.html">防抖</a></li>
+        <li><a href="library.html">素材库</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="features.html">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html" aria-current="page">下载</a></li>
       </ul>
-      </div>
     </details>
     <details class="lang">
       <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
@@ -391,8 +411,9 @@
 <footer class="band">
   <div class="wrap">
     <div class="row">
-      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · 由瑞士日内瓦的一位潜水爱好者开发</span>
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
       <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer/releases">所有版本</a>
     </div>

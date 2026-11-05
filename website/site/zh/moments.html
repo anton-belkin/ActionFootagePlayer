@@ -34,32 +34,52 @@
       Action Footage Player
     </a>
     <nav class="nav" aria-label="网站">
-      <a href="index.html">首页</a>
-      <a href="divers.html">水下拍摄</a>
-      <a href="moments.html" aria-current="page">海量素材</a>
-      <a href="features.html">全部功能</a>
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html" aria-current="page">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>功能</summary>
+        <ul>
+          <li><a href="log.html">Log 素材</a></li>
+          <li><a href="stabilization.html">防抖</a></li>
+          <li><a href="library.html">素材库</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="features.html" class="nm-all">全部功能</a></li>
+        </ul>
+      </details>
       <a href="download.html" class="nav-dl">下载</a>
     </nav>
-    <details class="pagemenu">
-      <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/></svg><span class="pm-label">本页内容</span></summary>
-      <div class="pm">
-      <ul class="pm-site">
-        <li><a href="index.html">首页</a></li>
-        <li><a href="divers.html">水下拍摄</a></li>
-        <li><a href="moments.html" aria-current="page">海量素材</a></li>
-        <li><a href="features.html">全部功能</a></li>
-        <li><a href="download.html">下载</a></li>
-      </ul>
-      <p class="pm-title">本页内容</p>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
       <ul>
-        <li><a href="#problem">旅行归来</a></li>
-        <li><a href="#fix">有了 Action Footage Player</a></li>
-        <li><a href="#moments">精彩瞬间</a></li>
-        <li><a href="#share">分享与剪辑</a></li>
-        <li><a href="#proof">眼见为实</a></li>
-        <li><a href="#faq">常见问题</a></li>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html" aria-current="page">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html">Log 素材</a></li>
+        <li><a href="stabilization.html">防抖</a></li>
+        <li><a href="library.html">素材库</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="features.html">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html">下载</a></li>
       </ul>
-      </div>
     </details>
     <details class="lang">
       <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
@@ -96,15 +116,15 @@
         </div>
         <div class="status">
           <span>免费开源</span>
-          <span>无需账户</span>
-          <span>原始文件绝不会被修改</span>
+          <span>无需账号</span>
+          <span>除非你要求，原始文件不会被改动</span>
         </div>
       </div>
 
       <figure class="media">
         <div class="halves"><span>其他应用中的样子</span><span>在这里播放的样子</span></div>
         <img src="../media/log-grey-color.jpg" width="1600" height="900" alt="一段 Log 片段中的一帧，从中间分开：左边平淡发灰，右边色彩完整。">
-        <figcaption>一帧真实画面，以 Log 拍摄：左边是其他应用显示的灰色，右边是在这里播放的色彩，无需调色。</figcaption>
+        <figcaption>一帧真实画面，以 Log 拍摄：在其他应用里是灰的，在这里播放时是彩色的，无需调色。</figcaption>
       </figure>
     </div>
   </section>
@@ -120,7 +140,7 @@
       <ul class="mo-pains">
         <li>
           <h3>到处灰蒙蒙</h3>
-          <p class="os-mac">用 Log 拍的？每个片段在 Finder、Quick Look 和剪辑软件里都又平又灰，看缩略图根本分不出哪个拍得好。</p>
+          <p class="os-mac">用 Log 拍的？每个片段在访达、快速查看和剪辑软件里都又平又灰，看缩略图根本分不出哪个拍得好。</p>
           <p class="os-win">用 Log 拍的？每个片段在文件资源管理器、它的预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）和剪辑软件里都又平又灰，看缩略图根本分不出哪个拍得好。</p>
         </li>
         <li>
@@ -151,7 +171,7 @@
       <ul class="mo-answers">
         <li>
           <h3>即使是 Log，也是正常色彩</h3>
-          <p>D-Log M、GP-Log 和 I-Log 以正常色彩和 HDR 播放，无需调色。普通片段照常播放。</p>
+          <p>Osmo Action 6 和 Osmo 360 的 D-Log M，以及 HERO12 Black（固件 1.20 或更高版本）和 HERO13 Black 的 GP-Log，都以正常色彩和 HDR 播放，无需调色。其他 Log 片段（包括 10-bit I-Log）只需按一个键：<kbd>Ctrl</kbd>+<kbd>l</kbd>。普通片段照常播放。</p>
         </li>
         <li>
           <h3>播放时即防抖</h3>
@@ -172,7 +192,7 @@
       <div class="stack">
         <p class="eyebrow">精彩瞬间</p>
         <h2>把最好的几分钟留成看得见的文件。</h2>
-        <p class="lede kbd-dark">标记一段，按 <kbd>k</kbd>：它就成为一个精彩瞬间，一个放在本次旅行 Moments 文件夹里的小视频，<span class="os-mac">Finder 和 Quick Look</span><span class="os-win">文件资源管理器和它的预览窗格</span>都以正常色彩显示它。双击它，播放的是原始文件，画质完整。</p>
+        <p class="lede kbd-dark">标记一段，按 <kbd>k</kbd>：它就成为一个精彩瞬间，一个放在本次旅行 <code>_Moments</code> 文件夹里的小视频，<span class="os-mac">访达和快速查看</span><span class="os-win">文件资源管理器和它的预览窗格</span>都以正常色彩显示它。在播放器里打开它，播放的是原始文件中的那一段，画质完整。第一次使用时，要在侧边面板的 Project 标签页里选好这次旅行的文件夹：<i>Initialize the project here</i>（在此初始化项目）。</p>
         <div class="dive-points kbd-dark">
           <div>
             <h3>你自己的标记</h3>
@@ -180,12 +200,12 @@
           </div>
           <div>
             <h3>放到一边，或设为收藏</h3>
-            <p class="os-mac"><kbd>X</kbd> 把片段标为没意思，放到一边。<kbd>K</kbd> 把它设为收藏，在 Finder 里带上绿色的 Favorite 标签。</p>
+            <p class="os-mac"><kbd>X</kbd> 把片段标为没意思，放到一边。<kbd>K</kbd> 把它设为收藏，在访达里带上绿色的 Favorite 标签。</p>
             <p class="os-win"><kbd>X</kbd> 把片段标为没意思，放到一边。<kbd>K</kbd> 把它设为收藏，在文件资源管理器里给它 5 星评分（4 星及以上评分都算收藏）。</p>
           </div>
           <div>
             <h3>整个旅程一目了然</h3>
-            <p>在菜单里操作，播放器会在 Clips 文件夹里为每个片段生成一本彩色的翻页小书，而不是一墙灰色缩略图。</p>
+            <p>在侧边面板的 Project 标签页里操作，播放器会在 <code>_Clips</code> 文件夹里为每个片段生成一本彩色的翻页小书，而不是一墙灰色缩略图。</p>
           </div>
           <div>
             <h3>无需维护素材库</h3>
@@ -195,18 +215,19 @@
       </div>
       <div class="stack">
         <ul class="mo-tree" aria-label="用播放器整理一个晚上之后的旅程文件夹">
-          <li><span class="dir">多洛米蒂 2026</span><span class="c">你的旅程文件夹</span>
+          <li><span class="dir">多洛米蒂 2026</span><span class="c">你的旅程文件夹：也就是项目</span>
             <ul>
-              <li><span class="dir">第1天</span><span class="c">素材，只读不写</span></li>
-              <li><span class="dir">Moments</span>
+              <li><span class="dir">第1天</span><span class="c">素材，每个片段旁边是你的标记</span></li>
+              <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>山顶山脊.mp4</li>
-                  <li>2026-07-14 16.02.11.mp4<span class="c">一个你没有命名的精彩瞬间</span></li>
+                  <li>山顶山脊.afplink.mp4</li>
+                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">一个你没有命名的精彩瞬间</span></li>
                   <li><span class="dir">自行车公园</span><span class="c">你自己建的子文件夹</span></li>
                 </ul>
               </li>
-              <li><span class="dir">Clips</span><span class="c">每个片段一个彩色翻页预览</span></li>
-              <li><span class="dir">Exports</span><span class="c">你导出的文件</span></li>
+              <li><span class="dir">_Clips</span><span class="c">每个片段一个彩色翻页预览</span></li>
+              <li><span class="dir">_Exports</span><span class="c">你导出的文件</span></li>
+              <li><span class="dir">_ActionFootagePlayer</span><span class="c">播放器自己的记录</span></li>
             </ul>
           </li>
         </ul>
@@ -224,12 +245,12 @@
       <div class="mo-share">
         <div>
           <h3>今晚</h3>
-          <p><kbd>Shift</kbd>+<kbd>E</kbd> 把你标记的那一段按播放时的样子导出到本次旅行的 Exports 文件夹：画面稳定，色彩正常。它是带有 Dolby Vision 信息的 HDR 视频，iPhone、iPad 和 Mac 播放时会用到这些信息。</p>
-          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · Exports</span>
+          <p><kbd>Shift</kbd>+<kbd>E</kbd> 把你标记的那一段按播放时的样子导出到本次旅行的 <code>_Exports</code> 文件夹：画面稳定，色彩正常。它是一个 HDR 视频，手机、Mac 和电视都会将其显示为 HDR。在 Mac 上以 <i>HLG+DV</i> 风格导出时（在没有 HDR 的 Mac 屏幕上，片段一开始用的就是这个风格），文件还带有 Dolby Vision 信息，iPhone、iPad 和 Mac 会利用这些信息，在没有 HDR 的屏幕上也把它显示好。</p>
+          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · _Exports</span>
         </div>
         <div>
           <h3>剪辑从你停下的地方开始</h3>
-          <p>到了正式剪辑的时候，Final Cut Pro、DaVinci Resolve（免费版也可以）和 Premiere Pro 都能拿到你的精彩瞬间、标记、收藏和文件夹，落在原始文件上。不用重新找，也不用标第二遍。</p>
+          <p>到了正式剪辑的时候，Final Cut Pro、DaVinci Resolve（免费版也可以）和 Premiere Pro 都能拿到你的精彩瞬间、标记、收藏和文件夹，直接对应原始文件。不用重新找，也不用标第二遍。</p>
           <span class="meta">Final Cut Pro · DaVinci Resolve · Premiere Pro</span>
         </div>
       </div>
@@ -256,14 +277,14 @@
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
-          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">Finder 窗口中的 Moments 和 Clips 文件夹</span><span class="os-win">文件资源管理器窗口中的 Moments 和 Clips 文件夹</span></div>
-          <figcaption><span class="os-mac">Finder 里的 Moments 和 Clips 文件夹，色彩正常。</span><span class="os-win">文件资源管理器里的 Moments 和 Clips 文件夹，色彩正常。</span></figcaption>
+          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">访达窗口中的 _Moments 和 _Clips 文件夹</span><span class="os-win">文件资源管理器窗口中的 _Moments 和 _Clips 文件夹</span></div>
+          <figcaption><span class="os-mac">访达里的 <code>_Moments</code> 和 <code>_Clips</code> 文件夹，色彩正常。</span><span class="os-win">文件资源管理器里的 <code>_Moments</code> 和 <code>_Clips</code> 文件夹，色彩正常。</span></figcaption>
         </figure>
       </div>
       <dl class="mo-fit">
         <div>
           <dt>Log 正常色彩</dt>
-          <dd>DJI 的 D-Log M，GoPro 的 GP-Log 和 GP-Log2，Insta360 的 10-bit I-Log</dd>
+          <dd>DJI 的 D-Log M，GoPro 的 GP-Log 和 GP-Log2，Insta360 的 10-bit I-Log（手动选择，<kbd>Ctrl</kbd>+<kbd>l</kbd>）</dd>
         </div>
         <div>
           <dt>精彩时刻标记</dt>
@@ -271,10 +292,10 @@
         </div>
         <div>
           <dt>播放时即防抖</dt>
-          <dd>DJI 关闭 EIS，GoPro 关闭 HyperSmooth，Insta360 关闭 FlowState</dd>
+          <dd>DJI 关闭 EIS 并用 Wide 视角，GoPro 关闭 HyperSmooth，Insta360 关闭 FlowState</dd>
         </div>
       </dl>
-      <p class="mo-trust">免费开源（GPL-3.0）· 无需账户 · 只读取你的原始文件 · 防抖由 Gyroflow 引擎完成</p>
+      <p class="mo-trust">免费开源（GPL-3.0）· 无需账号 · 除非你要求，原始文件不会被改动 · 防抖由 Gyroflow 引擎完成</p>
       <div class="btns" data-os-swap>
         <a class="btn primary dl-mac" href="download.html#mac">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -302,15 +323,15 @@
         </details>
         <details>
           <summary>相机上需要设置什么吗？</summary>
-          <div class="a"><p>想要色彩，就用相机的 Log 模式拍摄，不用也行：普通片段照常播放。想要播放时画面稳定，就关掉相机自身的防抖（DJI 的 EIS、GoPro 的 HyperSmooth、Insta360 的 FlowState），这样相机会记录下运动数据，播放器据此稳定画面。请直接从存储卡复制片段：经过其他应用导出或裁剪的片段，会丢失播放器要读取的信息。</p></div>
+          <div class="a"><p>想要色彩，就用相机的 Log 模式拍摄，不用也行：普通片段照常播放。想要播放时画面稳定，就关掉相机自身的防抖（DJI 的 EIS、GoPro 的 HyperSmooth、Insta360 的 FlowState），这样相机会记录下运动数据，播放器据此稳定画面。DJI 相机只有在使用 Wide 视角时才会记录这些数据。请直接从存储卡复制片段：经过其他应用导出或裁剪的片段，会丢失播放器要读取的信息。</p></div>
         </details>
         <details>
           <summary>它会修改我的原始文件吗？</summary>
-          <div class="a"><p>不会。Action Footage Player 只读取它们。精彩瞬间、片段预览和导出的文件都是独立的新文件。</p></div>
+          <div class="a"><p>只有你要求时才会。要把片段中拍坏的一段剪掉（<kbd>Ctrl</kbd>+<kbd>x</kbd>），播放器会重写这个片段、去掉那一段，不做任何重新编码，原始文件则移到废纸篓。除此之外，你的原始文件都保持原样：精彩瞬间、片段预览和导出的文件都是独立的新文件，你的标记则是片段旁边的一个小文件。</p></div>
         </details>
         <details>
           <summary>我的精彩瞬间存在哪里？写保护的存储卡上呢？</summary>
-          <div class="a"><p>Moments、Clips 和 Exports 文件夹放在这次旅行自己的文件夹里，就在素材旁边。如果是写保护的存储卡或只读的共享文件夹，播放器会先询问一个名字，再把它们放在<span class="os-mac">“文稿”</span><span class="os-win">“文档”</span>（Documents）里它自己的文件夹中。</p></div>
+          <div class="a"><p><code>_Moments</code>、<code>_Clips</code> 和 <code>_Exports</code> 文件夹放在项目文件夹里，也就是这次旅行的文件夹，你只需在侧边面板的 Project 标签页里选一次（<i>Initialize the project here</i>）。它可以是片段所在的文件夹，也可以是它的上一级文件夹。如果是写保护的存储卡或只读的共享文件夹，播放器会先询问一个名字，再把它们放在“文稿”（Documents）里它自己的文件夹中。</p></div>
         </details>
         <details>
           <summary>Mac 还是 Windows？</summary>
@@ -330,7 +351,7 @@
       <div class="section-head">
         <p class="eyebrow">试一试</p>
         <h2>插入存储卡，双击一个片段。</h2>
-        <p class="lede">免费，无需账户，你的素材保持原样。</p>
+        <p class="lede">免费，无需账号；除非你要求，你的素材不会被改动。</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -366,8 +387,9 @@
 <footer class="band">
   <div class="wrap">
     <div class="row">
-      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · 由瑞士日内瓦的一位潜水爱好者开发</span>
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
       <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="features.html">全部功能</a>
       <a href="download.html">下载</a>

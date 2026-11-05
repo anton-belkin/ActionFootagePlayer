@@ -34,32 +34,52 @@
       Action Footage Player
     </a>
     <nav class="nav" aria-label="Site">
-      <a href="index.html">Accueil</a>
-      <a href="divers.html">Sous l’eau</a>
-      <a href="moments.html" aria-current="page">Heures de clips</a>
-      <a href="features.html">Fonctions</a>
+      <details class="navmenu"><summary>Accueil</summary>
+        <ul>
+          <li><a href="index.html">Page d&rsquo;accueil</a></li>
+          <li><a href="index.html#features">Ce qu&rsquo;il fait</a></li>
+          <li><a href="index.html#how">Comment ça marche</a></li>
+          <li><a href="index.html#faq">Questions</a></li>
+          <li><a href="about.html">À propos de l&rsquo;auteur</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Pour qui</summary>
+        <ul>
+          <li><a href="divers.html">Plongée et snorkeling</a></li>
+          <li><a href="moments.html" aria-current="page">Voyageurs actifs</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Fonctions</summary>
+        <ul>
+          <li><a href="log.html">Images log</a></li>
+          <li><a href="stabilization.html">Stabilisation</a></li>
+          <li><a href="library.html">Bibliothèque</a></li>
+          <li><a href="photos.html">Photos</a></li>
+          <li><a href="features.html" class="nm-all">Toutes les fonctions</a></li>
+        </ul>
+      </details>
       <a href="download.html" class="nav-dl">Télécharger</a>
     </nav>
-    <details class="pagemenu">
-      <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/></svg><span class="pm-label">Sur cette page</span></summary>
-      <div class="pm">
-      <ul class="pm-site">
-        <li><a href="index.html">Accueil</a></li>
-        <li><a href="divers.html">Sous l’eau</a></li>
-        <li><a href="moments.html" aria-current="page">Heures de clips</a></li>
-        <li><a href="features.html">Fonctions</a></li>
-        <li><a href="download.html">Télécharger</a></li>
-      </ul>
-      <p class="pm-title">Sur cette page</p>
+    <details class="sitemenu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
       <ul>
-        <li><a href="#problem">Au retour de voyage</a></li>
-        <li><a href="#fix">Avec Action Footage Player</a></li>
-        <li><a href="#moments">Moments</a></li>
-        <li><a href="#share">Partager et monter</a></li>
-        <li><a href="#proof">Voyez par vous-même</a></li>
-        <li><a href="#faq">Questions</a></li>
+        <li class="sm-group">Accueil</li>
+        <li><a href="index.html">Page d&rsquo;accueil</a></li>
+        <li><a href="index.html#features">Ce qu&rsquo;il fait</a></li>
+        <li><a href="index.html#how">Comment ça marche</a></li>
+        <li><a href="index.html#faq">Questions</a></li>
+        <li><a href="about.html">À propos de l&rsquo;auteur</a></li>
+        <li class="sm-group">Pour qui</li>
+        <li><a href="divers.html">Plongée et snorkeling</a></li>
+        <li><a href="moments.html" aria-current="page">Voyageurs actifs</a></li>
+        <li class="sm-group">Fonctions</li>
+        <li><a href="log.html">Images log</a></li>
+        <li><a href="stabilization.html">Stabilisation</a></li>
+        <li><a href="library.html">Bibliothèque</a></li>
+        <li><a href="photos.html">Photos</a></li>
+        <li><a href="features.html">Toutes les fonctions</a></li>
+        <li class="sm-dl"><a href="download.html">Télécharger</a></li>
       </ul>
-      </div>
     </details>
     <details class="lang">
       <summary aria-label="Langue : français"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>FR</summary>
@@ -97,7 +117,7 @@
         <div class="status">
           <span>Gratuit et open source</span>
           <span>Sans compte</span>
-          <span>Vos fichiers originaux ne sont jamais modifiés</span>
+          <span>Rien ne modifie vos originaux sans que vous le demandiez</span>
         </div>
       </div>
 
@@ -120,7 +140,7 @@
       <ul class="mo-pains">
         <li>
           <h3>Du gris partout</h3>
-          <p class="os-mac">Filmé en log ? Chaque clip est plat et gris dans le Finder, dans Quick Look et dans votre logiciel de montage : les vignettes ne vous disent pas lequel était le bon.</p>
+          <p class="os-mac">Filmé en log ? Chaque clip est plat et gris dans le Finder, dans Coup d’œil et dans votre logiciel de montage : les vignettes ne vous disent pas lequel était le bon.</p>
           <p class="os-win">Filmé en log ? Chaque clip est plat et gris dans l’Explorateur de fichiers, dans son volet de visualisation (<kbd>Alt</kbd>+<kbd>P</kbd>) et dans votre logiciel de montage : les vignettes ne vous disent pas lequel était le bon.</p>
         </li>
         <li>
@@ -151,7 +171,7 @@
       <ul class="mo-answers">
         <li>
           <h3>En couleur, même en log</h3>
-          <p>Le D-Log M, le GP-Log et l’I-Log se lisent en couleur et en HDR, sans étalonnage. Les clips normaux se lisent comme d’habitude.</p>
+          <p>Le D-Log M des Osmo Action 6 et Osmo 360, et le GP-Log des HERO12 Black (firmware 1.20 ou plus récent) et HERO13 Black, se lisent en couleur et en HDR, sans étalonnage. Les autres clips log, I-Log 10 bits compris, demandent une touche : <kbd>Ctrl</kbd>+<kbd>l</kbd>. Les clips normaux se lisent comme d’habitude.</p>
         </li>
         <li>
           <h3>Stabilisé pendant la lecture</h3>
@@ -172,7 +192,7 @@
       <div class="stack">
         <p class="eyebrow">Moments</p>
         <h2>Gardez les meilleures minutes en fichiers que vous voyez.</h2>
-        <p class="lede kbd-dark">Délimitez un passage et appuyez sur <kbd>k</kbd> : il devient un moment, une petite vidéo dans le dossier Moments du voyage, que <span class="os-mac">le Finder et Quick Look affichent</span><span class="os-win">l’Explorateur de fichiers et son volet de visualisation affichent</span> en couleur. Double-cliquez dessus, et c’est l’original qui se lit, en pleine qualité.</p>
+        <p class="lede kbd-dark">Délimitez un passage et appuyez sur <kbd>k</kbd> : il devient un moment, une petite vidéo dans le dossier <code>_Moments</code> du voyage, que <span class="os-mac">le Finder et Coup d’œil affichent</span><span class="os-win">l’Explorateur de fichiers et son volet de visualisation affichent</span> en couleur. Ouvert dans le lecteur, il lit ce passage de l’original, en pleine qualité. La première fois, vous choisissez le dossier du voyage dans l’onglet Project (projet) du panneau latéral : <i>Initialize the project here</i> (initialiser le projet ici).</p>
         <div class="dive-points kbd-dark">
           <div>
             <h3>Vos propres repères</h3>
@@ -185,7 +205,7 @@
           </div>
           <div>
             <h3>Tout le voyage d’un coup d’œil</h3>
-            <p>Depuis le menu, le lecteur remplit un dossier Clips d’un flip-book en couleur par clip, au lieu d’un mur de vignettes grises.</p>
+            <p>Depuis l’onglet Project du panneau latéral, le lecteur remplit un dossier <code>_Clips</code> d’un flip-book en couleur par clip, au lieu d’un mur de vignettes grises.</p>
           </div>
           <div>
             <h3>Aucune bibliothèque à entretenir</h3>
@@ -195,18 +215,19 @@
       </div>
       <div class="stack">
         <ul class="mo-tree" aria-label="Le dossier d’un voyage après une soirée avec le lecteur">
-          <li><span class="dir">Dolomites 2026</span><span class="c">le dossier de votre voyage</span>
+          <li><span class="dir">Dolomites 2026</span><span class="c">le dossier de votre voyage : le projet</span>
             <ul>
-              <li><span class="dir">Jour 1</span><span class="c">les vidéos, uniquement lues</span></li>
-              <li><span class="dir">Moments</span>
+              <li><span class="dir">Jour 1</span><span class="c">les vidéos, avec vos repères à côté de chaque clip</span></li>
+              <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>Arête du sommet.mp4</li>
-                  <li>2026-07-14 16.02.11.mp4<span class="c">un moment que vous n’avez pas nommé</span></li>
+                  <li>Arête du sommet.afplink.mp4</li>
+                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">un moment que vous n’avez pas nommé</span></li>
                   <li><span class="dir">Bike park</span><span class="c">un sous-dossier à vous</span></li>
                 </ul>
               </li>
-              <li><span class="dir">Clips</span><span class="c">un flip-book en couleur par clip</span></li>
-              <li><span class="dir">Exports</span><span class="c">ce que vous avez exporté</span></li>
+              <li><span class="dir">_Clips</span><span class="c">un flip-book en couleur par clip</span></li>
+              <li><span class="dir">_Exports</span><span class="c">ce que vous avez exporté</span></li>
+              <li><span class="dir">_ActionFootagePlayer</span><span class="c">les notes du lecteur</span></li>
             </ul>
           </li>
         </ul>
@@ -224,8 +245,8 @@
       <div class="mo-share">
         <div>
           <h3>Ce soir</h3>
-          <p><kbd>Shift</kbd>+<kbd>E</kbd> exporte le passage délimité tel qu’il se lit, stabilisé et en couleur, dans le dossier Exports du voyage. C’est une vidéo HDR avec des informations Dolby Vision, que les iPhone, iPad et Mac utilisent quand ils la lisent.</p>
-          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · Exports</span>
+          <p><kbd>Shift</kbd>+<kbd>E</kbd> exporte le passage délimité tel qu’il se lit, stabilisé et en couleur, dans le dossier <code>_Exports</code> du voyage. C’est une vidéo HDR que les téléphones, les Mac et les téléviseurs affichent en HDR. Exportée sur un Mac dans le look <i>HLG+DV</i>, celui dans lequel les clips démarrent sur un écran de Mac sans HDR, elle porte aussi des informations Dolby Vision, que les iPhone, iPad et Mac utilisent pour bien l’afficher sur les écrans sans HDR.</p>
+          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · _Exports</span>
         </div>
         <div>
           <h3>Le montage reprend là où vous vous êtes arrêté</h3>
@@ -256,14 +277,14 @@
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
-          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">Une fenêtre du Finder avec les dossiers Moments et Clips</span><span class="os-win">Une fenêtre de l’Explorateur de fichiers avec les dossiers Moments et Clips</span></div>
-          <figcaption><span class="os-mac">Vos dossiers Moments et Clips dans le Finder, en couleur.</span><span class="os-win">Vos dossiers Moments et Clips dans l’Explorateur de fichiers, en couleur.</span></figcaption>
+          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">Une fenêtre du Finder avec les dossiers _Moments et _Clips</span><span class="os-win">Une fenêtre de l’Explorateur de fichiers avec les dossiers _Moments et _Clips</span></div>
+          <figcaption><span class="os-mac">Vos dossiers <code>_Moments</code> et <code>_Clips</code> dans le Finder, en couleur.</span><span class="os-win">Vos dossiers <code>_Moments</code> et <code>_Clips</code> dans l’Explorateur de fichiers, en couleur.</span></figcaption>
         </figure>
       </div>
       <dl class="mo-fit">
         <div>
           <dt>Le log en couleur</dt>
-          <dd>D-Log M de DJI, GP-Log et GP-Log2 de GoPro, I-Log 10 bits d’Insta360</dd>
+          <dd>D-Log M de DJI, GP-Log et GP-Log2 de GoPro, I-Log 10 bits d’Insta360 (manuellement, <kbd>Ctrl</kbd>+<kbd>l</kbd>)</dd>
         </div>
         <div>
           <dt>Repères de temps fort</dt>
@@ -271,10 +292,10 @@
         </div>
         <div>
           <dt>Stabilisé pendant la lecture</dt>
-          <dd>DJI avec l’EIS coupé, GoPro avec HyperSmooth coupé, Insta360 avec FlowState coupé</dd>
+          <dd>DJI avec l’EIS coupée et le FOV Wide, GoPro avec HyperSmooth coupé, Insta360 avec FlowState coupé</dd>
         </div>
       </dl>
-      <p class="mo-trust">Gratuit et open source (GPL-3.0) · Sans compte · Ne fait que lire vos originaux · Stabilisation par le moteur de Gyroflow</p>
+      <p class="mo-trust">Gratuit et open source (GPL-3.0) · Sans compte · Rien ne modifie vos originaux sans que vous le demandiez · Stabilisation par le moteur de Gyroflow</p>
       <div class="btns" data-os-swap>
         <a class="btn primary dl-mac" href="download.html#mac">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -302,15 +323,15 @@
         </details>
         <details>
           <summary>Faut-il régler quelque chose sur la caméra ?</summary>
-          <div class="a"><p>Pour la couleur, filmez dans le mode log de la caméra, ou pas : les clips normaux se lisent comme d’habitude. Pour une lecture stabilisée, coupez la stabilisation de la caméra (EIS chez DJI, HyperSmooth chez GoPro, FlowState chez Insta360) : la caméra enregistre alors les mouvements avec lesquels le lecteur stabilise l’image. Copiez les clips tels quels depuis la carte : une app qui les exporte ou les coupe supprime ce que le lecteur lit.</p></div>
+          <div class="a"><p>Pour la couleur, filmez dans le mode log de la caméra, ou pas : les clips normaux se lisent comme d’habitude. Pour une lecture stabilisée, coupez la stabilisation de la caméra (EIS chez DJI, HyperSmooth chez GoPro, FlowState chez Insta360) : la caméra enregistre alors les mouvements avec lesquels le lecteur stabilise l’image. Les caméras DJI ne les enregistrent qu’avec le champ de vision Wide (large). Copiez les clips tels quels depuis la carte : une app qui les exporte ou les coupe supprime ce que le lecteur lit.</p></div>
         </details>
         <details>
           <summary>Est-ce qu’il modifie mes fichiers originaux ?</summary>
-          <div class="a"><p>Non. Action Footage Player ne fait que les lire. Les moments, les aperçus des clips et les exports sont de nouveaux fichiers à part.</p></div>
+          <div class="a"><p>Seulement si vous le demandez. Pour couper un passage raté d’un clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), le lecteur réécrit le clip sans ce passage, sans rien réencoder, et l’original part à la Corbeille. Sinon, vos originaux restent tels quels : les moments, les aperçus des clips et les exports sont de nouveaux fichiers à part, et vos repères un petit fichier à côté du clip.</p></div>
         </details>
         <details>
           <summary>Où vont mes moments ? Et sur une carte verrouillée ?</summary>
-          <div class="a"><p>Les dossiers Moments, Clips et Exports vont dans le dossier du voyage, à côté de vos vidéos. Sur une carte verrouillée ou un partage en lecture seule, le lecteur demande un nom et les garde dans son propre dossier, dans Documents.</p></div>
+          <div class="a"><p>Les dossiers <code>_Moments</code>, <code>_Clips</code> et <code>_Exports</code> vont dans le dossier de projet : le dossier du voyage, que vous choisissez une fois dans l’onglet Project du panneau latéral (<i>Initialize the project here</i>). Ce peut être le dossier des clips lui-même ou un dossier au-dessus. Sur une carte verrouillée ou un partage en lecture seule, le lecteur demande un nom et les garde dans son propre dossier, dans Documents.</p></div>
         </details>
         <details>
           <summary>Mac ou Windows ?</summary>
@@ -330,7 +351,7 @@
       <div class="section-head">
         <p class="eyebrow">Essayez</p>
         <h2>Insérez une carte, double-cliquez sur un clip.</h2>
-        <p class="lede">Gratuit, sans compte, et vos vidéos restent telles quelles.</p>
+        <p class="lede">Gratuit, sans compte, et rien ne modifie vos vidéos sans que vous le demandiez.</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -366,8 +387,9 @@
 <footer class="band">
   <div class="wrap">
     <div class="row">
-      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · Créé par un plongeur à Genève, en Suisse</span>
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · <a href="about.html">Créé par un plongeur à Genève, en Suisse</a></span>
       <a href="index.html">Accueil</a>
+      <a href="about.html">À propos</a>
       <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
       <a href="features.html">Toutes les fonctions</a>
       <a href="download.html">Téléchargements</a>

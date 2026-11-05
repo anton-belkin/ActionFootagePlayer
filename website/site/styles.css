@@ -410,3 +410,6 @@ footer a { color: var(--ink); }
 /* Words for the visitor's system (top.js sets <html data-os>): the Mac's unless it says "win" */
 html:not([data-os="win"]) .os-win { display: none; }
 [data-os="win"] .os-mac { display: none; }
+
+/* Chinese text has no spaces to break a long path or command at: let code break anywhere */
+:lang(zh-Hans) main code { overflow-wrap: anywhere; }

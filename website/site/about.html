@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>About: who makes Action Footage Player</title>
 <meta name="description" content="Anton Belkin, a diver in Geneva, made Action Footage Player for his own footage: log in color, steady under water, nothing to render. Why it exists, and how a bit of physics fixed underwater stabilization.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/about">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/about">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/about">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/about">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/about">
 <link rel="icon" href="favicon.ico" sizes="32x32">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -80,6 +85,9 @@
       <summary aria-label="Language: English"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>EN</summary>
       <ul>
         <li><a href="about.html" hreflang="en" lang="en" aria-current="page">English</a></li>
+        <li><a href="fr/about.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="ru/about.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="zh/about.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
       </ul>
     </details>
   </div>
@@ -115,11 +123,17 @@
     <div class="wrap ab-story">
       <div class="ab-text">
         <h2>Beauty as it was.</h2>
-        <p>I love travel and diving for the beauty you get to see, and I love sharing it. What I don't love is spending evenings grading and polishing clips. I don't think beauty needs improving: it's already there. Technology should just carry it to the screen as it was.</p>
+        <p>I love travel and diving for the beauty you get to see, and I love sharing it. What I don't love is spending evenings grading and polishing clips. I don't think beauty needs improving: it's already there. When cameras and screens couldn't hold it all, it had to be squeezed into what they could show, and that took creative decisions. Not anymore: with log and HDR, technology is capable enough to carry beauty to the screen as it was. It just has to be used that way.</p>
 
         <h2>Better cameras, harder files.</h2>
         <p>Over the years cameras got better, and their files stopped being ordinary videos. Use everything a camera can do, and you get a grey log picture, gyro data, telemetry and highlight marks that ordinary players can't read. Turn it all off, and the video is plainer than the camera could have made it.</p>
         <p>In between there's only the maker's app: on a phone, like watching through a keyhole. You're tied to it for good, often with an account, a cloud or a subscription you never asked for.</p>
+
+        <h2>Colors as the eye remembers them.</h2>
+        <p>Under water, the colors were never right. In the camera's normal mode they came out too purple, too brown or too green: not what the eye remembers. Then I came across the cameras' log mode. Seen through a player that understands log, it looked better, if still not perfect. But only the makers' own phone apps read log: the keyhole again.</p>
+        <p>The makers publish how to turn their log into an ordinary SDR picture, never into HDR. The community, though, had measured it. <a class="text-link" href="https://www.zebgardner.com/photo-and-video-editing/gopro-log-color-management-accuracy-testing" rel="noopener">Zeb Gardner</a> had worked out how GoPro's and DJI's log really behave, and made free LUTs that convert it accurately. When I took my dives through them into HDR on my MacBook, the look was neutral and true, and at first I couldn't believe my eyes: finally, it looked like what I'd seen. I wanted everyone to have that. So I wrote to Zeb, and he kindly agreed to let the player use his LUTs.</p>
+        <p>It's not what the makers' apps give you. Exported from DJI's app, my dives have their shadows crushed into black, so the corals turn harsh and gothic, and the blues come out too blue, oversaturated. I wanted the neutral look, and Zeb's measurements gave it to me.</p>
+        <p>But applying LUTs takes professional software like DaVinci Resolve or Final Cut Pro, which you have to buy first. Loading clips into an editor just to see what I'd filmed felt like using a sledgehammer to crack a nut. That became the first reason for this player: double-click a log clip, and it plays in HDR, beautifully, right away.</p>
 
         <h2>Shaky under water.</h2>
         <p>Under water, everything shakes. When cameras got their own stabilization I was thrilled, until I saw it doesn't work there. And I never wanted a big two-handed rig. For me the dive comes first: being there, looking around, feeling the place. The camera is one hand, no more, or the joy goes.</p>
