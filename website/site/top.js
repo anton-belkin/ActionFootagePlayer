@@ -55,7 +55,7 @@
    outside them and on Escape, as menus do; without this script they still open and close on their summary. */
 (function () {
   "use strict";
-  var menus = document.querySelectorAll(".top details");
+  var menus = document.querySelectorAll(".top details");  // Features ▾, On this page, the language
   if (!menus.length) return;
   function closeAll(except) {
     for (var i = 0; i < menus.length; i++) if (menus[i] !== except) menus[i].open = false;

@@ -42,3 +42,7 @@
 /* Closing download: a card, right under the FAQ */
 .hub-cta { display: grid; gap: 18px; justify-items: start; padding: clamp(24px, 4vw, 44px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .hub-cta .note { margin-top: 4px; }
+
+/* Each card of What it does links to its guide page */
+.feature .feature-more { justify-self: start; font-size: var(--step--1); }
+.hub-guides { line-height: 1.9; }

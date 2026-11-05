@@ -1,0 +1,91 @@
+/* Photos page: what you get as a grid, the steps, text beside its picture (.ph-split), the gain map as a small
+   HTML diagram, settings tables that become cards on phones, the saved files as a tree, Live and Motion Photo in
+   the deep band. Loaded after styles.css. */
+
+.hero .wrap > * { min-width: 0; }
+
+/* What you get */
+.ph-gets { list-style: none; margin: 0; padding: 0; display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.ph-gets li { display: grid; gap: 8px; align-content: start; padding-top: 16px; border-top: 3px solid var(--accent); }
+.ph-gets p { color: var(--muted); }
+
+/* Text beside its picture */
+.ph-split { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); }
+.ph-split > * { min-width: 0; }
+.ph-split .stack { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .ph-split { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 48px; align-items: start; } }
+.ph-split .stack > p, .ph-p { color: var(--muted); max-width: 70ch; }
+.ph-split .stack > p b, .ph-p b { color: var(--ink); font-weight: 600; }
+.ph-h3 { margin-top: 18px; }
+.ph-p { margin-top: 16px; }
+.ph-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; color: var(--muted); max-width: 70ch; }
+.ph-list b { color: var(--ink); font-weight: 600; }
+.ph-label { overflow-wrap: anywhere; color: var(--ink); }
+.ph-tall { aspect-ratio: 3 / 4; width: min(100%, 480px); }
+
+/* The gain map: the file's two parts, and the two screens that show it */
+.ph-gain { margin: 0; display: grid; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.ph-file { display: grid; gap: 8px; padding: 14px; border: 2px solid var(--ink); border-radius: 8px; }
+.ph-file-name { font-family: var(--f-mono); font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
+.ph-part, .ph-screen { display: grid; gap: 2px; padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; }
+.ph-part span, .ph-screen span { color: var(--muted); }
+.ph-base { background: var(--bg); border: 1px solid var(--line); }
+.ph-map { border: 1px dashed var(--accent); }
+.ph-arrows { display: grid; gap: 10px; }
+.ph-screen { position: relative; margin-left: 22px; border: 1px solid var(--line); }
+.ph-screen::before { content: "→"; position: absolute; left: -22px; top: 9px; font-family: var(--f-mono); color: var(--accent-ink); }
+.ph-hdr { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: var(--accent); }
+.ph-gain figcaption { font-size: 0.9rem; color: var(--muted); }
+
+/* Settings and looks tables: rows on wide screens, a card per row on phones */
+.ph-table-wrap { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table.settings { min-width: 0; font-size: 0.95rem; }
+table.settings th, table.settings td { padding: 12px 14px; }
+table.settings tbody th { width: 34%; }
+table.settings td:last-child { width: 18%; color: var(--muted); }
+table.settings td { color: var(--muted); }
+table.settings tr:last-child th { border-bottom: 0; }
+table.settings td b { color: var(--ink); font-weight: 600; }
+table.settings .cam-sub { display: block; font-size: 0.82rem; margin-top: 2px; }
+.ph-looks + .note, .ph-table-wrap + .note { margin-top: 10px; }
+.ph-table-wrap { margin-top: 16px; }
+@media (max-width: 640px) {
+  .ph-table-wrap { border: 0; background: none; }
+  table.settings thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  table.settings, table.settings tbody, table.settings tr, table.settings th, table.settings td { display: block; width: auto !important; }
+  table.settings tr { padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  table.settings th, table.settings td { padding: 0; border: 0; }
+  table.settings td { margin-top: 6px; }
+  table.settings td:last-child:empty { display: none; }
+  table.settings td:last-child::before { content: "Default: "; color: var(--ink); font-weight: 600; }
+  table.ph-looks td:last-child::before { content: "Gain map: "; }
+}
+
+/* Size, clean-up, date, folder */
+.ph-facts { margin-top: 40px; display: grid; gap: 24px 36px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
+.ph-facts > div { display: grid; gap: 8px; align-content: start; padding-top: 14px; border-top: 2px solid var(--ink); }
+.ph-facts p { color: var(--muted); }
+
+/* The saved files */
+.ph-tree, .ph-tree ul { list-style: none; margin: 0; padding: 0; }
+.ph-tree { margin-top: 32px; max-width: 760px; display: grid; gap: 8px; padding: 18px 20px; border-radius: var(--radius); border: 1px dashed var(--line); background: var(--surface); font-family: var(--f-mono); font-size: 0.85rem; overflow-wrap: anywhere; }
+.ph-tree ul { display: grid; gap: 10px; margin: 8px 0 0 0.35em; padding-left: 1.2em; border-left: 1px solid var(--line); }
+.ph-tree .dir::after { content: "/"; color: var(--muted); }
+.ph-tree .c { display: block; font-family: var(--f-body); font-size: 0.8rem; color: var(--muted); }
+
+/* Live Photo, Motion Photo, Still, in the deep band */
+.ph-two { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.ph-two > div { display: grid; gap: 10px; align-content: start; padding-top: 16px; border-top: 2px solid rgba(255, 255, 255, 0.3); }
+.ph-tag { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-family: var(--f-mono); font-size: 0.7rem; font-weight: 500; letter-spacing: 0.04em; color: #FFB48A; border: 1px solid rgba(255, 180, 138, 0.5); }
+.dive code { color: var(--deep-fg); overflow-wrap: anywhere; }
+.dive .ph-p { color: var(--deep-muted); }
+.dive .ph-p b { color: var(--deep-fg); }
+.dive .lede kbd, .dive .ph-p kbd { background: var(--deep-2); border-color: rgba(255, 255, 255, 0.2); color: var(--deep-fg); }
+
+/* Limits */
+.ph-limits { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; max-width: 820px; }
+.ph-limits li { padding-left: 16px; border-left: 3px solid var(--accent); color: var(--muted); }
+.ph-limits b { color: var(--ink); font-weight: 600; }
+
+/* Keys: the right-hand side may hold several keys */
+.keys .key span:last-child { flex: 0 1 auto; }

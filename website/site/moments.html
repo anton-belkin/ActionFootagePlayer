@@ -37,7 +37,15 @@
       <a href="index.html">Home</a>
       <a href="divers.html">Under water</a>
       <a href="moments.html" aria-current="page">Hours of clips</a>
-      <a href="features.html">All features</a>
+      <details class="navmenu"><summary>Features</summary>
+        <ul>
+          <li><a href="log.html">Log footage</a></li>
+          <li><a href="stabilization.html">Stabilization</a></li>
+          <li><a href="library.html">Library</a></li>
+          <li><a href="photos.html">Photos</a></li>
+          <li><a href="features.html" class="nm-all">All features</a></li>
+        </ul>
+      </details>
       <a href="download.html" class="nav-dl">Download</a>
     </nav>
     <details class="pagemenu">
@@ -47,7 +55,12 @@
         <li><a href="index.html">Home</a></li>
         <li><a href="divers.html">Under water</a></li>
         <li><a href="moments.html" aria-current="page">Hours of clips</a></li>
-        <li><a href="features.html">All features</a></li>
+        <li class="pm-group">Features</li>
+        <li><a href="log.html" class="pm-sub">Log footage</a></li>
+        <li><a href="stabilization.html" class="pm-sub">Stabilization</a></li>
+        <li><a href="library.html" class="pm-sub">Library</a></li>
+        <li><a href="photos.html" class="pm-sub">Photos</a></li>
+        <li><a href="features.html" class="pm-sub">All features</a></li>
         <li><a href="download.html">Download</a></li>
       </ul>
       <p class="pm-title">On this page</p>
@@ -94,7 +107,7 @@
         <div class="status">
           <span>Free and open source</span>
           <span>No account</span>
-          <span>Your original files are never changed</span>
+          <span>Nothing changes your originals unless you ask</span>
         </div>
       </div>
 
@@ -148,7 +161,7 @@
       <ul class="mo-answers">
         <li>
           <h3>In color, even in log</h3>
-          <p>D-Log M, GP-Log and I-Log play in color and HDR, with no grading. Normal clips play as usual.</p>
+          <p>D-Log M from the Osmo Action 6 and Osmo 360, and GP-Log from the HERO12 Black (firmware 1.20 or later) and HERO13 Black, play in color and HDR, with no grading. Other log clips, 10-bit I-Log included, take one key: <kbd>Ctrl</kbd>+<kbd>l</kbd>. Normal clips play as usual.</p>
         </li>
         <li>
           <h3>Steady as it plays</h3>
@@ -169,7 +182,7 @@
       <div class="stack">
         <p class="eyebrow">Moments</p>
         <h2>Keep the best minutes as files you can see.</h2>
-        <p class="lede kbd-dark">Mark a part and press <kbd>k</kbd>: it becomes a moment, a small video in the trip's Moments folder that <span class="os-mac">Finder and Quick Look show</span><span class="os-win">File Explorer and its preview pane show</span> in color. Double-click it, and the original plays, in full quality.</p>
+        <p class="lede kbd-dark">Mark a part and press <kbd>k</kbd>: it becomes a moment, a small video in the trip's <code>_Moments</code> folder that <span class="os-mac">Finder and Quick Look show</span><span class="os-win">File Explorer and its preview pane show</span> in color. Opened in the player, it plays that part of the original, in full quality. The first time, you pick the trip's folder in the side panel's Project tab: <i>Initialize the project here</i>.</p>
         <div class="dive-points kbd-dark">
           <div>
             <h3>Marks of your own</h3>
@@ -182,7 +195,7 @@
           </div>
           <div>
             <h3>The whole trip at a glance</h3>
-            <p>From the menu, the player fills a Clips folder with a flip-book in color for each clip, instead of a wall of grey thumbnails.</p>
+            <p>From the side panel's Project tab, the player fills a <code>_Clips</code> folder with a flip-book in color for each clip, instead of a wall of grey thumbnails.</p>
           </div>
           <div>
             <h3>No library to look after</h3>
@@ -192,18 +205,19 @@
       </div>
       <div class="stack">
         <ul class="mo-tree" aria-label="A trip's folder after an evening with the player">
-          <li><span class="dir">Dolomites 2026</span><span class="c">your trip's folder</span>
+          <li><span class="dir">Dolomites 2026</span><span class="c">your trip's folder: the project</span>
             <ul>
-              <li><span class="dir">Day 1</span><span class="c">the footage, only ever read</span></li>
-              <li><span class="dir">Moments</span>
+              <li><span class="dir">Day 1</span><span class="c">the footage, with your marks beside each clip</span></li>
+              <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>Summit ridge.mp4</li>
-                  <li>2026-07-14 16.02.11.mp4<span class="c">a moment you didn't name</span></li>
+                  <li>Summit ridge.afplink.mp4</li>
+                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">a moment you didn't name</span></li>
                   <li><span class="dir">Bike park</span><span class="c">a subfolder of your own</span></li>
                 </ul>
               </li>
-              <li><span class="dir">Clips</span><span class="c">a flip-book in color for each clip</span></li>
-              <li><span class="dir">Exports</span><span class="c">what you exported</span></li>
+              <li><span class="dir">_Clips</span><span class="c">a flip-book in color for each clip</span></li>
+              <li><span class="dir">_Exports</span><span class="c">what you exported</span></li>
+              <li><span class="dir">_ActionFootagePlayer</span><span class="c">the player's own notes</span></li>
             </ul>
           </li>
         </ul>
@@ -221,8 +235,8 @@
       <div class="mo-share">
         <div>
           <h3>Tonight</h3>
-          <p><kbd>Shift</kbd>+<kbd>E</kbd> exports the part you marked as it plays, steady and in color, to the trip's Exports folder. It's an HDR video with Dolby Vision information, which iPhones, iPads and Macs use when they play it.</p>
-          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · Exports</span>
+          <p><kbd>Shift</kbd>+<kbd>E</kbd> exports the part you marked as it plays, steady and in color, to the trip's <code>_Exports</code> folder. It's an HDR video that phones, Macs and TVs show as HDR. Exported on a Mac in the <i>HLG+DV</i> look, the one clips start in on a Mac screen without HDR, it also carries Dolby Vision information, which iPhones, iPads and Macs use to show it well on screens without HDR.</p>
+          <span class="meta"><kbd>Shift</kbd>+<kbd>E</kbd> · _Exports</span>
         </div>
         <div>
           <h3>The edit starts where you left off</h3>
@@ -253,14 +267,14 @@
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
-          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">A Finder window of the Moments and Clips folders</span><span class="os-win">A File Explorer window of the Moments and Clips folders</span></div>
-          <figcaption><span class="os-mac">Your Moments and Clips folders in Finder, in color.</span><span class="os-win">Your Moments and Clips folders in File Explorer, in color.</span></figcaption>
+          <div class="media-slot" data-slot="finder-moments"><span class="os-mac">A Finder window of the _Moments and _Clips folders</span><span class="os-win">A File Explorer window of the _Moments and _Clips folders</span></div>
+          <figcaption><span class="os-mac">Your <code>_Moments</code> and <code>_Clips</code> folders in Finder, in color.</span><span class="os-win">Your <code>_Moments</code> and <code>_Clips</code> folders in File Explorer, in color.</span></figcaption>
         </figure>
       </div>
       <dl class="mo-fit">
         <div>
           <dt>Log in color</dt>
-          <dd>D-Log M from DJI, GP-Log and GP-Log2 from GoPro, 10-bit I-Log from Insta360</dd>
+          <dd>D-Log M from DJI, GP-Log and GP-Log2 from GoPro, 10-bit I-Log from Insta360 (by hand, <kbd>Ctrl</kbd>+<kbd>l</kbd>)</dd>
         </div>
         <div>
           <dt>Highlight marks</dt>
@@ -268,10 +282,10 @@
         </div>
         <div>
           <dt>Steady as it plays</dt>
-          <dd>DJI with EIS off, GoPro with HyperSmooth off, Insta360 with FlowState off</dd>
+          <dd>DJI with EIS off and the Wide FOV, GoPro with HyperSmooth off, Insta360 with FlowState off</dd>
         </div>
       </dl>
-      <p class="mo-trust">Free and open source (GPL-3.0) · No account · Only reads your originals · Stabilization by Gyroflow's engine</p>
+      <p class="mo-trust">Free and open source (GPL-3.0) · No account · Nothing changes your originals unless you ask · Stabilization by Gyroflow's engine</p>
       <div class="btns" data-os-swap>
         <a class="btn primary dl-mac" href="download.html#mac">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -299,15 +313,15 @@
         </details>
         <details>
           <summary>Do I need to set anything on the camera?</summary>
-          <div class="a"><p>For color, shoot in the camera's log mode, or don't: normal clips play as usual. For steady playback, turn the camera's own stabilization off (EIS on DJI, HyperSmooth on GoPro, FlowState on Insta360); the camera then records the motion the player steadies it with. Copy the clips straight off the card: an app that exports or trims them drops what the player reads.</p></div>
+          <div class="a"><p>For color, shoot in the camera's log mode, or don't: normal clips play as usual. For steady playback, turn the camera's own stabilization off (EIS on DJI, HyperSmooth on GoPro, FlowState on Insta360); the camera then records the motion the player steadies it with. DJI cameras record it only with the Wide field of view. Copy the clips straight off the card: an app that exports or trims them drops what the player reads.</p></div>
         </details>
         <details>
           <summary>Does it change my original files?</summary>
-          <div class="a"><p>No. Action Footage Player only reads them. Moments, clip previews and exports are new files of their own.</p></div>
+          <div class="a"><p>Only if you ask. To cut a spoiled part out of a clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), the player rewrites the clip without it, with nothing re-encoded, and the original goes to the Trash. Otherwise your originals stay as they are: moments, clip previews and exports are new files of their own, and your marks a small file beside the clip.</p></div>
         </details>
         <details>
           <summary>Where do my moments go? And on a locked card?</summary>
-          <div class="a"><p>The Moments, Clips and Exports folders go in the trip's own folder, next to your footage. On a locked card or a read-only share, the player asks for a name and keeps them in its own folder in Documents.</p></div>
+          <div class="a"><p>The <code>_Moments</code>, <code>_Clips</code> and <code>_Exports</code> folders go in the project folder: the trip's folder, which you pick once in the side panel's Project tab (<i>Initialize the project here</i>). It can be the clips' own folder or one above it. On a locked card or a read-only share, the player asks for a name and keeps them in its own folder in Documents.</p></div>
         </details>
         <details>
           <summary>Mac or Windows?</summary>
@@ -327,7 +341,7 @@
       <div class="section-head">
         <p class="eyebrow">Try it</p>
         <h2>Plug in a card, double-click a clip.</h2>
-        <p class="lede">Free, no account, and your footage stays as it is.</p>
+        <p class="lede">Free, no account, and nothing changes your footage unless you ask.</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>

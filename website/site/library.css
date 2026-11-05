@@ -1,0 +1,95 @@
+/* Library page (library.html): the trip's folder as a tree, two-column sections (text beside a screenshot), the
+   cut diagram, the editors table and the Project tab's controls. Builds on styles.css: colors, type, sections,
+   .dive band, .gap-grid, .checklist, .keys, .faq, .help. */
+
+.lib-hero { padding-block: 56px 24px; }
+.lib-hero .wrap { grid-template-columns: minmax(0, 1fr); }
+.lib-hero h1 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 3.8rem); max-width: 18ch; }
+.lib-gets { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px 32px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.lib-gets li { padding-top: 12px; border-top: 3px solid var(--accent); color: var(--muted); }
+.lib-gets strong { display: block; color: var(--ink); }
+
+/* Text beside a picture: one column on narrow screens */
+.lib-two { display: grid; gap: 32px 48px; grid-template-columns: minmax(0, 1fr); }
+.lib-two > * { min-width: 0; }
+@media (min-width: 900px) {
+  .lib-two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .lib-two-wide { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+  .lib-tall { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--top-h) + 24px); }
+}
+.lib-two .stack > p:not(.eyebrow):not(.lede):not(.note):not(.honest) { color: var(--muted); max-width: 66ch; }
+.lib-two .stack h3 { margin-top: 8px; }
+.lib-two .section-head { margin-bottom: 8px; }
+
+/* The trip's folder */
+.lib-tree, .lib-tree ul { list-style: none; margin: 0; padding: 0; }
+.lib-tree { display: grid; gap: 8px; padding: 18px 20px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); font-family: var(--f-mono); font-size: 0.82rem; line-height: 1.45; overflow-wrap: anywhere; }
+.lib-tree ul { display: grid; gap: 7px; margin: 7px 0 0 0.35em; padding-left: 1.1em; border-left: 1px solid var(--line); }
+.lib-tree .dir { font-weight: 500; }
+.lib-tree .dir::after { content: "/"; color: var(--muted); }
+.lib-tree .c { display: block; font-family: var(--f-body); font-size: 0.8rem; color: var(--muted); }
+
+/* Lists in the text */
+.lib-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; color: var(--muted); max-width: 66ch; }
+.lib-list strong { color: var(--ink); }
+.lib-cols { display: grid; gap: 16px 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); color: var(--muted); }
+.lib-cols strong { color: var(--ink); }
+.lib-limits { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); color: var(--muted); }
+.lib-limits li { padding-left: 16px; border-left: 2px solid var(--line); }
+.lib-limits strong { color: var(--ink); }
+
+/* Moments, in the deep band: the stabilization note beside the shots */
+.lib-snap { display: grid; gap: 10px; padding: 20px; border-radius: var(--radius); background: var(--deep-2); border: 1px solid rgba(255, 255, 255, 0.08); }
+.lib-snap h3 { font-size: 1.1rem; }
+.dive .lib-snap strong { color: var(--deep-fg); }
+.dive code { color: var(--deep-fg); overflow-wrap: anywhere; }
+.dive .media figcaption { color: var(--deep-muted); }
+.dive .media-slot { border-color: rgba(255, 255, 255, 0.2); color: var(--deep-muted); }
+
+/* The cut, drawn */
+.lib-diagram svg { display: block; width: 100%; height: auto; padding: 14px; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.cut-svg text { font-family: var(--f-mono); font-size: 13px; fill: var(--muted); }
+.cut-svg .lbl { font-family: var(--f-body); font-weight: 600; font-size: 14px; fill: var(--ink); }
+.cut-svg .in { font-weight: 500; fill: var(--ink); }
+.cut-svg .kept { fill: var(--ok-bg); stroke: var(--ok); stroke-width: 1.5; }
+.cut-svg .spoiled { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.cut-svg .kf { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
+.cut-svg .arrow { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Into your editor */
+.lib-steps { margin-bottom: 28px; }
+.lib-editors { min-width: 0; }
+.lib-editors tbody th { width: 18%; }
+.lib-editors td:nth-child(2) { width: 38%; }
+.lib-editors code { overflow-wrap: anywhere; }
+.lib-editors td { color: var(--muted); }
+
+/* Sources.txt */
+.lib-pre { margin: 24px 0 0; padding: 14px 18px; max-width: 760px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-family: var(--f-mono); font-size: 0.82rem; line-height: 1.5; overflow-x: auto; white-space: pre; }
+
+/* The Project tab's controls */
+.lib-settings-wrap { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+table.settings { min-width: 0; font-size: 0.93rem; }
+table.settings th, table.settings td { padding: 10px 16px; }
+table.settings tbody th { width: 36%; font-weight: 600; }
+table.settings td { color: var(--muted); }
+table.settings td strong { color: var(--ink); font-weight: 600; }
+table.settings tr.grp th { width: auto; padding-top: 18px; font-family: var(--f-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-ink); background: var(--bg); }
+table.settings tr:last-child td, table.settings tr:last-child th { border-bottom: 0; }
+
+/* Narrow screens: the tables' rows stack, each cell under its row's name */
+@media (max-width: 640px) {
+  .lib-editors, .lib-editors tbody, .lib-editors tr, .lib-editors th, .lib-editors td,
+  table.settings, table.settings tbody, table.settings tr, table.settings th, table.settings td { display: block; width: auto; }
+  .lib-editors thead, table.settings thead { display: none; }
+  .lib-editors tbody th { width: auto; border-bottom: 0; padding-bottom: 4px; }
+  .lib-editors td { border-bottom: 0; padding-block: 4px; }
+  .lib-editors td::before { content: attr(data-label); display: block; font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-ink); }
+  .lib-editors tr { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .lib-editors tr:last-child { border-bottom: 0; }
+  table.settings tbody th { width: auto; border-bottom: 0; padding-bottom: 2px; }
+  table.settings td { padding-top: 0; }
+}
+
+/* Long file names in running text break rather than widen the page */
+main code { overflow-wrap: anywhere; }
