@@ -345,8 +345,10 @@ local function moment_changed(ws)
     if not (m and ws.snap) then return false end
     if (ws.alone == true) ~= (m.alone == true) then return true end
     local g, st = state("gyroflow") or {}, m.stab or {}
+    -- With a project of its own, the project is what's saved: its horizon and the switch can go into it
+    if ws.own_project then return g.horizon_lock ~= nil and g.horizon_lock ~= "project" end
     if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
-    return not ws.own_project and g.level ~= st.level
+    return g.level ~= st.level
 end
 
 local function project_part(u, x, w, y)
@@ -794,13 +796,22 @@ local function stabilization_part(u, x, w, y)
     y = u:caption(x, w, y, project and "This clip has its project's smoothing; the level is for clips without one" or LEVEL_NOTES[g.level] or "")
 
     y = u:heading(x, w, y + 8 * s, "Horizon")
-    local horizons = { project = 1, yes = 2, no = 3 }
-    local horizon_list, horizon_on = with_saved("horizon_lock", {
-        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project", nil, "project" },
+    -- On a moment, As saved is its project's or the setting it was saved with: no As preset beside it
+    local horizons = moment and { yes = 1, no = 2 } or { project = 1, yes = 2, no = 3 }
+    local horizon_options = {
         { "Level", "script-message-to gyroflow horizon-lock yes", nil, "yes" },
         { "Free", "script-message-to gyroflow horizon-lock no", nil, "no" },
-    }, horizons, g.horizon_lock)
+    }
+    if not moment then
+        table.insert(horizon_options, 1, { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project", nil, "project" })
+    end
+    local horizon_list, horizon_on = with_saved("horizon_lock", horizon_options, horizons, g.horizon_lock)
     y = u:segmented(x, w, y, "horizon", horizon_list, horizon_on)
+    if moment then
+        local saved = (ws.moment and ws.moment.stab or {}).horizon_lock
+        y = u:caption(x, w, y, "Saved: " .. (ws.own_project and "as its Gyroflow project" or saved == "yes" and "level"
+            or saved == "no" and "free" or "as the preset"))
+    end
 
     y = u:heading(x, w, y + 8 * s, "Lens", keys["script-binding gyroflow/lens"])
     -- A clip with a project starts with the project's lens; one without, with what sticks

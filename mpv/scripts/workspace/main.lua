@@ -356,8 +356,13 @@ local function open_moment(path)
         -- As it was saved, but what's forced this session
         state.alone = force.alone
         if state.alone == nil then state.alone = l.alone == true end
-        local stab = {}
-        for k, v in pairs(type(l.stab) == "table" and l.stab or {}) do stab[k] = v end
+        -- One thing saved: its own Gyroflow project, which then decides (its horizon, crop, smoothing), or the
+        -- settings over the preset. Then what's forced this session
+        -- (with a project: on, its horizon; its level is the project's smoothing, none of the player's)
+        local stab = { view = "normal", horizon_lock = "project" }
+        if not fs.is_file(own) then
+            for k, v in pairs(type(l.stab) == "table" and l.stab or {}) do stab[k] = v end
+        end
         for _, k in ipairs({ "view", "level", "horizon_lock" }) do if force[k] ~= nil then stab[k] = force[k] end end
         state.stab = stab
         state.force = force
@@ -555,21 +560,32 @@ local function save(name, update, typed, quiet, opts)
     if not update or update.snap then
         local alone = opts.alone
         if alone == nil then alone = update and update.alone or (not update and settings().moments_alone == true) or false end
-        l.snap, l.alone, l.stab = 1, alone, opts.stab or (update and update.stab) or current_stab()
+        local stab = opts.stab or (update and update.stab) or current_stab()
+        l.snap, l.alone, l.stab = 1, alone, stab
         local own = own_project(file)
         local tool = project_tool()
-        local trim = string.format("%.3f,%.3f", a, b)
+        local args = { "--trim", string.format("%.3f,%.3f", a, b), "--alone", alone and "yes" or "no" }
+        -- A horizon set over the project as it's viewed goes into it: the moment as it was seen
+        local h = type(stab) == "table" and stab.horizon_lock
+        if h == "yes" or h == "no" then table.insert(args, "--horizon-lock"); table.insert(args, h == "yes" and "100" or "0") end
+        -- The options before the files: the project (and the clip, copying)
+        local function with(list)
+            local files = list[#list - 1] == state.clip and 2 or 1
+            for _, x in ipairs(args) do table.insert(list, #list - files + 1, x) end
+            return list
+        end
         if fs.is_file(own) then
-            if tool then run_tool({ tool, "--edit", "--trim", trim, "--alone", alone and "yes" or "no", own }) end
+            if tool then run_tool(with({ tool, "--edit", own })) end
             preview_project = own
         elseif not update then
             local g = mp.get_property_native("user-data/gyroflow")
             if tool and type(g) == "table" and g.kind == "project" and (g.project or "") ~= ""
-               and run_tool({ tool, "--copy", g.project, "--trim", trim, "--alone", alone and "yes" or "no", state.clip, own }) then
+               and run_tool(with({ tool, "--copy", g.project, state.clip, own })) then
                 preview_project = own
             end
         end
-        if not preview_project then preview_project = false end
+        -- One thing saved: with a project of its own, the project; without, the settings over the preset
+        if preview_project then l.stab = nil else preview_project = false end
     end
     -- The preview's frame: the first highlight inside the part, else its middle
     local at
@@ -1491,7 +1507,8 @@ mp.observe_property("user-data/gyroflow", "native", function(_, g)
     local m = state.moment
     if not (m and m.snap and state.loaded and type(g) == "table" and g.available and state.stab) then return end
     for _, k in ipairs({ "view", "level", "horizon_lock" }) do
-        if g[k] ~= nil and g[k] ~= state.stab[k] then
+        -- A project's moment has no level of the player's to force
+        if g[k] ~= nil and g[k] ~= state.stab[k] and not (k == "level" and state.own_project) then
             force[k], state.stab[k] = g[k], g[k]
             state.force = force
             publish()

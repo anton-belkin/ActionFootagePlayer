@@ -365,8 +365,10 @@ local function moment_changed(ws)
     if not (m and ws.snap) then return false end
     if (ws.alone == true) ~= (m.alone == true) then return true end
     local g, st = state("gyroflow") or {}, m.stab or {}
+    -- With a project of its own, the project is what's saved: its horizon and the switch can go into it
+    if ws.own_project then return g.horizon_lock ~= nil and g.horizon_lock ~= "project" end
     if g.view ~= st.view or g.horizon_lock ~= st.horizon_lock then return true end
-    return not ws.own_project and g.level ~= st.level
+    return g.level ~= st.level
 end
 
 -- The clip's moments (the workspace plugin's), each with what can be done to it

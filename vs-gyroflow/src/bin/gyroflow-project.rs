@@ -10,7 +10,8 @@
 //   --trim <in>,<out>   its part (seconds of the video) as the project's trim range, which Gyroflow opens at
 //   --alone yes|no      smoothed within it only (Gyroflow's trim_range_only), or as part of the whole video
 //   --copy <project>    a copy of the video's own project (its settings, sync, lens) instead of a new one
-//   --edit              <project.gyroflow> alone, changed in place: --trim, --alone (the moment's ends or its switch)
+//   --edit              <project.gyroflow> alone, changed in place: --trim, --alone, --horizon-lock (the moment's
+//                       ends, its switch, its horizon kept)
 //   --print-trim        <project.gyroflow>: its first trim range, "<in>,<out>" in seconds (nothing without one): a
 //                       moment's ends changed in Gyroflow, which the player takes
 //
@@ -78,7 +79,7 @@ fn main() {
         if args.len() != 1 || args[0].starts_with("--") { usage(); }
         let project = PathBuf::from(&args[0]);
         let result = std::fs::read_to_string(&project).map_err(|e| format!("{}: {e}", project.display()))
-            .and_then(|text| adjust(&text, trim, alone))
+            .and_then(|text| adjust(&text, trim, alone, horizon_lock))
             .and_then(|text| write_whole(&project, &text));
         if let Err(e) = result {
             eprintln!("gyroflow-project: {e}");
@@ -95,7 +96,7 @@ fn main() {
         // The video's own project, copied with the moment's trim: it then lives apart from it
         Some(src) => if project.exists() { Err(format!("{} already exists", project.display())) } else {
             std::fs::read_to_string(src).map_err(|e| format!("{src}: {e}"))
-                .and_then(|text| adjust(&text, trim, alone))
+                .and_then(|text| adjust(&text, trim, alone, horizon_lock))
                 .and_then(|text| write_whole(&project, &text))
         },
         None => run(&video, &project, preset.as_deref(), underwater, horizon_lock, level, wide, trim, alone),
@@ -106,9 +107,10 @@ fn main() {
     }
 }
 
-// A project's JSON with a trim range (seconds of the video) and "only within it" set; the rest as it is
-fn adjust(text: &str, trim: Option<(f64, f64)>, alone: Option<bool>) -> Result<String, String> {
-    if trim.is_none() && alone.is_none() { return Ok(text.to_string()); }
+// A project's JSON with a trim range (seconds of the video), "only within it" and the horizon lock's amount set; the
+// rest as it is
+fn adjust(text: &str, trim: Option<(f64, f64)>, alone: Option<bool>, horizon_lock: Option<f64>) -> Result<String, String> {
+    if trim.is_none() && alone.is_none() && horizon_lock.is_none() { return Ok(text.to_string()); }
     let mut json: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not a Gyroflow project: {e}"))?;
     let obj = json.as_object_mut().ok_or("not a Gyroflow project")?;
     if let Some((a, b)) = trim {
@@ -116,6 +118,10 @@ fn adjust(text: &str, trim: Option<(f64, f64)>, alone: Option<bool>) -> Result<S
         obj.remove("trim_end");
         obj.remove("trim_ranges");
         obj.insert("trim_ranges_ms".into(), serde_json::json!([[(a * 1000.0).round(), (b * 1000.0).round()]]));
+    }
+    if let Some(amount) = horizon_lock {
+        let stab = obj.entry("stabilization").or_insert_with(|| serde_json::json!({}));
+        stab.as_object_mut().ok_or("a broken stabilization")?.insert("horizon_lock_amount".into(), serde_json::json!(amount));
     }
     if let Some(alone) = alone {
         let stab = obj.entry("stabilization").or_insert_with(|| serde_json::json!({}));
@@ -152,7 +158,7 @@ fn run(video: &Path, project: &Path, preset: Option<&str>, underwater: Underwate
     if data.is_err() && std::fs::metadata(project).is_ok_and(|m| m.len() == 0) {
         let _ = std::fs::remove_file(project);
     }
-    let data = adjust(&data?, trim, alone)?;
+    let data = adjust(&data?, trim, alone, None)?;
     std::fs::write(project, data).map_err(|e| format!("{}: {e}", project.display()))?;
     println!("Wrote {}", project.display());
     Ok(())

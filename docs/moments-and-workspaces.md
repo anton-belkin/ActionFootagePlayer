@@ -345,6 +345,12 @@ Opening a moment's file (a double click, the player being the default app for MP
 - **Viewing is never saving** (Anton): the moment stays as it was saved until **Keep in <name>** (the panel shows it
   with "Changed for viewing only"; the menu has it too), which writes how it's viewed into the moment and its own
   project.
+- **One thing saved** (Anton): a moment has either its own Gyroflow project, which then decides (horizon, crop,
+  smoothing: no settings of the player's over it), or the settings over the preset, never both. A horizon set over
+  the clip's project as it was viewed (Level, Free) goes into the moment's copy of it (`gyroflow-project --copy
+  --horizon-lock`), and Keep on a project's moment writes its horizon and switch into the project (`--edit`); a
+  wider view or the stabilization off over a project is for viewing only. So on a moment the horizon is As saved,
+  Level or Free: As saved is the project's, or the setting it was saved with.
 - **As saved** (Anton): while a moment plays, each setting (view, level, horizon lock; *Stabilized*: on its own or
   with its clip) has *As saved* first, the default: every moment as it was saved. A value chosen instead (in the
   panel, or a key: Ctrl+g, Ctrl+k) is for every moment this session (`force`, the workspace plugin's), until As
