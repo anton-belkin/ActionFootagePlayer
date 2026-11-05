@@ -444,10 +444,11 @@ Anton's answers, 2026-11-04:
 5. **#1248's fork**: not written.
 6. **Moments in FCP's browser**: left to the design. An option at export, off by default.
 
+Anton's answer to the second draft's question, 2026-11-05:
+
+7. **Clips in the file by default**: every clip but the rejects; *With moments or marks* is the other choice in
+   the menu.
+
 ## Open questions
 
-1. **Which clips go into the file by default.** When the whole project is exported, which of its clips are in
-   it? As designed now: every clip except those whose preview you deleted from `Clips/`, so what you kept in
-   Finder reaches the editor even without a moment. The alternative is only clips with a moment or a mark
-   (highlights included), a shorter list for a trip with a lot of footage. Both are in the menu; the question is
-   which is ticked first.
+None left.

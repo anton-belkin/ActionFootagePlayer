@@ -443,8 +443,8 @@ right within the trip, on the wrong day.
 - **A moment comes with it**: exporting a part also saves it as the moment `export_<name>`, so every export
   can be found from its moment and played in full quality later, even after the export is deleted to make
   room. The exception is when the part *is* a moment, played from the menu or its file, or equal to one to the
-  frame: then no second moment is made, and the export is named after it. Whether that's the right rule is an
-  [open question](#open-questions). A whole clip exported makes no moment; its preview in `Clips/` is that.
+  frame: then no second moment is made, and the export is named after it ([Decided](#decided)). A whole clip
+  exported makes no moment; its preview in `Clips/` is that.
 
 ### From `stabilized/` to `Exports/`
 
@@ -592,11 +592,11 @@ Anton's answers to the first draft's questions, 2026-11-04:
 7. **The card's volume id**: left to the design. Written, for read-only cards ([`Sources.txt`](#sourcestxt)).
 8. **Clip previews**: never by themselves, only from the menu.
 
+Anton's answer to the second draft's question, 2026-11-05:
+
+9. **Exporting a part that is already a moment** makes no second moment: the export is named after the moment
+   (`Turtle.mov`), and its link points at the same range.
+
 ## Open questions
 
-1. **Exporting a part that is already a moment.** Exporting a part saves it as a moment too (`export_Turtle`),
-   so the part can be found and played again after the export is deleted. But when you export *a moment*
-   (played from the menu or its file, so the A-B part is exactly that moment), that would give a second moment
-   over the same range: `Turtle` and `export_Turtle`. As designed, no second one is made: the export is named
-   `Turtle.mov` after the moment, and its link points at the same range. Is that right? Or should every export
-   get its own `export_` moment, even a duplicate?
+None left.
