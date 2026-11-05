@@ -81,6 +81,9 @@ video with nothing to stabilize it with is color-converted only.
   --from <time>    start at this time (seconds, or m:ss)
   --to <time>      end at this time
   --out <folder>   write here instead of <video's folder>/stabilized
+  --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
+                   passes the one it plays with. The video's own is <name>.gyroflow or <name.ext>.gyroflow next to
+                   it, as the player's workspace plugin finds it
   --force          replace an existing output instead of skipping the video
   --interpolation  bilinear | bicubic | lanczos (default lanczos)
   --encoder <name> ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265
@@ -109,6 +112,7 @@ struct Options {
     from: Option<f64>,
     to: Option<f64>,
     out: Option<PathBuf>,
+    project: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
     encoder: Option<String>,
@@ -122,7 +126,7 @@ fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
-                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, force: false,
+                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false };
     let mut files = Vec::new();
@@ -156,6 +160,7 @@ fn main() {
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
+            "--project" => opts.project = Some(PathBuf::from(value("--project"))),
             "--force" => opts.force = true,
             "--interpolation" => opts.interpolation = match value("--interpolation").as_str() {
                 "bilinear" => Interpolation::Bilinear,
@@ -173,6 +178,8 @@ fn main() {
         }
     }
     if files.is_empty() { fail(USAGE); }
+    if opts.project.is_some() && files.len() > 1 { fail("--project is for one video"); }
+    if let Some(p) = opts.project.as_ref().filter(|p| !p.is_file()) { fail(&format!("no Gyroflow project {}", p.display())); }
     if let (Some(f), Some(t)) = (opts.from, opts.to) { if t <= f { fail("--to must be after --from"); } }
 
     // The pid first: a player stops or reprioritizes it by it, from the start
@@ -297,13 +304,14 @@ fn plugin_file(plugin: &str, name: &str) -> PathBuf {
     here.unwrap_or_else(|| mpv_dir().join("scripts")).join(plugin).join(name)
 }
 
-fn find_source(path: &Path) -> Result<Source, String> {
+// `project`: the one given (--project), else the video's own, as the workspace plugin finds it
+fn find_source(path: &Path, project: Option<&Path>) -> Result<Source, String> {
     let s = path.to_string_lossy().to_string();
-    let base = path.with_extension("");
-    for sidecar in [base.with_extension("gyroflow"), PathBuf::from(format!("{s}.gyroflow"))] {
-        if sidecar.is_file() {
-            return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project" });
-        }
+    if let Some(p) = project {
+        return Ok(Source { project: p.to_string_lossy().to_string(), preset: None, label: "project" });
+    }
+    if let Some(sidecar) = vs_gyroflow::workspace::gyroflow_project(path) {
+        return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project" });
     }
     let info = probe::probe(&s)?;
     match info["mode"].as_str() {
@@ -498,7 +506,7 @@ fn export(file: &str, opts: &Options) -> Result<Outcome, String> {
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
-    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path) };
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref()) };
     let source = match (source, curve) {
         (Ok(s), _) => Some(s),
         (Err(_), Some(_)) => None,

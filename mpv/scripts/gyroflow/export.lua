@@ -10,9 +10,9 @@
 -- export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
 -- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
--- under water, above it, as the camera says or as the project says, as the menu has it (--underwater). A log
--- clip with nothing to stabilize it with gyroflow-export converts in color only by itself. Script messages, for the
--- right-click menu:
+-- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
+-- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
+-- in color only by itself. Script messages, for the right-click menu:
 --   export [sdr]         the same as Shift+E, or in SDR whatever plays: the SDR look it plays in, else the one
 --                        the dlogm plugin would choose (its sdr_look)
 --   cancel-export        cancel this clip's export, without asking
@@ -237,6 +237,9 @@ local function start(path, sdr)
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
     local view = gyroflow("view")
     if view == "off" then table.insert(args, "--no-stabilize") end
+    -- The project it plays with, wherever the workspace plugin found it
+    local project = gyroflow("project")
+    if view ~= "off" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
     if view == "wide" then table.insert(args, "--wide") end
     if gyroflow("level") then table.insert(args, "--level"); table.insert(args, gyroflow("level")) end
     if gyroflow("edges") then

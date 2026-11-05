@@ -660,6 +660,8 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 - `mpv-side-panel-<version>.zip`, on any system: the settings in a panel beside the video (plain Lua), with
   footage-menu for its Clip buttons.
 
+- `mpv-workspace-<version>.zip`, on any system: the project a clip belongs to, for the other plugins (plain Lua).
+
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
   its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
@@ -871,6 +873,10 @@ ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
 - **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
 - **`highlights`**: the moments the camera marked (DJI, GoPro), on the seek bar and a key away. Plain Lua, any mpv
   on any system.
+- **`workspace`**: the project a clip belongs to, its trip folder, for the other plugins: where a clip's Gyroflow
+  project is, and soon its moments, marks and exports ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)).
+  Plain Lua, any mpv on any system. Without it, the gyroflow plugin looks next to the clip, which is the same place
+  for now.
 
 None needs anything in `mpv.conf` or `input.conf`.
 
@@ -1027,6 +1033,11 @@ mpv/scripts/side-panel/       the plugins' settings in a panel beside the video 
                               ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
+mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
+                              Lua; vs-gyroflow/src/workspace.rs is its twin)  →  ~/.config/mpv/scripts/workspace, and
+                              in ActionFootagePlayer
+tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
+                              `cargo test` in vs-gyroflow/ reads too
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is

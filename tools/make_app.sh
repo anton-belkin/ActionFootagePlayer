@@ -75,7 +75,8 @@ menu="$res/plugins/footage-menu"
 panel="$res/plugins/side-panel"
 sdrcheck="$res/plugins/sdr-check"
 agent="$res/plugins/agent"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent"
+workspace="$res/plugins/workspace"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
@@ -107,6 +108,7 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua "$workspace/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)
 install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"

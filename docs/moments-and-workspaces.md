@@ -153,8 +153,9 @@ to it. Reading two places would make "where is my moment" a question with two an
   need the same lookup in Rust. It's one small module, and the tests run both versions over the same tree of
   folders.
 - **Every plugin that reads mpv's `path`** to find the clip (gyroflow and its export, highlights, the
-  telemetry, dlogm, the menu, the panel: 24 reads in 8 files) takes it from the workspace module instead,
-  because a moment's file isn't the clip ([Playing a moment](#playing-a-moment)).
+  telemetry, dlogm, the menu, the panel: 24 reads in 8 files) takes it from the workspace plugin instead
+  (`user-data/workspace/clip`, when `user-data/workspace/path` is the file playing), because a moment's file isn't
+  the clip ([Playing a moment](#playing-a-moment)).
 
 ### Read-only cards and the NAS
 
@@ -537,11 +538,15 @@ The panel's Clip section gets the moments and marks as lists, the same as the me
 Each step is a PR of its own and works without the next. The order follows "the project is the trip folder
 first".
 
-1. **The workspace module** (Lua, `mpv/scripts/workspace/`, loaded by the other plugins as `platform` is): the
-   project of a clip (only in the trip folder for now), the paths of its files, `.actionfootageplayer/`, the
-   clip's real path for the other plugins. `find_project()` and gyroflow-export's lookup (`--project`) go
-   through it, and its Rust twin. Tests: `luajit` and `cargo test` over the same temporary trees (nested trips,
-   `DCIM`, read-only folders).
+1. **The workspace plugin** (`mpv/scripts/workspace/`, **done**): `workspace.lua` finds the project of a clip
+   (only in the trip folder for now) and the paths of its files; `main.lua` publishes them in
+   `user-data/workspace/` before the other plugins load the clip (on_load, priority 10), since each mpv plugin
+   runs on its own and the plugins also ship one by one. The gyroflow plugin's `find_project()` and Ctrl+e take
+   the Gyroflow project's paths from there (next to the clip without the plugin, the same place for now), and
+   its export passes the project it plays with (`--project`). gyroflow-export's own lookup is the Rust twin,
+   `vs-gyroflow/src/workspace.rs`. Tests: `luajit tests/workspace_test.lua` and `cargo test` over the same cases,
+   `tests/workspace_cases.txt` (nested trips, `DCIM`, the home folder, volumes, Windows paths). The clip's real
+   path for the other plugins comes with moments (step 4), the first time it differs from mpv's `path`.
 2. **The link**: the key reader in Lua (the `moov/udta/meta` walk, beside `highlights/mp4info.lua` of the
    editors' design) and the writer in gyroflow-export. Tests: files ffmpeg makes, read back; copied, renamed,
    tagged with `xattr`, remuxed (lost) and remuxed with `-map_metadata 0` (kept).

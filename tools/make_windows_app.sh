@@ -191,7 +191,8 @@ highlights="$plugins/highlights"
 menu="$plugins/footage-menu"
 panel="$plugins/side-panel"
 agent="$plugins/agent"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent"
+workspace="$plugins/workspace"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent" "$workspace"
 cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
 cp shaders/denoise.glsl "$dlogm/shaders/"
@@ -220,6 +221,7 @@ cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highligh
 cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
+cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua "$workspace/"
 
 echo "== ffmpeg"
 archive=$(fetch "$FFMPEG_URL" "$FFMPEG_SHA256")

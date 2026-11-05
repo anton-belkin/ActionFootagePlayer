@@ -1,0 +1,150 @@
+# Cases for the workspace module, read by both of its versions: tests/workspace_test.lua (the mpv plugin's,
+# mpv/scripts/workspace/workspace.lua) and `cargo test` (gyroflow-export's, vs-gyroflow/src/workspace.rs).
+#
+# case <name>      a new case: an empty folder (a temporary one; the Lua test fakes it), which is also the home folder
+# home <dir>       the home folder is <dir> in it instead
+# tree             then one path per line, indented, made in it: a folder ends with /, else it's an empty file
+# clip <path>      then, indented, what's expected for that clip:
+#   project <dir>    the project it belongs to (- for none)
+#   relative <path>  its path in that project
+#   new <dir>        where a project for it would be made
+#   gyroflow <file>  its Gyroflow project (- for none)
+#   gyroflow-new <file>  where a new one is written
+# volume <unix|windows> <path> <yes|no>   whether the path is a volume's top folder (no tree: plain strings)
+#
+# Paths are relative to the case's folder and use /.
+
+case a project in the trip folder
+tree
+  Egypt/.actionfootageplayer/
+  Egypt/Day 1/DJI_0068_D.MP4
+  Egypt/Day 1/DJI_0068_D.gyroflow
+  Egypt/Day 2/GX011057.MP4
+clip Egypt/Day 1/DJI_0068_D.MP4
+  project Egypt
+  relative Day 1/DJI_0068_D.MP4
+  new Egypt/Day 1
+  gyroflow Egypt/Day 1/DJI_0068_D.gyroflow
+  gyroflow-new Egypt/Day 1/DJI_0068_D.gyroflow
+clip Egypt/Day 2/GX011057.MP4
+  project Egypt
+  relative Day 2/GX011057.MP4
+  gyroflow -
+  gyroflow-new Egypt/Day 2/GX011057.gyroflow
+
+case no project
+tree
+  Egypt/Day 1/A.MP4
+clip Egypt/Day 1/A.MP4
+  project -
+  new Egypt/Day 1
+  gyroflow -
+
+case a clip in the project's own folder
+tree
+  Egypt/.actionfootageplayer/
+  Egypt/A.MP4
+clip Egypt/A.MP4
+  project Egypt
+  relative A.MP4
+
+case the nearest project wins
+tree
+  Egypt/.actionfootageplayer/
+  Egypt/Day 2/.actionfootageplayer/
+  Egypt/Day 2/B.MP4
+  Egypt/Day 1/A.MP4
+clip Egypt/Day 2/B.MP4
+  project Egypt/Day 2
+  relative B.MP4
+clip Egypt/Day 1/A.MP4
+  project Egypt
+  relative Day 1/A.MP4
+
+case a file named like the state folder is no project
+tree
+  Egypt/.actionfootageplayer
+  Egypt/A.MP4
+clip Egypt/A.MP4
+  project -
+
+case the search stops at the home folder
+home me
+tree
+  me/.actionfootageplayer/
+  me/Movies/A.MP4
+clip me/Movies/A.MP4
+  project -
+
+case the home folder's own projects
+home me
+tree
+  me/Movies/Egypt/.actionfootageplayer/
+  me/Movies/Egypt/A.MP4
+clip me/Movies/Egypt/A.MP4
+  project me/Movies/Egypt
+
+case a camera's tree: the project above DCIM
+tree
+  OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
+  GOPRO/DCIM/100GOPRO/GX011057.MP4
+  copy/DCIM/A.MP4
+  dcim-ish/Day 1/DCIM/x/y/A.MP4
+clip OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
+  project -
+  new OSMO ACTION
+clip GOPRO/DCIM/100GOPRO/GX011057.MP4
+  new GOPRO
+clip copy/DCIM/A.MP4
+  new copy
+clip dcim-ish/Day 1/DCIM/x/y/A.MP4
+  new dcim-ish/Day 1/DCIM/x/y
+
+case a card's project on its top folder
+tree
+  OSMO ACTION/.actionfootageplayer/
+  OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
+clip OSMO ACTION/DCIM/DJI_001/DJI_0068_D.MP4
+  project OSMO ACTION
+  relative DCIM/DJI_001/DJI_0068_D.MP4
+
+case Gyroflow's other name for a project
+tree
+  Egypt/A.MP4
+  Egypt/A.MP4.gyroflow
+clip Egypt/A.MP4
+  gyroflow Egypt/A.MP4.gyroflow
+  gyroflow-new Egypt/A.gyroflow
+
+case both Gyroflow names: the short one first
+tree
+  Egypt/A.MP4
+  Egypt/A.gyroflow
+  Egypt/A.MP4.gyroflow
+clip Egypt/A.MP4
+  gyroflow Egypt/A.gyroflow
+
+case a folder named .gyroflow is no project
+tree
+  Egypt/A.MP4
+  Egypt/A.gyroflow/
+clip Egypt/A.MP4
+  gyroflow -
+
+case volumes
+volume unix / yes
+volume unix /Volumes/DJI_Inbox yes
+volume unix /Volumes/OSMO ACTION yes
+volume unix /Volumes/DJI_Inbox/DJI Device no
+volume unix /Volumes no
+volume unix /media/anton/CARD yes
+volume unix /run/media/anton/CARD yes
+volume unix /media/anton no
+volume unix /mnt/nas yes
+volume unix /Users/anton no
+volume windows C:\ yes
+volume windows D: yes
+volume windows D:\Egypt no
+volume windows \\nas\video yes
+volume windows \\nas\video\ yes
+volume windows \\nas\video\Egypt no

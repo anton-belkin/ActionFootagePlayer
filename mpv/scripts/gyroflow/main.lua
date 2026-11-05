@@ -66,7 +66,7 @@
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
--- preset), view (normal, wide, off), level, still (Ctrl+p),
+-- preset), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
@@ -179,10 +179,26 @@ local function file_exists(path)
     return info ~= nil and info.is_file
 end
 
+-- The workspace plugin's word on the file at `path` (user-data/workspace/, published before this plugin's on_load),
+-- nil when it isn't installed or speaks of another file
+local function workspace_of(path)
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == path then return ws end
+    return nil
+end
+
+-- Where the video's project may be, in the order looked at, and where a new one goes (the first): the workspace
+-- plugin's paths for it in its project, else Gyroflow's two names for it next to the video
+local function project_paths(path)
+    local ws = workspace_of(path)
+    if ws and ws.gyroflow_projects and ws.gyroflow_new then return ws.gyroflow_projects, ws.gyroflow_new end
+    local base = path:match("^(.*)%.[^./\\]+$") or path
+    return { base .. ".gyroflow", path .. ".gyroflow" }, base .. ".gyroflow"
+end
+
 local function find_project(path)
     if not path or path:find("://", 1, true) then return nil end
-    local base = path:match("^(.*)%.[^./\\]+$") or path
-    for _, candidate in ipairs({ base .. ".gyroflow", path .. ".gyroflow" }) do
+    for _, candidate in ipairs((project_paths(path))) do
         if file_exists(candidate) then return candidate end
     end
     return nil
@@ -436,6 +452,7 @@ end, function() return current_source and not stab_off and frame_step(current_so
 local function publish()
     local state = {
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
+        project = has_project(current_source) and current_source.project or "",
         view = stab_off and "off" or view, level = level,
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
@@ -908,9 +925,9 @@ mp.register_script_message("remember", function()
     mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
--- Edit in Gyroflow. The project goes next to the video, where find_project() picks it up from then on: the one it
--- plays with, or for a video without one (its own motion data with the default preset) the same written out by
--- gyroflow-project, so Gyroflow opens it as it plays here. Gyroflow overwrites the
+-- Edit in Gyroflow. The project goes next to the video (or where the workspace plugin says), where find_project()
+-- picks it up from then on: the one it plays with, or for a video without one (its own motion data with the default
+-- preset) the same written out by gyroflow-project, so Gyroflow opens it as it plays here. Gyroflow overwrites the
 -- project it opened when it saves (Cmd+S), and the stabilization reloads with it while the video stays where it is.
 -- A video with no motion data opens as it is: Gyroflow finds the motion from the picture (optical flow), and the
 -- project it saves next to the video is waited for, then the video loads again to play with it.
@@ -1049,7 +1066,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         mp.osd_message("Gyroflow: gyroflow-project isn't installed", 2)
         return
     end
-    project = (path:match("^(.*)%.[^./\\]+$") or path) .. ".gyroflow"
+    project = select(2, project_paths(path))
     -- As it plays here: the level, the view (off: the preset's), the horizon lock, the lens
     local args = { PROJECT_WRITER, "--underwater", underwater, "--level", level }
     if view == "wide" and not stab_off then table.insert(args, "--wide") end
