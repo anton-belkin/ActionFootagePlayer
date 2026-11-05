@@ -70,7 +70,7 @@
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
--- Gyroflow), exporting, last_export.
+-- Gyroflow), exporting, last_export, live_photo.
 --
 -- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
 -- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
@@ -128,6 +128,9 @@
 --                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
 --                re-render as the clean still frame; playing on sets the chain up for playback again, which costs a
 --                moment on a slow GPU each time (still.lua). The quality menu sets it
+--   live_photo=yes  a photo (Alt+s; Enter in crop mode) comes with the motion around it, as an iPhone's Live Photo:
+--                a Live Photo on macOS (a .mov next to the HEIC), a Motion Photo elsewhere (the video in the JPEG).
+--                The crop panel's Live switch sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 
@@ -135,7 +138,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = true, gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -1102,4 +1105,6 @@ end)
 
 mp.register_event("end-file", stop_watching)
 
+-- export.lua's photos read it from here, and its live-photo message sets it
+mp.set_property_native("user-data/gyroflow/live_photo", o.live_photo)
 require 'export'

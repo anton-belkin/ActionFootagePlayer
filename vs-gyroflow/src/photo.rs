@@ -270,32 +270,69 @@ fn jpeg(rgb: &[u8], width: usize, height: usize, quality: u8, segments: Vec<Vec<
     Ok(out)
 }
 
+/// A Motion Photo's video (Google's Motion Photo format 1.0): an MP4 after the image(s), and the time of the frame
+/// the photo is in it
+pub struct Motion<'a> {
+    pub video: &'a [u8],
+    pub presentation_us: i64,
+}
+
+/// The primary image's XMP for a Motion Photo: GCamera's flags and the Container directory of what follows the
+/// primary image, in order and tightly packed (its gain map, if any, then the video, which ends the file)
+fn motion_xmp(gain_map_len: Option<usize>, motion: &Motion) -> Vec<u8> {
+    let item = |mime: &str, semantic: &str, len: Option<usize>| format!(
+        "<rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"{mime}\" Item:Semantic=\"{semantic}\"{}/></rdf:li>",
+        len.map(|l| format!(" Item:Length=\"{l}\"")).unwrap_or_default());
+    let mut items = item("image/jpeg", "Primary", None);
+    if let Some(l) = gain_map_len { items += &item("image/jpeg", "GainMap", Some(l)); }
+    items += &item("video/mp4", "MotionPhoto", Some(motion.video.len()));
+    let xml = format!(concat!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>",
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">",
+        "<rdf:Description rdf:about=\"\" xmlns:GCamera=\"http://ns.google.com/photos/1.0/camera/\" ",
+        "xmlns:Container=\"http://ns.google.com/photos/1.0/container/\" xmlns:Item=\"http://ns.google.com/photos/1.0/container/item/\" ",
+        "GCamera:MotionPhoto=\"1\" GCamera:MotionPhotoVersion=\"1\" GCamera:MotionPhotoPresentationTimestampUs=\"{}\">",
+        "<Container:Directory><rdf:Seq>{}</rdf:Seq></Container:Directory>",
+        "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"), motion.presentation_us, items);
+    let mut v = XMP_NS.to_vec();
+    v.extend_from_slice(xml.as_bytes());
+    v
+}
+
+const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+
 /// An Ultra HDR JPEG: `sdr` as the image, and `hdr`'s gain map if there's one (else a plain JPEG). `exif`: an APP1
-/// Exif segment's payload, if any
-pub fn ultra_hdr_jpeg(sdr: &Image, hdr: Option<&Image>, quality: u8, exif: Option<Vec<u8>>) -> Result<Vec<u8>, String> {
+/// Exif segment's payload, if any. With `motion`, a Motion Photo: the video after it all, and the XMP that says so
+pub fn ultra_hdr_jpeg(sdr: &Image, hdr: Option<&Image>, quality: u8, exif: Option<Vec<u8>>, motion: Option<&Motion>) -> Result<Vec<u8>, String> {
     let base = to_rgb8(sdr);
+    // XMP, then Exif before it: each goes right after the APP0
+    let head = |mut jpeg: Vec<u8>, map_len: Option<usize>| -> Result<Vec<u8>, String> {
+        if let Some(m) = motion { jpeg = insert_app1(jpeg, motion_xmp(map_len, m))?; }
+        if let Some(exif) = exif.clone() { jpeg = insert_app1(jpeg, exif)?; }
+        Ok(jpeg)
+    };
     let Some(hdr) = hdr else {
-        let mut out = jpeg(&base, sdr.width, sdr.height, quality, vec![], true)?;
-        if let Some(exif) = exif { out = insert_app1(out, exif)?; }
+        let mut out = head(jpeg(&base, sdr.width, sdr.height, quality, vec![], true)?, None)?;
+        if let Some(m) = motion { out.extend_from_slice(m.video); }
         return Ok(out);
     };
     let map = gain_map(sdr, hdr, GAIN_MAP_SCALE);
     let secondary = jpeg(&map.rgb, map.width, map.height, 90, vec![iso_metadata(Some(&map))], false)?;
     // The primary with a placeholder MPF of the final size, then its offsets in place
     let placeholder = mpf(0, 0, 0);
-    let mut primary = jpeg(&base, sdr.width, sdr.height, quality, vec![iso_metadata(None), placeholder.clone()], true)?;
-    if let Some(exif) = exif { primary = insert_app1(primary, exif)?; }
+    let mut primary = head(jpeg(&base, sdr.width, sdr.height, quality, vec![iso_metadata(None), placeholder.clone()], true)?, Some(secondary.len()))?;
     let at = primary.windows(placeholder.len()).position(|w| w == placeholder.as_slice()).ok_or("JPEG: MPF segment not found")?;
     let tiff = at + 4;
     let real = mpf(primary.len() as u32, secondary.len() as u32, (primary.len() - tiff) as u32);
     primary[at..at + real.len()].copy_from_slice(&real);
     primary.extend_from_slice(&secondary);
+    if let Some(m) = motion { primary.extend_from_slice(m.video); }
     Ok(primary)
 }
 
-/// `exif` as an APP1 segment right after the JPEG's SOI and its JFIF APP0
+/// `payload` (Exif's or XMP's) as an APP1 segment right after the JPEG's SOI and its JFIF APP0
 fn insert_app1(jpeg: Vec<u8>, exif: Vec<u8>) -> Result<Vec<u8>, String> {
-    if exif.len() > 65533 { return Err("Exif too large".into()); }
+    if exif.len() > 65533 { return Err("APP1 segment too large".into()); }
     let mut at = 2;
     if jpeg.get(2..4) == Some(&[0xFF, 0xE0]) { at += 2 + u16::from_be_bytes([jpeg[4], jpeg[5]]) as usize; }
     let mut out = Vec::with_capacity(jpeg.len() + exif.len() + 4);
@@ -413,7 +450,7 @@ mod tests {
             let (x, y) = ((i % w) as f32 / w as f32, (i / w) as f32 / h as f32);
             let v = if (0.4..0.6).contains(&y) { 0.75 + 0.25 * x } else { 0.75 * x };
             [v, v * 0.95, v * 0.8] }).collect() };
-        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6")))).unwrap()).unwrap();
+        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None).unwrap()).unwrap();
     }
 
     #[test]
@@ -421,7 +458,7 @@ mod tests {
         let (w, h) = (64, 32);
         let sdr = Image { width: w, height: h, pixels: vec![[0.5, 0.4, 0.3]; w * h] };
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6")))).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None).unwrap();
         // The MPF's entries: the primary's size, and the gain map where it says
         let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
         let tiff = at + 4;
@@ -433,5 +470,35 @@ mod tests {
         assert_eq!(&file[primary..primary + 2], &[0xFF, 0xD8]);
         assert!(file[primary..].windows(ISO_URN.len()).any(|w| w == ISO_URN));
         assert!(file[..primary].windows(6).any(|w| w == b"Exif\0\0"));
+    }
+
+    #[test]
+    fn motion_photo_layout() {
+        let (w, h) = (64, 32);
+        let sdr = Image { width: w, height: h, pixels: vec![[0.5, 0.4, 0.3]; w * h] };
+        let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
+        let video = b"\0\0\0\x18ftypmp42 a video, not really".to_vec();
+        let m = Motion { video: &video, presentation_us: 1_500_000 };
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None)), Some(&m)).unwrap();
+        assert!(file.ends_with(&video));
+        // The directory's lengths: the gain map and the video tightly after the primary
+        let xmp = String::from_utf8_lossy(&file[file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap()..]).to_string();
+        let len = |semantic: &str| -> usize {
+            let at = xmp.find(&format!("Item:Semantic=\"{semantic}\" Item:Length=\"")).unwrap();
+            let rest = &xmp[at..]; let rest = &rest[rest.find("Length=\"").unwrap() + 8..];
+            rest[..rest.find('"').unwrap()].parse().unwrap()
+        };
+        let (map_len, video_len) = (len("GainMap"), len("MotionPhoto"));
+        assert_eq!(video_len, video.len());
+        let primary = file.len() - video_len - map_len;
+        assert_eq!(&file[primary..primary + 2], &[0xFF, 0xD8]);
+        assert_eq!(&file[primary + map_len - 2..primary + map_len], &[0xFF, 0xD9]);
+        assert!(xmp.contains("GCamera:MotionPhotoPresentationTimestampUs=\"1500000\""));
+        // The MPF still finds the gain map: its size and offset unchanged by the video after it
+        let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
+        let be = |i: usize| u32::from_be_bytes(file[i..i + 4].try_into().unwrap()) as usize;
+        assert_eq!((be(at + 4 + 50 + 4), be(at + 4 + 50 + 20)), (primary, map_len));
+        // Exif before XMP
+        assert!(file.windows(6).position(|w| w == b"Exif\0\0").unwrap() < file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap());
     }
 }

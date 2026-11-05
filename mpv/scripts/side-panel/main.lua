@@ -676,9 +676,14 @@ local function crop_part(u, x, w, y)
         y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
         y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
     end
-    y = u:button(x, w, y + 10 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
+    local live = g.live_photo ~= false
+    y = u:switch(x, w, y + 10 * s, "crop-live", platform == "darwin" and "Live Photo" or "Motion Photo", live,
+                 "script-message-to gyroflow live-photo toggle")
+    y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
     y = u:caption(x, w, y, (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-                           .. " in the stabilized folder: the SDR look, brighter where the screen has HDR")
+                           .. " in the stabilized folder: the SDR look, brighter where the screen has HDR"
+                           .. (not live and "" or platform == "darwin" and ". Live: 3 s of the video around it as a .mov next to it, one Live Photo in Photos"
+                                                  or ". Motion: 3 s of the video around it inside the JPEG, as Android's cameras do"))
     return u:button(x, w, y + 6 * s, "crop-leave", "Leave crop mode", "script-message-to gyroflow crop no", { key = "Esc" })
 end
 

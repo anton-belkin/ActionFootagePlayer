@@ -20,7 +20,11 @@
 --   photo                the frame on screen as a photo (Alt+s; Enter in crop mode): gyroflow-export --photo, as it
 --                        plays (the same stabilization, the frame cleaned up from its neighbours as Ctrl+p does, crop
 --                        mode's camera and frame), as an SDR screen shows the look (as_it_plays) with a gain map to the
---                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder
+--                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the stabilized/ folder. Live (the
+--                        default, gyroflow.conf's live_photo): with 3 s of the video around it (--live), exported as
+--                        Shift+E would, at most 1920 wide or high: a Live Photo on macOS (a .mov next to the HEIC),
+--                        a Motion Photo elsewhere (<name>.MP.jpg, the video in it)
+--   live-photo yes|no|toggle  photos with their motion or without, kept in gyroflow.conf at once
 --
 -- The export and playback share the GPU and the video decoder/encoder, and at the same priority playback drops
 -- half its frames. So while the video plays the export runs at background priority (macOS's lowest: playback
@@ -210,31 +214,32 @@ local function local_path()
 end
 
 -- The color and stabilization as they play, into args. `sdr`: in SDR whatever plays; `photo`: the photo's image is
--- what an SDR screen shows of the look (--sdr-image), its gain map leads to the HLG:
+-- what an SDR screen shows of the look (--sdr-image), its gain map leads to the HLG, and its motion (`live`) is the
+-- video as Shift+E exports it (--sdr, --nbcu, --dv-rpu):
 --   maker                     the maker's LUT
 --   hdr                       the HLG as macOS tones it down for an SDR screen (elsewhere NBCU's)
 --   nbcu, tonemap, dv, dvsdr  NBCU's conversion: Dolby Vision's own SDR, as macOS draws it, only exists on screen
 --                             (AVFoundation's decoders ignore the RPU), and the RPU's trims are fitted to NBCU's; mpv's
 --                             tone mapping isn't in gyroflow-export
-local function as_it_plays(args, sdr, photo)
+local function as_it_plays(args, sdr, photo, live)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
         table.insert(args, "--curve"); table.insert(args, "none")
     elseif curve then
         table.insert(args, "--curve"); table.insert(args, curve)
     end
-    local sdr_look = (sdr or photo) and mp.get_property_native("user-data/dlogm/sdr_look") or look
+    local sdr_look = sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
     if photo then
         local image = look == "maker" and "maker" or (look == "hdr" and platform.macos) and "macos" or "nbcu"
         table.insert(args, "--sdr-image"); table.insert(args, image)
-    else
-        if sdr_look == "maker" then table.insert(args, "--sdr") end
-        if sdr_look == "nbcu" then table.insert(args, "--nbcu") end
     end
+    local video = not photo or live
+    if video and sdr_look == "maker" then table.insert(args, "--sdr") end
+    if video and sdr_look == "nbcu" then table.insert(args, "--nbcu") end
     -- The dv look: the RPU file the player attaches, on every frame of the export too, with each frame's own L1 when
     -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way)
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
-    if not sdr and not photo and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
+    if not sdr and video and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
         table.insert(args, "--dv-rpu"); table.insert(args, rpu)
         if mp.get_property_native("macos-dovi-live-l1") == true then table.insert(args, "--dv-live-l1") end
     end
@@ -271,7 +276,7 @@ local function start(path, sdr)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    as_it_plays(args, sdr, false)
+    as_it_plays(args, sdr, false, false)
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local range = ""
     if a and b and b > a then
@@ -366,7 +371,9 @@ local function photo()
     local t = mp.get_property_number("time-pos")
     if not t then return end
     local args = { EXPORT, "--photo", string.format("%.4f", t) }
-    as_it_plays(args, false, true)
+    local live = mp.get_property_native("user-data/gyroflow/live_photo") ~= false
+    if live then table.insert(args, "--live") end
+    as_it_plays(args, false, true, live)
     local still = mp.get_property_native("user-data/gyroflow/still")
     if still == false then table.insert(args, "--radius"); table.insert(args, "0") end
     local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
@@ -388,7 +395,8 @@ local function photo()
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
-    mp.osd_message("Saving a photo of " .. name .. " at " .. clock(t) .. "…", 30)
+    local kind = not live and "photo" or platform.macos and "Live Photo" or "Motion Photo"
+    mp.osd_message("Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…", 60)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         photos = photos - 1
@@ -397,8 +405,9 @@ local function photo()
         if r and r.status == 0 and out then
             last_export = out
             publish()
-            mp.osd_message("Photo saved: " .. platform.file_name(out), 4)
-            notify("Photo saved", out)
+            local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
+            mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
+            notify(saved, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
             mp.msg.warn("photo: " .. err)
@@ -410,3 +419,11 @@ end
 
 mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
+
+mp.register_script_message("live-photo", function(how)
+    local on = mp.get_property_native("user-data/gyroflow/live_photo") ~= false
+    if how == "yes" then on = true elseif how == "no" then on = false else on = not on end
+    mp.set_property_native("user-data/gyroflow/live_photo", on)
+    platform.save_options("gyroflow", { { "live_photo", on and "yes" or "no" } })
+    mp.osd_message("Photos: " .. (on and (platform.macos and "Live Photos, with 3 s of motion" or "Motion Photos, with 3 s of video") or "stills"), 2)
+end)
