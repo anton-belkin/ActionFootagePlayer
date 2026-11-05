@@ -699,8 +699,10 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
   moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
   project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
   its own project in Gyroflow, made then from what it plays with if it has none; a trim changed there becomes the
-  moment's ends. Changing the view, level, horizon lock or the switch while a moment plays is for viewing only: the
-  moment stays as it was saved until **Keep in Turtle** in the panel.
+  moment's ends. While a moment plays, each stabilization setting has **As saved** first: every moment plays as it
+  was saved. Pick a value instead and it's for every moment this session (a playlist of moments all at Strong, say),
+  without touching how clips play; back to As saved, each moment is its own again. None of it changes a moment: only
+  **Keep in Turtle** in the panel writes how it's viewed into it.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the

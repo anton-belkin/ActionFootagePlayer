@@ -342,11 +342,15 @@ Opening a moment's file (a double click, the player being the default app for MP
 - `snap` in its link: its stabilization is its own. `stab`: the settings it was made with over the preset (view,
   level, horizon lock). The gyroflow plugin applies them for that file only (`user-data/workspace/stab`), the
   settings that stick for the next clips untouched.
-- **Viewing is never saving** (Anton): what's changed while a moment plays (its view, level, horizon lock, *Stabilize
-  on its own*) changes how it's viewed this session only; the moment stays as it was saved until **Keep in <name>**
-  (the panel shows it with "Changed for viewing only"; the menu has it too), which writes it into the moment and its
-  own project. The switch as viewed reaches a project's "only within the trim range" through the engine (`alone`),
-  its file untouched. `k` (its ends) and a trim changed in Gyroflow are edits of the moment, and saved as they are.
+- **Viewing is never saving** (Anton): the moment stays as it was saved until **Keep in <name>** (the panel shows it
+  with "Changed for viewing only"; the menu has it too), which writes how it's viewed into the moment and its own
+  project.
+- **As saved** (Anton): while a moment plays, each setting (view, level, horizon lock; *Stabilized*: on its own or
+  with its clip) has *As saved* first, the default: every moment as it was saved. A value chosen instead (in the
+  panel, or a key: Ctrl+g, Ctrl+k) is for every moment this session (`force`, the workspace plugin's), until As
+  saved again. It's apart from the settings clips keep between them, which it doesn't change, nor they it; a clip
+  has no As saved. The switch as viewed reaches a project's "only within the trim range" through the engine
+  (`alone`), its file untouched. `k` (its ends) and a trim changed in Gyroflow are edits of the moment, and saved as they are.
 - Marks are the clip's, never a moment's own (Anton): one marks file per clip; a moment shows those inside it.
 - Made from a clip with a Gyroflow project: a copy of it beside the moment (`_Moments/Turtle.gyroflow`,
   `gyroflow-project --copy … --trim in,out --alone yes|no`), its trim range the moment, which it plays with from then

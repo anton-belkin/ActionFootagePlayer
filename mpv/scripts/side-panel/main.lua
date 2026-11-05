@@ -460,7 +460,15 @@ local function project_part(u, x, w, y)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
         -- How it's stabilized: as it was made
         if ws.snap then
-            y = u:switch(x, w, y, "alone", "Stabilize on its own", ws.alone == true, "script-message-to workspace moment-alone")
+            -- Stabilized on its own or with its clip: As saved (each moment's), or one way for every moment this session
+            local f = (ws.force or {}).alone
+            y = u:heading(x, w, y + 2 * s, "Stabilized")
+            y = u:segmented(x, w, y, "alone", {
+                { "As saved", "script-message-to workspace moment-force alone saved" },
+                { "On its own", "script-message-to workspace moment-force alone yes" },
+                { "With its clip", "script-message-to workspace moment-force alone no" },
+            }, f == nil and 1 or (f and 2 or 3))
+            if f == nil then y = u:caption(x, w, y - 2 * s, "This one was saved " .. (ws.moment.alone and "on its own" or "with its clip")) end
             -- Viewing is never saving: changed here or in the other tabs, it's kept in the moment only by this
             if moment_changed(ws) then
                 y = u:caption(x, w, y, "Changed for viewing only: the moment is as it was saved", { color = C.text })
@@ -748,32 +756,51 @@ local function stabilization_part(u, x, w, y)
     y = y + ch + 14 * s
     if not g.available then return y end
 
+    -- A moment playing: each setting As saved (every moment as it was saved), or one value for every moment this
+    -- session (the workspace plugin's force); a clip's are as they always were
+    local ws = state("workspace")
+    local moment = ws and ws.moment and ws.snap and ws.path == mp.get_property("path")
+    local force = moment and (ws.force or {}) or nil
+    -- The options with As saved first, their commands through the workspace plugin, and which is chosen
+    local function with_saved(key, options, values, current)
+        if not moment then return options, values[current] end
+        local list = { { "As saved", "script-message-to workspace moment-force " .. key .. " saved" } }
+        for _, o in ipairs(options) do
+            table.insert(list, { o[1], "script-message-to workspace moment-force " .. key .. " " .. o[4], o[3] })
+        end
+        return list, force[key] == nil and 1 or (values[force[key]] and values[force[key]] + 1)
+    end
+    if moment then y = u:caption(x, w, y, "A moment: As saved plays each moment as it was saved; a value, every moment this session") end
+
     y = u:heading(x, w, y, "View", keys["script-binding gyroflow/toggle"])
     local views = { normal = 1, wide = 2, off = 3 }
-    y = u:segmented(x, w, y, "view", {
-        { "On", "script-message-to gyroflow view normal" },
-        { "Wider", "script-message-to gyroflow view wide" },
-        { "Off", "script-message-to gyroflow view off" },
-    }, views[g.view])
+    local view_list, view_on = with_saved("view", {
+        { "On", "script-message-to gyroflow view normal", nil, "normal" },
+        { "Wider", "script-message-to gyroflow view wide", nil, "wide" },
+        { "Off", "script-message-to gyroflow view off", nil, "off" },
+    }, views, g.view)
+    y = u:segmented(x, w, y, "view", view_list, view_on)
     y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or g.view == "off" and "As recorded, for this clip" or "Zoomed in so no edge shows")
 
     local project = g.kind == "project"
     y = u:heading(x, w, y + 8 * s, "Level", keys["script-binding gyroflow/level"])
     local levels = { weak = 1, medium = 2, strong = 3 }
-    y = u:segmented(x, w, y, "level", {
-        { "Weak", "script-message-to gyroflow level weak" },
-        { "Medium", "script-message-to gyroflow level medium" },
-        { "Strong", "script-message-to gyroflow level strong" },
-    }, levels[g.level], project)
+    local level_list, level_on = with_saved("level", {
+        { "Weak", "script-message-to gyroflow level weak", nil, "weak" },
+        { "Medium", "script-message-to gyroflow level medium", nil, "medium" },
+        { "Strong", "script-message-to gyroflow level strong", nil, "strong" },
+    }, levels, g.level)
+    y = u:segmented(x, w, y, "level", level_list, level_on, project)
     y = u:caption(x, w, y, project and "This clip has its project's smoothing; the level is for clips without one" or LEVEL_NOTES[g.level] or "")
 
     y = u:heading(x, w, y + 8 * s, "Horizon")
     local horizons = { project = 1, yes = 2, no = 3 }
-    y = u:segmented(x, w, y, "horizon", {
-        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project" },
-        { "Level", "script-message-to gyroflow horizon-lock yes" },
-        { "Free", "script-message-to gyroflow horizon-lock no" },
-    }, horizons[g.horizon_lock])
+    local horizon_list, horizon_on = with_saved("horizon_lock", {
+        { project and "As project" or "As preset", "script-message-to gyroflow horizon-lock project", nil, "project" },
+        { "Level", "script-message-to gyroflow horizon-lock yes", nil, "yes" },
+        { "Free", "script-message-to gyroflow horizon-lock no", nil, "no" },
+    }, horizons, g.horizon_lock)
+    y = u:segmented(x, w, y, "horizon", horizon_list, horizon_on)
 
     y = u:heading(x, w, y + 8 * s, "Lens", keys["script-binding gyroflow/lens"])
     -- A clip with a project starts with the project's lens; one without, with what sticks
