@@ -345,8 +345,24 @@ pub fn patch_dvvc(path: &Path, fps: f64) -> Result<u8, String> {
     f.write_all(&moov).map_err(|e| e.to_string())?;
     debug_assert_eq!(moov_pos + moov.len() as u64, free_pos + 32);
     f.write_all(&free_head).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
+    sync(&f)?;
     Ok(level)
+}
+
+/// The file to disk. sync_all is F_FULLFSYNC on macOS, which an SMB share doesn't support ("Operation not
+/// supported"): there, a plain fsync, as far as the share goes
+fn sync(f: &File) -> Result<(), String> {
+    match f.sync_all() {
+        Ok(()) => Ok(()),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ENOTSUP) || e.raw_os_error() == Some(libc::EOPNOTSUPP)
+            || e.kind() == std::io::ErrorKind::Unsupported => {
+            use std::os::unix::io::AsRawFd;
+            unsafe { libc::fsync(f.as_raw_fd()); }
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[cfg(test)]
