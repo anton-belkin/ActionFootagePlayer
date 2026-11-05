@@ -1225,6 +1225,35 @@ local function plugin_tool(name)
     return fs.is_file(exe) and exe or nil
 end
 
+-- A file's fingerprint (gyroflow-export --fingerprint: SHA-256 of its first and last MiB), as links keep their
+-- original's (gyroflow-export adds it) and marks files their clip's, to find it again once it's moved or renamed
+local function fingerprint_args(file)
+    local exe = plugin_tool("gyroflow-export")
+    return exe and { name = "subprocess", playback_only = false, capture_stdout = true, args = { exe, "--fingerprint", file } }
+end
+local function fingerprint_of(r)
+    local h = r and r.status == 0 and type(r.stdout) == "string" and r.stdout:match("^(%x+)")
+    return h and #h == 64 and h or nil
+end
+local function fingerprint(file)
+    local cmd = fingerprint_args(file)
+    return cmd and fingerprint_of(mp.command_native(cmd)) or nil
+end
+
+-- The clip's, read in the background once it's loaded (2 MiB): published as hash, for the highlights plugin's marks
+mp.register_event("file-loaded", function()
+    local clip = state.clip
+    local cmd = clip and fs.is_file(clip) and fingerprint_args(clip)
+    if not cmd then return end
+    mp.command_native_async(cmd, function(ok, r)
+        local h = ok and fingerprint_of(r)
+        if h and state.clip == clip then
+            state.hash = h
+            publish()
+        end
+    end)
+end)
+
 local function split_name(name)
     local stem, ext = name:match("^(.*)(%.[^.]*)$")
     return stem or name, ext or ""
@@ -1314,6 +1343,7 @@ local function cut_finish()
                 p.size = info and info.size
                 p.created = cut_lib.later(c.created, p.from)
                 p.relative = c.project and ws.relative(p.file, c.project) or nil
+                p.hash = fingerprint(p.file)
             end
             -- Marks: each part's own, at its time
             local marks_kept = 0
@@ -1321,6 +1351,7 @@ local function cut_finish()
                 for _, p in ipairs(c.parts) do
                     local d = cut_lib.part_marks(doc, p.from, p.to, { file = p.name, size = p.size, duration = moments_lib.ms(p.to - p.from), created = p.created })
                     if d then
+                        d.clip.hash = p.hash
                         write_json(ws.marks_file(p.file), d)
                         marks_kept = marks_kept + #d.marks
                     end
@@ -1340,7 +1371,7 @@ local function cut_finish()
                 local l = raw and utils.parse_json(raw)
                 if type(l) == "table" then
                     local p = c.parts[i]
-                    l.clip, l.size, l.created, l["in"], l.out = p.relative, p.size, p.created, a, b
+                    l.clip, l.size, l.created, l.hash, l["in"], l.out = p.relative, p.size, p.created, p.hash, a, b
                     local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
                         args = { exe, "--set-key", m.file, link.KEY, utils.format_json(l) } })
                     if r and r.status == 0 then relinked = relinked + 1 else orphans[#orphans + 1] = m.name; orphan_files[#orphan_files + 1] = m.file end

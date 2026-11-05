@@ -100,7 +100,10 @@ if ok(run("ffmpeg -version")) then
             :format(q(exporter), q(LINK), q(preview), q(clip)))
         expect("gyroflow-export ran", ok(r), true)
         local k = link.read_keys(preview) or {}
-        expect("gyroflow-export's link", k[link.KEY], LINK)
+        -- With the original's fingerprint added (gyroflow-export --fingerprint prints the same)
+        local h = io.popen(("%s --fingerprint %s"):format(q(exporter), q(clip))):read("*l")
+        expect("gyroflow-export's fingerprint", type(h) == "string" and #h, 64)
+        expect("gyroflow-export's link", k[link.KEY], LINK:sub(1, -2) .. ',"hash":"' .. tostring(h) .. '"}')
         expect("gyroflow-export's date", k["com.apple.quicktime.creationdate"], "2026-10-22T15:28:42+0200")
     else
         print("gyroflow-export's preview: skipped (no GYROFLOW_EXPORT)")

@@ -5,6 +5,7 @@
 // A project is a folder with `_ActionFootagePlayer/` in it, the trip folder: its footage is under it, and the
 // player's files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip.
 
+use std::io::{ Read, Seek, SeekFrom };
 use std::path::{ Path, PathBuf };
 
 /// The folder a project's state is kept in, which also marks a folder as one
@@ -110,6 +111,35 @@ pub fn marks_file(clip: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fingerprints() {
+        let dir = std::env::temp_dir().join(format!("afp-fp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (small, big) = (dir.join("small"), dir.join("big"));
+        std::fs::write(&small, b"abc").unwrap();
+        // "abcabc"
+        assert_eq!(super::fingerprint(&small).unwrap(), "bbb59da3af939f7af5f360f2ceb80a496e3bae1cd87dde426db0ae40677e1c2c");
+        let data: Vec<u8> = (0..3u32 << 20).map(|i| (i * 7 % 251) as u8).collect();
+        std::fs::write(&big, &data).unwrap();
+        let mut ends = data[..1 << 20].to_vec();
+        ends.extend_from_slice(&data[data.len() - (1 << 20)..]);
+        use sha2::Digest;
+        let want: String = sha2::Sha256::digest(&ends).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(super::fingerprint(&big).unwrap(), want);
+        // The middle doesn't count, an end does
+        let mut changed = data.clone();
+        changed[3 << 19] ^= 1;
+        std::fs::write(&big, &changed).unwrap();
+        assert_eq!(super::fingerprint(&big).unwrap(), want);
+        changed[0] ^= 1;
+        std::fs::write(&big, &changed).unwrap();
+        assert_ne!(super::fingerprint(&big).unwrap(), want);
+        let link = super::with_fingerprint("{\"v\":1}", &small);
+        assert!(link.contains("\"hash\":\"bbb59da3"));
+        assert_eq!(super::with_fingerprint("{\"hash\":\"x\"}", &small), "{\"hash\":\"x\"}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     // tests/workspace_cases.txt, as its comment says, on a temporary folder
@@ -188,5 +218,38 @@ mod tests {
         assert_eq!(relative(Path::new("/a/bc/A.MP4"), Path::new("/a/b")), None);
         assert_eq!(gyroflow_new(Path::new("/a.b/clip")), PathBuf::from("/a.b/clip.gyroflow"));
         assert_eq!(gyroflow_projects(Path::new("/x/A.MP4"))[1], PathBuf::from("/x/A.MP4.gyroflow"));
+    }
+}
+
+/// How much of each end of a file its fingerprint reads
+pub const FINGERPRINT_PART: u64 = 1 << 20;
+
+/// A file's fingerprint, kept in a link with the original's path (docs/moments-and-workspaces.md, "The link inside"),
+/// to find the original again once it's been moved or renamed: SHA-256 (hex) of its first MiB followed by its last
+/// MiB, the two overlapping in a file under 2 MiB. Reads 2 MiB, not a 4 GB clip off a NAS; the link's size and
+/// creation time go with it. The same as `(head -c 1048576 f; tail -c 1048576 f) | shasum -a 256`
+pub fn fingerprint(path: &Path) -> std::io::Result<String> {
+    use sha2::{ Digest, Sha256 };
+    let mut f = std::fs::File::open(path)?;
+    let size = f.metadata()?.len();
+    let part = size.min(FINGERPRINT_PART) as usize;
+    let mut buf = vec![0u8; part];
+    let mut hash = Sha256::new();
+    f.read_exact(&mut buf)?;
+    hash.update(&buf);
+    f.seek(SeekFrom::Start(size - part as u64))?;
+    f.read_exact(&mut buf)?;
+    hash.update(&buf);
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// A link's JSON with the original's fingerprint, `hash`, when it has none (`clip`: the original)
+pub fn with_fingerprint(link: &str, clip: &Path) -> String {
+    match serde_json::from_str::<serde_json::Value>(link) {
+        Ok(serde_json::Value::Object(mut o)) if !o.contains_key("hash") => match fingerprint(clip) {
+            Ok(h) => { o.insert("hash".into(), h.into()); serde_json::Value::Object(o).to_string() }
+            Err(_) => link.to_string(),
+        },
+        _ => link.to_string(),
     }
 }

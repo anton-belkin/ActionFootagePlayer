@@ -204,7 +204,8 @@ A mark is a point in a clip: a camera highlight (DJI's quick switch, GoPro's HiL
     "file": "DJI_20261022152841_0068_D.MP4",
     "size": 5123456789,
     "duration": 47.580867,
-    "created": "2026-10-22T13:28:42Z"
+    "created": "2026-10-22T13:28:42Z",
+    "hash": "3f8a…"
   },
   "marks": [
     { "t": 10.010, "camera": "dji" },
@@ -216,7 +217,7 @@ A mark is a point in a clip: a camera highlight (DJI's quick switch, GoPro's HiL
 - Times are seconds of the clip, to the millisecond.
 - `clip` says which file the marks are for. A marks file whose clip now has another size is renamed
   `.marks.json.old` rather than applied to the wrong clip, which happens with GoPro's `GX010123` names, reused on
-  every card.
+  every card. `hash` is the clip's fingerprint, as a link has it (below).
 - The file is written whole, to a temporary file renamed over the old one, and fields it doesn't know are kept.
 
 **Gyroflow's project is never written to.** Gyroflow rebuilds the whole project when it saves
@@ -259,6 +260,7 @@ A metadata key in the MP4, `ch.actionfootageplayer.link`, whose value is JSON:
   "clip": "Day 1/DJI_20261022152841_0068_D.MP4",
   "size": 5123456789,
   "created": "2026-10-22T13:28:42Z",
+  "hash": "3f8a…",
   "in": 20.020,
   "out": 30.030,
   "name": "Turtle",
@@ -271,6 +273,12 @@ A metadata key in the MP4, `ch.actionfootageplayer.link`, whose value is JSON:
 - `clip`: the original's path **relative to the sources root**, with `/` on every OS. It's not relative to the
   moment file, so moving a moment between subfolders changes nothing.
 - `size` and `created` (the original's `creation_time`) say it's the right file, not another `GX010123.MP4`.
+- `hash`: the original's fingerprint, SHA-256 (hex) of its first MiB followed by its last MiB, the same as
+  `(head -c 1048576 f; tail -c 1048576 f) | shasum -a 256` (`gyroflow-export --fingerprint <file>` prints it). With
+  the size, it finds the original again after it's been moved or renamed outside the player, wherever it went:
+  reading 2 MiB of each candidate, not the whole 4 GB off a NAS. gyroflow-export adds it to every link it writes;
+  a lossless cut's parts get their own. Links from before it have none: they're found by path, size and date as
+  before. Finding and fixing them (*Project → Find moved originals*) is to come.
 - `in`/`out`: seconds of the original, to the millisecond. They're put on frames when written out for an editor.
 - `name`: the name it was saved with. The file's own name wins. A moment renamed in Finder is renamed.
 - `roots`: the absolute sources roots when it was made, a hint for a moment file copied out of its project (to

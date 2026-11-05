@@ -51,6 +51,8 @@ use vs_gyroflow::dv_mux::{ self, RpuInjector };
 use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Underwater, probe, gpu_lut::{ self, GpuLut }, edges::{ EdgeMode, EdgeSettings } };
 
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
+       gyroflow-export --fingerprint <file>...  (each file's fingerprint, as a link keeps its original's: SHA-256 of
+                                                 its first and last MiB)
 
 Renders each video stabilized (and, for log, color-converted) into the _Exports/ folder of its project (the trip
 folder with _ActionFootagePlayer/ in it above the video, as the player initializes it), else into a stabilized/
@@ -88,7 +90,8 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
                    (a moment's); with a project, its \"only within the trim range\" on, whatever it says
   --whole          with a project, its \"only within the trim range\" off, whatever it says
   --link <json>    the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link:
-                   written in room ffmpeg leaves after the moov, so the file isn't written twice)
+                   written in room ffmpeg leaves after the moov, so the file isn't written twice). Its `hash`, the
+                   video's fingerprint, is added when it has none (as --fingerprint prints it)
   --project <file> stabilize with this Gyroflow project instead of the video's own (one video only): the player
                    passes the one it plays with. The video's own is <name>.gyroflow or <name.ext>.gyroflow next to
                    it, as the player's workspace plugin finds it
@@ -113,7 +116,8 @@ shows and plays, the frame also their cover art (the icon)
                    .LRV); without --at, about 12 frames through the clip, 10 s apart at least, after its first second
   --at <time>      the frame's time (default: the middle of --from to --to); a flipbook's: times, comma-separated
   --cover <time>   a flipbook's cover art (its icon): the frame nearest this time (default: the middle)
-  --link <json>    the link to the original the player keeps in it (an MP4 key, ch.actionfootageplayer.link)
+  --link <json>    the link to the original the player keeps in it (an MP4 key, ch.actionfootageplayer.link), its
+                   `hash` added as for an export
   --dates <time>   its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00): the MP4's creation time,
                    QuickTime's creation date (Photos' day) and the file's dates; without it, the video's dates
 Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
@@ -190,6 +194,17 @@ enum Preview { Still, Flipbook }
 struct Dates { unix: f64, offset_min: i32 }
 
 fn main() {
+    let first = std::env::args().nth(1);
+    if first.as_deref() == Some("--fingerprint") {
+        let mut failed = false;
+        for f in std::env::args().skip(2) {
+            match vs_gyroflow::workspace::fingerprint(Path::new(&f)) {
+                Ok(h) => println!("{h}"),
+                Err(e) => { eprintln!("{f}: {e}"); println!(); failed = true; }
+            }
+        }
+        std::process::exit(if failed { 1 } else { 0 });
+    }
     vs_gyroflow::init_logging();
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium,
@@ -295,7 +310,10 @@ fn main() {
     // The pid first: a player stops or reprioritizes it by it, from the start
     opts.progress.write(serde_json::json!({ "pid": std::process::id() }));
     let mut failed = 0;
+    let link = opts.link.clone();
     for file in &files {
+        // The original's fingerprint in its link, to find it again once it's moved (workspace::fingerprint)
+        opts.link = link.as_deref().map(|l| vs_gyroflow::workspace::with_fingerprint(l, Path::new(file)));
         let outcome = if let Some(t) = opts.photo { photo(file, &opts, t) }
             else if opts.preview == Some(Preview::Flipbook) { flipbook(file, &opts) } else { export(file, &opts, None) };
         match outcome {

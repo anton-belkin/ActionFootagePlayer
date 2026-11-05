@@ -43,6 +43,13 @@ local function clip_path()
     return path
 end
 
+-- The clip's fingerprint, when the workspace plugin has read it (its hash): kept in the marks file, to find the clip
+-- again once it's moved or renamed
+local function clip_hash()
+    local ws = mp.get_property_native("user-data/workspace")
+    return type(ws) == "table" and ws.path == mp.get_property("path") and ws.hash or nil
+end
+
 local o = { before = 2, chapters = true }
 options.read_options(o, "highlights")
 
@@ -249,7 +256,9 @@ local function mark()
         local ws = mp.get_property_native("user-data/workspace")
         doc = {
             format = FORMAT, version = 1,
+            -- hash: the clip's fingerprint, to find it again once it's moved (the workspace plugin's)
             clip = { file = found.path:match("([^/\\]+)$"), size = found.size,
+                     hash = clip_hash(),
                      duration = found.offset == 0 and mp.get_property_number("duration") or nil,
                      created = mp.get_property("metadata/by-key/creation_time") or (type(ws) == "table" and ws.created) or nil },
             marks = copy,
@@ -276,6 +285,8 @@ local function mark()
         table.sort(doc.marks, function(a, b) return a.t < b.t end)
         message = "Mark at " .. clock(t)
     end
+    -- A file written before fingerprints: the clip's too, once it's known
+    if type(doc.clip) == "table" and doc.clip.hash == nil then doc.clip.hash = clip_hash() end
     local ok, err = write(doc)
     if not ok then return mp.osd_message("Couldn't write the marks: " .. tostring(err), 4) end
     found.doc, found.all, found.marks = doc, doc.marks, visible(doc.marks, found.offset, found.length)
