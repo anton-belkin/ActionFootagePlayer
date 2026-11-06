@@ -108,11 +108,13 @@ end
 local opts_set = nil
 local function apply()
     local opts = mp.get_property_native("glsl-shader-opts") or {}
-    for k in pairs(opts) do if k:match("^view360_") then opts[k] = nil end end
+    for k in pairs(opts) do if k:match("^view360_") or k == "afp_input_time" then opts[k] = nil end end
     local key = "off"
     if active then
         local mine = view.shader_opts(cur, STEREO_INDEX[sphere.stereo] or 0, HEADING_INDEX[heading])
         mine.view360_on = "1"
+        -- The gesture's time, for the app's mpv's --macos-latency-log (no shader reads it)
+        if input and input.input_time then mine.afp_input_time = string.format("%.6f", input.input_time) end
         local parts = {}
         for k, v in pairs(mine) do opts[k] = v; table.insert(parts, k .. "=" .. v) end
         table.sort(parts)

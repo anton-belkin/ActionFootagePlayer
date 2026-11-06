@@ -42,7 +42,7 @@ local function whole(scale)
 end
 
 function M.new(h)
-    local g = { on = false, paused = false, drag = nil, messages = false, saved = nil }
+    local g = { on = false, paused = false, drag = nil, messages = false, saved = nil, input_time = nil }
     local function acting() return g.on and not g.paused end
     local prefix = h.prefix
 
@@ -87,8 +87,10 @@ function M.new(h)
         end
     end
 
-    mp.register_script_message("gesture", function(kind, a, b, c)
+    mp.register_script_message("gesture", function(kind, a, b, c, d)
         if not acting() then return end
+        -- The event's time, last (the app's mpv): what the view shows next is from it (--macos-latency-log)
+        g.input_time = tonumber(kind == "scroll" and d or c)
         if kind == "scroll" then
             local phase = c
             if phase == "momentum" then return end
