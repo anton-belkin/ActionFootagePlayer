@@ -320,6 +320,13 @@ if [ $apps = 1 ] && [ $macos = 1 ]; then
     # A release has its version in VERSION
     version=$(cat VERSION 2>/dev/null || git describe --tags --always 2>/dev/null || echo local)
     tools/make_app.sh "$player" "$BIN" "$BUILD/dlogm_hlg.glsl" "$version"
+    # Action Footage Library beside it: a release has its binary in bin/, a checkout builds it
+    if [ -x "$BIN/ActionFootageLibrary" ]; then
+        LIBRARY_BIN="$BIN/ActionFootageLibrary" tools/make_library_app.sh "$APPS_DIR/ActionFootageLibrary.app" "$version"
+    else
+        tools/make_library_app.sh "$APPS_DIR/ActionFootageLibrary.app" "$version"
+    fi
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APPS_DIR/ActionFootageLibrary.app" 2>/dev/null || true
     old_player="$APPS_DIR/$OLD_PLAYER_NAME.app"
     if [ -d "$old_player" ]; then
         /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old_player" 2>/dev/null || true

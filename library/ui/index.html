@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action Footage Library</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+  <header class="top">
+    <div class="who">
+      <h1 id="name">Action Footage Library</h1>
+      <div id="path" class="path"></div>
+    </div>
+    <div class="acts">
+      <button id="open" type="button">Open…</button>
+      <button id="show" type="button" hidden>Show in Finder</button>
+    </div>
+  </header>
+
+  <div id="engine" class="banner bad" hidden></div>
+  <div id="error" class="banner bad" hidden></div>
+
+  <section id="empty" class="empty">
+    <h2>Open a trip</h2>
+    <p>A project is a trip folder with <b>Project.afproject</b> in it. Double-click that file, drop it here, or choose it with Open….</p>
+    <p class="dim">No project yet? Open one of the trip's clips in ActionFootagePlayer and initialize the project in its side panel's Project tab.</p>
+  </section>
+
+  <section id="project" hidden>
+    <div id="counts" class="counts"></div>
+    <div id="legacy" class="banner" hidden>This project is from before 0.10: the player moves its <b>_ActionFootagePlayer</b> folder into Project.afproject the next time it opens one of its clips.</div>
+
+    <div class="cards">
+      <article class="card">
+        <h3>Clip previews</h3>
+        <p>A flipbook of each clip in color, in <b>_Clips</b>: the trip at a glance in Finder. Only for clips without one; a removed one stays removed.</p>
+        <label class="check"><input type="checkbox" id="clips_flat"> All in _Clips itself, without the clips' folders</label>
+        <div class="row">
+          <button class="pri" data-job="clips" type="button">Make clip previews</button>
+          <button data-job="clips-again" type="button">Again for removed clips</button>
+        </div>
+        <details id="failed" hidden><summary id="failed-sum"></summary><ul id="failed-list"></ul></details>
+      </article>
+
+      <article class="card">
+        <h3>Moments of all marks</h3>
+        <p>Every mark that's in no moment yet becomes one, in <b>_Moments</b>: 2 s on each side, marks close together joined.</p>
+        <label class="check"><input type="checkbox" id="moments_alone"> Stabilized on their own, not as part of the clip</label>
+        <div class="row"><button class="pri" data-job="moments" type="button">Make moments</button></div>
+      </article>
+
+      <article class="card">
+        <h3>Photos of all marks</h3>
+        <p>A photo at each mark, into <b>_Stills</b>, with the clip's saved view. Once each: a deleted one isn't made again.</p>
+        <label class="field" for="photo">Kind
+          <select id="photo">
+            <option value="no">Stills</option>
+            <option value="live" class="mac">Live Photos</option>
+            <option value="motion">Motion Photos</option>
+          </select>
+        </label>
+        <div class="row"><button class="pri" data-job="photos" type="button">Make photos</button></div>
+      </article>
+
+      <article class="card">
+        <h3>Export all moments</h3>
+        <p>Each moment not exported yet, into <b>_Exports</b>, with its own settings, as Shift+E exports one.</p>
+        <label class="field" for="look">Look
+          <select id="look">
+            <option value="hdr">HDR, as recorded</option>
+            <option value="sdr">SDR</option>
+          </select>
+        </label>
+        <div class="row"><button class="pri" data-job="export" type="button">Export</button></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="queue">
+    <div class="qhead">
+      <h2>Queue</h2>
+      <button id="clear" type="button" hidden>Clear finished</button>
+    </div>
+    <p id="qempty" class="dim">Nothing yet. Batches run one at a time, in the background; the player can play meanwhile.</p>
+    <ol id="jobs"></ol>
+  </section>
+</main>
+
+<div id="ask" class="modal" hidden>
+  <div class="box" role="dialog" aria-labelledby="ask-title">
+    <h2 id="ask-title">Batches are still running</h2>
+    <p>Closing stops them: what's being made now is left unfinished, the rest isn't made.</p>
+    <div class="row end">
+      <button id="keep" type="button">Keep going</button>
+      <button id="quit" class="danger" type="button">Stop and quit</button>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

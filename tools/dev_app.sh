@@ -83,6 +83,10 @@ rm -rf "$app"
 BUNDLE_RUNTIME="$prefix" tools/make_app.sh "$app" "$bin" "$BUILD/dlogm_hlg.glsl" "$version"
 codesign --verify --deep --strict "$app"
 echo "   $app"
+echo "== Action Footage Library"
+library="$BUILD/ActionFootageLibrary.app"
+tools/make_library_app.sh "$library" "$version"
+echo "   $library"
 [ $install = 1 ] || exit 0
 
 echo "== In $APPS_DIR"
@@ -97,6 +101,11 @@ if [ -d "$player" ]; then
 fi
 ditto "$app" "$player"
 "$LSREGISTER" -f "$player"
+# The Library beside it (where it looks for the player), the app Project.afproject opens with
+library_to="$APPS_DIR/ActionFootageLibrary.app"
+[ -d "$library_to" ] && { "$LSREGISTER" -u "$library_to" 2>/dev/null || true; rm -rf "$library_to"; }
+ditto "$library" "$library_to"
+"$LSREGISTER" -f "$library_to"
 setup="$player/Contents/Resources/setup.sh"
 "$setup" lut | sed 's/^/   /'
 SERVICES_DIR="$SERVICES_DIR" "$setup" quick-actions | sed 's/^/   /'
