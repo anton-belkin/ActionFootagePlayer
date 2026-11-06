@@ -1,7 +1,8 @@
 -- workspace: which project the clip that plays belongs to, where that project's files for it are, and its moments
 -- (docs/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
 --
--- A project is a trip folder with `_ActionFootagePlayer/` in it: the nearest such folder above the clip, up to the
+-- A project is a trip folder with `Project.afproject` in it (or, before 0.10, `_ActionFootagePlayer/`, which moves
+-- into it: projectfile.lua): the nearest such folder above the clip, up to the
 -- volume's top folder, and never the home folder itself. A clip in none has no project, and plays as before. One is
 -- never made by itself: the side panel's Project tab (or the menu's Project) initializes it, in the folder chosen
 -- among those above the clip, and what needs one (k, exports, clip previews, X) opens that tab when there's none.
@@ -19,8 +20,9 @@
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
 -- Clip previews: _Clips/<the clip's path>.afplink.mp4, a flipbook of the clip in color (its marks, else a dozen
--- frames), made from the menu (Project -> Make clip previews), one at a time in the background, only for clips not
--- in _ActionFootagePlayer/clips-made.txt, so that one deleted (X, or in Finder: not interesting) stays deleted.
+-- frames), made by Action Footage Library (the batch mode at the end of this file), one at a time in the background,
+-- only for clips not in the project file's clips_made, so that one deleted (X, or in Finder: not interesting) stays
+-- deleted.
 --   X                   this clip isn't interesting: its preview to the Trash; again: made again
 -- A clip preview's file plays its original, all of it.
 --
@@ -1800,7 +1802,7 @@ end
 
 -- The project's marks, all at once (the Project tab's): a moment for each mark in no moment yet, 2 s on each side,
 -- those that overlap joined into one (the clip's marks: its own file's, else the camera's); or a photo of each mark,
--- into _Stills, except those made before (_ActionFootagePlayer/stills-made.txt: a line per clip and mark, so a photo
+-- into _Stills, except those made before (the project file's stills_made: a line per clip and mark, so a photo
 -- deleted stays deleted). One at a time in the background, each with its clip's saved view (else the defaults); a
 -- moment with settings of its own, as one saved with k: a copy of the clip's Gyroflow project when it has one. While it
 -- runs: user-data/workspace/marks_job { kind (moments, photos), done, total, failed }

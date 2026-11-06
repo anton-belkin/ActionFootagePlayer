@@ -12,6 +12,14 @@ made: the link inside an MP4 (written by ffmpeg, read by mpv), what a plain remu
 Look shows, and setting a file's dates. Not checked yet: anything on Windows, and typing names in mpv's console.
 Those are marked **(to try)**.
 
+> **Since 0.10** (Action Footage Library, step 1): the project's state is one file, `Project.afproject` (JSON:
+> settings, what was made, the names typed; `mpv/scripts/workspace/projectfile.lua`), in place of the
+> `_ActionFootagePlayer/` folder below, which the player moves into it the first time it meets one. A double click on
+> it opens the trip in Action Footage Library (`library/`), where the batches went: clip previews (and again for
+> removed clips), moments and photos of all marks, and, new, exports of all moments. The player's menu and Project tab
+> open the Library instead; it runs the player without a window for each (the workspace plugin's batch mode,
+> AFP_BATCH). Where this page says `_ActionFootagePlayer/<file>`, read that file's part of `Project.afproject`.
+
 ## In short
 
 - **A project folder per trip.** By default it's the trip's own folder: `_Moments/`, `_Clips/`, `_Exports/` and
@@ -63,7 +71,7 @@ player writes). By default they're the same folder:
     Turtle.mov
   _Stills/
     DJI_20261022152841_0068_D_20.4s.heic
-  _ActionFootagePlayer/               the player's state for this project
+  Project.afproject                   the project's state; a double click opens it in Action Footage Library
 ```
 
 A separate project folder holds the same things, minus the footage, plus `Sources.txt`:
@@ -73,7 +81,7 @@ A separate project folder holds the same things, minus the footage, plus `Source
   Sources.txt
   Day 1/DJI_20261022152841_0068_D.afp.json
   Day 1/DJI_20261022152841_0068_D.gyroflow
-  _Moments/  _Clips/  _Exports/  _Stills/  _ActionFootagePlayer/
+  _Moments/  _Clips/  _Exports/  _Stills/  Project.afproject
 ```
 
 The per-clip files sit at the clip's path relative to the sources root, so the tree repeats the footage's

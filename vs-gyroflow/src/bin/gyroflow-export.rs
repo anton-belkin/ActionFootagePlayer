@@ -55,7 +55,7 @@ const USAGE: &str = "usage: gyroflow-export [options] <video>...
                                                  its first and last MiB)
 
 Renders each video stabilized (and, for log, color-converted) into the _Exports/ folder of its project (the trip
-folder with _ActionFootagePlayer/ in it above the video, as the player initializes it), else into a stabilized/
+folder with Project.afproject in it above the video, as the player initializes it), else into a stabilized/
 folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the

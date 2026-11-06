@@ -241,8 +241,9 @@ switches and buttons, scrolled with the wheel:
 - **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
   with their keys beside them. At the top, the project: with none yet, what one is and **Initialize the project here**
   in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
-  then its counts, **Make clip previews** for clips without one, **Show all clips** and **Show all moments** in
-  Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
+  then its counts, **Open in Action Footage Library** (where the trip's [batches](#action-footage-library) are made:
+  clip previews, moments and photos of all marks, exports of all moments), **Show all clips** and **Show all moments**
+  in Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
   its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
   interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
   were moved).
@@ -545,7 +546,7 @@ The same from a terminal, for one clip or many:
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
-The result goes to the `_Exports/` folder of the clip's project (the trip folder with `_ActionFootagePlayer/` in it
+The result goes to the `_Exports/` folder of the clip's project (the trip folder with `Project.afproject` in it
 above the clip, as the player initializes it), or with none to a `stabilized/` folder next to the clip, as
 `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
 names the file.
@@ -747,8 +748,10 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
 - **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
   moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
-  `_ActionFootagePlayer` folder there, and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once
-  there's something to keep. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
+  `Project.afproject` file there (a double click opens the trip in [Action Footage Library](#action-footage-library)),
+  and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once there's something to keep. A project from
+  before 0.10 has an `_ActionFootagePlayer` folder instead: the player moves it into `Project.afproject` the first
+  time it opens one of its clips. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
@@ -762,18 +765,18 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
   viewing only; **Save** (the Transform tab) writes it into the moment.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
-- **All the marks at once** (the Project tab): **Moments for marks in none** makes a moment of each mark of the
-  trip's clips that is in no moment yet, 2 s on each side (marks closer together share one), named by the time it
-  happened, each with its source's transform, else the defaults; **Photos of all marks** saves a photo at each mark into `_Stills/` (a
-  still, Live or Motion Photo, as Save frame says), once: `_ActionFootagePlayer/stills-made.txt` keeps which, so a
-  photo deleted isn't made again. Both run in the background, one at a time, with **Stop**.
+- **All the marks at once** ([Action Footage Library](#action-footage-library)): **Moments of all marks** makes a
+  moment of each mark of the trip's clips that is in no moment yet, 2 s on each side (marks closer together share
+  one), named by the time it happened, each with its source's transform, else the defaults; **Photos of all marks**
+  saves a photo at each mark into `_Stills/` (stills, Live or Motion Photos, chosen there), once: `Project.afproject`
+  keeps which, so a photo deleted isn't made again.
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 
 ### Clip previews: the trip at a glance
 
-A folder of log footage is a wall of gray icons. **Project → Make clip previews** (right click) makes a small
-file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
+A folder of log footage is a wall of gray icons. **Make clip previews** in [Action Footage
+Library](#action-footage-library) makes a small file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
 `_Clips/Day 1/DJI_0068_D.afplink.mp4`.
 
 - **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
@@ -781,22 +784,46 @@ file for each clip of the trip in a **_Clips** folder, beside the footage's own 
   and Quick Look (space bar) flips through each clip. A double click in the player plays the clip itself.
 - **How long it takes**: a second or so per clip. Only keyframes are decoded, from the low-resolution copy the
   camera writes beside the clip when there is one (DJI's `.LRF`, GoPro's `.LRV`). That's far less to read from a
-  NAS. They're made one at a time in the background, with the progress in the bottom-left corner, and never by
-  themselves: the menu item makes them for the clips that have none, new footage that is.
+  NAS. They're made one at a time in the background, and never by themselves: the Library's button makes them for
+  the clips that have none, new footage that is.
 - **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
-  clip previews* doesn't bring it back (`_ActionFootagePlayer/clips-made.txt` lists what was made). `X` again, or
-  *Make again for removed clips*, does.
+  clip previews* doesn't bring it back (`Project.afproject` lists what was made). `X` again, or the Library's
+  *Again for removed clips*, does.
 - **Variants**: a clip preview plays as its clip is saved to. **Settings of its own** (the panel, while it plays)
   gives it its own view, and a copy of the clip's Gyroflow project when it has one: copy the preview in Finder for
   another, and each is a variant of the same clip.
 - **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
   into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
   lose them: their moments and previews point at their names.)
-- **Ignore subfolders** (next to *Make clip previews*): new previews all go in Clips itself, not in the clips'
+- **All in _Clips itself** (the Library's checkbox): new previews all go in Clips itself, not in the clips'
   folders, for a camera's folders by date that mean nothing to the trip. Two clips with the same name get their
   folder's name in parentheses.
 - A clip under a second long has a single keyframe, at its start: its preview is made from the frames as they are.
-  If some can't be made, the panel says how many, and *why* opens the list.
+  If some can't be made, the Library lists them, each with why.
+
+### Action Footage Library
+
+The player plays; what's made for a whole trip is made in **Action Footage Library**, an app beside it
+(`ActionFootageLibrary.app` next to the player in Applications; `ActionFootageLibrary.exe` in the player's folder on
+Windows). It opens a project: double-click the trip's `Project.afproject`, drop it on its window, choose it with
+**Open…**, or **Open in Action Footage Library** in the player (the side panel's Project tab, or right click →
+Project). Then, as buttons:
+
+- **Make clip previews** (and **Again for removed clips**), with **All in _Clips itself**;
+- **Make moments**: moments of all marks, with **Stabilized on their own**;
+- **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
+- **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
+  SDR, as `Shift+E` exports one.
+
+They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
+stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
+why. The player can play meanwhile. Closing the window while some are queued asks first; on a Mac it keeps the Mac
+awake while they run.
+
+The Library plays and renders nothing itself: each batch is the player run without a window (its plugins, its
+settings, the same code as the menu used to run), so what it makes is what the player would. Its settings for the
+trip are in `Project.afproject`, which the player reads too. Not on Linux yet: there the batches aren't reachable
+until it is.
 
 ### Notes for an AI agent
 
