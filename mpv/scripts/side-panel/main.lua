@@ -256,20 +256,17 @@ local function source_part(u, x, w, y)
     if ws and ws.moment and not ws.moment.missing then
         y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
     end
-    local input = ws and type(ws.input) == "table" and ws.input or {}
     local own = local_file(path) and ws and ws.clip and not ws.export
     y = u:caption(x, w, y + 4 * s, own and "Set once, for the source and all its moments and clips: saved at once"
         or "Not saved: this file isn't a source")
 
     if d then
         y = u:heading(x, w, y + 8 * s, "Log curve", keys["script-binding dlogm/curve"])
-        local saved = input.curve
         y = u:radio(x, w, y, "curve:auto", d.recorded ~= "" and ("From the clip: " .. (CURVE_NAMES[d.recorded] or d.recorded)) or "None, not log",
-                    d.curve == d.recorded, "script-message-to dlogm curve auto", { saved = saved == "auto" and d.curve ~= d.recorded })
+                    d.curve == d.recorded, "script-message-to dlogm curve auto")
         for _, c in ipairs(CURVES) do
             if c[1] ~= d.recorded then
-                y = u:radio(x, w, y, "curve:" .. c[1], c[2], d.curve == c[1], "script-message-to dlogm curve " .. c[1],
-                            { saved = saved == c[1] and d.curve ~= c[1] })
+                y = u:radio(x, w, y, "curve:" .. c[1], c[2], d.curve == c[1], "script-message-to dlogm curve " .. c[1])
             end
         end
     end
@@ -283,7 +280,7 @@ local function source_part(u, x, w, y)
         local turn = project and 1 or index_of(TURNS, g.rotation or 0)
         local list = {}
         for _, r in ipairs(TURNS) do table.insert(list, { r[2], "script-message-to gyroflow rotate " .. r[1] }) end
-        y = u:segmented(x, w, y, "turn", list, turn, project, not project and index_of(TURNS, tonumber(input.rotation) or 0) or nil)
+        y = u:segmented(x, w, y, "turn", list, turn, project)
         if (g.file_rotation or 0) ~= 0 then
             y = u:caption(x, w, y, "The file says it's turned " .. g.file_rotation .. "°: shown upright, and turned more by these")
         end
@@ -296,7 +293,7 @@ local function source_part(u, x, w, y)
         local water = project and nil or index_of(WATER, g.underwater)
         list = {}
         for _, v in ipairs(WATER) do table.insert(list, { v[1] == "auto" and "Auto" or v[2], "script-message-to gyroflow underwater " .. v[1] }) end
-        y = u:segmented(x, w, y, "water", list, water, project, not project and index_of(WATER, input.underwater or "auto") or nil)
+        y = u:segmented(x, w, y, "water", list, water, project)
         y = u:caption(x, w, y, project and "As defined in the Gyroflow project"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")
                 .. ". For a flat port (the camera's own glass, a flat housing); behind a dome port pick No"))
@@ -777,12 +774,9 @@ local function output_part(u, x, w, y)
         -- The log curve is the source's input: shown here, changed on the Source tab (or Ctrl+l)
         local curve = d.curve ~= "" and (CURVE_NAMES[d.curve] or d.curve) or "none, not log"
         local from = d.curve ~= "" and d.curve == d.recorded and ", from the clip" or ""
-        y = y + 6 * s
-        local bw = ui.text_width("Change in Source", 12, s) + 20 * s
-        local key = keys["script-binding dlogm/curve"]
-        u:text(x, y + 14 * s, "Log curve: " .. curve .. from, { size = 12, color = C.label })
-        if key then u:kbd(x + w - bw - 8 * s, y + 14 * s, key) end
-        y = u:button(x + w - bw, bw, y, "to-source", "Change in Source", function() tab, open = "source", true end)
+        y = u:heading(x, w, y + 10 * s, "Log curve", keys["script-binding dlogm/curve"])
+        y = u:caption(x, w, y - 4 * s, curve .. from .. ": the source's, saved with it", { color = C.label })
+        y = u:button(x, w, y, "to-source", "Change in Source", function() tab, open = "source", true end)
     end
 
     if g and local_file(path) then
