@@ -25,7 +25,9 @@ M.EXPORTS = "_Exports"
 M.CLIPS = "_Clips"
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
-local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, moments = true, clips = true, exports = true, stabilized = true }
+-- (and the photos' folder, whose Live Photos' .mov files aren't footage either)
+local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills = true, moments = true, clips = true, exports = true,
+                      stabilized = true }
 
 -- A clip preview's path in _Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
 -- a camera's own folders (DCIM and the one in it). `flat`: all in _Clips/ itself ("A.afplink.mp4")
