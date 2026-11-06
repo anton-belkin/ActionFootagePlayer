@@ -1,6 +1,6 @@
 -- When the stabilization doesn't keep up: playback pauses and offers lighter settings, and the one picked sticks (in
 -- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges), the
--- color fringes under water left as recorded (chromatic).
+-- color aberration correction skipped on this screen (chromatic_skip: the clip's transform keeps it, exports have it).
 --
 -- A laptop's GPU keeps up for its first half-minute or so, at its boost power, then slows to half at its sustained
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
@@ -73,7 +73,7 @@ local function choices()
     if edges ~= "off" then add("No edge fill: the background color", { { "edges", "off" } }) end
     local side = hooks.short_side()
     if side and side > 1080 then add("Render at 1080p", { { "resolution", "1080" } }) end
-    if hooks.chromatic() then add("Color fringes under water left as recorded", { { "chromatic", "no" } }) end
+    if hooks.chromatic() then add("Skip the color aberration correction on this screen", { { "chromatic_skip", "yes" } }) end
     return list
 end
 

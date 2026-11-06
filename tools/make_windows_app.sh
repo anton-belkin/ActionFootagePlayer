@@ -210,7 +210,7 @@ done
 for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sdr; do
     "$py" -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in "luts/${nbcu%%:*}.cube" "$dlogm/shaders/${nbcu#*:}.glsl" >/dev/null
 done
-cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
+cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
@@ -224,7 +224,7 @@ cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
-cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua "$workspace/"
+cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua "$workspace/"
 cp mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/view360.glsl "$view360/"
 
 echo "== ffmpeg"

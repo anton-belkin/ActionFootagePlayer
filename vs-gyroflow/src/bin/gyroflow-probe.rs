@@ -7,7 +7,9 @@
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
 //                                                       stabilize it with the default preset
-//   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
+//   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile Gyroflow
+//                                                       takes for it ("in the file", a profile's name, "" for none),
+//                                                       to correct the lens alone, and "camera"
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
 // the water, for the lens under water to follow it (water.rs), "rotation": how much a player turns the video to
@@ -20,8 +22,19 @@
 // what a 360 camera's file has for the view's heading modes: {"travel": {"available", "confidence", "why", ...},
 // "north": {...}, "world": {"held_by"}, "seconds": [[travel, north confidence], ...]} (sphere360::Motion's report).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
+//
+// `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
+// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" a profile's name from
+// Gyroflow's database, or "" when it has none (Unknown: pick one in Gyroflow).
 
-use vs_gyroflow::{ probe::{ probe, color_profile, spherical }, water };
+use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
+
+fn video_size(path: &str) -> Option<(usize, usize, f64)> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let m = gyroflow_core::util::get_video_metadata(&mut file, size, &gyroflow_core::filesystem::path_to_url(path)).ok()?;
+    Some((m.width, m.height, m.fps))
+}
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -32,10 +45,20 @@ fn main() {
     // plugin's panel: the same as the plugin's 360 mode finds (sphere360::Motion)
     let headings = args.first().is_some_and(|a| a == "--headings");
     if headings { args.remove(0); }
+    // --lens: the camera and the lens profile Gyroflow takes for it, for the side panel's Source tab
+    let lens = args.first().is_some_and(|a| a == "--lens");
+    if lens { args.remove(0); }
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens] <video>");
         std::process::exit(2);
     };
+    if lens {
+        // Gyroflow's readers take paths as URLs: a relative one reads nothing
+        let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
+        let (camera, lens) = camera_and_lens(&path).unwrap_or_default();
+        println!("{}", serde_json::json!({ "camera": camera, "lens": lens }));
+        return;
+    }
     if headings {
         let report = match vs_gyroflow::rig::read(&path) {
             Some(Ok(rig)) => match vs_gyroflow::sphere360::Motion::load(&path, &rig) {
@@ -60,6 +83,18 @@ fn main() {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
     };
+    // Nothing to stabilize with: whether the lens can be corrected on its own ("lens": the profile, "" for none)
+    if out["mode"].is_null() {
+        let (camera, lens) = camera_and_lens(&path).unwrap_or_default();
+        // Its size and rate, for the plugin to set the filter up as it does for a clip it stabilizes
+        if !lens.is_empty() {
+            if let Some((w, h, fps)) = video_size(&path) {
+                out["width"] = w.into(); out["height"] = h.into(); out["fps"] = fps.into();
+            }
+        }
+        out["camera"] = camera.into();
+        out["lens"] = lens.into();
+    }
     out["color"] = color_profile(&path).into();
     out["water"] = water::recorded(&path).into();
     out["rotation"] = vs_gyroflow::mp4meta::display_rotation(std::path::Path::new(&path)).unwrap_or(0).into();

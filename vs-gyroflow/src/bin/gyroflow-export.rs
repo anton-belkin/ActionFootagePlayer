@@ -21,9 +21,13 @@
 // with none, <video's folder>/stabilized/. --out and --output write elsewhere
 //   log:            HEVC Main10, Rec.2100 HLG (luts/<curve>_hlg.cube); D-Log M in Rec.709 with --sdr (DJI's LUT),
 //                   any curve in Rec.709 with --nbcu (its HLG through NBCUniversal's HLG -> SDR, luts/3-NBCU_*)
+//   HDR (HLG, PQ):  HEVC Main10 as it is; in Rec.709 with --nbcu (NBCUniversal's HLG or PQ -> SDR, luts/3-, 5-NBCU_*)
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
-//   --dv-rpu:       HLG as Dolby Vision 8.4 with the file's RPUs (src/dv_mux.rs; <name>_stab_dv.mov), macOS
+//   --dv-rpu:       HLG as Dolby Vision 8.4, PQ as 8.1, with the file's RPUs (src/dv_mux.rs; <name>_stab_dv.mov), macOS
+//   --lens-only:    the lens corrected (and its projection), nothing smoothed: with the stabilization off, or for a
+//                   clip with a lens profile and no motion data
+//   --lens-recorded: the lens left as recorded (no correction) while it's stabilized
 // Audio is copied as it is; the file gets the source's dates.
 //
 // Decoding and encoding are ffmpeg (Homebrew's on macOS; on Windows and Linux the one next to this binary, else the
@@ -61,8 +65,12 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
-  --nbcu           to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve)
+  --nbcu           to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve); an HDR file
+                   that isn't log through NBCU's HLG or PQ -> SDR
   --no-stabilize   the color conversion only, as a clip plays with the stabilization off
+  --lens-only      the lens corrected (and --projection), nothing smoothed: the stabilization off with the lens
+                   kept, or a clip with a lens profile and no motion data
+  --lens-recorded  stabilized with the lens left as recorded (no lens correction, no projection)
   --horizon-lock <%>  the horizon lock's amount (0-100, 0 off) instead of the project's or preset's
   --underwater <yes|no|auto|project>  the lens under water or not (Gyroflow's \"Lens is underwater\"), or as the
                    camera says over the clip, the default: its In water / Out of water (Osmo Action 6), elsewhere the
@@ -85,7 +93,7 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
                    background color, the default)
   --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
   --prores         ProRes 422 HQ instead of HEVC 10-bit
-  --dv-rpu <file>  HLG as Dolby Vision 8.4, with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
+  --dv-rpu <file>  HLG as Dolby Vision 8.4 (PQ as 8.1: an RPU made with afp-rpu --profile 8.1), with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
                    video gets RPU N, the last the frames after it) in place of VideoToolbox's, and the dvvC box Apple
                    needs to use them; the player's HDR + Dolby Vision look plays the same file (macOS, HLG only)
   --dv-live-l1     with --dv-rpu: each frame's own L1 in its RPU, measured on the GPU as the player's mpv measures
@@ -167,6 +175,8 @@ struct Options {
     sdr: bool,
     nbcu: bool,
     no_stabilize: bool,
+    // --lens-only, --lens-recorded: the lens corrected with nothing smoothed, or left as recorded while stabilized
+    lens: vs_gyroflow::LensMode,
     horizon_lock: Option<f64>,
     underwater: Underwater,
     fov: Fov,
@@ -247,7 +257,7 @@ fn main() {
     }
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
+    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
@@ -266,6 +276,8 @@ fn main() {
             "--sdr" => opts.sdr = true,
             "--nbcu" => opts.nbcu = true,
             "--no-stabilize" => opts.no_stabilize = true,
+            "--lens-only" => opts.lens = vs_gyroflow::LensMode::Only,
+            "--lens-recorded" => opts.lens = vs_gyroflow::LensMode::Recorded,
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
             "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no, auto or project")),
@@ -573,7 +585,8 @@ fn file_name(path: &str) -> String {
 enum Outcome { Done(PathBuf), Skipped(String) }
 
 // What the gyroflow plugin stabilizes the video with
-struct Source { project: String, preset: Option<String>, label: &'static str }
+// `lens`: what's done with the lens and motion; a clip with no motion data has its lens alone corrected, whatever was asked
+struct Source { project: String, preset: Option<String>, label: &'static str, lens: vs_gyroflow::LensMode }
 
 // mpv's own default: %APPDATA%\mpv on Windows, $XDG_CONFIG_HOME/mpv (~/.config/mpv) elsewhere
 fn mpv_dir() -> PathBuf {
@@ -598,21 +611,33 @@ fn plugin_file(plugin: &str, name: &str) -> PathBuf {
 }
 
 // `project`: the one given (--project), else the video's own, as the workspace plugin finds it
-fn find_source(path: &Path, project: Option<&Path>) -> Result<Source, String> {
+fn find_source(path: &Path, project: Option<&Path>, lens: vs_gyroflow::LensMode) -> Result<Source, String> {
     let s = path.to_string_lossy().to_string();
     if let Some(p) = project {
-        return Ok(Source { project: p.to_string_lossy().to_string(), preset: None, label: "project" });
+        return Ok(Source { project: p.to_string_lossy().to_string(), preset: None, label: "project", lens });
     }
     if let Some(sidecar) = vs_gyroflow::workspace::gyroflow_project(path) {
-        return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project" });
+        return Ok(Source { project: sidecar.to_string_lossy().to_string(), preset: None, label: "project", lens });
     }
-    let info = probe::probe(&s)?;
+    // Nothing to stabilize with: the lens alone when it has a lens profile and the lens is to be corrected
+    let lens_alone = |why: String| -> Result<Source, String> {
+        let has_lens = probe::camera_and_lens(&s).is_some_and(|(_, l)| !l.is_empty());
+        if lens != vs_gyroflow::LensMode::Recorded && has_lens {
+            Ok(Source { project: s.clone(), preset: None, label: "the lens alone", lens: vs_gyroflow::LensMode::Only })
+        } else {
+            Err(why)
+        }
+    };
+    let info = match probe::probe(&s) {
+        Ok(info) => info,
+        Err(e) => return lens_alone(e),
+    };
     match info["mode"].as_str() {
         Some("default") => {
             let preset = plugin_file("gyroflow", "default.gyroflow");
-            Ok(Source { project: s, preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset" })
+            Ok(Source { project: s.clone(), preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset", lens })
         }
-        _ => Err("no project or motion data".into()),
+        _ => lens_alone("no project or motion data".into()),
     }
 }
 
@@ -843,6 +868,12 @@ fn write_preview(files: &PreviewFiles, frames: usize, length: f64, tags: &[Strin
 
 // NBCUniversal's HLG -> SDR conversion (Type III), in the dlogm plugin's luts/
 const NBCU_HLG: &str = "3-NBCU_HLG2SDR_DL_v1.2.cube";
+const NBCU_PQ: &str = "5-NBCU_PQ2SDR_DL_v1.2.cube";
+
+// Tagged HDR (HLG or PQ) in its MP4/MOV, as the dlogm plugin reads it (video_color.lua): never log
+fn hdr_in(path: &Path) -> bool {
+    ffprobe(path).is_ok_and(|i| matches!(i.transfer.as_deref(), Some("arib-std-b67" | "smpte2084")))
+}
 
 // A file removed when it goes out of scope, however the export ends
 struct TempFile(PathBuf);
@@ -1052,7 +1083,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
-    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref()) };
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref(), opts.lens) };
     let source = match (source, curve) {
         (Ok(s), _) => Some(s),
         (Err(_), Some(_)) => None,
@@ -1062,6 +1093,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         (Err(_), None) if !opts.frame.is_none() => None,
         // A photo's motion (Live or Motion Photo): the video around it, whatever there is to change
         (Err(_), None) if part.is_some() => None,
+        // HDR that isn't log, in SDR (--nbcu) or with Dolby Vision (--dv-rpu): the color to change
+        (Err(_), None) if hdr_in(&path) && (opts.nbcu || dv_rpu.is_some()) => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
     let info = ffprobe(&path)?;
@@ -1132,13 +1165,17 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         lut_job = Some((cube, matrix, graph));
         let space = if matrix == "bt2020" { "bt2020nc" } else { "bt709" };
         (String::new(), vec![primaries.to_string(), transfer.to_string(), space.to_string(), "tv".to_string()], label)
-    } else if preview.is_some() && info.transfer.as_deref() == Some("arib-std-b67") {
-        // HLG that isn't log (a phone's, a camera's HLG mode): NBCU's HLG -> SDR on its own
-        let cube = lut(NBCU_HLG)?;
+    } else if let Some((cube, name)) = (preview.is_some() || nbcu).then(|| match info.transfer.as_deref() {
+        Some("arib-std-b67") => Some((NBCU_HLG, "HLG")),
+        Some("smpte2084") => Some((NBCU_PQ, "PQ")),
+        _ => None,
+    }).flatten() {
+        // HDR that isn't log (a phone's, a camera's HLG mode, an export): NBCU's HLG or PQ -> SDR on its own
+        let cube = lut(cube)?;
         let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
                              scale=out_color_matrix=bt709:out_range=tv", filter_path(&cube));
         lut_job = Some((cube, "bt709", graph));
-        (String::new(), vec!["bt709".to_string(), "bt709".to_string(), "bt709".to_string(), "tv".to_string()], "HLG -> Rec.709 (NBCU)".to_string())
+        (String::new(), vec!["bt709".to_string(), "bt709".to_string(), "bt709".to_string(), "tv".to_string()], format!("{name} -> Rec.709 (NBCU)"))
     } else {
         let tags = vec![
             info.primaries.clone().unwrap_or_else(|| "bt709".into()),
@@ -1153,8 +1190,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let dv_rpus = match dv_rpu {
         None => None,
         Some(file) => {
-            if !cfg!(target_os = "macos") || prores || tags[1] != "arib-std-b67" {
-                return Err("--dv-rpu: a Dolby Vision export is HLG in HEVC, from VideoToolbox (macOS)".into());
+            if !cfg!(target_os = "macos") || prores || !(tags[1] == "arib-std-b67" || tags[1] == "smpte2084") {
+                return Err("--dv-rpu: a Dolby Vision export is HLG (8.4) or PQ (8.1) in HEVC, from VideoToolbox (macOS)".into());
             }
             Some(dv_mux::read_rpu_file(file)?)
         }
@@ -1192,7 +1229,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers,
                                                    // --alone: --from to --to's own motion, a photo's motion too
-                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project, opts.frame)?)),
+                                                   opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project, opts.frame, source.lens)?)),
         None => None,
     };
     // The edge fill, as playback has it. Frames whose stabilized picture covers the output, all of those exported, have
@@ -1546,8 +1583,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let frames = r??;
             if !mux_status.map_or(false, |s| s.success()) { return Err(format!("muxing: {mux_err}")); }
             if frames != read { return Err(format!("Dolby Vision: {frames} pictures for {read} frames")); }
-            let level = dv_mux::patch_dvvc(&tmp_path, fps)?;
-            eprintln!("  Dolby Vision 8.4, level {level}: {} RPUs from {}", frames,
+            let (compatibility, profile) = if tags[1] == "smpte2084" { (1, "8.1") } else { (4, "8.4") };
+            let level = dv_mux::patch_dvvc(&tmp_path, fps, compatibility)?;
+            eprintln!("  Dolby Vision {profile}, level {level}: {} RPUs from {}", frames,
                       dv_rpu.map_or(String::new(), |p| p.display().to_string()));
         }
         Ok(read)
@@ -1672,7 +1710,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let lap = |what: &str| if std::env::var_os("AFP_TIMES").is_some() { eprintln!("  [{:6.2} s] {what}", clock.elapsed().as_secs_f64()) };
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
-    let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref()).ok() };
+    let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref(), opts.lens).ok() };
     let info = ffprobe(&path)?;
     if info.transfer.as_deref() == Some("smpte2084") && curve.is_none() {
         return Err("PQ video: no photo of it yet (HLG, log and SDR video only)".into());
@@ -1712,7 +1750,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
                                          (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
                                          // --alone: the part (--from, --to) stabilized by its own motion, as a moment plays
-                                         opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project, opts.frame)?),
+                                         opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project, opts.frame, s.lens)?),
             None => None,
         };
         let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };

@@ -49,7 +49,7 @@ player writes). By default they're the same folder:
   Day 1/
     DJI_20261022152841_0068_D.MP4
     DJI_20261022152841_0068_D.gyroflow        the clip's Gyroflow project, as now
-    DJI_20261022152841_0068_D.afp.json        its marks and saved view, once changed
+    DJI_20261022152841_0068_D.afp.json        its marks, input and transform, once changed
   Day 2/
     GX011057.MP4
   _Moments/
@@ -227,16 +227,56 @@ A mark is a point in a clip: a camera highlight (DJI's quick switch, GoPro's HiL
   workspace plugin's `view`, each read fresh and replaced, the other kept. Neither left: the file goes.
 - Before 0.9 it was `<clip>.marks.json` (`"format": "actionfootageplayer-marks"`), marks only: read when there's
   no `.afp.json`, and moved over at the next write.
-- `view`, the clip's saved view (Anton, 2026-11-05): the log curve (`auto`, or a curve picked by hand), the
-  stabilization (`normal`, `wide`, `off`), its `level`, `horizon_lock` (`yes`, `no`, `project`: the preset's),
-  `underwater` (`auto`, `yes`, `no`), the water's color fringes (`chromatic`), and the output's frame: `aspect`
-  (`original` or W:H), `rotation` (0, 90, 180, 270, clockwise) and `projection` (Gyroflow's output projection:
-  `linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`). Written by Save in the Clip tab, or
-  with every change while Auto save is on (a session's switch). Not kept: the video output (it depends on the
-  screen), the noise reduction, the quality settings (the computer's).
-- **A Gyroflow project wins** (Anton): what it has (the smoothing, horizon, lens under water, output size, rotation,
-  projection) isn't kept beside it. Changed in the panel it's for viewing only; a value kept from before the clip
-  got its project is left out as it loads.
+- `source`, the source's input, and `view`, its transform: see [Source and transform](#source-and-transform).
+
+### Source and transform
+
+Decided with Anton, 2026-11-06 (the model and the panel as published then). What the player keeps about a clip is of
+two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
+
+- **Input**, how to read the source right, set once: `curve` (`auto`, or a curve by hand), `rotation` (0, 90, 180,
+  270 clockwise, the turn it was recorded with, on top of the file's display matrix: Gyroflow's `video_rotation`,
+  before the stabilization) and `underwater` (`auto`: the camera's telemetry; `yes`: under water with a flat port;
+  `no`: above water or a dome port). Kept only in the source's `.afp.json` (`source`), always all three. A change, from
+  the source or any moment or clip preview of it (`input-set`, the workspace plugin's), is for viewing until the
+  Source tab's **Save to the source** (`input-save`) writes it; **Revert to saved** (`input-revert`) goes back
+  (Anton, 2026-11-06: the input is saved by its own button, and the Transform tab's Save never writes it). Moments and
+  clip previews never keep it. The lens's type and the gyro's sync are input too, set in Gyroflow for now.
+- **Transform**, how it's shown: `view` (`normal`, `wide`, `off`), `level`, `horizon_lock` (`yes`: level, `no`:
+  free), `chromatic`, `aspect` (`original`, or a ratio landscape-wise: `16:9`, `4:3`, `5:4`, `1:1`), `orientation`
+  (`as-is`: as the source is, `landscape`, `portrait`; the W:H shown is worked out for each source's shape, so one
+  bundle fits a vertical clip and a level one alike), `projection`, `lens` (`corrected`, `as-recorded`: apart from
+  the stabilization; `off` with `corrected` is the lens alone, Gyroflow with nothing smoothed, also what a clip with a
+  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected). An `aspect` from before the orientation (9:16:
+  the ratio as it showed) is that ratio turned, portrait. Kept only as a whole bundle, never a key alone: the
+  source's (`.afp.json`'s `view`), or a moment's or clip preview's own (its link's `stab`, with settings of its own:
+  `snap` for a moment, `own` for a clip preview, the panel's one switch). Levels, the topmost one there is plays and
+  they never mix: 5 what's chosen while it plays (until it ends), 4 the moment's or clip preview's own, 3 the
+  source's, 2 the session's (starts as the defaults, changed only by hand), 1 the defaults (`gyroflow.conf`).
+- **A change while it plays**: with a bundle of its own playing, for viewing only (Revert to saved goes back); with
+  the session's, the session's too. Bundles of clips that play one after another never change the session's.
+- **Save** writes what plays, whole, where "settings of its own" says: on, into the moment or clip preview; off, into
+  the source (the moment or clip preview is then a window onto it). **Auto save**, one switch for the session:
+  where nothing's saved, what plays is written as it opens, even unchanged, and that file plays as the session's to
+  the end (its changes are written and stick); every change after is written. Use as default writes `gyroflow.conf`.
+- **A bundle missing a key** (written before the key existed, or the empty `"stab":[]` the batch made before) is filled
+  as it opens with what it plays with, and written at once, Auto save or not: a key new since plays as before it
+  existed (`aspect` original, `projection` linear). `horizon_lock` `project` (the preset's, from before) becomes the
+  preset's `yes` or `no`.
+- **Moments** are made whole (`k`: what plays; the batch: the source's bundle, else the defaults, not the session's)
+  with a copy of the source's Gyroflow project when it has one, and never change by themselves. A clip preview is made
+  without its own.
+- **A Gyroflow project owns** what it has: the smoothing, horizon, frame and projection, and of the input the turn and
+  the lens. The panel shows them as the project's; the player never writes them (Ctrl+e makes a project only where
+  there's none, from what plays; a moment's copy gets only its trim and "within the trim range"). Over a project
+  only a wider view or none, for viewing. Values saved beside the clip before stay in its file, not played, and come
+  back if the project goes.
+- Not kept with a clip: the video output (Output → Display, the screen's), Performance & Quality (this computer's:
+  lighter playback, `chromatic_skip` among them, never what's saved or exported). The noise reduction while it plays
+  is off and out of the menus.
+- Moved as it opens: an old `.afp.json`'s input out of its `view` (a turn only where the frame kept its own aspect:
+  a turn with 9:16 made a portrait frame of a level scene, and stays to be looked at), and a link's input into its
+  source where the source has none.
 
 **Gyroflow's project is never written to.** Gyroflow rebuilds the whole project when it saves
 (`export_gyroflow_data` in `core/lib.rs` builds it with `json!` and `merge_json`), so keys of ours would be lost
@@ -367,25 +407,12 @@ Opening a moment's file (a double click, the player being the default app for MP
 4. Not found: the OSD says so ("Turtle: the original isn't at …/Day 1/DJI_…_D.MP4"), and the preview plays.
    The menu offers *Project → Footage moved…*.
 
-**A moment is stabilized as it was made** (Anton, 2026-11-05): nothing it plays with changes later by itself.
-- `snap` in its link: its stabilization is its own. `stab`: the settings it was made with over the preset (view,
-  level, horizon lock). The gyroflow plugin applies them for that file only (`user-data/workspace/stab`), the
-  settings that stick for the next clips untouched.
-- **Viewing is never saving** (Anton): the moment stays as it was saved until **Keep in <name>** (the panel shows it
-  with "Changed for viewing only"; the menu has it too), which writes how it's viewed into the moment and its own
-  project.
-- **One thing saved** (Anton): a moment has either its own Gyroflow project, which then decides (horizon, crop,
-  smoothing: no settings of the player's over it), or the settings over the preset, never both. A horizon set over
-  the clip's project as it was viewed (Level, Free) goes into the moment's copy of it (`gyroflow-project --copy
-  --horizon-lock`), and Keep on a project's moment writes its horizon and switch into the project (`--edit`); a
-  wider view or the stabilization off over a project is for viewing only. So on a moment the horizon is As saved,
-  Level or Free: As saved is the project's, or the setting it was saved with.
-- **As saved** (Anton): while a moment plays, each setting (view, level, horizon lock; *Stabilized*: on its own or
-  with its clip) has *As saved* first, the default: every moment as it was saved. A value chosen instead (in the
-  panel, or a key: Ctrl+g, Ctrl+k) is for every moment this session (`force`, the workspace plugin's), until As
-  saved again. It's apart from the settings clips keep between them, which it doesn't change, nor they it; a clip
-  has no As saved. The switch as viewed reaches a project's "only within the trim range" through the engine
-  (`alone`), its file untouched. `k` (its ends) and a trim changed in Gyroflow are edits of the moment, and saved as they are.
+**A moment is stabilized as it was made** (Anton, 2026-11-05 and 2026-11-06): nothing it plays with changes later by
+itself. Its transform is its own bundle (`snap`, `stab`: [Source and transform](#source-and-transform)), and a
+change while it plays is for viewing until Save. (Before 2026-11-06 there was Keep in <name>, and As saved with one
+value for every moment this session: both gone, Save and the session's bundle do it.) Its switch, stabilized on its
+own or with its clip, is written into it at once and into its project's "only within the trim range"; `k` (its ends)
+and a trim changed in Gyroflow are edits of the moment, and saved as they are.
 - Marks are the clip's, never a moment's own (Anton): one marks file per clip; a moment shows those inside it.
 - Made from a clip with a Gyroflow project: a copy of it beside the moment (`_Moments/Turtle.gyroflow`,
   `gyroflow-project --copy … --trim in,out --alone yes|no`), its trim range the moment, which it plays with from then
@@ -636,7 +663,7 @@ mockups):
   interesting* (`X`; *undo* once its preview is gone);
 - the selected part last, in a box of its own since it goes with the clip: its start and end, *Save as moment* or
   *Update <name>* (`k`).
-Exporting stays in the Clip tab. Playing all of a trip's moments is the Finder's: open any one, and the ones beside
+Exporting is in the Output tab. Playing all of a trip's moments is the Finder's: open any one, and the ones beside
 it are the playlist.
 
 ## The plan

@@ -14,6 +14,8 @@ M.C = {
     panel = "242222", rail = "1C1A1A", card = "2E2A2A", field = "322E2E", line = "4A4545", divider = "363333",
     text = "F4F2F2", dim = "A8A1A1", label = "DAD6D6", key = "CEC8C8", accent = "E56F1F", hover = "3A3636",
     knob = "FFFFFF",
+    -- What's saved, beside what's chosen (an amber dot)
+    saved = "6EC5F0",
 }
 
 -- libass's font size is a little smaller than the same size in points on the web: the mockup's sizes, matched
@@ -164,8 +166,14 @@ function Ui:caption(x, w, y, text, opts)
     return y + 2 * s
 end
 
--- options: { { label, cmd, disabled } }, selected: the index chosen (or nil)
-function Ui:segmented(x, w, y, id, options, selected, disabled)
+-- The dot that marks what's saved, at a segment's top right corner
+function Ui:saved_dot(right, top)
+    local s = self.s
+    self:shape(circle_path(right - 5 * s, top + 5 * s, 2.6 * s), M.C.saved)
+end
+
+-- options: { { label, cmd, disabled } }, selected: the index chosen (or nil), saved: the index saved (a dot; nil: none)
+function Ui:segmented(x, w, y, id, options, selected, disabled, saved)
     local s = self.s
     local h, pad = 30 * s, 2 * s
     self:box(x, y, w, h, 8, M.C.field, { border = 1 * s, border_color = M.C.line, alpha = disabled and "60" or "00" })
@@ -181,18 +189,47 @@ function Ui:segmented(x, w, y, id, options, selected, disabled)
         end
         self:text(bx + bw / 2, y + h / 2, opt[1], { align = 5, size = 12, color = i == selected and M.C.knob or M.C.label,
                                                     alpha = off and "99" or "00" })
+        if i == saved then self:saved_dot(bx + bw, y + pad) end
         if not off and i ~= selected then self:hit(bx, y, bw, h, key, opt[2]) end
     end
     return y + h + 6 * s
 end
 
--- A row with a switch at the right: label, on, cmd, key (shown before the switch), disabled
-function Ui:switch(x, w, y, id, label, on, cmd, key, disabled)
+-- Frames of an aspect, drawn: options { { label, cmd, w, h } } (w, h: the frame's shape, its long side about 1), the
+-- picture above, the label small below; selected, saved as in segmented
+function Ui:ratios(x, w, y, id, options, selected, disabled, saved)
+    local s = self.s
+    local h, pad = 50 * s, 3 * s
+    local bw = (w - (#options - 1) * pad) / #options
+    for i, opt in ipairs(options) do
+        local bx = x + (i - 1) * (bw + pad)
+        local key = id .. ":" .. i
+        local on = i == selected
+        local fill = on and M.C.accent or (self:hovered(key) and not disabled and M.C.hover or M.C.field)
+        self:box(bx, y, bw, h, 7, fill, { border = 1 * s, border_color = on and M.C.accent or M.C.line, alpha = disabled and "60" or "00" })
+        local color = on and M.C.knob or M.C.label
+        local fw, fh = (opt[3] or 1) * 22 * s, (opt[4] or 1) * 22 * s
+        local cx, cy = bx + bw / 2, y + 19 * s
+        self:shape(rrect_path(cx - fw / 2, cy - fh / 2, fw, fh, 2 * s), color,
+                   { fill = false, border = 1.5 * s, alpha = disabled and "99" or "00" })
+        self:text(cx, y + h - 9 * s, opt[1], { align = 5, size = 10.5, color = color, alpha = dim_alpha(disabled) })
+        if i == saved then self:saved_dot(bx + bw, y) end
+        if not disabled and not on then self:hit(bx, y, bw, h, key, opt[2]) end
+    end
+    return y + h + 6 * s
+end
+
+-- A row with a switch at the right: label, on, cmd, key (shown before the switch), disabled, saved (true or false: the
+-- state saved, a dot by the label when it isn't the one shown)
+function Ui:switch(x, w, y, id, label, on, cmd, key, disabled, saved)
     local s = self.s
     local h = 30 * s
     local cy = y + h / 2
     if self:hovered(id) and not disabled then self:box(x - 6 * s, y, w + 12 * s, h, 6, M.C.card) end
     self:text(x, cy, label, { size = 13, alpha = dim_alpha(disabled) })
+    if saved ~= nil and saved ~= on then
+        self:shape(circle_path(x + M.text_width(label, 13, s) + 8 * s, cy, 2.6 * s), M.C.saved)
+    end
     local tw, th = 32 * s, 18 * s
     local tx = x + w - tw
     self:box(tx, cy - th / 2, tw, th, 9, on and M.C.accent or M.C.line, { alpha = disabled and "80" or "00" })
@@ -220,6 +257,7 @@ function Ui:radio(x, w, y, id, label, on, cmd, opts)
     self:text(x + 2 * r + 9 * s, cy, label, { size = 13, alpha = dim_alpha(opts.disabled) })
     if opts.key then self:kbd(x + w, cy, opts.key) end
     if opts.note then self:text(x + w, cy, opts.note, { align = 6, size = 12, color = M.C.dim }) end
+    if opts.saved then self:shape(circle_path(x + 2 * r + 9 * s + M.text_width(label, 13, s) + 8 * s, cy, 2.6 * s), M.C.saved) end
     if not opts.disabled and not on then self:hit(x - 6 * s, y, w + 12 * s, h, id, cmd) end
     return y + h
 end

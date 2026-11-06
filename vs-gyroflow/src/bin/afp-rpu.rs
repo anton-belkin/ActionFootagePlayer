@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// `afp-rpu --look <look.json> [--l1 <min,avg,max | l1.json>] [--frames N] -o <out.rpu>`: Dolby Vision profile 8.4
-// RPUs for a look (src/dovi.rs), one per frame, in the .rpu file the player (--macos-dovi-rpu-file) and
+// `afp-rpu --look <look.json> [--l1 <min,avg,max | l1.json>] [--frames N] [--profile 8.4|8.1] -o <out.rpu>`: Dolby
+// Vision profile 8.4 RPUs (an HLG base layer; --profile 8.1 for a PQ one, HDR10) for a look (src/dovi.rs), one per frame, in the .rpu file the player (--macos-dovi-rpu-file) and
 // gyroflow-export (--dv-rpu) read. What `dovi_tool generate -p 8.4` writes for DV Lab's config, without dovi_tool.
 //   --look     a look as DV Lab saves it (mpv/scripts/dlogm/dv/nbcu_fit.json)
 //   --l1       the frames' L1 in 12-bit PQ codes: one for all of them (default 12,1750,2700, dovi.rs's DEFAULT_L1), or
 //              a JSON array with one {"min_pq", "avg_pq", "max_pq"} per frame, "scene_cut": true where a shot starts
 //   --frames   how many RPUs: default 1 with a constant L1 (one RPU stands for every frame), the file's length with
 //              one per frame
+//   --profile  8.4 (default): for HLG video; 8.1: for PQ (HDR10). The same trims and L1, the RPU's header as each has it
 //   --config   also writes the generator config as JSON, for dovi_tool generate -j (tools/make_dv_rpu.sh)
 
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ fn fail(msg: &str) -> ! {
 
 fn main() {
     let (mut look, mut l1, mut frames, mut out, mut config_out) = (None, None, None, None, None);
+    let mut pq = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().unwrap_or_else(|| fail(&format!("{name} needs a value")));
@@ -31,8 +33,9 @@ fn main() {
                 .unwrap_or_else(|| fail("--frames takes a number above 0"))),
             "-o" | "--out" => out = Some(PathBuf::from(value("-o"))),
             "--config" => config_out = Some(PathBuf::from(value("--config"))),
+            "--profile" => pq = match value("--profile").as_str() { "8.4" => false, "8.1" => true, p => fail(&format!("--profile {p}: 8.4 or 8.1")) },
             "-h" | "--help" => {
-                println!("usage: afp-rpu --look <look.json> [--l1 <min,avg,max | l1.json>] [--frames N] [--config <gen.json>] -o <out.rpu>");
+                println!("usage: afp-rpu --look <look.json> [--l1 <min,avg,max | l1.json>] [--frames N] [--profile 8.4|8.1] [--config <gen.json>] -o <out.rpu>");
                 return;
             }
             _ => fail(&format!("unknown argument {a}")),
@@ -52,7 +55,8 @@ fn main() {
         },
     };
     let frames = frames.unwrap_or(l1.len());
-    let config = dovi::generator_config(&look, &l1, frames).unwrap_or_else(|e| fail(&e));
+    let mut config = dovi::generator_config(&look, &l1, frames).unwrap_or_else(|e| fail(&e));
+    if pq { config.profile = dovi::PROFILE_PQ; }
     if let Some(p) = config_out {
         std::fs::write(&p, dovi::config_json(&config)).unwrap_or_else(|e| fail(&format!("{}: {e}", p.display())));
     }

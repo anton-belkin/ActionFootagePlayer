@@ -225,6 +225,7 @@ for curve in $HDR_CURVES; do
 done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 put luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$DLOGM/luts/3-NBCU_HLG2SDR_DL_v1.2.cube" 644
+put luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$DLOGM/luts/5-NBCU_PQ2SDR_DL_v1.2.cube" 644
 
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
@@ -274,6 +275,7 @@ put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
 put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
 put mpv/scripts/workspace/sidecar.lua   "$WORKSPACE/sidecar.lua" 644
+put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
