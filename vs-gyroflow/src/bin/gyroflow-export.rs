@@ -1015,6 +1015,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         (Err(_), None) if opts.preview.is_some() => None,
         // Turned or cut (--rotation, --aspect): that much to change
         (Err(_), None) if !opts.frame.is_none() => None,
+        // A photo's motion (Live or Motion Photo): the video around it, whatever there is to change
+        (Err(_), None) if part.is_some() => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
     let info = ffprobe(&path)?;

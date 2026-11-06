@@ -163,6 +163,8 @@ file("/T/Egypt/Day 1/A.LRF", 10)
 file("/T/Egypt/.hidden/C.MP4", 10)
 file("/T/Egypt/_Exports/x.mov", 10)
 file("/T/Egypt/_Clips/Day 1/A.afplink.mp4", 10)
+-- A Live Photo's .mov in _Stills isn't a clip
+file("/T/Egypt/_Stills/A_6.00s.mov", 10)
 local clips = m.footage("/T/Egypt")
 local rels = {}
 for _, c in ipairs(clips) do rels[#rels + 1] = c.relative end
