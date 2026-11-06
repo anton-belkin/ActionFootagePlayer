@@ -70,10 +70,14 @@
 --
 -- workspace.lua is the lookup itself (plain Lua; tests/workspace_test.lua), and gyroflow-export has its twin
 -- (vs-gyroflow/src/workspace.rs) for the Finder quick action and the command line. moments.lua is the moments'
--- part with no mpv in it (tests/moments_test.lua).
+-- part with no mpv in it (tests/moments_test.lua). longpath.lua lets the Lua file calls take Windows paths past 260
+-- characters, here and in the plugins that read or write beside the clip (gyroflow, dlogm, highlights, dji-telemetry).
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
+-- Windows: paths past 260 characters (a clip deep in a trip's folders) for the file calls here and in the modules
+local longpath = require 'longpath'
+longpath.install(utils)
 local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'
@@ -515,7 +519,7 @@ end
 
 local function mkdir(dir)
     if windows then
-        mp.command_native({ name = "subprocess", args = { "cmd", "/c", "mkdir", dir }, playback_only = false })
+        mp.command_native({ name = "subprocess", args = { "cmd", "/c", "mkdir", longpath.extended(dir) }, playback_only = false })
     else
         mp.command_native({ name = "subprocess", args = { "mkdir", "-p", dir }, playback_only = false })
     end

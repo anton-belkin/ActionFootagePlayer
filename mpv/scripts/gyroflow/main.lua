@@ -140,6 +140,14 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
+-- Windows: paths past 260 characters (a clip deep in a trip's folders), by the workspace plugin's longpath.lua beside
+-- this plugin's folder; without it, as before
+do
+    package.path = package.path .. ";" .. utils.join_path(utils.join_path(mp.get_script_directory(), "../workspace"), "?.lua")
+    local ok, longpath = pcall(require, 'longpath')
+    if ok then longpath.install(utils) end
+end
+
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
 -- user-data/workspace/clip, docs/moments-and-workspaces.md)
 local function clip_path()
