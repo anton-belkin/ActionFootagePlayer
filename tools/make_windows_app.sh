@@ -192,7 +192,8 @@ menu="$plugins/footage-menu"
 panel="$plugins/side-panel"
 agent="$plugins/agent"
 workspace="$plugins/workspace"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent" "$workspace"
+view360="$plugins/view360"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent" "$workspace" "$view360"
 cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
 cp shaders/denoise.glsl "$dlogm/shaders/"
@@ -210,8 +211,8 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
-    mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua \
+    mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe afp-cut.exe; do
     cp "$gyroflow_bin/$f" "$gyroflow/"
@@ -222,6 +223,7 @@ cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua "$workspace/"
+cp mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/view360.glsl "$view360/"
 
 echo "== ffmpeg"
 archive=$(fetch "$FFMPEG_URL" "$FFMPEG_SHA256")
