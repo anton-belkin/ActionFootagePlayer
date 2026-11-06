@@ -54,9 +54,10 @@
 //   8: translation2d.x, .y, matrix rows (1: no rolling shutter), valid (1)
 //   9: translation3d.x, .y, .z, 0    10-13: the digital lens's parameters [0..16]
 //  14: input horizontal stretch, vertical stretch, red's and blue's refractive index over green's (1 out of the water)
+//  15: the output camera in the world (a quaternion: the sphere trail's directions)
 
 #define PI 3.14159265358979
-#define PARAM_TEXELS 15
+#define PARAM_TEXELS 16
 
 int table_frame;
 // 1 for green (Gyroflow's own coefficient); red's or blue's ratio to it while the chromatic coordinates are found
@@ -180,7 +181,7 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
     return image && !fail;
 }
 
-#ifndef GRID_PASS
+#if !defined(GRID_PASS) && !defined(SPHERE_PASS)
 // The sampling passes only (the grid pass binds no HOOKED, and a compute shader has no dFdx)
 // ---- Sampling the source; uv in its pixels, centers at whole numbers ----
 
@@ -357,12 +358,18 @@ bool frame_setup()
 // (SRC_W x SRC_H, centers at whole numbers): Stabilization::undistort_coord. False where the ray has no image. The
 // output pixel goes into the kernel's output frame (OUT_W x OUT_H) as the VapourSynth path maps its pixel j there:
 // j * OUT_W / width
-bool source_coord(vec2 j, out vec2 uv)
+// Output pixel j's ray, in the output camera
+vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_pos = j * size / target_size + t2.xy;
     vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / lens.x;
-    vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+    return ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+}
+
+bool source_coord(vec2 j, out vec2 uv)
+{
+    vec3 d = output_ray(j);
     // The rolling shutter's row: where the middle row's rotation puts the ray, then that row's rotation
     float rows = t2.z;
     int idx = 0;
@@ -375,7 +382,7 @@ bool source_coord(vec2 j, out vec2 uv)
     return rotate_and_distort(d, row_rotation(idx, rows), uv);
 }
 
-#ifndef GRID_PASS
+#if !defined(GRID_PASS) && !defined(SPHERE_PASS)
 // The picture at source coordinate uv (Gyroflow's frame); past the frame by more than half a pixel, the background, as
 // Gyroflow's taps outside it are
 bool outside(vec2 uv) { return any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5)); }
@@ -416,11 +423,51 @@ vec4 edge_fill(vec2 uv)
 #endif
 }
 
+// The output pixel being drawn (the sphere trail's direction)
+vec2 cur_j;
+
+#if SPHERE_FILL
+ivec2 sphere_texel(vec3 w)
+{
+    vec2 size = vec2(imageSize(GYROFLOW_SPHERE));
+    float lon = atan(w.x, w.z), lat = asin(clamp(w.y / length(w), -1.0, 1.0));
+    return ivec2(floor(vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5) * size));
+}
+
+// The sphere trail (the plugin's sphere): what was last seen in this pixel's direction of the world, fading over a few
+// seconds (a half-life of 2.5 s, gone after 10), over the smooth fill; where nothing was seen, the smooth fill
+vec4 sphere_fill(vec2 uv)
+{
+    vec4 base = edge_fill(uv);
+    if (!frame_setup()) return base;
+    ivec2 t = sphere_texel(qrot(table(15), output_ray(cur_j)));
+    ivec2 size = imageSize(GYROFLOW_SPHERE);
+    vec3 sum = vec3(0.0);
+    float ws = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 p = ivec2((t.x + 2 * x + size.x) % size.x, clamp(t.y + 2 * y, 0, size.y - 1));
+            vec4 s = imageLoad(GYROFLOW_SPHERE, p);
+            float age = PTS + 1000.0 - s.a;
+            if (age >= -0.05 && age < 10.0) {
+                float k = exp2(-max(age, 0.0) / 2.5);
+                sum += k * s.rgb;
+                ws += k;
+            }
+        }
+    }
+    if (ws <= 0.0) return base;
+    return vec4(mix(base.rgb, sum / ws, clamp(ws / 9.0 * 1.5, 0.0, 1.0)), base.a);
+}
+#endif
+
 vec4 finish(vec2 uv)
 {
     if (outside(uv)) {
 #ifdef UV_OUT
         return BACKGROUND;
+#elif SPHERE_FILL
+        return sphere_fill(uv);
 #elif EDGE_FILL
         return edge_fill(uv);
 #else
@@ -534,6 +581,7 @@ vec4 hook()
 {
     if (!frame_setup()) return BACKGROUND;
     vec2 j = HOOKED_pos * target_size - 0.5;
+    cur_j = j;
     vec2 uv;
     want_boundary = EDGE_FILL == 1;
     if (!source_coord(j, uv)) {
@@ -587,6 +635,7 @@ void hook()
 vec4 hook()
 {
     vec2 j = HOOKED_pos * target_size - 0.5;
+    cur_j = j;
     vec2 uv;
     // The frame's parameters only where the grid has no image (each is a fetch per pixel). Not one condition with &&:
     // naga evaluates both calls, and the second overwrites uv
@@ -606,4 +655,29 @@ vec4 hook()
     if (grid_wet) return finish_rgb(uv, grid_rb);
 #endif
     return finish(uv);
+}
+
+// ==== pass sphere ====
+#ifdef SPHERE_PASS
+ivec2 sphere_texel(vec3 w)
+{
+    vec2 size = vec2(imageSize(GYROFLOW_SPHERE));
+    float lon = atan(w.x, w.z), lat = asin(clamp(w.y / length(w), -1.0, 1.0));
+    return ivec2(floor(vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5) * size));
+}
+#endif
+
+void hook()
+{
+    // Every other output pixel each way (a texel of the sphere is ~3.5 of a 1080p frame's): where the frame covers it,
+    // its color, by its direction of the world, with the time it was seen
+#ifdef SPHERE_PASS
+    vec2 j = vec2(gl_GlobalInvocationID.xy) * 2.0;
+    if (any(greaterThanEqual(j, target_size))) return;
+    vec2 uv;
+    if (!grid_coord(j, uv) || any(lessThan(uv, vec2(1.0))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 2.0))) return;
+    if (!frame_setup()) return;
+    vec4 c = HOOKED_mul * texelFetch(HOOKED_raw, ivec2(j), 0);
+    imageStore(GYROFLOW_SPHERE, sphere_texel(qrot(table(15), output_ray(j))), vec4(c.rgb, PTS + 1000.0));
+#endif
 }

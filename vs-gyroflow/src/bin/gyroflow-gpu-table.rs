@@ -49,12 +49,15 @@ fn player(json: &str, out: &str) {
     // Under water with the fringes taken out, the colors are read apart: the RGB layout. Else the planes
     let wet = chromatic && (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
     let edge_fill = match s("edges") { "smooth" | "sphere" => Some(j.get("edges_blur").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32 / 100.0), _ => None };
-    let opts = Options { mode: if wet { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
-                         chromatic: wet, chromatic_fast: true, edge_fill, time_offset, knots: 33, interp, shrink: false, range: None };
+    // The sphere trail needs the RGB layout too (gpu_sphere: the player's say, where its GPU has the room)
+    let sphere = s("edges") == "sphere" && j.get("gpu_sphere").and_then(|v| v.as_bool()).unwrap_or(true);
+    let rgb = wet || sphere;
+    let opts = Options { mode: if rgb { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
+                         chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset, knots: 33, interp, shrink: false, range: None };
     let table = match Table::build(&clip, &opts) { Ok(t) => t, Err(e) => reply(serde_json::json!({ "error": e })) };
     if let Err(e) = std::fs::write(out, gpu_table::shader(&clip, &opts, &table)) { reply(serde_json::json!({ "error": format!("{out}: {e}") })); }
-    reply(serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if wet { "grid" } else { "planes" },
-                              "chromatic": wet, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() }));
+    reply(serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
+                              "chromatic": wet, "sphere": sphere, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() }));
 }
 
 fn main() {
@@ -111,7 +114,7 @@ fn main() {
         return;
     }
 
-    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, chromatic: false, chromatic_fast: false, edge_fill: None, time_offset: 0.0, knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;
