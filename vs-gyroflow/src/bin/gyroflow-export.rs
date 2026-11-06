@@ -163,7 +163,8 @@ rendition as the image, the HDR one (HLG) above it
   --format <heic|jpeg>  HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere)
   --live           with the motion around it, 1.5 s on each side, as the export plays it (--sdr, --nbcu, --dv-rpu
                    say how; at most 1920 wide or high): a HEIC becomes a Live Photo (a .mov next to it, paired by
-                   afp-photo), a JPEG a Motion Photo (<name>.MP.jpg, the MP4 inside it, as Android's cameras write it)
+                   afp-photo), a JPEG a Motion Photo (<name>.MP.jpg, the MP4 inside it, as Android's cameras write it;
+                   its video in the image's SDR look, which the apps showing it all play alike)
   --quality <0-100>  the image's quality (default 92)";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
@@ -1059,6 +1060,8 @@ struct Part {
     max_fps: f64,
     mp4: bool,
     dv: bool,
+    // In an SDR look ("maker", "nbcu"), the one its photo's image has; None: as the export plays (a Live Photo's HLG)
+    sdr: Option<&'static str>,
 }
 
 // How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
@@ -1143,10 +1146,13 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
     let mut _temp_lut = None; // kept until the export ends
-    // A preview is in SDR: D-Log M by the maker's LUT when it's there, everything else through NBCU's conversion
-    let maker_sdr = curve == Some("dlogm") && !opts.nbcu && (opts.sdr || preview.is_some())
-        && (preview.is_none() || lut("dji-dlogm-rec709.cube").is_ok());
-    let nbcu = opts.nbcu || (preview.is_some() && !maker_sdr);
+    // A preview is in SDR: D-Log M by the maker's LUT when it's there, everything else through NBCU's conversion. A
+    // Motion Photo's video too, in its image's look (Part::sdr)
+    let part_sdr = part.and_then(|p| p.sdr);
+    let in_sdr = preview.is_some() || part_sdr.is_some();
+    let maker_sdr = curve == Some("dlogm") && !opts.nbcu && part_sdr != Some("nbcu") && (opts.sdr || in_sdr)
+        && (!in_sdr || lut("dji-dlogm-rec709.cube").is_ok());
+    let nbcu = opts.nbcu || (in_sdr && !maker_sdr);
     let (graph, tags, color_label) = if let Some(curve) = curve {
         let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
         let (cube, matrix, primaries, transfer, label) = if nbcu {
@@ -1165,7 +1171,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         lut_job = Some((cube, matrix, graph));
         let space = if matrix == "bt2020" { "bt2020nc" } else { "bt709" };
         (String::new(), vec![primaries.to_string(), transfer.to_string(), space.to_string(), "tv".to_string()], label)
-    } else if let Some((cube, name)) = (preview.is_some() || nbcu).then(|| match info.transfer.as_deref() {
+    } else if let Some((cube, name)) = (in_sdr || nbcu).then(|| match info.transfer.as_deref() {
         Some("arib-std-b67") => Some((NBCU_HLG, "HLG")),
         Some("smpte2084") => Some((NBCU_PQ, "PQ")),
         _ => None,
@@ -1743,6 +1749,14 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     while taken_by(&name(k)) && !opts.force { k += 1; }
     let out_path = name(k);
 
+    // The SDR look the image is: --sdr-image, else D-Log M by the maker's LUT, the rest through NBCU's conversion
+    let sdr_look = opts.sdr_image.clone().unwrap_or_else(|| (if curve == Some("dlogm") && !opts.nbcu { "maker" } else { "nbcu" }).to_string());
+    // A Motion Photo's video in that look too: the image is SDR (its gain map lifting it on an HDR screen), and the
+    // apps that play its motion (Google Photos, the gallery apps, Windows' Photos) show HLG each its own way, some
+    // compressing all of HLG's range into SDR's, white at a fifth. A Live Photo's (HEIC) stays HLG: Apple's Photos
+    // shows it as the player does
+    let motion_sdr = jpeg.then(|| if sdr_look == "maker" && curve == Some("dlogm") { "maker" } else { "nbcu" });
+
     // The image: the frame at `t`, cleaned up from its neighbours, in the HDR look and the SDR one the image is
     // (--sdr-image)
     let image = || -> Result<(ph::Image, Option<ph::Image>, String, usize), String> {
@@ -1903,7 +1917,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         } else {
             (None, "SDR".to_string())
         };
-        let want = opts.sdr_image.clone().unwrap_or_else(|| (if curve == Some("dlogm") && !opts.nbcu { "maker" } else { "nbcu" }).to_string());
+        let want = &sdr_look;
         let (sdr, how) = match &hdr {
             None => (rgb, "as recorded"),
             Some(h) if want == "macos" && cfg!(target_os = "macos") && helper.is_file() => (macos_sdr(&helper, h, &out_dir)?, "as macOS shows the HLG"),
@@ -1926,7 +1940,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let from = first as f64 / fps;
             let to = (t + half).min(info.duration.max(from + 1.0 / fps));
             let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
-            let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg };
+            let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr };
             // The photo's frame in it: the part starts at `first`
             let at = (n - first) as f64 / fps;
             scope.spawn(move || {
