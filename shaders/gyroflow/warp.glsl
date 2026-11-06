@@ -149,6 +149,8 @@ bool rotate_and_distort(vec3 d, vec4 q, vec4 fc, vec4 k, vec4 lens, vec3 t3, out
     return true;
 }
 
+#ifndef GRID_PASS
+// The sampling passes only (the grid pass binds no HOOKED, and a compute shader has no dFdx)
 // ---- Sampling the source; uv in its pixels, centers at whole numbers ----
 
 vec4 src(vec2 p) { return HOOKED_tex((p + 0.5) * HOOKED_pt); }
@@ -281,6 +283,8 @@ vec4 sample_src(vec2 uv, vec4 jac)
 vec4 sample_src(vec2 uv) { return src(uv); }
 #endif
 
+#endif
+
 // The frame's parameters, from the table by PTS. False where the table has none
 bool frame_setup()
 {
@@ -315,6 +319,7 @@ bool source_coord(vec2 j, out vec2 uv)
     return rotate_and_distort(d, row_rotation(idx, rows), fc, k, lens, t3, uv);
 }
 
+#ifndef GRID_PASS
 // The picture at source coordinate uv (Gyroflow's frame); past the frame by more than half a pixel, the background, as
 // Gyroflow's taps outside it are
 vec4 finish(vec2 uv)
@@ -343,6 +348,8 @@ vec4 finish(vec2 uv)
 #endif
 #endif
 }
+
+#endif
 
 #ifdef GRID_STEP
 // The grid: point (i, g) at output pixel ((i, g) - 1) * GRID_STEP, one before the edge to two past it

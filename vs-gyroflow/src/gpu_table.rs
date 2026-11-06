@@ -292,15 +292,13 @@ layout(set = 0, binding = 3) uniform texture2D table_t;
 layout(set = 0, binding = 4) uniform sampler table_s;
 layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
 #define GYROFLOW_GRID grid_img
-#define HOOKED_tex(pos) texture(sampler2D(hooked_t, hooked_s), pos)
-#define HOOKED_size hooked_size
-#define HOOKED_pt (1.0 / hooked_size)
 #define GYROFLOW_TABLE sampler2D(table_t, table_s)
 #define target_size out_size
-#define HOOKED_pos (gl_FragCoord.xy / out_size)
-",
+{}",
             if compute { "layout(local_size_x = 8, local_size_y = 8) in;" } else { "layout(location = 0) out vec4 o_color;" },
-            if compute { "writeonly" } else { "readonly" });
+            if compute { "writeonly" } else { "readonly" },
+            // The grid pass binds no HOOKED in mpv: none here either
+            if compute { "" } else { "#define HOOKED_tex(pos) texture(sampler2D(hooked_t, hooked_s), pos)\n#define HOOKED_size hooked_size\n#define HOOKED_pt (1.0 / hooked_size)\n#define HOOKED_pos (gl_FragCoord.xy / out_size)\n" });
         let (_, common, _) = sections();
         let main = if compute { "void main() { hook(); }" } else { "void main() { o_color = hook(); }" };
         format!("{head}\n{defs}\n{common}\n{}\n{main}\n", pass_body(name))
