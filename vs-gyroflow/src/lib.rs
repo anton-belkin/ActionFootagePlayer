@@ -484,23 +484,26 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     Ok((stab, project_json, motion))
 }
 
-impl Engine {
-    /// `subsampling`: log2 of the chroma subsampling, (w, h)
-    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
-    /// then `preset`
-    /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
-    /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
-    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
-    /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
-    /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
-    /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
-    /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
-    /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
-    /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
-    /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
-    /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
-    /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
+/// What Engine::load sets up before its GPU workers: the project or the video's motion loaded as the plugin plays it,
+/// the views and levels, the output frame and size. Also the GPU warp's table (gpu_table.rs), so it renders exactly
+/// what the filter does. The arguments are Engine::load's
+pub struct Prepared {
+    pub stab: StabilizationManager,
+    pub views: Arc<Views>,
+    pub view: u8,
+    pub view_index: usize,
+    pub level_geometry: Option<motion::Geometry>,
+    pub motion: Option<Arc<motion::Motion>>,
+    pub render_size: (usize, usize),
+    pub project_size: Option<(usize, usize)>,
+    pub output_size: (usize, usize),
+    pub frame: Frame,
+    pub frame_offset_us: i64,
+    pub uncovered_frames: (usize, usize),
+    pub wide_fov: Option<f64>,
+}
+
+pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), output_override: Option<(usize, usize)>, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Prepared, String> {
         let t = std::time::Instant::now();
         let lens_only = lens == LensMode::Only;
         let horizon_lock = if lens_only { Some(0.0) } else { horizon_lock };
@@ -622,6 +625,29 @@ impl Engine {
                              frame.projection.map(|p| format!(", {}", gyroflow_core::stabilization::projection::setting_name(p))).unwrap_or_default());
         log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}{turned}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
 
+        Ok(Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov })
+}
+
+impl Engine {
+    /// `subsampling`: log2 of the chroma subsampling, (w, h)
+    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
+    /// then `preset`
+    /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
+    /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
+    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
+    /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
+    /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
+    /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
+    /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
+    /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
+    /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
+    /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
+    /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
+    /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
+        let t = std::time::Instant::now();
+        let Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov } =
+            prepare(project, preset, fov, horizon_lock, underwater, level, lookahead, input_size, output_override, trim, alone, frame, lens)?;
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
         let plane_size = |(w, h): (usize, usize), p: usize| if p == 0 { (w, h) } else { (w >> subsampling.0, h >> subsampling.1) };

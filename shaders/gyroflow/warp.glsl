@@ -53,12 +53,14 @@
 //   7: fov, lens correction, refraction coefficient, field limit
 //   8: translation2d.x, .y, matrix rows (1: no rolling shutter), valid (1)
 //   9: translation3d.x, .y, .z, 0    10-13: the digital lens's parameters [0..16]
-//  14: input horizontal stretch, vertical stretch, 0, 0
+//  14: input horizontal stretch, vertical stretch, red's and blue's refractive index over green's (1 out of the water)
 
 #define PI 3.14159265358979
 #define PARAM_TEXELS 15
 
 int table_frame;
+// 1 for green (Gyroflow's own coefficient); red's or blue's ratio to it while the chromatic coordinates are found
+float refr_scale = 1.0;
 vec4 fc, lens, t2, stretch;
 vec3 t3;
 
@@ -142,7 +144,8 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
     float theta = atan(rxy, p.z);
     uv = vec2(0.0);
     if (lens.w > 0.0 && theta > lens.w) return false;
-    float refr = lens.z;
+    // Under water, the channel's own index (chromatic: red's and blue's over green's, refr_scale)
+    float refr = lens.z * refr_scale;
     if (refr != 1.0 && refr > 0.0 && rxy > 1e-12) {
         float sin_d = sin(theta) * refr;
         if (sin_d >= 1.0 || p.z <= 0.0) return false;
@@ -316,7 +319,8 @@ vec4 sample_src(vec2 uv) { return src(uv); }
 // The frame's parameters, from the table by PTS. False where the table has none
 bool frame_setup()
 {
-    table_frame = clamp(int(floor(PTS * FPS + 0.5)), 0, FRAMES - 1);
+    // A moment played as a video of its own starts TIME_OFFSET seconds into the clip
+    table_frame = clamp(int(floor((PTS + TIME_OFFSET) * FPS + 0.5)), 0, FRAMES - 1);
     fc = table(0);
     params.k1 = table(1); params.k2 = table(2); params.k3 = table(3);
     params.k4 = table(4); params.k5 = table(5); params.k6 = table(6);
@@ -356,21 +360,59 @@ bool source_coord(vec2 j, out vec2 uv)
 #ifndef GRID_PASS
 // The picture at source coordinate uv (Gyroflow's frame); past the frame by more than half a pixel, the background, as
 // Gyroflow's taps outside it are
-vec4 finish(vec2 uv)
+bool outside(vec2 uv) { return any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5)); }
+
+// Gyroflow's frame -> the texture's pixels (the same frame unless mpv hands over another size)
+vec2 texel(vec2 uv)
 {
-    if (any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5)))
-        return BACKGROUND;
-#ifdef UV_OUT
-    // The tests' output (gpu_table.rs): the source coordinate, not the picture
-    return vec4(uv, 0.0, 1.0);
-#else
-    // Gyroflow's frame -> the texture's pixels (the same frame unless mpv hands over another size)
     uv = (uv + 0.5) * HOOKED_size / vec2(SRC_W, SRC_H) - 0.5;
 #ifdef PLANE_OFFSET
     // A plane read on its own: where its samples sit against the frame's, in its pixels (MPEG-2's left-sited chroma:
     // +0.25 across)
     uv += PLANE_OFFSET;
 #endif
+    return uv;
+}
+
+// The edges the frame doesn't cover (EDGE_FILL 1, the plugin's "smooth"): the frame's own colors where its edge is
+// nearest, blurred over EDGE_BLUR of its height and muted with the distance (less color, a little darker), so the
+// stabilized frame's motion doesn't show there as a hard line. The sphere trail isn't on the GPU yet: the same fill
+vec4 edge_fill(vec2 uv)
+{
+    vec2 edge = clamp(uv, vec2(0.0), vec2(SRC_W, SRC_H) - 1.0);
+    float r = max(EDGE_BLUR * float(SRC_H), 1.0);
+    vec4 sum = vec4(0.0);
+    for (int y = -2; y <= 2; y++)
+        for (int x = -2; x <= 2; x++)
+            sum += src(texel(clamp(edge + vec2(x, y) * (0.5 * r), vec2(0.0), vec2(SRC_W, SRC_H) - 1.0)));
+    sum /= 25.0;
+    float m = clamp(length(uv - edge) / float(SRC_H) * 4.0, 0.0, 1.0);
+#ifdef PLANE_CHROMA
+    return mix(sum, vec4(0.5), 0.6 * m);
+#elif defined(PLANE_LUMA)
+    return sum * (1.0 - 0.25 * m);
+#else
+    float l = dot(sum.rgb, vec3(0.2627, 0.678, 0.0593));
+    return vec4(mix(sum.rgb, vec3(l), 0.6 * m) * (1.0 - 0.25 * m), sum.a);
+#endif
+}
+
+vec4 finish(vec2 uv)
+{
+    if (outside(uv)) {
+#ifdef UV_OUT
+        return BACKGROUND;
+#elif EDGE_FILL
+        return edge_fill(uv);
+#else
+        return BACKGROUND;
+#endif
+    }
+#ifdef UV_OUT
+    // The tests' output (gpu_table.rs): the source coordinate, not the picture
+    return vec4(uv, 0.0, 1.0);
+#else
+    uv = texel(uv);
 #if INTERP == 4
     vec2 ux = dFdx(uv), uy = dFdy(uv);
     return sample_src(uv, vec4(ux.x, uy.x, ux.y, uy.y));
@@ -383,6 +425,28 @@ vec4 finish(vec2 uv)
 #endif
 }
 
+
+#if CHROMATIC
+// Under water: each channel read at its own coordinate (red and blue refracted by their own index, rb: red's xy,
+// blue's xy), once, from the source; red and blue bilinear (CHROMATIC_FAST) or with the main kernel
+vec4 finish_rgb(vec2 uv, vec4 rb)
+{
+    vec4 c = finish(uv);
+    if (outside(uv) || outside(rb.xy) || outside(rb.zw)) return c;
+#ifdef UV_OUT
+    return c;
+#else
+#if CHROMATIC_FAST
+    c.r = src(texel(rb.xy)).r;
+    c.b = src(texel(rb.zw)).b;
+#else
+    c.r = finish(rb.xy).r;
+    c.b = finish(rb.zw).b;
+#endif
+    return c;
+#endif
+}
+#endif
 #endif
 
 #ifdef GRID_STEP
@@ -396,8 +460,13 @@ float cr3(float t) { return (0.5 * t - 0.5) * t * t; }
 
 #ifndef GRID_PASS
 // Output pixel j's source coordinate from the grid (Catmull-Rom over 4x4 points); false where one of them has no image
+// Red's and blue's coordinates (xy, zw) where the grid pass marked the frame under water (a point's z is 2: grid_wet)
+vec4 grid_rb;
+bool grid_wet;
 bool grid_coord(vec2 j, out vec2 uv)
 {
+    grid_rb = vec4(0.0);
+    grid_wet = false;
     vec2 g = j / float(GRID_STEP) + 1.0;
     ivec2 i = ivec2(floor(g));
     vec2 f = g - vec2(i);
@@ -407,6 +476,14 @@ bool grid_coord(vec2 j, out vec2 uv)
     vec4 p00 = imageLoad(GYROFLOW_GRID, clamp(i, ivec2(0), hi)), p10 = imageLoad(GYROFLOW_GRID, clamp(i + ivec2(1, 0), ivec2(0), hi));
     vec4 p01 = imageLoad(GYROFLOW_GRID, clamp(i + ivec2(0, 1), ivec2(0), hi)), p11 = imageLoad(GYROFLOW_GRID, clamp(i + ivec2(1, 1), ivec2(0), hi));
     uv = mix(mix(p00.xy, p10.xy, f.x), mix(p01.xy, p11.xy, f.x), f.y);
+#if CHROMATIC
+    grid_wet = p00.z > 1.5;
+    if (grid_wet) {
+        vec4 q00 = imageLoad(GYROFLOW_GRID_RB, clamp(i, ivec2(0), hi)), q10 = imageLoad(GYROFLOW_GRID_RB, clamp(i + ivec2(1, 0), ivec2(0), hi));
+        vec4 q01 = imageLoad(GYROFLOW_GRID_RB, clamp(i + ivec2(0, 1), ivec2(0), hi)), q11 = imageLoad(GYROFLOW_GRID_RB, clamp(i + ivec2(1, 1), ivec2(0), hi));
+        grid_rb = mix(mix(q00, q10, f.x), mix(q01, q11, f.x), f.y);
+    }
+#endif
     return min(min(p00.z, p10.z), min(p01.z, p11.z)) > 0.5;
 #else
     vec4 wx = vec4(cr0(f.x), cr1(f.x), cr2(f.x), cr3(f.x));
@@ -419,6 +496,10 @@ bool grid_coord(vec2 j, out vec2 uv)
             vec4 p = imageLoad(GYROFLOW_GRID, clamp(i + ivec2(x - 1, y - 1), ivec2(0), hi));
             row += wx[x] * p.xy;
             valid = min(valid, p.z);
+#if CHROMATIC
+            if (x == 1 && y == 1) grid_wet = p.z > 1.5;
+            grid_rb += wx[x] * wy[y] * imageLoad(GYROFLOW_GRID_RB, clamp(i + ivec2(x - 1, y - 1), ivec2(0), hi));
+#endif
         }
         sum += wy[y] * row;
     }
@@ -433,8 +514,20 @@ bool grid_coord(vec2 j, out vec2 uv)
 vec4 hook()
 {
     if (!frame_setup()) return BACKGROUND;
+    vec2 j = HOOKED_pos * target_size - 0.5;
     vec2 uv;
-    if (!source_coord(HOOKED_pos * target_size - 0.5, uv)) return BACKGROUND;
+    if (!source_coord(j, uv)) return BACKGROUND;
+#if CHROMATIC
+    if (stretch.z != 1.0 || stretch.w != 1.0) {
+        vec4 rb = vec4(uv, uv);
+        vec2 c;
+        refr_scale = stretch.z;
+        if (source_coord(j, c)) rb.xy = c;
+        refr_scale = stretch.w;
+        if (source_coord(j, c)) rb.zw = c;
+        return finish_rgb(uv, rb);
+    }
+#endif
     return finish(uv);
 }
 
@@ -444,8 +537,24 @@ void hook()
     ivec2 g = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(g, grid_size()))) return;
     vec2 uv = vec2(0.0);
-    bool ok = frame_setup() && source_coord(vec2(g - 1) * float(GRID_STEP), uv);
+    vec2 j = vec2(g - 1) * float(GRID_STEP);
+    bool ok = frame_setup() && source_coord(j, uv);
+#if CHROMATIC
+    bool wet = ok && (stretch.z != 1.0 || stretch.w != 1.0);
+    imageStore(GYROFLOW_GRID, g, vec4(uv, ok ? (wet ? 2.0 : 1.0) : 0.0, 0.0));
+    // Red's and blue's coordinates, where the frame is under water
+    vec4 rb = vec4(uv, uv);
+    if (wet) {
+        vec2 c;
+        refr_scale = stretch.z;
+        if (source_coord(j, c)) rb.xy = c;
+        refr_scale = stretch.w;
+        if (source_coord(j, c)) rb.zw = c;
+    }
+    imageStore(GYROFLOW_GRID_RB, g, rb);
+#else
     imageStore(GYROFLOW_GRID, g, vec4(uv, ok ? 1.0 : 0.0, 0.0));
+#endif
 }
 
 // ==== pass sample ====
@@ -461,5 +570,8 @@ vec4 hook()
     if (!ok) ok = frame_setup() && source_coord(j, uv);
 #endif
     if (!ok) return BACKGROUND;
+#if CHROMATIC
+    if (grid_wet) return finish_rgb(uv, grid_rb);
+#endif
     return finish(uv);
 }

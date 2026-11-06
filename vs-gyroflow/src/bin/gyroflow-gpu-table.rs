@@ -17,6 +17,9 @@
 //     --readout-ms <t>   the rolling shutter's readout time instead of the project's (to measure the knots on a clip
 //                        that has none)
 //
+//   gyroflow-gpu-table --player <json> <out.glsl>
+//     The player's GPU path (main.lua): its filter arguments in, the shader out, one JSON line printed (see player())
+//
 //   gyroflow-gpu-table --check-grid <W>x<H> [--readout-ms <t>] <project.gyroflow | video>
 //     No shader: the source coordinates on a coarse grid of a W x H output, interpolated (bilinear, Catmull-Rom),
 //     against the exact ones at every pixel, for grid steps of 4 to 32 px, on the fastest-turning frames
@@ -31,8 +34,32 @@ use gyroflow_core::stabilization::Stabilization;
 use nalgebra::Vector2;
 use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 
+/// The player's GPU path (mpv/scripts/gyroflow/main.lua): `--player <json> <out.glsl>`, the JSON main.lua hands the
+/// VapourSynth filter plus input_width/height, interpolation, chromatic (on/off), edges and edges_blur. Writes the shader
+/// and prints one JSON line: { shader, output: [w, h], mode, chromatic, ms } or { unsupported: why } or { error }
+fn player(json: &str, out: &str) {
+    let t = Instant::now();
+    fn reply(v: serde_json::Value) -> ! { println!("{v}"); std::process::exit(0) }
+    let j: serde_json::Value = match serde_json::from_str(json) { Ok(j) => j, Err(e) => reply(serde_json::json!({ "error": format!("bad JSON: {e}") })) };
+    let (clip, time_offset) = match gpu_table::from_player_json(&j) { Ok(c) => c, Err(e) => reply(serde_json::json!({ "error": e })) };
+    if let Some(why) = gpu_table::unsupported(&clip) { reply(serde_json::json!({ "unsupported": why })); }
+    let s = |k: &str| j.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let interp = match s("interpolation") { "bilinear" => 0, "lanczos" | "lanczos4" => 3, "ewa" => 4, "bspline" => 1, _ => 5 };
+    let chromatic = j.get("gpu_chromatic").and_then(|v| v.as_bool()).unwrap_or(false);
+    // Under water with the fringes taken out, the colors are read apart: the RGB layout. Else the planes
+    let wet = chromatic && (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
+    let edge_fill = match s("edges") { "smooth" | "sphere" => Some(j.get("edges_blur").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32 / 100.0), _ => None };
+    let opts = Options { mode: if wet { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
+                         chromatic: wet, chromatic_fast: true, edge_fill, time_offset, knots: 33, interp, shrink: false, range: None };
+    let table = match Table::build(&clip, &opts) { Ok(t) => t, Err(e) => reply(serde_json::json!({ "error": e })) };
+    if let Err(e) = std::fs::write(out, gpu_table::shader(&clip, &opts, &table)) { reply(serde_json::json!({ "error": format!("{out}: {e}") })); }
+    reply(serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if wet { "grid" } else { "planes" },
+                              "chromatic": wet, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() }));
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 3 { player(&args[1], &args[2]); }
     let usage = || -> ! {
         eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|bicubic9|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
         std::process::exit(2);
@@ -84,7 +111,7 @@ fn main() {
         return;
     }
 
-    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, chromatic: false, chromatic_fast: false, edge_fill: None, time_offset: 0.0, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;

@@ -73,6 +73,30 @@ pub struct Clip {
     pub frame_offset_us: i64,
 }
 
+/// The player's choices for a clip, as main.lua hands them to the VapourSynth filter (gyroflow.vpy's user-data JSON),
+/// plus the video's own size (`input_width`, `input_height`), which the filter learns from its input
+pub fn from_player_json(j: &serde_json::Value) -> Result<(Clip, f64), String> {
+    use crate::{ Fov, Frame, LensMode, Level };
+    let s = |k: &str| j.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
+    let project = s("project").ok_or("no project")?;
+    let fov = if j.get("wide").and_then(|v| v.as_bool().or(v.as_i64().map(|i| i != 0))).unwrap_or(false) { Fov::Wide }
+              else { f("fov").filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project) };
+    let underwater = match s("underwater") { None => Underwater::Auto, Some(v) => Underwater::parse(v).ok_or(format!("underwater {v}"))? };
+    let level = match s("level") { None => Level::Medium, Some(v) => Level::parse(v).ok_or(format!("level {v}"))? };
+    let trim = match (f("trim_start"), f("trim_end")) { (Some(a), Some(b)) if b > a => Some((a, b)), _ => None };
+    let alone = j.get("alone").and_then(|v| v.as_bool());
+    let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
+    let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
+    let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
+    // All of a clip's own motion data before it plays (lookahead 0): the table is written once
+    let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
+    let params = p.views.params[p.view_index].clone();
+    let sp = p.stab.params.read();
+    let clip = Clip { size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, params };
+    Ok((clip, f("time_offset").unwrap_or(0.0)))
+}
+
 impl Clip {
     /// Underwater as the project says, the project's output size, no horizon lock or FOV of the player's own: what
     /// the plugin does for a clip with a project, edges off. `readout_ms`: the rolling shutter's readout time instead
@@ -130,6 +154,16 @@ pub struct Options {
     pub grid_linear: bool,
     /// Planes: the chroma sampled bilinearly whatever the luma's interpolation
     pub chroma_bilinear: bool,
+    /// Under water, red and blue each read at their own coordinate (the water's color fringes taken out); needs the
+    /// RGB layouts (exact, grid)
+    pub chromatic: bool,
+    /// Red and blue bilinear under chromatic (else with the main interpolation)
+    pub chromatic_fast: bool,
+    /// The uncovered edges filled (the plugin's smooth fill), blurred over this fraction of the frame's height; None: the
+    /// background color
+    pub edge_fill: Option<f32>,
+    /// A moment played as a video of its own: where it starts in the clip, seconds
+    pub time_offset: f64,
     /// Knots a frame; 0: every row
     pub knots: usize,
     /// warp.glsl's INTERP: 0 bilinear, 1 B-spline, 2 bicubic, 3 Lanczos4, 4 EWA
@@ -173,7 +207,12 @@ impl Table {
                 [kp.translation2d[0], kp.translation2d[1], kp.matrix_count as f32, 1.0],
                 [kp.translation3d[0], kp.translation3d[1], kp.translation3d[2], 0.0],
                 dl(0), dl(1), dl(2), dl(3),
-                [kp.input_horizontal_stretch, kp.input_vertical_stretch, 0.0, 0.0],
+                {
+                    // Red's and blue's index over green's where the frame is under water and the fringes are taken out
+                    let n = kp.light_refraction_coefficient as f64;
+                    let k = if opts.chromatic && n > 1.0 && kp.lens_correction_amount >= 0.999 { crate::dispersion::water_ratios(n) } else { [1.0, 1.0] };
+                    [kp.input_horizontal_stretch, kp.input_vertical_stretch, k[0], k[1]]
+                },
             ];
             for (i, v) in texels.iter().enumerate() { data[base + i * 4..base + i * 4 + 4].copy_from_slice(v); }
             let quats = if opts.knots == 0 { row_quats(&tr.matrices) } else { knot_quats(&tr.matrices, per_frame) };
@@ -199,10 +238,11 @@ impl Table {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET {:.6}\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, clip.frame_count.max(1), table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32, opts.time_offset,
+        (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0)) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
@@ -232,14 +272,17 @@ fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, bod
 /// The passes for `opts.mode`, without the file's head
 pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let defs = defines(clip, opts, table);
-    let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID",
+    let rb = opts.chromatic && opts.mode == Mode::Grid;
+    let d = |v: &[&str]| v.iter().map(|s| s.to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let rb_bind = if rb { "//!BIND GYROFLOW_GRID_RB" } else { "" };
+    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind,
         "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, extra, pass_body("sample"));
     let grid = |hook: &str| {
         let s = opts.grid_step;
         let (gw, gh) = (GRID_MAX.0.div_ceil(s) + 4, GRID_MAX.1.div_ceil(s) + 4);
-        format!("//!TEXTURE GYROFLOW_GRID\n//!SIZE {gw} {gh}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}",
-            hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", "//!SAVE GYROFLOW_GRID_DONE",
+        let texture = |name: &str| format!("//!TEXTURE {name}\n//!SIZE {gw} {gh}\n//!FORMAT rgba32f\n//!STORAGE\n\n");
+        format!("{}{}{}", texture("GYROFLOW_GRID"), if rb { texture("GYROFLOW_GRID_RB") } else { String::new() },
+            hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!SAVE GYROFLOW_GRID_DONE",
                 &format!("//!WIDTH OUTPUT.w {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
                 &defs, "#define GRID_PASS", pass_body("grid")))
     };
@@ -248,10 +291,14 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, "", pass_body("exact")),
         Mode::Grid => format!("{}\n{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "")),
         Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
-            sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)"),
-            sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
-                if opts.chroma_bilinear { "\n#undef INTERP\n#define INTERP 0" } else { "" }))),
+            sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA"),
+            sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
+                if opts.chromatic_bilinear_planes() { "\n#undef INTERP\n#define INTERP 0" } else { "" }))),
     }
+}
+
+impl Options {
+    fn chromatic_bilinear_planes(&self) -> bool { self.chroma_bilinear }
 }
 
 /// The shader file mpv loads
@@ -348,11 +395,14 @@ layout(set = 0, binding = 2) uniform sampler hooked_s;
 layout(set = 0, binding = 3) uniform texture2D table_t;
 layout(set = 0, binding = 4) uniform sampler table_s;
 layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
+layout(set = 0, binding = 6, rgba32f) uniform {} image2D grid_rb_img;
 #define GYROFLOW_GRID grid_img
+#define GYROFLOW_GRID_RB grid_rb_img
 #define GYROFLOW_TABLE sampler2D(table_t, table_s)
 #define target_size out_size
 {}",
             if compute { "layout(local_size_x = 8, local_size_y = 8) in;" } else { "layout(location = 0) out vec4 o_color;" },
+            if compute { "writeonly" } else { "readonly" },
             if compute { "writeonly" } else { "readonly" },
             // The grid pass binds no HOOKED in mpv: none here either
             if compute { "" } else { "#define HOOKED_tex(pos) texture(sampler2D(hooked_t, hooked_s), pos)\n#define HOOKED_size hooked_size\n#define HOOKED_pt (1.0 / hooked_size)\n#define HOOKED_pos (gl_FragCoord.xy / out_size)\n" });
@@ -394,7 +444,8 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         g.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &[
             wgpu::BindGroupLayoutEntry { binding: 0, visibility: vis, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             tex(1), smp(2), tex(3), smp(4),
-            wgpu::BindGroupLayoutEntry { binding: 5, visibility: vis, ty: wgpu::BindingType::StorageTexture { access, format: wgpu::TextureFormat::Rgba32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None }] })
+            wgpu::BindGroupLayoutEntry { binding: 5, visibility: vis, ty: wgpu::BindingType::StorageTexture { access, format: wgpu::TextureFormat::Rgba32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 6, visibility: vis, ty: wgpu::BindingType::StorageTexture { access, format: wgpu::TextureFormat::Rgba32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None }] })
     }
 
     /// Each output pixel's (u, v) as the shader computes it, out.0 x out.1, for the frame at `pts`: the grid pass first
@@ -404,6 +455,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         let hooked = texture(g, 4, 4, Some(&[0.5; 64]), wgpu::TextureUsages::TEXTURE_BINDING);
         let table_tex = texture(g, table.width, table.height, Some(&table.data), wgpu::TextureUsages::TEXTURE_BINDING);
         let grid_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
+        let grid_rb_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
         let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1, _pad: [0.0; 2] };
         let buf = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<U>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         g.queue.write_buffer(&buf, 0, bytemuck::bytes_of(&u));
@@ -414,7 +466,8 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
             wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&table_tex.create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&sampler) },
-            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&grid_tex.create_view(&Default::default())) }] });
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&grid_tex.create_view(&Default::default())) },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&grid_rb_tex.create_view(&Default::default())) }] });
         let mut enc = d.create_command_encoder(&Default::default());
         if let Some(src) = grid {
             let l = layout(g, wgpu::ShaderStages::COMPUTE, wgpu::StorageTextureAccess::WriteOnly);
@@ -479,7 +532,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         let mut frames: Vec<usize> = [0usize, 600, 1049, 1181, n / 2, n - 1].into_iter().filter(|f| *f < n).collect();
         frames.dedup();
         let fast = if n > 1049 { 1049 } else { n / 2 };
-        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, knots: 33, interp: 2, shrink: false, range: None };
+        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false, edge_fill: None, time_offset: 0.0, knots: 33, interp: 2, shrink: false, range: None };
         // (label, options, every frame or only the fastest)
         let cases = [
             ("exact, 33 knots", base, true),
@@ -530,9 +583,11 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         let table = Table::build(&clip, &Options { range: Some((0, 0)), ..base }).unwrap();
         for interp in 0..6 {
             for shrink in [false, true] {
-                for (mode, name) in [(Mode::Exact, "exact"), (Mode::Grid, "sample"), (Mode::Grid, "grid")] {
-                    let opts = Options { mode, interp, shrink, ..base };
-                    let src = glsl(&clip, &opts, &table, name, false);
+                for (mode, name, chromatic, fill, plane) in [(Mode::Exact, "exact", false, None, ""), (Mode::Grid, "sample", false, None, ""), (Mode::Grid, "grid", false, None, ""),
+                    (Mode::Exact, "exact", true, Some(0.02), ""), (Mode::Grid, "sample", true, Some(0.02), ""), (Mode::Grid, "grid", true, Some(0.02), ""),
+                    (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_LUMA\n"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n")] {
+                    let opts = Options { mode, interp, shrink, chromatic, edge_fill: fill, grid_linear: interp % 2 == 0, ..base };
+                    let src = glsl(&clip, &opts, &table, name, false).replacen("#version 450\n", &format!("#version 450\n{plane}"), 1);
                     let scope = g.device.push_error_scope(wgpu::ErrorFilter::Validation);
                     module(&g, &src, if name == "grid" { wgpu::naga::ShaderStage::Compute } else { wgpu::naga::ShaderStage::Fragment });
                     let err = pollster::block_on(scope.pop());
