@@ -42,6 +42,7 @@ pub mod heading;
 pub mod sphere360;
 pub mod view360;
 pub mod export360;
+pub mod gpu_table;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
