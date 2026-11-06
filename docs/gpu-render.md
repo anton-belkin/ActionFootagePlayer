@@ -89,7 +89,7 @@ compiles them), the Newton loops keep their `break`s.
 | Today (vs-gyroflow, VapourSynth) | On the GPU |
 |---|---|
 | Stabilize: each plane uploaded, warped by gyroflow-core's wgpu kernel, read back; the row matrices rebuilt for each plane | **The warp pass**, once per frame, in RGB, at the output size |
-| Chromatic (dispersion.rs): the lens geometry stamped into the last luma row; chromatic.glsl re-samples red and blue at the end, from a picture already warped and resampled | **Inside the warp pass**: the green ray refracted per channel (Snell's law with water's indices) and each channel sampled once from the source |
+| Chromatic (dispersion.rs): the lens geometry stamped into the last luma row; chromatic.glsl re-samples red and blue at the end, from a picture already warped and resampled | **Inside the warp pass or not at all**: the green ray refracted per channel (Snell's law with water's indices) and each channel sampled once from the source; no pass at the end |
 | Edge fill (edges.rs, sphere.rs, smooth.rs): a mask rendered on the GPU, the fill and blur on a coarse CPU grid, the sphere (a cube map with a 5 s memory) on the CPU, the composite on the CPU | **Passes of the render**: the warp knows per pixel that its ray left the frame; the sphere is a storage texture written each frame from the covered pixels; pull-push and blur as a mip chain; the composite in the warp pass |
 | Crop mode's preview, the 360 stamp: identity marks in the pixels | `PTS` and parameters; no marks |
 | Still (still.rs): on pause, ±5 neighbours re-decoded through VapourSynth, block matching and fusion on wgpu | **Stays as it is in the player for now** (a pause can afford it); moves into our renderer, which can read any frame |
@@ -163,17 +163,30 @@ Where the warp shrinks the source a lot (4K into a 1080p window: two to one), a 
 widened its taps, Gyroflow's EWA is the exact answer but costs most. **(to try: those, and a prefiltered half-size
 source, on detail like a reef; and their cost on the N100.)**
 
-### Chromatic correction inside the warp
+### Chromatic correction inside the warp, or not at all
 
 Today: the stabilized YUV goes through VapourSynth with one (green) refraction, mpv converts it to RGB, and
 chromatic.glsl re-samples red and blue around the lens axis it read from the stamp: a second resampling of an image
-already resampled once.
+already resampled once. That patch at the end is not carried over: the correction is done inside the warp, or, where
+the machine can't afford that, not at all. It is a small effect on the picture, not worth a second resampling.
 
-In the warp pass each output pixel has its ray; under water the green ray is refracted by water's index for green
-(as now), and red and blue by theirs, and each channel is read from the source with its own coordinate: one
-resampling, from the original pixels, with the exact lens model rather than the stamp's approximation. Cost: two
-more coordinate computations per pixel and 2 × the taps for red and blue (or bilinear for them, which the eye won't
-tell under water) **(to try)**. The export gets the same correction for free.
+In the warp each output pixel has its ray; under water the green ray is refracted by water's index for green (as
+now), and red and blue by theirs, and each channel is read from the source at its own coordinate: one resampling, from
+the original pixels, with the exact lens model rather than the stamp's approximation.
+
+**It doesn't need the source converted to RGB first.** The conversion from YCbCr to (non-linear) RGB is a linear
+matrix, so reading the Y and CbCr planes at the red channel's coordinate and converting gives exactly the red that a
+pre-converted RGB frame would give there, and likewise for green and blue. The warp that reads the planes itself
+(below, "Conversion before the warp") samples Y and CbCr at three coordinates, converts each, and keeps R from the
+first, G from the second, B from the third. The two ways cost the same in the warp (three times the taps); the
+plane-reading one saves the source-sized conversion pass and interpolates the chroma once, with the warp's kernel,
+instead of twice (mpv's `cscale` to the source's size, then the warp).
+
+**It costs only under water.** Out of water, or with the correction off, the three coordinates are the same and the
+warp samples once: a branch per frame (the indices are per frame), not per pixel. Under water: three times the warp's
+taps, or the main kernel for green and bilinear for red and blue, which the eye shouldn't tell from it **(to try:
+both, against today's chromatic.glsl on a dive clip, and their cost on the N100)**. The export gets the same
+correction for free.
 
 ### The edge fill on the GPU
 
@@ -259,9 +272,9 @@ What a pass costs scales with one of three things, and that decides which knob h
 | Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | Exists (`fps_limit`); the most visible (judder), so last |
 | Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
 | Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
-| Chromatic under water | red and blue with the main kernel · bilinear · off | output px × 2 × taps, or × 2 | Exists as `chromatic_skip`; bilinear for the two channels is the middle step the eye shouldn't tell under water **(to try)** |
+| Chromatic under water | inside the warp, every channel with the main kernel · red and blue bilinear · off | under water only: output px × 3 × taps, or × (taps + 2) | Exists as `chromatic_skip`. Never as a pass at the end (above); out of water it costs nothing |
 | Edge fill | sphere · smooth · off; the sphere's resolution; written every frame or every n-th | the composite: output px; the sphere: per frame (its texels) | Exists (`edges`, `edge_fill_rate`); on the GPU the sphere may be cheap enough that the rate goes **(to try)** |
-| Conversion before the warp | mpv converts the whole source to RGB and the warp reads that · the warp reads the Y and CbCr planes and converts only what it samples | the first: source px with chroma upsampling; the second: only the warp's taps | A design choice more than a setting, but the biggest saving on weak GPUs, which spend most of a frame on source-sized passes **(to try: whether a MAINPRESUB pass can bind LUMA and CHROMA, and whether libplacebo then skips converting MAIN)** |
+| Conversion before the warp | the warp reads the Y and CbCr planes and converts only what it samples · mpv converts the whole source to RGB and the warp reads that | the first: only the warp's taps; the second: source px with chroma upsampling | A design choice more than a setting, and the biggest saving on weak GPUs, which spend most of a frame on source-sized passes. Both allow the chromatic correction. **(to try: whether a pass can bind LUMA and CHROMA and replace MAIN so libplacebo skips converting the source; if mpv won't, the plane-reading warp is for our renderer only)** |
 | HDR on an SDR screen | peak detection on · off | per frame, a compute pass | mpv's `hdr-compute-peak` |
 | The stream (server) | 2160p · 1080p · 720p; how many streams | output px | The encoder (VDEnc) is fixed-function hardware and doesn't use the shader cores; streams share the shader cores |
 
