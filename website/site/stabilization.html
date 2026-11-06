@@ -53,8 +53,9 @@
         <ul>
           <li><a href="log.html">Log footage</a></li>
           <li><a href="stabilization.html" aria-current="page">Stabilization</a></li>
-          <li><a href="library.html">Library</a></li>
+          <li><a href="organizing.html">Organizing</a></li>
           <li><a href="photos.html">Photos</a></li>
+          <li><a href="360.html">360 video</a></li>
           <li><a href="features.html" class="nm-all">All features</a></li>
         </ul>
       </details>
@@ -75,8 +76,9 @@
         <li class="sm-group">Features</li>
         <li><a href="log.html">Log footage</a></li>
         <li><a href="stabilization.html" aria-current="page">Stabilization</a></li>
-        <li><a href="library.html">Library</a></li>
+        <li><a href="organizing.html">Organizing</a></li>
         <li><a href="photos.html">Photos</a></li>
+        <li><a href="360.html">360 video</a></li>
         <li><a href="features.html">All features</a></li>
         <li class="sm-dl"><a href="download.html">Download</a></li>
       </ul>
@@ -181,7 +183,7 @@
           <p>Nothing else to set. Log or not doesn't matter here: color is a separate step, explained in <a class="text-link" href="log.html">Log footage</a>.</p>
         </li>
       </ol>
-      <p class="note">Checked on real clips: DJI Osmo Action 6 with EIS off and GoPro HERO12 Black with HyperSmooth off, on a Mac with Apple Silicon. Other DJI cameras, other GoPros and single-lens Insta360 cameras are built for and should work.</p>
+      <p class="note">Checked on real clips: DJI Osmo Action 6 with EIS off and GoPro HERO12 Black with HyperSmooth off, on a Mac with Apple Silicon. Other DJI cameras, other GoPros and single-lens Insta360 cameras are built for and should work. 360 clips: <a class="text-link" href="360.html">360 video</a>.</p>
     </div>
   </section>
 
@@ -195,11 +197,11 @@
         <div class="dive-points">
           <div>
             <h3>A clip steadied from its gyro data</h3>
-            <p>The player first writes a project next to the clip, as it plays: the same preset, level, view, horizon lock and lens, and the motion data, so Gyroflow doesn't read it again. A <code>.gyroflow</code> that's already there is opened as it is, never overwritten.</p>
+            <p>The player first writes a project next to the clip, as it plays: the same preset, stabilization, level, horizon lock, lens and frame, and the motion data, so Gyroflow doesn't read it again. A <code>.gyroflow</code> that's already there is opened as it is, never overwritten.</p>
           </div>
           <div>
             <h3>A clip with a project</h3>
-            <p>Its project opens in Gyroflow as it is.</p>
+            <p>Its project opens in Gyroflow as it is. From then on the project sets the smoothing, the horizon, the frame, the projection, the turn and the lens under water: the panel shows its values, and you change them in Gyroflow.</p>
           </div>
           <div>
             <h3>No gyro data? No problem</h3>
@@ -215,72 +217,99 @@
       </div>
       <div class="stack">
         <figure class="media" id="shot-stabilization-4">
-          <img src="media/stabilization-4.jpg" alt="The side panel's Stabilization part on a clip with a Gyroflow project: the Level greyed, Horizon and Lens As project." width="584" height="1222" loading="lazy">
-          <figcaption>A clip with its own project: the Level is the project's, so it's greyed.</figcaption>
+          <img src="media/stabilization-4.jpg" alt="The side panel's Transform tab on a clip with a Gyroflow project: Stabilization On, Lens As in the project, and the card In the Gyroflow project with its smoothing, horizon, frame and projection, and Edit in Gyroflow." width="584" height="1450" loading="lazy">
+          <figcaption>A clip with its own project: the smoothing, horizon, frame and projection are the project's, listed in the Transform tab.</figcaption>
         </figure>
         <figure class="media" id="shot-stabilization-5">
-          <img src="media/stabilization-5.jpg" alt="The side panel's Stabilization part on a clip without motion data: No motion data in this clip, and the button Stabilize in Gyroflow." width="584" height="356" loading="lazy">
+          <img src="media/stabilization-5.jpg" alt="The side panel's Transform tab on a clip without motion data: Stabilization greyed at Off, No motion data in this clip: Gyroflow can find it in the picture (optical flow), and the button Stabilize in Gyroflow." width="584" height="779" loading="lazy">
           <figcaption>No gyro data? One button opens the video in Gyroflow, to stabilize it from the picture.</figcaption>
         </figure>
       </div>
     </div>
   </section>
 
-  <!-- The panel's Stabilization part -->
+  <!-- The panel's Transform and Source tabs -->
   <section class="section band" id="panel">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">The Stabilization part</p>
+        <p class="eyebrow">The Transform tab</p>
         <h2>The settings, in the panel beside the video.</h2>
-        <p class="lede">The side panel opens on its Stabilization part. <kbd>Tab</kbd> hides the panel and shows it again. From top to bottom:</p>
+        <p class="lede">The side panel opens on its Project tab. How a clip is shown, steadied and framed is on its <b>Transform</b> tab; how to read the file, such as the turn it was recorded with and the lens under water, is on its <b>Source</b> tab, <a class="text-link" href="#source">below</a>. <kbd>Tab</kbd> hides the panel and shows it again. The Transform tab, from top to bottom:</p>
       </div>
       <div class="st-panel">
         <dl class="st-settings">
           <div>
-            <dt>What it's stabilized with</dt>
-            <dd>A card at the top says which case the clip is: “The camera's gyro data”, “Gyroflow project”, or “No motion data in this clip”. Below it, <b>Edit in Gyroflow…</b>, or <b>Stabilize in Gyroflow…</b> when there's no gyro data (<kbd>Ctrl</kbd>+<kbd>e</kbd>, <a class="text-link" href="#gyroflow">above</a>). Without gyro data the rest of the part is hidden.</dd>
+            <dt>Transform defined in</dt>
+            <dd>A card at the top says where what plays comes from: <b>this session</b> (nothing saved for it), <b>the source</b>, <b>the moment</b> or <b>the clip preview</b>. Under it: <b>Save</b> (it says <b>Save to the source</b>, <b>Save to the moment</b> or <b>Save to the clip preview</b>), <b>Revert to saved</b>, <b>Use as default</b> and the <b>Auto save</b> switch (default off). While a moment or clip preview plays, the switch <b>Settings of its own</b> is there too. Each setting below shows your choice filled and the saved one with a dot in its corner. What these do: <a class="text-link" href="#how-long">How long a setting lasts</a>.</dd>
           </div>
           <div>
-            <dt>View <span class="st-def-val">default On</span> <kbd>Ctrl</kbd>+<kbd>g</kbd></dt>
-            <dd><b>On</b>: zoomed in so no edge shows. <b>Wider</b>: no zoom, so you see more of the picture and the edges show at times, filled as <a class="text-link" href="#edges">Edges</a> says. <b>Off</b>: as recorded, for this clip only.</dd>
+            <dt>Stabilization <span class="st-def-val">default On</span> <kbd>Ctrl</kbd>+<kbd>g</kbd></dt>
+            <dd><b>On</b>: zoomed in so no edge shows. <b>Wider</b>: no zoom, so you see more of the picture and the edges show at times, filled as <a class="text-link" href="#edges">Edges</a> says. <b>Off</b>: not stabilized; the lens below still applies. No motion data in the clip? It's greyed at Off, with <b>Stabilize in Gyroflow…</b> (<kbd>Ctrl</kbd>+<kbd>e</kbd>, <a class="text-link" href="#gyroflow">above</a>), and the rest of the tab stays. With a Gyroflow project, Wider and Off are for viewing only, never saved: Wider shows how much the project's crop cuts off, Off the motion as recorded.</dd>
           </div>
           <div>
             <dt>Level <span class="st-def-val">default Medium</span> <kbd>Ctrl</kbd>+<kbd>k</kbd></dt>
-            <dd>How strongly, for a clip without a project. <b>Weak</b>: 10 % cropped, smoothness 50 %. <b>Medium</b>: 20 % cropped, smoothness 75 %. <b>Strong</b>: 30 % cropped, smoothness 100 %. When the camera turns further than the crop has room for, the picture follows it sooner, so edges show only then. Switching level takes effect at once, while the clip plays. Greyed for a clip with a project: it has the project's smoothing.</dd>
+            <dd>How strongly. <b>Weak</b>: 10 % cropped, smoothness 50 %. <b>Medium</b>: 20 % cropped, smoothness 75 %. <b>Strong</b>: 30 % cropped, smoothness 100 %. When the camera turns further than the crop has room for, the picture follows it sooner, so edges show only then. Switching level takes effect at once, while the clip plays. Greyed when Stabilization is Off. Not shown for a clip with a project: it has the project's smoothing.</dd>
           </div>
           <div>
-            <dt>Horizon <span class="st-def-val">default As preset</span></dt>
-            <dd><b>As preset</b> (<b>As project</b> for a clip with one): as it says. The preset that comes with the player leaves the horizon free. <b>Level</b>: the horizon kept level. It needs more zoom, so edges show more. <b>Free</b>: not kept level.</dd>
+            <dt>Horizon <span class="st-def-val">default Free</span></dt>
+            <dd><b>Level</b>: the horizon kept level. It needs more zoom, so edges show more. <b>Free</b>: not kept level. The default is the preset's, and the one that comes with the player leaves the horizon free. Not shown for a clip with a project.</dd>
           </div>
           <div>
-            <dt>Lens <span class="st-def-val">default Auto</span> <kbd>Ctrl</kbd>+<kbd>u</kbd></dt>
-            <dd>The correction for how water bends light. <b>Auto</b>: as the camera says it was in the water, switching over one frame when a clip goes in or out. Only the Osmo Action 6 records that; for other cameras Auto is greyed and the clip plays as the preset or project says (the shipped preset: under water). <b>In water</b> and <b>Above</b> set it by hand. A clip with a project has <b>As project</b> first. <kbd>Ctrl</kbd>+<kbd>u</kbd> switches to Above and back.</dd>
+            <dt>Lens <span class="st-def-val">default Corrected, Linear</span></dt>
+            <dd><b>Corrected</b>: the lens's bend taken out, as its profile says, then drawn as you pick: <b>Linear</b> (straight lines), <b>Fisheye 1</b> (stereographic), <b>Fisheye 2</b> (equidistant), <b>Fisheye 3</b> (equisolid) or <b>Fisheye 4</b> (orthographic). <b>As recorded</b>: the lens as the camera recorded it. The lens is its own setting: with Stabilization Off and the lens Corrected, only the lens is corrected and nothing is smoothed. It needs a lens profile: an unknown lens stays at As recorded (Source › Lens says why). With a project it's <b>As in the project</b>, and As recorded is for viewing only.</dd>
           </div>
           <div>
-            <dt>Reduce color aberration <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>a</kbd></dt>
-            <dd>Under water, the flat glass in front of the lens splits colors apart towards the frame's edges. This puts them back, wherever the lens is under water. On Osmo Action 6 dive clips, red's fringe at the edge goes from 3-7 px to about 1 px. Playback only: exports keep the fringes. Greyed with Lens on Above.</dd>
+            <dt>Frame <span class="st-def-val">default Own, As is</span></dt>
+            <dd>The shape of the whole clip: <b>Own</b> (the video's), <b>16:9</b>, <b>4:3</b>, <b>5:4</b> or <b>1:1</b>, then <b>As is</b>, <b>Landscape</b> or <b>Portrait</b>; in Portrait the ratios read 9:16, 3:4 and 4:5. It plays in it, and exports, moments, clip previews and photos are made in it. Zoom stays Gyroflow's. On a clip that isn't stabilized, mpv's own crop does it. With motion data, <b>Make a Gyroflow project…</b> (<kbd>Ctrl</kbd>+<kbd>e</kbd>) takes the frame into a new project. With a project, the card <b>In the Gyroflow project</b> shows its smoothing, horizon, frame and projection instead, with <b>Edit in Gyroflow…</b>.</dd>
           </div>
           <div>
-            <dt>Make these the defaults</dt>
-            <dd>At the bottom of the part: saves the settings as they are for the next time you start the player.</dd>
+            <dt>Water: Reduce color aberration <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>a</kbd></dt>
+            <dd>Under water, the flat glass in front of the lens splits colors apart towards the frame's edges. This puts them back, wherever the lens is under water. On Osmo Action 6 dive clips, red's fringe at the edge goes from 3-7 px to about 1 px. It's part of the transform, saved with the rest. Playback only: exports keep the fringes. Greyed when Source › <b>Under water, flat port</b> is No.</dd>
           </div>
         </dl>
         <figure class="media" id="shot-stabilization-2">
-          <img src="media/stabilization-2.jpg" alt="The side panel's Stabilization part on a dive clip: The camera's gyro data, View On, Level Medium, Horizon As preset, Lens Auto, Reduce color aberration on." width="584" height="1222" loading="lazy">
+          <img src="media/stabilization-2.jpg" alt="The side panel's Transform tab on a dive clip: Transform defined in this session, Stabilization On, Level Medium, Horizon Free, Lens Corrected and Linear, Frame Own and As is, Reduce color aberration on." width="584" height="2019" loading="lazy">
           <figcaption>A dive clip with the default settings, steadied from its gyro data.</figcaption>
         </figure>
       </div>
 
+      <h3 class="st-sub" id="source">The Source tab: how to read the clip</h3>
+      <p class="st-p">What the file is, set once for each source. The <b>Input</b> card at its top says “Changed for viewing. The dot marks what's saved”, “Saved in the source, for all its moments and clips” or “Nothing saved: as the file says”. <b>Save to the source</b> keeps what you changed, for the clip and all its moments and clip previews; <b>Revert to saved</b> goes back. It works from a moment or a clip preview too.</p>
+      <dl class="st-settings">
+        <div>
+          <dt>Recorded turned <span class="st-def-val">default As is</span></dt>
+          <dd><b>As is</b>, <b>90° ↻</b>, <b>180°</b> or <b>90° ↺</b>: for a clip shot with the camera turned, such as an Osmo Action 6 held upright. It plays, stabilizes and exports upright. When the file says it's turned, it's shown upright already, and these turn it more. The turn comes before the stabilization.</dd>
+        </div>
+        <div>
+          <dt>Lens</dt>
+          <dd><b>Camera</b>, <b>Profile</b> (from the file, from the project, or unknown) and <b>Motion data</b>: what it's stabilized with, “Gyroflow project”, “Gyro, in-camera stabilization off”, “none: the camera stabilized it (EIS)” or “none”. Without a lens profile the lens can't be corrected; Gyroflow can set one (<kbd>Ctrl</kbd>+<kbd>e</kbd>), and picking one here comes later.</dd>
+        </div>
+        <div>
+          <dt>Under water, flat port <span class="st-def-val">default Auto</span> <kbd>Ctrl</kbd>+<kbd>u</kbd></dt>
+          <dd>The correction for how water bends light. <b>Auto</b>: as the camera's telemetry says, switching over one frame when a clip goes in or out. Only the Osmo Action 6 records that; for other cameras Auto takes the preset's (the shipped preset: under water). <b>Yes</b>: under water behind a flat port, the camera's own glass or a flat housing. <b>No</b>: above water, or behind a dome port. Greyed with a project, and for an unknown lens.</dd>
+        </div>
+      </dl>
+      <p class="st-p">With a Gyroflow project, the turn and the lens under water are the project's: the tab says “Turn and lens as defined in the Gyroflow project”. <b>Edit in Gyroflow…</b> (<kbd>Ctrl</kbd>+<kbd>e</kbd>) is right under them. The log curve is set here too: <a class="text-link" href="log.html#settings">Log footage</a>.</p>
+
       <h3 class="st-sub" id="how-long">How long a setting lasts</h3>
-      <p class="st-p">A setting you change sticks for the rest of the session, for the next clips too, unless you press <b>Make these the defaults</b>, which keeps it for the next start. A clip with a project starts with the project's own settings; what you change there is for that clip only.</p>
+      <p class="st-p">The Source tab's input is the clip's own: a change is for viewing until <b>Save to the source</b>, and it isn't carried to the next clip. The Transform tab's settings are kept together, as a whole, never one alone. What plays is one of these, the first that exists, never a mix:</p>
+      <ol class="st-p">
+        <li><b>A moment's or a clip preview's own</b>, while <b>Settings of its own</b> is on.</li>
+        <li><b>The source's</b>, saved in <code>&lt;clip&gt;.afp.json</code> beside the clip, with its marks.</li>
+        <li><b>The session's</b>: it starts as the defaults and follows what you change on clips with nothing saved.</li>
+        <li><b>The defaults</b>, as <b>Use as default</b> last wrote them.</li>
+      </ol>
+      <p class="st-p">On a clip with nothing saved, a change goes into the session's, so it sticks for the next clips too. On a clip with a saved transform, a change is for viewing: the dot shows what's saved, and <b>Revert to saved</b> goes back. <b>Save</b> writes what plays, whole, where the card says: the moment or clip preview when Settings of its own is on, else the source. <b>Auto save</b>, for this session, saves a clip or moment that has nothing saved as it opens, then each change. <b>Use as default</b> keeps what plays for the next start, and for the next clips now.</p>
+      <p class="st-p">A Gyroflow project owns its settings: the smoothing, the horizon, the frame, the projection, the turn and the lens under water. The player shows them and never writes them. A key for one of them says it's “as defined in the Gyroflow project” and that <kbd>Ctrl</kbd>+<kbd>e</kbd> edits it in Gyroflow. What was saved for the clip before stays in its file and plays again if the project goes.</p>
       <div class="compare-wrap">
         <table class="settings">
           <thead><tr><th scope="col">Setting</th><th scope="col">Clip without a project</th><th scope="col">Clip with a project</th></tr></thead>
           <tbody>
-            <tr><th scope="row">View</th><td>On and Wider stick for the next clips. Off is for this clip only.</td><td>Starts On, as Gyroflow has it. Wider or Off: this clip only.</td></tr>
-            <tr><th scope="row">Level</th><td>Sticks.</td><td>Doesn't apply: the project's smoothing.</td></tr>
-            <tr><th scope="row">Horizon, Lens</th><td>Stick for the next clips without a project.</td><td>Start As project. A change: this clip only.</td></tr>
-            <tr><th scope="row">Edges, color aberration, temporal denoise</th><td colspan="2">The player's own, not Gyroflow's: they stick for every clip.</td></tr>
+            <tr><th scope="row">Stabilization</th><td>Part of the transform: the saved one, else the session's, which sticks for the next clips.</td><td>Starts On, as Gyroflow has it. Wider or Off: for viewing only.</td></tr>
+            <tr><th scope="row">Level, Horizon, Frame, projection</th><td>Part of the transform, as above.</td><td>The project's, shown in <b>In the Gyroflow project</b>.</td></tr>
+            <tr><th scope="row">Lens, color aberration</th><td colspan="2">Part of the transform. With a project, the lens As recorded is for viewing only.</td></tr>
+            <tr><th scope="row">Recorded turned, Under water</th><td>The source's input: kept by <b>Save to the source</b>, for the clip and its moments. Not carried to the next clip.</td><td>The project's.</td></tr>
+            <tr><th scope="row">Edges, temporal denoise</th><td colspan="2">The player's own, not Gyroflow's: they stick for every clip.</td></tr>
             <tr><th scope="row">Performance &amp; Quality picks</th><td colspan="2">Kept for this computer as soon as you pick them.</td></tr>
           </tbody>
         </table>
@@ -291,7 +320,7 @@
       <p class="st-p">To start from your own, save a preset from Gyroflow (Export → Create settings preset) as <code>default.gyroflow</code> in <code class="os-mac">~/Library/Application Support/ActionFootagePlayer/gyroflow/</code><code class="os-win">%LOCALAPPDATA%\ActionFootagePlayer\gyroflow\</code>. The panel's settings still go on top of it.</p>
 
       <h3 class="st-sub" id="exports">What goes into an export</h3>
-      <p class="st-p"><kbd>Shift</kbd>+<kbd>E</kbd> exports the clip as it plays: the same project or preset, Level, View, Horizon, Lens and edge fill. Color-aberration removal and denoise are playback only. Exporting, and where the file goes, is on <a class="text-link" href="log.html">Log footage</a>.</p>
+      <p class="st-p"><kbd>Shift</kbd>+<kbd>E</kbd> exports the clip as it plays: the same project or preset, the source's input (log curve, recorded turn, lens under water) and the transform: Stabilization, Level, Horizon, the lens corrected or as recorded and its projection, the frame's ratio and orientation, and the edge fill. Color-aberration removal is playback only. Exporting, and where the file goes, is on <a class="text-link" href="log.html#export">Log footage</a>.</p>
     </div>
   </section>
 
@@ -323,7 +352,7 @@
           <figcaption>The same frame in the Wider view, with each of the three edge fills.</figcaption>
         </figure>
       </div>
-      <p class="st-p"><kbd>Ctrl</kbd>+<kbd>b</kbd> switches between them while the clip plays. They're in the panel's Performance &amp; Quality part, below. The Wider view picks a field of view where the steadied picture covers about as much area as the frame, so it shows more of the scene, with edges throughout.</p>
+      <p class="st-p"><kbd>Ctrl</kbd>+<kbd>b</kbd> switches between them while the clip plays. They're in the panel's Performance &amp; Quality tab, below. The Wider view picks a field of view where the steadied picture covers about as much area as the frame, so it shows more of the scene, with edges throughout.</p>
       <p class="honest">The trail knows only how the camera turned, not how it moved. Near things the camera passed, and things that moved by themselves, can be off in it. Where nothing was seen, the fill is made-up color, not picture.</p>
     </div>
   </section>
@@ -334,7 +363,7 @@
       <div class="section-head">
         <p class="eyebrow">Performance &amp; Quality</p>
         <h2>For a computer that doesn't keep up.</h2>
-        <p class="lede">The panel's Performance &amp; Quality part shows for a clip that's stabilized. Its picks are kept for this computer as soon as you make them.</p>
+        <p class="lede">The panel's Performance &amp; Quality tab shows for a clip that's stabilized. Its picks are kept for this computer as soon as you make them.</p>
       </div>
       <dl class="st-settings st-cols">
         <div>
@@ -363,17 +392,17 @@
         </div>
         <div>
           <dt>More</dt>
-          <dd><b>Reduce color aberration</b>: the same switch as in the Stabilization part. <b>Pause and ask when slow</b> (on): see below.</dd>
+          <dd><b>Skip color aberration correction</b> (off): skips it on this screen only; the clip's own setting on the Transform tab stays. <b>Pause and ask when slow</b> (on): see below.</dd>
         </div>
       </dl>
       <div class="st-slow">
         <div class="stack">
           <h3>When it can't keep up, it asks</h3>
-          <p>If more than a tenth of the frames are dropped for over 2 seconds, playback pauses and asks: “Stabilization can't keep up, frames are dropped. Play lighter:”. It offers what helps on that clip: 30 or 15 fps, a lighter edge fill, no edge fill, rendering at 1080p, leaving the color fringes, or playing on as it is, and “Don't ask again”. What you pick is kept.</p>
+          <p>If more than a tenth of the frames are dropped for over 2 seconds, playback pauses and asks: “Stabilization can't keep up, frames are dropped. Play lighter:”. It offers what helps on that clip: 30 or 15 fps, a lighter edge fill, no edge fill, rendering at 1080p, skipping the color aberration correction on this screen, or playing on as it is, and “Don't ask again”. What you pick is kept.</p>
           <p>On an M1 Pro MacBook Pro, the stabilization keeps up with 4K at 60 fps with room to spare. On a thin 15 W Windows laptop, 4K at 60 fps with the trail kept up at 15 fps, not at 30.</p>
         </div>
         <figure class="media" id="shot-stabilization-6">
-          <img src="media/stabilization-6.jpg" alt="A paused wreck frame with the list Stabilization can't keep up, frames are dropped. Play lighter, and its choices." width="1600" height="900" loading="lazy">
+          <img src="media/stabilization-6.jpg" alt="A paused wreck frame with the list Stabilization can't keep up, frames are dropped. Play lighter, and its choices, among them Skip the color aberration correction on this screen." width="1600" height="900" loading="lazy">
           <figcaption>The prompt when the computer can't keep up.</figcaption>
         </figure>
       </div>
@@ -385,12 +414,12 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">Moments</p>
-        <h2>A moment keeps the stabilization it was saved with.</h2>
+        <h2>A moment keeps the transform it was saved with.</h2>
       </div>
       <div class="st-moments">
-        <p>A moment is a part of a clip you keep (<kbd>k</kbd>). It saves one of two things, never both. If the clip had a Gyroflow project, the moment gets its own trimmed copy, <code>_Moments/&lt;name&gt;.gyroflow</code>, which then decides its horizon, crop and smoothing. Otherwise it keeps the View, Level and Horizon it was made with, over the preset. A later change to the clip or to its project doesn't reach the moment.</p>
-        <p>While a moment plays, the panel's <b>Stabilized</b> row offers <b>As saved</b>, <b>On its own</b> (smoothed from the moment's own motion only) and <b>With its clip</b> (smoothed with the clip's motion around it). Every setting starts at As saved. What you choose is for viewing only, for every moment this session, until <b>Keep in &lt;name&gt;</b> writes it into the moment.</p>
-        <p><a class="text-link" href="library.html#moments">Moments in the Library</a></p>
+        <p>A moment is a part of a clip you keep (<kbd>k</kbd>). It takes what plays, whole: its stabilization, level, horizon, color aberration, lens, projection and frame. If the clip had a Gyroflow project, the moment also gets its own trimmed copy, <code>_Moments/&lt;name&gt;.gyroflow</code>, which then decides its horizon, crop and smoothing. A moment never changes by itself: a later change to the clip or to its project doesn't reach it. How to read the file, the Source tab's input, stays the source's, for all its moments.</p>
+        <p>While a moment plays, the Transform tab's card says <b>the moment</b>, and <b>Settings of its own</b> is on. What you change is for viewing until <b>Save to the moment</b> (or Auto save) writes it. Switch Settings of its own off, and the moment plays as its source; its own settings go, and its own project copy goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>. The Project tab's switch <b>Stabilized on its own</b> smooths it from the moment's own motion only, or, off, with the clip's motion around it. A clip preview has the same Settings of its own switch, off at first.</p>
+        <p><a class="text-link" href="organizing.html#moments">Moments, in Organizing</a></p>
       </div>
     </div>
   </section>
@@ -401,27 +430,27 @@
       <div class="section-head">
         <p class="eyebrow">How it decides</p>
         <h2>Three questions, in this order, each time a clip opens.</h2>
-        <p class="lede">The player never guesses. It stabilizes a clip only when it knows how, and otherwise plays it as it was recorded.</p>
+        <p class="lede">The player never guesses. It stabilizes a clip only when it knows how, and otherwise doesn't smooth it.</p>
       </div>
       <div class="st-logic">
         <ol class="checklist st-order">
           <li>
             <h3>A Gyroflow project next to the clip wins</h3>
-            <p>A Gyroflow project is a small <code>.gyroflow</code> file with everything Gyroflow needs to steady one clip. The player looks for one beside the video with the same name: <code>DJI_0007_D.gyroflow</code> or <code>DJI_0007_D.MP4.gyroflow</code>. If it finds one, the clip plays as Gyroflow renders it: the project's smoothing, zoom, lens, output size, horizon lock and correction for water. The player's Level doesn't apply.</p>
+            <p>A Gyroflow project is a small <code>.gyroflow</code> file with everything Gyroflow needs to steady one clip. The player looks for one beside the video with the same name: <code>DJI_0007_D.gyroflow</code> or <code>DJI_0007_D.MP4.gyroflow</code>. If it finds one, the clip plays as Gyroflow renders it: the project's smoothing, zoom, lens, projection, output size, turn, horizon lock and correction for water. The player's Level doesn't apply.</p>
           </li>
           <li>
             <h3>Else, the camera's gyro data, if the camera's stabilization was off</h3>
-            <p>Before the clip plays, the player reads what the camera wrote into the file. It steadies the clip only when the file has gyro data <em>and</em> the camera recorded that its own stabilization was off: EIS off on DJI (and the Wide FOV, the field of view), HyperSmooth off on GoPro, FlowState off on Insta360. GoPro and Insta360 clips also need their lens in Gyroflow's lens database. The clip then plays with the preset that comes with the player and your settings in the panel: <a class="text-link" href="#panel">Level, View, Horizon and Lens</a>.</p>
+            <p>Before the clip plays, the player reads what the camera wrote into the file. It steadies the clip only when the file has gyro data <em>and</em> the camera recorded that its own stabilization was off: EIS off on DJI (and the Wide FOV, the field of view), HyperSmooth off on GoPro, FlowState off on Insta360. GoPro and Insta360 clips also need their lens in Gyroflow's lens database. The clip then plays with the preset that comes with the player and the transform: the one saved for it, else yours on the <a class="text-link" href="#panel">Transform tab</a>.</p>
           </li>
           <li>
             <h3>Else, no gyro data? No problem: <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow</h3>
-            <p>Until then the clip plays as it was recorded. Press <kbd>Ctrl</kbd>+<kbd>e</kbd>, and the video opens in Gyroflow, which stabilizes it optically, from the motion in the picture itself (optical flow). Save the project there, next to the clip, and the clip loads again where it was, stabilized: it's now a clip with a project, case 1.</p>
+            <p>Until then nothing is smoothed. A clip whose lens profile is known gets its lens corrected; a DJI clip shot with EIS on records none and plays as it was recorded. Press <kbd>Ctrl</kbd>+<kbd>e</kbd>, and the video opens in Gyroflow, which stabilizes it optically, from the motion in the picture itself (optical flow). Save the project there, next to the clip, and the clip loads again where it was, stabilized: it's now a clip with a project, case 1.</p>
           </li>
         </ol>
         <figure class="media st-flow" id="shot-stabilization-1">
           <svg class="flow" viewBox="0 0 480 540" role="img" aria-labelledby="flow-title flow-desc">
             <title id="flow-title">What decides how a clip is stabilized</title>
-            <desc id="flow-desc">You open a clip. Is there a Gyroflow project next to it? Yes: it plays as the project says. No: did the camera record gyro data with its own stabilization off (on DJI, EIS off and the Wide FOV)? Yes: it plays steadied from its gyro data, with the shipped preset and your panel settings. No: no problem, Ctrl+e opens it in Gyroflow, which stabilizes it from the picture. Saving the project there, next to the clip, brings it back to the first question, and it plays stabilized.</desc>
+            <desc id="flow-desc">You open a clip. Is there a Gyroflow project next to it? Yes: it plays as the project says. No: did the camera record gyro data with its own stabilization off (on DJI, EIS off and the Wide FOV)? Yes: it plays steadied from its gyro data, with the shipped preset and the transform. No: no problem, Ctrl+e opens it in Gyroflow, which stabilizes it from the picture. Saving the project there, next to the clip, brings it back to the first question, and it plays stabilized.</desc>
             <defs>
               <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
                 <path d="M0 0 L8 4 L0 8 z" class="flow-head"/>
@@ -458,8 +487,8 @@
             <rect class="flow-ok" x="268" y="186" width="204" height="108" rx="10"/>
             <text class="flow-t" x="370" y="213" text-anchor="middle">From its gyro data</text>
             <text class="flow-s" x="370" y="236" text-anchor="middle">the shipped preset, with</text>
-            <text class="flow-s" x="370" y="254" text-anchor="middle">your Level, View,</text>
-            <text class="flow-s" x="370" y="272" text-anchor="middle">Horizon and Lens</text>
+            <text class="flow-s" x="370" y="254" text-anchor="middle">the saved transform,</text>
+            <text class="flow-s" x="370" y="272" text-anchor="middle">else the session's</text>
 
             <line class="flow-line" x1="138" y1="294" x2="138" y2="324" marker-end="url(#flow-arrow)"/>
             <text class="flow-l" x="146" y="314">no</text>
@@ -482,7 +511,7 @@
           <figcaption>What decides, from the top. A project made in Gyroflow takes the clip back to the first question.</figcaption>
         </figure>
       </div>
-      <p class="honest">Why so strict: footage the camera has already steadied gets worse when it's stabilized a second time. So a clip whose camera says its stabilization was on, or doesn't say, plays as recorded. A wrong guess about a camera means its clips play as they are, not worse.</p>
+      <p class="honest">Why so strict: footage the camera has already steadied gets worse when it's stabilized a second time. So a clip whose camera says its stabilization was on, or doesn't say, isn't smoothed again. A wrong guess about a camera means its clips play as they are, not worse.</p>
     </div>
   </section>
 
@@ -492,12 +521,12 @@
       <div class="section-head">
         <p class="eyebrow">Keys</p>
         <h2>The keys.</h2>
-        <p class="lede"><kbd>Ctrl</kbd> is <kbd>Ctrl</kbd> on a Mac too, not <kbd>Cmd</kbd>.</p>
+        <p class="lede"><kbd>Ctrl</kbd> is <kbd>Ctrl</kbd> on a Mac too, not <kbd>Cmd</kbd>. <kbd>Ctrl</kbd>+<kbd>g</kbd>, <kbd>Ctrl</kbd>+<kbd>k</kbd> and <kbd>Ctrl</kbd>+<kbd>a</kbd> change the transform: they stick for the next clips while nothing is saved for the clip. <kbd>Ctrl</kbd>+<kbd>u</kbd> changes the source's input, kept with <b>Save to the source</b>.</p>
       </div>
       <div class="keys">
-        <div class="key"><span>View: On → Wider → Off</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
+        <div class="key"><span>Stabilization: On → Wider → Off</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
         <div class="key"><span>Level: Weak → Medium → Strong</span><span><kbd>Ctrl</kbd>+<kbd>k</kbd></span></div>
-        <div class="key"><span>Lens above water, and back</span><span><kbd>Ctrl</kbd>+<kbd>u</kbd></span></div>
+        <div class="key"><span>Under water with a flat port, or above water and dome port</span><span><kbd>Ctrl</kbd>+<kbd>u</kbd></span></div>
         <div class="key"><span>Color aberration under water, on or off</span><span><kbd>Ctrl</kbd>+<kbd>a</kbd></span></div>
         <div class="key"><span>What fills the edges</span><span><kbd>Ctrl</kbd>+<kbd>b</kbd></span></div>
         <div class="key"><span>Open in Gyroflow</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
@@ -519,11 +548,12 @@
       <ul class="st-limits">
         <li><b>No gyro data? Gyroflow stabilizes it optically.</b> A DJI clip shot with EIS on, or in another FOV than Wide, may have none. <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow; save the project there, and it plays steady here.</li>
         <li><b>Camera stabilization on means as recorded,</b> GoPro HyperSmooth and Insta360 FlowState included, even though those cameras record gyro data anyway.</li>
-        <li><b>The panel says “No motion data in this clip” for any clip it doesn't stabilize,</b> also a GoPro clip with HyperSmooth on that has gyro data. Gyroflow may then use that gyro data rather than optical flow.</li>
+        <li><b>The Transform tab says “No motion data in this clip” for any clip it doesn't stabilize,</b> also a GoPro clip with HyperSmooth on that has gyro data. Gyroflow may then use that gyro data rather than optical flow.</li>
         <li><b>Checked on two cameras:</b> the Osmo Action 6 and the GoPro HERO12 Black. GoPro and Insta360 clips need their lens in Gyroflow's lens database.</li>
         <li><b>A project made with <kbd>Ctrl</kbd>+<kbd>e</kbd> smooths a little differently in Gyroflow</b> than the Level does in the player.</li>
         <li><b>After a jump past what's been read,</b> a clip without a project plays uncorrected for a moment (about 2 s from a network drive), then the correction fades in.</li>
-        <li><b>Color-aberration removal and denoise are playback only,</b> not in exports.</li>
+        <li><b>Color-aberration removal is playback only,</b> not in exports.</li>
+        <li><b>No lens profile? Gyroflow sets one.</b> Without one the lens can't be corrected; picking a profile in the player comes later.</li>
         <li><b>While a clip plays, an export nearly stops.</b> Pause to let it run.</li>
         <li><b>Only files on a drive</b> are stabilized, not streams from a web address.</li>
         <li><b>The Windows app is an alpha,</b> with little testing so far.</li>
@@ -541,11 +571,11 @@
       <div class="faq">
         <details>
           <summary>Why does my clip still play shaky?</summary>
-          <div class="a"><p>Most often the camera's own stabilization was on, or, on DJI, the clip wasn't shot in the Wide FOV, so there's no gyro data to use. The panel's card says “No motion data in this clip”. Press <kbd>Ctrl</kbd>+<kbd>e</kbd> to stabilize it in Gyroflow; once the project is saved next to the clip, it plays steady here.</p></div>
+          <div class="a"><p>Most often the camera's own stabilization was on, or, on DJI, the clip wasn't shot in the Wide FOV, so there's no gyro data to use. The Transform tab says “No motion data in this clip”, and Source › Lens › <b>Motion data</b> says why. Press <kbd>Ctrl</kbd>+<kbd>e</kbd> to stabilize it in Gyroflow; once the project is saved next to the clip, it plays steady here.</p></div>
         </details>
         <details>
           <summary>Should I turn the camera's stabilization off above water too?</summary>
-          <div class="a"><p>Not necessarily. In air, DJI's EIS works well. Under water it doesn't, and that's where turning it off pays. For a clip shot in air with EIS off on a camera other than the Osmo Action 6, set Lens to Above (<kbd>Ctrl</kbd>+<kbd>u</kbd>): the shipped preset assumes water.</p></div>
+          <div class="a"><p>Not necessarily. In air, DJI's EIS works well. Under water it doesn't, and that's where turning it off pays. For a clip shot in air with EIS off on a camera other than the Osmo Action 6, set Source › <b>Under water, flat port</b> to No (<kbd>Ctrl</kbd>+<kbd>u</kbd>) and press <b>Save to the source</b>: the shipped preset assumes water.</p></div>
         </details>
         <details>
           <summary>Do I need Gyroflow?</summary>

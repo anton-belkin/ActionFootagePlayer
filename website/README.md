@@ -19,11 +19,13 @@ site/            what is served, as is
   index.html     the hub; routes to the landings
   divers.html    the landing for divers and snorkelers
   moments.html   the landing for people who shoot a lot (often in log): moments, marks, sharing, the editor
-  log.html, stabilization.html, library.html, photos.html
+  log.html, stabilization.html, organizing.html, photos.html, 360.html
                  the four guides, one feature set each, from what you get to every setting
+  _redirects     Cloudflare Pages' redirects: the old library pages to organizing (renamed when the companion app
+                 took the name Action Footage Library)
   about.html     who makes it and why: Anton's story, a timeline with links
   features.html  every feature on one page, the reference the other pages link to (footer: All features)
-  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, library.css, photos.css, about.css
+  hub.css, divers.css, moments.css, features.css, log.css, stabilization.css, organizing.css, photos.css, about.css, v360.css
                  each page's own styles, next to the shared styles.css
   media/         real footage from an Osmo Action 6: stab-underwater.mp4 (+ .jpg poster; as recorded | as it
                  plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
@@ -77,7 +79,7 @@ Every page, English included, carries:
   page in each language.
 - the header is the same on every page: three dropdowns and a link. **Home ▾** (the home page, three of its
   sections and About the maker), **Who it's for ▾** (Divers & snorkelers: divers.html; Active travelers: moments.html), **Features ▾**
-  (Log footage, Stabilization, Library, Photos, then All features) and **Download**. The page you're on is marked
+  (Log footage, Stabilization, Organizing, Photos, 360 video, then All features) and **Download**. The page you're on is marked
   with `aria-current`, on its link and on its dropdown's title. Each dropdown is a `<details class="navmenu">`, so it
   works without script. Below 900px they take a second row; below 520px they're hidden and the same links, grouped
   the same way, are in one ☰ menu (`<details class="sitemenu">`) beside the language. top.js closes any of these

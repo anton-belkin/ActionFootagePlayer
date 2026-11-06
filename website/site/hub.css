@@ -24,8 +24,8 @@
 @media (min-width: 960px) { .hub-pains { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* What it does: the line under the cards */
-.hub-measured { margin-top: 18px; color: var(--muted); max-width: 70ch; }
-.hub-measured strong { color: var(--ink); font-weight: 600; }
+/* The early-version note under the download buttons: an invitation to try it and say what's wrong */
+.hub-feedback { color: var(--muted); font-size: var(--step--1); max-width: 56ch; }
 
 /* Proof, in the deep band: the stabilization clip across the width, the screenshot under it */
 .hub-proof { display: grid; gap: 36px; grid-template-columns: minmax(0, 1fr); }
