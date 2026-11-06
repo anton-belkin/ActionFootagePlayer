@@ -29,6 +29,9 @@
 // A video opened while one plays takes its place, in the same window (mpv's IPC pipe). Several opened together
 // (Explorer starts this once for each) go into one playlist.
 //
+// `ActionFootagePlayer.exe --batch <request.json>` is Action Footage Library's: mpv with no window making a project's
+// clip previews, moments, photos or exports (the workspace plugin's batch mode, AFP_BATCH), waited for.
+//
 // `ActionFootagePlayer.exe --export <video>...` is Explorer's Stabilize + LUT: gyroflow-export on the videos, in a
 // console window that shows how it goes. Videos sent while it runs are exported after the others, in the same window.
 
@@ -58,6 +61,8 @@ fn main() {
     let result = if args.first().is_some_and(|a| a == "--export") {
         args.remove(0);
         export(&app, args)
+    } else if args.first().is_some_and(|a| a == "--batch") && args.len() == 2 {
+        batch(&app, &args[1])
     } else {
         play(&app, args)
     };
@@ -169,6 +174,26 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     Ok(())
+}
+
+// Action Footage Library's batch: no window, no IPC pipe (a video opened meanwhile starts its own player), the same
+// plugins and settings; this waits for it, so that the Library sees when it's done
+fn batch(app: &Path, request: &OsString) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mpv = app.join(r"mpv\mpv.exe");
+    let mut cmd = Command::new(&mpv);
+    environment(&mut cmd, app);
+    cmd.env("AFP_BATCH", request)
+        .arg("--idle=yes").arg("--vo=null").arg("--ao=null").arg("--force-window=no").arg("--terminal=no")
+        .arg(format!("--config-dir={}", mpv_config().display())).arg("--load-scripts=no")
+        .arg(format!("--include={}", app.join("app.conf").display()));
+    for plugin in PLUGINS {
+        cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let status = cmd.status().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn export(app: &Path, videos: Vec<OsString>) -> Result<(), String> {

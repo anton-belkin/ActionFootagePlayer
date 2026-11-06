@@ -982,6 +982,8 @@ end)
 
 -- Clip previews (_Clips/): one at a time, in the background, from the menu or X
 local clips_job = nil
+-- Batch mode (Action Footage Library runs the player without a window to make them): { finished(summary), ... }
+local batch = nil
 local recount
 local overlay = mp.create_osd_overlay("ass-events")
 
@@ -1094,6 +1096,7 @@ local function next_clip()
             pf.update(job.project, function(d) d.clips_failed = job.failures end)
         end
         recount()
+        if batch then return batch.finished({ made = job.made, failed = job.failed, failures = job.failures, stopped = job.stopping }) end
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
         mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " couldn't be made: "
             .. job.failures[1][2]) or ""), job.failed > 0 and 6 or 4)
@@ -1150,12 +1153,15 @@ local function start_clips(root, queue, what)
 end
 
 -- The project's clips without a preview made (again: the ones made and since deleted)
-local function make_clips(again)
+-- `root`: the project's folder, in batch mode (no clip plays)
+local function make_clips(again, root)
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
-    if not state.clip or state.clip:find("://", 1, true) then return end
-    local root = need_project("Making clip previews")
-    if not root then return end
-    local made = read_made()
+    if not root then
+        if not state.clip or state.clip:find("://", 1, true) then return end
+        root = need_project("Making clip previews")
+        if not root then return end
+    end
+    local made = read_made(root)
     local queue = {}
     for _, c in ipairs(moments.footage(root)) do
         local info = utils.file_info(c.file)
@@ -1166,13 +1172,13 @@ local function make_clips(again)
         end
     end
     if #queue == 0 then
-        return mp.osd_message(again and "No clip preview was removed" or "Every clip has its preview (removed ones: Make again for removed clips)", 4)
+        local why = again and "No clip preview was removed" or "Every clip has its preview (removed ones: Make again for removed clips)"
+        if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
+        return mp.osd_message(why, 4)
     end
     start_clips(root, queue, "Clip previews: " .. #queue .. (#queue == 1 and " clip" or " clips") .. ", in the background")
 end
 
-mp.register_script_message("clips-make", function() make_clips(false) end)
-mp.register_script_message("clips-again", function() make_clips(true) end)
 mp.register_script_message("clips-stop", function()
     if not clips_job then return end
     clips_job.stopping = true
@@ -1811,10 +1817,11 @@ end
 -- What's made of a source by the batches (moments and photos of all marks): its bundle, else the app's defaults (not
 -- the session's: a moment is kept as made, and the session may be a try of the moment), whole; and its input, which
 -- the preview or photo is rendered with too. The bundle alone goes into a moment's link
-local function made_view_of(file, movie)
+local function made_view_of(file, movie, own)
     local doc = sidecar.read(file)
     local defaults = mp.get_property_native("user-data/gyroflow/defaults")
-    local bundle = transform.complete(transform.pick(doc and doc.view) or defaults, defaults)
+    -- `own`: a moment's own bundle, which it keeps whatever the source's is now
+    local bundle = transform.complete(transform.pick(own) or transform.pick(doc and doc.view) or defaults, defaults)
     local rendered = copy(bundle)
     if doc then transform.migrate_source(doc) end
     for k, v in pairs(doc and doc.source or {}) do rendered[k] = v end
@@ -1836,6 +1843,7 @@ local function job_finish(message)
     local j = marks_job
     marks_job = nil
     job_progress()
+    if batch and j then return batch.finished({ made = j.done - j.failed, failed = j.failed, failures = j.failures, stopped = j.stopping }) end
     if message then mp.osd_message(message, 5) end
     if j and j.kind == "moments" then refresh() end
 end
@@ -1853,6 +1861,7 @@ mp.register_script_message("job-done", function(id, json)
         end
     else
         j.failed = j.failed + 1
+        j.failures[#j.failures + 1] = { tostring(item and (item.relative or item.name) or ""), tostring(r.error or "failed") }
         mp.msg.warn((j.kind == "moments" and "moment " or "photo ") .. tostring(item and item.name or "") .. ": " .. tostring(r.error))
     end
     j.done = j.done + 1
@@ -1953,24 +1962,270 @@ local function marks_queue(kind, root)
     return queue
 end
 
-local function start_marks_job(kind)
+-- `root`: the project's folder, in batch mode (no clip plays)
+local function start_marks_job(kind, root)
     if marks_job then return mp.osd_message("Already making " .. marks_job.kind .. ": " .. marks_job.done .. " of " .. #marks_job.queue, 3) end
-    local root = need_project(kind == "moments" and "Moments of the marks" or "Photos of the marks")
+    root = root or need_project(kind == "moments" and "Moments of the marks" or "Photos of the marks")
     if not root then return end
-    if not markers then return mp.osd_message("This needs the highlights plugin", 3) end
+    if not markers then
+        if batch then return batch.finished({ made = 0, failed = 0, error = "the highlights plugin isn't there" }) end
+        return mp.osd_message("This needs the highlights plugin", 3)
+    end
     mp.osd_message("Looking for the marks in the project's clips…", 30)
+    if batch then batch.looking() end
     local queue = marks_queue(kind, root)
     if #queue == 0 then
-        return mp.osd_message(kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)", 4)
+        local why = kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)"
+        if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
+        return mp.osd_message(why, 4)
     end
-    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, id = 0, root = root, alone = pf.read(root).settings.moments_alone == true }
+    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, alone = pf.read(root).settings.moments_alone == true }
     mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
     job_progress()
     job_next()
 end
 
-mp.register_script_message("marks-moments", function() start_marks_job("moments") end)
-mp.register_script_message("marks-photos", function() start_marks_job("photos") end)
-mp.register_script_message("marks-stop", function()
-    if marks_job then marks_job.stopping = true; mp.osd_message("Stopping after this one…", 2) end
+-- The project opened in Action Footage Library, where its batches are made (clip previews, moments and photos of
+-- all marks, exports of all moments): its file, Project.afproject, opened as the system opens it
+mp.register_script_message("open-library", function()
+    local root = state.project
+    if not root then return need_project("Action Footage Library") end
+    migrate(root)
+    local file = pf.path(root)
+    if not fs.is_file(file) and not pf.update(root, function() end) then
+        return mp.osd_message("Can't write " .. file, 4)
+    end
+    local args = macos and { "open", file } or windows and { "cmd", "/d", "/c", "start", "", file } or { "xdg-open", file }
+    mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        if not r or r.status ~= 0 then
+            mp.osd_message("Action Footage Library isn't installed: it opens " .. workspace.PROJECT_FILE, 4)
+        end
+    end)
 end)
+
+-- Export all moments (Action Footage Library): each moment of the project not exported yet, one at a time, as Shift+E
+-- exports one it plays: its part, its own transform (and its own Gyroflow project), the source's input, into
+-- _Exports/<name>.mov (" (SDR)" in SDR), the link inside. A moment exported in that look already (an export of the
+-- same part of the same clip) and the export_<name> moments exports leave are skipped
+local export_job = nil
+
+local function exported_parts(root)
+    local set = {}
+    local dir = ws.join(root, moments_lib.EXPORTS)
+    for _, name in ipairs(utils.readdir(dir, "files") or {}) do
+        local lower = name:lower()
+        if lower:match("%.mov$") or lower:match("%.mp4$") then
+            local raw = fs.read_link(ws.join(dir, name))
+            local l = raw and fs.parse_json(raw)
+            if type(l) == "table" and l.kind == "export" and type(l.clip) == "string" and l["in"] and l.out then
+                local sdr = l.look == "maker" or l.look == "nbcu"
+                set[l.clip .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] = true
+            end
+        end
+    end
+    return set
+end
+
+local function export_next()
+    local j = export_job
+    if not j then return end
+    if j.stopping or j.done >= #j.queue then
+        export_job = nil
+        if batch then batch.finished({ made = j.made, failed = j.failed, failures = j.failures, stopped = j.stopping }) end
+        return
+    end
+    local m = j.queue[j.done + 1]
+    j.id = j.id + 1
+    j.fraction = 0
+    local label = j.sdr and " (SDR)" or ""
+    local output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
+    local l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
+                ["in"] = m.link["in"], out = m.link.out, name = final, look = j.sdr and "nbcu" or "hdr",
+                stabilized = m.rendered.view ~= "off", roots = { j.root } }
+    m.output = output
+    mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
+        id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
+        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = j.sdr,
+        progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
+    }))
+end
+
+mp.register_script_message("export-batch-done", function(id, json)
+    local j = export_job
+    if not j or tostring(j.id) ~= id then return end
+    local r = utils.parse_json(json or "") or {}
+    if r.ok then j.made = j.made + 1 end
+    if not r.ok and not j.stopping then
+        j.failed = j.failed + 1
+        j.failures[#j.failures + 1] = { j.queue[j.done + 1].name, tostring(r.error or "failed") }
+    end
+    j.done = j.done + 1
+    export_next()
+end)
+
+local function export_moments(root, sdr)
+    if export_job then return end
+    if batch then batch.looking() end
+    local done = exported_parts(root)
+    local queue, failures = {}, {}
+    for _, m in ipairs(moments.scan(root, nil).list) do
+        local l = m.link
+        if not m.name:match("^export_") and type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"]
+           and not done[tostring(l.clip) .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] then
+            local original = moments.original(l, root)
+            if original then
+                local movie = markers and markers.movie and markers.movie(original) or nil
+                local _, rendered = made_view_of(original, movie, l.stab)
+                local own = own_project(m.file)
+                m.original, m.rendered = original, rendered
+                m.project = fs.is_file(own) and own or nil
+                -- A moment kept as made (snap): stabilized on its own or as part of its clip, as Shift+E has it
+                if l.snap then m.alone = l.alone == true else m.alone = nil end
+                queue[#queue + 1] = m
+            else
+                failures[#failures + 1] = { m.name, "its original isn't found" }
+            end
+        end
+    end
+    table.sort(queue, function(a, b) return a.name:lower() < b.name:lower() end)
+    if #queue == 0 then
+        if batch then
+            return batch.finished({ made = 0, failed = #failures, failures = failures,
+                                    nothing = #failures == 0 and "Every moment is exported already" or nil })
+        end
+        return
+    end
+    mkdir(ws.join(root, moments_lib.EXPORTS))
+    local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
+    export_job = { root = root, sdr = sdr, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
+                   progress = utils.join_path(tmp, "afp-batch-export-" .. tostring(utils.getpid()) .. ".json") }
+    -- Those whose original is missing count as failed, after the rest
+    export_job.total_extra = #failures
+    export_next()
+end
+
+-- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
+-- { kind, project, status, stop, photo, sdr }: kind clips (previews of the clips without one), clips-again (the ones
+-- removed), moments (moments of all marks), photos (photos of all marks; photo: no, live or motion), export (all
+-- moments; sdr: in SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
+-- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
+-- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
+-- is cancelled) and quits when it's done
+do
+    local req_file = os.getenv("AFP_BATCH")
+    if req_file and req_file ~= "" then
+        local f = io.open(req_file, "r")
+        local req = f and utils.parse_json(f:read("*a") or "")
+        if f then f:close() end
+        if type(req) ~= "table" or type(req.project) ~= "string" or type(req.status) ~= "string" then
+            mp.msg.error("AFP_BATCH: not a request: " .. req_file)
+            mp.add_timeout(0.1, function() mp.commandv("quit", "2") end)
+        else
+            local root = ws.normalize(req.project)
+            local status = { kind = req.kind, project = root, state = "starting", done = 0, total = 0, failed = 0 }
+            local function write_status()
+                local out = io.open(req.status .. ".tmp", "w")
+                if not out then return end
+                out:write(utils.format_json(status) or "{}")
+                out:close()
+                if not os.rename(req.status .. ".tmp", req.status) then
+                    os.remove(req.status)
+                    os.rename(req.status .. ".tmp", req.status)
+                end
+            end
+            local started, stop_sent, ended = false, false, false
+            batch = {}
+            function batch.looking()
+                status.state = "looking"
+                write_status()
+            end
+            function batch.finished(sum)
+                if ended then return end
+                ended = true
+                status.state = sum.stopped and "stopped" or (sum.error and "failed") or "done"
+                status.made, status.failed = sum.made or 0, sum.failed or 0
+                status.done = status.total > 0 and (sum.stopped and status.done or status.total) or status.done
+                status.failures = sum.failures
+                status.message = sum.nothing or sum.error
+                status.fraction, status.current = nil, nil
+                write_status()
+                mp.add_timeout(0.2, function() mp.commandv("quit") end)
+            end
+            local function progress()
+                if not started or ended then return end
+                local j = clips_job or marks_job or export_job
+                if j then
+                    status.state = stop_sent and "stopping" or "running"
+                    status.total = j.total or #j.queue
+                    status.done = j.done
+                    status.failed = j.failed
+                    local item = j.queue and j.queue[j.done + 1]
+                    if clips_job then item = nil end
+                    status.current = item and (item.name or item.relative) or nil
+                    if export_job and export_job.progress then
+                        local pf_ = io.open(export_job.progress, "r")
+                        local st = pf_ and utils.parse_json(pf_:read("*a") or "")
+                        if pf_ then pf_:close() end
+                        status.fraction = type(st) == "table" and st.total and st.total > 0 and st.done / st.total or nil
+                    end
+                    write_status()
+                end
+                -- Stop: after the one being made (clip previews: that one too; an export: cancelled)
+                if req.stop and not stop_sent and fs.is_file(req.stop) then
+                    stop_sent = true
+                    status.state = "stopping"
+                    write_status()
+                    if clips_job then
+                        clips_job.stopping = true
+                        if clips_job.id then mp.abort_async_command(clips_job.id) end
+                    elseif marks_job then
+                        marks_job.stopping = true
+                    elseif export_job then
+                        export_job.stopping = true
+                        mp.commandv("script-message-to", "gyroflow", "export-batch-stop", tostring(export_job.id))
+                    else
+                        batch.finished({ stopped = true })
+                    end
+                end
+            end
+            local function start()
+                if started then return end
+                started = true
+                state.project = root
+                migrate(root)
+                if not (fs.is_file(pf.path(root)) or fs.is_dir(pf.legacy_dir(root))) then
+                    return batch.finished({ error = root .. " isn't a project (no " .. workspace.PROJECT_FILE .. " in it)" })
+                end
+                write_status()
+                local kind = req.kind
+                if kind == "clips" or kind == "clips-again" then
+                    make_clips(kind == "clips-again", root)
+                elseif kind == "moments" then
+                    start_marks_job("moments", root)
+                elseif kind == "photos" then
+                    if req.photo == "no" or req.photo == "live" or req.photo == "motion" then
+                        mp.set_property_native("user-data/gyroflow/live_photo", req.photo)
+                    end
+                    start_marks_job("photos", root)
+                elseif kind == "export" then
+                    export_moments(root, req.sdr == true)
+                else
+                    batch.finished({ error = "no such batch: " .. tostring(kind) })
+                end
+            end
+            write_status()
+            mp.add_periodic_timer(0.5, progress)
+            -- Once the gyroflow plugin has said where gyroflow-export is and what the app's defaults are
+            local function ready()
+                if mp.get_property_native("user-data/gyroflow/exporter") and mp.get_property_native("user-data/gyroflow/defaults") then
+                    start()
+                end
+            end
+            mp.observe_property("user-data/gyroflow/exporter", "native", ready)
+            mp.observe_property("user-data/gyroflow/defaults", "native", ready)
+            mp.add_timeout(20, function()
+                if not started then batch.finished({ error = "the gyroflow plugin didn't start" }) end
+            end)
+        end
+    end
+end

@@ -495,6 +495,67 @@ mp.register_script_message("preview", function(json)
     end)
 end)
 
+-- An export for the workspace plugin's batch mode (Action Footage Library's Export all moments): a clip's part with
+-- a saved view, nothing playing. { id, clip, view, project (a moment's own Gyroflow project), alone, from, to, output,
+-- link, sdr, progress (gyroflow-export's progress file), reply, done }. The answer: <done> <id> { ok, error, out }.
+-- export-batch-stop <id>: cancelled, as Shift+E twice cancels (the unfinished file removed)
+local batch_jobs = {}
+mp.register_script_message("export-batch", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
+    local id = tostring(req.id or "")
+    local function reply(ok, err, out)
+        mp.commandv("script-message-to", req.reply, req.done or "export-batch-done", id, utils.format_json({ ok = ok, error = err, out = out }))
+    end
+    local info = utils.file_info(EXPORT)
+    if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
+    local control = platform.windows and temp_name("control") or nil
+    local args = { EXPORT, "--force" }
+    if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
+    if control then table.insert(args, "--control"); table.insert(args, control) end
+    view_args(args, type(req.view) == "table" and req.view or {})
+    if req.sdr == true then table.insert(args, "--nbcu") end
+    if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
+    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
+    local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
+    add("--from", req.from and string.format("%.3f", req.from))
+    add("--to", req.to and string.format("%.3f", req.to))
+    add("--output", req.output)
+    add("--link", req.link)
+    table.insert(args, req.clip)
+    mp.msg.info("export (batch): " .. table.concat(args, " "))
+    local job = { control = control, progress = req.progress, state = {} }
+    batch_jobs[id] = job
+    job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        batch_jobs[id] = nil
+        if control then os.remove(control) end
+        local err = r and r.stderr or ""
+        local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
+        if job.cancelling then return reply(false, "cancelled") end
+        if r and r.status == 0 and out then return reply(true, nil, out) end
+        mp.msg.warn("export (batch): " .. err)
+        reply(false, last_line(err) or "gyroflow-export failed")
+    end)
+end)
+mp.register_script_message("export-batch-stop", function(id)
+    local job = batch_jobs[tostring(id or "")]
+    if not job or job.cancelling then return end
+    job.cancelling = true
+    local f = job.progress and io.open(job.progress, "r")
+    if f then
+        local st = utils.parse_json(f:read("*a") or "")
+        f:close()
+        if type(st) == "table" then job.state = st end
+    end
+    if not signal(job, "TERM") then return mp.abort_async_command(job.id) end
+    mp.add_timeout(KILL_AFTER, function()
+        if batch_jobs[tostring(id)] ~= job then return end
+        mp.abort_async_command(job.id)
+        local partial = job.state.partial
+        if partial then mp.add_timeout(2, function() os.remove(partial) end) end
+    end)
+end)
+
 -- The frame on screen as a photo. Crop mode's camera and frame (crop.lua's user-data/gyroflow/crop): the frame in
 -- shares of the view the camera renders; where mpv's own zoom and pan move the picture (not stabilized), the frame in
 -- shares of the video

@@ -434,7 +434,7 @@ local function project_part(u, x, w, y)
         u:text(ix, y + 8 * s, "No project yet", { size = 14, bold = true })
         y = y + 22 * s
         y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders _Moments, _Clips and _Exports, "
-            .. "and _ActionFootagePlayer for its own notes. A clip's own files, its marks and Gyroflow project, "
+            .. "and the file Project.afproject, which opens the trip in Action Footage Library. A clip's own files, its marks and Gyroflow project, "
             .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
             .. "kept beside the clip anyway.")
         local choices = ws.project_choices or {}
@@ -488,40 +488,24 @@ local function project_part(u, x, w, y)
         if card_more then
             y = actions(u, ix, iw, y + 2 * s, "card", {
                 { platform == "darwin" and "Project folder in Finder" or "Project folder", "script-message-to workspace project-folder" },
-                { "Make again for removed clips", "script-message-to workspace clips-again" },
                 { (ws.moments_alone and "✓ " or "") .. "New moments stabilized on their own", "script-message-to workspace moments-alone" },
             })
         end
         local where = platform == "darwin" and "Finder" or "the folder"
+        -- The trip's batches (clip previews, moments and photos of all marks, exports of all moments) are made in
+        -- Action Footage Library, in the background, whatever plays here
+        y = u:button(ix, iw, y + 2 * s, "library", "Open in Action Footage Library", "script-message-to workspace open-library", { primary = true })
+        y = u:caption(ix, iw, y - 2 * s, "Clip previews" .. (st and st.new > 0 and (" (" .. st.new .. " new clips)") or "")
+            .. ", moments and photos of all marks, exports of all moments: made there, in the background")
         if ws.clips then
             y = u:caption(ix, iw, y + 2 * s, "Making clip previews: " .. ws.clips.done .. " of " .. ws.clips.total, { color = C.text })
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
-        elseif st and st.new > 0 then
-            y = u:button(ix, iw, y + 2 * s, "clips-make", "Make clip previews · " .. st.new .. " new", "script-message-to workspace clips-make")
-            -- All in _Clips/ itself: for a camera's folders by date, say, that mean nothing to the trip
-            y = u:switch(ix, iw, y - 2 * s, "clips-flat", "Ignore subfolders", ws.clips_flat == true, "script-message-to workspace clips-flat")
-        end
-        if ws.clips_failed and not ws.clips then
-            y = u:button(ix, iw, y, "clips-failed", ws.clips_failed .. (ws.clips_failed == 1 and " preview" or " previews") .. " couldn't be made: why",
-                         "script-message-to workspace clips-failed")
         end
         if st and st.previews > 0 then
             y = u:button(ix, iw, y, "clips-show", "Show all clips in " .. where, "script-message-to workspace clips-folder")
         end
         if total > 0 then
             y = u:button(ix, iw, y, "moments-show", "Show all moments in " .. where, "script-message-to workspace moments-folder")
-        end
-        -- The project's marks, all at once: moments for those in none, photos of each (with each clip's saved view)
-        local job = ws.marks_job
-        if job then
-            y = u:caption(ix, iw, y + 2 * s, (job.kind == "moments" and "Making moments of the marks: " or "Saving photos of the marks: ")
-                .. job.done .. " of " .. job.total .. ((job.failed or 0) > 0 and (", " .. job.failed .. " failed") or ""), { color = C.text })
-            y = u:button(ix, iw, y, "marks-stop", "Stop", "script-message-to workspace marks-stop")
-        else
-            y = u:button(ix, iw, y + 2 * s, "marks-moments", "Moments for marks in none", "script-message-to workspace marks-moments")
-            y = u:caption(ix, iw, y - 2 * s, "Every clip's marks that are in no moment: 2 s on each side, those close together joined")
-            y = u:button(ix, iw, y, "marks-photos", "Photos of all marks", "script-message-to workspace marks-photos")
-            y = u:caption(ix, iw, y - 2 * s, "A photo at each mark into _Stills, as Save frame's Photo says; once each, a deleted one stays deleted")
         end
     end
     behind(u, at, x, top, w, y - top + pad - 6 * s, C.card)
