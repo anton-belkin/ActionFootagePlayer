@@ -156,6 +156,186 @@ impl Stamps {
     }
 }
 
+/// A 360 clip's motion for the stamp: gyroflow-core's (the gyro alone, no smoothing), the world it's leveled into, the
+/// heading modes per frame (heading.rs), and what the modes found, for the player's panel (`report`)
+pub struct Motion {
+    pub stab: Arc<StabilizationManager>,
+    pub world: World,
+    pub headings: Headings,
+    pub fps: f64,
+    pub frame_count: usize,
+    pub frame_offset_us: i64,
+    pub report: serde_json::Value,
+}
+
+impl Motion {
+    pub fn load(video: &str, rig: &Rig) -> Result<Motion, String> {
+        // The motion, smoothed by nothing: the output camera is the camera at the middle of the frame
+        let stab = StabilizationManager::default();
+        {
+            let url = filesystem::path_to_url(video);
+            let mut file = std::fs::File::open(video).map_err(|e| format!("{video}: {e}"))?;
+            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+            stab.load_video_file(&mut file, size, &url, None, true).map_err(|e| format!("Can't load {video}: {e:?}"))?;
+        }
+        if !stab.gyro.read().has_motion() { return Err(format!("{video} has no motion data")); }
+        // The motion in the rig's axes: gyroflow-core's camera is the rig's (RigLens), for the rolling shutter as much as
+        // for the stamp
+        let imu_orientation = stab.gyro.read().file_metadata.read().imu_orientation.clone();
+        let (gyro_turn, acc_turn) = match std::env::var("AFP_360_IMU").ok() {
+            // For checking another body (tools/sphere360/): the gyro's and the accelerometer's turns, each as the images
+            // of x, y, z, "x,y,z;-y,-x,-z"
+            Some(v) => { let mut it = v.split(';').map(axes); (it.next().flatten(), it.next().flatten()) }
+            None => imu_turn(rig, imu_orientation.as_deref()),
+        };
+        {
+            let mut g = stab.gyro.write();
+            g.imu_transforms.imu_rotation = gyro_turn.map(|t| (flip() * t * flip()).to_rotation_matrix());
+            g.imu_transforms.acc_rotation = acc_turn.or(gyro_turn).map(|t| (flip() * t * flip()).to_rotation_matrix());
+        }
+        // The gyro alone: the vertical comes from the accelerometer averaged over seconds (heading.rs), not within the
+        // integration, which takes braking for a pitch
+        stab.gyro.write().integration_method = 3;
+        stab.recompute_gyro();
+        stab.set_smoothing_method(0);
+        stab.recompute_blocking();
+        let (fps, frame_count, frame_offset_us) = {
+            let p = stab.params.read();
+            (p.fps, p.frame_count, (p.frame_offset as f64 / p.fps * 1_000_000.0).round() as i64)
+        };
+
+        // The world: gyroflow-core's, leveled frame by frame to the accelerometer averaged over seconds (heading.rs).
+        // Per frame its samples turned into gyroflow-core's world (by their own time: the averaging is over seconds)
+        let ups = {
+            let gyro = stab.gyro.read();
+            let md = gyro.file_metadata.read();
+            let mut ups = vec![Vector3::zeros(); frame_count.max(1)];
+            for x in gyro.raw_imu(&md) {
+                let (Some(a), ts) = (x.accl, (x.timestamp_ms * 1000.0).round() as i64) else { continue };
+                let Some((_, q)) = gyro.quaternions.range(..=ts).next_back() else { continue };
+                let frame = (x.timestamp_ms / 1000.0 * fps).round();
+                if frame >= 0.0 && (frame as usize) < ups.len() { ups[frame as usize] += q * Vector3::from(a); }
+            }
+            ups
+        };
+        if ups.iter().all(|u| u.norm() < 1e-9) { return Err(format!("{video}: no accelerometer to level the horizon with")); }
+        {
+            // Where the accelerometer says up, in the rig's axes: -y for a camera held upright, as most are
+            let gyro = stab.gyro.read();
+            let md = gyro.file_metadata.read();
+            let mean = gyro.raw_imu(&md).iter().filter_map(|x| x.accl).fold(Vector3::zeros(), |s, a| s + flip() * Vector3::from(a));
+            let tilt = mean.angle(&-Vector3::y()).to_degrees();
+            log::info!("{video}: up in the rig's axes on average {:.3?}, {tilt:.0}° from the rig's own (IMU orientation {imu_orientation:?})", mean.normalize().as_slice());
+        }
+        let world = World::new(&ups, fps);
+        let headings = {
+            let gyro = stab.gyro.read();
+            let yaws: Vec<(f64, f64)> = (0..frame_count).map(|i| {
+                let us = (i as f64 * 1e6 / fps).round() as i64 + frame_offset_us;
+                yaw(&world.world_from_cam(i as f64, &gyro.org_quat_at_timestamp(us as f64 / 1000.0)))
+            }).collect();
+            Headings::new(&yaws, fps)
+        };
+
+        let (headings, report) = travel_and_north(video, rig, &stab, &world, headings, fps, frame_count, frame_offset_us);
+        Ok(Motion { stab: Arc::new(stab), world, headings, fps, frame_count, frame_offset_us, report })
+    }
+
+    /// The camera in the world at frame `i` (its middle)
+    pub fn world_from_cam(&self, i: usize) -> nalgebra::UnitQuaternion<f64> {
+        let us = (i as f64 * 1e6 / self.fps).round() as i64 + self.frame_offset_us;
+        self.world.world_from_cam(i as f64, &self.stab.gyro.read().org_quat_at_timestamp(us as f64 / 1000.0))
+    }
+}
+
+/// Along the way and north (heading.rs), from what the file records besides its motion (nav.rs), and the report for the
+/// panel: per mode whether it's there, how sure, and why not
+#[allow(clippy::too_many_arguments)]
+fn travel_and_north(video: &str, rig: &Rig, stab: &StabilizationManager, world: &World, headings: Headings, fps: f64, frame_count: usize, frame_offset_us: i64) -> (Headings, serde_json::Value) {
+    use std::f64::consts::{ PI, TAU };
+    let telemetry = crate::nav::Telemetry::read(video).unwrap_or_default();
+    let frame_s = |i: usize| (i as f64 * 1000.0 / fps + frame_offset_us as f64 / 1000.0) / 1000.0;
+    let mut report = serde_json::json!({});
+    let track: Vec<(f64, [f64; 2])> = crate::nav::local_track(&telemetry.gps, 5.0).iter().map(|(t, p, _)| (t / 1000.0, *p)).collect();
+    let speeds: Vec<(f64, f64)> = telemetry.gps.iter().filter(|f| f.fix >= 2 && f.speed.is_finite()).map(|f| (f.t_ms / 1000.0, f.speed)).collect();
+    let alignment = if track.len() >= 20 {
+        // The accelerometer's specific force in the leveled world, at its own rate
+        let gyro = stab.gyro.read();
+        let md = gyro.file_metadata.read();
+        let acc: Vec<(f64, Vector3<f64>)> = gyro.raw_imu(&md).iter().filter_map(|x| {
+            let a = x.accl?;
+            let (_, q) = gyro.quaternions.range(..=(x.timestamp_ms * 1000.0).round() as i64).next_back()?;
+            let frame = (x.timestamp_ms / 1000.0 * fps).round().max(0.0);
+            Some((x.timestamp_ms / 1000.0, world.level(frame) * (q * Vector3::from(a))))
+        }).collect();
+        crate::heading::align(&acc, &track)
+    } else { None };
+    let mut headings = headings;
+    let moving_share = speeds.iter().filter(|s| s.1 >= 3.0).count() as f64 / speeds.len().max(1) as f64;
+    report["travel"] = match (&alignment, track.len()) {
+        (_, n) if n < 20 => serde_json::json!({ "available": false, "why": telemetry.why_no_gps(), "gps_records": telemetry.gps_records }),
+        (None, _) => serde_json::json!({ "available": false, "why": "too little acceleration to tie the camera's turns to the GPS track (a straight road at a steady speed, or standing)" }),
+        (Some(a), _) => {
+            let tr = crate::heading::travel(a, &track, &speeds, headings.camera(), fps, frame_s);
+            let ok = a.confidence() > 0.2 && !tr.is_empty();
+            log::info!("{video}: along the way: θ {:.1}°, drift {:.2}°/min, GPS {:.1} s late ({}), ρ {:.2}, ±{:.1}°, {:.0} s of acceleration, scale {:.2}: confidence {:.2}",
+                a.theta.to_degrees(), a.drift.to_degrees() * 60.0, a.lag, telemetry.gps_clock, a.rho, a.sigma.to_degrees(), a.excited_s, a.scale, a.confidence());
+            if ok { headings = headings.with_travel(tr); }
+            serde_json::json!({
+                "available": ok, "confidence": a.confidence(), "sigma_deg": a.sigma.to_degrees(), "rho": a.rho, "lag_s": a.lag,
+                "gps_clock": telemetry.gps_clock, "drift_deg_min": a.drift.to_degrees() * 60.0, "moving": moving_share,
+                "why": if ok { serde_json::Value::Null } else { "the camera's turns don't match the GPS track well enough".into() },
+            })
+        }
+    };
+    // North: a compass where the camera has one (none of the Insta360s; telemetry.north stays empty), else the GPS
+    // fit's true north
+    let cams: Vec<nalgebra::UnitQuaternion<f64>> = if telemetry.north.is_empty() { Vec::new() } else {
+        let gyro = stab.gyro.read();
+        (0..frame_count).map(|i| world.world_from_cam(i as f64, &gyro.org_quat_at_timestamp(frame_s(i) * 1000.0))).collect()
+    };
+    let no_compass = if rig.brand == "Insta360" { "an Insta360 has no compass" } else { "no compass in this clip" };
+    report["north"] = if !telemetry.north.is_empty() {
+        let compass: Vec<(Vector3<f64>, f64)> = (0..frame_count).map(|i| {
+            let t = frame_s(i) * 1000.0;
+            let k = telemetry.north.partition_point(|n| n.0 < t).min(telemetry.north.len() - 1);
+            let k = if k > 0 && (telemetry.north[k - 1].0 - t).abs() < (telemetry.north[k].0 - t).abs() { k - 1 } else { k };
+            (telemetry.north[k].1, telemetry.north[k].2)
+        }).collect();
+        let n = crate::heading::north(&cams, &compass, fps);
+        let confidence = n.iter().map(|x| x.1).sum::<f64>() / n.len().max(1) as f64;
+        let ok = confidence > 0.1;
+        if ok { headings = headings.with_north(n); }
+        serde_json::json!({ "available": ok, "source": "compass", "confidence": confidence,
+                            "why": if ok { serde_json::Value::Null } else { "the camera wasn't sure of its compass".into() } })
+    } else if let Some(a) = alignment.as_ref().filter(|a| a.confidence() > 0.2) {
+        let n: Vec<(f64, f64)> = (0..frame_count).map(|i| (-a.theta_at(frame_s(i)), a.confidence())).collect();
+        headings = headings.with_north(n);
+        serde_json::json!({ "available": true, "source": "gps", "confidence": a.confidence() })
+    } else {
+        serde_json::json!({ "available": false, "why": if track.len() < 20 { format!("{no_compass}, and no GPS track to find north by") }
+                                                       else { format!("{no_compass}, and the GPS track doesn't tie the camera's turns to the world") } })
+    };
+    // In the world, held in the real world where north or the GPS fit say how the gyro's world turns
+    let drift: Option<(Vec<f64>, &str)> = if let Some(n) = headings.north().filter(|n| n.iter().any(|x| x.1 > 0.1)) {
+        let first = n[0].0;
+        Some((n.iter().map(|x| (x.0 - first + PI).rem_euclid(TAU) - PI).collect(), if telemetry.north.is_empty() { "gps" } else { "north" }))
+    } else { None };
+    report["world"] = match &drift {
+        Some((d, by)) => serde_json::json!({ "held_by": by, "drift_deg_min": d.last().map(|x| x.to_degrees() / (frame_count as f64 / fps) * 60.0) }),
+        None => serde_json::json!({ "held_by": null }),
+    };
+    if let Some((d, _)) = drift { headings = headings.with_drift(d); }
+    // Per second, for the panel: how sure each is then
+    let seconds = (frame_count as f64 / fps).ceil() as usize;
+    report["seconds"] = (0..seconds).map(|sec| {
+        let i = ((sec as f64 + 0.5) * fps) as usize;
+        let c = |v: Option<&[(f64, f64)]>| v.and_then(|v| v.get(i.min(v.len().saturating_sub(1)))).map(|x| (x.1 * 100.0).round() / 100.0).unwrap_or(0.0);
+        serde_json::json!([c(headings.travel()), c(headings.north())])
+    }).collect::<Vec<_>>().into();
+    (headings, report)
+}
+
 struct Job {
     timestamp_us: i64,
     planes: Vec<PlaneJob>,
@@ -211,72 +391,7 @@ impl Sphere360 {
         let sphere_w = (width.max(512) / 4) * 4;
         let sphere = (sphere_w, sphere_w / 2);
 
-        // The motion, smoothed by nothing: the output camera is the camera at the middle of the frame
-        let stab = StabilizationManager::default();
-        {
-            let url = filesystem::path_to_url(video);
-            let mut file = std::fs::File::open(video).map_err(|e| format!("{video}: {e}"))?;
-            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
-            stab.load_video_file(&mut file, size, &url, None, true).map_err(|e| format!("Can't load {video}: {e:?}"))?;
-        }
-        if !stab.gyro.read().has_motion() { return Err(format!("{video} has no motion data")); }
-        // The motion in the rig's axes: gyroflow-core's camera is the rig's (RigLens), for the rolling shutter as much as
-        // for the stamp
-        let imu_orientation = stab.gyro.read().file_metadata.read().imu_orientation.clone();
-        let (gyro_turn, acc_turn) = match std::env::var("AFP_360_IMU").ok() {
-            // For checking another body (tools/sphere360/): the gyro's and the accelerometer's turns, each as the images
-            // of x, y, z, "x,y,z;-y,-x,-z"
-            Some(v) => { let mut it = v.split(';').map(axes); (it.next().flatten(), it.next().flatten()) }
-            None => imu_turn(&rig, imu_orientation.as_deref()),
-        };
-        {
-            let mut g = stab.gyro.write();
-            g.imu_transforms.imu_rotation = gyro_turn.map(|t| (flip() * t * flip()).to_rotation_matrix());
-            g.imu_transforms.acc_rotation = acc_turn.or(gyro_turn).map(|t| (flip() * t * flip()).to_rotation_matrix());
-        }
-        // The gyro alone: the vertical comes from the accelerometer averaged over seconds (heading.rs), not within the
-        // integration, which takes braking for a pitch
-        stab.gyro.write().integration_method = 3;
-        stab.recompute_gyro();
-        stab.set_smoothing_method(0);
-        stab.recompute_blocking();
-        let (fps, frame_count, frame_offset_us) = {
-            let p = stab.params.read();
-            (p.fps, p.frame_count, (p.frame_offset as f64 / p.fps * 1_000_000.0).round() as i64)
-        };
-
-        // The world: gyroflow-core's, leveled frame by frame to the accelerometer averaged over seconds (heading.rs).
-        // Per frame its samples turned into gyroflow-core's world (by their own time: the averaging is over seconds)
-        let ups = {
-            let gyro = stab.gyro.read();
-            let md = gyro.file_metadata.read();
-            let mut ups = vec![Vector3::zeros(); frame_count.max(1)];
-            for x in gyro.raw_imu(&md) {
-                let (Some(a), ts) = (x.accl, (x.timestamp_ms * 1000.0).round() as i64) else { continue };
-                let Some((_, q)) = gyro.quaternions.range(..=ts).next_back() else { continue };
-                let frame = (x.timestamp_ms / 1000.0 * fps).round();
-                if frame >= 0.0 && (frame as usize) < ups.len() { ups[frame as usize] += q * Vector3::from(a); }
-            }
-            ups
-        };
-        if ups.iter().all(|u| u.norm() < 1e-9) { return Err(format!("{video}: no accelerometer to level the horizon with")); }
-        {
-            // Where the accelerometer says up, in the rig's axes: -y for a camera held upright, as most are
-            let gyro = stab.gyro.read();
-            let md = gyro.file_metadata.read();
-            let mean = gyro.raw_imu(&md).iter().filter_map(|x| x.accl).fold(Vector3::zeros(), |s, a| s + flip() * Vector3::from(a));
-            let tilt = mean.angle(&-Vector3::y()).to_degrees();
-            log::info!("{video}: up in the rig's axes on average {:.3?}, {tilt:.0}° from the rig's own (IMU orientation {imu_orientation:?})", mean.normalize().as_slice());
-        }
-        let world = World::new(&ups, fps);
-        let headings = {
-            let gyro = stab.gyro.read();
-            let yaws: Vec<(f64, f64)> = (0..frame_count).map(|i| {
-                let us = (i as f64 * 1e6 / fps).round() as i64 + frame_offset_us;
-                yaw(&world.world_from_cam(i as f64, &gyro.org_quat_at_timestamp(us as f64 / 1000.0)))
-            }).collect();
-            Headings::new(&yaws, fps)
-        };
+        let Motion { stab, world, headings, fps, frame_offset_us, .. } = Motion::load(video, &rig)?;
 
         // Per lens, its parameters
         let base = ComputeParams::from_manager(&stab);
@@ -321,7 +436,6 @@ impl Sphere360 {
             rig.brand, rig.model, rig.lenses.len(), rig.pictures, rig.picture.0, rig.picture.1, sphere.0, sphere.1, t.elapsed().as_secs_f64() * 1000.0);
 
         let device = stab.params.read().current_device as isize;
-        let stab = Arc::new(stab);
         let cfg = Config { kind, depth, is_yuv, interpolation, subsampling };
         let shared = Arc::new(Shared { rig, params, spans, sphere, stamps: Stamps { stab, world, headings, fps, frame_offset_us }, device, cfg });
 

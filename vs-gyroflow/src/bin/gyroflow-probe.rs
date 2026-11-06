@@ -16,7 +16,9 @@
 // layout, pose or initial view: probe::spherical), null for any other video. A 360 camera's own file (its lenses in
 // their tracks, rig.rs) also has "rig360": {"brand", "model", "lenses", "tracks", "width", "height"} (a track's size),
 // or {"error": why the player can't render it}; the plugin's 360 mode plays it.
-// `gyroflow-probe --rig <video>` prints the rig whole, as telemetry-parser reads it.
+// `gyroflow-probe --rig <video>` prints the rig whole, as telemetry-parser reads it; `gyroflow-probe --headings <video>`
+// what a 360 camera's file has for the view's heading modes: {"travel": {"available", "confidence", "why", ...},
+// "north": {...}, "world": {"held_by"}, "seconds": [[travel, north confidence], ...]} (sphere360::Motion's report).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 
 use vs_gyroflow::{ probe::{ probe, color_profile, spherical }, water };
@@ -26,10 +28,26 @@ fn main() {
     // --rig: the 360 rig as telemetry-parser reads it, whole (CameraRig), for looking at
     let dump_rig = args.first().is_some_and(|a| a == "--rig");
     if dump_rig { args.remove(0); }
+    // --headings: what a 360 camera's file has for the view's heading modes (along the way, north), for the view360
+    // plugin's panel: the same as the plugin's 360 mode finds (sphere360::Motion)
+    let headings = args.first().is_some_and(|a| a == "--headings");
+    if headings { args.remove(0); }
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings] <video>");
         std::process::exit(2);
     };
+    if headings {
+        let report = match vs_gyroflow::rig::read(&path) {
+            Some(Ok(rig)) => match vs_gyroflow::sphere360::Motion::load(&path, &rig) {
+                Ok(m) => m.report,
+                Err(e) => serde_json::json!({ "error": e }),
+            },
+            Some(Err(e)) => serde_json::json!({ "error": e }),
+            None => serde_json::json!({ "error": "not a 360 camera's file" }),
+        };
+        println!("{report}");
+        return;
+    }
     if dump_rig {
         println!("{}", serde_json::to_string_pretty(&vs_gyroflow::rig::camera_rig(&path)).unwrap_or_default());
         return;

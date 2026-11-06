@@ -439,5 +439,48 @@ do
     expect("vo=image: no gestures", f.forced(), 0)
 end
 
+do
+    -- A 360 camera's own file (an Insta360 .insv with GPS): stamped, along the camera until the clip's been read; then along
+    -- the way, which it has; Alt+h through the modes it has; north it hasn't, refused saying why
+    local f = load_view360()
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.load(false)
+    local function mode() return f.props["glsl-shader-opts"].view360_heading end
+    expect("rig: stamped", f.props["user-data/view360"].stamped, true)
+    expect("rig: along the camera first", mode(), "1")
+    expect("rig: modes not known yet", f.props["user-data/view360"].modes, false)
+    f.props["time-pos"] = 2.4
+    f.set("user-data/gyroflow/headings360", {
+        travel = { available = true, confidence = 1, sigma_deg = 1.6 },
+        north = { available = false, why = "an Insta360 has no compass" },
+        world = { held_by = "gps" },
+        seconds = { { 0, 0 }, { 0.5, 0 }, { 0.9, 0 } },
+    })
+    expect("read: along the way", mode(), "2")
+    expect("read: travel there", f.props["user-data/view360"].modes.travel.available, true)
+    expect("read: north not, and why", f.props["user-data/view360"].modes.north.why, "an Insta360 has no compass")
+    expect("read: the world held by GPS", f.props["user-data/view360"].modes.world.held_by, "gps")
+    near("read: sure now (third second)", f.props["user-data/view360"].heading_confidence, 0.9)
+    f.set("time-pos", 1.2)
+    near("later: sure then", f.props["user-data/view360"].heading_confidence, 0.5)
+    f.bindings["heading"].fn()
+    expect("Alt+h: along the camera", mode(), "1")
+    f.bindings["heading"].fn()
+    expect("Alt+h: north skipped, the world", mode(), "0")
+    f.bindings["heading"].fn()
+    expect("Alt+h: back to along the way", mode(), "2")
+    f.message("view360-heading", "north")
+    expect("north refused", mode(), "2")
+    expect("north refused: says why", (f.osd or ""):find("compass", 1, true) ~= nil, true)
+    f.message("view360-heading", "camera")
+    -- Chosen by the viewer: a later reading doesn't take it back
+    f.set("user-data/gyroflow/headings360", { travel = { available = true }, north = { available = true }, seconds = {} })
+    expect("chosen stays", mode(), "1")
+    f.message("view360-heading", "north")
+    expect("north now there", mode(), "3")
+    f.event("end-file")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -148,8 +148,10 @@
 -- rig. Its lens tracks are joined side by side (lavfi-complex hstack), the plugin's 360 mode (sphere360.vpy) makes the
 -- sphere in the camera's axes with the rolling shutter taken out and stamps each frame with the camera in the world and
 -- its headings, and the view360 plugin shows it, the horizon level. user-data/gyroflow/rig360 has its rig (brand, model,
--- lenses, tracks), false for any other clip. Decoded with the copy mode of hwdec: zero-copy turns into software decoding
--- under lavfi-complex, and the frames go to memory for VapourSynth anyway
+-- lenses, tracks), false for any other clip; user-data/gyroflow/headings360 what it has for the view's heading modes
+-- (gyroflow-probe --headings: along the way from GPS, north), a second or so later, false until then. Decoded with the
+-- copy mode of hwdec: zero-copy turns into software decoding under lavfi-complex, and the frames go to memory for
+-- VapourSynth anyway
 
 local mp = require 'mp'
 local options = require 'mp.options'
@@ -758,11 +760,19 @@ local function add_sphere(source)
     mp.set_property("file-local-options/video-rotate", "no")
     mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined%s", tostring(rig.brand), tostring(rig.model), tonumber(rig.lenses) or 0,
                               tracks, tostring(rig.width), tostring(rig.height), step > 1 and string.format(", every %s frames", step) or ""))
+    -- What it has for the view's heading modes, for view360 and its panel (the plugin finds the same for its stamp,
+    -- reading the whole clip's motion and GPS: about a second for a few minutes of a clip)
+    mp.command_native_async({ name = "subprocess", args = { PROBE, "--headings", source.project }, capture_stdout = true, playback_only = true }, function(_, r)
+        if rig360 ~= rig then return end
+        local h = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        mp.set_property_native("user-data/gyroflow/headings360", type(h) == "table" and h or { error = "gyroflow-probe --headings failed" })
+    end)
 end
 
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
+    mp.set_property_native("user-data/gyroflow/headings360", false)
     -- Back to the level and color fringes that stick, after a clip's own
     if level_before then level, level_before = level_before, nil end
     if chromatic_before ~= nil then chromatic, chromatic_before = chromatic_before, nil end

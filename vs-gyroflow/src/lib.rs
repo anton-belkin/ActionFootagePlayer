@@ -37,6 +37,7 @@ pub mod cut;
 pub mod photo;
 pub mod stamp;
 pub mod rig;
+pub mod nav;
 pub mod heading;
 pub mod sphere360;
 pub use levels::Level;
