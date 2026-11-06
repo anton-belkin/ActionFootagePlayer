@@ -20,7 +20,7 @@ import statistics
 import sys
 
 LINE = re.compile(r"frame=(\d+) applied=([\d.]+) newest=([\d.]+) begin=([\d.]+) drawable=([\d.]+) "
-                  r"submit=([\d.]+) shown=([\d.]+)(?: fresh=(\d))?")
+                  r"submit=([\d.]+) shown=([\d.]+)(?: fresh=(\d))?(?: sb=(\d))?")
 
 
 def pct(values, p):
@@ -50,10 +50,27 @@ def summarize(path):
                          (int(m[1]),) + tuple(float(x) for x in m.groups()[1:7])))
             # Rendered from the video frame, not the renderer's cache (patch 0011 logs it; before it, taken as yes)
             f["fresh"] = m[8] != "0"
+            f["sb"] = m[9] == "1"
             frames.append(f)
     print(f"{path}: {len(frames)} frames")
     if not frames:
         return
+    # The sample buffer layer (--macos-sample-buffer-layer): enqueued, never said when shown
+    sb = [f for f in frames if f["sb"]]
+    if sb:
+        first, last = [], 0.0
+        for f in sb:
+            if f["applied"] > last and f["fresh"]:
+                first.append(f)
+                last = f["applied"]
+        span = sb[-1]["submit"] - sb[0]["submit"]
+        print(f"  sample buffer layer: {len(sb)} frames enqueued, {len(sb) / span if span else 0:.1f}/s, "
+              f"inputs {len(first)} (when they're shown: a camera's to say)")
+        print(row("input -> enqueued", [f["submit"] - f["applied"] for f in first]))
+        print(row("  input -> begin", [f["begin"] - f["applied"] for f in first]))
+        frames = [f for f in frames if not f["sb"]]
+        if not frames:
+            return
     shown = [f for f in frames if f["shown"] > 0]
     dropped = len(frames) - len(shown)
     gaps = [b["shown"] - a["shown"] for a, b in zip(shown, shown[1:]) if b["shown"] > a["shown"]]

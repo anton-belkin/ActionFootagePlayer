@@ -29,6 +29,8 @@ local function fake_mp()
     f.props["keepaspect-window"] = "yes"
     f.props["video-aspect-override"] = "-1"
     f.props["vo"] = "gpu-next"
+    f.props["video-timing-offset"] = "0.050000"
+    f.props["display-fps"] = 120
     -- The app's mpv: the option's there
     f.props["macos-gesture-messages"] = false
     local function changed(name)
@@ -361,6 +363,8 @@ do
     expect("360: the window's aspect", f.props["file-local-options/video-aspect-override"], "1600:900")
     expect("360: the window free", f.props["file-local-options/keepaspect-window"], "no")
     expect("360: gestures taken", f.forced() >= 10, true)
+    expect("360: a frame drawn a refresh ahead", f.props["file-local-options/video-timing-offset"], "0.0123")
+    expect("360: not the app's mpv, no display sync option", f.props["file-local-options/macos-display-sync"], nil)
     expect("360: initial heading", opts.view360_yaw, "30.0000")
     local st = f.props["user-data/view360"]
     expect("360: available", st.available, true)
@@ -430,6 +434,7 @@ do
     expect("toggled off: shader off", f.props["glsl-shader-opts"].view360_on, "0")
     expect("toggled off: aspect back", f.props["file-local-options/video-aspect-override"], "-1")
     expect("toggled off: window aspect back", f.props["file-local-options/keepaspect-window"], "yes")
+    expect("toggled off: timing back", f.props["file-local-options/video-timing-offset"], "0.050000")
     expect("toggled off: gestures given back", f.forced(), 0)
     expect("toggled off: window dragged", f.props["window-dragging"], true)
     f.bindings["toggle"].fn()

@@ -213,6 +213,17 @@ local function fit()
     mp.set_property("file-local-options/video-aspect-override", value)
 end
 
+-- Turning the head shows sooner (docs/360-implementation-plan.md, step 6): a video frame is drawn a refresh before its
+-- time rather than 50 ms ahead (video-timing-offset), so the VO is free to redraw the view meanwhile and the frame has
+-- the newest head; and in a window the frames are shown as they come, not at a vsync first (the app's mpv,
+-- macos-display-sync: macOS composites a window at its refresh anyway; in full screen it would tear)
+local function pace()
+    if not active then return end
+    local fps = mp.get_property_number("display-fps")
+    local offset = (fps and fps > 0) and math.max(0.008, math.min(0.05, 1 / fps + 0.004)) or 0.02
+    mp.set_property("file-local-options/video-timing-offset", string.format("%.4f", offset))
+end
+
 -- The view on or off. ending: the file's ending, and mpv puts its file-local options back itself
 local function set_active(on, ending)
     on = on and sphere ~= nil and shader
@@ -220,9 +231,12 @@ local function set_active(on, ending)
     active = on
     aspect_set = nil
     if on then
-        saved = { aspect = mp.get_property("video-aspect-override"), window = mp.get_property("keepaspect-window") }
+        saved = { aspect = mp.get_property("video-aspect-override"), window = mp.get_property("keepaspect-window"),
+                  timing = mp.get_property("video-timing-offset"), sync = mp.get_property("macos-display-sync") }
         mp.set_property("file-local-options/keepaspect-window", "no")
+        if saved.sync then mp.set_property("file-local-options/macos-display-sync", "fullscreen") end
         fit()
+        pace()
         if input then
             input:set(true)
             input:pause(crop_on)
@@ -232,6 +246,8 @@ local function set_active(on, ending)
         if not ending and saved then
             mp.set_property("file-local-options/video-aspect-override", saved.aspect or "-1")
             mp.set_property("file-local-options/keepaspect-window", saved.window or "yes")
+            if saved.timing then mp.set_property("file-local-options/video-timing-offset", saved.timing) end
+            if saved.sync then mp.set_property("file-local-options/macos-display-sync", saved.sync) end
         end
         saved = nil
     end
@@ -299,6 +315,8 @@ for _, prop in ipairs({ "osd-dimensions", "video-margin-ratio-right", "video-mar
                         "video-margin-ratio-bottom" }) do
     mp.observe_property(prop, "native", function() if active then fit() end end)
 end
+
+mp.observe_property("display-fps", "native", function() pace() end)
 
 -- Crop mode on top of the view has the gestures while it's on
 mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
