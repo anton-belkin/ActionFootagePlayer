@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>360-видео: оглядитесь, горизонт ровный · Action Footage Player</title>
+<meta name="description" content="Откройте клип с 360-камеры и оглядывайтесь в нём прямо во время воспроизведения: поворачивайте вид мышью или двумя пальцами, горизонт держится ровно по гироскопу камеры, а вид поворачивается с частотой вашего экрана. Сначала Insta360 X5, на Mac. Бесплатно.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/360">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/360">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/360">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/360">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/360">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Roboto+Flex:wdth,wght@100..125,500..900&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../stabilization.css">
+<link rel="stylesheet" href="../v360.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, на главную">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Сайт">
+      <details class="navmenu"><summary>Главная</summary>
+        <ul>
+          <li><a href="index.html">Главная страница</a></li>
+          <li><a href="index.html#features">Что он умеет</a></li>
+          <li><a href="index.html#how">Как это работает</a></li>
+          <li><a href="index.html#faq">Вопросы</a></li>
+          <li><a href="about.html">Об авторе</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Для кого</summary>
+        <ul>
+          <li><a href="divers.html">Дайверам и снорклерам</a></li>
+          <li><a href="moments.html">Активным путешественникам</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Функции</summary>
+        <ul>
+          <li><a href="log.html">Log-записи</a></li>
+          <li><a href="stabilization.html">Стабилизация</a></li>
+          <li><a href="organizing.html">Организация</a></li>
+          <li><a href="photos.html">Фото</a></li>
+          <li><a href="360.html" aria-current="page">360-видео</a></li>
+          <li><a href="features.html" class="nm-all">Все функции</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Скачать</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Меню"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Главная</li>
+        <li><a href="index.html">Главная страница</a></li>
+        <li><a href="index.html#features">Что он умеет</a></li>
+        <li><a href="index.html#how">Как это работает</a></li>
+        <li><a href="index.html#faq">Вопросы</a></li>
+        <li><a href="about.html">Об авторе</a></li>
+        <li class="sm-group">Для кого</li>
+        <li><a href="divers.html">Дайверам и снорклерам</a></li>
+        <li><a href="moments.html">Активным путешественникам</a></li>
+        <li class="sm-group">Функции</li>
+        <li><a href="log.html">Log-записи</a></li>
+        <li><a href="stabilization.html">Стабилизация</a></li>
+        <li><a href="organizing.html">Организация</a></li>
+        <li><a href="photos.html">Фото</a></li>
+        <li><a href="360.html" aria-current="page">360-видео</a></li>
+        <li><a href="features.html">Все функции</a></li>
+        <li class="sm-dl"><a href="download.html">Скачать</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Язык: русский"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>RU</summary>
+      <ul>
+        <li><a href="../360.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/360.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/360.html" hreflang="ru" lang="ru" aria-current="page">Русский</a></li>
+        <li><a href="../zh/360.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../360.html" hreflang="en">Читать оригинал на английском</a></p>
+</div>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">360-видео</p>
+        <h1>Оглядитесь внутри клипа 360° прямо во время воспроизведения.</h1>
+        <p class="lede">Откройте клип с 360-камеры и тяните картинку мышью или ведите двумя пальцами по трекпаду: вы оглядываетесь в сцене, пока она идёт. Горизонт остаётся ровным, а вид поворачивается так быстро, как только успевает показать ваш экран.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>Сначала Insta360 X5</span>
+          <span>На Mac</span>
+          <span>Новинка: расскажите, как у вас работает</span>
+        </div>
+      </div>
+      <figure class="media v360-fig">
+        <svg class="v360-svg" viewBox="0 0 640 360" role="img" aria-labelledby="v360-title">
+          <title id="v360-title">Вся сфера, которую записывает 360-камера, развёрнутая на плоскость, и окно, которое вы видите на экране и перетаскиванием двигаете по ней.</title>
+          <rect class="sky" x="0" y="0" width="640" height="180"/>
+          <rect class="sea" x="0" y="180" width="640" height="180"/>
+          <path class="horizon" d="M0 180 H640"/>
+          <path class="grid" d="M80 0V360M160 0V360M240 0V360M320 0V360M400 0V360M480 0V360M560 0V360M0 60H640M0 120H640M0 240H640M0 300H640"/>
+          <rect class="view" x="250" y="110" width="176" height="99" rx="6"/>
+          <text class="lbl" x="338" y="102" text-anchor="middle">что вы видите</text>
+          <path class="arrow" d="M224 160h-28m6-6-6 6 6 6M452 160h28m-6-6 6 6-6 6M338 236v26m-6-6 6 6 6-6"/>
+          <text class="cap" x="320" y="344" text-anchor="middle">вся сфера, записанная камерой, в развёртке</text>
+        </svg>
+        <figcaption>Перетаскивайте, чтобы двигать окно по сфере; горизонт остаётся ровным, даже когда камера наклоняется.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band" id="how-it-works">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Как это работает</p>
+        <h2>Сферу даёт камера. Ваш вид поворачивается на экране.</h2>
+        <p class="lede">360-камера снимает двумя очень широкоугольными объективами, смотрящими в разные стороны. Плеер прямо во время воспроизведения собирает из них одну сферу и показывает ту её часть, куда вы смотрите.</p>
+      </div>
+      <div class="gap-grid v360-two">
+        <div class="gap-item">
+          <h3>Одна сфера из двух объективов</h3>
+          <p>Клип прямо с Insta360 X5 сшивает в одну сферу движок Gyroflow — тот же, что выравнивает остальные клипы в плеере. Параметры каждого объектива он берёт из файла и убирает «желе» от rolling shutter камеры.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Горизонт держится ровно</h3>
+          <p>Гироскоп камеры сообщает, как она была наклонена в каждом кадре. Плеер поворачивает сферу обратно ровно на столько же, так что горизонт остаётся ровным, куда бы вы ни смотрели, даже если камера кренилась.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Ваш вид — с частотой экрана</h3>
+          <p>Поворот вида не проходит через стабилизацию. Он делается на видеокарте прямо перед тем, как показать каждый кадр. На Mac с экраном 120 Гц поворот в окне доходит до экрана примерно за 9 мс: картинка будто приклеена к пальцам.</p>
+        </div>
+        <div class="gap-item">
+          <h3>И уже сшитые клипы</h3>
+          <p>360-видео, экспортированное из приложения производителя камеры, с обычными метаданными 360, задумано открываться так же. Данных движения в нём уже нет, поэтому оно воспроизводится так, как было сшито, и поворачивается только ваш вид.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Looking around -->
+  <section class="section band tight-top" id="look">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Как оглядываться</p>
+        <h2>Тяните, сводите пальцы — и снова смотрите вперёд.</h2>
+        <p class="lede">Когда открывается 360-клип, вид включается сам — и при воспроизведении, и на паузе. Боковая панель открывается на разделе <b>360° view</b> (вид 360°).</p>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Оглядеться</span><span>перетаскивание или два пальца на трекпаде</span></div>
+        <div class="key"><span>Ближе или шире</span><span>колесо или щипок двумя пальцами</span></div>
+        <div class="key"><span>Наклонить горизонт</span><span><kbd>Alt</kbd>+перетаскивание или поворот двух пальцев</span></div>
+        <div class="key"><span>Снова смотреть вперёд</span><span>двойной щелчок или <kbd>Backspace</kbd></span></div>
+        <div class="key"><span>Вид или вся сфера на плоскости</span><span><kbd>Alt</kbd>+<kbd>v</kbd></span></div>
+        <div class="key"><span>Следующая проекция</span><span><kbd>Alt</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>За чем следует «вперёд»</span><span><kbd>Alt</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>Скрыть или показать панель</span><span><kbd>Tab</kbd></span></div>
+      </div>
+      <p class="note">В приложении для Mac жесты на трекпаде поворачивают вид напрямую. Перетаскивание мышью тоже работает, чуть менее непосредственно.</p>
+    </div>
+  </section>
+
+  <!-- Projections -->
+  <section class="section band" id="projections">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Проекции</p>
+        <h2>От обычного вида до маленькой планеты.</h2>
+        <p class="lede">Как сфера раскладывается на плоскость вашего экрана. <b>Projection</b> (проекция) на панели или <kbd>Alt</kbd>+<kbd>p</kbd>.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Auto (автоматически)</h3>
+          <p>Прямые линии остаются прямыми до угла обзора 100°, как у обычной камеры; если отдалять дальше, видно всё больше сферы, а начиная со 160° — вся она. Вариант по умолчанию.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Rectilinear (прямолинейная)</h3>
+          <p>Прямые линии прямые, как через объектив обычной камеры. При широком угле картинка растягивается к краям.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Stereographic (стереографическая)</h3>
+          <p>Формы сохраняются до самых краёв, а охватить можно почти всю сферу сразу.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Little planet (маленькая планета)</h3>
+          <p>Взгляд прямо вниз, а путь вперёд — наверху: мир в виде маленькой круглой планеты. Ведите вокруг центра, чтобы её вращать.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Straight ahead -->
+  <section class="section band tight-top" id="follows">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Направление «вперёд»</p>
+        <h2>«Вперёд» — вслед за камерой или неподвижно в пространстве.</h2>
+        <p class="lede">Когда вы отпускаете, вид продолжает смотреть в ту же сторону. Какая это сторона, задаёт <b>Follows</b> (следует за) на панели или <kbd>Alt</kbd>+<kbd>h</kbd>. Режимы, которые клип дать не может, неактивны, и рядом сказано почему.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Camera (по камере)</h3>
+          <p>Куда направлена камера, сглаженно за несколько секунд, чтобы повороты закреплённой камеры не дёргали вид. По умолчанию для клипа без GPS.</p>
+        </div>
+        <div class="gap-item">
+          <h3>World (в пространстве)</h3>
+          <p>Куда камера смотрела в начале, и это направление держится. Без компаса или GPS, которые бы его удерживали, оно понемногу уплывает вместе с дрейфом гироскопа.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Way (по ходу движения)</h3>
+          <p>Туда, куда вы движетесь, по GPS-треку. Нужен клип, записанный с GPS: на Insta360 — с GPS-пультом или с включённым GPS в приложении на телефоне.</p>
+        </div>
+        <div class="gap-item">
+          <h3>North (на север)</h3>
+          <p>На истинный север, по GPS-треку. Компаса у камер Insta360 нет, так что и здесь нужен GPS.</p>
+        </div>
+      </div>
+      <p class="honest">Camera и World проверены на настоящем клипе. Way и North сделаны и протестированы на смоделированном движении, но ещё не на настоящем клипе с GPS: короткий клип от вас очень помог бы.</p>
+    </div>
+  </section>
+
+  <!-- Cameras -->
+  <section class="section band" id="cameras">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Камеры</p>
+        <h2>Какие 360-камеры работают.</h2>
+        <p class="lede">Это первая версия. Её опробовали на клипе с Insta360 X5; остальное сделано и ждёт клипов.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="cams">
+          <thead><tr><th scope="col">Камера или файл</th><th scope="col">Воспроизводится</th><th scope="col">Примечания</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Insta360 X5, её собственный <code>.insv</code></th><td><span class="pill ok">Опробовано</span></td><td>Оба объектива в одном файле, сшиваются и выравниваются по горизонту прямо во время воспроизведения. До 30 fps в полной детализации; клипы с большей частотой воспроизводятся через кадр.</td></tr>
+            <tr><th scope="row">Insta360 X4, её собственный <code>.insv</code></th><td><span class="pill exp">Ожидается</span></td><td>Та же модель объектива, что у X5; клип ещё не пробовали.</td></tr>
+            <tr><th scope="row">Сшитое 360-видео</th><td><span class="pill exp">Ожидается</span></td><td>MP4 или MOV с метаданными 360, как их экспортируют Insta360 Studio, DJI Studio или GoPro Player. Воспроизводится так, как сшито, без стабилизации.</td></tr>
+            <tr><th scope="row">Insta360 X3</th><td><span class="pill part">Пока нет</span></td><td>Она записывает каждый объектив в отдельный файл.</td></tr>
+            <tr><th scope="row">DJI Osmo 360, её собственный <code>.OSV</code></th><td><span class="pill part">Пока нет</span></td><td>Модель её объектива и данные движения пока не читаются. Сшитые экспорты из неё должны воспроизводиться.</td></tr>
+            <tr><th scope="row">GoPro MAX 2, её собственный <code>.360</code></th><td><span class="pill part">Пока нет</span></td><td>В работе.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">На Mac с Apple Silicon. В приложении для Windows это тоже есть, но ещё не опробовано.</p>
+    </div>
+  </section>
+
+  <!-- Exports -->
+  <section class="section band tight-top" id="export">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Экспорт</p>
+        <h2>Ровное 360-видео или обычное — туда, куда вы смотрели. <span class="soon">Скоро</span></h2>
+        <p class="lede">Движок экспорта уже умеет записывать и то и другое: всю сферу как 360-видео с ровным горизонтом — для YouTube или VR-шлема — или обычное видео 16:9, которое следует за вашим взглядом. Следующий шаг — сохранять их из плеера одной клавишей, как другие клипы.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band tight-top" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Ограничения</p>
+        <h2>Полезно знать.</h2>
+      </div>
+      <ul class="st-limits">
+        <li><b>Пока опробовано на немногих клипах.</b> Клипы с вашей камеры — самый быстрый способ добиться, чтобы с ней всё работало хорошо.</li>
+        <li><b>Горизонт в крутых поворотах.</b> Когда камера сильно кренится на быстром вираже, горизонт может уйти примерно на 10°.</li>
+        <li><b>Как открыть файл <code>.insv</code>:</b> перетащите его в окно плеера. Открытие двойным щелчком в <span class="os-mac">Finder</span><span class="os-win">Проводнике</span> пока не настроено.</li>
+        <li><b>Первая секунда.</b> Сразу после открытия клипа, пока загружаются данные движения, несколько кадров могут пропасть.</li>
+        <li><b>Клипы быстрее 30 fps</b> воспроизводятся через кадр: 8K-камера при 60 fps — это больше, чем сфера успевает обработать во время воспроизведения.</li>
+        <li><b>Во весь экран</b> вид поворачивается чуть медленнее, чем в окне (около 30 мс вместо 9), потому что macOS тогда ждёт обновления экрана.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Попробуйте</p>
+        <h2>Перетащите 360-клип в плеер и оглядитесь.</h2>
+        <p class="lede">Бесплатно, без учётной записи, а ваши записи остаются как есть.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Пришлите 360-клип</h3>
+          <p>Больше всего помогут несколько секунд прямо с камеры, по возможности с включённым GPS.</p>
+          <a href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a>
+        </div>
+        <div class="help-card">
+          <h3>Стабилизация</h3>
+          <p>Как плеер выравнивает обычный клип по тем же данным движения.</p>
+          <a href="stabilization.html">Стабилизация</a>
+        </div>
+        <div class="help-card">
+          <h3>Всё, что он умеет</h3>
+          <p>Все клавиши и настройки, а также камеры по отдельности.</p>
+          <a href="features.html">Все функции</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · <a href="about.html">Сделано дайвером из Женевы, Швейцария</a></span>
+      <a href="index.html">Главная</a>
+      <a href="about.html">Об авторе</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">Все функции</a>
+      <a href="download.html">Загрузки</a>
+    </div>
+    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M и GP-Log, построенными на shaper LUT от Zeb Gardner (используются с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision и символ двойного D являются товарными знаками Dolby Laboratories Licensing Corporation. Action Footage Player не связан с Dolby и не одобрен ею. Плеер сам записывает метаданные Dolby Vision с помощью открытой библиотеки <code>dolby_vision</code> (MIT); никакого ПО Dolby в его составе нет.</p>
+    <p class="mt-foot">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../360.html" hreflang="en">Читать оригинал на английском</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

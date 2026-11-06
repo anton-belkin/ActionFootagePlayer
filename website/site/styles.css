@@ -417,3 +417,7 @@ html:not([data-os="win"]) .os-win { display: none; }
 /* Features described ahead of the app: a small tag beside them until they ship */
 .soon { display: inline-block; vertical-align: 0.15em; margin-left: 0.4em; padding: 1px 8px; border: 1px solid var(--accent); border-radius: 999px; font-family: var(--f-mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0.04em; line-height: 1.6; color: var(--accent-ink); white-space: nowrap; text-transform: none; }
 .soon kbd { font-size: 0.95em; padding: 0 4px; }
+
+/* Long words in big headings (Russian, French) wrap by syllable on a phone instead of widening the page */
+h1, h2 { overflow-wrap: break-word; hyphens: auto; }
+.hero .wrap > * { min-width: 0; }
