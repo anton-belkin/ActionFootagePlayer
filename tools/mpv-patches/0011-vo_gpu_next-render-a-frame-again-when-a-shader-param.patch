@@ -1,0 +1,149 @@
+From f300de14b5257c8e5554d7aaa163588910c56e2d Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Fri, 6 Nov 2026 14:44:50 +0100
+Subject: [PATCH 11/12] vo_gpu_next: render a frame again when a shader
+ parameter's value changed
+
+libplacebo reuses a cached frame while the render params' hash is the
+same, and that hash covers the hooks, not their parameters' current
+values. A frame drawn again after a parameter changed (a redraw, or a
+frame shown for several vsyncs with display-resample) showed it with
+the old values: a view turned by DYNAMIC parameters moved only when a
+new video frame came. The frames' signatures now carry a hash of the
+parameters' values, as they carry the OSD's state.
+
+--macos-latency-log says per frame whether it was rendered from the
+video frame or taken from the cache (fresh=1/0).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/mac/latency.c | 13 +++++++++++--
+ video/out/mac/latency.h |  2 ++
+ video/out/vo_gpu_next.c | 33 +++++++++++++++++++++++++++++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/video/out/mac/latency.c b/video/out/mac/latency.c
+index 5d52e1263..9bac1af31 100644
+--- a/video/out/mac/latency.c
++++ b/video/out/mac/latency.c
+@@ -27,6 +27,7 @@
+ struct record {
+     uint64_t id;
+     double applied, newest, begin, drawable, submit;
++    int fresh;
+ };
+ 
+ static mp_static_mutex lock = MP_STATIC_MUTEX_INITIALIZER;
+@@ -79,6 +80,14 @@ void mac_latency_frame_begin(double applied)
+     mp_mutex_unlock(&lock);
+ }
+ 
++void mac_latency_frame_fresh(bool fresh)
++{
++    mp_mutex_lock(&lock);
++    if (current.id && ring[current.id % RING].id == current.id)
++        ring[current.id % RING].fresh = fresh;
++    mp_mutex_unlock(&lock);
++}
++
+ void mac_latency_frame_submitted(void)
+ {
+     double now = mac_latency_now();
+@@ -112,8 +121,8 @@ void mac_latency_presented(uint64_t id, double presented)
+         // One line per frame, the times as they are (tools/latency360/summarize.py reads them)
+         mp_msg(latency_log, MSGL_INFO,
+                "frame=%" PRIu64 " applied=%.6f newest=%.6f begin=%.6f drawable=%.6f "
+-               "submit=%.6f shown=%.6f\n", r->id, r->applied, r->newest, r->begin,
+-               r->drawable, r->submit, presented);
++               "submit=%.6f shown=%.6f fresh=%d\n", r->id, r->applied, r->newest, r->begin,
++               r->drawable, r->submit, presented, r->fresh);
+         r->id = 0;
+     }
+     mp_mutex_unlock(&lock);
+diff --git a/video/out/mac/latency.h b/video/out/mac/latency.h
+index a4cb29a3d..91387ec3f 100644
+--- a/video/out/mac/latency.h
++++ b/video/out/mac/latency.h
+@@ -37,6 +37,8 @@ void mac_latency_input(double event_time);
+ // The VO thread: a frame starts being drawn. applied: the time of the input event whose effect
+ // the frame shows (0 when nobody said)
+ void mac_latency_frame_begin(double applied);
++// The frame was rendered from the video frame (fresh), not taken from the renderer's cache
++void mac_latency_frame_fresh(bool fresh);
+ // The frame is handed to the swapchain
+ void mac_latency_frame_submitted(void);
+ 
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 03c0c2484..0f9db6798 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -167,6 +167,7 @@ struct priv {
+     uint64_t osd_sync;
+     double last_pts;
+     bool is_interpolated;
++    bool rendered_fresh;    // this frame rendered a video frame (not from the cache)
+     bool want_reset;
+     bool want_seek_reset;
+     bool flush_cache;
+@@ -1181,6 +1182,8 @@ static void info_callback(void *priv, const struct pl_render_info *info)
+ {
+     struct vo *vo = priv;
+     struct priv *p = vo->priv;
++    if (info->stage == PL_RENDER_STAGE_FRAME)
++        p->rendered_fresh = true;
+     if (info->index >= VO_PASS_PERF_MAX)
+         return; // silently ignore clipped passes, whatever
+ 
+@@ -1381,6 +1384,22 @@ static void update_tm_viz(struct pl_color_map_params *params,
+ static void update_hook_opts_dynamic(struct priv *p, const struct pl_hook *hook,
+                                      const struct mp_image *mpi);
+ 
++// FNV-1a over the current values of all the hooks' parameters
++static uint64_t hook_params_signature(const struct pl_hook *const *hooks, int num_hooks)
++{
++    uint64_t h = 0xcbf29ce484222325ULL;
++    for (int i = 0; i < num_hooks; i++) {
++        for (int j = 0; j < hooks[i]->num_parameters; j++) {
++            const unsigned char *b = (const unsigned char *) hooks[i]->parameters[j].data;
++            for (size_t k = 0; k < sizeof(pl_var_data); k++) {
++                h ^= b[k];
++                h *= 0x100000001b3ULL;
++            }
++        }
++    }
++    return num_hooks ? h : 0;
++}
++
+ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ {
+     struct priv *p = vo->priv;
+@@ -1804,12 +1823,26 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+         // Update dynamic hook parameters
+         for (int i = 0; i < pars->params.num_hooks; i++)
+             update_hook_opts_dynamic(p, p->hooks[i], frame->current);
++
++        // libplacebo reuses a cached frame while the render params' hash is
++        // the same, and that hashes the hooks, not their parameters' values:
++        // a frame drawn again with a parameter changed (a redraw, a frame
++        // shown for several vsyncs) would show the old values. The frames'
++        // signatures carry the values instead, as they carry the OSD's.
++        uint64_t par_sig = hook_params_signature(pars->params.hooks,
++                                                 pars->params.num_hooks);
++        for (int i = 0; i < mix.num_frames; i++)
++            ((uint64_t *) mix.signatures)[i] ^= par_sig;
+     }
+ 
+     // Render frame
+     stats_time_start(p->stats, "render");
++    p->rendered_fresh = false;
+     bool render_ok = pl_render_image_mix(p->rr, &mix, &target, &params);
+     stats_time_end(p->stats, "render");
++#if HAVE_COCOA && HAVE_SWIFT
++    mac_latency_frame_fresh(p->rendered_fresh);
++#endif
+     if (!render_ok) {
+         MP_ERR(vo, "Failed rendering frame!\n");
+         goto done;
+-- 
+2.42.0
+

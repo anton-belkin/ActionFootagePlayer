@@ -55,7 +55,17 @@ local function fake_mp()
         remove_key_binding = function(name) f.bindings[name] = nil end,
         register_script_message = function(name, fn) f.messages[name] = fn end,
         osd_message = function(text) f.osd = text end,
+        -- Run at once, or (f.defer) when f.flush() says the messages waiting are handled
+        add_timeout = function(_, fn)
+            if f.defer then table.insert(f.timers, fn) else fn() end
+        end,
     }
+    f.timers = {}
+    f.flush = function()
+        local t = f.timers
+        f.timers = {}
+        for _, fn in ipairs(t) do fn() end
+    end
     mp.set_property = function(name, v) f.props[name] = v; changed(name) end
     f.mp = mp
     f.set = function(name, v) f.props[name] = v; changed(name) end
@@ -383,8 +393,30 @@ do
     expect("fov held in range", f.props["glsl-shader-opts"].view360_fov, "300.0000")
     f.message("view360-heading", "camera")
     expect("heading", f.props["glsl-shader-opts"].view360_heading, "1")
+    -- The app's mpv: each message carries its time and number; the view says which it has applied, so the VO turns
+    -- it by the later ones itself; messages waiting together are applied once (setting the options waits for the VO)
+    f.defer = true
+    local sets = 0
+    local set = f.mp.set_property_native
+    f.mp.set_property_native = function(name, v)
+        if name == "glsl-shader-opts" then sets = sets + 1 end
+        return set(name, v)
+    end
+    local before = f.props["glsl-shader-opts"].view360_yaw
+    f.message("gesture", "scroll", "10", "0", "changed", "100.250000", "41")
+    f.message("gesture", "scroll", "10", "0", "changed", "100.258000", "42")
+    f.message("gesture", "scroll", "10", "0", "momentum", "100.266000", "43")
+    expect("waiting messages: not applied yet", sets, 0)
+    f.flush()
+    expect("waiting messages: applied once", sets, 1)
+    expect("applied: turned", f.props["glsl-shader-opts"].view360_yaw ~= before, true)
+    expect("applied: the last number, the coasting's too", f.props["glsl-shader-opts"].afp_input_seq, "43")
+    expect("applied: the last taken one's time", f.props["glsl-shader-opts"].afp_input_time, "100.258000")
+    f.mp.set_property_native = set
+    f.defer = false
     -- Crop mode on top: the view's gestures pause (crop's take the mouse), and come back
     f.set("user-data/gyroflow/crop", { active = true })
+    expect("under crop mode: the VO doesn't turn the view", f.props["glsl-shader-opts"].afp_input_seq, nil)
     local yaw = f.props["glsl-shader-opts"].view360_yaw
     f.message("gesture", "scroll", "30", "0", "changed")
     expect("under crop mode: left alone", f.props["glsl-shader-opts"].view360_yaw, yaw)

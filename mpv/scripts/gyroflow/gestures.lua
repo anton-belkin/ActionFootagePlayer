@@ -42,8 +42,9 @@ local function whole(scale)
 end
 
 function M.new(h)
-    local g = { on = false, paused = false, drag = nil, messages = false, saved = nil, input_time = nil }
+    local g = { on = false, paused = false, drag = nil, messages = false, saved = nil, input_time = nil, input_seq = 0 }
     local function acting() return g.on and not g.paused end
+    function g:acting() return acting() end
     local prefix = h.prefix
 
     local function pan(dx, dy, x, y) h.pan(dx, dy, x, y) end
@@ -87,13 +88,17 @@ function M.new(h)
         end
     end
 
-    mp.register_script_message("gesture", function(kind, a, b, c, d)
+    mp.register_script_message("gesture", function(kind, a, b, c, d, e)
+        -- After the phase, the app's mpv sends the event's time and the message's number: the view shows the
+        -- gestures up to it once it's applied (--macos-latency-log; the VO turns the view by the ones after it,
+        -- tools/mpv-patches/0012). Every message counts, taken or not
+        g.input_seq = tonumber(kind == "scroll" and e or d) or g.input_seq
         if not acting() then return end
-        -- The event's time, last (the app's mpv): what the view shows next is from it (--macos-latency-log)
-        g.input_time = tonumber(kind == "scroll" and d or c)
+        local t = tonumber(kind == "scroll" and d or c)
         if kind == "scroll" then
             local phase = c
             if phase == "momentum" then return end
+            g.input_time = t
             local dx, dy = tonumber(a) or 0, tonumber(b) or 0
             -- A mouse's wheel, in fine steps: up zooms in
             if phase == "none" then
@@ -104,9 +109,11 @@ function M.new(h)
             local pos = mp.get_property_native("mouse-pos") or {}
             pan(dx * s, dy * s, pos.x and pos.x + dx * s, pos.y and pos.y + dy * s)
         elseif kind == "magnify" then
+            g.input_time = t
             h.zoom(1 + (tonumber(a) or 0))
         elseif kind == "rotate" then
             -- Counterclockwise as the fingers turn
+            g.input_time = t
             h.roll(tonumber(a) or 0)
         end
     end)

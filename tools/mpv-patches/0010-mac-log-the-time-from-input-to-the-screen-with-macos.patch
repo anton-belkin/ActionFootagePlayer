@@ -1,7 +1,7 @@
-From df1b696c1abab6d67ee773c4bd33719dbf73d022 Mon Sep 17 00:00:00 2001
+From 0b3b152beb2aa13842f8c2841ce4bb3ca418d1d5 Mon Sep 17 00:00:00 2001
 From: Anton Belkin <anton.belkin@icloud.com>
 Date: Fri, 6 Nov 2026 14:27:37 +0100
-Subject: [PATCH] mac: log the time from input to the screen with
+Subject: [PATCH 10/12] mac: log the time from input to the screen with
  --macos-latency-log
 
 For each frame shown through the swapchain, a line in the latency
@@ -25,10 +25,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  video/out/mac/latency.c                      | 120 +++++++++++++++++++
  video/out/mac/latency.h                      |  47 ++++++++
  video/out/mac/metal_layer.swift              |  13 ++
- video/out/mac/view.swift                     |  39 +++++-
+ video/out/mac/view.swift                     |  42 ++++++-
+ video/out/mac_common.swift                   |   8 ++
  video/out/vo_gpu_next.c                      |  21 ++++
  video/out/vulkan/context_mac.m               |   5 +
- 12 files changed, 269 insertions(+), 2 deletions(-)
+ 13 files changed, 280 insertions(+), 2 deletions(-)
  create mode 100644 DOCS/interface-changes/macos-latency-log.txt
  create mode 100644 video/out/mac/latency.c
  create mode 100644 video/out/mac/latency.h
@@ -324,20 +325,10 @@ index 5a321f164..faae4eb73 100644
          didSet {
              if displaySyncEnabled != oldValue { logState(property: "display sync") }
 diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
-index bf8c138e7..f07b2f0cf 100644
+index bf8c138e7..410c6146e 100644
 --- a/video/out/mac/view.swift
 +++ b/video/out/mac/view.swift
-@@ -43,6 +43,9 @@ class View: NSView, CALayerDelegate {
-         wantsBestResolutionOpenGLSurface = true
-         wantsExtendedDynamicRangeOpenGLSurface = true
-         registerForDraggedTypes([ .fileURL, .URL, .string ])
-+        // --macos-latency-test, changed at runtime
-+        let poll = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.updateLatencyTest() }
-+        RunLoop.main.add(poll, forMode: .common)
-     }
- 
-     required init?(coder: NSCoder) {
-@@ -129,6 +132,7 @@ class View: NSView, CALayerDelegate {
+@@ -129,6 +129,7 @@ class View: NSView, CALayerDelegate {
      }
  
      override func mouseDragged(with event: NSEvent) {
@@ -345,7 +336,7 @@ index bf8c138e7..f07b2f0cf 100644
          signalMouseMovement(event)
      }
  
-@@ -176,8 +180,41 @@ class View: NSView, CALayerDelegate {
+@@ -176,8 +177,47 @@ class View: NSView, CALayerDelegate {
          case .cancelled: phase = "cancelled"
          default: if event.momentumPhase != [] { phase = "momentum" }
          }
@@ -367,17 +358,23 @@ index bf8c138e7..f07b2f0cf 100644
 +    var latencyTestHz: Int = 0
 +    var latencyTestCount: Int = 0
 +
++    // Polled by MacCommon (the option can change at runtime) while the VO is there
 +    func updateLatencyTest() {
 +        let hz = Int(common.option.mac.macos_latency_test)
 +        if hz == latencyTestHz { return }
-+        latencyTestTimer?.invalidate()
-+        latencyTestTimer = nil
++        stopLatencyTest()
 +        latencyTestHz = hz
-+        latencyTestCount = 0
 +        if hz <= 0 { return }
 +        let timer = Timer(timeInterval: 1.0 / Double(hz), repeats: true) { [weak self] _ in self?.latencyTestTick() }
 +        RunLoop.main.add(timer, forMode: .common)
 +        latencyTestTimer = timer
++    }
++
++    func stopLatencyTest() {
++        latencyTestTimer?.invalidate()
++        latencyTestTimer = nil
++        latencyTestHz = 0
++        latencyTestCount = 0
 +    }
 +
 +    func latencyTestTick() {
@@ -388,6 +385,39 @@ index bf8c138e7..f07b2f0cf 100644
      }
  
      override func magnify(with event: NSEvent) {
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index e8600a252..d521c90db 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -27,6 +27,8 @@ class MacCommon: Common {
+     var timer: PreciseTimer?
+     var swapTime: UInt64 = 0
+     let swapLock: NSCondition = NSCondition()
++    // --macos-latency-test's option, read while the VO is there
++    var latencyTestPoll: Timer?
+ 
+     @objc init(_ vo: UnsafeMutablePointer<vo>) {
+         let log = LogHelper(mp_log_new(vo, vo.pointee.log, "mac"))
+@@ -48,6 +50,9 @@ class MacCommon: Common {
+             sampleBufferLayer = sampleLayer
+             updateSampleBufferRange()
+             initMisc(vo)
++            let poll = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.view?.updateLatencyTest() }
++            RunLoop.main.add(poll, forMode: .common)
++            latencyTestPoll = poll
+         }
+     }
+ 
+@@ -93,6 +98,9 @@ class MacCommon: Common {
+         timer?.terminate()
+ 
+         DispatchQueue.main.sync {
++            latencyTestPoll?.invalidate()
++            latencyTestPoll = nil
++            view?.stopLatencyTest()
+             window?.delegate = nil
+             window?.close()
+ 
 diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
 index f0194946d..03c0c2484 100644
 --- a/video/out/vo_gpu_next.c

@@ -20,7 +20,7 @@ import statistics
 import sys
 
 LINE = re.compile(r"frame=(\d+) applied=([\d.]+) newest=([\d.]+) begin=([\d.]+) drawable=([\d.]+) "
-                  r"submit=([\d.]+) shown=([\d.]+)")
+                  r"submit=([\d.]+) shown=([\d.]+)(?: fresh=(\d))?")
 
 
 def pct(values, p):
@@ -47,7 +47,9 @@ def summarize(path):
         m = LINE.search(line)
         if m:
             f = dict(zip(("frame", "applied", "newest", "begin", "drawable", "submit", "shown"),
-                         (int(m[1]),) + tuple(float(x) for x in m.groups()[1:])))
+                         (int(m[1]),) + tuple(float(x) for x in m.groups()[1:7])))
+            # Rendered from the video frame, not the renderer's cache (patch 0011 logs it; before it, taken as yes)
+            f["fresh"] = m[8] != "0"
             frames.append(f)
     print(f"{path}: {len(frames)} frames")
     if not frames:
@@ -63,13 +65,18 @@ def summarize(path):
     if bad:
         print(f"  !! {len(bad)} frames shown before their input or their drawing: the clocks don't match")
 
-    # The first frame showing each new input
-    first, last = [], 0.0
+    # The first frame showing each new input: rendered fresh (a frame from the renderer's cache shows the parameters
+    # it was rendered with, whatever the frame's own)
+    first, last, stale = [], 0.0, 0
     for f in shown:
         if f["applied"] > last:
+            if not f["fresh"]:
+                stale += 1
+                continue
             first.append(f)
             last = f["applied"]
-    print(f"  inputs shown: {len(first)}")
+    print(f"  inputs shown: {len(first)}, frames with new input from the cache: {stale}, "
+          f"fresh frames {sum(f['fresh'] for f in shown)} of {len(shown)}")
     print(row("input -> light", [f["shown"] - f["applied"] for f in first]))
     print(row("  input -> begin", [f["begin"] - f["applied"] for f in first]))
     print(row("  begin -> submit", [f["submit"] - f["begin"] for f in first if f["submit"]]))
