@@ -87,6 +87,7 @@ local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'
 local sidecar_lib = require 'sidecar'
+local projectfile = require 'projectfile'
 local has_input, input = pcall(require, 'mp.input')
 if not has_input then input = nil end
 
@@ -119,6 +120,18 @@ local fs = {
 local ws = workspace.new(fs)
 local moments = moments_lib.new(ws, fs)
 local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows })
+-- The project's own file, Project.afproject (projectfile.lua)
+local pf = projectfile.new({
+    parse_json = fs.parse_json, format_json = utils.format_json, join = function(a, b) return ws.join(a, b) end,
+    is_dir = fs.is_dir, is_file = fs.is_file,
+    rmdir = function(dir)
+        if windows then
+            mp.command_native({ name = "subprocess", args = { "cmd", "/d", "/c", "rmdir", dir }, playback_only = false, capture_stderr = true })
+        else
+            os.remove(dir)
+        end
+    end,
+})
 
 local state = {}
 -- The project's _Moments/ as last read: every moment in it, and its folders' times
@@ -206,12 +219,21 @@ local tracked_cache = setmetatable({}, {
     __newindex = function(_, k, v) cache[k] = v; cache_dirty = true end,
 })
 
+-- A project of before 0.10, its state folder: moved into Project.afproject the first time it's met (once a session)
+local migrated = {}
+local function migrate(root)
+    if not root or migrated[root] then return end
+    migrated[root] = true
+    if fs.is_dir(pf.legacy_dir(root)) and pf.migrate(root) then mp.msg.info("project moved into " .. pf.path(root)) end
+end
+
 -- What's known about the file at `path`, as published
 local function describe(path)
     if not path or path == "" then return {} end
     if path:find("://", 1, true) then return { path = path } end
     local clip = ws.absolute(path, mp.get_property("working-directory"))
     local root = ws.project_root(clip)
+    migrate(root)
     return {
         path = path,
         clip = clip,
@@ -509,21 +531,41 @@ local function ask(opts, done)
     })
 end
 
-local function state_file(name)
-    return state.project and ws.join(ws.join(state.project, workspace.STATE_DIR), name) or nil
-end
+-- The project's own file read (projectfile.lua), and a change to it; nil and false without a project
+local function project_doc() return state.project and pf.read(state.project) or nil end
+local function project_update(fn) return state.project ~= nil and pf.update(state.project, fn) end
 
--- The names typed for moments, the last one last (mp.input keeps them there for ↑)
-local function history_file() return state_file("moment-names.txt") end
-
+-- The names typed for moments, the last one last: the project's moment_names, and a name typed is added to them
 local function last_name()
     if last_typed then return last_typed end
-    local f = history_file() and io.open(history_file(), "r")
+    local doc = project_doc()
+    local names = doc and doc.moment_names or {}
+    return names[#names]
+end
+
+local function remember_name(text)
+    if not text or not text:match("%S") then return end
+    project_update(function(d)
+        if d.moment_names[#d.moment_names] ~= text then d.moment_names[#d.moment_names + 1] = text end
+        -- The last few hundred are enough for ↑
+        while #d.moment_names > 500 do table.remove(d.moment_names, 1) end
+    end)
+end
+
+-- mp.input's ↑ reads earlier names from a file: the project's, written out for it before it asks
+local history_path = nil
+local function history_file()
+    local doc = project_doc()
+    if not doc then return nil end
+    if not history_path then
+        local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
+        history_path = utils.join_path(tmp, "afp-moment-names-" .. tostring(utils.getpid()) .. ".txt")
+    end
+    local f = io.open(history_path, "w")
     if not f then return nil end
-    local last
-    for line in f:lines() do if line:match("%S") then last = line end end
+    for _, n in ipairs(doc.moment_names) do f:write(n, "\n") end
     f:close()
-    return last
+    return history_path
 end
 
 -- What the dialog suggests: the last name typed with the next free number, else the moment's date and time by the
@@ -700,11 +742,8 @@ mp.register_script_message("preview-done", function(id, json)
         mp.osd_message("Couldn't save " .. p.name .. ": " .. tostring(r.error or "gyroflow-export failed"), 6)
         return
     end
-    -- The first name typed in a new project: kept for the next suggestion and ↑, where mp.input couldn't yet
-    if p.history and p.typed and history_file() then
-        local f = io.open(history_file(), "a")
-        if f then f:write(p.typed, "\n"); f:close() end
-    end
+    -- The name typed: kept for the next suggestion and ↑
+    if p.typed and not p.update then remember_name(p.typed) end
     local edited = state.moment or state.editing
     if p.update and edited and edited.file == p.file then
         edited["in"], edited.out = p.a, p.b
@@ -915,10 +954,7 @@ mp.register_script_message("export-name", function(json)
             -- A moment stabilized on its own, without a project: its part (or the part of it) on its own
             alone = state.snap == true and state.alone or nil,
         }))
-        if first and text ~= "" and history_file() then
-            local f = io.open(history_file(), "a")
-            if f then f:write(text, "\n"); f:close() end
-        end
+        if text ~= "" then remember_name(text) end
         -- Every export can be found from a moment, and played in full quality after it's deleted
         if part and not same then save("export_" .. final, nil, nil, true) end
     end)
@@ -961,14 +997,11 @@ do
     end
 end
 
-local function made_file() return state_file("clips-made.txt") end
-
-local function read_made()
-    local f = made_file() and io.open(made_file(), "r")
-    if not f then return {} end
-    local text = f:read("*a")
-    f:close()
-    return moments_lib.parse_made(text)
+-- The clips a preview was made for (the project file's clips_made), as a set of made_line()s
+local function read_made(root)
+    root = root or state.project
+    if not root then return {} end
+    return moments_lib.parse_made(table.concat(pf.read(root).clips_made, "\n"))
 end
 
 -- A clip's marks: its marks file's, else the camera's; nil for none
@@ -991,23 +1024,10 @@ end
 
 local function native(rel) return windows and rel:gsub("/", "\\") or rel end
 
--- The project's settings, _ActionFootagePlayer/settings.json: clips_flat (clip previews all in _Clips/ itself)
+-- The project's settings (the project file's): clips_flat (clip previews all in _Clips/ itself), moments_alone
 settings = function()
-    local f = state_file("settings.json") and io.open(state_file("settings.json"), "r")
-    if not f then return {} end
-    local t = utils.parse_json(f:read("*a") or "")
-    f:close()
-    return type(t) == "table" and t or {}
-end
-
-local function save_settings(t)
-    local file = state_file("settings.json")
-    local f = file and io.open(file .. ".tmp", "w")
-    if not f then return end
-    f:write(utils.format_json(t) or "{}", "\n")
-    f:close()
-    os.remove(file)
-    os.rename(file .. ".tmp", file)
+    local doc = project_doc()
+    return doc and doc.settings or {}
 end
 
 -- The clip previews there are, found by the link inside each: renamed, or moved into folders of one's own within
@@ -1069,16 +1089,9 @@ local function next_clip()
         state.clips = nil
         publish()
         draw_progress()
-        -- Why the ones that failed did, in a file the panel opens
-        local failed = ws.join(ws.join(job.project, workspace.STATE_DIR), "clips-failed.txt")
-        if #job.failures > 0 then
-            local f = io.open(failed, "w")
-            if f then
-                for _, x in ipairs(job.failures) do f:write(x[1], "\t", x[2], "\n") end
-                f:close()
-            end
-        elseif not job.stopping then
-            os.remove(failed)
+        -- Why the ones that failed did, in the project file (Action Footage Library shows them)
+        if #job.failures > 0 or not job.stopping then
+            pf.update(job.project, function(d) d.clips_failed = job.failures end)
         end
         recount()
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
@@ -1105,8 +1118,8 @@ local function next_clip()
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             job.made = job.made + 1
-            local f = io.open(ws.join(ws.join(job.project, workspace.STATE_DIR), "clips-made.txt"), "a")
-            if f then f:write(moments_lib.made_line(c.relative, c.size), "\n"); f:close() end
+            local line = moments_lib.made_line(c.relative, c.size)
+            pf.update(job.project, function(d) d.clips_made[#d.clips_made + 1] = line end)
         elseif not job.stopping then
             job.failed = job.failed + 1
             local err = r and r.stderr or ""
@@ -1128,7 +1141,7 @@ local function start_clips(root, queue, what)
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
     clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
-                  flat = settings().clips_flat == true }
+                  flat = pf.read(root).settings.clips_flat == true }
     state.clips = { done = 0, total = #queue }
     publish()
     draw_progress()
@@ -1217,16 +1230,9 @@ extras = function(force)
     end
     state.clips_stats = cached.stats
     local info = utils.file_info(state.clip)
-    state.clips_flat = settings().clips_flat == true
-    state.moments_alone = settings().moments_alone == true
-    local failed = io.open(ws.join(ws.join(project, workspace.STATE_DIR), "clips-failed.txt"), "r")
-    state.clips_failed = nil
-    if failed then
-        local n = 0
-        for _ in failed:lines() do n = n + 1 end
-        failed:close()
-        state.clips_failed = n > 0 and n or nil
-    end
+    local doc = pf.read(project)
+    state.moments_alone = doc.settings.moments_alone == true
+    state.clips_failed = #doc.clips_failed > 0 and #doc.clips_failed or nil
     if state.relative and preview_for(state.relative, info and info.size) then state.clip_preview = "made"
     elseif state.relative and made[moments_lib.made_line(state.relative, info and info.size)] then state.clip_preview = "removed"
     else state.clip_preview = "none" end
@@ -1250,8 +1256,8 @@ mp.register_script_message("init-project", function(dir)
     local allowed = false
     for _, d in ipairs(ws.project_choices(state.clip)) do if d == dir then allowed = true end end
     if not allowed then return end
-    local sd = ws.join(dir, workspace.STATE_DIR)
-    if not fs.is_dir(sd) and not mkdir(sd) then
+    -- Its file, Project.afproject, makes it one
+    if not pf.update(dir, function() end) then
         return mp.osd_message("Can't write in " .. dir, 4)
     end
     state.project = dir
@@ -1262,24 +1268,6 @@ mp.register_script_message("init-project", function(dir)
     refresh()
 end)
 
--- Clip previews all in _Clips/ itself, or in the footage's folders (a project's setting)
-mp.register_script_message("clips-flat", function()
-    if not state.project then return end
-    local t = settings()
-    t.clips_flat = not (t.clips_flat == true)
-    save_settings(t)
-    state.clips_flat = t.clips_flat
-    publish()
-    mp.osd_message(t.clips_flat and "New clip previews: all in _Clips/, the clips' folders left out"
-        or "New clip previews: in the clips' folders, within _Clips/", 3)
-end)
-
--- Why the last clip previews that failed did
-mp.register_script_message("clips-failed", function()
-    local file = state.project and ws.join(ws.join(state.project, workspace.STATE_DIR), "clips-failed.txt")
-    if not file or not fs.is_file(file) then return end
-    if macos then run({ "open", "-t", file }) elseif windows then run({ "notepad", file }) else run({ "xdg-open", file }) end
-end)
 
 -- Cutting a spoiled part out of the clip (docs/lossless-cut.md): Ctrl+x cuts the A-B part out (the menu: also all
 -- before or after where it is). afp-cut (the gyroflow plugin's) writes the parts kept, hidden, each read back as
@@ -1782,10 +1770,10 @@ end)
 -- New moments stabilized on their own (a project's setting)
 mp.register_script_message("moments-alone", function()
     if not state.project then return end
-    local t = settings()
-    t.moments_alone = not (t.moments_alone == true)
-    save_settings(t)
-    state.moments_alone = t.moments_alone
+    local alone
+    project_update(function(d) d.settings.moments_alone = not (d.settings.moments_alone == true); alone = d.settings.moments_alone end)
+    local t = { moments_alone = alone }
+    state.moments_alone = alone
     publish()
     mp.osd_message(t.moments_alone and "New moments: stabilized on their own" or "New moments: stabilized as part of their clip", 3)
 end)
@@ -1813,14 +1801,10 @@ end
 local MOMENT_AROUND = 2
 local marks_job = nil
 
-local function stills_made_file() return state_file("stills-made.txt") end
 local function stills_line(relative, size, t) return relative .. "\t" .. tostring(size) .. "\t" .. string.format("%.3f", t) end
-local function read_stills_made()
+local function read_stills_made(root)
     local made = {}
-    local f = stills_made_file() and io.open(stills_made_file(), "r")
-    if not f then return made end
-    for line in f:lines() do made[line] = true end
-    f:close()
+    for _, line in ipairs(pf.read(root).stills_made) do made[line] = true end
     return made
 end
 
@@ -1864,8 +1848,8 @@ mp.register_script_message("job-done", function(id, json)
     local item = j.queue[j.done + 1]
     if r.ok then
         if j.kind == "photos" and item then
-            local f = stills_made_file() and io.open(stills_made_file(), "a")
-            if f then f:write(stills_line(item.relative, item.size, item.t), "\n"); f:close() end
+            local line = stills_line(item.relative, item.size, item.t)
+            pf.update(j.root, function(d) d.stills_made[#d.stills_made + 1] = line end)
         end
     else
         j.failed = j.failed + 1
@@ -1924,7 +1908,7 @@ end
 -- What there is to make, over the project's clips (their headers read: a second or so per hundred clips)
 local function marks_queue(kind, root)
     local queue = {}
-    local made = kind == "photos" and read_stills_made() or nil
+    local made = kind == "photos" and read_stills_made(root) or nil
     local all = kind == "moments" and moments.scan(root, nil).list or nil
     local taken_names = {}
     for _, c in ipairs(moments.footage(root)) do
@@ -1979,7 +1963,7 @@ local function start_marks_job(kind)
     if #queue == 0 then
         return mp.osd_message(kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)", 4)
     end
-    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, id = 0, root = root, alone = settings().moments_alone == true }
+    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, id = 0, root = root, alone = pf.read(root).settings.moments_alone == true }
     mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
     job_progress()
     job_next()

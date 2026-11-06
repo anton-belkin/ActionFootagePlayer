@@ -2,14 +2,17 @@
 // twin of the workspace mpv plugin's workspace.lua, for gyroflow-export run without the player (the Finder quick
 // action, the command line). Both are tested over tests/workspace_cases.txt: keep the two in step.
 //
-// A project is a folder with `_ActionFootagePlayer/` in it, the trip folder: its footage is under it, and the
-// player's files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip.
+// A project is a folder with `Project.afproject` in it, the trip folder: its footage is under it, and the player's
+// files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip. Before 0.10 the
+// mark was a folder, `_ActionFootagePlayer/`, which still makes a project.
 
 use std::io::{ Read, Seek, SeekFrom };
 use std::path::{ Path, PathBuf };
 
-/// The folder a project's state is kept in, which also marks a folder as one
-pub const STATE_DIR: &str = "_ActionFootagePlayer";
+/// The file a project's state is kept in, which also marks a folder as one (Action Footage Library opens it)
+pub const PROJECT_FILE: &str = "Project.afproject";
+/// The folder it was before 0.10, which still marks a project
+pub const LEGACY_DIR: &str = "_ActionFootagePlayer";
 
 /// A volume's top folder, where looking further up for a project ends: a disk or a share as the system mounts it
 /// (/Volumes/<name>, /media/<user>/<name>, /run/media/<user>/<name>, /mnt/<name>, C:\, \\nas\video), or /.
@@ -44,15 +47,15 @@ pub fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.is_empty()).map(PathBuf::from)
 }
 
-/// The project the clip (an absolute path) belongs to: the nearest folder above it, or its own, with the state folder
-/// in it. The search ends at the volume's top folder (included: a card's project is on its top) or at `home` (not
+/// The project the clip (an absolute path) belongs to: the nearest folder above it, or its own, with the project's
+/// file (or the folder of before) in it. The search ends at the volume's top folder (included: a card's project is on its top) or at `home` (not
 /// included: a project of everything in it would be no trip). None: none
 pub fn project_root_in(clip: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut dir = clip.parent();
     while let Some(d) = dir {
         if d.as_os_str().is_empty() { return None; }
         if home.is_some_and(|h| same(d, h)) { return None; }
-        if d.join(STATE_DIR).is_dir() { return Some(d.to_path_buf()); }
+        if d.join(PROJECT_FILE).is_file() || d.join(LEGACY_DIR).is_dir() { return Some(d.to_path_buf()); }
         if is_volume_root(d) { return None; }
         dir = d.parent();
     }
