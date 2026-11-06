@@ -351,7 +351,7 @@ pub fn read(path: &str) -> Option<Result<Rig, String>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The sample X5 clip's rig, as telemetry-parser reads it (vid_20250416_143628_00_005): its numbers, written out
