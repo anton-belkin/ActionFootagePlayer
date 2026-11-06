@@ -127,8 +127,8 @@ expect("windows gyroflow", win.gyroflow_new("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip
 expect("windows sidecar", win.sidecar_file("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.afp.json")
 
 -- The project search on Windows: the drive's top is looked at, the home folder isn't
-local wdirs = { ["E:\\_ActionFootagePlayer"] = true, ["C:\\Users\\me\\_ActionFootagePlayer"] = true }
-local wfs = { is_dir = function(p) return wdirs[p] == true end, is_file = function() return false end,
+local wfiles = { ["E:\\Project.afproject"] = true, ["C:\\Users\\me\\Project.afproject"] = true }
+local wfs = { is_dir = function() return false end, is_file = function(p) return wfiles[p] == true end,
               home = "C:\\Users\\me", windows = true }
 local w = workspace.new(wfs)
 expect("windows card project", w.project_root("E:\\DCIM\\100GOPRO\\GX01.MP4"), "E:\\")

@@ -111,6 +111,9 @@ unzip_to() { "$py" -I -m zipfile -e "$1" "$2"; }
 
 (cd vs-gyroflow && cargo build --release ${target:+--target "$target"})
 (cd windows/launcher && cargo build --release ${target:+--target "$target"})
+# Action Footage Library (library/, Tauri: the WebView2 Windows 10 and 11 have)
+(cd library && cargo build --release ${target:+--target "$target"})
+library_bin="library/target/${target:+$target/}release"
 gyroflow_bin="vs-gyroflow/target/${target:+$target/}release"
 launcher_bin="windows/launcher/target/${target:+$target/}release"
 # A cross build's set-icon runs in Wine (SET_ICON: how to run it)
@@ -224,7 +227,7 @@ cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
-cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua "$workspace/"
+cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua "$workspace/"
 cp mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/view360.glsl "$view360/"
 
 echo "== ffmpeg"
@@ -242,6 +245,7 @@ fi
 
 echo "== The launcher and the setup"
 cp "$launcher_bin/ActionFootagePlayer.exe" "$app/"
+cp "$library_bin/ActionFootageLibrary.exe" "$app/"
 $set_icon "$app/ActionFootagePlayer.exe" windows/AppIcon.ico
 mkdir -p "$app/tools"
 cp windows/setup.py tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$app/tools/"

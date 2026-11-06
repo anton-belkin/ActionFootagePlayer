@@ -1,5 +1,7 @@
 /vs-gyroflow/target/
 /windows/launcher/target/
+/library/target/
+/library/gen/
 /build/
 .DS_Store
 /dist/

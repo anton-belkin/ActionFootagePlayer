@@ -11,7 +11,7 @@
 --   moments.safe_name(name), moments.next_name(last, taken), moments.unique_file(dir, name)
 --   moments_lib.loose_parts(marks, taken, duration, around) -> the parts for marks in no moment
 
-local STATE_DIR = require('workspace').STATE_DIR
+local workspace_lib = require('workspace')
 
 local M = {}
 
@@ -47,7 +47,7 @@ function M.clip_preview_relative(relative, flat)
     return table.concat(out, "/")
 end
 
--- _ActionFootagePlayer/clips-made.txt: a line per clip a preview was made for, its path in the project and its size
+-- The project file's clips_made: a line per clip a preview was made for, its path in the project and its size
 function M.parse_made(text)
     local made = {}
     for line in (text or ""):gmatch("[^\r\n]+") do
@@ -310,15 +310,16 @@ function M.new(ws, fs)
         return out
     end
 
-    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the state
-    -- folder in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
+    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the
+    -- project's file (or the state folder of before) in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
     function self.project_of(file, folder)
         folder = (folder or M.FOLDER):lower()
         local dir = ws.parent(file)
         while dir do
             local up = ws.parent(dir)
             if not up then return nil end
-            if ws.name(dir):lower() == folder and fs.is_dir(ws.join(up, STATE_DIR)) then return up end
+            if ws.name(dir):lower() == folder and (fs.is_file(ws.join(up, workspace_lib.PROJECT_FILE))
+                                                   or fs.is_dir(ws.join(up, workspace_lib.LEGACY_DIR))) then return up end
             dir = up
         end
         return nil

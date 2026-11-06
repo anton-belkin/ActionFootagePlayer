@@ -403,9 +403,8 @@ local function project_menu(w, key)
         table.insert(items, info("Clip previews: " .. w.clips.done .. " of " .. w.clips.total))
         table.insert(items, item("Stop clip previews", "script-message-to workspace clips-stop"))
     else
-        table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
-        table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
-        table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
+        -- Clip previews, moments and photos of all marks, exports of all moments: Action Footage Library's
+        table.insert(items, item("Open in Action Footage Library", "script-message-to workspace open-library"))
         table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
     end
     table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))

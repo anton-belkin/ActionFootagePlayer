@@ -1,0 +1,25 @@
+[package]
+name = "action-footage-library"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Action Footage Library: a trip's clip previews, moments, photos and exports, made in the background"
+
+[[bin]]
+name = "ActionFootageLibrary"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

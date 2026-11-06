@@ -68,8 +68,14 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autoprograms}\Action Footage Library"; Filename: "{app}\ActionFootageLibrary.exe"
 
 [Registry]
+; A trip's Project.afproject opens in Action Footage Library
+Root: HKCU; Subkey: "Software\Classes\.afproject"; ValueType: string; ValueData: "{#AppName}.Project"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project"; ValueType: string; ValueData: "Action Footage project"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project\DefaultIcon"; ValueType: string; ValueData: "{app}\ActionFootageLibrary.exe,0"
+Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project\shell\open\command"; ValueType: string; ValueData: """{app}\ActionFootageLibrary.exe"" ""%1"""
 ; The kind of file it opens: Open With, and what Default apps lists for it
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueData: "Video ({#AppName})"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
