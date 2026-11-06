@@ -137,18 +137,34 @@ vec3 ray_to_dir(vec2 ray)
 
 // Stabilization::rotate_and_distort: a ray in the output camera, turned into the source camera by row rotation q,
 // imaged by the lens. False where the ray has no image (past the field limit, outside Snell's window)
+// want_boundary: where the ray has no image (past the lens's field, outside Snell's window), uv is still found, where the
+// ray at the edge of what the lens sees lands (boundary_uv set), for the edge fill to take its colors from
+bool want_boundary = false;
+bool boundary_uv = false;
 bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
 {
     vec3 p = qrot(q, d) + t3;
     float rxy = length(p.xy);
     float theta = atan(rxy, p.z);
     uv = vec2(0.0);
-    if (lens.w > 0.0 && theta > lens.w) return false;
+    boundary_uv = false;
+    bool fail = false;
+    if (lens.w > 0.0 && theta > lens.w) {
+        if (!want_boundary || rxy < 1e-12) return false;
+        fail = true;
+        theta = lens.w;
+        p = vec3(p.xy * (sin(theta) / rxy), cos(theta));
+        rxy = length(p.xy);
+    }
     // Under water, the channel's own index (chromatic: red's and blue's over green's, refr_scale)
     float refr = lens.z * refr_scale;
     if (refr != 1.0 && refr > 0.0 && rxy > 1e-12) {
         float sin_d = sin(theta) * refr;
-        if (sin_d >= 1.0 || p.z <= 0.0) return false;
+        if (sin_d >= 1.0 || p.z <= 0.0) {
+            if (!want_boundary) return false;
+            fail = true;
+            sin_d = 0.9999;
+        }
         float theta_d = asin(sin_d);
         p = vec3(p.xy * (sin(theta_d) / rxy), cos(theta_d));
     }
@@ -159,7 +175,9 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
     if (stretch.x > 0.001) uv.x /= stretch.x;
     if (stretch.y > 0.001) uv.y /= stretch.y;
     // The models' "no image" (-99999, from their Newton solves): no image here either
-    return uv.x > -9999.0 && uv.y > -9999.0;
+    bool image = uv.x > -9999.0 && uv.y > -9999.0;
+    boundary_uv = fail && image;
+    return image && !fail;
 }
 
 #ifndef GRID_PASS
@@ -380,7 +398,8 @@ vec2 texel(vec2 uv)
 vec4 edge_fill(vec2 uv)
 {
     vec2 edge = clamp(uv, vec2(0.0), vec2(SRC_W, SRC_H) - 1.0);
-    float r = max(EDGE_BLUR * float(SRC_H), 1.0);
+    // Wider further out, so the frame's edge doesn't streak across the fill
+    float r = max(EDGE_BLUR * float(SRC_H), 1.0) * (1.0 + 6.0 * clamp(length(uv - edge) / float(SRC_H) * 4.0, 0.0, 1.0));
     vec4 sum = vec4(0.0);
     for (int y = -2; y <= 2; y++)
         for (int x = -2; x <= 2; x++)
@@ -516,7 +535,14 @@ vec4 hook()
     if (!frame_setup()) return BACKGROUND;
     vec2 j = HOOKED_pos * target_size - 0.5;
     vec2 uv;
-    if (!source_coord(j, uv)) return BACKGROUND;
+    want_boundary = EDGE_FILL == 1;
+    if (!source_coord(j, uv)) {
+#if EDGE_FILL && !defined(UV_OUT)
+        if (boundary_uv) return edge_fill(uv);
+#endif
+        return BACKGROUND;
+    }
+    want_boundary = false;
 #if CHROMATIC
     if (stretch.z != 1.0 || stretch.w != 1.0) {
         vec4 rb = vec4(uv, uv);
@@ -566,8 +592,14 @@ vec4 hook()
     // naga evaluates both calls, and the second overwrites uv
     bool ok = grid_coord(j, uv);
 #ifndef GRID_STRICT
-    // The tests leave this out: the grid alone
-    if (!ok) ok = frame_setup() && source_coord(j, uv);
+    // The tests leave this out: the grid alone. Where the ray has no image, the edge fill from where the lens's field ends
+    if (!ok) {
+        want_boundary = EDGE_FILL == 1;
+        ok = frame_setup() && source_coord(j, uv);
+#if EDGE_FILL
+        if (!ok && boundary_uv) return edge_fill(uv);
+#endif
+    }
 #endif
     if (!ok) return BACKGROUND;
 #if CHROMATIC

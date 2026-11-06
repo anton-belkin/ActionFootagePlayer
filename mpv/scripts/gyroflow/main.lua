@@ -454,6 +454,10 @@ local edge_blur = o.edges_blur
 
 -- What the clip plays stabilized with (find_source), nil: not stabilized
 local current_source = nil
+-- The GPU path's state (further down, at add_filter): { shader, output, mode, chromatic } while the clip plays through it,
+-- and what writes its shader again after a change
+local gpu = nil
+local gpu_refresh
 -- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
 local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
@@ -826,12 +830,10 @@ end
 -- app's mpv, 0.41.0 + 499 commits or later). The warp is the scaler too: it renders at the size of the video's rectangle
 -- on screen. What it doesn't do yet keeps the filter: a clip turned or cut to another frame, a lens or setting the
 -- shader doesn't have (gyroflow-gpu-table says which), the clean still frame and crop mode's camera; the sphere trail
--- fills the edges as the smooth fill does. nil: the filter's path
-local gpu = nil
+-- fills the edges as the smooth fill does. gpu (declared further up): nil on the filter's path
 -- Files the GPU path couldn't do, and why: they play through the filter when loaded again
 local gpu_blocked = {}
 local gpu_count = 0
-local gpu_refresh
 
 local function mpv_has_pts()
     local v = mp.get_property("mpv-version") or ""
@@ -908,6 +910,9 @@ local function gpu_apply(reply)
         mp.set_property("file-local-options/video-aspect-override", "no")
     end
     mp.set_property("file-local-options/interpolation", "no")
+    -- The RGB layout has mpv convert the whole source first: its chroma upscaled bilinearly, the warp resamples it
+    -- anyway (the app's Lanczos took 10 ms of a 5.3K frame on an M1 Pro)
+    mp.set_property("file-local-options/cscale", reply.mode == "grid" and "bilinear" or (mp.get_property("options/cscale") or "bilinear"))
     gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic }
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
 end
