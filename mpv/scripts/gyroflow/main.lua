@@ -58,6 +58,9 @@
 --   level weak|medium|strong  the level (Ctrl+k)
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
 --   underwater yes|auto|project|no  the lens under water, as the camera says, as the project says, or above water
+--   lens-mode corrected|as-recorded|toggle  the lens corrected (Gyroflow's lens correction and the projection) or as
+--                           recorded, apart from the stabilization: off with the lens corrected is the lens alone, nothing
+--                           smoothed; a clip with a lens profile and no motion data (kind "lens") plays that way
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
@@ -65,8 +68,10 @@
 --                           gyroflow.conf at once (quality.lua)
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
--- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
--- preset), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
+-- and export.lua's. The state is in user-data/gyroflow/ for the menu: available (a Gyroflow filter can be set up: a
+-- project, motion data, or a lens profile alone), kind (project, default: the preset, lens: no motion data, the lens
+-- alone), motion (there's motion data), lens_mode (corrected, as-recorded), filter (stabilized, recorded, only, "":
+-- what the filter does), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
@@ -149,7 +154,7 @@ local function clip_path()
     return path
 end
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -252,6 +257,12 @@ local function find_source(path, done)
     if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return done(nil) end
     mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
         local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        if info and not info.mode and (info.lens or "") ~= "" then
+            -- Nothing to stabilize with, but a lens profile: the lens can be corrected on its own
+            mp.msg.verbose("no motion data (" .. (info.reason or "") .. "), lens " .. info.lens)
+            return done({ project = path, kind = "lens", width = info.width, height = info.height, fps = info.fps, water = info.water,
+                          rotation = tonumber(info.rotation) or 0, lens = info.lens })
+        end
         if not info or not info.mode then
             mp.msg.verbose("not stabilizing: " .. (info and info.reason or "probe failed"))
             return done(nil)
@@ -268,7 +279,7 @@ local function find_source(path, done)
     end)
 end
 
-local KIND_LABELS = { project = "", default = " (default preset)" }
+local KIND_LABELS = { project = "", default = " (default preset)", lens = " (the lens alone)" }
 
 -- The display the window is on, in its own pixels (a Retina display's, not its points); as last seen while the window
 -- isn't up yet, nil when it never was
@@ -428,7 +439,8 @@ local function preset_horizon()
 end
 
 -- The transform bundle (docs/moments-and-workspaces.md, "Source and transform"): the stabilization (normal, wide; off is
--- a saved bundle's or this viewing's), level, horizon lock, color fringes, aspect, projection. The app's defaults are
+-- a saved bundle's or this viewing's), level, horizon lock, color fringes, aspect, projection, and the lens (corrected,
+-- or as recorded) apart from the stabilization. The app's defaults are
 -- gyroflow.conf's; the session's start as them and change only by hand, on a file that plays with them (nothing saved
 -- for it: the workspace plugin publishes no view). A file with a bundle of its own plays with it, and a change there is
 -- for viewing only (or Save, Auto save)
@@ -442,6 +454,7 @@ local function defaults_bundle()
         aspect = (split_aspect(o.aspect, o.orientation)),
         orientation = select(2, split_aspect(o.aspect, o.orientation)),
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
+        lens = o.lens == "as-recorded" and "as-recorded" or "corrected",
         preset_horizon = preset_horizon(),
     }
 end
@@ -471,6 +484,9 @@ local function view_label(v)
 end
 -- true or false: locked or not; nil: the project's (a clip with a Gyroflow project, which decides it)
 local HORIZON = { yes = true, no = false }
+-- The lens: corrected (and projected as frame.projection says), or as recorded; apart from the stabilization, so a clip
+-- stabilized or not, and one with a lens profile and no motion data (kind "lens"), has it corrected or not
+local lens_mode = "corrected"
 local horizon = session.horizon_lock == "yes"
 -- The lens under water with a flat port (yes), above water or behind a dome port (no), as the camera's telemetry says
 -- (auto), or as the project says (project, a clip with one). Input: the source's own correction (the workspace
@@ -511,6 +527,10 @@ local function take(b)
     if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
     frame.aspect, frame.orientation = split_aspect(b.aspect, b.orientation)
     frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
+    -- A bundle from before the lens was a key of its own: off showed the lens as recorded too
+    if b.lens == "corrected" or b.lens == "as-recorded" then lens_mode = b.lens
+    elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
+    else lens_mode = session.lens end
     return b.view == "off"
 end
 
@@ -589,6 +609,9 @@ local function time_offset()
     return nil
 end
 
+-- What the filter does with the lens and the motion (vs-gyroflow's LensMode, further down), nil: no filter
+local filter_lens
+
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
     local _, trim, alone = fixed()
@@ -609,7 +632,8 @@ local function gyroflow_filter(source, enabled)
                                                 alone = project_alone,
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
                                                 aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
-                                                projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil }),
+                                                projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil,
+                                                lens = filter_lens(source) or "stabilized" }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -619,22 +643,35 @@ end
 
 -- Off for this clip (Ctrl+g)
 local stab_off = false
+-- The stabilization and the lens as the filter does them: stabilized with the lens corrected or as recorded, the lens
+-- alone corrected (the stabilization off, or no motion data: kind "lens"), or nothing (off and as recorded: no filter)
+filter_lens = function(source)
+    source = source or current_source
+    if not source then return nil end
+    if source.kind ~= "lens" and not stab_off then return lens_mode == "as-recorded" and "recorded" or "stabilized" end
+    if lens_mode == "corrected" then return "only" end
+    return nil
+end
+-- The filter is on: it makes the frame (else mpv's own turn and crop do)
+local function filtering()
+    return current_source ~= nil and filter_lens() ~= nil
+end
 -- Ctrl+e on a clip without motion data: the project Gyroflow will save for it is waited for
 local waiting = false
 
 -- The clean still frame needs the stabilization's filter in the chain, on
 still.init(o, function()
-    if not current_source or stab_off then return false end
+    if not filtering() then return false end
     for _, f in ipairs(mp.get_property_native("vf") or {}) do
         if f.label == LABEL and f.enabled ~= false then return true end
     end
     return false
-end, function() return current_source and not stab_off and frame_step(current_source) or 1 end)
+end, function() return filtering() and frame_step(current_source) or 1 end)
 
 -- Crop mode (c): the camera turned and zoomed by the plugin where it stabilizes the clip, mpv's own pan and zoom elsewhere
 crop.init({
     stabilizing = function()
-        if not current_source or stab_off then return false end
+        if not filtering() then return false end
         for _, f in ipairs(mp.get_property_native("vf") or {}) do
             if f.label == LABEL and f.enabled ~= false then return true end
         end
@@ -673,6 +710,9 @@ local function publish()
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
         project = has_project(current_source) and current_source.project or "",
         view = stab_off and "off" or view, level = level,
+        -- The motion data to stabilize with (a project, or the clip's own), and the lens: corrected or as recorded, and
+        -- what the filter does (stabilized, recorded, only: the lens alone; "" none)
+        motion = current_source ~= nil and current_source.kind ~= "lens", lens_mode = lens_mode, filter = filter_lens() or "",
         horizon_lock = horizon == nil and "project" or (horizon and "yes" or "no"), edges = edge_mode, waiting = waiting,
         underwater = underwater, water = current_source and current_source.water or false,
         chromatic = chromatic, chromatic_available = chromatic_shader,
@@ -739,7 +779,7 @@ local function add_filter(source)
     local off = take(fixed())
     clip_settings(source)
     if has_project(source) then
-        view, off, horizon = "normal", false, nil
+        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
         frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
@@ -766,15 +806,16 @@ local function add_filter(source)
     local step = step_filter(source, true)
     if step then table.insert(vf, step) end
     if scale then table.insert(vf, scale) end
-    table.insert(vf, gyroflow_filter(source, not off))
+    table.insert(vf, gyroflow_filter(source, filter_lens(source) ~= nil))
     mp.set_property_native("file-local-options/vf", vf)
     -- The plugin's frame is upright: mpv's own turn by the file's display matrix would turn it again
     mp.set_property("file-local-options/video-rotate", off and tostring(frame.rotation) or "no")
     mp.msg.info("stabilizing with " .. source.project .. KIND_LABELS[source.kind] .. (source.preset and (" + " .. source.preset) or "") .. ", " .. interpolation(source)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
-                .. (has_project(source) and "" or ", " .. level)
-                .. (horizon ~= nil and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
+                .. ((has_project(source) or filter_lens(source) == "only") and "" or ", " .. level)
+                .. (filter_lens(source) == "only" and ", the lens alone corrected" or filter_lens(source) == "recorded" and ", the lens as recorded" or "")
+                .. ((horizon ~= nil and filter_lens(source) ~= "only") and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
 end
 
 -- The chain set up again (further down)
@@ -790,7 +831,7 @@ local function find_water(path, source)
         local turn = tonumber(info.rotation) or 0
         if turn ~= (source.rotation or 0) then
             source.rotation = turn
-            if (frame.rotation ~= 0 or shown_aspect() ~= "original") and not stab_off then place_filters(true) end
+            if (frame.rotation ~= 0 or shown_aspect() ~= "original") and filtering() then place_filters(true) end
         end
         if info.water then
             source.water = true
@@ -852,8 +893,10 @@ mp.register_event("file-loaded", function()
             end
         end)
     end
-    if current_source then
-        mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+    if current_source and current_source.kind == "lens" then
+        if filtering() then mp.osd_message("Gyroflow: no motion data, the lens corrected", 1.5) end
+    elseif current_source and filtering() then
+        mp.osd_message("Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
                        .. (view == "wide" and ", wider view" or ""), 1.5)
     end
 end)
@@ -947,7 +990,7 @@ end
 still.full_size({
     -- Playing renders it smaller, or skips frames
     needed = function()
-        if not current_source or stab_off or full_size then return false end
+        if not filtering() or full_size then return false end
         return render_sizes(current_source).key ~= render_sizes(current_source, true).key or frame_step(current_source) > 1 or fast(current_source)
     end,
     active = function() return full_size end,
@@ -980,7 +1023,7 @@ local function display_changed()
     if display_timer then display_timer:kill() end
     display_timer = mp.add_timeout(0.5, function()
         display_timer = nil
-        if not current_source or stab_off or o.resolution == "video" then return end
+        if not filtering() or o.resolution == "video" then return end
         local sizes = render_sizes(current_source)
         if sizes.key == current_source.sizes then return end
         mp.msg.info(string.format("display %dx%d: stabilizing at %s", w, h, sizes.key))
@@ -999,21 +1042,47 @@ local mpv_frame
 -- The stabilization on (normal), on with the wider view (wide), or off for this clip; normal and wide stick
 local function show(v)
     if not current_source then return no_source() end
-    local was_on = not stab_off
+    if current_source.kind == "lens" then
+        return mp.osd_message("Gyroflow: no motion data in this clip, only its lens is corrected (Ctrl+e: optical flow in Gyroflow)", 2.5)
+    end
+    local before = filter_lens()
     local enabled = v ~= "off"
     if enabled then view = v end
     if enabled and not has_project(current_source) then sticks("view", v) end
     stab_off = not enabled
     write_edge_control()
     -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
-    -- clip, whose rate depends on the view's edges (gyroflow.vpy), nor on or off: the input scaling goes with it, off
-    -- shows the video as it is
-    if not (was_on and enabled and not fast(current_source)) then place_filters(enabled) end
+    -- clip, whose rate depends on the view's edges (gyroflow.vpy), nor when what the filter does changes (on, off, the
+    -- lens alone): the input scaling goes with it, no filter shows the video as it is
+    if not (before ~= nil and before == filter_lens() and not fast(current_source)) then place_filters(filtering()) end
     mpv_frame()
     publish()
-    mp.msg.info("stabilization " .. view_label(v))
-    mp.osd_message("Gyroflow: " .. view_label(v), 1.5)
+    mp.msg.info("stabilization " .. view_label(v) .. (filter_lens() == "only" and ", the lens corrected" or ""))
+    mp.osd_message("Gyroflow: " .. view_label(v) .. (filter_lens() == "only" and ", the lens corrected" or ""), 1.5)
 end
+
+-- The lens corrected or as recorded (the transform's, apart from the stabilization); over a Gyroflow project, for
+-- viewing only
+local function set_lens(v)
+    if v == "toggle" then v = lens_mode == "corrected" and "as-recorded" or "corrected" end
+    if v ~= "corrected" and v ~= "as-recorded" then return end
+    if not current_source then
+        lens_mode = v
+        sticks("lens", v)
+        publish()
+        return mp.osd_message("Gyroflow: no lens profile for this clip", 2)
+    end
+    local before = filter_lens()
+    lens_mode = v
+    if not has_project(current_source) then sticks("lens", v) end
+    if before ~= filter_lens() then
+        with_pause("Gyroflow: the lens " .. (v == "corrected" and "corrected" or "as recorded") .. "…", function() place_filters(filtering()) end)
+    end
+    mpv_frame()
+    publish()
+    mp.osd_message("Gyroflow: the lens " .. (v == "corrected" and "corrected" or "as recorded"), 1.5)
+end
+mp.register_script_message("lens-mode", set_lens)
 
 -- mpv's own turn and crop of the frame where the stabilization doesn't make it (off, or no motion data): the crop in
 -- the decoded frame's own coordinates, before the turn
@@ -1021,7 +1090,7 @@ mpv_frame = function()
     if not mp.get_property("path") then return end
     -- Stabilized, the plugin's frame is upright already (the file's turn and the frame's): mpv turns it no more
     local rotation, crop = "no", ""
-    if not (current_source and not stab_off) then
+    if not filtering() then
         -- mpv's turn is added to the file's own (its display matrix), and the crop is in the decoded frame's coordinates
         rotation = tostring(frame.rotation)
         local d = mp.get_property_native("video-dec-params")
@@ -1057,7 +1126,7 @@ local function set_frame(aspect, rotation, projection, orientation)
     local message = "Frame: " .. (aspect == "original" and "its own ratio" or aspect) .. ", " .. ORIENTATION_LABELS[orientation]
         .. (shown ~= "original" and shown ~= aspect and (" (" .. shown .. ")") or "") .. ", " .. ROTATION_LABELS[rotation]
         .. ", " .. PROJECTION_LABELS[projection]
-    if current_source and not stab_off then
+    if filtering() then
         with_pause(message, function() place_filters(true) end)
     else
         mp.osd_message(message, 2)
@@ -1196,7 +1265,7 @@ local function set_chromatic(value)
     sticks("chromatic", value)
     write_edge_control()
     publish()
-    if current_source and not stab_off and mp.get_property_native("pause") then
+    if filtering() and mp.get_property_native("pause") then
         local pos = mp.get_property_number("time-pos")
         if pos then mp.commandv("seek", tostring(pos), "absolute+exact") end
     end
@@ -1256,7 +1325,7 @@ local function set_quality(key, value)
     publish()
     mp.msg.info("quality: " .. key .. " " .. value)
     local message = "Gyroflow: " .. (key == "edges" and "edges: " or "") .. QUALITY[key][value]
-    if (key == "fps_limit" or key == "resolution") and current_source and not stab_off then
+    if (key == "fps_limit" or key == "resolution") and filtering() then
         with_pause(message .. "…", function() place_filters(true) end)
     elseif key ~= "edges" then
         mp.osd_message(message, 2)
@@ -1266,7 +1335,7 @@ end
 mp.register_script_message("quality", set_quality)
 
 quality.init(o, {
-    stabilizing = function() return current_source ~= nil and not stab_off end,
+    stabilizing = function() return filtering() end,
     short_side = function()
         if not current_source then return nil end
         local out = render_sizes(current_source).output
@@ -1292,6 +1361,7 @@ local function as_plays()
         aspect = project and session.aspect or frame.aspect,
         orientation = project and session.orientation or frame.orientation,
         projection = project and session.projection or frame.projection,
+        lens = project and session.lens or lens_mode,
     }
 end
 
@@ -1300,11 +1370,11 @@ mp.register_script_message("remember", function()
     local saved = platform.save_options("gyroflow", {
         { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
         { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "orientation", b.orientation }, { "projection", b.projection },
-        { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
+        { "lens", b.lens }, { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
         { "still", still.enabled() and "yes" or "no" },
     })
     if saved then
-        o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection
+        o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection, o.lens = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection, b.lens
         DEFAULTS = defaults_bundle()
         for k, v in pairs(b) do session[k] = v end
         publish()
@@ -1329,13 +1399,13 @@ mp.register_script_message("apply-view", function(json)
     local off = take(b)
     frame.rotation = turn
     if has_project(current_source) then
-        view, off, horizon = "normal", false, nil
+        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
         frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
     end
     stab_off = off
     write_edge_control()
     if current_source then
-        with_pause("Gyroflow: as saved…", function() place_filters(not stab_off) end)
+        with_pause("Gyroflow: as saved…", function() place_filters(filtering()) end)
     end
     mpv_frame()
     publish()
@@ -1473,7 +1543,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     -- One saved meanwhile is the user's: open it as it is
     local project = find_project(path)
     if project then return edit_project(project) end
-    if not current_source then
+    if not current_source or current_source.kind == "lens" then
         return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data:\n"
             .. "let it find the motion from the picture (optical flow) and save the project next to the video,\n"
             .. "then it plays here stabilized")

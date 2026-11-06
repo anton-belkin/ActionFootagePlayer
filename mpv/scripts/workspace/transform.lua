@@ -3,16 +3,18 @@
 --
 -- Input: how to read the source right, set once, kept only beside the source (its .afp.json's `source`): the log
 -- curve, the turn it was recorded with, the lens under water with a flat port. A correction from anywhere (the source,
--- a moment, a clip preview) is written there at once, and every moment and clip preview of it reads it there.
+-- a moment, a clip preview) is for viewing until saved (the Source tab's Save), then written there, and every moment
+-- and clip preview of it reads it there.
 --
 -- Transform: how it's shown, a matter of taste, always kept whole, all its keys at once (a bundle): the
 -- stabilization (normal, wide, off), its level, the horizon lock, the water's color fringes, the frame's aspect and
--- lens projection. A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
+-- orientation, the lens's projection, and the lens corrected or as recorded (apart from the stabilization: corrected
+-- with it off is the lens alone). A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
 -- `stab`, with "settings of its own"); with none, the session's plays (the gyroflow plugin's, from the app's defaults
 -- and changed only by hand). The topmost bundle there is plays, and bundles never mix.
 --
--- A Gyroflow project owns what it has: the smoothing (level), the horizon, the frame, the projection, and of the
--- input the turn and the lens under water. They're shown as the project's, and kept in a bundle beside it only to come
+-- A Gyroflow project owns what it has: the smoothing (level), the horizon, the frame, the projection, the lens, and of
+-- the input the turn and the lens under water. They're shown as the project's, and kept in a bundle beside it only to come
 -- back if the project goes.
 --
 --   local t = require('transform')
@@ -33,10 +35,10 @@
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection" }
+M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle; a wider view or none over it is for viewing only, so the view too
-M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true }
+M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
 M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear" }
 
 local VALID = {
@@ -47,6 +49,7 @@ local VALID = {
     aspect = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true },
     orientation = { ["as-is"] = true, landscape = true, portrait = true },
     projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true },
+    lens = { corrected = true, ["as-recorded"] = true },
 }
 
 local function valid(k, v)
@@ -108,7 +111,9 @@ function M.complete(bundle, session)
             added = true
         end
         if not valid(k, v) then
-            if M.NEUTRAL[k] ~= nil then v = M.NEUTRAL[k] else v = session[k] end
+            -- The lens before it was a key of its own: corrected wherever it was stabilized, as recorded with it off
+            if k == "lens" and type(bundle) == "table" and next(bundle) ~= nil then v = out.view == "off" and "as-recorded" or "corrected"
+            elseif M.NEUTRAL[k] ~= nil then v = M.NEUTRAL[k] else v = session[k] end
             if not valid(k, v) then v = nil end
             added = added or v ~= nil
         end

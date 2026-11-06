@@ -204,9 +204,15 @@ end
 
 local function stabilization_menu(g, key)
     local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"], key["script-binding gyroflow/level"]
-    if not g.available then
+    -- The lens, apart from the stabilization: corrected or as recorded (with a lens profile)
+    local lens_items = submenu("Lens", {
+        item(g.kind == "project" and "As in the project" or "Corrected", "script-message-to gyroflow lens-mode corrected", { checked = g.lens_mode == "corrected" }),
+        item("As recorded", "script-message-to gyroflow lens-mode as-recorded", { checked = g.lens_mode == "as-recorded" }),
+    }, { disabled = not g.available })
+    if not g.motion then
         return {
             info("No motion data in this clip"),
+            lens_items,
             g.waiting and info("Waiting for the project from Gyroflow…")
                 or item("Stabilize in Gyroflow (optical flow)…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         }
@@ -229,7 +235,8 @@ local function stabilization_menu(g, key)
         }, { shortcut = level, disabled = g.kind == "project" }),
         SEPARATOR,
         -- A clip with a project has the project's horizon and lens (Gyroflow changes them); the lens under water is the
-        -- source's input, saved with it at once
+        -- source's input, saved with the Source tab's Save
+        lens_items,
         submenu("Horizon", {
             item("Level", "script-message-to gyroflow horizon-lock yes", { checked = g.horizon_lock == "yes" }),
             item("Free", "script-message-to gyroflow horizon-lock no", { checked = g.horizon_lock == "no" }),

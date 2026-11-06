@@ -27,7 +27,7 @@ expect("empty: aspect neutral", b.aspect, "original")
 expect("empty: projection neutral", b.projection, "linear")
 
 -- A whole bundle stays as it is
-local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "16:9", orientation = "portrait", projection = "linear" }
+local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "16:9", orientation = "portrait", projection = "linear", lens = "corrected" }
 b, added = t.complete(whole, session)
 expect("whole: nothing added", added, false)
 expect("whole: aspect", b.aspect, "16:9")
@@ -59,7 +59,7 @@ b = t.complete({ aspect = "16:9" }, session)
 expect("old landscape: stays landscape", b.orientation, "landscape")
 b = t.complete({ aspect = "original" }, session)
 expect("old original: as is", b.orientation, "as-is")
-b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "4:3", orientation = "as-is", projection = "linear" }, session)
+b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "4:3", orientation = "as-is", projection = "linear", lens = "corrected" }, session)
 expect("new: nothing added", added, false)
 expect("new: as is kept", b.orientation, "as-is")
 expect("a portrait ratio as an aspect isn't one", t.valid("aspect", "3:4"), false)
@@ -73,6 +73,22 @@ expect("own, as is", t.concrete("original", "as-is", 4000, 3000), "original")
 expect("own, portrait of 4:3", t.concrete("original", "portrait", 4000, 3000), "3:4")
 expect("own, landscape of a landscape", t.concrete("original", "landscape", 4000, 3000), "original")
 expect("own, landscape of a portrait 9:16", t.concrete("original", "landscape", 1080, 1920), "16:9")
+
+-- The lens, before it was a key of its own: as it played (off: as recorded), an empty bundle the session's
+b, added = t.complete({ view = "off", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "original", orientation = "as-is", projection = "linear" }, session)
+expect("old off: lens as recorded", b.lens, "as-recorded")
+expect("old off: added", added, true)
+b = t.complete({ view = "wide", level = "weak" }, session)
+expect("old on: lens corrected", b.lens, "corrected")
+b = t.complete({}, { lens = "as-recorded" })
+expect("empty: the session's lens", b.lens, "as-recorded")
+b = t.complete({ view = "off", lens = "corrected" }, session)
+expect("off with the lens corrected: the lens alone", b.lens, "corrected")
+local lensy = {}
+for k, v in pairs(whole) do lensy[k] = v end
+lensy.lens = "as-recorded"
+expect("status: the lens changed", t.status(whole, lensy, false), "changed")
+expect("status: the lens over a project is for viewing", t.status(whole, lensy, true), "saved")
 
 -- pick, input_of
 expect("pick: none", t.pick({ curve = "dlogm" }), nil)

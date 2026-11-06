@@ -247,12 +247,15 @@ switches and buttons, scrolled with the wheel:
   interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
   were moved).
 - **Source**: what the clip is, Finder and its path, and how to read it right ([its input](#source-and-transform)):
-  the log curve, the turn it was recorded with, the lens (its type, as Gyroflow takes it, and whether it was under
-  water with a flat port). Set once, saved with the source at once. Its marks.
+  its color as recorded (log and its curve, HDR in HLG or PQ with or without Dolby Vision, or SDR), the log curve,
+  the turn it was recorded with, the lens (the camera, its lens profile and where it comes from, whether there's
+  motion data, and whether it was under water with a flat port). **Save to the source** and **Revert to saved**, its
+  own: a change is for viewing until saved. Its marks.
 - **Transform**: how it's shown ([its transform](#source-and-transform)): where that's defined, **Save**, **Revert
   to saved**, **Use as default**, **Auto save**, a moment's or clip preview's **Settings of its own**; the
-  stabilization (on, wider, off), the level, the horizon (level or free), the **Frame** (its ratio, drawn, and
-  as is, landscape or portrait), the projection (linear or a fisheye) and the water's color aberration. The dot in a
+  stabilization (on, wider, off), the level, the horizon (level or free), the **Lens** (corrected, with its
+  projection, linear or a fisheye; or as recorded), the **Frame** (its ratio, drawn, and as is, landscape or
+  portrait) and the water's color aberration. The dot in a
   corner marks what's saved, beside what's chosen. With a Gyroflow project, what the project has is shown as its
   values, with **Edit in Gyroflow…**.
 - **Output**: **Display**, the video output on this screen (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping;
@@ -281,12 +284,12 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: saved with it at once. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
+| `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` | The clip's next video output: HDR (HLG), HLG with Dolby Vision in HDR and in SDR (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
-| `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: saved with it at once, for all its moments and clips | `dlogm/curve` |
+| `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: Source → Save to the source keeps it, for all its moments and clips | `dlogm/curve` |
 | `Ctrl+p` | Temporal denoise of the paused frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
@@ -335,6 +338,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
 | `gyroflow.conf`: `chromatic_skip=no` | `yes`: the color aberration correction skipped on this screen, for smooth playback (Performance & Quality); the clips' transforms keep it, exports and photos have it |
 | `gyroflow.conf`: `aspect=original`, `orientation=as-is`, `projection=linear` | the default frame: `original` or a ratio landscape-wise (`16:9`, `4:3`, `5:4`, `1:1`), its orientation (`as-is`, `landscape`, `portrait`), and the projection (`linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`); **Use as default** writes them |
+| `gyroflow.conf`: `lens=corrected` | the default lens: `corrected` (Gyroflow's lens correction and the projection, with the stabilization off too: the lens alone) or `as-recorded`; **Use as default** writes it |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
@@ -605,9 +609,13 @@ a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
-for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it in SDR
-through NBCU's HLG or PQ → SDR conversion (one in Display P3 by mpv's tone mapping, NBCU's being for BT.2020); on a
-screen without HDR it starts that way, as log clips do.
+for log and graded a second time, whatever camera metadata or `_D` name it carries. Output → Display offers what its
+format allows: HDR as recorded; with Dolby Vision as macOS shows it, in HDR or toned down to SDR (its own Dolby
+Vision when it has one, profile 8.4 on HLG or 8.1 on PQ; else the player's trims, as an RPU of profile 8.4 for HLG
+and 8.1 for PQ: HDR10 underneath); in SDR by mpv's tone mapping or NBCU's HLG or PQ → SDR conversion (NBCU's for
+BT.2020 only). On a screen without HDR it starts in SDR, as log clips do. Export follows the look: Export in SDR
+through NBCU's conversion, and with Dolby Vision the player's RPU in the file (a file's own isn't carried: it's for
+the frames as they were). An SDR file has one look, as recorded.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses), without edges to fill. Filling them costs more: the export writes the sphere with every frame, where
@@ -692,12 +700,15 @@ What the player keeps about a clip comes in two kinds, and the panel has a tab f
 **The source's input** (the Source tab): how to read the source right, set once. The log curve (as the camera says,
 or one picked by hand), the turn it was recorded with (on top of what the file itself says), and the lens under
 water with a flat port (Auto: as the camera's telemetry says; Yes; No, above water or behind a dome port). It's kept
-only with the source, in its own file beside it (`<clip>.afp.json`, with its marks), and saved there the moment it's
-changed, from wherever: the source, or one of its moments or clip previews, which all read it there.
+only with the source, in its own file beside it (`<clip>.afp.json`, with its marks). A change, from wherever (the
+source, or one of its moments or clip previews, which all read it there), is for viewing until **Save to the source**
+on the Source tab writes it; **Revert to saved** goes back. The Transform tab's Save never touches it. The tab also
+shows what the source is: its color as recorded, the camera and the lens profile Gyroflow takes (from the file, its
+database, the Gyroflow project, or unknown) and whether it has motion data.
 
 **The transform** (the Transform tab): how it's shown, a matter of taste. The stabilization (on, wider, off), the
-level, the horizon (level or free), the color aberration under water, the frame's ratio and orientation, and the
-projection. It's kept only whole, every setting at once, never one alone:
+level, the horizon (level or free), the lens (corrected, or as recorded) and its projection, the color aberration
+under water, and the frame's ratio and orientation. It's kept only whole, every setting at once, never one alone:
 
 - **Where it's defined**, from the top: what's chosen while it plays (for viewing only, until it ends); a moment's or
   clip preview's own (with **Settings of its own**); the source's own (in its file); the session's, which starts as
@@ -718,12 +729,18 @@ projection. It's kept only whole, every setting at once, never one alone:
   input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). Only a
   wider view (how much the project's crop cuts off) or none, for viewing, never saved. What was saved beside the
   clip before stays in its file, not played, and comes back if the project goes.
+- **Lens**: apart from the stabilization. **Corrected** (Gyroflow's lens correction, and the projection below) or **As
+  recorded**. It needs a lens profile (Source → Lens), not motion data: the stabilization off with the lens
+  corrected shows the lens alone corrected, nothing smoothed, and so does a clip with a lens profile and no motion
+  data (an underwater rig that's steady already). A clip whose camera recorded no lens (an Osmo Action 6 with its own
+  stabilization on records neither) can't have it corrected yet: picking a lens by hand comes later. A transform
+  saved before the lens was a setting of its own plays as it did: off with the lens as recorded.
 - **Frame**: the ratio (the video's own, 16:9, 4:3, 5:4, 1:1) and its orientation (**As is**: as the source is, a
   vertical clip's 16:9 is 9:16; **Landscape**; **Portrait**), and the projection: linear
   (straight lines straight), or a fisheye, its edges more and more compressed (Gyroflow's stereographic,
   equidistant, equisolid and orthographic), for Wide footage above water. The player shows it as it'll be, and
-  exports, moments, clip previews and photos are made in it. Where the clip isn't stabilized, mpv crops it; the
-  projection needs the stabilization.
+  exports, moments, clip previews and photos are made in it. Where Gyroflow doesn't make the frame (no lens
+  correction, no stabilization), mpv crops it; the projection needs the lens corrected.
 - **Not in either**: the video output (Output → Display: it depends on the screen) and Performance & Quality (this
   computer's), which make playback lighter without changing what's saved or exported.
 

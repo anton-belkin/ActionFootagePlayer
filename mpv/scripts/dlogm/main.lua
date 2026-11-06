@@ -38,8 +38,11 @@
 -- The SDR looks tag the video as BT.709 for mpv, and leave the target as it was: on an HDR screen they show as an
 -- SDR screen shows them.
 -- A file tagged HDR has its own: as it is, in HDR (hdr; L too), or in SDR by NBCU's conversion for its transfer
--- (nbcu: nbcu_hlg2sdr.glsl, nbcu_pq2sdr.glsl, in BT.2020), or by mpv's tone mapping (tonemap), or, signaled as
--- Dolby Vision (a dvvC box, as the player's own Dolby Vision exports have), by macOS with its own RPU (dv). Ctrl+l still grades one with a log curve by hand.
+-- (nbcu: nbcu_hlg2sdr.glsl, nbcu_pq2sdr.glsl, in BT.2020), or by mpv's tone mapping (tonemap), or by macOS with a
+-- Dolby Vision RPU (dv, dvsdr): its own when it's signaled as profile 8 (a dvvC box: an HLG base layer, 8.4, or an
+-- HDR10 one, 8.1), else the player's for its transfer (dv/nbcu_fit.rpu for HLG, dv/nbcu_fit.81.rpu for PQ, or the
+-- user's trims). Profile 5 has no base layer to show: mpv's tone mapping only. Ctrl+l still grades one with a log
+-- curve by hand.
 -- Noise reduction while it plays (shaders/denoise.glsl, on the video's planes before mpv turns them into RGB) is off and
 -- out of the menus: at the frame rates it plays at, the eye evens the noise out anyway. The code stays, for denoise=yes
 -- in dlogm.conf; the paused frame's clean-up (the gyroflow plugin's Ctrl+p) is what does the job.
@@ -72,7 +75,8 @@
 -- ""), curve (the one applied, or ""), look (hdr, dv, dvsdr, tonemap, nbcu, maker, off, or "" when untouched), looks (the ones
 -- the file has, in Ctrl+s's order), maker (whose LUT maker is, or ""), maker_lut (which LUT that is and where it's
 -- from), sdr_look (the SDR look an export in SDR takes: maker or nbcu, or ""), screen (hdr, sdr, or "" when
--- unknown), hdr (the file is tagged HDR: hlg or pq, or ""), denoise (the noise reduction is on), dv_trims (the dv
+-- unknown), hdr (the file is tagged HDR: hlg or pq, or ""), prim (its primaries), dv_profile (its own Dolby Vision:
+-- "8.4", "8.1", "5", or ""), denoise (the noise reduction is on), dv_trims (the dv
 -- look's), dv_custom (they're the user's), dv_neutral (they're all neutral), dv_live (each frame's L1 is measured and
 -- written into the RPU: the scene levels, l3*, are left neutral), dv_own (the dv look is the file's own Dolby Vision).
 --
@@ -132,6 +136,8 @@ local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl
 local DENOISE = "shaders/denoise.glsl"
 -- The dv look's Dolby Vision RPU (made by afp-rpu from dv/nbcu_fit.json, tools/make_dv_rpu.sh) and its name
 local DV_RPU = "dv/nbcu_fit.rpu"
+-- The same for PQ video: profile 8.1 (an HDR10 base layer) instead of 8.4 (afp-rpu --profile 8.1)
+local DV_RPU_PQ = "dv/nbcu_fit.81.rpu"
 local DV_LOOK = "dv/nbcu_fit.json"
 local DV_NAME = "NBCU fit"
 -- The user's own trims, when changed (dv-trim): the look as JSON and its RPU, made by afp-rpu (the gyroflow plugin's,
@@ -246,9 +252,9 @@ local function label(m)
         elseif m == "tonemap" then
             text = text .. " tone-mapped to SDR by mpv"
         elseif m == "dv" then
-            text = text .. " with its Dolby Vision, as macOS shows it"
+            text = text .. (hdr.dv_signaled and " with its Dolby Vision" or (" + Dolby Vision (" .. DV_NAME .. ")")) .. ", as macOS shows it"
         elseif m == "dvsdr" then
-            text = text .. " with its Dolby Vision, toned down to SDR by macOS"
+            text = text .. (hdr.dv_signaled and " with its Dolby Vision" or (" + Dolby Vision (" .. DV_NAME .. ")")) .. ", toned down to SDR by macOS"
         else
             text = text .. ", as it is"
         end
@@ -291,13 +297,17 @@ local function plugin_file(name)
     return nil
 end
 
+-- The player's Dolby Vision RPU for video in a transfer (further down)
+local our_rpu
+
 -- The looks this file has, in Ctrl+s's order: hdr and dv (the system tones them down), mpv's tone mapping, then
--- the SDR ones whose shaders are there
+-- the SDR ones whose shaders are there. An HDR file's dv looks: its own Dolby Vision (profile 8: an HLG or HDR10 base
+-- layer macOS shows with its RPU), else the player's RPU for its transfer; none for profile 5 (no base layer to show)
 local function looks()
     if not base then return {} end
     if hdr and not curve then
         local list = { "hdr" }
-        if DV_OK and hdr.dv_signaled and hdr.trc == "hlg" then
+        if DV_OK and not hdr.dovi and (hdr.dv_signaled or our_rpu(hdr.trc)) then
             table.insert(list, "dv")
             if DV_EDR then table.insert(list, "dvsdr") end
         end
@@ -334,7 +344,7 @@ local function resolve(want)
 end
 
 -- The dv look's trims: the shipped look (NBCU fit), or the user's, read once
-local dv_look, dv_user_rpu = nil, nil
+local dv_look, dv_user_rpu, dv_user_rpu_pq = nil, nil, nil
 local function read_json(path)
     local f = path and io.open(path, "r")
     if not f then return nil end
@@ -349,6 +359,8 @@ local function load_dv_look()
     if user and user.rpu then
         local rpu = utils.join_path(DV_USER, "look." .. user.rpu .. ".rpu")
         if file_exists(rpu) then dv_user_rpu = rpu end
+        local pq = utils.join_path(DV_USER, "look." .. user.rpu .. ".81.rpu")
+        if file_exists(pq) then dv_user_rpu_pq = pq end
     end
     return dv_look
 end
@@ -364,12 +376,23 @@ local function dv_neutral()
 end
 -- Whether the dv looks write each frame's own L1 (the app's mpv has it, and dlogm.conf doesn't turn it off)
 local function dv_live() return DV_LIVE and o.dv_live_l1 or false end
+-- The player's RPU for video in `trc` (HLG: 8.4, PQ: 8.1): the user's trims when changed, else the shipped look's
+our_rpu = function(trc)
+    load_dv_look()
+    if trc == "pq" then return dv_user_rpu_pq or plugin_file(DV_RPU_PQ) end
+    return dv_user_rpu or plugin_file(DV_RPU)
+end
 
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local c = curve or CURVE.dlogm
     local sdr_look = ""
-    if curve then
+    if hdr and not curve then
+        -- An HDR file in SDR: NBCU's conversion for its transfer, where there is one
+        local has = {}
+        for _, l in ipairs(looks()) do has[l] = true end
+        sdr_look = has.nbcu and "nbcu" or ""
+    elseif curve then
         sdr_look = (current == "maker" or current == "nbcu") and current
             or resolve((chosen.sdr == "maker" or chosen.sdr == "nbcu") and chosen.sdr or "maker")
         if sdr_look ~= "maker" and sdr_look ~= "nbcu" then sdr_look = "" end
@@ -379,7 +402,9 @@ local function publish()
         look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
         sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise, dv = DV_OK,
         maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
-        dv_own = hdr ~= nil and not curve,
+        dv_own = hdr ~= nil and not curve and hdr.dv_signaled == true,
+        -- What the file is, for the Source tab: its primaries, its Dolby Vision ("8.4", "8.1", "5", "" none)
+        prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -509,9 +534,18 @@ local function apply_hdr_file(m)
     elseif m == "tonemap" then
         sdr_target(target)
     elseif DV_LOOKS[m] then
-        -- the base layer as it is, its RPU for macOS (mpv would reshape it into PQ itself otherwise)
+        -- the base layer as it is, its own RPU for macOS (mpv would reshape it into PQ itself otherwise), or the
+        -- player's for its transfer
+        local rpu = nil
+        if not hdr.dv_signaled then
+            rpu = our_rpu(hdr.trc)
+            if not rpu then
+                mp.osd_message(label(m) .. ": its Dolby Vision RPU isn't installed", 3)
+                return false
+            end
+        end
         hdr_target(target, hdr.trc, hdr.prim)
-        dv_target(target, nil, m)
+        dv_target(target, rpu, m)
         tags = { gamma = hdr.trc, primaries = hdr.prim, dolbyvision = "no", colormatrix = "bt.2020-ncl" }
     else
         m = "hdr"
@@ -642,10 +676,16 @@ mp.add_hook("on_preloaded", 50, function(hook)
     if trc then
         -- Log is recorded tagged as SDR: what an HDR file's camera metadata says (an export's) isn't read
         hdr = { trc = trc, prim = prim or "bt.2020", tagged = true }
-        -- Signaled as Dolby Vision (a dvvC box): Apple shows it with its RPU, the dv look does too
+        -- Signaled as Dolby Vision (a dvvC box): Apple shows it with its RPU, the dv look does too. Profile 8 only (a
+        -- base layer in the file's transfer); profile 5 has none, mpv's tone mapping takes it. Tracks aren't selected
+        -- yet here: the one mpv will play (--vid, else the first video track that isn't a cover)
+        local vid = tonumber(mp.get_property("vid"))
+        local picked = nil
         for _, track in ipairs(mp.get_property_native("track-list") or {}) do
-            if track.type == "video" and track.selected and track["dolby-vision-profile"] then hdr.dv_signaled = true end
+            if track.type == "video" and not track.albumart and not picked and (not vid or track.id == vid) then picked = track end
         end
+        local profile = picked and tonumber(picked["dolby-vision-profile"])
+        if profile == 8 then hdr.dv_signaled = true elseif profile == 5 then hdr.dovi = true end
     end
     -- The curve the clip is saved to play with, by hand (the workspace plugin's view: a curve's id, or auto)
     local saved = saved_curve()
@@ -887,19 +927,26 @@ local function make_dv_rpu()
     if not f then dv_busy = false; return mp.msg.warn("can't write " .. tmp) end
     f:write(utils.format_json(saved))
     f:close()
-    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
-                              args = { AFP_RPU, "--look", tmp, "-o", out } }, function(_, r)
+    -- HLG's (8.4), then PQ's (8.1) from the same trims
+    local out_pq = utils.join_path(DV_USER, "look." .. next .. ".81.rpu")
+    local function done(r)
         dv_busy = false
         if r and r.status == 0 then
             look.rpu = next
             local lf = io.open(utils.join_path(DV_USER, "look.json"), "w")
             if lf then lf:write(utils.format_json(look)); lf:close() end
-            dv_user_rpu = out
+            dv_user_rpu, dv_user_rpu_pq = out, out_pq
             if DV_LOOKS[current] then apply(current) else publish() end
         else
             mp.msg.warn("afp-rpu: " .. ((r and r.stderr) or "failed"))
         end
         if dv_again then dv_again = false; make_dv_rpu() end
+    end
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                              args = { AFP_RPU, "--look", tmp, "-o", out } }, function(_, r)
+        if not (r and r.status == 0) then return done(r) end
+        mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                  args = { AFP_RPU, "--look", tmp, "--profile", "8.1", "-o", out_pq } }, function(_, r2) done(r2) end)
     end)
 end
 
@@ -937,10 +984,10 @@ end)
 
 -- Back to the shipped trims (NBCU fit)
 mp.register_script_message("dv-reset", function()
-    for _, n in ipairs({ "look.json", "look.a.rpu", "look.b.rpu", "look.tmp.json" }) do
+    for _, n in ipairs({ "look.json", "look.a.rpu", "look.b.rpu", "look.a.81.rpu", "look.b.81.rpu", "look.tmp.json" }) do
         os.remove(utils.join_path(DV_USER, n))
     end
-    dv_look, dv_user_rpu = nil, nil
+    dv_look, dv_user_rpu, dv_user_rpu_pq = nil, nil, nil
     if DV_LOOKS[current] then apply(current) else publish() end
 end)
 

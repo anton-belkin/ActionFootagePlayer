@@ -223,6 +223,7 @@ for curve in $HDR_CURVES; do
 done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 put luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$DLOGM/luts/3-NBCU_HLG2SDR_DL_v1.2.cube" 644
+put luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$DLOGM/luts/5-NBCU_PQ2SDR_DL_v1.2.cube" 644
 
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644

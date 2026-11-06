@@ -207,7 +207,7 @@ local function passport(d, g, t, h)
         elseif d.hdr and d.hdr ~= "" then table.insert(parts, "HDR (" .. d.hdr:upper() .. ")")
         else table.insert(parts, "not log") end
     end
-    if g then table.insert(parts, g.available and (g.kind == "project" and "Gyroflow project" or "gyro") or "no motion data") end
+    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or g.motion and "gyro" or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry") end
     if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return table.concat(parts, " · ")
@@ -226,22 +226,15 @@ end
 -- turn it was recorded with, the lens under water. Saved into the source's own file at once, for all its moments and
 -- clip previews; what a Gyroflow project has is the project's
 local TURNS = { { 0, "As is" }, { 90, "90° ↻" }, { 180, "180°" }, { 270, "90° ↺" } }
+-- An HDR file's log curves shown (Grade as log by hand…), until another file plays
+local grade_open, grade_for = false, nil
 local WATER = { { "auto", "Auto" }, { "yes", "Yes" }, { "no", "No" } }
-
-local function lens_type(g)
-    local l = g and g.lens
-    if type(l) ~= "table" then return "…" end
-    local camera = (l.camera or ""):gsub("^%s+", "")
-    if g.kind == "project" then return camera ~= "" and (camera .. ", from the project") or "From the project" end
-    if l.lens == "in the file" then return camera ~= "" and (camera .. ", from the file") or "From the file" end
-    if (l.lens or "") ~= "" then return (l.lens:gsub("_", " ")) end
-    return "Unknown"
-end
 
 local function source_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
     if not path then return u:caption(x, w, y, "Nothing plays") end
+    if grade_for ~= path then grade_open, grade_for = false, path end
     local d, g, t, h, ws = state("dlogm"), state("gyroflow"), state("dji_telemetry"), state("highlights"), state("workspace")
     for i, l in ipairs(ui.wrap(mp.get_property("filename", ""), w, 14, s)) do
         if i > 2 then break end
@@ -256,17 +249,59 @@ local function source_part(u, x, w, y)
     if ws and ws.moment and not ws.moment.missing then
         y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
     end
+    -- The input: for viewing as it's changed, saved into the source's own file with Save (for all its moments and clips)
     local own = local_file(path) and ws and ws.clip and not ws.export
-    y = u:caption(x, w, y + 4 * s, own and "Set once, for the source and all its moments and clips: saved at once"
-        or "Not saved: this file isn't a source")
+    local saved_in = own and ws.input or nil
+    local status = own and ws.input_status or nil
+    local at = y + 6 * s
+    local ix, iw = x + 10 * s, w - 20 * s
+    y = at + 8 * s
+    y = u:heading(ix, iw, y, "Input")
+    if not own then
+        y = u:caption(ix, iw, y - 4 * s, "Not saved: this file isn't a source")
+    else
+        y = u:caption(ix, iw, y - 4 * s, status == "changed" and "Changed for viewing. The dot marks what's saved"
+            or status == "saved" and "Saved in the source, for all its moments and clips"
+            or "Nothing saved: as the file says", status == "changed" and { color = C.text } or nil)
+        local ihalf = (iw - 8 * s) / 2
+        u:button(ix, ihalf, y, "input-save", "Save to the source", "script-message-to workspace input-save",
+                 { primary = status == "changed", disabled = status ~= "changed" })
+        y = u:button(ix + ihalf + 8 * s, ihalf, y, "input-revert", "Revert to saved", "script-message-to workspace input-revert",
+                     { disabled = status ~= "changed" })
+    end
+    u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
+    y = y + 10 * s
+    -- A saved value's dot, only while something differs from it
+    local changed = status == "changed"
+    local saved_input = changed and (saved_in or {}) or nil
 
     if d then
-        y = u:heading(x, w, y + 8 * s, "Log curve", keys["script-binding dlogm/curve"])
-        y = u:radio(x, w, y, "curve:auto", d.recorded ~= "" and ("From the clip: " .. (CURVE_NAMES[d.recorded] or d.recorded)) or "None, not log",
-                    d.curve == d.recorded, "script-message-to dlogm curve auto")
-        for _, c in ipairs(CURVES) do
-            if c[1] ~= d.recorded then
-                y = u:radio(x, w, y, "curve:" .. c[1], c[2], d.curve == c[1], "script-message-to dlogm curve " .. c[1])
+        y = u:heading(x, w, y + 4 * s, "Color")
+        local hdr = (d.hdr or "") ~= ""
+        local recorded = hdr and ("HDR, " .. d.hdr:upper() .. (d.prim == "bt.2020" and " · BT.2020" or d.prim ~= "" and (" · " .. d.prim) or ""))
+            or (d.recorded or "") ~= "" and ("Log, " .. (CURVE_NAMES[d.recorded] or d.recorded))
+            or "SDR, Rec.709"
+        u:text(x, y + 9 * s, "Recorded", { size = 13 })
+        u:text(x + w, y + 9 * s, recorded, { align = 6, size = 12, color = C.dim })
+        y = y + 22 * s
+        if hdr then
+            u:text(x, y + 9 * s, "Dolby Vision", { size = 13 })
+            u:text(x + w, y + 9 * s, (d.dv_profile or "") ~= "" and ("profile " .. d.dv_profile) or "none", { align = 6, size = 12, color = C.dim })
+            y = y + 22 * s
+        end
+        local saved_curve = saved_input and (saved_input.curve or "auto")
+        if hdr and not d.log and not grade_open then
+            y = u:caption(x, w, y, "Tagged HDR, so not taken for log")
+            y = u:button(x, w, y, "grade", "Grade as log by hand…", function() grade_open = true end)
+        else
+            y = u:heading(x, w, y + 6 * s, "Log curve", keys["script-binding dlogm/curve"])
+            y = u:radio(x, w, y, "curve:auto", d.recorded ~= "" and ("From the clip: " .. (CURVE_NAMES[d.recorded] or d.recorded)) or "None, not log",
+                        d.curve == d.recorded, "script-message-to dlogm curve auto", { saved = saved_curve == "auto" and d.curve ~= d.recorded })
+            for _, c in ipairs(CURVES) do
+                if c[1] ~= d.recorded then
+                    y = u:radio(x, w, y, "curve:" .. c[1], c[2], d.curve == c[1], "script-message-to dlogm curve " .. c[1],
+                                { saved = saved_curve == c[1] and d.curve ~= c[1] })
+                end
             end
         end
     end
@@ -280,21 +315,33 @@ local function source_part(u, x, w, y)
         local turn = project and 1 or index_of(TURNS, g.rotation or 0)
         local list = {}
         for _, r in ipairs(TURNS) do table.insert(list, { r[2], "script-message-to gyroflow rotate " .. r[1] }) end
-        y = u:segmented(x, w, y, "turn", list, turn, project)
+        y = u:segmented(x, w, y, "turn", list, turn, project, saved_input and index_of(TURNS, tonumber(saved_input.rotation) or 0) or nil)
         if (g.file_rotation or 0) ~= 0 then
             y = u:caption(x, w, y, "The file says it's turned " .. g.file_rotation .. "°: shown upright, and turned more by these")
         end
 
         y = u:heading(x, w, y + 8 * s, "Lens")
-        u:text(x, y + 9 * s, "Type", { size = 13 })
-        u:text(x + w, y + 9 * s, lens_type(g), { align = 6, size = 12, color = C.dim })
-        y = y + 24 * s
-        y = u:heading(x, w, y, "Under water, flat port", keys["script-binding gyroflow/lens"])
+        local l = type(g.lens) == "table" and g.lens or {}
+        local known = g.available == true
+        local rows = { { "Camera", (l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or (g.lens and "unknown" or "…") },
+                       { "Profile", project and "From the project" or (not g.lens and "…") or l.lens == "in the file" and "From the file"
+                           or (l.lens or "") ~= "" and (l.lens:gsub("_", " ")) or "Unknown" },
+                       { "Motion data", project and "Gyroflow project" or g.motion and "Gyro, in-camera stabilization off"
+                           or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
+        for _, r in ipairs(rows) do
+            u:text(x, y + 9 * s, r[1], { size = 13 })
+            u:text(x + w, y + 9 * s, r[2], { align = 6, size = 12, color = (r[2] == "Unknown") and C.saved or C.dim })
+            y = y + 22 * s
+        end
+        if not known and g.lens then
+            y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected. Picking one by hand comes later")
+        end
+        y = u:heading(x, w, y + 6 * s, "Under water, flat port", keys["script-binding gyroflow/lens"])
         local water = project and nil or index_of(WATER, g.underwater)
         list = {}
         for _, v in ipairs(WATER) do table.insert(list, { v[1] == "auto" and "Auto" or v[2], "script-message-to gyroflow underwater " .. v[1] }) end
-        y = u:segmented(x, w, y, "water", list, water, project)
-        y = u:caption(x, w, y, project and "As defined in the Gyroflow project"
+        y = u:segmented(x, w, y, "water", list, water, project or not known, saved_input and index_of(WATER, saved_input.underwater or "auto") or nil)
+        y = u:caption(x, w, y, project and "As defined in the Gyroflow project" or not known and "Needs a known lens"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")
                 .. ". For a flat port (the camera's own glass, a flat housing); behind a dome port pick No"))
         y = u:button(x, w, y + 2 * s, "edit-lens", "Edit in Gyroflow…", "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
@@ -652,9 +699,11 @@ local function project_part(u, x, w, y)
 end
 
 local function look_title(d, look)
-    if look == "hdr" then return (not d.log and d.hdr == "pq") and "HDR, PQ" or "HDR, HLG" end
-    if look == "dv" then return "HDR, HLG+DV" end
-    if look == "dvsdr" then return "SDR, HLG+DV" end
+    local file_hdr = not d.log and (d.hdr or "") ~= ""
+    local base = file_hdr and d.hdr == "pq" and "PQ" or "HLG"
+    if look == "hdr" then return "HDR, " .. base .. (file_hdr and ((d.dv_profile or "") ~= "" and " (base layer)" or ", as recorded") or "") end
+    if look == "dv" then return d.dv_own and "HDR, its own Dolby Vision" or ("HDR, " .. base .. "+DV") end
+    if look == "dvsdr" then return d.dv_own and "SDR, its own Dolby Vision" or ("SDR, " .. base .. "+DV") end
     if look == "tonemap" then return "SDR tone mapped from HDR by mpv" end
     if look == "nbcu" then return "SDR, NBCU" end
     if look == "maker" then return "SDR, camera maker's LUT" end
@@ -670,6 +719,8 @@ local function look_note(d, look)
     end
     if look == "dv" then
         if d.dv_own then return "HDR with the file's own Dolby Vision metadata: macOS tones it down by them, as Apple's devices do" end
+        if d.hdr == "pq" and not d.log then return "PQ with Dolby Vision metadata (profile 8.1, HDR10 underneath), shown by macOS: in HDR on an HDR screen, "
+            .. "toned down by the trims on an SDR one. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)." or "The trims are the author's, and can be changed in Dolby Vision.") end
         return "HLG with Dolby Vision metadata, shown by macOS: in HDR on an HDR screen, toned down by the metadata's trims "
             .. "on an SDR one, as QuickTime and Apple's devices show the export. " .. (d.dv_custom and "These are your own trims (Dolby Vision, in the rail)."
             or "They're picked by Action Footage Player's author, fitted to NBCU's HLG to SDR conversion, and can be changed in Dolby Vision.")
@@ -751,8 +802,12 @@ local function output_part(u, x, w, y)
     local d, g = state("dlogm"), state("gyroflow")
     if d then
         y = u:heading(x, w, y, "Display", keys["script-binding dlogm/sdr"])
+        local from = d.log and ("Log, " .. (CURVE_NAMES[d.curve] or d.curve)) or (d.hdr or "") ~= ""
+            and ("HDR, " .. d.hdr:upper() .. ((d.dv_profile or "") ~= "" and (" + Dolby Vision " .. d.dv_profile) or "")) or "SDR, Rec.709"
+        y = u:caption(x, w, y - 4 * s, "From " .. from)
         if not d.log and (d.hdr or "") == "" then
-            y = u:caption(x, w, y, "Not log, as the camera says")
+            y = u:radio(x, w, y, "look:sdr", "SDR, as recorded", true, function() end)
+            y = u:caption(x, w, y + 6 * s, "An SDR picture shows as it is. If it's log in fact, pick its curve in Source", { color = C.label })
         else
             if d.screen == "hdr" then y = u:caption(x, w, y, "HDR screen: SDR shows as an SDR screen would") end
             for _, look in ipairs(d.looks or {}) do
@@ -793,7 +848,7 @@ local function output_part(u, x, w, y)
             local label = (a and b and b > a) and ("Export the part " .. clock(a) .. "–" .. clock(b)) or "Export the clip"
             y = u:button(x, w, y, "export", label, "script-binding gyroflow/export", { primary = true })
         end
-        if d and d.log and (d.sdr_look or "") ~= "" then
+        if d and (d.sdr_look or "") ~= "" then
             u:button(x, half, y, "export-sdr", "Export in SDR", "script-message-to gyroflow export sdr", { disabled = g.exporting })
         end
         y = u:button(x + half + 8 * s, half, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
@@ -846,6 +901,9 @@ end
 
 -- The transform: where it's defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
 -- a moment's or clip preview's own settings; then what it has, or what its Gyroflow project has
+-- The filter makes the frame (stabilized, or the lens alone): else mpv's own crop and turn do
+local function filtering_note(g) return (g.filter or "") ~= "" end
+
 local function transform_part(u, x, w, y)
     local s = u.s
     local g, ws = state("gyroflow"), state("workspace")
@@ -882,28 +940,69 @@ local function transform_part(u, x, w, y)
     u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
     y = y + 14 * s
 
-    if not g.available then
-        y = u:caption(x, w, y, "No motion data in this clip: Gyroflow can find the motion in the picture (optical flow)")
-        if g.waiting then return u:caption(x, w, y, "Waiting for the project from Gyroflow…") end
-        y = u:button(x, w, y, "edit", "Stabilize in Gyroflow…", "script-binding gyroflow/edit", { key = edit, primary = true })
-        y = u:heading(x, w, y + 8 * s, "Frame")
-        return frame_controls(u, x, w, y, g, saved, false)
-    end
-
-    -- Stabilization: over a project, a wider view or none for viewing only (never saved)
+    -- Stabilization: with motion data (a project, or the clip's own). Over a project, a wider view or none is for viewing
+    -- only (never saved)
     y = u:heading(x, w, y, "Stabilization", keys["script-binding gyroflow/toggle"])
     local list = {}
     for _, v in ipairs(VIEWS) do table.insert(list, { v[2], "script-message-to gyroflow view " .. v[1] }) end
-    y = u:segmented(x, w, y, "view", list, index_of(VIEWS, g.view), false, not project and saved and index_of(VIEWS, saved.view) or (project and 1 or nil))
+    if not g.motion then
+        y = u:segmented(x, w, y, "view", list, 3, true)
+        y = u:caption(x, w, y, "No motion data in this clip: Gyroflow can find it in the picture (optical flow)")
+        if g.waiting then y = u:caption(x, w, y, "Waiting for the project from Gyroflow…")
+        else y = u:button(x, w, y, "edit", "Stabilize in Gyroflow…", "script-binding gyroflow/edit", { key = edit }) end
+    else
+        y = u:segmented(x, w, y, "view", list, index_of(VIEWS, g.view), false, not project and saved and index_of(VIEWS, saved.view) or (project and 1 or nil))
+    end
+    local off = g.view == "off"
+    if g.motion and project then
+        y = u:caption(x, w, y, "For viewing only, never saved. Wider shows how much the project's crop cuts off; Off shows the motion as recorded")
+    elseif g.motion then
+        y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or off and "Not stabilized: the lens below still applies"
+            or "Zoomed in so no edge shows")
+        y = u:heading(x, w, y + 8 * s, "Level", keys["script-binding gyroflow/level"])
+        list = {}
+        for _, l in ipairs(LEVELS) do table.insert(list, { l[2], "script-message-to gyroflow level " .. l[1] }) end
+        y = u:segmented(x, w, y, "level", list, index_of(LEVELS, g.level), off, saved and index_of(LEVELS, saved.level) or nil)
+        y = u:caption(x, w, y, LEVEL_NOTES[g.level] or "")
+        y = u:heading(x, w, y + 8 * s, "Horizon")
+        list = {}
+        for _, hz in ipairs(HORIZONS) do table.insert(list, { hz[2], "script-message-to gyroflow horizon-lock " .. hz[1] }) end
+        y = u:segmented(x, w, y, "horizon", list, index_of(HORIZONS, g.horizon_lock), off, saved and index_of(HORIZONS, saved.horizon_lock) or nil)
+    end
+
+    -- The lens, apart from the stabilization: corrected (and its projection) or as recorded; it needs a lens profile
+    y = u:heading(x, w, y + 8 * s, "Lens")
+    local known = g.available == true
+    local lenses = { { "as-recorded", "As recorded" }, { "corrected", project and "As in the project" or "Corrected" } }
+    list = {}
+    for _, l in ipairs(lenses) do table.insert(list, { l[2], "script-message-to gyroflow lens-mode " .. l[1] }) end
+    local lens_now = known and (g.lens_mode or "corrected") or "as-recorded"
+    y = u:segmented(x, w, y, "lens", list, index_of(lenses, lens_now), not known, not project and saved and index_of(lenses, saved.lens) or nil)
+    local corrected = known and lens_now == "corrected"
+    if not known then
+        y = u:caption(x, w, y, "The lens is unknown: Source › Lens")
+    elseif project then
+        y = u:caption(x, w, y, "As recorded: for viewing only, never saved")
+    else
+        for _, p in ipairs(PROJECTIONS) do
+            y = u:radio(x, w, y, "frame-lens:" .. p[1], p[2], (g.projection or "linear") == p[1], "script-message-to gyroflow projection " .. p[1],
+                        { note = p[3], disabled = not corrected, saved = saved and saved.projection == p[1] and (g.projection or "linear") ~= p[1] })
+        end
+        local l = type(g.lens) == "table" and g.lens or {}
+        local what = ((l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or "The lens") .. (l.lens == "in the file" and " (from the file)" or "")
+        local water = g.underwater == "yes" and ", under water" or g.underwater == "auto" and ", under water as the camera says" or ", above water"
+        y = u:caption(x, w, y, not corrected and "The lens as the camera recorded it"
+            or (what .. water .. (g.filter == "only" and ": only the lens is corrected, nothing is smoothed" or "")))
+    end
+
     if project then
-        y = u:caption(x, w, y, "For viewing only, never saved. Wider shows how much the project's crop cuts off; Off shows it as recorded")
         -- What the project has: values, changed only in Gyroflow
         local info = type(g.project_info) == "table" and g.project_info or {}
         local rows = { { "Smoothing", "its own" },
                        { "Horizon", (info.horizon or 0) > 0 and string.format("locked, %g %%", info.horizon) or "free" },
                        { "Frame", (info.width and info.height) and string.format("%d×%d", info.width, info.height) or "as the video" },
                        { "Projection", info.projection and info.projection:gsub("^%l", string.upper) or "Linear" } }
-        local bat = y + 4 * s
+        local bat = y + 8 * s
         y = bat + 8 * s
         y = u:heading(ix, iw, y, "In the Gyroflow project")
         for _, r in ipairs(rows) do
@@ -913,36 +1012,19 @@ local function transform_part(u, x, w, y)
         end
         y = u:button(ix, iw, y + 4 * s, "edit", "Edit in Gyroflow…", "script-binding gyroflow/edit", { key = edit })
         u:box(x, bat, w, y - bat + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
-        y = y + 14 * s
+        y = y + 6 * s
     else
-        y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or g.view == "off" and "As recorded" or "Zoomed in so no edge shows")
-        y = u:heading(x, w, y + 8 * s, "Level", keys["script-binding gyroflow/level"])
-        list = {}
-        for _, l in ipairs(LEVELS) do table.insert(list, { l[2], "script-message-to gyroflow level " .. l[1] }) end
-        y = u:segmented(x, w, y, "level", list, index_of(LEVELS, g.level), false, saved and index_of(LEVELS, saved.level) or nil)
-        y = u:caption(x, w, y, LEVEL_NOTES[g.level] or "")
-        y = u:heading(x, w, y + 8 * s, "Horizon")
-        list = {}
-        for _, hz in ipairs(HORIZONS) do table.insert(list, { hz[2], "script-message-to gyroflow horizon-lock " .. hz[1] }) end
-        y = u:segmented(x, w, y, "horizon", list, index_of(HORIZONS, g.horizon_lock), false, saved and index_of(HORIZONS, saved.horizon_lock) or nil)
         y = u:heading(x, w, y + 8 * s, "Frame", "a")
         y = frame_controls(u, x, w, y, g, saved, false)
-        y = u:heading(x, w, y + 8 * s, "Projection")
-        local stabilized = g.view ~= "off"
-        for _, p in ipairs(PROJECTIONS) do
-            y = u:radio(x, w, y, "frame-lens:" .. p[1], p[2], (g.projection or "linear") == p[1], "script-message-to gyroflow projection " .. p[1],
-                        { note = p[3], disabled = not stabilized, saved = saved and saved.projection == p[1] and (g.projection or "linear") ~= p[1] })
-        end
-        y = u:caption(x, w, y, stabilized and "A fisheye for Wide footage above water: linear squeezes its center and thins its edges"
-            or "Only where it's stabilized")
-        y = u:button(x, w, y + 4 * s, "edit", "Make a Gyroflow project…", "script-binding gyroflow/edit", { key = edit })
+        if not filtering_note(g) then y = u:caption(x, w, y, "Frame and turn by mpv's own crop") end
+        if g.motion then y = u:button(x, w, y + 4 * s, "edit", "Make a Gyroflow project…", "script-binding gyroflow/edit", { key = edit }) end
     end
 
     y = u:heading(x, w, y + 8 * s, "Water", keys["script-binding gyroflow/fringes"])
     local saved_fringes = nil
     if saved then saved_fringes = saved.chromatic == true end
     y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
-                 nil, not g.chromatic_available or g.underwater == "no", saved_fringes)
+                 nil, not g.chromatic_available or g.underwater == "no" or not filtering_note(g), saved_fringes)
     y = u:caption(x, w, y - 2 * s, g.chromatic_skip and "Skipped on this screen (Performance & Quality): exports and photos have it"
         or "The water's color fringes, where the lens is under water")
     return y

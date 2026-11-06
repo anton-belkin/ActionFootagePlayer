@@ -237,13 +237,17 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
 - **Input**, how to read the source right, set once: `curve` (`auto`, or a curve by hand), `rotation` (0, 90, 180,
   270 clockwise, the turn it was recorded with, on top of the file's display matrix: Gyroflow's `video_rotation`,
   before the stabilization) and `underwater` (`auto`: the camera's telemetry; `yes`: under water with a flat port;
-  `no`: above water or a dome port). Kept only in the source's `.afp.json` (`source`), always all three, and written
-  the moment one changes, from the source or any moment or clip preview of it (`input-set`, the workspace plugin's).
-  Moments and clip previews never keep it. The lens's type and the gyro's sync are input too, set in Gyroflow for now.
+  `no`: above water or a dome port). Kept only in the source's `.afp.json` (`source`), always all three. A change, from
+  the source or any moment or clip preview of it (`input-set`, the workspace plugin's), is for viewing until the
+  Source tab's **Save to the source** (`input-save`) writes it; **Revert to saved** (`input-revert`) goes back
+  (Anton, 2026-11-06: the input is saved by its own button, and the Transform tab's Save never writes it). Moments and
+  clip previews never keep it. The lens's type and the gyro's sync are input too, set in Gyroflow for now.
 - **Transform**, how it's shown: `view` (`normal`, `wide`, `off`), `level`, `horizon_lock` (`yes`: level, `no`:
   free), `chromatic`, `aspect` (`original`, or a ratio landscape-wise: `16:9`, `4:3`, `5:4`, `1:1`), `orientation`
   (`as-is`: as the source is, `landscape`, `portrait`; the W:H shown is worked out for each source's shape, so one
-  bundle fits a vertical clip and a level one alike), `projection`. An `aspect` from before the orientation (9:16:
+  bundle fits a vertical clip and a level one alike), `projection`, `lens` (`corrected`, `as-recorded`: apart from
+  the stabilization; `off` with `corrected` is the lens alone, Gyroflow with nothing smoothed, also what a clip with a
+  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected). An `aspect` from before the orientation (9:16:
   the ratio as it showed) is that ratio turned, portrait. Kept only as a whole bundle, never a key alone: the
   source's (`.afp.json`'s `view`), or a moment's or clip preview's own (its link's `stab`, with settings of its own:
   `snap` for a moment, `own` for a clip preview, the panel's one switch). Levels, the topmost one there is plays and

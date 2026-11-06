@@ -85,7 +85,7 @@ install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
 mkdir -p "$dlogm/dv"
-install -m 644 mpv/scripts/dlogm/dv/nbcu_fit.json mpv/scripts/dlogm/dv/nbcu_fit.rpu "$dlogm/dv/"
+install -m 644 mpv/scripts/dlogm/dv/nbcu_fit.json mpv/scripts/dlogm/dv/nbcu_fit.rpu mpv/scripts/dlogm/dv/nbcu_fit.81.rpu "$dlogm/dv/"
 # The other log curves' HDR shaders, from their makers' published formulas (tools/make_hdr_lut.py), and their LUTs
 # for gyroflow-export
 for curve in dlog gplog2 ilog; do
@@ -97,7 +97,7 @@ python3 -I tools/cube_to_glsl.py shaders/log_hlg.glsl.in luts/gplog_hlg.cube "$d
 for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sdr; do
     python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in "luts/${nbcu%%:*}.cube" "$dlogm/shaders/${nbcu#*:}.glsl" >/dev/null
 done
-install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
+install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/gyroflow.vpy \
     mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"

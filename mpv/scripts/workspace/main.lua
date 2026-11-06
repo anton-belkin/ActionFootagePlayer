@@ -58,7 +58,8 @@
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
---   input           the source's input, from its own file: { curve, rotation, underwater } (transform.lua)
+--   input           the source's input saved in its own file: { curve, rotation, underwater } (transform.lua); input_now:
+--                   as it's shown when changed and not saved; input_status: saved, changed, none (nothing saved)
 --   view            the transform bundle saved for it that plays (a moment's or clip preview's own, else the source's);
 --                   absent: the session's plays (the gyroflow plugin's). saved: what's saved where Save writes
 --   view_target     where Save writes: moment, preview or source (absent: nowhere); view_from: where the playing
@@ -67,8 +68,9 @@
 -- Without this plugin, the gyroflow plugin looks next to the clip itself, which is the same place for now.
 --
 -- The transform and the input (the side panel's Source and Transform): view-save, view-revert, view-auto (Auto save),
--- view-own (settings of its own), input-set <curve|rotation|underwater> <value> (the source's file at once, the dlogm
--- and gyroflow plugins'), moment-alone <yes|no|toggle>, autoplay <yes|no|toggle>.
+-- view-own (settings of its own), input-set <curve|rotation|underwater> <value> (the dlogm and gyroflow plugins', as
+-- they apply one: for viewing), input-save (into the source's file), input-revert, moment-alone <yes|no|toggle>,
+-- autoplay <yes|no|toggle>.
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
@@ -454,7 +456,8 @@ mp.add_hook("on_load", 10, function()
             sidecar.update(state.clip, takes)
             doc = sidecar.read(state.clip)
         end
-        state.input = copy(doc and doc.source)
+        state.input = doc and type(doc.source) == "table" and copy(doc.source) or nil
+        state.input_status = state.input and "saved" or "none"
         if not state.view_target then
             state.view_target = "source"
             local raw = doc and transform.pick(doc.view)
@@ -576,6 +579,8 @@ local function current_view()
     if type(g) ~= "table" then return copy(state.saved) end
     local v = {}
     for _, k in ipairs(transform.KEYS) do v[k] = g[k] end
+    -- The gyroflow plugin's `lens` is the lens profile; the bundle's lens (corrected, as recorded) is its lens_mode
+    v.lens = g.lens_mode
     if g.kind == "project" then
         local keep = state.saved or g.session or {}
         for k in pairs(transform.PROJECT_KEYS) do v[k] = keep[k] end
@@ -1675,22 +1680,57 @@ mp.register_script_message("view-auto", function()
     mp.osd_message(auto_save and "Auto save on: the transform is saved as it's changed, this session" or "Auto save off", 3)
 end)
 
--- The source's input corrected (input-set <curve|rotation|underwater> <value>, the dlogm and gyroflow plugins'): written
--- into its own file at once, whole, and so for every moment and clip preview of it
+-- The source's input as it's shown (input-set <curve|rotation|underwater> <value>, the dlogm and gyroflow plugins', as
+-- they apply a change): for viewing until Save on the Source tab (input-save) writes it into the source's own file,
+-- whole, and so for every moment and clip preview of it. Transform's Save doesn't touch it
 local INPUT_DEFAULTS = { curve = "auto", rotation = 0, underwater = "auto" }
-mp.register_script_message("input-set", function(key, value)
-    if INPUT_DEFAULTS[key] == nil or not state.clip or state.export or state.clip:find("://", 1, true) then return end
-    if key == "rotation" then value = tonumber(value) or 0 end
+local INPUT_ORDER = { "curve", "rotation", "underwater" }
+local function input_pack(from)
     local pack = {}
     for k, d in pairs(INPUT_DEFAULTS) do
-        pack[k] = (state.input or {})[k]
+        pack[k] = (from or {})[k]
         if pack[k] == nil then pack[k] = d end
     end
-    pack[key] = value
-    local ok, err = sidecar.update(state.clip, function(d) d.source = pack; stamp(d) end)
-    if not ok then return mp.osd_message("Couldn't save the correction in the source's file: " .. tostring(err), 4) end
-    state.input = pack
+    return pack
+end
+local function input_status()
+    if not state.input_now then return state.input and "saved" or "none" end
+    local saved = input_pack(state.input)
+    for _, k in ipairs(INPUT_ORDER) do
+        if tostring(state.input_now[k]) ~= tostring(saved[k]) then return "changed" end
+    end
+    return state.input and "saved" or "none"
+end
+local function input_place()
+    return state.clip and not state.export and not state.clip:find("://", 1, true)
+end
+mp.register_script_message("input-set", function(key, value)
+    if INPUT_DEFAULTS[key] == nil or not input_place() then return end
+    if key == "rotation" then value = tonumber(value) or 0 end
+    state.input_now = state.input_now or input_pack(state.input)
+    state.input_now[key] = value
+    state.input_status = input_status()
     publish()
+end)
+mp.register_script_message("input-save", function()
+    if not input_place() then return mp.osd_message("Not saved: this file isn't a source", 2) end
+    local pack = input_pack(state.input_now or state.input)
+    local ok, err = sidecar.update(state.clip, function(d) d.source = pack; stamp(d) end)
+    if not ok then return mp.osd_message("Couldn't save the input in the source's file: " .. tostring(err), 4) end
+    state.input, state.input_now = pack, nil
+    state.input_status = input_status()
+    publish()
+    mp.osd_message("Input saved in the source's file: for all its moments and clips", 2)
+end)
+-- Back to the saved input, for this viewing: each plugin applies its part again (and says so with input-set)
+mp.register_script_message("input-revert", function()
+    if not state.input_now then return end
+    local saved = input_pack(state.input)
+    local now = state.input_now
+    if tostring(now.curve) ~= tostring(saved.curve) then mp.commandv("script-message-to", "dlogm", "curve", tostring(saved.curve)) end
+    if tostring(now.rotation) ~= tostring(saved.rotation) then mp.commandv("script-message-to", "gyroflow", "rotate", tostring(saved.rotation)) end
+    if tostring(now.underwater) ~= tostring(saved.underwater) then mp.commandv("script-message-to", "gyroflow", "underwater", tostring(saved.underwater)) end
+    mp.osd_message("Input as saved", 1.5)
 end)
 
 -- A moment stabilized on its own or with its clip: written into it (and its project's trim range), played again

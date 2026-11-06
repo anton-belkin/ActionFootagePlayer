@@ -318,6 +318,26 @@ impl Frame {
     }
 }
 
+/// What's done with the lens and the motion (the transform's lens apart from its stabilization)
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum LensMode {
+    /// Stabilized, the lens corrected (and its projection): the stabilization as it always was
+    #[default]
+    Stabilized,
+    /// The lens corrected (and its projection), nothing smoothed: the frame moves as the camera did. For a clip with a
+    /// lens profile and no motion data, or the stabilization off. No rolling shutter correction either: what's read of
+    /// the motion data is the first seconds (motion.rs), and the frame would change where it stops
+    Only,
+    /// Stabilized, the lens left as recorded: Gyroflow's lens correction at 0
+    Recorded,
+}
+
+impl LensMode {
+    pub fn parse(v: &str) -> Option<LensMode> {
+        match v { "stabilized" => Some(LensMode::Stabilized), "only" => Some(LensMode::Only), "recorded" => Some(LensMode::Recorded), _ => None }
+    }
+}
+
 /// The FOV the stabilization renders at
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Fov {
@@ -398,7 +418,9 @@ pub struct Engine {
 /// for a video's own motion data. project.rs writes a project from it, so Gyroflow opens the clip as it plays
 /// `lookahead`: for the video's own motion data, how much of it is read before it plays, past its first START_S
 /// seconds (motion.rs); 0 reads all of it. The motion data as it comes in is returned with it
-pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
+/// `lens_only`: the lens alone (LensMode::Only): a video with no motion data is loaded too when it has a lens profile,
+/// and its motion data isn't streamed (nothing is smoothed)
+pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64, lens_only: bool) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
     let stab = StabilizationManager::default();
     let url = filesystem::path_to_url(project);
     let mut motion = None;
@@ -420,7 +442,10 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays
         let (m, size) = motion::Motion::open(project, &url, lookahead).map_err(|e| format!("Can't open {project}: {e}"))?;
         m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
-        if !stab.gyro.read().has_motion() {
+        if lens_only && stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
+            return Err(format!("{project}: no lens profile to correct the lens with"));
+        }
+        if !lens_only && !stab.gyro.read().has_motion() {
             return Err(format!("{project} has no project and no motion data"));
         }
         if let Some(preset) = preset {
@@ -428,8 +453,12 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
             stab.import_gyroflow_file(&filesystem::path_to_url(preset), false, |_| (), Arc::new(AtomicBool::new(false)), true)
                 .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
         }
-        log::info!("{project}: own motion data, default preset");
-        motion = Some(m);
+        if lens_only {
+            log::info!("{project}: the lens alone, nothing smoothed");
+        } else {
+            log::info!("{project}: own motion data, default preset");
+            motion = Some(m);
+        }
         None
     };
     // Project gyro transforms (including LPF) are restored after the video's motion data is loaded,
@@ -461,9 +490,23 @@ impl Engine {
     /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
     /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
     /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame) -> Result<Engine, String> {
+    /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
+    /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
         let t = std::time::Instant::now();
-        let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead)?;
+        let lens_only = lens == LensMode::Only;
+        let horizon_lock = if lens_only { Some(0.0) } else { horizon_lock };
+        let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead, lens_only)?;
+        match lens {
+            LensMode::Only => {
+                // No smoothing (gyroflow-core's first algorithm, None), no rolling shutter correction, a zoom that holds
+                stab.set_smoothing_method(0);
+                stab.params.write().frame_readout_time = 0.0;
+                stab.set_adaptive_zoom(-1.0);
+            }
+            LensMode::Recorded => stab.set_lens_correction_amount(0.0),
+            LensMode::Stabilized => {}
+        }
         // The frame's rotation on top of the file's own turn: the frames come unturned (mpv's video-rotate off)
         let frame = {
             let video = if project_json.is_some() { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
@@ -473,7 +516,7 @@ impl Engine {
             frame
         };
         // The frame's projection, before anything measures the frame (the zoom, the levels, the wider view)
-        if let Some(projection) = frame.projection { stab.set_output_projection(projection); }
+        if let (Some(projection), false) = (frame.projection, lens == LensMode::Recorded) { stab.set_output_projection(projection); }
         if let (Some(alone), None) = (alone, motion.as_ref()) {
             stab.smoothing.write().current_mut().set_parameter("trim_range_only", if alone { 1.0 } else { 0.0 });
         }
@@ -1353,6 +1396,10 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     // The output frame turned and cut to an aspect, and its projection (Frame), in place of the project's
     let frame = Frame::new(unsafe { map_get_i64(api, input, c"rotation") }.unwrap_or(0), unsafe { map_get_str(api, input, c"aspect") }.as_deref(),
                            unsafe { map_get_i64(api, input, c"projection") })?;
+    let lens = match unsafe { map_get_str(api, input, c"lens") } {
+        None => LensMode::Stabilized,
+        Some(v) => LensMode::parse(&v).ok_or_else(|| format!("unknown lens {v} (stabilized, only, recorded)"))?,
+    };
     // A project saved again within the file system's time resolution: the size tells the versions apart
     let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
     let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
@@ -1361,9 +1408,9 @@ unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Resu
     // The level isn't either: the control file switches it. Nor the sizes, in or out (render_size_for): the paused frame
     // at full size (still.lua) and another display's size cost no other engine, only the GPU workers set up again for
     // them. A second engine for a 4K clip ran a 2 GB integrated GPU out of memory
-    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{frame:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
+    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{frame:?}|{lens:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
     let input_size = (vi.width as usize, vi.height as usize);
-    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone, frame))?;
+    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone, frame, lens))?;
     let size = engine.render_size_for(input_size, output_override);
     Ok((engine, size))
 }
@@ -1490,10 +1537,10 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
                            vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
         (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;lens:data:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
         (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;".as_ptr(),
+                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;lens:data:opt;".as_ptr(),
                                c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),

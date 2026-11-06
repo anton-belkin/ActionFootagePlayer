@@ -10,7 +10,7 @@
 -- look (Ctrl+s): HDR, SDR by the maker's LUT (--sdr, DJI's) or by NBCU's conversion (--nbcu), HDR + Dolby Vision with the RPU
 -- the look plays (--dv-rpu, with each frame's L1 as the player measures it, --dv-live-l1: Apple's devices then show the
 -- export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
--- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
+-- only; --lens-only with the lens corrected; --lens-recorded stabilized with the lens as recorded), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
 -- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
@@ -264,17 +264,23 @@ local function as_it_plays(args, sdr, photo, live)
     -- The dv look: the RPU file the player attaches, on every frame of the export too, with each frame's own L1 when
     -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way)
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
-    if not sdr and video and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
+    -- (a file's own Dolby Vision isn't carried: its RPU is for the frames as they were, not as they're made here)
+    local own = mp.get_property_native("user-data/dlogm/dv_own") == true
+    if not sdr and video and (look == "dv" or look == "dvsdr") and not own and rpu ~= "" then
         table.insert(args, "--dv-rpu"); table.insert(args, rpu)
         if mp.get_property_native("macos-dovi-live-l1") == true then table.insert(args, "--dv-live-l1") end
     end
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
+    -- What the filter does: stabilized (the lens corrected or as recorded), the lens alone, or nothing
+    local filter = gyroflow("filter") or ""
     local view = gyroflow("view")
-    if view == "off" then table.insert(args, "--no-stabilize") end
+    if filter == "" then table.insert(args, "--no-stabilize")
+    elseif filter == "only" then table.insert(args, "--lens-only")
+    elseif filter == "recorded" then table.insert(args, "--lens-recorded") end
     -- The project it plays with, wherever the workspace plugin found it
     local project = gyroflow("project")
-    if view ~= "off" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
-    if view == "wide" then table.insert(args, "--wide") end
+    if filter ~= "" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
+    if view == "wide" and (filter == "stabilized" or filter == "recorded") then table.insert(args, "--wide") end
     if gyroflow("level") then table.insert(args, "--level"); table.insert(args, gyroflow("level")) end
     if gyroflow("edges") then
         table.insert(args, "--edges"); table.insert(args, gyroflow("edges"))
@@ -291,7 +297,7 @@ local function as_it_plays(args, sdr, photo, live)
     if rotation and rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(rotation)) end
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
-    if PROJECTIONS[projection] and view ~= "off" then table.insert(args, "--projection"); table.insert(args, projection) end
+    if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
@@ -300,7 +306,14 @@ end
 local function view_args(args, v)
     local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
     if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
-    if v.view == "off" then add("--no-stabilize") elseif v.view == "wide" then add("--wide") end
+    -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
+    -- it (a bundle from before the lens was a key: off was as recorded)
+    local lens = v.lens or (v.view == "off" and "as-recorded" or "corrected")
+    if v.view == "off" then add(lens == "corrected" and "--lens-only" or "--no-stabilize")
+    else
+        if v.view == "wide" then add("--wide") end
+        if lens == "as-recorded" then add("--lens-recorded") end
+    end
     if v.level then add("--level", v.level) end
     local edges = mp.get_property_native("user-data/gyroflow/edges")
     if edges then
@@ -315,7 +328,7 @@ local function view_args(args, v)
     -- an aspect from before, as it showed
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
-    if PROJECTIONS[v.projection] and v.view ~= "off" then add("--projection", v.projection) end
+    if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
 end
 
 local function installed(what)
