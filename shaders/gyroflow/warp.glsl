@@ -9,11 +9,19 @@
 // pixels. It replaces MAIN (on gpu-next the same as MAINPRESUB: after the conversion to RGB, before the looks) with a
 // texture the size of the video's rectangle on screen, so it is the scaler too.
 //
-// What the spike covers: the opencv_fisheye lens, full lens correction, no digital lens, the output projections but
+// What it covers so far: the opencv_fisheye lens, full lens correction, no digital lens, the output projections but
 // the equirect, rolling shutter (the two-step row lookup), refraction under water, a solid background. The
 // interpolation is chosen per file (INTERP): 0 bilinear, 1 B-spline (4 bilinear fetches), 2 Gyroflow's bicubic (Keys
 // a = -0.75, 16 taps), 3 Lanczos4 (64 taps), 4 EWA Robidoux (Gyroflow's, up to 9x9 taps). SHRINK 1 widens the
 // bicubic's and Lanczos's taps where the warp shrinks the source (up to 4x, each tap a bilinear fetch).
+//
+// The passes (gpu_table.rs assembles them from the sections at the end of this file, each with the common code):
+// - exact: one pass at MAIN, the whole geometry at every pixel;
+// - grid: the geometry once a frame on a coarse grid of the output (GRID_STEP pixels apart, a compute pass into the
+//   storage texture GYROFLOW_GRID), then sampling passes that interpolate it (Catmull-Rom: within 0.04 px of the
+//   exact coordinates at a 32 px step): one at MAIN (RGB), or one at LUMA and one at CHROMA (the planes, so libplacebo
+//   converts at the output's size, not the source's). Where a grid point has no image (past the lens's field), the
+//   sampling pass falls back to the exact geometry.
 //
 // No directive marks (two slashes and a bang) in the comments of a pass: libplacebo takes them as directives anywhere.
 
@@ -33,15 +41,9 @@
 //!FILTER NEAREST
 @TABLE_HEX@
 
-//!HOOK MAIN
-//!BIND HOOKED
-//!BIND GYROFLOW_TABLE
-//!WIDTH OUTPUT.w
-//!HEIGHT OUTPUT.h
-//!WHEN gyroflow_gpu_on
-//!DESC gyroflow warp
+@PASSES@
 
-@DEFINES@
+// ==== common ====
 
 // The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0-4 the frame's parameters,
 // then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows (FULL_ROWS: one per row)
@@ -53,6 +55,8 @@
 #define PI 3.14159265358979
 
 int table_frame;
+vec4 fc, k, lens, t2;
+vec3 t3;
 
 vec4 table(int t)
 {
@@ -277,26 +281,30 @@ vec4 sample_src(vec2 uv, vec4 jac)
 vec4 sample_src(vec2 uv) { return src(uv); }
 #endif
 
-vec4 hook()
+// The frame's parameters, from the table by PTS. False where the table has none
+bool frame_setup()
 {
     table_frame = clamp(int(floor(PTS * FPS + 0.5)), 0, FRAMES - 1);
-    vec4 fc = table(0);
-    vec4 k = table(1);
-    vec4 lens = table(2);
-    vec4 t2 = table(3);
-    vec3 t3 = table(4).xyz;
-    if (t2.w < 0.5) return BACKGROUND;
+    fc = table(0);
+    k = table(1);
+    lens = table(2);
+    t2 = table(3);
+    t3 = table(4).xyz;
+    return t2.w >= 0.5;
+}
 
-    // The output pixel in the kernel's output frame (OUT_W x OUT_H), as the VapourSynth path maps its pixel j there:
-    // j * OUT_W / width
+// Output pixel j (0 .. target_size - 1, pixel centers at whole numbers) -> its source coordinate in Gyroflow's frame
+// (SRC_W x SRC_H, centers at whole numbers): Stabilization::undistort_coord. False where the ray has no image. The
+// output pixel goes into the kernel's output frame (OUT_W x OUT_H) as the VapourSynth path maps its pixel j there:
+// j * OUT_W / width
+bool source_coord(vec2 j, out vec2 uv)
+{
     vec2 size = vec2(OUT_W, OUT_H);
-    vec2 out_pos = HOOKED_pos * size - 0.5 * size / target_size + t2.xy;
+    vec2 out_pos = j * size / target_size + t2.xy;
     vec2 out_f = fc.xy / lens.x;
     vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
-
     // The rolling shutter's row: where the middle row's rotation puts the ray, then that row's rotation
     float rows = t2.z;
-    vec2 uv;
     int idx = 0;
     if (rows > 1.0) {
         int mid = int(rows) / 2;
@@ -304,9 +312,13 @@ vec4 hook()
             idx = clamp(int(floor(uv.y + 0.5)), 0, SRC_H);
         idx = min(idx, int(rows) - 1);
     }
-    if (!rotate_and_distort(d, row_rotation(idx, rows), fc, k, lens, t3, uv))
-        return BACKGROUND;
-    // Past the frame by more than half a pixel: the background, as Gyroflow's taps outside it are
+    return rotate_and_distort(d, row_rotation(idx, rows), fc, k, lens, t3, uv);
+}
+
+// The picture at source coordinate uv (Gyroflow's frame); past the frame by more than half a pixel, the background, as
+// Gyroflow's taps outside it are
+vec4 finish(vec2 uv)
+{
     if (any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5)))
         return BACKGROUND;
 #ifdef UV_OUT
@@ -316,11 +328,10 @@ vec4 hook()
     // Gyroflow's frame -> the texture's pixels (the same frame unless mpv hands over another size)
     uv = (uv + 0.5) * HOOKED_size / vec2(SRC_W, SRC_H) - 0.5;
 #ifdef PLANE_OFFSET
-    // A plane read on its own (the spike's LUMA and CHROMA passes): where its samples sit against the frame's, in its
-    // pixels (MPEG-2's left-sited chroma: +0.25 across)
+    // A plane read on its own: where its samples sit against the frame's, in its pixels (MPEG-2's left-sited chroma:
+    // +0.25 across)
     uv += PLANE_OFFSET;
 #endif
-
 #if INTERP == 4
     vec2 ux = dFdx(uv), uy = dFdy(uv);
     return sample_src(uv, vec4(ux.x, uy.x, ux.y, uy.y));
@@ -331,4 +342,75 @@ vec4 hook()
     return sample_src(uv);
 #endif
 #endif
+}
+
+#ifdef GRID_STEP
+// The grid: point (i, g) at output pixel ((i, g) - 1) * GRID_STEP, one before the edge to two past it
+ivec2 grid_size() { return ivec2(ceil(target_size / float(GRID_STEP))) + 3; }
+
+float cr0(float t) { return ((-0.5 * t + 1.0) * t - 0.5) * t; }
+float cr1(float t) { return (1.5 * t - 2.5) * t * t + 1.0; }
+float cr2(float t) { return ((-1.5 * t + 2.0) * t + 0.5) * t; }
+float cr3(float t) { return (0.5 * t - 0.5) * t * t; }
+
+#ifndef GRID_PASS
+// Output pixel j's source coordinate from the grid (Catmull-Rom over 4x4 points); false where one of them has no image
+bool grid_coord(vec2 j, out vec2 uv)
+{
+    vec2 g = j / float(GRID_STEP) + 1.0;
+    ivec2 i = ivec2(floor(g));
+    vec2 f = g - vec2(i);
+    ivec2 hi = grid_size() - 1;
+    vec4 wx = vec4(cr0(f.x), cr1(f.x), cr2(f.x), cr3(f.x));
+    vec4 wy = vec4(cr0(f.y), cr1(f.y), cr2(f.y), cr3(f.y));
+    vec2 sum = vec2(0.0);
+    float valid = 1.0;
+    for (int y = 0; y < 4; y++) {
+        vec2 row = vec2(0.0);
+        for (int x = 0; x < 4; x++) {
+            vec4 p = imageLoad(GYROFLOW_GRID, clamp(i + ivec2(x - 1, y - 1), ivec2(0), hi));
+            row += wx[x] * p.xy;
+            valid = min(valid, p.z);
+        }
+        sum += wy[y] * row;
+    }
+    uv = sum;
+    return valid > 0.5;
+}
+#endif
+#endif
+
+// ==== pass exact ====
+vec4 hook()
+{
+    if (!frame_setup()) return BACKGROUND;
+    vec2 uv;
+    if (!source_coord(HOOKED_pos * target_size - 0.5, uv)) return BACKGROUND;
+    return finish(uv);
+}
+
+// ==== pass grid ====
+void hook()
+{
+    ivec2 g = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(g, grid_size()))) return;
+    vec2 uv = vec2(0.0);
+    bool ok = frame_setup() && source_coord(vec2(g - 1) * float(GRID_STEP), uv);
+    imageStore(GYROFLOW_GRID, g, vec4(uv, ok ? 1.0 : 0.0, 0.0));
+}
+
+// ==== pass sample ====
+vec4 hook()
+{
+    if (!frame_setup()) return BACKGROUND;
+    vec2 j = HOOKED_pos * target_size - 0.5;
+    vec2 uv;
+    // Not one condition with &&: naga evaluates both calls, and the second overwrites uv
+    bool ok = grid_coord(j, uv);
+#ifndef GRID_STRICT
+    // The tests leave this out: the grid alone
+    if (!ok) ok = source_coord(j, uv);
+#endif
+    if (!ok) return BACKGROUND;
+    return finish(uv);
 }

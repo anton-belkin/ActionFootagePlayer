@@ -4,12 +4,19 @@
 // table (src/gpu_table.rs) in it, for mpv's glsl-shaders. mpv then warps each frame on the GPU, finding it by its PTS.
 //
 //   gyroflow-gpu-table [options] <project.gyroflow | video> <out.glsl>
+//     --mode <m>         exact: one pass, the geometry at every pixel; grid (default): the geometry on a coarse grid,
+//                        one sampling pass at MAIN; planes: the grid, sampling passes at LUMA and CHROMA
+//     --grid-step <px>   the grid's step in output pixels (default 16)
 //     --knots <n>        quaternion knots per frame along its rows (default 33); 0: every row (Gyroflow's own, large)
 //     --interp <i>       bilinear, bspline, bicubic, lanczos4, ewa (default bicubic)
 //     --shrink           widened taps where the warp shrinks the source (bicubic, lanczos4)
 //     --frames <a>-<b>   only these frames in the table (the rest show the background)
 //     --readout-ms <t>   the rolling shutter's readout time instead of the project's (to measure the knots on a clip
 //                        that has none)
+//
+//   gyroflow-gpu-table --check-grid <W>x<H> [--readout-ms <t>] <project.gyroflow | video>
+//     No shader: the source coordinates on a coarse grid of a W x H output, interpolated (bilinear, Catmull-Rom),
+//     against the exact ones at every pixel, for grid steps of 4 to 32 px, on the fastest-turning frames
 //
 //   gyroflow-gpu-table --check <n> [--readout-ms <t>] <project.gyroflow | video>
 //     No shader: the n fastest-turning frames (and some through the clip) through Gyroflow's CPU kernel
@@ -24,7 +31,7 @@ use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-gpu-table [--knots n] [--interp bilinear|bspline|bicubic|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
+        eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
         std::process::exit(2);
     };
     let mut value = |name: &str| -> Option<String> {
@@ -33,18 +40,23 @@ fn main() {
         args.remove(i);
         Some(v.unwrap_or_else(|| usage()))
     };
+    let mode = match value("--mode").as_deref().unwrap_or("grid") {
+        "exact" => gpu_table::Mode::Exact, "grid" => gpu_table::Mode::Grid, "planes" => gpu_table::Mode::Planes, _ => usage(),
+    };
+    let grid_step: usize = value("--grid-step").map(|v| v.parse().unwrap_or_else(|_| usage())).unwrap_or(16);
     let knots: usize = value("--knots").map(|v| v.parse().unwrap_or_else(|_| usage())).unwrap_or(33);
     let interp = match value("--interp").as_deref().unwrap_or("bicubic") {
         "bilinear" => 0, "bspline" => 1, "bicubic" => 2, "lanczos4" => 3, "ewa" => 4, _ => usage(),
     };
     let readout: Option<f64> = value("--readout-ms").map(|v| v.parse().unwrap_or_else(|_| usage()));
     let check: Option<usize> = value("--check").map(|v| v.parse().unwrap_or_else(|_| usage()));
+    let check_grid: Option<String> = value("--check-grid");
     let range: Option<(usize, usize)> = value("--frames").map(|v| {
         let (a, b) = v.split_once('-').unwrap_or_else(|| usage());
         (a.parse().unwrap_or_else(|_| usage()), b.parse().unwrap_or_else(|_| usage()))
     });
     let shrink = if let Some(i) = args.iter().position(|a| a == "--shrink") { args.remove(i); true } else { false };
-    if args.is_empty() || (check.is_none() && args.len() != 2) { usage(); }
+    if args.is_empty() || (check.is_none() && check_grid.is_none() && args.len() != 2) { usage(); }
     if knots == 1 { eprintln!("--knots: 0, or at least 2"); std::process::exit(2); }
 
     let t = Instant::now();
@@ -60,12 +72,17 @@ fn main() {
         eprintln!("Warning: a horizontal rolling shutter, which the spike's shader doesn't do");
     }
 
+    if let Some(out) = check_grid {
+        let (w, h) = out.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).unwrap_or_else(|| usage());
+        check_grid_error(&clip, (w, h));
+        return;
+    }
     if let Some(n) = check {
         check_knots(&clip, n);
         return;
     }
 
-    let opts = Options { knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;
@@ -126,4 +143,62 @@ fn check_knots(clip: &Clip, n: usize) {
 
 fn grid(size: (usize, usize), step: usize) -> impl Iterator<Item = Vector2<f32>> {
     (0..size.1).step_by(step).flat_map(move |y| (0..size.0).step_by(step).map(move |x| Vector2::new(x as f32, y as f32)))
+}
+
+/// The coarse geometry's error: grid points every `step` output pixels, from one before the edge to two past it
+fn check_grid_error(clip: &Clip, out: (usize, usize)) {
+    let mut spin: Vec<(f64, usize)> = (0..clip.frame_count).map(|frame| {
+        let tr = clip.transform(frame, out);
+        let q = gpu_table::row_quats(&[tr.matrices[0], *tr.matrices.last().unwrap()]);
+        let a = gpu_table::row_quats(&[clip.transform(frame.saturating_sub(1), out).matrices[0], tr.matrices[0]]);
+        let turn = |q: &Vec<[f32; 4]>| 2.0 * ((q[0][0] * q[1][0] + q[0][1] * q[1][1] + q[0][2] * q[1][2] + q[0][3] * q[1][3]).abs().min(1.0) as f64).acos();
+        (turn(&q) + turn(&a), frame)
+    }).collect();
+    spin.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let frames: Vec<usize> = spin.iter().take(4).map(|s| s.1).chain([0, clip.frame_count / 2]).collect();
+    println!("frame  step  bilinear_max  bilinear_p99  catmull_max  catmull_p99   (source px)");
+    for frame in frames {
+        let tr = clip.transform(frame, out);
+        let kp = &tr.kernel_params;
+        let f = gyroflow_core::stabilization::projection::output_focal(kp);
+        let (out_c, out_f) = (Vector2::new(kp.output_width as f32 / 2.0, kp.output_height as f32 / 2.0), Vector2::new(f.0, f.1));
+        let coord = |x: f32, y: f32| Stabilization::undistort_coord(Vector2::new(x, y), kp, &tr.matrices, &clip.params.distortion_model, clip.params.digital_lens.as_ref(), &[], &out_c, &out_f);
+        // Exact, every pixel, in parallel
+        let exact: Vec<Option<Vector2<f32>>> = std::thread::scope(|s| {
+            let chunks: Vec<_> = (0..8).map(|t| { let coord = &coord; s.spawn(move || {
+                (0..out.1).filter(|y| y % 8 == t).flat_map(|y| (0..out.0).map(move |x| (y, coord(x as f32, y as f32)))).collect::<Vec<_>>()
+            }) }).collect();
+            let mut all = vec![None; out.0 * out.1];
+            for c in chunks { for (i, (y, v)) in c.join().unwrap().into_iter().enumerate() { let x = i % out.0; all[y * out.0 + x] = v; } }
+            all
+        });
+        for step in [4usize, 8, 16, 32] {
+            let (gw, gh) = (out.0.div_ceil(step) + 3, out.1.div_ceil(step) + 3);
+            let grid: Vec<Vector2<f32>> = (0..gh).flat_map(|j| (0..gw).map(move |i| (i, j))).map(|(i, j)| {
+                coord((i as f32 - 1.0) * step as f32, (j as f32 - 1.0) * step as f32).unwrap_or(Vector2::new(f32::NAN, f32::NAN))
+            }).collect();
+            let g = |i: isize, j: isize| grid[(j.clamp(0, gh as isize - 1) as usize) * gw + i.clamp(0, gw as isize - 1) as usize];
+            let cr = |t: f32| -> [f32; 4] { let t2 = t * t; let t3 = t2 * t;
+                [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2] };
+            let (mut eb, mut ec) = (Vec::new(), Vec::new());
+            for y in 0..out.1 {
+                for x in 0..out.0 {
+                    let Some(e) = exact[y * out.0 + x] else { continue };
+                    if e.x < 0.0 || e.y < 0.0 || e.x >= clip.size.0 as f32 || e.y >= clip.size.1 as f32 { continue; }
+                    let (gx, gy) = (x as f32 / step as f32 + 1.0, y as f32 / step as f32 + 1.0);
+                    let (i, j) = (gx.floor() as isize, gy.floor() as isize);
+                    let (fx, fy) = (gx - i as f32, gy - j as f32);
+                    let b = g(i, j) * (1.0 - fx) * (1.0 - fy) + g(i + 1, j) * fx * (1.0 - fy) + g(i, j + 1) * (1.0 - fx) * fy + g(i + 1, j + 1) * fx * fy;
+                    let (wx, wy) = (cr(fx), cr(fy));
+                    let mut c = Vector2::zeros();
+                    for dj in 0..4 { for di in 0..4 { c += g(i - 1 + di as isize, j - 1 + dj as isize) * (wx[di] * wy[dj]); } }
+                    if b.x.is_finite() { eb.push((b - e).norm()); }
+                    if c.x.is_finite() { ec.push((c - e).norm()); }
+                }
+            }
+            let stat = |v: &mut Vec<f32>| { v.sort_by(|a, b| a.total_cmp(b)); (v.last().copied().unwrap_or(0.0), v.get(v.len() * 99 / 100).copied().unwrap_or(0.0)) };
+            let ((bm, b99), (cm, c99)) = (stat(&mut eb), stat(&mut ec));
+            println!("{frame:5}  {step:4}  {bm:12.4}  {b99:12.4}  {cm:11.4}  {c99:11.4}");
+        }
+    }
 }

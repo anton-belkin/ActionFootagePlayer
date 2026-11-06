@@ -59,8 +59,25 @@ impl Clip {
     }
 }
 
+/// How the passes are laid out (warp.glsl's header)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    /// One pass at MAIN, the geometry at every pixel
+    Exact,
+    /// The geometry on a coarse grid (a compute pass), then one sampling pass at MAIN
+    Grid,
+    /// The grid, then sampling passes at LUMA and CHROMA (libplacebo converts at the output's size)
+    Planes,
+}
+
+/// The largest output the grid texture is made for
+const GRID_MAX: (usize, usize) = (8192, 4608);
+
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    pub mode: Mode,
+    /// The grid's step in output pixels
+    pub grid_step: usize,
     /// Knots a frame; 0: every row
     pub knots: usize,
     /// warp.glsl's INTERP: 0 bilinear, 1 B-spline, 2 bicubic, 3 Lanczos4, 4 EWA
@@ -129,13 +146,62 @@ pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
         "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, clip.frame_count.max(1), table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0)
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}", opts.grid_step) }
+}
+
+/// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
+fn sections() -> (&'static str, &'static str, Vec<(&'static str, &'static str)>) {
+    let common_at = TEMPLATE.find("// ==== common ====\n").expect("warp.glsl: no common section");
+    let head = &TEMPLATE[..common_at];
+    let rest = &TEMPLATE[common_at + "// ==== common ====\n".len()..];
+    let mut parts = rest.split("// ==== pass ");
+    let common = parts.next().unwrap();
+    let passes = parts.map(|p| {
+        let (name, body) = p.split_once(" ====\n").expect("warp.glsl: a pass without a name");
+        (name, body)
+    }).collect();
+    (head, common, passes)
+}
+
+fn pass_body(name: &str) -> &'static str {
+    sections().2.into_iter().find(|(n, _)| *n == name).map(|(_, b)| b).unwrap_or_else(|| panic!("warp.glsl: no pass {name}"))
+}
+
+/// One hook pass: its directives, the defines, the common code and its body
+fn hook_pass(directives: &[String], defines: &str, extra: &str, body: &str) -> String {
+    let (_, common, _) = sections();
+    format!("{}\n\n{defines}\n{extra}\n{common}\n{body}\n", directives.join("\n"))
+}
+
+/// The passes for `opts.mode`, without the file's head
+pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
+    let defs = defines(clip, opts, table);
+    let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(&d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID",
+        "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, extra, pass_body("sample"));
+    let grid = |hook: &str| {
+        let s = opts.grid_step;
+        let (gw, gh) = (GRID_MAX.0.div_ceil(s) + 4, GRID_MAX.1.div_ceil(s) + 4);
+        format!("//!TEXTURE GYROFLOW_GRID\n//!SIZE {gw} {gh}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}",
+            hook_pass(&d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", "//!SAVE GYROFLOW_GRID_DONE",
+                &format!("//!WIDTH OUTPUT.w {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
+                &defs, "#define GRID_PASS", pass_body("grid")))
+    };
+    match opts.mode {
+        Mode::Exact => hook_pass(&d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, "", pass_body("exact")),
+        Mode::Grid => format!("{}\n{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "")),
+        Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
+            sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)"),
+            sample("CHROMA", "gyroflow warp chroma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_OFFSET vec2(0.25, 0.0)")),
+    }
 }
 
 /// The shader file mpv loads
 pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String {
-    TEMPLATE.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@DEFINES@", &defines(clip, opts, table))
+    let (head, _, _) = sections();
+    head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
+        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table))
 }
 
 /// Each row's 3x3 (row-major, `M·d`) as a quaternion (x, y, z, w), signs kept continuous along the rows
@@ -190,10 +256,11 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
-    // warp.glsl against gyroflow-core's CPU kernel: the shader (through naga's GLSL front end, on this machine's GPU,
-    // no window) writes each output pixel's source coordinate, compared with Stabilization::undistort_coord over every
-    // pixel. On a real clip: AFP_GPU_CLIP=<project.gyroflow> cargo test --release gpu_table -- --nocapture (skipped
-    // without it). A synthetic readout time, so the rolling shutter's path runs too.
+    // warp.glsl against gyroflow-core's CPU kernel: the shader's passes (through naga's GLSL front end, on this
+    // machine's GPU, no window) write each output pixel's source coordinate, compared with
+    // Stabilization::undistort_coord at every pixel. On a real clip: AFP_GPU_CLIP=<project.gyroflow> cargo test
+    // --release gpu_table -- --nocapture (skipped without it). A synthetic readout time, so the rolling shutter's path
+    // runs too. What libplacebo declares is declared here around each pass's text, as view360.rs's test does.
     use super::*;
     use gyroflow_core::stabilization::Stabilization;
     use nalgebra::Vector2;
@@ -207,26 +274,36 @@ mod tests {
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
     struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, _pad: [f32; 2] }
 
-    fn glsl(clip: &Clip, opts: &Options, table: &Table) -> String {
-        let at = TEMPLATE.find("//!DESC gyroflow warp").unwrap();
-        let body = &TEMPLATE[at..];
-        let body = &body[body.find('\n').unwrap() + 1..];
-        let defs = format!("{}\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)", defines(clip, opts, table));
-        let head = "#version 450
-layout(set = 0, binding = 0, std140) uniform Params { vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; };
+    const GRID_TEX: (u32, u32) = (600, 340);
+
+    /// Pass `name` as a shader for naga: "grid" a compute shader, the others fragment shaders
+    fn glsl(clip: &Clip, opts: &Options, table: &Table, name: &str, uv_out: bool) -> String {
+        let compute = name == "grid";
+        let mut defs = defines(clip, opts, table);
+        if compute { defs += "\n#define GRID_PASS"; }
+        if uv_out && std::env::var("AFP_GPU_STRICT").is_ok() { defs += "\n#define GRID_STRICT"; }
+        if uv_out { defs += "\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)"; }
+        let head = format!("#version 450
+{}
+layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; }};
 layout(set = 0, binding = 1) uniform texture2D hooked_t;
 layout(set = 0, binding = 2) uniform sampler hooked_s;
 layout(set = 0, binding = 3) uniform texture2D table_t;
 layout(set = 0, binding = 4) uniform sampler table_s;
-layout(location = 0) out vec4 o_color;
+layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
+#define GYROFLOW_GRID grid_img
 #define HOOKED_tex(pos) texture(sampler2D(hooked_t, hooked_s), pos)
 #define HOOKED_size hooked_size
 #define HOOKED_pt (1.0 / hooked_size)
 #define GYROFLOW_TABLE sampler2D(table_t, table_s)
 #define target_size out_size
 #define HOOKED_pos (gl_FragCoord.xy / out_size)
-";
-        format!("{head}\n{}\nvoid main() {{ o_color = hook(); }}\n", body.replace("@DEFINES@", &defs))
+",
+            if compute { "layout(local_size_x = 8, local_size_y = 8) in;" } else { "layout(location = 0) out vec4 o_color;" },
+            if compute { "writeonly" } else { "readonly" });
+        let (_, common, _) = sections();
+        let main = if compute { "void main() { hook(); }" } else { "void main() { o_color = hook(); }" };
+        format!("{head}\n{defs}\n{common}\n{}\n{main}\n", pass_body(name))
     }
 
     struct Gpu { device: wgpu::Device, queue: wgpu::Queue }
@@ -238,53 +315,77 @@ layout(location = 0) out vec4 o_color;
         Gpu { device, queue }
     }
 
-    fn texture(g: &Gpu, w: usize, h: usize, data: &[f32]) -> wgpu::Texture {
+    fn texture(g: &Gpu, w: usize, h: usize, data: Option<&[f32]>, usage: wgpu::TextureUsages) -> wgpu::Texture {
         let t = g.device.create_texture(&wgpu::TextureDescriptor {
             label: None, size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1,
-            dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba32Float, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
+            dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba32Float, usage: usage | wgpu::TextureUsages::COPY_DST, view_formats: &[],
         });
-        g.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &t, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            bytemuck::cast_slice(data), wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((w * 16) as u32), rows_per_image: Some(h as u32) },
-            wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 });
+        if let Some(data) = data {
+            g.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &t, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                bytemuck::cast_slice(data), wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((w * 16) as u32), rows_per_image: Some(h as u32) },
+                wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 });
+        }
         t
     }
 
-    /// Each output pixel's (u, v) as the shader computes it, out.0 x out.1, for the frame at `pts`
-    fn render_uv(g: &Gpu, src: &str, table: &Table, src_size: (usize, usize), out: (usize, usize), pts: f32) -> Vec<[f32; 4]> {
+    fn module(g: &Gpu, src: &str, stage: wgpu::naga::ShaderStage) -> wgpu::ShaderModule {
+        g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("warp"), source: wgpu::ShaderSource::Glsl { shader: src.into(), stage, defines: &[] } })
+    }
+
+    fn layout(g: &Gpu, vis: wgpu::ShaderStages, access: wgpu::StorageTextureAccess) -> wgpu::BindGroupLayout {
+        let tex = |b: u32| wgpu::BindGroupLayoutEntry { binding: b, visibility: vis, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None };
+        let smp = |b: u32| wgpu::BindGroupLayoutEntry { binding: b, visibility: vis, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None };
+        g.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &[
+            wgpu::BindGroupLayoutEntry { binding: 0, visibility: vis, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            tex(1), smp(2), tex(3), smp(4),
+            wgpu::BindGroupLayoutEntry { binding: 5, visibility: vis, ty: wgpu::BindingType::StorageTexture { access, format: wgpu::TextureFormat::Rgba32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None }] })
+    }
+
+    /// Each output pixel's (u, v) as the shader computes it, out.0 x out.1, for the frame at `pts`: the grid pass first
+    /// when `grid` is given, then `fs` (a fragment pass's GLSL)
+    fn render_uv(g: &Gpu, grid: Option<&str>, fs: &str, table: &Table, src_size: (usize, usize), out: (usize, usize), pts: f32) -> Vec<[f32; 4]> {
         let d = &g.device;
-        let fs = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("warp"), source: wgpu::ShaderSource::Glsl { shader: src.into(), stage: wgpu::naga::ShaderStage::Fragment, defines: &[] } });
-        let vs = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("vs"), source: wgpu::ShaderSource::Wgsl(VS.into()) });
-        let tex = |b: u32| wgpu::BindGroupLayoutEntry { binding: b, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None };
-        let smp = |b: u32| wgpu::BindGroupLayoutEntry { binding: b, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None };
-        let layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &[
-            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-            tex(1), smp(2), tex(3), smp(4)] });
-        let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None, layout: Some(&pl),
-            vertex: wgpu::VertexState { module: &vs, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
-            fragment: Some(wgpu::FragmentState { module: &fs, entry_point: Some("main"), targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba32Float, blend: None, write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
-            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
-        });
-        let hooked = texture(g, 4, 4, &[0.5; 64]);
-        let table_tex = texture(g, table.width, table.height, &table.data);
+        let hooked = texture(g, 4, 4, Some(&[0.5; 64]), wgpu::TextureUsages::TEXTURE_BINDING);
+        let table_tex = texture(g, table.width, table.height, Some(&table.data), wgpu::TextureUsages::TEXTURE_BINDING);
+        let grid_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
         let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1, _pad: [0.0; 2] };
         let buf = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<U>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         g.queue.write_buffer(&buf, 0, bytemuck::bytes_of(&u));
         let sampler = d.create_sampler(&wgpu::SamplerDescriptor::default());
-        let group = d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &layout, entries: &[
+        let group = |l: &wgpu::BindGroupLayout| d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: l, entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&hooked.create_view(&Default::default())) },
             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
             wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&table_tex.create_view(&Default::default())) },
-            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&sampler) }] });
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&sampler) },
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&grid_tex.create_view(&Default::default())) }] });
+        let mut enc = d.create_command_encoder(&Default::default());
+        if let Some(src) = grid {
+            let l = layout(g, wgpu::ShaderStages::COMPUTE, wgpu::StorageTextureAccess::WriteOnly);
+            let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&l)], immediate_size: 0 });
+            let cs = module(g, src, wgpu::naga::ShaderStage::Compute);
+            let p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: None, layout: Some(&pl), module: &cs, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&p);
+            pass.set_bind_group(0, &group(&l), &[]);
+            pass.dispatch_workgroups(GRID_TEX.0.div_ceil(8), GRID_TEX.1.div_ceil(8), 1);
+        }
+        let l = layout(g, wgpu::ShaderStages::FRAGMENT, wgpu::StorageTextureAccess::ReadOnly);
+        let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&l)], immediate_size: 0 });
+        let vs = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("vs"), source: wgpu::ShaderSource::Wgsl(VS.into()) });
+        let fsm = module(g, fs, wgpu::naga::ShaderStage::Fragment);
+        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None, layout: Some(&pl),
+            vertex: wgpu::VertexState { module: &vs, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState { module: &fsm, entry_point: Some("main"), targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba32Float, blend: None, write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
+            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
+        });
         let target = d.create_texture(&wgpu::TextureDescriptor {
             label: None, size: wgpu::Extent3d { width: out.0 as u32, height: out.1 as u32, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1,
             dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba32Float, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
         });
         let row = (out.0 * 16).div_ceil(256) * 256;
         let back = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * out.1) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
-        let mut enc = d.create_command_encoder(&Default::default());
         {
             let view = target.create_view(&Default::default());
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -293,7 +394,7 @@ layout(location = 0) out vec4 o_color;
                 ..Default::default()
             });
             pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &group, &[]);
+            pass.set_bind_group(0, &group(&l), &[]);
             pass.draw(0..3, 0..1);
         }
         enc.copy_texture_to_buffer(
@@ -315,15 +416,25 @@ layout(location = 0) out vec4 o_color;
         let g = gpu();
         let out = (1920usize, 1080usize);
         let frames = [0usize, 600, 1049, 1181, clip.frame_count - 1];
-        for knots in [33usize, 0] {
-            let opts = Options { knots, interp: 2, shrink: false, range: None };
+        let base = Options { mode: Mode::Exact, grid_step: 16, knots: 33, interp: 2, shrink: false, range: None };
+        // (label, options, every frame or only the fastest)
+        let cases = [
+            ("exact, 33 knots", base, true),
+            ("exact, every row", Options { knots: 0, range: Some((frames[2], frames[2])), ..base }, false),
+            ("grid 16, 33 knots", Options { mode: Mode::Grid, ..base }, true),
+            ("grid 32, 33 knots", Options { mode: Mode::Grid, grid_step: 32, ..base }, false),
+        ];
+        for (label, opts, all) in cases {
             // The full rows only for the frames compared: the whole clip would be 5 M texels
-            let table = Table::build(&clip, &Options { range: if knots == 0 { Some((frames[2], frames[2])) } else { None }, ..opts }).unwrap();
-            let src = glsl(&clip, &opts, &table);
+            let table = Table::build(&clip, &opts).unwrap();
+            let (grid, fs) = match opts.mode {
+                Mode::Exact => (None, glsl(&clip, &opts, &table, "exact", true)),
+                _ => (Some(glsl(&clip, &opts, &table, "grid", true)), glsl(&clip, &opts, &table, "sample", true)),
+            };
             for &frame in &frames {
-                if knots == 0 && frame != frames[2] { continue; }
+                if !all && frame != frames[2] { continue; }
                 let pts = (frame as f64 / clip.fps) as f32;
-                let uv = render_uv(&g, &src, &table, clip.size, out, pts);
+                let uv = render_uv(&g, grid.as_deref(), &fs, &table, clip.size, out, pts);
                 // Gyroflow at the same pixels, into a buffer of the output's size (the filter's dst)
                 let tr = clip.transform(frame, out);
                 let kp = &tr.kernel_params;
@@ -336,35 +447,33 @@ layout(location = 0) out vec4 o_color;
                         let s = uv[y * out.0 + x];
                         let c = Stabilization::undistort_coord(Vector2::new(x as f32, y as f32), kp, &tr.matrices, &clip.params.distortion_model, None, &[], &out_c, &out_f);
                         let inside = |p: Vector2<f32>| p.x >= 0.0 && p.y >= 0.0 && p.x <= clip.size.0 as f32 - 1.0 && p.y <= clip.size.1 as f32 - 1.0;
-                        match c {
-                            Some(c) if inside(c) => {
-                                if s[0] < -1000.0 { mismatched += 1; continue; }
-                                let e = (Vector2::new(s[0], s[1]) - c).norm();
-                                worst = worst.max(e);
-                                sum += e as f64;
-                                n += 1;
-                            }
-                            _ => {}
+                        if let Some(c) = c.filter(|c| inside(*c)) {
+                            if s[0] < -1000.0 { mismatched += 1; continue; }
+                            let e = (Vector2::new(s[0], s[1]) - c).norm();
+                            worst = worst.max(e);
+                            sum += e as f64;
+                            n += 1;
                         }
                     }
                 }
-                eprintln!("frame {frame}, {}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out",
-                          if knots == 0 { "every row".to_string() } else { format!("{knots} knots") }, sum / n.max(1) as f64);
+                eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out", sum / n.max(1) as f64);
                 assert!(n > out.0 * out.1 / 2, "frame {frame}: too few pixels compared");
-                assert!(worst < 0.1, "frame {frame}: the shader is {worst} px off Gyroflow");
+                assert!(worst < 0.1, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
                 assert!(mismatched < out.0, "frame {frame}: {mismatched} pixels the shader left out");
             }
         }
-        // Every interpolation compiles (the picture, not the coordinates)
-        let table = Table::build(&clip, &Options { knots: 33, interp: 0, shrink: false, range: Some((0, 0)) }).unwrap();
+        // Every interpolation compiles in every pass (the picture, not the coordinates)
+        let table = Table::build(&clip, &Options { range: Some((0, 0)), ..base }).unwrap();
         for interp in 0..5 {
             for shrink in [false, true] {
-                let opts = Options { knots: 33, interp, shrink, range: None };
-                let src = glsl(&clip, &opts, &table).replace("#define UV_OUT 1", "");
-                let scope = g.device.push_error_scope(wgpu::ErrorFilter::Validation);
-                g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("warp"), source: wgpu::ShaderSource::Glsl { shader: src.into(), stage: wgpu::naga::ShaderStage::Fragment, defines: &[] } });
-                let err = pollster::block_on(scope.pop());
-                assert!(err.is_none(), "INTERP {interp}, SHRINK {shrink}: {err:?}");
+                for (mode, name) in [(Mode::Exact, "exact"), (Mode::Grid, "sample"), (Mode::Grid, "grid")] {
+                    let opts = Options { mode, interp, shrink, ..base };
+                    let src = glsl(&clip, &opts, &table, name, false);
+                    let scope = g.device.push_error_scope(wgpu::ErrorFilter::Validation);
+                    module(&g, &src, if name == "grid" { wgpu::naga::ShaderStage::Compute } else { wgpu::naga::ShaderStage::Fragment });
+                    let err = pollster::block_on(scope.pop());
+                    assert!(err.is_none(), "INTERP {interp}, SHRINK {shrink}, pass {name}: {err:?}");
+                }
             }
         }
     }
