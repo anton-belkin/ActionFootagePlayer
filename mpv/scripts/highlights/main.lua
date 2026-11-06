@@ -36,6 +36,11 @@ local options = require 'mp.options'
 local markers = require 'markers'
 -- The clip's file (the workspace plugin's sidecar.lua, beside this plugin's folder)
 package.path = package.path .. ";" .. utils.join_path(utils.join_path(mp.get_script_directory(), "../workspace"), "?.lua")
+-- Windows: paths past 260 characters (a clip deep in a trip's folders), by its longpath.lua too
+do
+    local ok, longpath = pcall(require, 'longpath')
+    if ok then longpath.install(utils) end
+end
 local platform = mp.get_property("platform") or ""
 local has_sidecar, sidecar_lib = pcall(require, 'sidecar')
 if not has_sidecar then mp.msg.warn("the workspace plugin's sidecar.lua isn't beside this plugin: marks can't be written") end
