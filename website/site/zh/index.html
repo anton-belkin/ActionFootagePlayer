@@ -53,9 +53,9 @@
         <ul>
           <li><a href="log.html">Log 素材</a></li>
           <li><a href="stabilization.html">防抖</a></li>
-          <li><a href="organizing.html">素材库</a></li>
+          <li><a href="organizing.html">整理素材</a></li>
           <li><a href="photos.html">照片</a></li>
-          <li><a href="../360.html" hreflang="en" lang="en">360 视频</a></li>
+          <li><a href="360.html">360 视频</a></li>
           <li><a href="features.html" class="nm-all">全部功能</a></li>
         </ul>
       </details>
@@ -76,9 +76,9 @@
         <li class="sm-group">功能</li>
         <li><a href="log.html">Log 素材</a></li>
         <li><a href="stabilization.html">防抖</a></li>
-        <li><a href="organizing.html">素材库</a></li>
+        <li><a href="organizing.html">整理素材</a></li>
         <li><a href="photos.html">照片</a></li>
-        <li><a href="../360.html" hreflang="en" lang="en">360 视频</a></li>
+        <li><a href="360.html">360 视频</a></li>
         <li><a href="features.html">全部功能</a></li>
         <li class="sm-dl"><a href="download.html">下载</a></li>
       </ul>
@@ -105,7 +105,7 @@
       <div class="hero-text">
         <p class="eyebrow">免费的运动相机视频播放器 · Mac 和 Windows</p>
         <h1>运动相机拍的片段，色彩完整，画面稳定。双击即可。</h1>
-        <p class="lede">Action Footage Player 在你的电脑上播放 GoPro、DJI 和 Insta360 相机拍摄的素材。用 Log（相机色彩最丰富的设置）拍摄的片段，会以完整色彩播放，而不是平淡的灰色。晃动的片段播放时画面稳定，水下也一样。值得分享的那一刻，按一个键就能为手机准备好。</p>
+        <p class="lede">Action Footage Player 在你的电脑上播放 GoPro、DJI 和 Insta360 相机拍摄的素材。用 Log（相机色彩最丰富的设置）拍摄，在这里看到的是完整色彩，而不是平淡的灰色。晃动的片段播放时画面稳定，水下也一样。值得分享的那一刻，按一个键就能为手机准备好。</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -116,6 +116,7 @@
             <span class="btn-label"><span class="os-mac">Windows</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small></span>
           </a>
         </div>
+        <p class="hub-feedback">这是一个早期版本。用你自己的片段试一试，有什么不对请告诉我们：<a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> 或 <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>。</p>
         <div class="status">
           <span>免费、开源</span>
           <span>无需账号，不上传</span>
@@ -125,9 +126,9 @@
       </div>
 
       <figure class="media">
-        <div class="halves"><span><span class="os-mac">Log 片段在访达中的样子</span><span class="os-win">Log 片段在文件资源管理器中的样子</span></span><span>在这里播放的样子</span></div>
-        <img src="../media/log-grey-color.jpg" width="1600" height="900" fetchpriority="high" alt="Log 片段的一帧，从中间一分为二：左边平淡发灰，右边色彩完整。">
-        <figcaption>同一片段的同一帧。这张图片不是 HDR：在 HDR 屏幕上，播放器显示的画面更明亮。</figcaption>
+        <div class="halves"><span>原始录制：Log，防抖关闭</span><span>在这里播放的样子</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="../media/log-steady.jpg" width="1920" height="540" src="../media/log-steady.mp4" aria-label="同一段潜水画面并排播放：左边是相机以 Log 录制的样子，平淡、发灰、晃动；右边是在这里播放的样子，色彩完整，画面稳定。"></video>
+        <figcaption>DJI Osmo Action 6，D-Log M，相机防抖关闭。左右两边是同一段片段；这段视频不是 HDR：在 HDR 屏幕上，播放器显示的画面更明亮。</figcaption>
       </figure>
     </div>
   </section>
@@ -187,6 +188,11 @@
           <a class="text-link feature-more" href="organizing.html#marks">了解详情 →</a>
         </div>
         <div class="feature">
+          <h3>相机测到的数据</h3>
+          <p>片段播放时，深度、速度和 GPS 显示在屏幕上，前提是相机记录了它们。比画面本身告诉你更多当时发生的事。</p>
+          <a class="text-link feature-more" href="features.html#telemetry">了解详情 →</a>
+        </div>
+        <div class="feature">
           <h3>留住最好的片段</h3>
           <p>你保留的片段会成为 <code>_Moments</code> 文件夹里的一个小文件，在<span class="os-mac">访达和快速查看</span><span class="os-win">文件资源管理器及其预览窗格</span>中都是彩色的。</p>
           <a class="text-link feature-more" href="organizing.html#moments">了解详情 →</a>
@@ -197,14 +203,8 @@
           <p class="os-win">标记一段，按一个键：就能得到一个适合手机、电视或 YouTube 的 HDR 文件。</p>
           <a class="text-link feature-more" href="log.html#export">了解详情 →</a>
         </div>
-        <div class="feature">
-          <h3>之后交给剪辑软件 <span class="soon">即将推出</span></h3>
-          <p>Final Cut Pro、DaVinci Resolve 和 Premiere Pro 会收到你的精彩瞬间和标记，直接对应原始文件。</p>
-          <a class="text-link feature-more" href="organizing.html#editors">了解详情 →</a>
-        </div>
       </div>
-      <p class="hub-measured"><strong>相机测到的数据：</strong>深度、速度和 GPS 显示在屏幕上，前提是相机记录了它们。</p>
-      <p class="note hub-guides">分步指南：<a class="text-link" href="log.html">Log 素材</a> · <a class="text-link" href="stabilization.html">防抖</a> · <a class="text-link" href="organizing.html">素材库</a> · <a class="text-link" href="photos.html">照片</a> · <a class="text-link" href="features.html">全部功能详解 →</a></p>
+      <p class="note hub-guides">分步指南：<a class="text-link" href="log.html">Log 素材</a> · <a class="text-link" href="stabilization.html">防抖</a> · <a class="text-link" href="organizing.html">整理素材</a> · <a class="text-link" href="photos.html">照片</a> · <a class="text-link" href="360.html">360 视频</a> · <a class="text-link" href="features.html">全部功能详解 →</a></p>
     </div>
   </section>
 
@@ -320,6 +320,8 @@
               </table>
             </div>
             <p class="note"><span class="pill ok">已验证</span> 已在播放器中用真实素材播放过。<span class="pill exp">预计可用</span> 已根据厂商公开的元数据或示例片段做了适配，但尚未用真实素材验证。<span class="pill exp">预计可用*</span> 同上，但需要一步手动操作，具体见该行说明。<span class="pill part">尚不支持</span> 目前还不能用。</p>
+            <p>360 相机（从 Insta360 X5 开始）：见 <a class="text-link" href="360.html">360 视频</a>。</p>
+            <p>你的相机被标为「预计可用」，或者不在列表里？发给我们一段它拍的简短片段，它就可能变成「已验证」：<a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> 或 <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>。</p>
           </div>
         </details>
         <details>
@@ -332,7 +334,7 @@
         </details>
         <details>
           <summary>它会修改我的原始文件吗？</summary>
-          <div class="a"><p>只有你要求时才会。要把片段中拍坏的一段剪掉（<kbd>Ctrl</kbd>+<kbd>x</kbd>），播放器会重写这个片段、去掉那一段，不做任何重新编码，原始文件则移到废纸篓。除此之外，你的原始文件都保持原样。</p><p>它生成的东西都放进这次旅行的项目文件夹，这个文件夹你只需在侧边面板的 Project 标签页里选一次：<code>_Moments</code> 存放你保留的片段，<code>_Clips</code> 存放每个片段的预览，<code>_Exports</code> 存放你导出的视频，<code>_ActionFootagePlayer</code> 存放播放器自己的记录。你自己的标记和片段的 Gyroflow 项目，是放在片段旁边的小文件。如果是写保护的存储卡或无法写入的文件夹，项目文件夹会改放到“文稿”（Documents）里。</p></div>
+          <div class="a"><p>只有你要求时才会。要把片段中拍坏的一段剪掉（<kbd>Ctrl</kbd>+<kbd>x</kbd>），播放器会重写这个片段、去掉那一段，不做任何重新编码，原始文件则移到废纸篓。除此之外，你的原始文件都保持原样。</p><p>它生成的东西都放进这次旅行的项目文件夹，这个文件夹你只需在侧边面板的 Project 标签页里选一次：<code>_Moments</code> 存放你保留的片段，<code>_Clips</code> 存放每个片段的预览，<code>_Exports</code> 存放你导出的视频，还有 <code>Project.afproject</code>，用它可以在 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 中打开这次旅行。每个片段旁边还有两个属于它自己的小文件：<code>&lt;clip&gt;.afp.json</code>，存放你的标记和片段保存的画面设置；以及它的 Gyroflow 项目（如果有的话）。如果是写保护的存储卡或无法写入的文件夹，项目文件夹会改放到“文稿”（Documents）里。</p></div>
         </details>
         <details>
           <summary>真的免费吗？</summary>

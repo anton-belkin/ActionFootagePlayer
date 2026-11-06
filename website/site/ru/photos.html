@@ -53,9 +53,9 @@
         <ul>
           <li><a href="log.html">Log-записи</a></li>
           <li><a href="stabilization.html">Стабилизация</a></li>
-          <li><a href="organizing.html">Библиотека</a></li>
+          <li><a href="organizing.html">Организация</a></li>
           <li><a href="photos.html" aria-current="page">Фото</a></li>
-          <li><a href="../360.html" hreflang="en" lang="en">360-видео</a></li>
+          <li><a href="360.html">360-видео</a></li>
           <li><a href="features.html" class="nm-all">Все функции</a></li>
         </ul>
       </details>
@@ -76,9 +76,9 @@
         <li class="sm-group">Функции</li>
         <li><a href="log.html">Log-записи</a></li>
         <li><a href="stabilization.html">Стабилизация</a></li>
-        <li><a href="organizing.html">Библиотека</a></li>
+        <li><a href="organizing.html">Организация</a></li>
         <li><a href="photos.html" aria-current="page">Фото</a></li>
-        <li><a href="../360.html" hreflang="en" lang="en">360-видео</a></li>
+        <li><a href="360.html">360-видео</a></li>
         <li><a href="features.html">Все функции</a></li>
         <li class="sm-dl"><a href="download.html">Скачать</a></li>
       </ul>
@@ -125,8 +125,8 @@
       </div>
 
       <figure class="media" id="shot-photos-1">
-        <img src="../media/photos-1.jpg" alt="Плеер на паузе на рифе с рыбой-фугу в режиме Save frame: рамка 4:5 с линиями третей, затемнённое окружение, строка подписи над рамкой, боковая панель на разделе Save frame." width="1600" height="900" loading="lazy">
-        <figcaption>Save frame (<kbd>c</kbd>): рамка фото поверх видео на паузе, рядом боковая панель.</figcaption>
+        <img src="../media/photos-1.jpg" alt="Плеер на паузе на рифе в режиме Save frame: рамка 4:5 с линиями третей, затемнённое окружение, строка подписи над рамкой, боковая панель на разделе Save frame — пятом значке её боковой полосы, после Project, Source, Transform и Output." width="1600" height="900" loading="lazy">
+        <figcaption>Save frame (<kbd>c</kbd>): рамка фото поверх видео на паузе, рядом раздел Save frame боковой панели.</figcaption>
       </figure>
     </div>
   </section>
@@ -154,7 +154,7 @@
         </li>
         <li>
           <h3>Скадрировано как фото</h3>
-          <p>16:9, 4:3, квадрат, 4:5 или 3:4 для ленты, 9:16 для истории или собственные пропорции видео. Кадрирование учитывает объектив, так что лицо из угла не растянуто в середине фото.</p>
+          <p>16:9, 4:3, квадрат, 4:5 или 3:4 для ленты, 9:16 для истории или собственные пропорции видео. Кадрирование учитывает объектив, так что лицо из угла не растянуто в середине фото. Свою форму можно задать и всему клипу: <a class="text-link" href="#whole-clip">Transform → Frame</a>.</p>
         </li>
         <li>
           <h3>Полное разрешение</h3>
@@ -243,6 +243,8 @@
           <h3>Пропорции</h3>
           <p><kbd>a</kbd> переключает на следующие пропорции, <kbd>Shift</kbd>+<kbd>a</kbd> — на предыдущие: Original, 16:9, 4:3, 1:1, 4:5, 3:4, 9:16. Рамка остаётся по центру и занимает не больше 80&nbsp;% видео по каждой стороне, чтобы вокруг было видно, что вы оставляете за кадром.</p>
           <p>Нажмите <kbd>Enter</kbd>, чтобы сохранить, <kbd>c</kbd> или <kbd>Esc</kbd>, чтобы выйти. Пока вы кадрируете, картинка на экране не очищается, потому что каждый поворот рендерит её заново. Сохранённое фото всё равно очищается.</p>
+          <h3 id="whole-clip">Форма всего клипа</h3>
+          <p>Save frame кадрирует одно фото. Чтобы задать форму всему клипу, воспользуйтесь в боковой панели Transform → <b>Frame</b> (кадр): <b>Own</b> (как у видео), <b>16:9</b>, <b>4:3</b>, <b>5:4</b> или <b>1:1</b>, и <b>As is</b> (как есть), <b>Landscape</b> (горизонтально) или <b>Portrait</b> (вертикально). Клип так и играет, и в этой же форме делаются его экспорт, моменты, превью клипов и фото. Чтобы приблизить весь клип, задайте его зум в Gyroflow (<kbd>Ctrl</kbd>+<kbd>e</kbd>).</p>
         </div>
         <figure class="media" id="shot-photos-3">
           <div class="halves"><span>В начале</span><span>Повёрнуто и выровнено</span></div>
@@ -340,16 +342,16 @@
       <div class="section-head">
         <p class="eyebrow">Live Photo и Motion Photo</p>
         <h2>Поддержка Live Photo. И Motion Photo от Android.</h2>
-        <p class="lede">Фото, которое оживает от касания, как те, что снимают телефоны. 3 с вокруг кадра (по 1,5 с с каждой стороны) экспортируются точно так же, как их экспортировал бы <kbd>Shift</kbd>+<kbd>E</kbd>: ровно и в том же стиле, с той же рамкой и камерой, что и фото.</p>
+        <p class="lede">Фото, которое оживает от касания, как те, что снимают телефоны. 3 с вокруг кадра (по 1,5 с с каждой стороны) экспортируются почти так же, как их экспортировал бы <kbd>Shift</kbd>+<kbd>E</kbd>: ровно, с той же рамкой и камерой, что и фото. Подходит любой клип, и самый обычный тоже: не в log или без данных движения.</p>
       </div>
       <div class="ph-two kbd-dark">
         <div>
           <h3>Live Photo <span class="ph-tag">приложение для Mac</span></h3>
-          <p>HEIC и <code>.mov</code> с одинаковым именем и общим идентификатором внутри, сделанные так, как приложение «Фото» от Apple ожидает Live Photo, поэтому оба файла идут вместе как одно целое. Видео — в HEVC, с собственной частотой кадров клипа и со звуком. В стилях Dolby Vision видео сохраняет свой Dolby Vision.</p>
+          <p>HEIC и <code>.mov</code> с одинаковым именем и общим идентификатором внутри, сделанные так, как приложение «Фото» от Apple ожидает Live Photo, поэтому оба файла идут вместе как одно целое. Видео — в HEVC, с собственной частотой кадров клипа и со звуком, в том стиле, который играет, — так, как его экспортирует <kbd>Shift</kbd>+<kbd>E</kbd>. В стилях Dolby Vision видео сохраняет свой Dolby Vision.</p>
         </div>
         <div>
           <h3>Motion Photo <span class="ph-tag">Mac и Windows</span></h3>
-          <p>Один файл, <code>…_8.00s.MP.jpg</code>: Ultra HDR JPEG с видео, сохранённым внутри него после фото, так, как камеры Android записывают Motion Photo. Приложения, которые не знают этот формат, показывают фото.</p>
+          <p>Один файл, <code>…_8.00s.MP.jpg</code>: Ultra HDR JPEG с видео, сохранённым внутри него после фото, так, как камеры Android записывают Motion Photo. Приложения, которые не знают этот формат, показывают фото. Видео в нём — SDR (Rec.709), в собственном стиле фото, поэтому в Google Фото или в «Фотографиях» Windows оно играет так же ярко, как фото. Motion Photo, сохранённые прежними версиями, сохраняют своё HDR-видео.</p>
         </div>
         <div>
           <h3>Просто фото</h3>
@@ -367,7 +369,7 @@
       <div class="section-head">
         <p class="eyebrow">Настройки</p>
         <h2>В боковой панели.</h2>
-        <p class="lede">Раздел Save frame (значок камеры, второй в ряду значков панели) открывается сам, когда вы нажимаете <kbd>c</kbd>, а когда вы выходите, панель возвращается туда, где была.</p>
+        <p class="lede">Раздел Save frame (значок камеры, пятый в ряду значков панели, после Project, Source, Transform и Output) открывается сам, когда вы нажимаете <kbd>c</kbd>, а когда вы выходите, панель возвращается туда, где была.</p>
       </div>
 
       <div class="ph-split">
@@ -385,11 +387,11 @@
                 <tr><th scope="row">Photo</th><td><span class="os-mac"><b>Still</b>, <b>Live Photo</b> или <b>Motion Photo</b>.</span><span class="os-win"><b>Still</b> или <b>Motion Photo</b>. (На Mac есть ещё Live Photo.)</span> Что создаёт сохранение. Запоминается на следующий раз.</td><td><span class="os-mac">Live Photo</span><span class="os-win">Motion Photo</span></td></tr>
                 <tr><th scope="row">Save the frame as a photo <span class="cam-sub"><kbd>Enter</kbd></span></th><td>Сохраняет. Строка под кнопкой говорит, что вы получите.</td><td></td></tr>
                 <tr><th scope="row">Done framing <span class="cam-sub"><kbd>Esc</kbd></span></th><td>Выход из Save frame.</td><td></td></tr>
-                <tr><th scope="row">Open in Gyroflow… <span class="cam-sub">или Stabilize in Gyroflow…, <kbd>Ctrl</kbd>+<kbd>e</kbd></span></th><td>Save frame кадрирует только фото. Чтобы обрезать всё видео, задайте обрезку и зум в Gyroflow; см. <a class="text-link" href="stabilization.html">Стабилизация</a>.</td><td></td></tr>
+                <tr><th scope="row">Open in Gyroflow… <span class="cam-sub">или Stabilize in Gyroflow…, <kbd>Ctrl</kbd>+<kbd>e</kbd></span></th><td>Save frame кадрирует только фото. Форма всего клипа задаётся в Transform → <b>Frame</b> (<a class="text-link" href="#whole-clip">см. выше</a>), а его зум — в Gyroflow. См. <a class="text-link" href="stabilization.html">Стабилизация</a>.</td><td></td></tr>
               </tbody>
             </table>
           </div>
-          <p class="note">Вне Save frame в разделе <b>Clip</b> панели есть та же кнопка <b>Save the frame as a photo</b> (<kbd>Alt</kbd>+<kbd>s</kbd>): фото всего стабилизированного вида.</p>
+          <p class="note">Вне Save frame <kbd>Alt</kbd>+<kbd>s</kbd> в любой момент сохраняет фото всего стабилизированного вида. Раздел Output → Export в панели отсылает сюда: <i>A still or a Live Photo: Save frame</i> (фото или Live Photo: Save frame).</p>
 
           <h3 class="ph-h3">Performance &amp; Quality</h3>
           <div class="ph-table-wrap">
@@ -405,11 +407,11 @@
         </div>
         <div class="stack">
           <figure class="media" id="shot-photos-4">
-            <img src="../media/photos-4.jpg" alt="Раздел Save frame боковой панели: Frame the photo включено, пропорции 4:5, Zoom 120 %, Horizon 3,5°, Live Photo и Save the frame as a photo." width="584" height="1594" loading="lazy">
+            <img src="../media/photos-4.jpg" alt="Раздел Save frame боковой панели, пятый значок её боковой полосы: Frame the photo включено, пропорции 4:5, Zoom 120 %, Horizon 3,5°, Photo в положении Live Photo и Save the frame as a photo." width="584" height="1594" loading="lazy">
             <figcaption>Раздел Save frame на Mac.</figcaption>
           </figure>
           <figure class="media" id="shot-photos-5">
-            <img src="../media/photos-5.jpg" alt="Paused frame, As it played или Full size, и включённый переключатель Temporal denoise, с подписями." width="570" height="400" loading="lazy">
+            <img src="../media/photos-5.jpg" alt="Performance &amp; Quality в боковой панели: Paused frame, As it played или Full size, и включённый переключатель Temporal denoise, с подписями." width="570" height="400" loading="lazy">
             <figcaption>Paused frame и Temporal denoise в разделе Performance &amp; Quality.</figcaption>
           </figure>
         </div>
@@ -450,8 +452,8 @@
         <h2>Чего нет в фото.</h2>
       </div>
       <ul class="ph-limits">
-        <li><b>Исправления только для воспроизведения.</b> Устранение цветной каймы от воды (<kbd>Ctrl</kbd>+<kbd>a</kbd>) и Noise reduction (шумоподавление, <kbd>Ctrl</kbd>+<kbd>n</kbd>) работают при воспроизведении, а не в фото или экспорте. Подводное фото сохраняет кайму, которую на экране убрали. Глубины и других показаний поверх видео в нём тоже нет.</li>
-        <li><b>Три стиля совпадают не точно.</b> В <i>SDR tone mapped from HDR by mpv</i> и в двух стилях HLG+DV изображение фото — это преобразование NBCU, близкое к тому, что показывает экран, но не то же самое. Трим-настройки из панели Dolby Vision в фото не попадают. В стиле с тональной компрессией mpv 3 с видео в Live Photo или Motion Photo — в HDR (HLG), а видео в Motion Photo в стилях HLG+DV — HLG без Dolby Vision.</li>
+        <li><b>Исправления только для воспроизведения.</b> Устранение цветной каймы от воды (<kbd>Ctrl</kbd>+<kbd>a</kbd>) работает при воспроизведении, а не в фото или экспорте. Подводное фото сохраняет кайму, которую на экране убрали. Глубины и других показаний поверх видео в нём тоже нет.</li>
+        <li><b>Три стиля совпадают не точно.</b> В <i>SDR tone mapped from HDR by mpv</i> и в двух стилях HLG+DV изображение фото — это преобразование NBCU, близкое к тому, что показывает экран, но не то же самое. Трим-настройки из панели Dolby Vision в фото не попадают. В стиле с тональной компрессией mpv 3 с видео в Live Photo — в HDR (HLG). Видео в Motion Photo всегда в SDR, в собственном стиле фото.</li>
         <li><b>Для поворота камеры нужна стабилизация.</b> На клипе без данных движения или с выключенным <kbd>Ctrl</kbd>+<kbd>g</kbd> Save frame только сдвигает и масштабирует картинку, а горизонт выровнять нельзя. Чистому кадру стабилизация тоже нужна.</li>
         <li><b>Приближение не добавляет деталей.</b> Больше 100&nbsp;% фото — это увеличенное видео.</li>
         <li><b>Очистка для фото фиксированная.</b> Сохранённое фото всегда использует 5 кадров с каждой стороны; настройки в <code>gyroflow.conf</code> действуют только на экране. У начала или конца клипа кадров меньше.</li>
@@ -484,7 +486,11 @@
         </details>
         <details>
           <summary>Можно ли так же обрезать всё видео?</summary>
-          <div class="a"><p>Нет, Save frame — для фото. Чтобы обрезать или приблизить весь клип, задайте обрезку и зум в Gyroflow (<kbd>Ctrl</kbd>+<kbd>e</kbd>); тогда плеер так его и будет воспроизводить и экспортировать. См. <a class="text-link" href="stabilization.html">Стабилизация</a>.</p></div>
+          <div class="a"><p>Save frame — для фото. Всему клипу форму задаёт Transform → <b>Frame</b> в боковой панели (16:9, 4:3, 5:4, квадрат, горизонтально или вертикально), и в этой форме клип играет и экспортируется, и в ней же делаются моменты и фото. Чтобы приблизить весь клип, задайте его зум в Gyroflow (<kbd>Ctrl</kbd>+<kbd>e</kbd>). См. <a class="text-link" href="stabilization.html">Стабилизация</a>.</p></div>
+        </details>
+        <details>
+          <summary>Можно ли сразу получить фото на каждой метке?</summary>
+          <div class="a"><p>Да: <b>Photos of all marks</b> (фото всех меток) в <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> — небольшом приложении, которое обрабатывает всю поездку сразу. Просто фото, Live Photo (на Mac) или Motion Photo, в <code>_Stills</code>, по одному разу: удалённое вами фото заново не создаётся.</p></div>
         </details>
         <details>
           <summary>Меняется ли моё исходное видео?</summary>
@@ -524,9 +530,9 @@
           <a href="stabilization.html">Стабилизация</a>
         </div>
         <div class="help-card">
-          <h3>Библиотека</h3>
+          <h3>Организация</h3>
           <p>Проекты, моменты, метки и папка <code>_Stills</code>, куда попадают ваши фото.</p>
-          <a href="organizing.html">Библиотека</a>
+          <a href="organizing.html">Организация</a>
         </div>
       </div>
     </div>

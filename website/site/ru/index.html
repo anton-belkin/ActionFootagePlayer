@@ -53,9 +53,9 @@
         <ul>
           <li><a href="log.html">Log-записи</a></li>
           <li><a href="stabilization.html">Стабилизация</a></li>
-          <li><a href="organizing.html">Библиотека</a></li>
+          <li><a href="organizing.html">Организация</a></li>
           <li><a href="photos.html">Фото</a></li>
-          <li><a href="../360.html" hreflang="en" lang="en">360-видео</a></li>
+          <li><a href="360.html">360-видео</a></li>
           <li><a href="features.html" class="nm-all">Все функции</a></li>
         </ul>
       </details>
@@ -76,9 +76,9 @@
         <li class="sm-group">Функции</li>
         <li><a href="log.html">Log-записи</a></li>
         <li><a href="stabilization.html">Стабилизация</a></li>
-        <li><a href="organizing.html">Библиотека</a></li>
+        <li><a href="organizing.html">Организация</a></li>
         <li><a href="photos.html">Фото</a></li>
-        <li><a href="../360.html" hreflang="en" lang="en">360-видео</a></li>
+        <li><a href="360.html">360-видео</a></li>
         <li><a href="features.html">Все функции</a></li>
         <li class="sm-dl"><a href="download.html">Скачать</a></li>
       </ul>
@@ -105,7 +105,7 @@
       <div class="hero-text">
         <p class="eyebrow">Бесплатный видеоплеер для записей с экшн-камер · Mac и Windows</p>
         <h1>Клипы с вашей экшн-камеры — в цвете и без тряски. Просто двойной щелчок.</h1>
-        <p class="lede">Action Footage Player воспроизводит на компьютере записи с камер GoPro, DJI и Insta360. Клипы, снятые в log — самом богатом цветовом режиме вашей камеры, — воспроизводятся в полном цвете, а не плоскими и серыми. Трясущиеся клипы воспроизводятся ровно, даже под водой. А момент, которым стоит поделиться, одной клавишей готов для телефона.</p>
+        <p class="lede">Action Footage Player воспроизводит на компьютере записи с камер GoPro, DJI и Insta360. Снимайте в log — самом богатом цветовом режиме вашей камеры — и смотрите здесь в полном цвете, а не в плоском сером. Трясущиеся клипы воспроизводятся ровно, даже под водой. А момент, которым стоит поделиться, одной клавишей готов для телефона.</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -116,6 +116,7 @@
             <span class="btn-label"><span class="os-mac">Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small></span>
           </a>
         </div>
+        <p class="hub-feedback">Это ранняя версия. Попробуйте её на своих клипах и напишите, что не так: <a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> или <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>.</p>
         <div class="status">
           <span>Бесплатно, с открытым кодом</span>
           <span>Без учётной записи и без загрузки в облако</span>
@@ -125,9 +126,9 @@
       </div>
 
       <figure class="media">
-        <div class="halves"><span><span class="os-mac">Клип в log, как его показывает Finder</span><span class="os-win">Клип в log, как его показывает Проводник</span></span><span>Как он воспроизводится здесь</span></div>
-        <img src="../media/log-grey-color.jpg" width="1600" height="900" fetchpriority="high" alt="Кадр из клипа в log, разделённый посередине: слева плоский и серый, справа в полном цвете.">
-        <figcaption>Один кадр одного и того же клипа. Эта картинка не в HDR: на HDR-экране плеер показывает его ярче.</figcaption>
+        <div class="halves"><span>Как записано: log, стабилизация выключена</span><span>Как он воспроизводится здесь</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="../media/log-steady.jpg" width="1920" height="540" src="../media/log-steady.mp4" aria-label="Одно и то же погружение рядом: слева плоское, серое и с тряской, как камера записала его в log; справа в цвете и ровное, как оно воспроизводится здесь."></video>
+        <figcaption>DJI Osmo Action 6, D-Log M, её стабилизация выключена. С обеих сторон один и тот же клип; это видео не в HDR: на HDR-экране плеер показывает его ярче.</figcaption>
       </figure>
     </div>
   </section>
@@ -166,7 +167,7 @@
   <section class="section band tight-top" id="features">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">Что он делает</p>
+        <p class="eyebrow">Что он умеет</p>
         <h2>Дважды щёлкните по клипу. Он воспроизводится таким, каким вы его запомнили.</h2>
         <p class="lede">Без импорта, без монтажа, без ожидания. Всё происходит прямо во время воспроизведения.</p>
       </div>
@@ -187,6 +188,11 @@
           <a class="text-link feature-more" href="organizing.html#marks">Как это работает →</a>
         </div>
         <div class="feature">
+          <h3>Что измерила камера</h3>
+          <p>Глубина, скорость и GPS на экране во время воспроизведения, если камера их записала. Больше о том, что происходило, чем видно на картинке.</p>
+          <a class="text-link feature-more" href="features.html#telemetry">Как это работает →</a>
+        </div>
+        <div class="feature">
           <h3>Сохраните лучшее</h3>
           <p>Фрагмент, который вы сохраняете, становится маленьким файлом в папке <code>_Moments</code>, цветным в <span class="os-mac">Finder и Быстром просмотре</span><span class="os-win">Проводнике и в его области просмотра</span>.</p>
           <a class="text-link feature-more" href="organizing.html#moments">Как это работает →</a>
@@ -197,14 +203,8 @@
           <p class="os-win">Отметьте фрагмент и нажмите одну клавишу: получится HDR-файл для телефона, телевизора или YouTube.</p>
           <a class="text-link feature-more" href="log.html#export">Как это работает →</a>
         </div>
-        <div class="feature">
-          <h3>Потом — в монтажную программу <span class="soon">Скоро</span></h3>
-          <p>Final Cut Pro, DaVinci Resolve и Premiere Pro получают ваши моменты и отметки — на исходных файлах.</p>
-          <a class="text-link feature-more" href="organizing.html#editors">Как это работает →</a>
-        </div>
       </div>
-      <p class="hub-measured"><strong>Что измерила камера:</strong> глубина, скорость и GPS на экране, если камера их записала.</p>
-      <p class="note hub-guides">Пошагово: <a class="text-link" href="log.html">Видео в log</a> · <a class="text-link" href="stabilization.html">Стабилизация</a> · <a class="text-link" href="organizing.html">Библиотека</a> · <a class="text-link" href="photos.html">Фото</a> · <a class="text-link" href="features.html">Все функции подробно →</a></p>
+      <p class="note hub-guides">Пошагово: <a class="text-link" href="log.html">Log-записи</a> · <a class="text-link" href="stabilization.html">Стабилизация</a> · <a class="text-link" href="organizing.html">Организация</a> · <a class="text-link" href="photos.html">Фото</a> · <a class="text-link" href="360.html">360-видео</a> · <a class="text-link" href="features.html">Все функции подробно →</a></p>
     </div>
   </section>
 
@@ -320,6 +320,8 @@
               </table>
             </div>
             <p class="note"><span class="pill ok">Проверена</span> воспроизводится в плеере на настоящих записях. <span class="pill exp">Ожидается</span> поддержка сделана по опубликованным производителем метаданным или образцам клипов, но на настоящих записях ещё не проверена. <span class="pill exp">Ожидается*</span> то же самое, но с одним шагом вручную, описанным в строке камеры. <span class="pill part">Пока нет</span> пока не работает.</p>
+            <p>360-камеры, начиная с Insta360 X5: см. <a class="text-link" href="360.html">360-видео</a>.</p>
+            <p>У вас камера с пометкой «Ожидается» или её нет в списке? Пришлите нам с неё короткий клип, и она сможет перейти в «Проверена»: <a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> или <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>.</p>
           </div>
         </details>
         <details>
@@ -332,7 +334,7 @@
         </details>
         <details>
           <summary>Он изменяет мои исходные файлы?</summary>
-          <div class="a"><p>Только если вы попросите. Чтобы вырезать из клипа испорченный кусок (<kbd>Ctrl</kbd>+<kbd>x</kbd>), плеер перезаписывает клип без него, ничего не перекодируя, а оригинал отправляется в Корзину. В остальном ваши исходные файлы остаются как есть.</p><p>Всё, что он создаёт, попадает в папку проекта поездки, которую вы один раз выбираете на вкладке Project боковой панели: <code>_Moments</code> — для фрагментов, которые вы сохраняете, <code>_Clips</code> — для превью каждого клипа, <code>_Exports</code> — для экспортированных видео и <code>_ActionFootagePlayer</code> — для его собственных заметок. Ваши собственные отметки и проект Gyroflow для клипа — маленькие файлы рядом с клипом. На заблокированной карте или в папке, куда плеер не может писать, папка проекта создаётся в «Документах».</p></div>
+          <div class="a"><p>Только если вы попросите. Чтобы вырезать из клипа испорченный кусок (<kbd>Ctrl</kbd>+<kbd>x</kbd>), плеер перезаписывает клип без него, ничего не перекодируя, а оригинал отправляется в Корзину. В остальном ваши исходные файлы остаются как есть.</p><p>Всё, что он создаёт, попадает в папку проекта поездки, которую вы один раз выбираете на вкладке Project боковой панели: <code>_Moments</code> — для фрагментов, которые вы сохраняете, <code>_Clips</code> — для превью каждого клипа, <code>_Exports</code> — для экспортированных видео и <code>Project.afproject</code>, который открывает поездку в <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>. Рядом с каждым клипом лежат два его собственных маленьких файла: <code>&lt;clip&gt;.afp.json</code> с вашими отметками и сохранённым видом клипа и его проект Gyroflow, если он есть. На заблокированной карте или в папке, куда плеер не может писать, папка проекта создаётся в «Документах».</p></div>
         </details>
         <details>
           <summary>Он правда бесплатный?</summary>
@@ -344,7 +346,7 @@
         </details>
         <details>
           <summary>Каким получается экспортированный файл?</summary>
-          <div class="a"><p>Это HDR-видеофайл, который iPhone, Mac, большинство HDR-телевизоров и YouTube показывают как HDR. Если экспортировать его на Mac в стиле <i>HLG+DV</i> — том, что включается сразу на экране Mac без HDR, — в нём будет ещё и информация Dolby Vision, по которой iPhone, iPad и Mac хорошо показывают его на экранах без HDR. А если экспортировать в SDR-стиле NBCU или производителя камеры, получится обычный SDR-файл (Rec.709).</p><p>В файл не добавлено никакого стиля, так что это естественная отправная точка: настройте его на свой вкус в редакторе, который работает с HDR, например в iMovie. Стиль, вшитый в файл, уже не убрать: тени, задавленные в чёрное, так и останутся чёрными.</p></div>
+          <div class="a"><p>Это HDR-видеофайл, который iPhone, Mac, большинство HDR-телевизоров и YouTube показывают как HDR. Если экспортировать его на Mac в стиле <i>HLG+DV</i> — том, в котором клипы открываются на экране Mac без HDR, — в нём будет ещё и информация Dolby Vision, по которой iPhone, iPad и Mac хорошо показывают его на экранах без HDR. А если экспортировать в SDR-стиле NBCU или производителя камеры, получится обычный SDR-файл (Rec.709).</p><p>В файл не добавлено никакого стиля, так что это естественная отправная точка: настройте его на свой вкус в редакторе, который работает с HDR, например в iMovie. Стиль, вшитый в файл, уже не убрать: тени, задавленные в чёрное, так и останутся чёрными.</p></div>
         </details>
         <details>
           <summary>Почему бы просто не пользоваться приложением производителя камеры?</summary>

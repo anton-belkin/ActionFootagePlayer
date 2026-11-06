@@ -9,3 +9,5 @@
 .v360-svg .lbl { font-family: var(--f-mono); font-size: 13px; fill: var(--accent-ink); }
 .v360-svg .cap { font-family: var(--f-mono); font-size: 13px; fill: var(--muted); }
 @media (min-width: 900px) { .v360-two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The gestures are words, not keys: let them wrap on a phone */
+#look .key span:last-child { flex: 0 1 auto; }
