@@ -1,0 +1,509 @@
+From fa9eebf11cb934d45e0532797c950ffb221b5627 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Fri, 6 Nov 2026 14:52:34 +0100
+Subject: [PATCH] mac: turn a 360 view by the trackpad's gestures in the VO
+
+A script turning a view by the gestures (view360) applies them through
+--glsl-shader-opts, which waits for the VO: at 60 Hz the gestures came
+faster than it could set them and the view fell behind, by seconds
+while playing. Now each gesture message carries a number, the script
+says which one its values include (afp_input_seq), and the VO, before
+it draws, turns the view (view360_yaw, _pitch, _roll, _fov) by the
+gestures after it with the same geometry near the picture's middle,
+and is woken to draw as each comes in, playing or paused. The script
+stays the one that turns the view exactly (what's under the mouse
+staying under it); the VO only bridges the frames until its values
+come. The little planet's pan is left to the script.
+
+--macos-latency-test's timer now runs from MacCommon, stopped when the
+VO goes: polled from the view, it could read the options after they
+were freed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ DOCS/man/options.rst           |   8 +-
+ meson.build                    |   3 +-
+ osdep/mac/app_bridge_objc.h    |   1 +
+ video/out/mac/gesture_view.c   | 138 +++++++++++++++++++++++++++++++++
+ video/out/mac/gesture_view.h   |  53 +++++++++++++
+ video/out/mac/latency.c        |   9 +++
+ video/out/mac/latency.h        |   2 +
+ video/out/mac/view.swift       |  23 +++++-
+ video/out/vo_gpu_next.c        |  78 +++++++++++++++++--
+ video/out/vulkan/context_mac.m |   3 +
+ 10 files changed, 307 insertions(+), 11 deletions(-)
+ create mode 100644 video/out/mac/gesture_view.c
+ create mode 100644 video/out/mac/gesture_view.h
+
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index ca0ce20d1..20a41cae6 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7290,8 +7290,12 @@ them.
+     moves, instead of ``WHEEL_*`` keys. A mouse wheel's clicks stay ``WHEEL_*`` keys. ``<phase>``
+     is ``began``, ``changed``, ``ended``, ``cancelled``, ``momentum`` (the scroll going on after
+     the fingers left) or ``none``. Can be changed at runtime, so a script can take the gestures
+-    only while it needs them. Each message ends with its event's time, in seconds of the host
+-    clock (as ``NSEvent.timestamp``), after the phase.
++    only while it needs them. After the phase, each message has its event's time, in seconds of
++    the host clock (as ``NSEvent.timestamp``), and its number. A script turning a 360 view
++    (``view360_yaw``, ``_pitch``, ``_roll``, ``_fov`` and ``_projection`` shader parameters) puts
++    the number of the last message its values include in ``--glsl-shader-opts`` as
++    ``afp_input_seq``; the VO then turns the view by the later gestures itself before it draws,
++    and draws as each comes in, until the script's values come.
+ 
+ ``--macos-latency-log=<yes|no>``
+     Logs, for each frame shown through the swapchain, how long ago the input it shows came in
+diff --git a/meson.build b/meson.build
+index cc4f160fa..103a50808 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1652,7 +1652,8 @@ if features['cocoa'] and features['swift']
+                            'video/out/mac/title_bar.swift',
+                            'video/out/mac/view.swift',
+                            'video/out/mac/window.swift')
+-    sources += files('video/out/mac/latency.c')
++    sources += files('video/out/mac/latency.c',
++                     'video/out/mac/gesture_view.c')
+ endif
+ 
+ macos_10_15_4_features = get_option('macos-10-15-4-features').require(
+diff --git a/osdep/mac/app_bridge_objc.h b/osdep/mac/app_bridge_objc.h
+index 8d5991b83..9c73dfaa9 100644
+--- a/osdep/mac/app_bridge_objc.h
++++ b/osdep/mac/app_bridge_objc.h
+@@ -34,6 +34,7 @@
+ #include "osdep/main-fn.h"
+ #include "osdep/mac/app_bridge.h"
+ #include "video/out/mac/latency.h"
++#include "video/out/mac/gesture_view.h"
+ 
+ // complex macros won't get imported to swift so we have to reassign them
+ static const int SWIFT_MBTN_LEFT       = MP_MBTN_LEFT;
+diff --git a/video/out/mac/gesture_view.c b/video/out/mac/gesture_view.c
+new file mode 100644
+index 000000000..78d429502
+--- /dev/null
++++ b/video/out/mac/gesture_view.c
+@@ -0,0 +1,138 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <math.h>
++
++#include "common/common.h"
++#include "osdep/threads.h"
++#include "video/out/vo.h"
++
++#include "gesture_view.h"
++
++// The gestures sent and not yet applied by the script: a few seconds' worth
++#define RING 512
++
++struct gesture {
++    uint64_t seq;
++    enum mac_gesture_kind kind;
++    double a, b, time;
++};
++
++static mp_static_mutex lock = MP_STATIC_MUTEX_INITIALIZER;
++static struct vo *wake_vo;
++static bool active;
++static uint64_t last_seq;
++static struct gesture ring[RING];
++
++void mac_gesture_set_vo(struct vo *vo)
++{
++    mp_mutex_lock(&lock);
++    wake_vo = vo;
++    mp_mutex_unlock(&lock);
++}
++
++void mac_gesture_set_active(bool on)
++{
++    mp_mutex_lock(&lock);
++    active = on;
++    mp_mutex_unlock(&lock);
++}
++
++uint64_t mac_gesture_push(enum mac_gesture_kind kind, double a, double b, double time)
++{
++    mp_mutex_lock(&lock);
++    uint64_t seq = ++last_seq;
++    ring[seq % RING] = (struct gesture){ .seq = seq, .kind = kind, .a = a, .b = b, .time = time };
++    // Drawn now, playing or paused, rather than when the script gets to it
++    if (active && wake_vo && kind != MAC_GESTURE_NONE)
++        vo_redraw(wake_vo);
++    mp_mutex_unlock(&lock);
++    return seq;
++}
++
++// view360's geometry (mpv/scripts/view360/view.lua, view360.glsl), near the picture's middle
++static const float fov_min[4] = { 20, 20, 20, 60 };
++static const float fov_max[4] = { 300, 150, 300, 330 };
++#define PITCH_MAX 89.9
++
++static double smoothstep(double a, double b, double x)
++{
++    double t = MPCLAMP((x - a) / (b - a), 0, 1);
++    return t * t * (3 - 2 * t);
++}
++
++static double wrap(double deg)
++{
++    deg = fmod(deg, 360);
++    if (deg > 180)
++        deg -= 360;
++    if (deg < -180)
++        deg += 360;
++    return deg;
++}
++
++static void turn(struct mac_gesture_view *v, const struct gesture *g, double height_px)
++{
++    int proj = MPCLAMP(v->projection, 0, 3);
++    switch (g->kind) {
++    case MAC_GESTURE_ZOOM:
++        if (g->a > 0)
++            v->fov = MPCLAMP(v->fov / g->a, fov_min[proj], fov_max[proj]);
++        break;
++    case MAC_GESTURE_ROLL:
++        v->roll = wrap(v->roll + g->a);
++        break;
++    case MAC_GESTURE_PAN: {
++        // The little planet spins and tilts about its middle: left to the script
++        if (proj == 3 || height_px <= 0)
++            break;
++        // The projection's distance d and scale k (r = k sin θ / (cos θ + d), in half heights):
++        // near the middle, a half height is (1 + d) / k radians
++        double d = proj == 1 ? 0 : proj == 2 ? 1 : smoothstep(100, 160, v->fov);
++        double half = v->fov * M_PI / 360;
++        double k = 16.0 / 9 * (cos(half) + d) / sin(half);
++        double rad_per_px = (1 + d) / k / (height_px / 2);
++        // The picture's axes turned by the roll into the head's
++        double r = v->roll * M_PI / 180;
++        double hx = g->a * cos(r) - g->b * sin(r);
++        double hy = g->a * sin(r) + g->b * cos(r);
++        double cp = MPMAX(0.05, cos(v->pitch * M_PI / 180));
++        // The picture moving right looks left, moving down looks up
++        v->yaw = wrap(v->yaw - hx * rad_per_px * 180 / M_PI / cp);
++        v->pitch = MPCLAMP(v->pitch + hy * rad_per_px * 180 / M_PI, -PITCH_MAX, PITCH_MAX);
++        break;
++    }
++    default:
++        break;
++    }
++}
++
++double mac_gesture_predict(uint64_t done, double height_px, struct mac_gesture_view *v)
++{
++    double newest = 0;
++    mp_mutex_lock(&lock);
++    uint64_t from = MPMAX(done + 1, last_seq >= RING ? last_seq - RING + 1 : 1);
++    for (uint64_t seq = from; seq <= last_seq; seq++) {
++        const struct gesture *g = &ring[seq % RING];
++        if (g->seq != seq || g->kind == MAC_GESTURE_NONE)
++            continue;
++        turn(v, g, height_px);
++        newest = MPMAX(newest, g->time);
++    }
++    mp_mutex_unlock(&lock);
++    return newest;
++}
+diff --git a/video/out/mac/gesture_view.h b/video/out/mac/gesture_view.h
+new file mode 100644
+index 000000000..2ceedd129
+--- /dev/null
++++ b/video/out/mac/gesture_view.h
+@@ -0,0 +1,53 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct vo;
++
++// The trackpad's gestures straight to a 360 view's shader parameters (view360_yaw, _pitch, _roll,
++// _fov, _projection), between the updates of the script that turns them exactly: each gesture
++// message (--macos-gesture-messages) has a number; the script says in --glsl-shader-opts which it
++// has applied (afp_input_seq), and the VO turns the view by the ones after it before it draws, and
++// is woken to draw as each comes in. Without afp_input_seq nothing is added.
++
++enum mac_gesture_kind {
++    MAC_GESTURE_NONE = 0,   // a message the view doesn't act on (a momentum scroll...)
++    MAC_GESTURE_PAN,        // a, b: the picture moved by so many pixels, right and down
++    MAC_GESTURE_ZOOM,       // a: the factor, above 1 closer
++    MAC_GESTURE_ROLL,       // a: degrees, counterclockwise
++};
++
++// The VO to wake for a redraw (NULL: none); the VO thread
++void mac_gesture_set_vo(struct vo *vo);
++// Whether the VO adds the gestures to the view (the script asked for it with afp_input_seq)
++void mac_gesture_set_active(bool active);
++
++// A gesture message sent (the main thread): its number, which the message carries
++uint64_t mac_gesture_push(enum mac_gesture_kind kind, double a, double b, double time);
++
++struct mac_gesture_view {
++    float yaw, pitch, roll, fov;
++    int projection;     // 0 auto, 1 rectilinear, 2 stereographic, 3 little planet
++};
++
++// The VO thread: the view turned by the gestures after done (the script's afp_input_seq), for a
++// picture height px pixels high. Returns the newest gesture's time, 0 when there was none
++double mac_gesture_predict(uint64_t done, double height_px, struct mac_gesture_view *v);
+diff --git a/video/out/mac/latency.c b/video/out/mac/latency.c
+index 9bac1af31..01e043950 100644
+--- a/video/out/mac/latency.c
++++ b/video/out/mac/latency.c
+@@ -80,6 +80,15 @@ void mac_latency_frame_begin(double applied)
+     mp_mutex_unlock(&lock);
+ }
+ 
++void mac_latency_frame_applied(double applied)
++{
++    mp_mutex_lock(&lock);
++    if (current.id && ring[current.id % RING].id == current.id &&
++        applied > ring[current.id % RING].applied)
++        ring[current.id % RING].applied = applied;
++    mp_mutex_unlock(&lock);
++}
++
+ void mac_latency_frame_fresh(bool fresh)
+ {
+     mp_mutex_lock(&lock);
+diff --git a/video/out/mac/latency.h b/video/out/mac/latency.h
+index 91387ec3f..c42323a10 100644
+--- a/video/out/mac/latency.h
++++ b/video/out/mac/latency.h
+@@ -37,6 +37,8 @@ void mac_latency_input(double event_time);
+ // The VO thread: a frame starts being drawn. applied: the time of the input event whose effect
+ // the frame shows (0 when nobody said)
+ void mac_latency_frame_begin(double applied);
++// The frame shows an input newer than the one begin was given (the VO applied it itself)
++void mac_latency_frame_applied(double applied);
+ // The frame was rendered from the video frame (fresh), not taken from the renderer's cache
+ void mac_latency_frame_fresh(bool fresh);
+ // The frame is handed to the swapchain
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index 410c6146e..b3186c058 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -180,12 +180,29 @@ class View: NSView, CALayerDelegate {
+         sendGesture(kind, values, phase, event.timestamp)
+     }
+ 
+-    // The event's time last (seconds of the host clock, as NSEvent.timestamp): a script passes it on in
+-    // glsl-shader-opts as afp_input_time, for --macos-latency-log
++    // After the phase, the event's time (seconds of the host clock, as NSEvent.timestamp: a script
++    // passes it on in glsl-shader-opts as afp_input_time, for --macos-latency-log) and the message's
++    // number (afp_input_seq: the VO turns a 360 view by the gestures after it, video/out/mac/gesture_view.h)
+     func sendGesture(_ kind: String, _ values: [Double], _ phase: String, _ time: TimeInterval) {
+         mac_latency_input(time)
++        // What the view360 script does with it (gestures.lua): a scroll pans, a mouse's smooth wheel
++        // (no phase) zooms by 1.1 every 10 points, the coasting after the fingers left does nothing
++        var view = MAC_GESTURE_NONE
++        var a = 0.0, b = 0.0
++        let x = values.count > 0 ? values[0] : 0, y = values.count > 1 ? values[1] : 0
++        switch (kind, phase) {
++        case ("scroll", "momentum"): break
++        case ("scroll", "none"): if y != 0 { view = MAC_GESTURE_ZOOM; a = pow(1.1, y / 10) }
++        case ("scroll", _):
++            let scale = Double(window?.backingScaleFactor ?? 1)
++            view = MAC_GESTURE_PAN; a = x * scale; b = y * scale
++        case ("magnify", _): view = MAC_GESTURE_ZOOM; a = 1 + x
++        case ("rotate", _): view = MAC_GESTURE_ROLL; a = x
++        default: break
++        }
++        let seq = mac_gesture_push(view, a, b, time)
+         let args = values.map { String(format: "%.4f", $0) }.joined(separator: " ")
+-        input?.command("script-message gesture \(kind) \(args) \(phase) \(String(format: "%.6f", time))")
++        input?.command("script-message gesture \(kind) \(args) \(phase) \(String(format: "%.6f", time)) \(seq)")
+     }
+ 
+     // --macos-latency-test=<hz>: a two-finger scroll made up at that rate while the gestures are messages,
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 0f9db6798..7ff8f3e23 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -54,17 +54,24 @@
+ #include "gpu_next/context.h"
+ 
+ #if HAVE_COCOA && HAVE_SWIFT
++#include "video/out/mac/gesture_view.h"
+ #include "video/out/mac/latency.h"
+ 
++static const char *shader_opt(char **opts, const char *key)
++{
++    for (int n = 0; opts && opts[n * 2]; n++) {
++        if (strcmp(opts[n * 2], key) == 0)
++            return opts[n * 2 + 1];
++    }
++    return NULL;
++}
++
+ // The time of the input whose effect the frame shows, as the script that turned it into shader
+ // parameters said (glsl-shader-opts afp_input_time), for --macos-latency-log
+ static double input_time(char **opts)
+ {
+-    for (int n = 0; opts && opts[n * 2]; n++) {
+-        if (strcmp(opts[n * 2], "afp_input_time") == 0)
+-            return strtod(opts[n * 2 + 1], NULL);
+-    }
+-    return 0;
++    const char *t = shader_opt(opts, "afp_input_time");
++    return t ? strtod(t, NULL) : 0;
+ }
+ #endif
+ 
+@@ -168,6 +175,13 @@ struct priv {
+     double last_pts;
+     bool is_interpolated;
+     bool rendered_fresh;    // this frame rendered a video frame (not from the cache)
++
++    // The 360 view's parameters, turned by the gestures the script hasn't applied yet
++    // (video/out/mac/gesture_view.h): yaw, pitch, roll, fov, projection, and the first four as
++    // the options set them
++    const struct pl_hook_par *view_par[5];
++    float view_base[4];
++    bool view_base_stale;
+     bool want_reset;
+     bool want_seek_reset;
+     bool flush_cache;
+@@ -1400,6 +1414,55 @@ static uint64_t hook_params_signature(const struct pl_hook *const *hooks, int nu
+     return num_hooks ? h : 0;
+ }
+ 
++#if HAVE_COCOA && HAVE_SWIFT
++// The 360 view (view360.glsl) turned by the trackpad's gestures its script hasn't applied yet:
++// the script's values (from --glsl-shader-opts) and the gestures after afp_input_seq
++static void turn_view(struct priv *p, char **opts)
++{
++    static const char *const names[5] = { "view360_yaw", "view360_pitch", "view360_roll",
++                                          "view360_fov", "view360_projection" };
++    if (p->view_base_stale) {
++        // Just set from the options: these are the script's values
++        p->view_base_stale = false;
++        memset(p->view_par, 0, sizeof(p->view_par));
++        for (int i = 0; i < p->pars->params.num_hooks; i++) {
++            const struct pl_hook *hook = p->pars->params.hooks[i];
++            for (int j = 0; j < hook->num_parameters; j++) {
++                for (int n = 0; n < 5; n++) {
++                    if (strcmp(hook->parameters[j].name, names[n]) == 0)
++                        p->view_par[n] = &hook->parameters[j];
++                }
++            }
++        }
++        for (int n = 0; n < 4; n++)
++            p->view_base[n] = p->view_par[n] ? p->view_par[n]->data->f : 0;
++    }
++    for (int n = 0; n < 5; n++) {
++        if (!p->view_par[n]) {
++            mac_gesture_set_active(false);
++            return;
++        }
++    }
++
++    const char *done = shader_opt(opts, "afp_input_seq");
++    mac_gesture_set_active(done != NULL);
++    struct mac_gesture_view v = {
++        .yaw = p->view_base[0], .pitch = p->view_base[1], .roll = p->view_base[2],
++        .fov = p->view_base[3], .projection = p->view_par[4]->data->i,
++    };
++    if (done) {
++        double t = mac_gesture_predict(strtoull(done, NULL, 10),
++                                       p->dst.y1 - p->dst.y0, &v);
++        if (t)
++            mac_latency_frame_applied(t);
++    }
++    p->view_par[0]->data->f = v.yaw;
++    p->view_par[1]->data->f = v.pitch;
++    p->view_par[2]->data->f = v.roll;
++    p->view_par[3]->data->f = v.fov;
++}
++#endif
++
+ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ {
+     struct priv *p = vo->priv;
+@@ -1824,6 +1887,10 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+         for (int i = 0; i < pars->params.num_hooks; i++)
+             update_hook_opts_dynamic(p, p->hooks[i], frame->current);
+ 
++#if HAVE_COCOA && HAVE_SWIFT
++        turn_view(p, opts->user_shader_opts);
++#endif
++
+         // libplacebo reuses a cached frame while the render params' hash is
+         // the same, and that hashes the hooks, not their parameters' values:
+         // a frame drawn again with a parameter changed (a redraw, a frame
+@@ -3105,6 +3172,7 @@ static void update_render_options(struct vo *vo)
+     }
+ 
+     pars->params.hooks = p->hooks;
++    p->view_base_stale = true;
+ 
+     MP_DBG(p, "Render options updated, flushing renderer cache.\n");
+     p->flush_cache = p->paused || !p->next_opts->inter_preserve;
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index 2c48359db..5afdb5f49 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -23,6 +23,7 @@
+ #include "osdep/mac/app_bridge.h"
+ #include "osdep/mac/swift.h"
+ #include "video/out/gpu/context.h"
++#include "video/out/mac/gesture_view.h"
+ #include "video/out/mac/latency.h"
+ #include "video/out/mac/sample_buffer.h"
+ 
+@@ -45,6 +46,7 @@ static void mac_vk_uninit(struct ra_ctx *ctx)
+     struct priv *p = ctx->priv;
+ 
+     mac_latency_set_log(NULL);
++    mac_gesture_set_vo(NULL);
+     mac_sample_buffer_destroy(&p->sb, p->vk.gpu);
+     ra_vk_ctx_uninit(ctx);
+     mpvk_uninit(&p->vk);
+@@ -159,6 +161,7 @@ static bool mac_vk_init(struct ra_ctx *ctx)
+     p->opts_cache = m_config_cache_alloc(p, ctx->global, &macos_conf);
+     p->opts = p->opts_cache->opts;
+     p->latency_log = mp_log_new(p, ctx->global->log, "latency");
++    mac_gesture_set_vo(ctx->vo);
+ 
+     p->vo_mac = [[MacCommon alloc] init:ctx->vo];
+     if (!p->vo_mac)
+-- 
+2.42.0
+

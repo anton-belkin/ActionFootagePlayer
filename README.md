@@ -217,16 +217,16 @@ panel. Without it (`footage_menu.conf`: `menu=yes` for it in any case), right-cl
 everything the keys do, with the keys beside it, and what has no key. At the
 top, what the clip is (the camera, its log curve, whether it has motion data and telemetry, how many highlights);
 then playing, marking a part and exporting it; **Highlights** (the next, the previous, or any one by its time);
-**Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand, noise reduction); **Stabilization** (on,
-the wider view, the level, the horizon locked or not, the lens under water or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
+**Look** (HDR, the maker's SDR, NBCU's SDR, as recorded, the log curve by hand); **Stabilization** (on,
+the wider view, the level, the horizon level or free, the lens under water with a flat port or not, what fills the edges, Gyroflow); **Telemetry** (where it shows,
 the units, which fields); **Export** (in SDR, the last export in Finder); **Clip** (the next and
 previous clip in the folder, Finder, the path, a still); **Player** (speed, tracks, fullscreen); and Note for the
 agent… (see [Notes for an AI agent](#notes-for-an-ai-agent)), Keys…, Help and Report this camera…, which opens an
 issue on GitHub with what the plugins found in the clip. In the app, that last submenu has the version beside its
 name: *ActionFootagePlayer 0.6.4*.
 
-Look, Stabilization and Telemetry each have **Remember as default**: the settings as they are become the plugin's
-options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
+Look and Telemetry have **Remember as default**, Stabilization **Use as default**: the settings as they are become
+the plugin's options (see Options), for the next start. A clip without motion data has **Stabilize in Gyroflow (optical
 flow)…** instead: see Stabilization.
 
 The menu is mpv's own, so it needs mpv 0.41 or later (Homebrew's is); with an older mpv, right click pauses as it
@@ -241,21 +241,37 @@ switches and buttons, scrolled with the wheel:
 - **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
   with their keys beside them. At the top, the project: with none yet, what one is and **Initialize the project here**
   in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
-  then its counts, **Make clip previews** for clips without one, **Show all clips** and **Show all moments** in
-  Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
+  then its counts, **Open in Action Footage Library** (where the trip's [batches](#action-footage-library) are made:
+  clip previews, moments and photos of all marks, exports of all moments), **Show all clips** and **Show all moments**
+  in Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
   its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
   interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
   were moved).
-- **Clip**: what it is, Finder and its path, its [saved view](#a-clips-saved-view-and-frame) (**Save**, **Auto
-  save**), marking a part, its **Frame** (aspect, a turn by 90°, the lens: linear or a fisheye), exporting it, the
-  highlights, the next and previous clip.
-- **Look**: the video output (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping; NBCU's and the maker's SDR),
-  the log curve by hand, noise reduction.
-- **Stabilization**: Gyroflow, the view, the level, the horizon, the lens and its color aberration.
+- **Source**: what the clip is, Finder and its path, and how to read it right ([its input](#source-and-transform)):
+  its color as recorded (log and its curve, HDR in HLG or PQ with or without Dolby Vision, or SDR), the log curve,
+  the turn it was recorded with, the lens (the camera, its lens profile and where it comes from, whether there's
+  motion data, and whether it was under water with a flat port). **Save to the source** and **Revert to saved**, its
+  own: a change is for viewing until saved. Its marks.
+- **Transform**: how it's shown ([its transform](#source-and-transform)): where that's defined, **Save**, **Revert
+  to saved**, **Use as default**, **Auto save**, a moment's or clip preview's **Settings of its own**; the
+  stabilization (on, wider, off), the level, the horizon (level or free), the **Lens** (corrected, with its
+  projection, linear or a fisheye; or as recorded), the **Frame** (its ratio, drawn, and as is, landscape or
+  portrait) and the water's color aberration. The dot in a
+  corner marks what's saved, beside what's chosen. With a Gyroflow project, what the project has is shown as its
+  values, with **Edit in Gyroflow…**.
+- **Output**: **Display**, the video output on this screen (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping;
+  NBCU's and the maker's SDR); and **Export**, a file of what plays (the part marked, in SDR, the last export).
+- Source and Output have **In the folder** at the bottom: the previous and next clip, **Autoplay next**, **Loop the
+  clip**.
 - **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame (full size, temporal
-  denoise), what fills the edges and how often the trail is written, whether it asks when the GPU can't keep up.
+  denoise), what fills the edges and how often the trail is written, skipping the color aberration correction on
+  this screen, whether it asks when the GPU can't keep up. They make playback lighter on this computer; what's
+  saved, exports and photos stay as they are.
 - **Telemetry**: whether it shows, the corner, the units, the fields.
 - **Dolby Vision** (Mac, the app): the trims, as sliders; back to the author's, or neutral ones.
+- **360° view**, for a 360° clip: looking around on or off, the projection, the field of view, the horizon, **Look
+  ahead again**, and what the view follows (it needs the camera's motion in the frames, which a stitched clip doesn't
+  have: for raw clips, later).
 - **Support**, at the bottom: the version, Keys…, Note for the agent…, Report this camera…, Set up again…, and links
   to the website and GitHub.
 
@@ -272,13 +288,12 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+u` | The lens above water (no refraction), and back to under water, as the camera says or as the project says, whichever it was (Stabilization → Lens in the menu); it sticks for the next clips without a project | `gyroflow/lens` |
+| `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` | The clip's next video output: HDR (HLG), HLG with Dolby Vision in HDR and in SDR (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
-| `Ctrl+l` | This clip's log curve, by hand, in HDR: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say | `dlogm/curve` |
-| `Ctrl+n` | Noise reduction on/off: the blotches of color in shadows and under water mostly go, the detail stays. On the GPU, before the log conversion; any clip, log or not. It sticks for the next clips. Playback only: exports are as before | `dlogm/denoise` |
+| `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: Source → Save to the source keeps it, for all its moments and clips | `dlogm/curve` |
 | `Ctrl+p` | Temporal denoise of the paused frame on/off: a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It sticks for the next clips | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
@@ -292,6 +307,9 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
+| drag, wheel | On a 360° clip (stitched, with spherical metadata: Insta360 Studio's, DJI Studio's, GoPro Player's exports), the view to look around in: a drag, or two fingers on a trackpad, turns your head, what's under the mouse staying under it; the wheel or a pinch zooms; `Alt`+drag or a two-finger rotation turns the horizon; a double click or `Backspace` looks ahead again. Paused as playing. The window isn't dragged by the video meanwhile | |
+| `Alt+v` | A 360° clip: the view to look around in, or the sphere as recorded, unrolled flat | `view360/toggle` |
+| `Alt+p` | A 360° clip: the projection, auto (straight lines straight up to 100°, the whole sphere from 160°) → rectilinear → stereographic → little planet | `view360/projection` |
 | right click | The plugins' menu, when there's no side panel (mpv's own menu with it) | `footage_menu/menu` |
 | `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
@@ -312,7 +330,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 |---|---|
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `dlogm.conf`: `dv_live_l1=yes` | Mac, the app: *HLG+DV* measures each frame's light levels as it plays and sends them with it (`--macos-dovi-live-l1`); `no`: the trims' fixed ones, and the side panel's scene-level sliders back |
-| `dlogm.conf`: `denoise=no` | `yes`: clips start with the noise reduction on (`Ctrl+n`). How strong it is: `glsl-shader-opts=denoise_strength=2` in `mpv.conf` (1 by default, tuned for 10-bit log) |
+| `dlogm.conf`: `denoise=no` | `yes`: the noise reduction while it plays (no key or menu item any more: at playback rates the eye evens the noise out, and `Ctrl+p` cleans the paused frame). How strong it is: `glsl-shader-opts=denoise_strength=2` in `mpv.conf` |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
 | `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
@@ -322,9 +340,12 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
-| `gyroflow.conf`: `horizon_lock=project` | clips without a project: `yes`, the horizon locked level (Gyroflow's horizon lock at 100 %, in exports too); `no`: not locked; `project`: as the preset says. A clip with a `.gyroflow` plays with the project's |
-| `gyroflow.conf`: `underwater=auto` | the lens of clips without a project: `yes` under water, `no` above water, `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says), `project` as the preset says. A clip with a `.gyroflow` plays with the project's. See Stabilization |
+| `gyroflow.conf`: `horizon_lock=project` | the default horizon: `yes`, level (Gyroflow's horizon lock at 100 %, in exports too); `no`: free; `project`: as the preset has it. A clip with a `.gyroflow` plays with the project's |
+| `gyroflow.conf`: `underwater=auto` | the lens of sources without a correction of their own: `yes` under water with a flat port, `no` above water (or a dome port), `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says). A clip with a `.gyroflow` plays with the project's. See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
+| `gyroflow.conf`: `chromatic_skip=no` | `yes`: the color aberration correction skipped on this screen, for smooth playback (Performance & Quality); the clips' transforms keep it, exports and photos have it |
+| `gyroflow.conf`: `aspect=original`, `orientation=as-is`, `projection=linear` | the default frame: `original` or a ratio landscape-wise (`16:9`, `4:3`, `5:4`, `1:1`), its orientation (`as-is`, `landscape`, `portrait`), and the projection (`linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`); **Use as default** writes them |
+| `gyroflow.conf`: `lens=corrected` | the default lens: `corrected` (Gyroflow's lens correction and the projection, with the stabilization off too: the lens alone) or `as-recorded`; **Use as default** writes it |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
@@ -535,7 +556,7 @@ The same from a terminal, for one clip or many:
 ~/.config/mpv/scripts/gyroflow/gyroflow-export --from 1:20 --to 1:45 DJI_0007_D.MP4
 ```
 
-The result goes to the `_Exports/` folder of the clip's project (the trip folder with `_ActionFootagePlayer/` in it
+The result goes to the `_Exports/` folder of the clip's project (the trip folder with `Project.afproject` in it
 above the clip, as the player initializes it), or with none to a `stabilized/` folder next to the clip, as
 `<name>_stab.mov` (a part: `<name>_stab_<from>-<to>s.mov`). `--out <folder>` puts it elsewhere, `--output <file>`
 names the file.
@@ -595,9 +616,13 @@ a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the
 
 Exports play back in HDR in the player too, as they are: a file tagged HDR (HLG or PQ: an export, a phone's or
 an action camera's HDR video) switches the screen to HDR the way a log clip does, with no LUT, and is never taken
-for log and graded a second time, whatever camera metadata or `_D` name it carries. `Ctrl+s` shows it in SDR
-through NBCU's HLG or PQ → SDR conversion (one in Display P3 by mpv's tone mapping, NBCU's being for BT.2020); on a
-screen without HDR it starts that way, as log clips do.
+for log and graded a second time, whatever camera metadata or `_D` name it carries. Output → Display offers what its
+format allows: HDR as recorded; with Dolby Vision as macOS shows it, in HDR or toned down to SDR (its own Dolby
+Vision when it has one, profile 8.4 on HLG or 8.1 on PQ; else the player's trims, as an RPU of profile 8.4 for HLG
+and 8.1 for PQ: HDR10 underneath); in SDR by mpv's tone mapping or NBCU's HLG or PQ → SDR conversion (NBCU's for
+BT.2020 only). On a screen without HDR it starts in SDR, as log clips do. Export follows the look: Export in SDR
+through NBCU's conversion, and with Dolby Vision the player's RPU in the file (a file's own isn't carried: it's for
+the frames as they were). An SDR file has one look, as recorded.
 
 A 4K60 clip exports at ~35 fps on an M1 Pro (Lanczos interpolation; `--interpolation bicubic` is what
 playback uses), without edges to fill. Filling them costs more: the export writes the sphere with every frame, where
@@ -664,7 +689,7 @@ usually happened.
 
 **Your own marks**: `M` adds one where the video is, and on a mark (within half a second) removes it, a camera's
 too. The first change writes the marks into the clip's own file beside it, `<clip>.afp.json` (which also keeps its
-[saved view](#a-clips-saved-view-and-frame)), with the camera's marks copied in and flagged as the camera's; from
+[input and transform](#source-and-transform)), with the camera's marks copied in and flagged as the camera's; from
 then on that list is the clip's marks. Marks need no project. Delete the file, and the camera's are back. The menu's
 **Marks** lists them by time, the camera's as "DJI quick switch" or "GoPro HiLight". A file left from another clip
 with the same name (GoPro reuses them on every card) is renamed `.afp.json.old` rather than shown on the wrong clip.
@@ -675,28 +700,56 @@ come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPr
 [Highlights](#highlights) in How it works. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
-### A clip's saved view and frame
+### Source and transform
 
-How a clip is viewed can be kept with it, in its own file beside it (`<clip>.afp.json`, with its marks): the log
-curve (as the camera says, or one picked by hand), the stabilization (on, wider, off), its level, the horizon, the
-lens under water or above, the water's color fringes, and the **Frame**. The clip then opens as it was saved,
-whatever the defaults are. The video output (HDR or SDR, which depends on the screen) and the noise reduction
-aren't kept.
+What the player keeps about a clip comes in two kinds, and the panel has a tab for each.
 
-- **Save** in the Clip tab writes it; the panel says whether the clip plays as saved, or was changed for viewing.
-  **Defaults** forgets it. **Auto save**, for this session, writes each change as it's made.
-- **Frame**: the output's aspect (the video's own, 16:9, 4:3, 1:1, 4:5, 3:4, 9:16), a turn by 90°, 180° or 270°
-  for footage shot with the camera on its side, and the lens: linear (straight lines straight), or a fisheye, its
-  edges more and more compressed (Gyroflow's stereographic, equidistant, equisolid and orthographic output
-  projections), for Wide footage above water, which linear makes too wide: its center squeezed, its edges thin.
-  The player shows it as it'll be, and exports, moments, clip previews and photos are made in it. Where the clip
-  isn't stabilized, mpv turns and crops it; the lens needs the stabilization.
-- **A clip with a Gyroflow project**: what the project has (the smoothing, horizon, lens under water, output size,
-  turn and projection) is the project's. Changed in the panel, it's for viewing only and isn't saved beside the
-  project: change it in Gyroflow (`Ctrl+e`) to keep it.
-- **Moments and clip previews** have **Settings of its own** (the Project tab, while one plays): on, they keep
-  their own view, whatever the clip's becomes; off, they play as the clip is saved. A moment has its own from the
-  start, a clip preview the clip's; either can be switched.
+**The source's input** (the Source tab): how to read the source right, set once. The log curve (as the camera says,
+or one picked by hand), the turn it was recorded with (on top of what the file itself says), and the lens under
+water with a flat port (Auto: as the camera's telemetry says; Yes; No, above water or behind a dome port). It's kept
+only with the source, in its own file beside it (`<clip>.afp.json`, with its marks). A change, from wherever (the
+source, or one of its moments or clip previews, which all read it there), is for viewing until **Save to the source**
+on the Source tab writes it; **Revert to saved** goes back. The Transform tab's Save never touches it. The tab also
+shows what the source is: its color as recorded, the camera and the lens profile Gyroflow takes (from the file, its
+database, the Gyroflow project, or unknown) and whether it has motion data.
+
+**The transform** (the Transform tab): how it's shown, a matter of taste. The stabilization (on, wider, off), the
+level, the horizon (level or free), the lens (corrected, or as recorded) and its projection, the color aberration
+under water, and the frame's ratio and orientation. It's kept only whole, every setting at once, never one alone:
+
+- **Where it's defined**, from the top: what's chosen while it plays (for viewing only, until it ends); a moment's or
+  clip preview's own (with **Settings of its own**); the source's own (in its file); the session's, which starts as
+  the defaults and changes only by hand; the defaults. The topmost one there is plays, and they never mix.
+- **What sticks**: a change on a clip that plays with the session's (nothing saved for it) is the session's too, for
+  the next clips. On a clip with its own saved, a change is for viewing only, and **Revert to saved** goes back.
+- **Save** writes what plays, whole, where it's defined: a moment's or clip preview's own, else the source's. **Auto
+  save** (this session) writes as you go: a clip with nothing saved gets what plays as it opens (even unchanged), and
+  every change after. That's for a fresh card: look through it and set each clip as it seems right, without a
+  button. Off, to try things on footage already set. **Use as default** makes what plays the defaults and the
+  session's.
+- **Moments** are made with their own, whole, and a copy of the source's Gyroflow project when it has one: nothing
+  changes a moment later but you. `k` takes what plays; **Moments for marks in none** takes the source's own, else
+  the defaults (not the session's: a moment is kept as made). A **clip preview** starts without its own and plays as
+  its source; switched on, it keeps its own too. A transform written before a setting existed is filled with what
+  it plays with as it opens.
+- **A clip with a Gyroflow project**: the project decides the smoothing, horizon, frame and projection, and of the
+  input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). Only a
+  wider view (how much the project's crop cuts off) or none, for viewing, never saved. What was saved beside the
+  clip before stays in its file, not played, and comes back if the project goes.
+- **Lens**: apart from the stabilization. **Corrected** (Gyroflow's lens correction, and the projection below) or **As
+  recorded**. It needs a lens profile (Source → Lens), not motion data: the stabilization off with the lens
+  corrected shows the lens alone corrected, nothing smoothed, and so does a clip with a lens profile and no motion
+  data (an underwater rig that's steady already). A clip whose camera recorded no lens (an Osmo Action 6 with its own
+  stabilization on records neither) can't have it corrected yet: picking a lens by hand comes later. A transform
+  saved before the lens was a setting of its own plays as it did: off with the lens as recorded.
+- **Frame**: the ratio (the video's own, 16:9, 4:3, 5:4, 1:1) and its orientation (**As is**: as the source is, a
+  vertical clip's 16:9 is 9:16; **Landscape**; **Portrait**), and the projection: linear
+  (straight lines straight), or a fisheye, its edges more and more compressed (Gyroflow's stereographic,
+  equidistant, equisolid and orthographic), for Wide footage above water. The player shows it as it'll be, and
+  exports, moments, clip previews and photos are made in it. Where Gyroflow doesn't make the frame (no lens
+  correction, no stabilization), mpv crops it; the projection needs the lens corrected.
+- **Not in either**: the video output (Output → Display: it depends on the screen) and Performance & Quality (this
+  computer's), which make playback lighter without changing what's saved or exported.
 
 ### Moments
 
@@ -718,38 +771,35 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
 - **Where**: in the trip's project. A project is never made by itself: the first time something needs one (a
   moment, an export, clip previews), the side panel's **Project** tab opens and asks you to initialize it, in the
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
-  `_ActionFootagePlayer` folder there, and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once
-  there's something to keep. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
+  `Project.afproject` file there (a double click opens the trip in [Action Footage Library](#action-footage-library)),
+  and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once there's something to keep. A project from
+  before 0.9 has an `_ActionFootagePlayer` folder instead: the player moves it into `Project.afproject` the first
+  time it opens one of its clips. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
   **Moments** lists the clip's moments, to play, rename, remove (to the Trash) or show in Finder.
-- **Viewed as it was made**: a moment keeps the [view](#a-clips-saved-view-and-frame) it was saved with (its own
-  settings, which can be switched off to play as the clip is saved). Over the default preset, its log curve, view,
-  level, horizon, lens, color fringes and frame; a clip with a Gyroflow project gives the
-  moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the clip's project changed later doesn't change the
-  moment. **Stabilize on its own** (the panel, for the moment playing; *New moments stabilized on their own* in the
-  project's `⋯`): its smoothing and crop from its own motion, not the clip's around it. `Ctrl+e` on a moment opens
-  its own project in Gyroflow, made then from what it plays with if it has none; a trim changed there becomes the
-  moment's ends. While a moment plays, each stabilization setting has **As saved** first: every moment plays as it
-  was saved. Pick a value instead and it's for every moment this session (a playlist of moments all at Strong, say),
-  without touching how clips play; back to As saved, each moment is its own again. A moment with its own Gyroflow
-  project plays as the project says (its horizon, crop and smoothing): what it saves is the project, never settings
-  over it. None of it changes a moment: only
-  **Keep in Turtle** in the panel writes how it's viewed into it.
+- **Viewed as it was made**: a moment keeps the [transform](#source-and-transform) it was made with, whole (its own
+  settings, which can be switched off to play as its source does); the input (curve, turn, lens) is always its
+  source's. A clip with a Gyroflow project gives the moment a copy, `_Moments/Turtle.gyroflow`, trimmed to it, so the
+  clip's project changed later doesn't change the moment. **Stabilized on its own** (the Project tab, for the moment
+  playing; *New moments stabilized on their own* in the project's `⋯`): its smoothing and crop from its own motion,
+  not the clip's around it. `Ctrl+e` on a moment opens its own project in Gyroflow, made then from what it plays
+  with if it has none; a trim changed there becomes the moment's ends. Changed while it plays, its transform is for
+  viewing only; **Save** (the Transform tab) writes it into the moment.
 - **Changing one**: play it (or open it in its whole clip), move its start or end with `l`, press `k`, and Enter
   updates it; a new name saves a new moment instead. Its Finder tags stay.
-- **All the marks at once** (the Project tab): **Moments for marks in none** makes a moment of each mark of the
-  trip's clips that is in no moment yet, 2 s on each side (marks closer together share one), named by the time it
-  happened, each with its clip's saved view; **Photos of all marks** saves a photo at each mark into `_Stills/` (a
-  still, Live or Motion Photo, as Save frame says), once: `_ActionFootagePlayer/stills-made.txt` keeps which, so a
-  photo deleted isn't made again. Both run in the background, one at a time, with **Stop**.
+- **All the marks at once** ([Action Footage Library](#action-footage-library)): **Moments of all marks** makes a
+  moment of each mark of the trip's clips that is in no moment yet, 2 s on each side (marks closer together share
+  one), named by the time it happened, each with its source's transform, else the defaults; **Photos of all marks**
+  saves a photo at each mark into `_Stills/` (stills, Live or Motion Photos, chosen there), once: `Project.afproject`
+  keeps which, so a photo deleted isn't made again.
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 
 ### Clip previews: the trip at a glance
 
-A folder of log footage is a wall of gray icons. **Project → Make clip previews** (right click) makes a small
-file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
+A folder of log footage is a wall of gray icons. **Make clip previews** in [Action Footage
+Library](#action-footage-library) makes a small file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
 `_Clips/Day 1/DJI_0068_D.afplink.mp4`.
 
 - **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
@@ -757,22 +807,46 @@ file for each clip of the trip in a **_Clips** folder, beside the footage's own 
   and Quick Look (space bar) flips through each clip. A double click in the player plays the clip itself.
 - **How long it takes**: a second or so per clip. Only keyframes are decoded, from the low-resolution copy the
   camera writes beside the clip when there is one (DJI's `.LRF`, GoPro's `.LRV`). That's far less to read from a
-  NAS. They're made one at a time in the background, with the progress in the bottom-left corner, and never by
-  themselves: the menu item makes them for the clips that have none, new footage that is.
+  NAS. They're made one at a time in the background, and never by themselves: the Library's button makes them for
+  the clips that have none, new footage that is.
 - **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
-  clip previews* doesn't bring it back (`_ActionFootagePlayer/clips-made.txt` lists what was made). `X` again, or
-  *Make again for removed clips*, does.
+  clip previews* doesn't bring it back (`Project.afproject` lists what was made). `X` again, or the Library's
+  *Again for removed clips*, does.
 - **Variants**: a clip preview plays as its clip is saved to. **Settings of its own** (the panel, while it plays)
   gives it its own view, and a copy of the clip's Gyroflow project when it has one: copy the preview in Finder for
   another, and each is a variant of the same clip.
 - **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
   into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
   lose them: their moments and previews point at their names.)
-- **Ignore subfolders** (next to *Make clip previews*): new previews all go in Clips itself, not in the clips'
+- **All in _Clips itself** (the Library's checkbox): new previews all go in Clips itself, not in the clips'
   folders, for a camera's folders by date that mean nothing to the trip. Two clips with the same name get their
   folder's name in parentheses.
 - A clip under a second long has a single keyframe, at its start: its preview is made from the frames as they are.
-  If some can't be made, the panel says how many, and *why* opens the list.
+  If some can't be made, the Library lists them, each with why.
+
+### Action Footage Library
+
+The player plays; what's made for a whole trip is made in **Action Footage Library**, an app beside it
+(`ActionFootageLibrary.app` next to the player in Applications; `ActionFootageLibrary.exe` in the player's folder on
+Windows). It opens a project: double-click the trip's `Project.afproject`, drop it on its window, choose it with
+**Open…**, or **Open in Action Footage Library** in the player (the side panel's Project tab, or right click →
+Project). Then, as buttons:
+
+- **Make clip previews** (and **Again for removed clips**), with **All in _Clips itself**;
+- **Make moments**: moments of all marks, with **Stabilized on their own**;
+- **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
+- **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
+  SDR, as `Shift+E` exports one.
+
+They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
+stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
+why. The player can play meanwhile. Closing the window while some are queued asks first; on a Mac it keeps the Mac
+awake while they run.
+
+The Library plays and renders nothing itself: each batch is the player run without a window (its plugins, its
+settings, the same code as the menu used to run), so what it makes is what the player would. Its settings for the
+trip are in `Project.afproject`, which the player reads too. Not on Linux yet: there the batches aren't reachable
+until it is.
 
 ### Notes for an AI agent
 
@@ -832,7 +906,8 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 - `mpv-workspace-<version>.zip`, on any system: the project a clip belongs to, for the other plugins (plain Lua).
 
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
-  its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
+  its binaries, and view360 (360° clips as a view to look around in) beside it, which uses its probe and gestures.
+  Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
 
 ### With install.sh
@@ -1194,6 +1269,10 @@ mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses an
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
+mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
+mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
+                              rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
+                              ~/.config/mpv/scripts/view360, and in ActionFootagePlayer
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
                               markers.lua reads them from the file
@@ -1211,10 +1290,11 @@ mpv/scripts/workspace/        the project a clip belongs to, for the other plugi
 tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
                               `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
                               files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export;
-                              moments_test.lua
+                              moments_test.lua; view360_test.lua, the 360 view's geometry, gestures and what it does
+                              with a 360° clip and any other; make_equirect.py, synthetic 360° clips to try it on
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
-shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is
+shaders/denoise.glsl          the noise reduction while it plays (off; dlogm.conf denoise=yes), installed with the log plugin
 luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
 luts/gplog_hlg.cube           GoPro GP-Log → Rec.2100 HLG LUT
 tools/cube_to_glsl.py         .cube → mpv shader
@@ -1224,6 +1304,7 @@ docs/luts.md                  the makers' log LUTs and formulas: where they are,
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut (Rust)
 docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
+docs/360-cameras.md           360° cameras (design): the plugin's sphere in the camera's axes, the angles in the frame, the view in a shader
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script

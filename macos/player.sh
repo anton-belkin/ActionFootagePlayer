@@ -41,7 +41,7 @@ fi
 # Started by Finder, the videos come as Apple Events once mpv runs: until then it waits, with its window up. The
 # video gets a window of its own (finder-launch.lua), for HDR to engage
 [ $# = 0 ] && set -- --player-operation-mode=pseudo-gui "--script=$res/finder-launch.lua"
-for plugin in workspace gyroflow dlogm dji-telemetry highlights footage-menu side-panel sdr-check agent any-layout; do
+for plugin in workspace gyroflow view360 dlogm dji-telemetry highlights footage-menu side-panel sdr-check agent any-layout; do
     set -- "--script=$res/plugins/$plugin" "$@"
 done
 set -- "--config-dir=$config" --load-scripts=no "--include=$res/app.conf" "$@"
@@ -55,14 +55,18 @@ fi
 
 # The first time, the setup's offered (from mpv: see setup-offer.lua). After that, DJI's LUT (Ctrl+s, exports
 # with --sdr) is fetched in the background when the setup hasn't got it
-if [ ! -e "$data/setup-offered" ]; then
+# Action Footage Library runs it with no window to make a project's clip previews, moments, photos and exports
+# (AFP_BATCH: the workspace plugin's batch mode): no setup offered then, and not in the Dock
+if [ -n "${AFP_BATCH:-}" ]; then
+    :
+elif [ ! -e "$data/setup-offered" ]; then
     mkdir -p "$data" && : > "$data/setup-offered"
     set -- "--script=$res/setup-offer.lua" "$@"
 elif [ ! -f "$DLOGM_DATA/shaders/dlogm_lut3d.glsl" ]; then
     "$res/setup.sh" lut >/dev/null 2>&1 &
 fi
 
-export MPVBUNDLE=true
+[ -z "${AFP_BATCH:-}" ] && export MPVBUNDLE=true
 contents="$app/Contents"
 if [ -x "$contents/Helpers/mpv" ]; then
     # VapourSynth's Python (and the `vapoursynth` command that tells VSScript where it is), the Vulkan driver

@@ -28,16 +28,13 @@
 -- (the camera as the plugin stabilizes it again). The frame's state is published as user-data/gyroflow/crop for the
 -- export.
 --
--- On macOS the app's mpv sends the trackpad's gestures as script messages while it's on (--macos-gesture-messages,
--- tools/mpv-patches/0008), so a two-finger scroll pans and a mouse wheel zooms. A trackpad's scroll comes in phases
--- (fingers on, moving, off); a mouse's wheel smoothed into fine steps (Logitech's Options+) comes without, and zooms.
--- The coasting after the fingers are off is left out: the picture stops where they did. Elsewhere a wheel's whole clicks zoom
--- and the fractions a touchpad sends pan, and Ctrl+wheel (a pinch, on Windows) zooms.
+-- The mouse, the wheel and the trackpad's gestures are gestures.lua's, which the 360 view (../view360) turns by too.
 --
 -- Loaded by main.lua, which says whether the plugin stabilizes the clip and writes the control file (init).
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
+local gestures = require 'gestures'
 
 local M = {}
 
@@ -52,13 +49,7 @@ local ASPECTS = {
     { name = "3:4", ratio = 3 / 4 },
     { name = "9:16", ratio = 9 / 16 },
 }
--- A wheel's click zooms by this much; a pinch's magnification as it comes
-local WHEEL_ZOOM = 1.1
 local ZOOM_MIN, ZOOM_MAX = 0.15, 4
--- A touchpad scroll's unit (mpv's wheel scale), in screen pixels, off macOS
-local SCROLL_PX = 40
--- A smooth wheel's points (macOS) for one click's zoom
-local SMOOTH_WHEEL_PT = 10
 -- How the picture moves as the camera turns: view_rotation's yaw (looking right) moves it left, pitch (looking down)
 -- up, roll counterclockwise (ROLL_SIGN); the camera model below (rotation) has the same
 local ROLL_SIGN = 1
@@ -85,9 +76,6 @@ local refreshing = nil
 local dirty = false
 local write_timer = nil
 local last_write = 0
--- The mouse held: its last position, and whether it turns the horizon (Alt)
-local drag = nil
-local saved = {}
 
 local function default_camera()
     return { yaw = 0, pitch = 0, roll = 0, zoom = 1 / MARGIN }
@@ -446,90 +434,19 @@ local function reset()
     changed()
 end
 
--- The mouse: a drag pans, Alt+drag turns the horizon
-local function button(alt)
-    return function(info)
-        if info.event == "down" then
-            local pos = mp.get_property_native("mouse-pos")
-            if pos then drag = { x = pos.x, y = pos.y, alt = alt } end
-        elseif info.event == "up" then
-            drag = nil
-            if cam then write_now() end
-        end
-    end
-end
-
-local function on_mouse(_, pos)
-    if not drag or not pos then return end
-    local dx, dy = pos.x - drag.x, pos.y - drag.y
-    drag.x, drag.y = pos.x, pos.y
-    if drag.alt then
-        local v = video_rect()
-        -- To the right: clockwise
-        if v then roll(-dx / v.w * 90) end
-    else
-        pan(dx, dy, pos.x, pos.y)
-    end
-end
-
-local gestures = false
-
-local function whole(scale)
-    return scale and scale >= 1 and math.abs(scale - math.floor(scale + 0.5)) < 1e-6
-end
-
--- A wheel: up zooms in. A touchpad's fractions pan where the trackpad's gestures don't come as messages
-local function wheel(dx, dy, ctrl)
-    return function(info)
-        if info.event == "up" then return end
-        local scale = info.scale or 1
-        if dx == 0 and (gestures or ctrl or whole(scale)) then
-            return zoom(WHEEL_ZOOM ^ (dy * scale))
-        end
-        pan(dx * scale * SCROLL_PX, dy * scale * SCROLL_PX)
-    end
-end
-
-mp.register_script_message("gesture", function(kind, a, b, c)
-    if not active then return end
-    if kind == "scroll" then
-        local phase = c
-        if phase == "momentum" then return end
-        local dx, dy = tonumber(a) or 0, tonumber(b) or 0
-        -- A mouse's wheel, in fine steps: up zooms in
-        if phase == "none" then
-            if dy ~= 0 then zoom(WHEEL_ZOOM ^ (dy / SMOOTH_WHEEL_PT)) end
-            return
-        end
-        local s = mp.get_property_number("display-hidpi-scale") or 1
-        local pos = mp.get_property_native("mouse-pos") or {}
-        pan(dx * s, dy * s, pos.x and pos.x + dx * s, pos.y and pos.y + dy * s)
-    elseif kind == "magnify" then
-        zoom(1 + (tonumber(a) or 0))
-    elseif kind == "rotate" then
-        -- Counterclockwise as the fingers turn
-        roll(tonumber(a) or 0)
-    end
-end)
-
--- Named apart from the script messages: mpv registers a binding's name as a script message too
-local BINDINGS = {
-    { "MBTN_LEFT", "crop-key-drag", button(false), { complex = true } },
-    { "Alt+MBTN_LEFT", "crop-key-roll", button(true), { complex = true } },
-    { "MBTN_LEFT_DBL", "crop-key-reset-dbl", reset },
-    { "BS", "crop-key-reset", reset },
-    { "WHEEL_UP", "crop-key-wheel-up", wheel(0, 1), { complex = true } },
-    { "WHEEL_DOWN", "crop-key-wheel-down", wheel(0, -1), { complex = true } },
-    { "WHEEL_LEFT", "crop-key-wheel-left", wheel(1, 0), { complex = true } },
-    { "WHEEL_RIGHT", "crop-key-wheel-right", wheel(-1, 0), { complex = true } },
-    { "Ctrl+WHEEL_UP", "crop-key-pinch-in", wheel(0, 1, true), { complex = true } },
-    { "Ctrl+WHEEL_DOWN", "crop-key-pinch-out", wheel(0, -1, true), { complex = true } },
-    { "ENTER", "crop-key-photo", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
-    { "KP_ENTER", "crop-key-photo-kp", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
-    { "a", "crop-key-aspect", function() aspect = aspect % #ASPECTS + 1; draw(); publish() end },
-    { "A", "crop-key-aspect-back", function() aspect = (aspect - 2) % #ASPECTS + 1; draw(); publish() end },
-    { "ESC", "crop-key-leave", function() M.set(false) end },
-}
+local input = gestures.new({
+    prefix = "crop", pan = pan, zoom = zoom, roll = roll, reset = reset,
+    -- The camera into the control file as soon as the mouse lets go
+    released = function() if cam then write_now() end end,
+    width = function() local v = video_rect(); return v and v.w end,
+    bindings = {
+        { "ENTER", "crop-key-photo", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
+        { "KP_ENTER", "crop-key-photo-kp", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
+        { "a", "crop-key-aspect", function() aspect = aspect % #ASPECTS + 1; draw(); publish() end },
+        { "A", "crop-key-aspect-back", function() aspect = (aspect - 2) % #ASPECTS + 1; draw(); publish() end },
+        { "ESC", "crop-key-leave", function() M.set(false) end },
+    },
+})
 
 function M.set(on)
     if on == active then return end
@@ -542,17 +459,10 @@ function M.set(on)
             cam, flat = nil, { zoom = 0, x = 0, y = 0 }
         end
         shown = nil
-        saved.dragging = mp.get_property_native("window-dragging")
-        mp.set_property_native("window-dragging", false)
-        -- The app's mpv (tools/mpv-patches/0008); others have no such option
-        gestures = mp.set_property_native("macos-gesture-messages", true) == true
-        for _, b in ipairs(BINDINGS) do mp.add_forced_key_binding(b[1], b[2], b[3], b[4]) end
+        input:set(true)
         mp.osd_message("Save frame: drag to pan, wheel or pinch to zoom, Alt+drag to level, Enter to save", 3)
     else
-        for _, b in ipairs(BINDINGS) do mp.remove_key_binding(b[2]) end
-        if saved.dragging ~= nil then mp.set_property_native("window-dragging", saved.dragging) end
-        if gestures then mp.set_property_native("macos-gesture-messages", false) end
-        gestures, drag = false, nil
+        input:set(false)
         local had_camera = cam ~= nil
         if write_timer then write_timer:kill(); write_timer = nil end
         cam, flat, shown = nil, nil, nil
@@ -603,7 +513,6 @@ mp.observe_property("pause", "bool", function(_, paused)
     draw()
 end)
 
-mp.observe_property("mouse-pos", "native", on_mouse)
 for _, prop in ipairs({ "osd-dimensions", "video-out-params", "video-margin-ratio-right", "video-margin-ratio-left" }) do
     mp.observe_property(prop, "native", function() if active then draw(); publish() end end)
 end

@@ -69,8 +69,7 @@ local KEY_LABELS = {
     { "script-binding dlogm/sdr", "The next video output: HDR, HLG+DV in HDR and in SDR, mpv's tone mapping, NBCU's SDR, the maker's SDR" },
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
-    { "script-binding dlogm/curve", "The next log curve, by hand" },
-    { "script-binding dlogm/denoise", "Noise reduction on / off" },
+    { "script-binding dlogm/curve", "The next log curve, by hand (saved with the source)" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
     { "script-binding gyroflow/still", "Temporal denoise of the paused frame on / off" },
@@ -199,22 +198,26 @@ local function look_menu(d, key)
     end
     table.insert(items, submenu("Log curve", curves, { shortcut = key["script-binding dlogm/curve"] }))
     table.insert(items, SEPARATOR)
-    table.insert(items, item("Noise reduction", "script-binding dlogm/denoise", { checked = d.denoise, shortcut = key["script-binding dlogm/denoise"] }))
-    table.insert(items, SEPARATOR)
     table.insert(items, item("Remember as default (looks on HDR and SDR screens)", "script-message-to dlogm remember"))
     return items
 end
 
 local function stabilization_menu(g, key)
     local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"], key["script-binding gyroflow/level"]
-    if not g.available then
+    -- The lens, apart from the stabilization: corrected or as recorded (with a lens profile)
+    local lens_items = submenu("Lens", {
+        item(g.kind == "project" and "As in the project" or "Corrected", "script-message-to gyroflow lens-mode corrected", { checked = g.lens_mode == "corrected" }),
+        item("As recorded", "script-message-to gyroflow lens-mode as-recorded", { checked = g.lens_mode == "as-recorded" }),
+    }, { disabled = not g.available })
+    if not g.motion then
         return {
             info("No motion data in this clip"),
+            lens_items,
             g.waiting and info("Waiting for the project from Gyroflow…")
                 or item("Stabilize in Gyroflow (optical flow)…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
         }
     end
-    local says = g.kind == "default" and "preset" or "project"
+    local project = g.kind == "project"
     local edges = {}
     for _, e in ipairs(EDGES) do
         table.insert(edges, item(e[2], "script-message-to gyroflow edges " .. e[1], { checked = g.edges == e[1] }))
@@ -231,33 +234,30 @@ local function stabilization_menu(g, key)
             item("Strong: 30 % crop, smoothness 100 %", "script-message-to gyroflow level strong", { checked = g.level == "strong", shortcut = level }),
         }, { shortcut = level, disabled = g.kind == "project" }),
         SEPARATOR,
-        -- A clip with a project starts with the project's horizon lock and lens; one without, with what sticks
+        -- A clip with a project has the project's horizon and lens (Gyroflow changes them); the lens under water is the
+        -- source's input, saved with the Source tab's Save
+        lens_items,
         submenu("Horizon", {
-            item("Locked level", "script-message-to gyroflow horizon-lock yes", { checked = g.horizon_lock == "yes" }),
-            item("Not locked", "script-message-to gyroflow horizon-lock no", { checked = g.horizon_lock == "no" }),
-            item("As the " .. says .. " says", "script-message-to gyroflow horizon-lock project", { checked = g.horizon_lock == "project" }),
-        }),
-        submenu("Lens", {
-            item("Under water", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
-            -- Only a camera that records when it's in the water has it; elsewhere auto is the project's or preset's
-            item(g.water and "Auto: as the camera says (In water / Out of water)" or "Auto: this camera doesn't say, so as the "
-                 .. says .. " says",
-                 "script-message-to gyroflow underwater auto", { checked = g.underwater == "auto", disabled = not g.water, shortcut = lens }),
-            item("As the " .. says .. " says", "script-message-to gyroflow underwater project", { checked = g.underwater == "project", shortcut = lens }),
-            item("Above water", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
-            SEPARATOR,
-            -- Only under water: above water no color moves either way
-            item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
-                 { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no",
-                   shortcut = key["script-binding gyroflow/fringes"] }),
-        }, { shortcut = lens }),
+            item("Level", "script-message-to gyroflow horizon-lock yes", { checked = g.horizon_lock == "yes" }),
+            item("Free", "script-message-to gyroflow horizon-lock no", { checked = g.horizon_lock == "no" }),
+        }, { disabled = project }),
+        submenu("Lens under water, flat port", {
+            item("Auto: as the camera's telemetry says", "script-message-to gyroflow underwater auto",
+                 { checked = g.underwater == "auto", shortcut = lens }),
+            item("Yes", "script-message-to gyroflow underwater yes", { checked = g.underwater == "yes", shortcut = lens }),
+            item("No (above water, or a dome port)", "script-message-to gyroflow underwater no", { checked = g.underwater == "no", shortcut = lens }),
+        }, { shortcut = lens, disabled = project }),
+        -- Only under water: above water no color moves either way
+        item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
+             { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no",
+               shortcut = key["script-binding gyroflow/fringes"] }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
         item("Temporal denoise on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
         item("Save frame…", "script-binding gyroflow/crop", { checked = (g.crop or {}).active == true, shortcut = key["script-binding gyroflow/crop"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
-        item("Remember as default", "script-message-to gyroflow remember"),
+        item("Use as default", "script-message-to gyroflow remember"),
     }
 end
 
@@ -284,8 +284,9 @@ local function quality_menu(g)
     end
     -- Only the sphere trail is written apart from the frames
     table.insert(items, submenu("Edge fill rate", fill, { disabled = g.edges ~= "sphere" }))
-    table.insert(items, item("Take out color fringes under water", "script-message-to gyroflow chromatic toggle",
-                             { checked = g.chromatic == true, disabled = not g.chromatic_available or g.underwater == "no" }))
+    -- Smoother playback on this computer: the clip's transform keeps them taken out (exports and photos too)
+    table.insert(items, item("Skip the color aberration correction", "script-message-to gyroflow quality chromatic_skip " .. (g.chromatic_skip and "no" or "yes"),
+                             { checked = g.chromatic_skip == true }))
     table.insert(items, SEPARATOR)
     table.insert(items, item("Pause and ask when it can't keep up", "script-message-to gyroflow quality ask_when_slow " .. (g.ask_when_slow == false and "yes" or "no"),
                              { checked = g.ask_when_slow ~= false }))
@@ -361,16 +362,6 @@ local function marks_menu(h, key)
 end
 
 
--- A moment playing viewed otherwise than it was saved (its view, level, horizon lock, its switch): only Keep saves it
--- A moment playing whose view was changed from how it was saved: its switch, or the settings (the workspace plugin's
--- view_status)
-local function moment_changed(ws)
-    local m = ws and ws.moment
-    if not (m and ws.snap) then return false end
-    if (ws.alone == true) ~= (m.alone == true) then return true end
-    return ws.view_status == "changed" and ws.view_saved_in == "moment"
-end
-
 -- The clip's moments (the workspace plugin's), each with what can be done to it
 local function moments_menu(w)
     local reveal = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open its folder"
@@ -412,9 +403,8 @@ local function project_menu(w, key)
         table.insert(items, info("Clip previews: " .. w.clips.done .. " of " .. w.clips.total))
         table.insert(items, item("Stop clip previews", "script-message-to workspace clips-stop"))
     else
-        table.insert(items, item("Make clip previews", "script-message-to workspace clips-make"))
-        table.insert(items, item("Make again for removed clips", "script-message-to workspace clips-again", { disabled = not w.project }))
-        table.insert(items, item("Clip previews ignore subfolders", "script-message-to workspace clips-flat", { checked = w.clips_flat }))
+        -- Clip previews, moments and photos of all marks, exports of all moments: Action Footage Library's
+        table.insert(items, item("Open in Action Footage Library", "script-message-to workspace open-library"))
         table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
     end
     table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
@@ -507,11 +497,11 @@ local function build()
                 add(item((a and b and b > a) and ("Save as moment " .. clock(a) .. "–" .. clock(b) .. "…") or "Save as moment (mark a part first)",
                          "script-binding workspace/moment", { shortcut = moment, disabled = not (a and b and b > a) }))
             end
-            if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone", { checked = w.alone })) end
-            if moment_changed(w) then add(item("Keep how it's viewed in " .. w.moment.name, "script-message-to workspace moment-keep")) end
+            if w.moment and w.snap then add(item("Stabilize this moment on its own", "script-message-to workspace moment-alone toggle", { checked = w.alone })) end
             if w.link then add(item("Settings of its own", "script-message-to workspace view-own", { checked = w.link.own == true })) end
-            if w.view_saved_in and w.view_saved_in ~= "moment" and w.view_status ~= "saved" then
-                add(item(w.view_saved_in == "clip" and "Save the view in this clip" or "Save the view in this clip preview", "script-message-to workspace view-save"))
+            if w.view_target and w.view_status ~= "saved" then
+                local places = { source = "the source", moment = "the moment", preview = "the clip preview" }
+                add(item("Save the transform to " .. places[w.view_target], "script-message-to workspace view-save"))
             end
             if w.moments and #w.moments > 0 then add(submenu("Moments (" .. #w.moments .. ")", moments_menu(w))) end
         end

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tools/make_dv_rpu.sh [<look.json> [<out.rpu>]]: the Dolby Vision RPU of a look, made by afp-rpu (vs-gyroflow,
 # src/dovi.rs): one RPU, for every frame, with the constant L1 afp-rpu defaults to. Without arguments, the shipped
-# look: mpv/scripts/dlogm/dv/nbcu_fit.json -> nbcu_fit.rpu.
+# look: mpv/scripts/dlogm/dv/nbcu_fit.json -> nbcu_fit.rpu, and for PQ video nbcu_fit.81.rpu (profile 8.1).
 #
 # With dovi_tool installed (brew install dovi_tool), it also checks that afp-rpu writes what dovi_tool does:
 #   - one frame and 48 frames of the look, from a config made here the way DV Lab makes it (DVLab.swift,
@@ -21,6 +21,9 @@ afp=vs-gyroflow/target/release/afp-rpu
 
 "$afp" --look "$look" -o "$out"
 echo "$out: $(wc -c < "$out" | tr -d ' ') bytes"
+out_pq=${out%.rpu}.81.rpu
+"$afp" --look "$look" --profile 8.1 -o "$out_pq"
+echo "$out_pq: $(wc -c < "$out_pq" | tr -d ' ') bytes (profile 8.1, for PQ)"
 
 command -v dovi_tool >/dev/null || { echo "(no dovi_tool: not compared)"; exit 0; }
 work=$(mktemp -d)

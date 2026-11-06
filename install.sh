@@ -8,8 +8,9 @@
 #                          scripts/footage-menu (their right-click menu, mpv 0.41 and later), scripts/side-panel
 #                          (their settings in a panel beside the video, Tab), scripts/agent (notes for an AI
 #                          agent: areas of the frame and a comment), scripts/workspace (the project a clip
-#                          belongs to: its trip folder) and scripts/any-layout (the keys in a Cyrillic keyboard
-#                          layout too); and mpv.conf when there's none yet
+#                          belongs to: its trip folder), scripts/any-layout (the keys in a Cyrillic keyboard
+#                          layout too) and scripts/view360 (360° clips as a view to look around in); and mpv.conf
+#                          when there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
 #                          ActionFootagePlayer in the applications menu instead: the system's mpv with the plugins
@@ -124,6 +125,7 @@ PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 WORKSPACE="$MPV_DIR/scripts/workspace"
 ANYLAYOUT="$MPV_DIR/scripts/any-layout"
+VIEW360="$MPV_DIR/scripts/view360"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
 backup_path() {
@@ -223,6 +225,7 @@ for curve in $HDR_CURVES; do
 done
 put "$lut"                          "$DLOGM/luts/dji-dlogm-rec709.cube" 644
 put luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$DLOGM/luts/3-NBCU_HLG2SDR_DL_v1.2.cube" 644
+put luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$DLOGM/luts/5-NBCU_PQ2SDR_DL_v1.2.cube" 644
 
 # The gyroflow plugin
 put mpv/scripts/gyroflow/main.lua    "$GYROFLOW/main.lua" 644
@@ -230,8 +233,10 @@ put mpv/scripts/gyroflow/export.lua  "$GYROFLOW/export.lua" 644
 put mpv/scripts/gyroflow/platform.lua "$GYROFLOW/platform.lua" 644
 put mpv/scripts/gyroflow/still.lua   "$GYROFLOW/still.lua" 644
 put mpv/scripts/gyroflow/crop.lua    "$GYROFLOW/crop.lua" 644
+put mpv/scripts/gyroflow/gestures.lua "$GYROFLOW/gestures.lua" 644
 put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
+put mpv/scripts/gyroflow/sphere360.vpy "$GYROFLOW/sphere360.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
 put mpv/scripts/gyroflow/crop_preview.glsl "$GYROFLOW/crop_preview.glsl" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
@@ -270,9 +275,17 @@ put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
 put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
 put mpv/scripts/workspace/sidecar.lua   "$WORKSPACE/sidecar.lua" 644
+put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
+put mpv/scripts/workspace/projectfile.lua "$WORKSPACE/projectfile.lua" 644
+put mpv/scripts/workspace/longpath.lua  "$WORKSPACE/longpath.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
+
+# 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
+put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644
+put mpv/scripts/view360/view.lua     "$VIEW360/view.lua" 644
+put mpv/scripts/view360/view360.glsl "$VIEW360/view360.glsl" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now
 for f in gyroflow-router export-finder.sh; do
@@ -318,6 +331,13 @@ if [ $apps = 1 ] && [ $macos = 1 ]; then
     # A release has its version in VERSION
     version=$(cat VERSION 2>/dev/null || git describe --tags --always 2>/dev/null || echo local)
     tools/make_app.sh "$player" "$BIN" "$BUILD/dlogm_hlg.glsl" "$version"
+    # Action Footage Library beside it: a release has its binary in bin/, a checkout builds it
+    if [ -x "$BIN/ActionFootageLibrary" ]; then
+        LIBRARY_BIN="$BIN/ActionFootageLibrary" tools/make_library_app.sh "$APPS_DIR/ActionFootageLibrary.app" "$version"
+    else
+        tools/make_library_app.sh "$APPS_DIR/ActionFootageLibrary.app" "$version"
+    fi
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APPS_DIR/ActionFootageLibrary.app" 2>/dev/null || true
     old_player="$APPS_DIR/$OLD_PLAYER_NAME.app"
     if [ -d "$old_player" ]; then
         /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old_player" 2>/dev/null || true

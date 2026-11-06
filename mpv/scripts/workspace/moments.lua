@@ -11,7 +11,7 @@
 --   moments.safe_name(name), moments.next_name(last, taken), moments.unique_file(dir, name)
 --   moments_lib.loose_parts(marks, taken, duration, around) -> the parts for marks in no moment
 
-local STATE_DIR = require('workspace').STATE_DIR
+local workspace_lib = require('workspace')
 
 local M = {}
 
@@ -47,7 +47,7 @@ function M.clip_preview_relative(relative, flat)
     return table.concat(out, "/")
 end
 
--- _ActionFootagePlayer/clips-made.txt: a line per clip a preview was made for, its path in the project and its size
+-- The project file's clips_made: a line per clip a preview was made for, its path in the project and its size
 function M.parse_made(text)
     local made = {}
     for line in (text or ""):gmatch("[^\r\n]+") do
@@ -248,6 +248,21 @@ function M.new(ws, fs)
         end
     end
 
+    -- A folder's files ({ name, info }) and subfolders (names) from one listing, but hidden ones: each entry's kind
+    -- asked once (fs.info), not by a listing of the files and another of the folders. On a NAS each is a round trip,
+    -- and through fs.info each is a moment the player's own script can let mpv have a turn (a quit, the next clip)
+    local function entries(dir)
+        local files, subdirs = {}, {}
+        for _, name in ipairs(fs.readdir(dir, "all") or {}) do
+            if name:sub(1, 1) ~= "." then
+                local info = fs.info(ws.join(dir, name))
+                if info and info.is_file then files[#files + 1] = { name = name, info = info }
+                elseif info and info.is_dir then subdirs[#subdirs + 1] = name end
+            end
+        end
+        return files, subdirs
+    end
+
     -- Every .mp4 under <project>/_Moments/ (or `folder`), subfolders included, with its link (of `kind`: moment, or
     -- clip for _Clips/). cache[file] = { size, mtime, raw } keeps what was read of a file, read again only when its
     -- size or time changes. dirs: each folder's modification time, which a file added, removed or renamed in it
@@ -260,30 +275,26 @@ function M.new(ws, fs)
             local info = fs.info(dir)
             if not info or not info.is_dir then return end
             dirs[dir] = info.mtime
-            for _, name in ipairs(fs.readdir(dir, "files") or {}) do
-                if name:lower():match("%.mp4$") and name:sub(1, 1) ~= "." then
-                    local file = ws.join(dir, name)
-                    local fi = fs.info(file)
-                    if fi then
-                        local c = cache and cache[file]
-                        local raw
-                        if c and c.size == fi.size and c.mtime == fi.mtime then
-                            raw = c.raw
-                        else
-                            raw = fs.read_link(file) or false
-                            if cache then cache[file] = { size = fi.size, mtime = fi.mtime, raw = raw } end
-                        end
-                        local link = raw and fs.parse_json(raw)
-                        if type(link) == "table" and link.v == 1 and link.kind == kind then
-                            list[#list + 1] = { file = file, name = M.display_name(file), link = link, raw = raw }
-                        end
+            local files, subdirs = entries(dir)
+            for _, e in ipairs(files) do
+                if e.name:lower():match("%.mp4$") then
+                    local file, fi = ws.join(dir, e.name), e.info
+                    local c = cache and cache[file]
+                    local raw
+                    if c and c.size == fi.size and c.mtime == fi.mtime then
+                        raw = c.raw
+                    else
+                        raw = fs.read_link(file) or false
+                        if cache then cache[file] = { size = fi.size, mtime = fi.mtime, raw = raw } end
+                    end
+                    local link = raw and fs.parse_json(raw)
+                    if type(link) == "table" and link.v == 1 and link.kind == kind then
+                        list[#list + 1] = { file = file, name = M.display_name(file), link = link, raw = raw }
                     end
                 end
             end
             if depth < 8 then
-                for _, name in ipairs(fs.readdir(dir, "dirs") or {}) do
-                    if name:sub(1, 1) ~= "." then walk(ws.join(dir, name), depth + 1) end
-                end
+                for _, name in ipairs(subdirs) do walk(ws.join(dir, name), depth + 1) end
             end
         end
         walk(root, 0)
@@ -310,15 +321,16 @@ function M.new(ws, fs)
         return out
     end
 
-    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the state
-    -- folder in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
+    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the
+    -- project's file (or the state folder of before) in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
     function self.project_of(file, folder)
         folder = (folder or M.FOLDER):lower()
         local dir = ws.parent(file)
         while dir do
             local up = ws.parent(dir)
             if not up then return nil end
-            if ws.name(dir):lower() == folder and fs.is_dir(ws.join(up, STATE_DIR)) then return up end
+            if ws.name(dir):lower() == folder and (fs.is_file(ws.join(up, workspace_lib.PROJECT_FILE))
+                                                   or fs.is_dir(ws.join(up, workspace_lib.LEGACY_DIR))) then return up end
             dir = up
         end
         return nil
@@ -355,20 +367,23 @@ function M.new(ws, fs)
         return out
     end
 
-    -- The project's clips: its videos, but the player's own folders, hidden ones and link files. { file, relative }
+    -- The project's clips: its videos, but the player's own folders, hidden ones and link files. { file, relative,
+    -- size }
     function self.footage(project)
         local out = {}
         local function walk(dir, rel, depth)
-            for _, name in ipairs(fs.readdir(dir, "files") or {}) do
+            local files, subdirs = entries(dir)
+            for _, e in ipairs(files) do
+                local name = e.name
                 local lower = name:lower()
                 local ext = lower:match("%.([^.]+)$")
-                if ext and M.FOOTAGE[ext] and name:sub(1, 1) ~= "." and lower:sub(-#M.EXT) ~= M.EXT then
-                    out[#out + 1] = { file = ws.join(dir, name), relative = rel and (rel .. "/" .. name) or name }
+                if ext and M.FOOTAGE[ext] and lower:sub(-#M.EXT) ~= M.EXT then
+                    out[#out + 1] = { file = ws.join(dir, name), relative = rel and (rel .. "/" .. name) or name, size = e.info.size }
                 end
             end
             if depth >= 8 then return end
-            for _, name in ipairs(fs.readdir(dir, "dirs") or {}) do
-                if name:sub(1, 1) ~= "." and not (depth == 0 and OWN_FOLDERS[name:lower()]) then
+            for _, name in ipairs(subdirs) do
+                if not (depth == 0 and OWN_FOLDERS[name:lower()]) then
                     walk(ws.join(dir, name), rel and (rel .. "/" .. name) or name, depth + 1)
                 end
             end

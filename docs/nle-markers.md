@@ -51,7 +51,7 @@ From the project ([the model](moments-and-workspaces.md)):
 | The moment's folders | `_Moments/Reef/Moray eel.afplink.mp4` → `Reef` | a bin, a keyword collection, a keyword |
 | Tags on a moment | Finder tags; Explorer's stars | keywords; *Favorite* (or ★, 4–5 stars) a favorite |
 | A clip | the footage under the sources root (not `_Moments/`, `_Clips/`, `_Exports/`) | a clip, at its timecode |
-| A clip's rating | `_Clips/**/<clip>.afplink.mp4`, and `_ActionFootagePlayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
+| A clip's rating | `_Clips/**/<clip>.afplink.mp4`, and `Project.afproject` (its clips_made) | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
 | A clip's folders and tags | `_Clips/Day 1/…`, Finder tags | a bin, keywords |
 | Marks | `<clip>.afp.json` beside the clip (`.marks.json` before 0.9), else the clip's highlights | markers; a camera's with its note ("DJI quick switch") |
 

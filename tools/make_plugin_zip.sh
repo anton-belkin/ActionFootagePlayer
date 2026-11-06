@@ -2,7 +2,8 @@
 # tools/make_plugin_zip.sh <version> [<rust target>]: into dist/
 #   mpv-gyroflow-<version>-linux-x86_64.zip     the gyroflow plugin alone, with its binaries built for this system:
 #   mpv-gyroflow-<version>-windows-x86_64.zip   unzipped into mpv's scripts/ folder (~/.config/mpv/scripts/,
-#                                               %APPDATA%\mpv\scripts\)
+#                                               %APPDATA%\mpv\scripts\); with view360 beside it, which uses
+#                                               its probe and gestures
 #   mpv-gyroflow-<version>-windows-arm64.zip    the same, with the Rust target aarch64-pc-windows-msvc
 #
 # The Linux and Windows counterpart of the macOS plugin zip in tools/make_release.sh (which makes the rest of the
@@ -14,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 version=${1:?usage: tools/make_plugin_zip.sh <version> [<rust target>]}
 target=${2:-}
-if ! git diff --quiet HEAD -- vs-gyroflow mpv/scripts/gyroflow; then
+if ! git diff --quiet HEAD -- vs-gyroflow mpv/scripts/gyroflow mpv/scripts/view360; then
     echo "vs-gyroflow or the plugin has uncommitted changes; the zip would not match the tree" >&2
     exit 1
 fi
@@ -40,7 +41,7 @@ bin="vs-gyroflow/target/${target:+$target/}release"
 name="mpv-gyroflow-$version-$os-$arch"
 rm -rf "dist/$name" "dist/$name.zip"
 mkdir -p "dist/$name"
-git archive HEAD mpv/scripts/gyroflow | tar -x --strip-components 2 -C "dist/$name"
+git archive HEAD mpv/scripts/gyroflow mpv/scripts/view360 | tar -x --strip-components 2 -C "dist/$name"
 mv "dist/$name/gyroflow/underwater.gyroflow" "dist/$name/gyroflow/default.gyroflow"
 # Without the debug info and symbols the release profile keeps (the MSVC build has them in .pdb files, which
 # aren't copied)
@@ -57,6 +58,6 @@ done
 
 # zip isn't in Git Bash; Python's keeps the executable bits too
 py=$(command -v python3 || command -v python)
-(cd "dist/$name" && "$py" -I -m zipfile -c "../$name.zip" gyroflow)
+(cd "dist/$name" && "$py" -I -m zipfile -c "../$name.zip" gyroflow view360)
 rm -rf "dist/$name"
 ls -l "dist/$name.zip"

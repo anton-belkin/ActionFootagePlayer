@@ -1,0 +1,512 @@
+From 0b3b152beb2aa13842f8c2841ce4bb3ca418d1d5 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Fri, 6 Nov 2026 14:27:37 +0100
+Subject: [PATCH 10/12] mac: log the time from input to the screen with
+ --macos-latency-log
+
+For each frame shown through the swapchain, a line in the latency
+module with the time of the input it shows (afp_input_time, which the
+script that turns gestures into shader parameters puts in
+--glsl-shader-opts), the newest input when the VO began drawing it,
+when it began, got its drawable, went to the swapchain and was shown
+(the drawable's presentedTime), all on the host clock. The trackpad's
+gesture messages carry their event's time last, so a script can pass
+it on. --macos-latency-test makes up a two-finger scroll at a given
+rate, for measuring without a trackpad.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ DOCS/interface-changes/macos-latency-log.txt |   1 +
+ DOCS/man/options.rst                         |  19 ++-
+ meson.build                                  |   1 +
+ osdep/mac/app_bridge.h                       |   2 +
+ osdep/mac/app_bridge.m                       |   2 +
+ osdep/mac/app_bridge_objc.h                  |   1 +
+ video/out/mac/latency.c                      | 120 +++++++++++++++++++
+ video/out/mac/latency.h                      |  47 ++++++++
+ video/out/mac/metal_layer.swift              |  13 ++
+ video/out/mac/view.swift                     |  42 ++++++-
+ video/out/mac_common.swift                   |   8 ++
+ video/out/vo_gpu_next.c                      |  21 ++++
+ video/out/vulkan/context_mac.m               |   5 +
+ 13 files changed, 280 insertions(+), 2 deletions(-)
+ create mode 100644 DOCS/interface-changes/macos-latency-log.txt
+ create mode 100644 video/out/mac/latency.c
+ create mode 100644 video/out/mac/latency.h
+
+diff --git a/DOCS/interface-changes/macos-latency-log.txt b/DOCS/interface-changes/macos-latency-log.txt
+new file mode 100644
+index 000000000..457742aca
+--- /dev/null
++++ b/DOCS/interface-changes/macos-latency-log.txt
+@@ -0,0 +1 @@
++add `--macos-latency-log` and `--macos-latency-test`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 1ee6dbe7c..ca0ce20d1 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7290,7 +7290,24 @@ them.
+     moves, instead of ``WHEEL_*`` keys. A mouse wheel's clicks stay ``WHEEL_*`` keys. ``<phase>``
+     is ``began``, ``changed``, ``ended``, ``cancelled``, ``momentum`` (the scroll going on after
+     the fingers left) or ``none``. Can be changed at runtime, so a script can take the gestures
+-    only while it needs them.
++    only while it needs them. Each message ends with its event's time, in seconds of the host
++    clock (as ``NSEvent.timestamp``), after the phase.
++
++``--macos-latency-log=<yes|no>``
++    Logs, for each frame shown through the swapchain, how long ago the input it shows came in
++    (default: no): a line ``frame=<n> applied=<t> newest=<t> begin=<t> drawable=<t> submit=<t>
++    shown=<t>`` in the ``latency`` module, at info level, the times in seconds of the host clock
++    (as ``NSEvent.timestamp`` and a drawable's ``presentedTime``). ``applied`` is the time of the
++    input the frame shows, as a script turning gestures into shader parameters gives it in
++    ``--glsl-shader-opts`` as ``afp_input_time`` (the gestures' script messages carry their event's
++    time last); ``newest`` the newest input event when the VO began drawing it, ``begin`` then,
++    ``drawable`` when the frame got the Metal layer's drawable, ``submit`` when it went to the
++    swapchain and ``shown`` when it was on screen (0: never).
++
++``--macos-latency-test=<0-1000>``
++    Makes up a two-finger scroll of 4 points this many times a second, a second to the right and a
++    second to the left, while ``--macos-gesture-messages`` is on, each timed as it's sent (default:
++    0, none). For measuring with ``--macos-latency-log`` without a trackpad.
+ 
+ ``--macos-bundle-path=path1,path2,...``
+     App Bundles operate in their own shell environment that is different from the one in the
+diff --git a/meson.build b/meson.build
+index 285f19623..cc4f160fa 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1652,6 +1652,7 @@ if features['cocoa'] and features['swift']
+                            'video/out/mac/title_bar.swift',
+                            'video/out/mac/view.swift',
+                            'video/out/mac/window.swift')
++    sources += files('video/out/mac/latency.c')
+ endif
+ 
+ macos_10_15_4_features = get_option('macos-10-15-4-features').require(
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index dff914984..c17ae6cb4 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -101,6 +101,8 @@ struct macos_opts {
+     bool macos_sample_buffer_edr;
+     bool macos_menu_shortcuts;
+     bool macos_gesture_messages;
++    bool macos_latency_log;
++    int macos_latency_test;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+     bool cocoa_cb_10bit_context;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index bceec2b03..86d405d7f 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -74,6 +74,8 @@ const struct m_sub_options macos_conf = {
+         {"macos-sample-buffer-edr", OPT_BOOL(macos_sample_buffer_edr)},
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-gesture-messages", OPT_BOOL(macos_gesture_messages)},
++        {"macos-latency-log", OPT_BOOL(macos_latency_log)},
++        {"macos-latency-test", OPT_INT(macos_latency_test), M_RANGE(0, 1000)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+             {"auto", -1}, {"no", 0}, {"yes", 1})},
+diff --git a/osdep/mac/app_bridge_objc.h b/osdep/mac/app_bridge_objc.h
+index bcde2caf8..8d5991b83 100644
+--- a/osdep/mac/app_bridge_objc.h
++++ b/osdep/mac/app_bridge_objc.h
+@@ -33,6 +33,7 @@
+ 
+ #include "osdep/main-fn.h"
+ #include "osdep/mac/app_bridge.h"
++#include "video/out/mac/latency.h"
+ 
+ // complex macros won't get imported to swift so we have to reassign them
+ static const int SWIFT_MBTN_LEFT       = MP_MBTN_LEFT;
+diff --git a/video/out/mac/latency.c b/video/out/mac/latency.c
+new file mode 100644
+index 000000000..5d52e1263
+--- /dev/null
++++ b/video/out/mac/latency.c
+@@ -0,0 +1,120 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include "common/msg.h"
++#include "osdep/threads.h"
++#include "osdep/timer.h"
++
++#include "latency.h"
++
++// The frames drawn and not yet shown, by id (a drawable can be shown after a few more were drawn)
++#define RING 64
++
++struct record {
++    uint64_t id;
++    double applied, newest, begin, drawable, submit;
++};
++
++static mp_static_mutex lock = MP_STATIC_MUTEX_INITIALIZER;
++static struct mp_log *latency_log;
++static double newest_input;
++static uint64_t next_id = 1;
++static struct record current;
++static struct record ring[RING];
++
++double mac_latency_now(void)
++{
++    return mp_raw_time_ns() * 1e-9;
++}
++
++void mac_latency_set_log(struct mp_log *log)
++{
++    mp_mutex_lock(&lock);
++    latency_log = log;
++    mp_mutex_unlock(&lock);
++}
++
++bool mac_latency_enabled(void)
++{
++    mp_mutex_lock(&lock);
++    bool on = latency_log != NULL;
++    mp_mutex_unlock(&lock);
++    return on;
++}
++
++void mac_latency_input(double event_time)
++{
++    mp_mutex_lock(&lock);
++    if (event_time > newest_input)
++        newest_input = event_time;
++    mp_mutex_unlock(&lock);
++}
++
++void mac_latency_frame_begin(double applied)
++{
++    double now = mac_latency_now();
++    mp_mutex_lock(&lock);
++    current = (struct record){
++        .id = latency_log ? next_id++ : 0,
++        .applied = applied,
++        .newest = newest_input,
++        .begin = now,
++    };
++    if (current.id)
++        ring[current.id % RING] = current;
++    mp_mutex_unlock(&lock);
++}
++
++void mac_latency_frame_submitted(void)
++{
++    double now = mac_latency_now();
++    mp_mutex_lock(&lock);
++    if (current.id && ring[current.id % RING].id == current.id)
++        ring[current.id % RING].submit = now;
++    mp_mutex_unlock(&lock);
++}
++
++uint64_t mac_latency_drawable(void)
++{
++    double now = mac_latency_now();
++    mp_mutex_lock(&lock);
++    uint64_t id = latency_log ? current.id : 0;
++    if (id && ring[id % RING].id == id) {
++        // A second drawable for the same frame: the first one's frame wasn't this one
++        if (ring[id % RING].drawable)
++            id = 0;
++        else
++            ring[id % RING].drawable = now;
++    }
++    mp_mutex_unlock(&lock);
++    return id;
++}
++
++void mac_latency_presented(uint64_t id, double presented)
++{
++    mp_mutex_lock(&lock);
++    struct record *r = &ring[id % RING];
++    if (latency_log && id && r->id == id) {
++        // One line per frame, the times as they are (tools/latency360/summarize.py reads them)
++        mp_msg(latency_log, MSGL_INFO,
++               "frame=%" PRIu64 " applied=%.6f newest=%.6f begin=%.6f drawable=%.6f "
++               "submit=%.6f shown=%.6f\n", r->id, r->applied, r->newest, r->begin,
++               r->drawable, r->submit, presented);
++        r->id = 0;
++    }
++    mp_mutex_unlock(&lock);
++}
+diff --git a/video/out/mac/latency.h b/video/out/mac/latency.h
+new file mode 100644
+index 000000000..a4cb29a3d
+--- /dev/null
++++ b/video/out/mac/latency.h
+@@ -0,0 +1,47 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct mp_log;
++
++// --macos-latency-log: per frame shown, from the input it shows to the light. All times are
++// seconds of the host clock (mach_absolute_time), as NSEvent.timestamp, CACurrentMediaTime()
++// and a drawable's presentedTime are.
++
++// The log to write to, or NULL to stop (the VO thread)
++void mac_latency_set_log(struct mp_log *log);
++bool mac_latency_enabled(void);
++double mac_latency_now(void);
++
++// An input event came in (its event time; the main thread)
++void mac_latency_input(double event_time);
++
++// The VO thread: a frame starts being drawn. applied: the time of the input event whose effect
++// the frame shows (0 when nobody said)
++void mac_latency_frame_begin(double applied);
++// The frame is handed to the swapchain
++void mac_latency_frame_submitted(void);
++
++// The frame being drawn got its drawable (CAMetalLayer.nextDrawable): its id, for
++// mac_latency_presented, 0 when not logging
++uint64_t mac_latency_drawable(void);
++// The frame's drawable was shown at presented (0: it never was); any thread
++void mac_latency_presented(uint64_t id, double presented);
+diff --git a/video/out/mac/metal_layer.swift b/video/out/mac/metal_layer.swift
+index 5a321f164..faae4eb73 100644
+--- a/video/out/mac/metal_layer.swift
++++ b/video/out/mac/metal_layer.swift
+@@ -77,6 +77,19 @@ class MetalLayer: CAMetalLayer {
+         if !Thread.isMainThread { CATransaction.flush() }
+     }
+ 
++    // --macos-latency-log: when the frame drawn into this drawable was shown. MoltenVK takes the
++    // drawable while the frame is drawn (the VO thread)
++    override func nextDrawable() -> CAMetalDrawable? {
++        let drawable = super.nextDrawable()
++        if let drawable = drawable {
++            let id = mac_latency_drawable()
++            if id != 0 {
++                drawable.addPresentedHandler { shown in mac_latency_presented(id, shown.presentedTime) }
++            }
++        }
++        return drawable
++    }
++
+     override var displaySyncEnabled: Bool {
+         didSet {
+             if displaySyncEnabled != oldValue { logState(property: "display sync") }
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index bf8c138e7..410c6146e 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -129,6 +129,7 @@ class View: NSView, CALayerDelegate {
+     }
+ 
+     override func mouseDragged(with event: NSEvent) {
++        mac_latency_input(event.timestamp)
+         signalMouseMovement(event)
+     }
+ 
+@@ -176,8 +177,47 @@ class View: NSView, CALayerDelegate {
+         case .cancelled: phase = "cancelled"
+         default: if event.momentumPhase != [] { phase = "momentum" }
+         }
++        sendGesture(kind, values, phase, event.timestamp)
++    }
++
++    // The event's time last (seconds of the host clock, as NSEvent.timestamp): a script passes it on in
++    // glsl-shader-opts as afp_input_time, for --macos-latency-log
++    func sendGesture(_ kind: String, _ values: [Double], _ phase: String, _ time: TimeInterval) {
++        mac_latency_input(time)
+         let args = values.map { String(format: "%.4f", $0) }.joined(separator: " ")
+-        input?.command("script-message gesture \(kind) \(args) \(phase)")
++        input?.command("script-message gesture \(kind) \(args) \(phase) \(String(format: "%.6f", time))")
++    }
++
++    // --macos-latency-test=<hz>: a two-finger scroll made up at that rate while the gestures are messages,
++    // a second to the right, a second to the left, timed when it's sent (no trackpad or HID in it)
++    var latencyTestTimer: Timer?
++    var latencyTestHz: Int = 0
++    var latencyTestCount: Int = 0
++
++    // Polled by MacCommon (the option can change at runtime) while the VO is there
++    func updateLatencyTest() {
++        let hz = Int(common.option.mac.macos_latency_test)
++        if hz == latencyTestHz { return }
++        stopLatencyTest()
++        latencyTestHz = hz
++        if hz <= 0 { return }
++        let timer = Timer(timeInterval: 1.0 / Double(hz), repeats: true) { [weak self] _ in self?.latencyTestTick() }
++        RunLoop.main.add(timer, forMode: .common)
++        latencyTestTimer = timer
++    }
++
++    func stopLatencyTest() {
++        latencyTestTimer?.invalidate()
++        latencyTestTimer = nil
++        latencyTestHz = 0
++        latencyTestCount = 0
++    }
++
++    func latencyTestTick() {
++        guard gestureMessages, latencyTestHz > 0 else { return }
++        let dx = (latencyTestCount / latencyTestHz) % 2 == 0 ? 4.0 : -4.0
++        latencyTestCount += 1
++        sendGesture("scroll", [dx, 0], "changed", CACurrentMediaTime())
+     }
+ 
+     override func magnify(with event: NSEvent) {
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index e8600a252..d521c90db 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -27,6 +27,8 @@ class MacCommon: Common {
+     var timer: PreciseTimer?
+     var swapTime: UInt64 = 0
+     let swapLock: NSCondition = NSCondition()
++    // --macos-latency-test's option, read while the VO is there
++    var latencyTestPoll: Timer?
+ 
+     @objc init(_ vo: UnsafeMutablePointer<vo>) {
+         let log = LogHelper(mp_log_new(vo, vo.pointee.log, "mac"))
+@@ -48,6 +50,9 @@ class MacCommon: Common {
+             sampleBufferLayer = sampleLayer
+             updateSampleBufferRange()
+             initMisc(vo)
++            let poll = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.view?.updateLatencyTest() }
++            RunLoop.main.add(poll, forMode: .common)
++            latencyTestPoll = poll
+         }
+     }
+ 
+@@ -93,6 +98,9 @@ class MacCommon: Common {
+         timer?.terminate()
+ 
+         DispatchQueue.main.sync {
++            latencyTestPoll?.invalidate()
++            latencyTestPoll = nil
++            view?.stopLatencyTest()
+             window?.delegate = nil
+             window?.close()
+ 
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index f0194946d..03c0c2484 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -53,6 +53,21 @@
+ #include "sub/osd.h"
+ #include "gpu_next/context.h"
+ 
++#if HAVE_COCOA && HAVE_SWIFT
++#include "video/out/mac/latency.h"
++
++// The time of the input whose effect the frame shows, as the script that turned it into shader
++// parameters said (glsl-shader-opts afp_input_time), for --macos-latency-log
++static double input_time(char **opts)
++{
++    for (int n = 0; opts && opts[n * 2]; n++) {
++        if (strcmp(opts[n * 2], "afp_input_time") == 0)
++            return strtod(opts[n * 2 + 1], NULL);
++    }
++    return 0;
++}
++#endif
++
+ #if HAVE_GL && defined(PL_HAVE_OPENGL)
+ #include <libplacebo/opengl.h>
+ #include "video/out/opengl/ra_gl.h"
+@@ -1375,6 +1390,9 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ 
+     struct pl_render_params params = pars->params;
+     const struct gl_video_opts *opts = p->opts_cache->opts;
++#if HAVE_COCOA && HAVE_SWIFT
++    mac_latency_frame_begin(input_time(opts->user_shader_opts));
++#endif
+     bool will_redraw = frame->display_synced && frame->num_vsyncs > 1;
+     bool cache_frame = will_redraw || frame->still || p->paused;
+     bool can_interpolate = opts->interpolation && frame->display_synced &&
+@@ -1863,6 +1881,9 @@ static void flip_page(struct vo *vo)
+         } else if (!pl_swapchain_submit_frame(p->sw)) {
+             MP_ERR(vo, "Failed presenting frame!\n");
+         }
++#if HAVE_COCOA && HAVE_SWIFT
++        mac_latency_frame_submitted();
++#endif
+         p->frame_pending = false;
+         p->ext_pending = false;
+     }
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index 71f662fda..2c48359db 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -23,6 +23,7 @@
+ #include "osdep/mac/app_bridge.h"
+ #include "osdep/mac/swift.h"
+ #include "video/out/gpu/context.h"
++#include "video/out/mac/latency.h"
+ #include "video/out/mac/sample_buffer.h"
+ 
+ #include "common.h"
+@@ -36,12 +37,14 @@ struct priv {
+     struct macos_opts *opts;
+     struct mac_sample_buffer *sb;
+     bool sb_active, sb_shown, sb_failed;
++    struct mp_log *latency_log;
+ };
+ 
+ static void mac_vk_uninit(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+ 
++    mac_latency_set_log(NULL);
+     mac_sample_buffer_destroy(&p->sb, p->vk.gpu);
+     ra_vk_ctx_uninit(ctx);
+     mpvk_uninit(&p->vk);
+@@ -79,6 +82,7 @@ static bool mac_vk_ext_active(struct ra_ctx *ctx)
+         mac_sample_buffer_set_live_l1(p->sb, p->opts->macos_dovi_live_l1);
+         talloc_free(path);
+     }
++    mac_latency_set_log(p->opts->macos_latency_log ? p->latency_log : NULL);
+     if (!p->sb_failed && mac_sample_buffer_failed(p->sb)) {
+         MP_WARN(ctx, "Presenting through the sample buffer layer failed, "
+                 "using the swapchain.\n");
+@@ -154,6 +158,7 @@ static bool mac_vk_init(struct ra_ctx *ctx)
+ 
+     p->opts_cache = m_config_cache_alloc(p, ctx->global, &macos_conf);
+     p->opts = p->opts_cache->opts;
++    p->latency_log = mp_log_new(p, ctx->global->log, "latency");
+ 
+     p->vo_mac = [[MacCommon alloc] init:ctx->vo];
+     if (!p->vo_mac)
+-- 
+2.42.0
+

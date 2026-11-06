@@ -231,8 +231,9 @@ pub fn dv_level(w: u32, h: u32, fps: f64) -> u8 {
     13
 }
 
-/// The dvvC box for profile 8 with HLG compatibility (8.4): version 1.0, an RPU and a base layer, no enhancement layer
-pub fn dvvc_box(level: u8) -> [u8; 32] {
+/// The dvvC box for profile 8: version 1.0, an RPU and a base layer, no enhancement layer; `compatibility` 4 for an
+/// HLG base layer (8.4), 1 for a PQ (HDR10) one (8.1)
+pub fn dvvc_box(level: u8, compatibility: u8) -> [u8; 32] {
     let mut b = [0u8; 32];
     b[0..4].copy_from_slice(&32u32.to_be_bytes());
     b[4..8].copy_from_slice(b"dvvC");
@@ -240,7 +241,7 @@ pub fn dvvc_box(level: u8) -> [u8; 32] {
     b[9] = 0;
     let bits: u16 = (8 << 9) | ((level as u16) << 3) | (1 << 2) | 1; // profile 8, level, rpu, (no el), bl
     b[10..12].copy_from_slice(&bits.to_be_bytes());
-    b[12] = 4 << 4; // dv_bl_signal_compatibility_id 4: HLG
+    b[12] = compatibility << 4; // dv_bl_signal_compatibility_id: 4 HLG, 1 HDR10
     b
 }
 
@@ -289,7 +290,7 @@ fn hvc1_chain(moov: &[u8]) -> Result<Vec<(usize, usize, [u8; 4])>, String> {
 
 /// Writes the dvvC box into the MOV's hvc1 sample entry, in place: the MOV has its moov before mdat with a free box
 /// after it (ffmpeg's -moov_size), which gives up the room, so nothing else in the file moves. Returns the level.
-pub fn patch_dvvc(path: &Path, fps: f64) -> Result<u8, String> {
+pub fn patch_dvvc(path: &Path, fps: f64, compatibility: u8) -> Result<u8, String> {
     let mut f = File::options().read(true).write(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let len = f.metadata().map_err(|e| e.to_string())?.len();
     // The top-level boxes: ftyp, (wide,) moov, free, mdat
@@ -330,7 +331,7 @@ pub fn patch_dvvc(path: &Path, fps: f64) -> Result<u8, String> {
     if kids.iter().any(|k| &k.2 == b"dvvC" || &k.2 == b"dvcC") { return Err("it already has a Dolby Vision configuration".into()); }
     let hvcc = kids.iter().find(|k| &k.2 == b"hvcC").ok_or("no hvcC in hvc1")?;
     let level = dv_level(w, h, fps);
-    let dvvc = dvvc_box(level);
+    let dvvc = dvvc_box(level, compatibility);
     // Every box from moov down to hvc1 grows by the box
     for (p, s, _) in chain.iter().chain(std::iter::once(&(0usize, moov.len(), *b"moov"))) {
         moov[*p..*p + 4].copy_from_slice(&((*s + 32) as u32).to_be_bytes());
@@ -345,8 +346,24 @@ pub fn patch_dvvc(path: &Path, fps: f64) -> Result<u8, String> {
     f.write_all(&moov).map_err(|e| e.to_string())?;
     debug_assert_eq!(moov_pos + moov.len() as u64, free_pos + 32);
     f.write_all(&free_head).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
+    sync(&f)?;
     Ok(level)
+}
+
+/// The file to disk. sync_all is F_FULLFSYNC on macOS, which an SMB share doesn't support ("Operation not
+/// supported"): there, a plain fsync, as far as the share goes
+fn sync(f: &File) -> Result<(), String> {
+    match f.sync_all() {
+        Ok(()) => Ok(()),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ENOTSUP) || e.raw_os_error() == Some(libc::EOPNOTSUPP)
+            || e.kind() == std::io::ErrorKind::Unsupported => {
+            use std::os::unix::io::AsRawFd;
+            unsafe { libc::fsync(f.as_raw_fd()); }
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -403,6 +420,6 @@ mod tests {
     #[test]
     fn the_box_is_mp4boxs() {
         // MP4Box -add x.hevc:dvp=8.4 for 2160p59.94
-        assert_eq!(&dvvc_box(9)[..13], &[0, 0, 0, 32, b'd', b'v', b'v', b'C', 1, 0, 0x10, 0x4d, 0x40]);
+        assert_eq!(&dvvc_box(9, 4)[..13], &[0, 0, 0, 32, b'd', b'v', b'v', b'C', 1, 0, 0x10, 0x4d, 0x40]);
     }
 }

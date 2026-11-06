@@ -105,6 +105,9 @@ fn look_blocks(look: &Look) -> Vec<ExtMetadataBlock> {
     blocks
 }
 
+/// Profile 8.1, for a PQ (HDR10) base layer: the config's `profile` in place of 8.4's (afp-rpu --profile 8.1)
+pub const PROFILE_PQ: GenerateProfile = GenerateProfile::Profile81;
+
 /// DV Lab's generator config for `frames` frames. `l1` is one L1 for all of them, or one per frame. A per-frame list
 /// with scene_cut set anywhere has shots from those frames (frame 0 always starts one) and, inside a shot, a frame
 /// edit where L1 changes; without, each change of L1 starts a shot, so constant L1 is one shot and L1 that changes

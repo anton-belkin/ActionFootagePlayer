@@ -1,0 +1,229 @@
+From c3a22698b86364d5f244064f1689e5cd18ff80c3 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Fri, 6 Nov 2026 15:03:57 +0100
+Subject: [PATCH] mac/vulkan: show frames without waiting for the vsync with
+ --macos-display-sync
+
+In a window, macOS composites the layer at its own refresh whatever the
+layer does: a frame presented without waiting for the vsync first
+(displaySyncEnabled off) reaches the screen a frame or two sooner,
+without tearing. --vulkan-swap-mode=immediate did that, but only when
+the swapchain is made and in full screen too, where macOS may show the
+layer directly and it can tear. --macos-display-sync=no turns the wait
+off, fullscreen keeps it only in full screen; both at runtime, so a
+script can ask for it while the input has to show quickly.
+
+--macos-latency-log logs the frames enqueued to the sample buffer
+layer as they're enqueued (sb=1): the layer doesn't say when it shows
+them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ DOCS/interface-changes/macos-display-sync.txt |  1 +
+ DOCS/man/options.rst                          | 11 +++++++++-
+ osdep/mac/app_bridge.h                        |  7 +++++++
+ osdep/mac/app_bridge.m                        |  3 +++
+ video/out/mac/latency.c                       | 15 +++++++++++++
+ video/out/mac/latency.h                       |  3 +++
+ video/out/mac/metal_layer.swift               | 21 +++++++++++++++++--
+ video/out/mac_common.swift                    |  7 +++++++
+ video/out/vo_gpu_next.c                       |  3 +++
+ video/out/vulkan/context_mac.m                |  1 +
+ 10 files changed, 69 insertions(+), 3 deletions(-)
+ create mode 100644 DOCS/interface-changes/macos-display-sync.txt
+
+diff --git a/DOCS/interface-changes/macos-display-sync.txt b/DOCS/interface-changes/macos-display-sync.txt
+new file mode 100644
+index 000000000..c80bc3ebb
+--- /dev/null
++++ b/DOCS/interface-changes/macos-display-sync.txt
+@@ -0,0 +1 @@
++add `--macos-display-sync`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 20a41cae6..57d8247bf 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -7297,6 +7297,13 @@ them.
+     ``afp_input_seq``; the VO then turns the view by the later gestures itself before it draws,
+     and draws as each comes in, until the script's values come.
+ 
++``--macos-display-sync=<auto|no|fullscreen>``
++    Whether the Metal layer waits for the display's vsync to show a frame (``auto``: as
++    ``--vulkan-swap-mode`` says, waiting unless it's ``immediate``). ``no`` shows each frame as it
++    comes; in a window macOS composites it at its next refresh all the same, a frame or two sooner
++    than waiting for the vsync first, but in full screen (where macOS may show the layer directly)
++    it can tear. ``fullscreen`` waits only in full screen. Can be changed at runtime.
++
+ ``--macos-latency-log=<yes|no>``
+     Logs, for each frame shown through the swapchain, how long ago the input it shows came in
+     (default: no): a line ``frame=<n> applied=<t> newest=<t> begin=<t> drawable=<t> submit=<t>
+@@ -7306,7 +7313,9 @@ them.
+     ``--glsl-shader-opts`` as ``afp_input_time`` (the gestures' script messages carry their event's
+     time last); ``newest`` the newest input event when the VO began drawing it, ``begin`` then,
+     ``drawable`` when the frame got the Metal layer's drawable, ``submit`` when it went to the
+-    swapchain and ``shown`` when it was on screen (0: never).
++    swapchain and ``shown`` when it was on screen (0: never). Frames enqueued to the sample buffer
++    layer (``--macos-sample-buffer-layer``) are logged as they're enqueued, with ``shown=0 sb=1``:
++    the layer doesn't say when it shows them.
+ 
+ ``--macos-latency-test=<0-1000>``
+     Makes up a two-finger scroll of 4 points this many times a second, a second to the right and a
+diff --git a/osdep/mac/app_bridge.h b/osdep/mac/app_bridge.h
+index c17ae6cb4..153ebd52d 100644
+--- a/osdep/mac/app_bridge.h
++++ b/osdep/mac/app_bridge.h
+@@ -35,6 +35,12 @@ enum {
+     RENDER_TIMER_PRECISE,
+ };
+ 
++enum {
++    MAC_DISPLAY_SYNC_AUTO = 0,
++    MAC_DISPLAY_SYNC_NO,
++    MAC_DISPLAY_SYNC_FULLSCREEN,
++};
++
+ enum {
+     MAC_APPEAR_AUTO = 0,
+     MAC_APPEAR_AQUA,
+@@ -102,6 +108,7 @@ struct macos_opts {
+     bool macos_menu_shortcuts;
+     bool macos_gesture_messages;
+     bool macos_latency_log;
++    int macos_display_sync;
+     int macos_latency_test;
+     char **macos_bundle_path;
+     int cocoa_cb_sw_renderer;
+diff --git a/osdep/mac/app_bridge.m b/osdep/mac/app_bridge.m
+index 86d405d7f..430456dd7 100644
+--- a/osdep/mac/app_bridge.m
++++ b/osdep/mac/app_bridge.m
+@@ -75,6 +75,9 @@ const struct m_sub_options macos_conf = {
+         {"macos-menu-shortcuts", OPT_BOOL(macos_menu_shortcuts)},
+         {"macos-gesture-messages", OPT_BOOL(macos_gesture_messages)},
+         {"macos-latency-log", OPT_BOOL(macos_latency_log)},
++        {"macos-display-sync", OPT_CHOICE(macos_display_sync,
++            {"auto", MAC_DISPLAY_SYNC_AUTO}, {"no", MAC_DISPLAY_SYNC_NO},
++            {"fullscreen", MAC_DISPLAY_SYNC_FULLSCREEN})},
+         {"macos-latency-test", OPT_INT(macos_latency_test), M_RANGE(0, 1000)},
+         {"macos-bundle-path", OPT_STRINGLIST(macos_bundle_path)},
+         {"cocoa-cb-sw-renderer", OPT_CHOICE(cocoa_cb_sw_renderer,
+diff --git a/video/out/mac/latency.c b/video/out/mac/latency.c
+index 01e043950..2efb97b71 100644
+--- a/video/out/mac/latency.c
++++ b/video/out/mac/latency.c
+@@ -106,6 +106,21 @@ void mac_latency_frame_submitted(void)
+     mp_mutex_unlock(&lock);
+ }
+ 
++void mac_latency_frame_enqueued(void)
++{
++    double now = mac_latency_now();
++    mp_mutex_lock(&lock);
++    struct record *r = &ring[current.id % RING];
++    if (latency_log && current.id && r->id == current.id) {
++        mp_msg(latency_log, MSGL_INFO,
++               "frame=%" PRIu64 " applied=%.6f newest=%.6f begin=%.6f drawable=0.000000 "
++               "submit=%.6f shown=0.000000 fresh=%d sb=1\n", r->id, r->applied, r->newest,
++               r->begin, now, r->fresh);
++        r->id = 0;
++    }
++    mp_mutex_unlock(&lock);
++}
++
+ uint64_t mac_latency_drawable(void)
+ {
+     double now = mac_latency_now();
+diff --git a/video/out/mac/latency.h b/video/out/mac/latency.h
+index c42323a10..35a0237ee 100644
+--- a/video/out/mac/latency.h
++++ b/video/out/mac/latency.h
+@@ -43,6 +43,9 @@ void mac_latency_frame_applied(double applied);
+ void mac_latency_frame_fresh(bool fresh);
+ // The frame is handed to the swapchain
+ void mac_latency_frame_submitted(void);
++// The frame is enqueued to the sample buffer layer (--macos-sample-buffer-layer): logged now,
++// with shown=0 and sb=1, the layer saying nothing of when it shows it
++void mac_latency_frame_enqueued(void);
+ 
+ // The frame being drawn got its drawable (CAMetalLayer.nextDrawable): its id, for
+ // mac_latency_presented, 0 when not logging
+diff --git a/video/out/mac/metal_layer.swift b/video/out/mac/metal_layer.swift
+index faae4eb73..c84b97bac 100644
+--- a/video/out/mac/metal_layer.swift
++++ b/video/out/mac/metal_layer.swift
+@@ -90,9 +90,26 @@ class MetalLayer: CAMetalLayer {
+         return drawable
+     }
+ 
++    // What the swapchain sets (MoltenVK: off for VK_PRESENT_MODE_IMMEDIATE_KHR), unless
++    // --macos-display-sync turns it off
++    var displaySyncWanted: Bool = true
++    var displaySyncOff: Bool = false {
++        didSet { if displaySyncOff != oldValue { applyDisplaySync() } }
++    }
+     override var displaySyncEnabled: Bool {
+-        didSet {
+-            if displaySyncEnabled != oldValue { logState(property: "display sync") }
++        get { return super.displaySyncEnabled }
++        set {
++            displaySyncWanted = newValue
++            applyDisplaySync()
++        }
++    }
++
++    func applyDisplaySync() {
++        let sync = displaySyncWanted && !displaySyncOff
++        if super.displaySyncEnabled != sync {
++            super.displaySyncEnabled = sync
++            logState(property: "display sync")
++            commitFromVoThread()
+         }
+     }
+ 
+diff --git a/video/out/mac_common.swift b/video/out/mac_common.swift
+index d521c90db..88bb281aa 100644
+--- a/video/out/mac_common.swift
++++ b/video/out/mac_common.swift
+@@ -155,6 +155,13 @@ class MacCommon: Common {
+         }
+     }
+ 
++    // --macos-display-sync: the frames shown as they come rather than at the next vsync (the VO thread)
++    @objc func updateDisplaySync(_ mode: Int32) {
++        let fullscreen = window?.isInFullscreen ?? false
++        let off = mode == MAC_DISPLAY_SYNC_NO || (mode == MAC_DISPLAY_SYNC_FULLSCREEN && !fullscreen)
++        if layer?.displaySyncOff != off { layer?.displaySyncOff = off }
++    }
++
+     @objc func isVisible() -> Bool {
+         return window?.occlusionState.contains(.visible) ?? false ||
+                option.vo.force_render ||
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 7ff8f3e23..f6b75225a 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -1978,6 +1978,9 @@ static void flip_page(struct vo *vo)
+         if (p->ext_pending) {
+             sw->fns->ext_submit_frame(sw, &p->ext_frame, &p->ext_info);
+             av_buffer_unref(&p->ext_info.dovi_rpu);
++#if HAVE_COCOA && HAVE_SWIFT
++            mac_latency_frame_enqueued();
++#endif
+         } else if (!pl_swapchain_submit_frame(p->sw)) {
+             MP_ERR(vo, "Failed presenting frame!\n");
+         }
+diff --git a/video/out/vulkan/context_mac.m b/video/out/vulkan/context_mac.m
+index 5afdb5f49..b5ec2d183 100644
+--- a/video/out/vulkan/context_mac.m
++++ b/video/out/vulkan/context_mac.m
+@@ -85,6 +85,7 @@ static bool mac_vk_ext_active(struct ra_ctx *ctx)
+         talloc_free(path);
+     }
+     mac_latency_set_log(p->opts->macos_latency_log ? p->latency_log : NULL);
++    [p->vo_mac updateDisplaySync:p->opts->macos_display_sync];
+     if (!p->sb_failed && mac_sample_buffer_failed(p->sb)) {
+         MP_WARN(ctx, "Presenting through the sample buffer layer failed, "
+                 "using the swapchain.\n");
+-- 
+2.42.0
+

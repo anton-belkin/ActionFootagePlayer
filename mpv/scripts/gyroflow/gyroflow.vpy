@@ -50,6 +50,10 @@ if args.get('aspect'):
 # of the project's or preset's
 if args.get('projection') is not None:
     stab['projection'] = int(args['projection'])
+# The lens and the motion (vs-gyroflow's LensMode): stabilized, only (the lens corrected, nothing smoothed: the
+# stabilization off, or a clip with a lens profile and no motion data), recorded (stabilized, the lens as recorded)
+if args.get('lens'):
+    stab['lens'] = str(args['lens'])
 # The size to render at, for the display (main.lua); the project's or the input's without it
 if args.get('width') and args.get('height'):
     stab['width'] = int(args['width'])

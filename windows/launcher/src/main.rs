@@ -12,8 +12,8 @@
 //   plugins\                  the plugins: dlogm, gyroflow (with ffmpeg.exe and ffprobe.exe for its exports),
 //                             dji-telemetry, highlights, footage-menu (their right-click menu), side-panel (their
 //                             settings beside the video), agent (notes for an AI agent, and its IPC), workspace
-//                             (the project a clip belongs to) and any-layout (the keys in a Cyrillic keyboard
-//                             layout too)
+//                             (the project a clip belongs to), any-layout (the keys in a Cyrillic keyboard layout
+//                             too) and view360 (360° clips as a view to look around in)
 //   vulkan\vulkan-1.dll       the Vulkan loader, which mpv.exe can't start without, for a PC whose GPU driver hasn't
 //                             installed one (last in mpv's PATH: the system's comes first)
 //   tools\setup.py            what fetches DJI's LUT
@@ -29,6 +29,9 @@
 // A video opened while one plays takes its place, in the same window (mpv's IPC pipe). Several opened together
 // (Explorer starts this once for each) go into one playlist.
 //
+// `ActionFootagePlayer.exe --batch <request.json>` is Action Footage Library's: mpv with no window making a project's
+// clip previews, moments, photos or exports (the workspace plugin's batch mode, AFP_BATCH), waited for.
+//
 // `ActionFootagePlayer.exe --export <video>...` is Explorer's Stabilize + LUT: gyroflow-export on the videos, in a
 // console window that shows how it goes. Videos sent while it runs are exported after the others, in the same window.
 
@@ -41,8 +44,15 @@ use std::process::Command;
 const NAME: &str = "ActionFootagePlayer";
 // The playing one's IPC pipe: videos opened with the app go there while it plays
 const PIPE: &str = r"\\.\pipe\ActionFootagePlayer";
-const PLUGINS: [&str; 9] =
-    ["workspace", "gyroflow", "dlogm", "dji-telemetry", "highlights", "footage-menu", "side-panel", "agent", "any-layout"];
+// Held by the launcher of the running player until its mpv has exited (play)
+const PLAYER: &str = r"Local\ActionFootagePlayer-player";
+// How long a player quitting is waited for, at most, before another starts anyway
+const PLAYER_WAIT_MS: u32 = 60_000;
+// How long the playing one has to answer the videos sent to it (ipc::send_videos)
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+const PLUGINS: [&str; 10] = [
+    "workspace", "gyroflow", "view360", "dlogm", "dji-telemetry", "highlights", "footage-menu", "side-panel", "agent", "any-layout",
+];
 // Their settings' files, in script-opts\
 const PLUGIN_OPTS: [&str; 7] = ["gyroflow", "dlogm", "dji_telemetry", "highlights", "footage_menu", "side_panel", "agent"];
 // A video sent to a player started less than this long ago goes into its playlist (several opened together), later
@@ -58,6 +68,8 @@ fn main() {
     let result = if args.first().is_some_and(|a| a == "--export") {
         args.remove(0);
         export(&app, args)
+    } else if args.first().is_some_and(|a| a == "--batch") && args.len() == 2 {
+        batch(&app, &args[1])
     } else {
         play(&app, args)
     };
@@ -128,12 +140,16 @@ fn is_option(arg: &OsString) -> bool {
 
 fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
     // One at a time: of several started together, the first starts mpv and the others wait for its pipe
-    let _starting = win::Mutex::acquire(r"Local\ActionFootagePlayer-start", u32::MAX);
+    let starting = win::Mutex::acquire(r"Local\ActionFootagePlayer-start", u32::MAX);
     let files: Vec<&OsString> = args.iter().filter(|a| !is_option(a)).collect();
     if !files.is_empty() && ipc::send_videos(&files) {
         win::focus_mpv();
         return Ok(());
     }
+    // A player quitting has closed its pipe but keeps its name until it has exited (its plugins finishing what they
+    // do, seconds on a NAS); one started meanwhile would get no pipe, and later videos would each start another. The
+    // launcher of each player holds PLAYER until its mpv has exited: waited for here, a while at most
+    let player = win::Mutex::acquire(PLAYER, PLAYER_WAIT_MS);
 
     let mpv = app.join(r"mpv\mpv.exe");
     let mut cmd = Command::new(&mpv);
@@ -149,7 +165,7 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
         cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
     }
     cmd.args(&args);
-    cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
     let _ = std::fs::create_dir_all(data_dir());
     let _ = std::fs::write(started_file(), b"");
 
@@ -168,7 +184,31 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    // Videos opened from now on go to its pipe; this launcher stays (windowless) with PLAYER until mpv has exited
+    drop(starting);
+    let _ = child.wait();
+    drop(player);
     Ok(())
+}
+
+// Action Footage Library's batch: no window, no IPC pipe (a video opened meanwhile starts its own player), the same
+// plugins and settings; this waits for it, so that the Library sees when it's done
+fn batch(app: &Path, request: &OsString) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mpv = app.join(r"mpv\mpv.exe");
+    let mut cmd = Command::new(&mpv);
+    environment(&mut cmd, app);
+    cmd.env("AFP_BATCH", request)
+        .arg("--idle=yes").arg("--vo=null").arg("--ao=null").arg("--force-window=no").arg("--terminal=no")
+        .arg(format!("--config-dir={}", mpv_config().display())).arg("--load-scripts=no")
+        .arg(format!("--include={}", app.join("app.conf").display()));
+    for plugin in PLUGINS {
+        cmd.arg(format!("--script={}", app.join("plugins").join(plugin).display()));
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let status = cmd.status().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn export(app: &Path, videos: Vec<OsString>) -> Result<(), String> {
@@ -280,10 +320,30 @@ mod ipc {
         for (i, video) in videos.iter().enumerate() {
             let path = full_path(video);
             let mode = if together || i > 0 { "append-play" } else { "replace" };
-            commands.push_str(&format!("{{\"command\":[\"loadfile\",{},\"{mode}\"]}}\n",
-                                       json_string(&path.to_string_lossy())));
+            commands.push_str(&format!("{{\"command\":[\"loadfile\",{},\"{mode}\"],\"request_id\":{}}}\n",
+                                       json_string(&path.to_string_lossy()), i + 1));
         }
-        pipe.write_all(commands.as_bytes()).is_ok()
+        pipe.write_all(commands.as_bytes()).is_ok() && answered(pipe, videos.len())
+    }
+
+    // Whether mpv answered the last command. A player quitting keeps its pipe a while (its plugins finishing what
+    // they do): it may take the commands, then close the pipe without playing them
+    fn answered(pipe: std::fs::File, last: usize) -> bool {
+        use std::io::BufRead;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let id = format!("\"request_id\":{last}");
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
+                // Events come on the pipe too; a reply is {"data":…,"request_id":<n>,"error":…}
+                if let Some(at) = line.find(&id) {
+                    if !line[at + id.len()..].starts_with(|c: char| c.is_ascii_digit()) {
+                        let _ = tx.send(());
+                        return;
+                    }
+                }
+            }
+        });
+        rx.recv_timeout(ANSWER_WAIT).is_ok()
     }
 }
 

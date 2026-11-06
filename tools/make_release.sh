@@ -5,7 +5,8 @@
 #                                                       downloads DJI's LUT. With BUNDLE_RUNTIME, with mpv and ffmpeg
 #                                                       in it too: MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
 #                                                       tools/build_mpv.sh, when it's there), else Homebrew's
-#   ActionFootagePlayer-<version>-macos-arm64.zip             the same app, zipped: unzipped into Applications
+#                                                       ActionFootageLibrary.app beside it (tools/make_library_app.sh)
+#   ActionFootagePlayer-<version>-macos-arm64.zip             the same two apps, zipped: unzipped into Applications
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
@@ -20,7 +21,8 @@
 #                                                       gyroflow plugin's projects), the same way (plain Lua)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
-#                                                       tools/make_plugin_zip.sh's)
+#                                                       tools/make_plugin_zip.sh's); with view360 beside it, which
+#                                                       uses its probe and gestures
 #   ActionFootagePlayer-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
 #                                                       install.sh needs no Rust (it uses bin/ when it's there)
 #
@@ -43,6 +45,7 @@ if ! git diff --quiet HEAD -- vs-gyroflow; then
 fi
 
 (cd vs-gyroflow && cargo build --release)
+(cd library && cargo build --release)
 
 rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
@@ -52,6 +55,7 @@ for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-export af
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
+install -m 755 library/target/release/ActionFootageLibrary "dist/$name/bin/ActionFootageLibrary"
 # The build machine's path otherwise stays in the library as its install name
 install_name_tool -id @rpath/libvs_gyroflow.dylib "dist/$name/bin/libvs_gyroflow.dylib"
 for f in "dist/$name/bin/"*; do
@@ -68,7 +72,9 @@ stage="dist/app-$version"
 rm -rf "$stage" "dist/$app.zip" "dist/$app.dmg"
 mkdir -p "$stage"
 tools/make_app.sh "$stage/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
-ditto -c -k --keepParent "$stage/ActionFootagePlayer.app" "dist/$app.zip"
+LIBRARY_BIN="dist/$name/bin/ActionFootageLibrary" tools/make_library_app.sh "$stage/ActionFootageLibrary.app" "$version"
+# Both apps at the zip's top: unzipped into Applications, side by side
+(cd "$stage" && zip -qry "$OLDPWD/dist/$app.zip" ActionFootagePlayer.app ActionFootageLibrary.app)
 # The disk image: the app and a link to Applications, compressed with LZFSE. hdiutil sometimes finds its device
 # still busy on GitHub's runners: tried again then
 ln -s /Applications "$stage/Applications"
@@ -82,10 +88,10 @@ rm -rf "$stage"
 gyroflow="mpv-gyroflow-$version-macos-arm64"
 rm -rf "dist/$gyroflow" "dist/$gyroflow.zip"
 mkdir -p "dist/$gyroflow/gyroflow"
-git archive HEAD mpv/scripts/gyroflow | tar -x --strip-components 2 -C "dist/$gyroflow"
+git archive HEAD mpv/scripts/gyroflow mpv/scripts/view360 | tar -x --strip-components 2 -C "dist/$gyroflow"
 mv "dist/$gyroflow/gyroflow/underwater.gyroflow" "dist/$gyroflow/gyroflow/default.gyroflow"
 cp -p "dist/$name/bin/"* "dist/$gyroflow/gyroflow/"
-(cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow)
+(cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow view360)
 rm -rf "dist/$gyroflow" "dist/$name"
 
 dlogm="mpv-dlogm-$version"

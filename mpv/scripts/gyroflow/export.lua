@@ -10,7 +10,7 @@
 -- look (Ctrl+s): HDR, SDR by the maker's LUT (--sdr, DJI's) or by NBCU's conversion (--nbcu), HDR + Dolby Vision with the RPU
 -- the look plays (--dv-rpu, with each frame's L1 as the player measures it, --dv-live-l1: Apple's devices then show the
 -- export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
--- only), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
+-- only; --lens-only with the lens corrected; --lens-recorded stabilized with the lens as recorded), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
 -- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
 -- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
@@ -264,17 +264,23 @@ local function as_it_plays(args, sdr, photo, live)
     -- The dv look: the RPU file the player attaches, on every frame of the export too, with each frame's own L1 when
     -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way)
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
-    if not sdr and video and (look == "dv" or look == "dvsdr") and curve and curve ~= "" and rpu ~= "" then
+    -- (a file's own Dolby Vision isn't carried: its RPU is for the frames as they were, not as they're made here)
+    local own = mp.get_property_native("user-data/dlogm/dv_own") == true
+    if not sdr and video and (look == "dv" or look == "dvsdr") and not own and rpu ~= "" then
         table.insert(args, "--dv-rpu"); table.insert(args, rpu)
         if mp.get_property_native("macos-dovi-live-l1") == true then table.insert(args, "--dv-live-l1") end
     end
     local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
+    -- What the filter does: stabilized (the lens corrected or as recorded), the lens alone, or nothing
+    local filter = gyroflow("filter") or ""
     local view = gyroflow("view")
-    if view == "off" then table.insert(args, "--no-stabilize") end
+    if filter == "" then table.insert(args, "--no-stabilize")
+    elseif filter == "only" then table.insert(args, "--lens-only")
+    elseif filter == "recorded" then table.insert(args, "--lens-recorded") end
     -- The project it plays with, wherever the workspace plugin found it
     local project = gyroflow("project")
-    if view ~= "off" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
-    if view == "wide" then table.insert(args, "--wide") end
+    if filter ~= "" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
+    if view == "wide" and (filter == "stabilized" or filter == "recorded") then table.insert(args, "--wide") end
     if gyroflow("level") then table.insert(args, "--level"); table.insert(args, gyroflow("level")) end
     if gyroflow("edges") then
         table.insert(args, "--edges"); table.insert(args, gyroflow("edges"))
@@ -286,11 +292,12 @@ local function as_it_plays(args, sdr, photo, live)
     end
     if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
     -- The output's frame: turned, and of another aspect (the Clip tab's), stabilized or not
-    local rotation, aspect = gyroflow("rotation"), gyroflow("aspect")
+    -- The frame's W:H as it shows (its ratio turned for its orientation and the source's shape)
+    local rotation, aspect = gyroflow("rotation"), gyroflow("frame_aspect")
     if rotation and rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(rotation)) end
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
-    if PROJECTIONS[projection] and view ~= "off" then table.insert(args, "--projection"); table.insert(args, projection) end
+    if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
@@ -299,7 +306,14 @@ end
 local function view_args(args, v)
     local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
     if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
-    if v.view == "off" then add("--no-stabilize") elseif v.view == "wide" then add("--wide") end
+    -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
+    -- it (a bundle from before the lens was a key: off was as recorded)
+    local lens = v.lens or (v.view == "off" and "as-recorded" or "corrected")
+    if v.view == "off" then add(lens == "corrected" and "--lens-only" or "--no-stabilize")
+    else
+        if v.view == "wide" then add("--wide") end
+        if lens == "as-recorded" then add("--lens-recorded") end
+    end
     if v.level then add("--level", v.level) end
     local edges = mp.get_property_native("user-data/gyroflow/edges")
     if edges then
@@ -310,8 +324,11 @@ local function view_args(args, v)
     if v.horizon_lock == "yes" or v.horizon_lock == "no" then add("--horizon-lock", v.horizon_lock == "yes" and "100" or "0") end
     if v.underwater then add("--underwater", v.underwater) end
     if v.rotation and v.rotation ~= 0 then add("--rotation", v.rotation) end
-    if v.aspect and v.aspect ~= "original" then add("--aspect", v.aspect) end
-    if PROJECTIONS[v.projection] and v.view ~= "off" then add("--projection", v.projection) end
+    -- The frame's W:H for that source (the workspace plugin's frame_aspect: its ratio turned for its orientation);
+    -- an aspect from before, as it showed
+    local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
+    if aspect and aspect ~= "original" then add("--aspect", aspect) end
+    if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
 end
 
 local function installed(what)
@@ -488,6 +505,67 @@ mp.register_script_message("preview", function(json)
         if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then return reply(true) end
         mp.msg.warn("preview: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
+    end)
+end)
+
+-- An export for the workspace plugin's batch mode (Action Footage Library's Export all moments): a clip's part with
+-- a saved view, nothing playing. { id, clip, view, project (a moment's own Gyroflow project), alone, from, to, output,
+-- link, sdr, progress (gyroflow-export's progress file), reply, done }. The answer: <done> <id> { ok, error, out }.
+-- export-batch-stop <id>: cancelled, as Shift+E twice cancels (the unfinished file removed)
+local batch_jobs = {}
+mp.register_script_message("export-batch", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
+    local id = tostring(req.id or "")
+    local function reply(ok, err, out)
+        mp.commandv("script-message-to", req.reply, req.done or "export-batch-done", id, utils.format_json({ ok = ok, error = err, out = out }))
+    end
+    local info = utils.file_info(EXPORT)
+    if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
+    local control = platform.windows and temp_name("control") or nil
+    local args = { EXPORT, "--force" }
+    if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
+    if control then table.insert(args, "--control"); table.insert(args, control) end
+    view_args(args, type(req.view) == "table" and req.view or {})
+    if req.sdr == true then table.insert(args, "--nbcu") end
+    if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
+    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
+    local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
+    add("--from", req.from and string.format("%.3f", req.from))
+    add("--to", req.to and string.format("%.3f", req.to))
+    add("--output", req.output)
+    add("--link", req.link)
+    table.insert(args, req.clip)
+    mp.msg.info("export (batch): " .. table.concat(args, " "))
+    local job = { control = control, progress = req.progress, state = {} }
+    batch_jobs[id] = job
+    job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        batch_jobs[id] = nil
+        if control then os.remove(control) end
+        local err = r and r.stderr or ""
+        local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
+        if job.cancelling then return reply(false, "cancelled") end
+        if r and r.status == 0 and out then return reply(true, nil, out) end
+        mp.msg.warn("export (batch): " .. err)
+        reply(false, last_line(err) or "gyroflow-export failed")
+    end)
+end)
+mp.register_script_message("export-batch-stop", function(id)
+    local job = batch_jobs[tostring(id or "")]
+    if not job or job.cancelling then return end
+    job.cancelling = true
+    local f = job.progress and io.open(job.progress, "r")
+    if f then
+        local st = utils.parse_json(f:read("*a") or "")
+        f:close()
+        if type(st) == "table" then job.state = st end
+    end
+    if not signal(job, "TERM") then return mp.abort_async_command(job.id) end
+    mp.add_timeout(KILL_AFTER, function()
+        if batch_jobs[tostring(id)] ~= job then return end
+        mp.abort_async_command(job.id)
+        local partial = job.state.partial
+        if partial then mp.add_timeout(2, function() os.remove(partial) end) end
     end)
 end)
 

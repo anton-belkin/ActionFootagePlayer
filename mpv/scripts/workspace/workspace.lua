@@ -2,8 +2,9 @@
 -- Plain Lua with no mpv in it, so that luajit tests it (tests/workspace_test.lua) over the same cases as its Rust
 -- twin in gyroflow-export (vs-gyroflow/src/workspace.rs): keep the two in step.
 --
--- A project is a folder with `_ActionFootagePlayer/` in it, the trip folder: its footage is under it, and the
--- player's files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip.
+-- A project is a folder with `Project.afproject` in it, the trip folder: its footage is under it, and the player's
+-- files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip. Before 0.9 the
+-- mark was a folder, `_ActionFootagePlayer/`: one still makes a project (projectfile.lua moves it into the file).
 -- Separate project folders (Sources.txt) come later; every path here is already the same for them.
 --
 --   local ws = require('workspace').new({ is_dir = f, is_file = f, home = "/Users/me", windows = false })
@@ -14,9 +15,11 @@
 
 local M = {}
 
--- The folder a project's state is kept in, which also marks a folder as one. Not hidden: the project is its files,
--- where the user sees them, and the underscore puts it first by name, with _Moments, _Clips and _Exports
-M.STATE_DIR = "_ActionFootagePlayer"
+-- The file a project's state is kept in, which also marks a folder as one, and which a double click opens in Action
+-- Footage Library. Not hidden: the project is its files, where the user sees them
+M.PROJECT_FILE = "Project.afproject"
+-- The folder it was before 0.9
+M.LEGACY_DIR = "_ActionFootagePlayer"
 
 function M.new(fs)
     local ws = {}
@@ -108,7 +111,7 @@ function M.new(fs)
     end
 
     -- The project the clip (a normalized absolute path) belongs to: the nearest folder above it, or its own, with
-    -- the state folder in it. The search ends at the volume's top folder (included: a card's project is on its
+    -- the project's file (or the folder of before) in it. The search ends at the volume's top folder (included: a card's project is on its
     -- top) or at the home folder (not included: a project of everything in it would be no trip). nil: none
     function ws.project_root(clip)
         if not clip or clip:find("://", 1, true) then return nil end
@@ -116,7 +119,7 @@ function M.new(fs)
         local dir = ws.parent(clip)
         while dir do
             if home and same(dir, home) then return nil end
-            if fs.is_dir(ws.join(dir, M.STATE_DIR)) then return dir end
+            if fs.is_file(ws.join(dir, M.PROJECT_FILE)) or fs.is_dir(ws.join(dir, M.LEGACY_DIR)) then return dir end
             if ws.is_volume_root(dir) then return nil end
             dir = ws.parent(dir)
         end
