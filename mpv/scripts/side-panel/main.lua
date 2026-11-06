@@ -1,7 +1,7 @@
 -- side-panel: the plugins' settings in a panel at the right of the window, beside the video (it's moved over for it,
 -- not covered): a rail of icons at the edge, one for each part (the project: the trip's marks, moments and clip
 -- previews, the workspace plugin's; the clip, its look, the stabilization, performance and quality, the telemetry,
--- the Dolby Vision trims; support at the bottom), and the panel of the one chosen, scrolled
+-- the Dolby Vision trims, the 360 view of a 360° clip; support at the bottom), and the panel of the one chosen, scrolled
 -- with the wheel. The plugins' settings as controls: it reads the state they keep in user-data/<plugin>/ and runs
 -- their commands. While it's loaded, footage-menu leaves the right-click menu to mpv's own (it publishes
 -- user-data/side_panel/loaded). An mpv plugin: this folder goes into ~~/scripts/.
@@ -16,7 +16,7 @@
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
 --   open=yes         and the panel beside it
---   tab=project      the part it opens on: project, clip, look, stabilization, quality, telemetry, dv, support
+--   tab=project      the part it opens on: project, clip, look, stabilization, quality, telemetry, dv, view360, support
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
@@ -162,6 +162,14 @@ local function icon(u, name, cx, cy, color)
         u:shape("m " .. at(-4, -5) .. " l " .. at(-2.5, -8) .. " " .. at(2.5, -8) .. " " .. at(4, -5), color)
         u:shape(ui.circle_path(cx, cy + 1.2 * s, 3.6 * s), color, stroke)
         u:shape(ui.circle_path(cx + 6 * s, cy - 2.4 * s, 0.9 * s), color)
+    elseif name == "view360" then
+        -- A globe: its rim, a meridian and the equator
+        u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
+        local k = 4 * 0.5523
+        u:shape("m " .. at(0, -8) .. " b " .. at(k, -8) .. " " .. at(4, -k * 2) .. " " .. at(4, 0) .. " b " .. at(4, k * 2) .. " "
+                .. at(k, 8) .. " " .. at(0, 8) .. " b " .. at(-k, 8) .. " " .. at(-4, k * 2) .. " " .. at(-4, 0) .. " b " .. at(-4, -k * 2)
+                .. " " .. at(-k, -8) .. " " .. at(0, -8), color, { fill = false, border = 1.2 * s })
+        u:box(cx - 8 * s, cy - 0.6 * s, 16 * s, 1.2 * s, 0, color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -171,16 +179,20 @@ end
 -- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 local TABS = {
     { "project", "Project" }, { "clip", "Clip" }, { "crop", "Save frame" }, { "look", "Look" }, { "stabilization", "Stabilization" }, { "quality", "Performance & Quality" },
-    { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" },
+    { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" }, { "view360", "360° view" },
 }
 local TAB_TITLES = { support = "Support" }
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
 
--- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS)
+-- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS), the 360 view only for a
+-- 360° clip
 local function shown_tabs()
-    local list, d = {}, state("dlogm")
+    local list, d, v = {}, state("dlogm"), state("view360")
     for _, t in ipairs(TABS) do
-        if not t[3] and (t[1] ~= "dv" or (d and d.dv)) then table.insert(list, t) end
+        if not t[3] and (t[1] ~= "dv" or (d and d.dv))
+           and (t[1] ~= "view360" or (type(v) == "table" and (v.available or v.note))) then
+            table.insert(list, t)
+        end
     end
     return list
 end
@@ -1162,8 +1174,79 @@ local function crop_part(u, x, w, y)
     return whole_video(y)
 end
 
+-- The 360 view (the view360 plugin): a 360° clip as a view to look around in, the head turned by the mouse and the
+-- trackpad; the projection, the FOV, the horizon, what the view follows
+local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" } }, { { "stereographic", "Stereographic" }, { "planet", "Little planet" } } }
+-- Along the way you move and north come with step 5 of docs/360-implementation-plan.md (GPS, the compass)
+local HEADING_OPTIONS = { { "camera", "Camera" }, { "world", "World" } }
+local function view360_part(u, x, w, y)
+    local s = u.s
+    local v = state("view360")
+    if type(v) ~= "table" or not (v.available or v.note) then return u:caption(x, w, y, "Open a 360° clip to look around in it") end
+    if not v.available then return u:caption(x, w, y, v.note) end
+    local function msg(...) return "script-message-to view360 " .. table.concat({ ... }, " ") end
+    y = u:switch(x, w, y, "view360", "Look around", v.active == true, msg("view360", "toggle"), keys["script-binding view360/toggle"])
+    if not v.active then
+        return u:caption(x, w, y, "Off: the sphere as it was recorded, unrolled flat")
+    end
+    local function value_row(label, value)
+        u:text(x, y + 8 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 8 * s, value, { size = 12, color = C.dim, align = 6 })
+    end
+
+    y = u:heading(x, w, y + 10 * s, "Projection", keys["script-binding view360/projection"])
+    for r, row in ipairs(PROJECTION_ROWS) do
+        local options, selected = {}, nil
+        for i, p in ipairs(row) do
+            table.insert(options, { p[2], msg("view360-projection", p[1]) })
+            if p[1] == v.projection then selected = i end
+        end
+        y = u:segmented(x, w, y, "view360-projection-" .. r, options, selected)
+    end
+    local notes = { auto = "Straight lines straight up to 100°, then more and more of the sphere: from 160° all of it, as a stereographic",
+                    rectilinear = "Straight lines straight, as a camera's lens; stretched towards the edges above about 110°",
+                    stereographic = "Shapes kept to the edges, up to nearly the whole sphere",
+                    planet = "Looking straight down, the way ahead at the top: drag around the middle to spin it" }
+    y = u:caption(x, w, y, notes[v.projection] or "")
+
+    y = u:heading(x, w, y + 10 * s, "View")
+    local fmin, fmax = v.fov_min or 20, v.fov_max or 300
+    value_row("Field of view", string.format("%.0f°", v.fov or 100))
+    y = u:slider(x, w, y + 14 * s, "view360:fov", math.log((v.fov or 100) / fmin) / math.log(fmax / fmin),
+                 function(p) mp.commandv("script-message-to", "view360", "view360-set", "fov", string.format("%.2f", fmin * (fmax / fmin) ^ p)) end,
+                 "Closer", "Wider")
+    y = y + 6 * s
+    value_row("Horizon", string.format("%.1f°", v.roll or 0))
+    y = u:slider(x, w, y + 14 * s, "view360:roll", math.max(0, math.min(1, ((v.roll or 0) + 45) / 90)),
+                 function(p) mp.commandv("script-message-to", "view360", "view360-set", "roll", string.format("%.1f", p * 90 - 45)) end, "−45°", "45°")
+    local function turn(a, plus, minus)
+        if math.abs(a or 0) < 0.05 then return nil end
+        return string.format("%.0f° %s", math.abs(a), a > 0 and plus or minus)
+    end
+    local parts = {}
+    for _, t in ipairs({ turn(v.yaw, "right", "left"), turn(v.pitch, "up", "down") }) do table.insert(parts, t) end
+    y = u:caption(x, w, y + 4 * s, #parts > 0 and ("Looking " .. table.concat(parts, ", ")) or "Looking ahead")
+    y = u:button(x, w, y + 4 * s, "view360-reset", "Look ahead again", msg("view360-reset"), { key = "BS" })
+    y = u:caption(x, w, y + 4 * s, "Drag, or two fingers on a trackpad: look around. Wheel or pinch: zoom. "
+                                   .. "Alt+drag or turning two fingers: the horizon. Double click: ahead again")
+
+    -- What the view follows comes with the camera's motion in each frame (a 360 camera's own file): a stitched clip has none
+    y = u:heading(x, w, y + 10 * s, "Follows", keys["script-binding view360/heading"])
+    local options, selected = {}, nil
+    for i, h in ipairs(HEADING_OPTIONS) do
+        table.insert(options, { h[2], msg("view360-heading", h[1]) })
+        if h[1] == v.heading then selected = i end
+    end
+    y = u:segmented(x, w, y, "view360-heading", options, selected, not v.stamped)
+    if not v.stamped then
+        y = u:caption(x, w, y, "This clip has no motion data in its frames: the camera as it was stitched, level and still, "
+                               .. "and only your head turns")
+    end
+    return y
+end
+
 local PARTS = { project = project_part, clip = clip_part, crop = crop_part, look = look_part, dv = dv_part, stabilization = stabilization_part, quality = quality_part,
-                telemetry = telemetry_part, player = player_part, support = support_part }
+                telemetry = telemetry_part, player = player_part, support = support_part, view360 = view360_part }
 -- Each part's "these as the defaults"
 local REMEMBER = { look = "script-message-to dlogm remember", stabilization = "script-message-to gyroflow remember",
                    quality = "script-message-to gyroflow remember",
@@ -1414,6 +1497,7 @@ end)
 
 -- What it shows comes from the plugins' state and the player's
 for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
+                        "user-data/view360",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
                         "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
@@ -1434,6 +1518,20 @@ mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
         end
     end
     -- The camera's numbers as it turns
+    update()
+end)
+
+-- A 360° clip: its part shows, if the panel's open; another clip: back to the one there was
+local sphere_on, before_sphere = false, nil
+mp.observe_property("user-data/view360", "native", function(_, v)
+    local on = type(v) == "table" and v.available == true
+    if on == sphere_on then return end
+    sphere_on = on
+    if on then
+        if open and tab ~= "view360" then before_sphere, tab = tab, "view360" end
+    elseif before_sphere and tab == "view360" then
+        tab, before_sphere = before_sphere, nil
+    end
     update()
 end)
 

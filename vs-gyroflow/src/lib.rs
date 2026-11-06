@@ -35,6 +35,10 @@ pub mod workspace;
 pub mod mp4meta;
 pub mod cut;
 pub mod photo;
+pub mod stamp;
+pub mod rig;
+pub mod heading;
+pub mod sphere360;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -1128,6 +1132,22 @@ struct Filter {
 struct BlankFrame(*mut VSFrame);
 unsafe impl Send for BlankFrame {}
 
+/// Whether the pts in _MP_IMAGE is still to be found (`calibrate_pts`, from the first frame and the next)
+pub(crate) fn pts_unknown() -> bool { MP_PTS_OFFSET.load(Ordering::Relaxed) == PTS_UNKNOWN }
+
+/// Finds the pts in _MP_IMAGE from frame n and n + 1, once per process: it's the same mpv build for every filter
+pub(crate) unsafe fn calibrate_pts(api: &VSAPI, props: *const VSMap, next_props: *const VSMap, duration: f64) {
+    let found = match (unsafe { mp_image(api, props) }, unsafe { mp_image(api, next_props) }) {
+        (Some(a), Some(b)) => find_pts_offset(a, b, duration),
+        _ => None,
+    };
+    match found {
+        Some(off) => log::info!("Found the pts in mpv's _MP_IMAGE at offset {off}"),
+        None => log::warn!("No pts in the frame properties; timing by frame number, which is only right without seeking"),
+    }
+    let _ = MP_PTS_OFFSET.compare_exchange(PTS_UNKNOWN, found.map(|x| x as isize).unwrap_or(PTS_UNAVAILABLE), Ordering::Relaxed, Ordering::Relaxed);
+}
+
 /// A frame's duration in seconds, from its properties
 pub(crate) unsafe fn frame_duration(api: &VSAPI, props: *const VSMap, fallback: f64) -> f64 {
     let mut e1 = VSMapPropertyError::Success;
@@ -1167,15 +1187,7 @@ impl Filter {
 
     /// Finds the pts in _MP_IMAGE from frame n and n + 1
     unsafe fn calibrate(&self, api: &VSAPI, props: *const VSMap, next_props: *const VSMap) {
-        let found = match (unsafe { mp_image(api, props) }, unsafe { mp_image(api, next_props) }) {
-            (Some(a), Some(b)) => find_pts_offset(a, b, unsafe { self.frame_duration(api, props) }),
-            _ => None,
-        };
-        match found {
-            Some(off) => log::info!("Found the pts in mpv's _MP_IMAGE at offset {off}"),
-            None => log::warn!("No pts in the frame properties; timing by frame number, which is only right without seeking"),
-        }
-        let _ = MP_PTS_OFFSET.compare_exchange(PTS_UNKNOWN, found.map(|x| x as isize).unwrap_or(PTS_UNAVAILABLE), Ordering::Relaxed, Ordering::Relaxed);
+        unsafe { calibrate_pts(api, props, next_props, self.frame_duration(api, props)) }
     }
 
     /// Presentation time of frame `n`, in seconds
@@ -1285,7 +1297,7 @@ unsafe extern "system-unwind" fn filter_free(instance: *mut c_void, _core: *mut 
     }
 }
 
-unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<String> {
+pub(crate) unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<String> {
     let mut err = VSMapPropertyError::Success;
     let ptr = unsafe { (api.mapGetData)(map, key.as_ptr(), 0, &mut err) };
     if err != VSMapPropertyError::Success || ptr.is_null() { return None; }
@@ -1498,6 +1510,13 @@ pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugi
         (api.registerFunction)(c"Still".as_ptr(),
                                c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
                                c"clip:vnode;".as_ptr(), still::still_create, null_mut(), plugin);
+        // The 360 mode: a 360 camera's lens tracks joined side by side into the sphere and its stamp (sphere360.rs)
+        (api.registerFunction)(c"Sphere360".as_ptr(),
+                               c"clip:vnode;video:data;width:int:opt;distance:float:opt;interpolation:data:opt;workers:int:opt;start_time:float:opt;time_offset:float:opt;".as_ptr(),
+                               c"clip:vnode;".as_ptr(), sphere360::create, null_mut(), plugin);
+        // Test only: stamps known values for the 360 stamp's test (tools/stamp360/)
+        (api.registerFunction)(c"Stamp360Test".as_ptr(), c"clip:vnode;log:data:opt;time_base:int:opt;".as_ptr(),
+                               c"clip:vnode;".as_ptr(), stamp::test_create, null_mut(), plugin);
     }
 }
 
