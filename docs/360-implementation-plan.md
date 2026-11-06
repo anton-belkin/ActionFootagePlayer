@@ -184,8 +184,9 @@ What was checked:
 - **The horizon**: the plugin's stamps against the horizon measured in the sphere every second of the clip: 9.9°
   rms, 18° at worst (the measurement itself is good to ~5°), through braking and a curve with the camera rolling
   50°. On screen (the app's mpv, gpu-next, Anton's OK), paused at 8 s, in both modes and at yaw 0/90/180/−90 and a
-  300° FOV: level within a few degrees. That screen test was with the earlier IMU turn; the final one is checked
-  only without the screen (rendered views, `level-*.png` of the ignored test).
+  300° FOV: level within a few degrees. Again with the final IMU turns, paused at 8, 11, 12 and 13 s (the curve), the
+  head at 0/90/180/−90°: level at 8 s and sideways throughout; looking ahead along the road in the curve (11–13 s),
+  tilted ~10–15° with the bike leaning, as the measurement above says (it was 30–60° before).
 - **The head and the modes** on screen: the drag/IPC turns, both modes switch at once playing and paused, the stamp
   reads back (`stamped`), the little planet.
 - **The seam** at the default 2 m: not visible in the rendered spheres at the clip's scale; not judged closely on
@@ -193,7 +194,7 @@ What was checked:
 - **Throughput**: without the screen 24–25 fps through the plugin (`--vo=null --untimed`); the same chain with a
   copy in VapourSynth instead of the plugin, 26 fps: mpv's decoding, joining and conversion of two 3840² tracks is
   the limit on this clip, not the plugin. **On the screen it doesn't keep up**: ~20–22 fps through the plugin, mpv
-  dropping ~12 frames a second of 25. Not solved here; options: a 5760 sphere (half the plugin's GPU time, and less to
+  dropping 7–12 frames a second of 25 (69 in 10 s in the last run). Not solved here; options: a 5760 sphere (half the plugin's GPU time, and less to
   upload), the plugin's GPU time traded against the view shader's, step 6's GPU route.
 
 Open: the throughput on screen; the final IMU turns on screen; travel and north (step 5); X4, X3 (two files), DJI
