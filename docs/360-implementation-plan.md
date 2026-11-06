@@ -198,7 +198,13 @@ What was checked:
   tracks then ~65 fps, through the plugin 30 fps at 7680 and 53 at 5760 without the screen. **On the screen** (the
   app's mpv, gpu-next, the view on, 15 s of the clip from 1 s): 7680 dropped 143 frames, 6912 17, 6400 and 5760
   none; 5760 with the head turning all the while (IPC, 20 times a second), none. So 5760 by default
-  (`sphere_width` raises it), the queue on in 360 mode.
+  (`sphere_width` raises it), the queue on in 360 mode. Anton's own runs of a test copy at 5760 (2026-11-06): the
+  first with the machine busy (load ~12 on 10 cores) dropped 238 frames over the clip; the plugin gave 3.4 fps for
+  the first 100 frames (start-up), then 26. The second (with step 6's patches) dropped 33 frames in the first 2 s
+  and ~20/s from 7 to 16 s while Time Machine and a VM ran, then none; in his words smooth after a stumble at the
+  start, the head and the video both moving smoothly. The drops came from background load and the start, not the
+  view shader, so its filter stays as it is for full screen. Open: the start (the motion load and the first
+  frames) could wait paused until the sphere is ready.
 
 Open: travel and north (step 5); X4, X3 (two files), DJI
 Osmo 360 (ThetaPoly, quaternions only, `imu_from_rig`), GoPro MAX 2 (EAC); the mirror flag (no clip has it); 8K60.
