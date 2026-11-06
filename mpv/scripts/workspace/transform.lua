@@ -28,29 +28,34 @@
 --   t.status(saved, now, project) -> "saved", "changed" or "none" (nothing saved), comparing the bundle's keys (a
 --                                    project's own left out)
 --   t.migrate_source(doc)         -> moves an old .afp.json's input out of `view` into `source`; true when it changed
+--   t.concrete(aspect, orientation, w, h) -> the frame's W:H for a source w x h (upright), or "original": the ratio
+--                                    (landscape-wise) turned for the orientation; as-is: as the source is
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "projection" }
+M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle; a wider view or none over it is for viewing only, so the view too
-M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, projection = true }
-M.NEUTRAL = { aspect = "original", projection = "linear" }
+M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true }
+M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear" }
 
 local VALID = {
     view = { normal = true, wide = true, off = true },
     level = { weak = true, medium = true, strong = true },
     horizon_lock = { yes = true, no = true },
     chromatic = { [true] = true, [false] = true },
-    aspect = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true,
-               ["4:5"] = true, ["3:4"] = true, ["9:16"] = true },
+    aspect = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true },
+    orientation = { ["as-is"] = true, landscape = true, portrait = true },
     projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true },
 }
 
 local function valid(k, v)
     if v == nil then return false end
-    -- The frame's own ratio turned to portrait is any W:H
-    if k == "aspect" and type(v) == "string" and v:match("^%d+:%d+$") then return true end
+    -- Any other ratio, landscape-wise (W >= H)
+    if k == "aspect" and type(v) == "string" then
+        local w, h = v:match("^(%d+):(%d+)$")
+        if w then return tonumber(w) >= tonumber(h) and tonumber(h) > 0 end
+    end
     return VALID[k][v] == true
 end
 M.valid = valid
@@ -73,9 +78,28 @@ function M.input_of(view)
     return any and out or nil
 end
 
+-- The frame's aspect, before the orientation was a key of its own, was the ratio as it'd show: 9:16 a portrait
+-- frame. Now it's the ratio landscape-wise (16:9) with an orientation: as it was (landscape, portrait), "original" as is
+local function split_frame(b)
+    if type(b) ~= "table" or b.aspect == nil or (b.orientation ~= nil and VALID.orientation[b.orientation]) then return b, false end
+    local out = {}
+    for k, v in pairs(b) do out[k] = v end
+    local w, h = tostring(b.aspect):match("^(%d+):(%d+)$")
+    if w and tonumber(w) < tonumber(h) then
+        out.aspect, out.orientation = h .. ":" .. w, "portrait"
+    elseif w then
+        out.orientation = "landscape"
+    else
+        out.orientation = "as-is"
+    end
+    return out, true
+end
+
 function M.complete(bundle, session)
     session = session or {}
-    local out, added = {}, false
+    local split
+    bundle, split = split_frame(bundle)
+    local out, added = {}, split
     for _, k in ipairs(M.KEYS) do
         local v = nil
         if type(bundle) == "table" then v = bundle[k] end
@@ -101,6 +125,22 @@ function M.status(saved, now, project)
         end
     end
     return "saved"
+end
+
+function M.concrete(aspect, orientation, w, h)
+    local landscape = not (w and h) or w >= h
+    if aspect == nil or aspect == "original" then
+        if orientation == "as-is" or orientation == nil or not (w and h) then return "original" end
+        if (orientation == "portrait") == (w < h) or w == h then return "original" end
+        local function gcd(a, b) while b ~= 0 do a, b = b, a % b end return a end
+        local g = gcd(math.floor(w), math.floor(h))
+        return string.format("%d:%d", math.floor(h) / g, math.floor(w) / g)
+    end
+    local a, b = tostring(aspect):match("^(%d+):(%d+)$")
+    if not a then return "original" end
+    local portrait = orientation == "portrait" or (orientation ~= "landscape" and not landscape)
+    if portrait and a ~= b then return b .. ":" .. a end
+    return a .. ":" .. b
 end
 
 -- Before input and transform were apart, `view` held the log curve, the frame's turn and the lens under water too.

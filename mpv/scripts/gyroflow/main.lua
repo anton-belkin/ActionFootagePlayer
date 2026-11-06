@@ -149,7 +149,7 @@ local function clip_path()
     return path
 end
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", projection = "linear", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -291,15 +291,43 @@ end
 -- rotation (vs-gyroflow), its zoom fitting the picture into it; elsewhere mpv's video-rotate and video-crop. A clip
 -- with a project has the project's own unless changed here, for viewing
 local ASPECTS = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true, ["4:5"] = true, ["3:4"] = true, ["9:16"] = true }
--- Those, or any W:H (the source's own ratio turned to portrait: 4:3 -> 3:4, 16:9 -> 9:16, 1920:1440 reduced)
+-- Those, or any W:H
 local function aspect_ok(a)
     return a ~= nil and (ASPECTS[a] == true or tostring(a):match("^%d+:%d+$") ~= nil)
 end
+-- The frame's ratio is kept landscape-wise (16:9) with an orientation: as-is (as the source is), landscape, portrait. An
+-- aspect from before (9:16: the ratio as it showed) is that ratio turned, portrait; another W:H landscape; original as is
+local ORIENTATIONS = { ["as-is"] = true, landscape = true, portrait = true }
+local function split_aspect(aspect, orientation)
+    if not aspect_ok(aspect) then aspect = "original" end
+    local w, h = tostring(aspect):match("^(%d+):(%d+)$")
+    if w and tonumber(w) < tonumber(h) then return h .. ":" .. w, "portrait" end
+    if ORIENTATIONS[orientation] then return aspect, orientation end
+    return aspect, w and "landscape" or "as-is"
+end
+-- The W:H the frame shows for a source w x h (upright), or original (workspace's transform.lua concrete, the same)
+local function concrete(aspect, orientation, w, h)
+    local landscape = not (w and h) or w >= h
+    if aspect == nil or aspect == "original" then
+        if orientation == "as-is" or orientation == nil or not (w and h) then return "original" end
+        if (orientation == "portrait") == (w < h) or w == h then return "original" end
+        local function gcd(a, b) while b ~= 0 do a, b = b, a % b end return a end
+        local g = gcd(math.floor(w), math.floor(h))
+        return string.format("%d:%d", math.floor(h) / g, math.floor(w) / g)
+    end
+    local a, b = tostring(aspect):match("^(%d+):(%d+)$")
+    if not a then return "original" end
+    local portrait = orientation == "portrait" or (orientation ~= "landscape" and not landscape)
+    if portrait and a ~= b then return b .. ":" .. a end
+    return a .. ":" .. b
+end
+-- The frame's W:H as it shows now (further down, once the source's size is known)
+local shown_aspect
 -- And the output's lens where it's stabilized, Gyroflow's output projection: linear (rectilinear, straight lines
 -- straight), or a fisheye, its edges more and more compressed: stereographic, equidistant, equisolid, orthographic. For
 -- Wide footage above water, too wide for linear: its center squeezed, its edges thin
 local PROJECTIONS = { linear = 0, stereographic = 1, equidistant = 2, equisolid = 3, orthographic = 4 }
-local frame = { aspect = "original", rotation = 0, projection = "linear" }
+local frame = { aspect = "original", orientation = "as-is", rotation = 0, projection = "linear" }
 
 -- The size of a w x h frame turned and cut to the aspect: its largest centered part of that aspect, each side
 -- rounded down to even (vs-gyroflow's Frame::size, which renders it)
@@ -325,8 +353,9 @@ local function render_sizes(source, full)
     -- The file's own turn (its display matrix: a camera held upright) comes first, then the frame's: the plugin renders
     -- it upright (vs-gyroflow's Frame), and mpv doesn't turn it again. A project has its own, unless the frame changes it
     local turn = (source.rotation or 0) % 360
-    if frame.rotation ~= 0 or frame.aspect ~= "original" or (turn ~= 0 and source.kind ~= "project") then
-        ow, oh = frame_size(w, h, { rotation = (turn + frame.rotation) % 360, aspect = frame.aspect })
+    local fa = shown_aspect()
+    if frame.rotation ~= 0 or fa ~= "original" or (turn ~= 0 and source.kind ~= "project") then
+        ow, oh = frame_size(w, h, { rotation = (turn + frame.rotation) % 360, aspect = fa })
     end
     local scale = 1
     local dw, dh = display_size()
@@ -410,7 +439,8 @@ local function defaults_bundle()
         level = LEVEL_LABELS[o.level] and o.level or "medium",
         horizon_lock = horizon_default,
         chromatic = o.chromatic == true,
-        aspect = aspect_ok(o.aspect) and o.aspect or "original",
+        aspect = (split_aspect(o.aspect, o.orientation)),
+        orientation = select(2, split_aspect(o.aspect, o.orientation)),
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
         preset_horizon = preset_horizon(),
     }
@@ -479,7 +509,7 @@ local function take(b)
     if h ~= "yes" and h ~= "no" then h = session.horizon_lock end
     horizon = h == "yes"
     if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
-    frame.aspect = aspect_ok(b.aspect) and b.aspect or "original"
+    frame.aspect, frame.orientation = split_aspect(b.aspect, b.orientation)
     frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
     return b.view == "off"
 end
@@ -578,7 +608,7 @@ local function gyroflow_filter(source, enabled)
                                                 time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
                                                 alone = project_alone,
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
-                                                aspect = frame.aspect ~= "original" and frame.aspect or nil,
+                                                aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
                                                 projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -632,6 +662,11 @@ local function source_aspect()
     return string.format("%d:%d", math.floor(w) / g, math.floor(h) / g)
 end
 
+shown_aspect = function()
+    local w, h = tostring(source_aspect() or ""):match("^(%d+):(%d+)$")
+    return concrete(frame.aspect, frame.orientation, tonumber(w), tonumber(h))
+end
+
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local state = {
@@ -643,7 +678,8 @@ local function publish()
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
-        ask_when_slow = o.ask_when_slow, aspect = frame.aspect, rotation = frame.rotation, projection = frame.projection,
+        ask_when_slow = o.ask_when_slow, aspect = frame.aspect, orientation = frame.orientation, frame_aspect = shown_aspect(),
+        rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
@@ -704,7 +740,7 @@ local function add_filter(source)
     clip_settings(source)
     if has_project(source) then
         view, off, horizon = "normal", false, nil
-        frame.aspect, frame.projection, frame.rotation = "original", "linear", 0
+        frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
         local st, out = type(j.stabilization) == "table" and j.stabilization or {}, type(j.output) == "table" and j.output or {}
@@ -754,7 +790,7 @@ local function find_water(path, source)
         local turn = tonumber(info.rotation) or 0
         if turn ~= (source.rotation or 0) then
             source.rotation = turn
-            if (frame.rotation ~= 0 or frame.aspect ~= "original") and not stab_off then place_filters(true) end
+            if (frame.rotation ~= 0 or shown_aspect() ~= "original") and not stab_off then place_filters(true) end
         end
         if info.water then
             source.water = true
@@ -768,7 +804,7 @@ local function setup(done)
     current_source, stab_off = nil, false
     -- What's saved for it, else the session's; the source's input (a clip without motion data shows the frame and turn
     -- too, by mpv's own crop and rotation)
-    frame = { aspect = "original", rotation = 0, projection = "linear" }
+    frame = { aspect = "original", orientation = "as-is", rotation = 0, projection = "linear" }
     stab_off = take(fixed())
     clip_settings(nil)
     if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
@@ -989,9 +1025,10 @@ mpv_frame = function()
         -- mpv's turn is added to the file's own (its display matrix), and the crop is in the decoded frame's coordinates
         rotation = tostring(frame.rotation)
         local d = mp.get_property_native("video-dec-params")
-        if frame.aspect ~= "original" and type(d) == "table" and d.w and d.h then
+        local fa = shown_aspect()
+        if fa ~= "original" and type(d) == "table" and d.w and d.h then
             local total = ((tonumber(d.rotate) or 0) + frame.rotation) % 360
-            local fw, fh = frame_size(d.w, d.h, { rotation = total, aspect = frame.aspect })
+            local fw, fh = frame_size(d.w, d.h, { rotation = total, aspect = fa })
             if total == 90 or total == 270 then fw, fh = fh, fw end
             fw, fh = math.min(fw, d.w), math.min(fh, d.h)
             -- The whole frame (9:16 turned a quarter): nothing to crop
@@ -1010,11 +1047,15 @@ local ROTATION_LABELS = { [0] = "not turned", [90] = "turned 90° right", [180] 
 -- The frame turned and cut to an aspect, for this clip: set up again where it's stabilized (its output size changes)
 local PROJECTION_LABELS = { linear = "linear lens", stereographic = "stereographic fisheye", equidistant = "equidistant fisheye",
                             equisolid = "equisolid fisheye", orthographic = "orthographic fisheye" }
-local function set_frame(aspect, rotation, projection)
+local ORIENTATION_LABELS = { ["as-is"] = "as the source is", landscape = "landscape", portrait = "portrait" }
+local function set_frame(aspect, rotation, projection, orientation)
     projection = projection or frame.projection
-    if aspect == frame.aspect and rotation == frame.rotation and projection == frame.projection then return end
-    frame = { aspect = aspect, rotation = rotation, projection = projection }
-    local message = "Frame: " .. (aspect == "original" and "its own aspect" or aspect) .. ", " .. ROTATION_LABELS[rotation]
+    orientation = orientation or frame.orientation
+    if aspect == frame.aspect and rotation == frame.rotation and projection == frame.projection and orientation == frame.orientation then return end
+    frame = { aspect = aspect, rotation = rotation, projection = projection, orientation = orientation }
+    local shown = shown_aspect()
+    local message = "Frame: " .. (aspect == "original" and "its own ratio" or aspect) .. ", " .. ORIENTATION_LABELS[orientation]
+        .. (shown ~= "original" and shown ~= aspect and (" (" .. shown .. ")") or "") .. ", " .. ROTATION_LABELS[rotation]
         .. ", " .. PROJECTION_LABELS[projection]
     if current_source and not stab_off then
         with_pause(message, function() place_filters(true) end)
@@ -1039,10 +1080,21 @@ mp.register_script_message("projection", function(p)
     publish()
 end)
 
+-- The ratio, landscape-wise (original, 16:9, 4:3, 5:4, 1:1); a portrait one (9:16) is that ratio turned, portrait
 mp.register_script_message("aspect", function(a)
     if not aspect_ok(a) or project_owns("the frame") then return end
-    set_frame(a, frame.rotation)
-    sticks("aspect", a)
+    local ratio, orientation = split_aspect(a, frame.orientation)
+    set_frame(ratio, frame.rotation, nil, orientation)
+    sticks("aspect", ratio)
+    sticks("orientation", orientation)
+    publish()
+end)
+
+-- as-is (as the source is), landscape, portrait
+mp.register_script_message("orientation", function(v)
+    if not ORIENTATIONS[v] or project_owns("the frame") then return end
+    set_frame(frame.aspect, frame.rotation, nil, v)
+    sticks("orientation", v)
     publish()
 end)
 
@@ -1238,6 +1290,7 @@ local function as_plays()
         horizon_lock = (project or horizon == nil) and session.horizon_lock or (horizon and "yes" or "no"),
         chromatic = chromatic == true,
         aspect = project and session.aspect or frame.aspect,
+        orientation = project and session.orientation or frame.orientation,
         projection = project and session.projection or frame.projection,
     }
 end
@@ -1246,12 +1299,12 @@ mp.register_script_message("remember", function()
     local b = as_plays()
     local saved = platform.save_options("gyroflow", {
         { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
-        { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "projection", b.projection },
+        { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "orientation", b.orientation }, { "projection", b.projection },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
         { "still", still.enabled() and "yes" or "no" },
     })
     if saved then
-        o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.projection = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.projection
+        o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection
         DEFAULTS = defaults_bundle()
         for k, v in pairs(b) do session[k] = v end
         publish()
@@ -1277,7 +1330,7 @@ mp.register_script_message("apply-view", function(json)
     frame.rotation = turn
     if has_project(current_source) then
         view, off, horizon = "normal", false, nil
-        frame.aspect, frame.projection = "original", "linear"
+        frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
     end
     stab_off = off
     write_edge_control()
@@ -1441,7 +1494,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     end
     -- The frame as it plays: the project has it from then on (its output size, rotation and projection)
     if frame.rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(frame.rotation)) end
-    if frame.aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, frame.aspect) end
+    if shown_aspect() ~= "original" then table.insert(args, "--aspect"); table.insert(args, shown_aspect()) end
     if frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
     -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
     local ws = workspace_of(path)

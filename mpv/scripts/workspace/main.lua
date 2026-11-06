@@ -1827,13 +1827,18 @@ end
 -- What's made of a source by the batches (moments and photos of all marks): its bundle, else the app's defaults (not
 -- the session's: a moment is kept as made, and the session may be a try of the moment), whole; and its input, which
 -- the preview or photo is rendered with too. The bundle alone goes into a moment's link
-local function made_view_of(file)
+local function made_view_of(file, movie)
     local doc = sidecar.read(file)
     local defaults = mp.get_property_native("user-data/gyroflow/defaults")
     local bundle = transform.complete(transform.pick(doc and doc.view) or defaults, defaults)
     local rendered = copy(bundle)
     if doc then transform.migrate_source(doc) end
     for k, v in pairs(doc and doc.source or {}) do rendered[k] = v end
+    -- The frame's W:H for this source: its ratio turned for its orientation and the source's shape, upright (the
+    -- file's turn and the input's)
+    local w, h = movie and movie.width, movie and movie.height
+    if w and h and (((movie.turn or 0) + (tonumber(rendered.rotation) or 0)) % 180) == 90 then w, h = h, w end
+    rendered.frame_aspect = transform.concrete(bundle.aspect, bundle.orientation, w, h)
     return bundle, rendered
 end
 
@@ -1928,7 +1933,7 @@ local function marks_queue(kind, root)
             local info = utils.file_info(c.file)
             local size = info and info.size
             local movie = markers and markers.movie and markers.movie(c.file) or nil
-            local view, rendered = made_view_of(c.file)
+            local view, rendered = made_view_of(c.file, movie)
             if kind == "photos" then
                 for _, t in ipairs(times) do
                     if not made[stills_line(c.relative, size, t)] then

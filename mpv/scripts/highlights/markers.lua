@@ -150,8 +150,24 @@ local function hglg(f, a, b, times)
     return true
 end
 
+-- A video track's header (trak/tkhd): its width and height as shown (16.16), and its turn (the display matrix,
+-- clockwise: 0, 90, 180, 270)
+local function tkhd(f, a, b)
+    local h = read_at(f, a, math.min(b - a, 96))
+    if #h < 84 then return nil end
+    local off = h:byte(1) == 1 and 12 or 0
+    if #h < 84 + off then return nil end
+    local w, ht = u32(h, 77 + off), u32(h, 81 + off)
+    local ma, mb = i32(h, 41 + off), i32(h, 45 + off)
+    if not (w and ht) or w == 0 or ht == 0 then return nil end
+    local turn = 0
+    if ma == 0 and mb and mb > 0 then turn = 90 elseif ma and ma < 0 then turn = 180 elseif ma == 0 and mb and mb < 0 then turn = 270 end
+    return math.floor(w / 65536), math.floor(ht / 65536), turn
+end
+
 -- The movie's own header (moov/mvhd): its length in seconds and when it was made (seconds since 1970, UTC; nil when
--- the camera left it 0), or nil. As FFmpeg reads them (mpv's duration and creation_time)
+-- the camera left it 0), or nil. As FFmpeg reads them (mpv's duration and creation_time). And its video's width,
+-- height and turn (the first track that has a size: tkhd)
 function M.movie(path)
     local f = io.open(path, "rb")
     if not f then return nil end
@@ -172,10 +188,22 @@ function M.movie(path)
                     if scale and scale > 0 and duration then
                         -- 1904-01-01 to 1970-01-01
                         local unix = created and created > 2082844800 and created - 2082844800 or nil
-                        out = { duration = duration / scale, created = unix }
+                        out = out or {}
+                        out.duration, out.created = duration / scale, unix
+                    end
+                elseif mt == "trak" and not (out and out.width) then
+                    for tt, ta, tb in boxes(f, ma, mb) do
+                        if tt == "tkhd" then
+                            local w, h, turn = tkhd(f, ta, tb)
+                            if w then
+                                out = out or {}
+                                out.width, out.height, out.turn = w, h, turn
+                            end
+                        end
                     end
                 end
             end
+            if out and not out.duration then out = nil end
             break
         end
     end

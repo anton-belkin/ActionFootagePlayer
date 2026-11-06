@@ -241,7 +241,10 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
   the moment one changes, from the source or any moment or clip preview of it (`input-set`, the workspace plugin's).
   Moments and clip previews never keep it. The lens's type and the gyro's sync are input too, set in Gyroflow for now.
 - **Transform**, how it's shown: `view` (`normal`, `wide`, `off`), `level`, `horizon_lock` (`yes`: level, `no`:
-  free), `chromatic`, `aspect` (`original` or W:H), `projection`. Kept only as a whole bundle, never a key alone: the
+  free), `chromatic`, `aspect` (`original`, or a ratio landscape-wise: `16:9`, `4:3`, `5:4`, `1:1`), `orientation`
+  (`as-is`: as the source is, `landscape`, `portrait`; the W:H shown is worked out for each source's shape, so one
+  bundle fits a vertical clip and a level one alike), `projection`. An `aspect` from before the orientation (9:16:
+  the ratio as it showed) is that ratio turned, portrait. Kept only as a whole bundle, never a key alone: the
   source's (`.afp.json`'s `view`), or a moment's or clip preview's own (its link's `stab`, with settings of its own:
   `snap` for a moment, `own` for a clip preview, the panel's one switch). Levels, the topmost one there is plays and
   they never mix: 5 what's chosen while it plays (until it ends), 4 the moment's or clip preview's own, 3 the

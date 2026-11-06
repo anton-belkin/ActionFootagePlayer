@@ -286,7 +286,8 @@ local function as_it_plays(args, sdr, photo, live)
     end
     if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
     -- The output's frame: turned, and of another aspect (the Clip tab's), stabilized or not
-    local rotation, aspect = gyroflow("rotation"), gyroflow("aspect")
+    -- The frame's W:H as it shows (its ratio turned for its orientation and the source's shape)
+    local rotation, aspect = gyroflow("rotation"), gyroflow("frame_aspect")
     if rotation and rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(rotation)) end
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
@@ -310,7 +311,10 @@ local function view_args(args, v)
     if v.horizon_lock == "yes" or v.horizon_lock == "no" then add("--horizon-lock", v.horizon_lock == "yes" and "100" or "0") end
     if v.underwater then add("--underwater", v.underwater) end
     if v.rotation and v.rotation ~= 0 then add("--rotation", v.rotation) end
-    if v.aspect and v.aspect ~= "original" then add("--aspect", v.aspect) end
+    -- The frame's W:H for that source (the workspace plugin's frame_aspect: its ratio turned for its orientation);
+    -- an aspect from before, as it showed
+    local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
+    if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and v.view ~= "off" then add("--projection", v.projection) end
 end
 

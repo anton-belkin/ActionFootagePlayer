@@ -806,65 +806,41 @@ local LEVEL_NOTES = { weak = "10 % cropped, smoothness 50 %", medium = "20 % cro
 local VIEWS = { { "normal", "On" }, { "wide", "Wider" }, { "off", "Off" } }
 local LEVELS = { { "weak", "Weak" }, { "medium", "Medium" }, { "strong", "Strong" } }
 local HORIZONS = { { "yes", "Level" }, { "no", "Free" } }
--- The frame's ratios, landscape (portrait: turned), drawn as their shape
-local RATIOS = { { "own", "Own", 1, 0.75 }, { "16:9", "16:9", 1, 0.5625 }, { "4:3", "4:3", 1, 0.75 }, { "5:4", "5:4", 1, 0.8 }, { "1:1", "1:1", 0.75, 0.75 } }
-local PORTRAIT = { ["16:9"] = "9:16", ["4:3"] = "3:4", ["5:4"] = "4:5" }
-local LANDSCAPE = { ["9:16"] = "16:9", ["3:4"] = "4:3", ["4:5"] = "5:4" }
+-- The frame's ratios, landscape-wise, drawn as their shape; and its orientation: as the source is, landscape, portrait
+local RATIOS = { { "original", "Own", 1, 0.75 }, { "16:9", "16:9", 1, 0.5625 }, { "4:3", "4:3", 1, 0.75 }, { "5:4", "5:4", 1, 0.8 }, { "1:1", "1:1", 0.75, 0.75 } }
+local ORIENTS = { { "as-is", "As is" }, { "landscape", "Landscape" }, { "portrait", "Portrait" } }
 local WHERE = { session = "this session (nothing saved for it)", source = "the source", moment = "the moment", preview = "the clip preview" }
 local TO = { source = "Save to the source", moment = "Save to the moment", preview = "Save to the clip preview" }
 
--- An aspect as ratio and orientation: the RATIOS' key and true for portrait. own: the source's own (W:H, upright)
-local function ratio_of(aspect, own)
-    if aspect == nil or aspect == "original" then return "own", false end
-    if PORTRAIT[aspect] then return aspect, false end
-    if LANDSCAPE[aspect] then return LANDSCAPE[aspect], true end
-    if aspect == "1:1" then return "1:1", false end
-    local w, h = tostring(aspect):match("^(%d+):(%d+)$")
-    local ow, oh = tostring(own or ""):match("^(%d+):(%d+)$")
-    if w and ow and tonumber(w) * tonumber(ow) == tonumber(h) * tonumber(oh) then return "own", false end
-    if w and ow and tonumber(w) * tonumber(oh) == tonumber(h) * tonumber(ow) then return "own", true end
-    return nil, tonumber(w or 1) < tonumber(h or 1)
-end
-
--- The aspect for a ratio and orientation
-local function aspect_for(ratio, portrait, own)
-    if ratio == "own" then
-        if not portrait then return "original" end
-        local w, h = tostring(own or ""):match("^(%d+):(%d+)$")
-        if not w then return nil end
-        if tonumber(w) < tonumber(h) then return "original" end
-        return h .. ":" .. w
-    end
-    if ratio == "1:1" then return "1:1" end
-    return portrait and PORTRAIT[ratio] or ratio
-end
-
 local function frame_controls(u, x, w, y, g, saved, disabled)
-    local s = u.s
-    local own = g.source_aspect or nil
-    local ratio, portrait = ratio_of(g.aspect, own)
-    local sratio, sportrait = nil, nil
-    if saved then sratio, sportrait = ratio_of(saved.aspect, own) end
+    -- Drawn as it shows: turned when the frame is portrait (as is: when the source is)
+    local sw, sh = tostring(g.source_aspect or ""):match("^(%d+):(%d+)$")
+    local source_portrait = sw ~= nil and tonumber(sw) < tonumber(sh)
+    local orient = g.orientation or "as-is"
+    local portrait = orient == "portrait" or (orient == "as-is" and source_portrait)
     local list = {}
     for _, r in ipairs(RATIOS) do
-        local rw, rh = r[3], r[4]
-        local label = r[2]
-        if portrait and r[1] ~= "1:1" then
+        local rw, rh, label = r[3], r[4], r[2]
+        if r[1] == "original" and source_portrait then rw, rh = rh, rw end
+        if r[1] == "original" then
+            -- Own turned: the source's ratio the other way
+            if (orient == "portrait" and not source_portrait) or (orient == "landscape" and source_portrait) then rw, rh = rh, rw end
+        elseif portrait and r[1] ~= "1:1" then
             rw, rh = rh, rw
-            if r[1] == "own" then label = "Own" else label = PORTRAIT[r[1]] end
+            local a, b = r[1]:match("^(%d+):(%d+)$")
+            label = b .. ":" .. a
         end
-        local a = aspect_for(r[1], portrait, own)
-        table.insert(list, { label, a and ("script-message-to gyroflow aspect " .. a) or "ignore", rw, rh })
+        table.insert(list, { label, "script-message-to gyroflow aspect " .. r[1], rw, rh })
     end
-    local sel = index_of(RATIOS, ratio)
-    local sav = (saved and sportrait == portrait) and index_of(RATIOS, sratio) or nil
-    y = u:ratios(x, w, y, "ratio", list, sel, disabled, sav)
-    local function oriented(p)
-        local a = aspect_for(ratio or "own", p, own)
-        return a and ("script-message-to gyroflow aspect " .. a) or "ignore"
+    local sav = saved and index_of(RATIOS, saved.aspect) or nil
+    y = u:ratios(x, w, y, "ratio", list, index_of(RATIOS, g.aspect or "original"), disabled, sav)
+    list = {}
+    for _, o in ipairs(ORIENTS) do table.insert(list, { o[2], "script-message-to gyroflow orientation " .. o[1] }) end
+    y = u:segmented(x, w, y, "orient", list, index_of(ORIENTS, orient), disabled or g.aspect == "1:1",
+                    saved and index_of(ORIENTS, saved.orientation) or nil)
+    if orient == "as-is" then
+        y = u:caption(x, w, y - 2 * u.s, source_portrait and "As is: portrait, as the source is" or "As is: as the source is")
     end
-    y = u:segmented(x, w, y, "orient", { { "Landscape", oriented(false) }, { "Portrait", oriented(true), ratio == "1:1" } },
-                    portrait and 2 or 1, disabled or ratio == "1:1", saved and sratio ~= "1:1" and (sportrait and 2 or 1) or nil)
     return y
 end
 

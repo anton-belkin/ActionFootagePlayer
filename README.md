@@ -252,7 +252,7 @@ switches and buttons, scrolled with the wheel:
 - **Transform**: how it's shown ([its transform](#source-and-transform)): where that's defined, **Save**, **Revert
   to saved**, **Use as default**, **Auto save**, a moment's or clip preview's **Settings of its own**; the
   stabilization (on, wider, off), the level, the horizon (level or free), the **Frame** (its ratio, drawn, and
-  landscape or portrait), the projection (linear or a fisheye) and the water's color aberration. The dot in a
+  as is, landscape or portrait), the projection (linear or a fisheye) and the water's color aberration. The dot in a
   corner marks what's saved, beside what's chosen. With a Gyroflow project, what the project has is shown as its
   values, with **Edit in Gyroflow…**.
 - **Output**: **Display**, the video output on this screen (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping;
@@ -334,7 +334,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `underwater=auto` | the lens of sources without a correction of their own: `yes` under water with a flat port, `no` above water (or a dome port), `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says). A clip with a `.gyroflow` plays with the project's. See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
 | `gyroflow.conf`: `chromatic_skip=no` | `yes`: the color aberration correction skipped on this screen, for smooth playback (Performance & Quality); the clips' transforms keep it, exports and photos have it |
-| `gyroflow.conf`: `aspect=original`, `projection=linear` | the default frame: `original` or W:H (`16:9`, `9:16`, `4:5`…), and the projection (`linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`); **Use as default** writes them |
+| `gyroflow.conf`: `aspect=original`, `orientation=as-is`, `projection=linear` | the default frame: `original` or a ratio landscape-wise (`16:9`, `4:3`, `5:4`, `1:1`), its orientation (`as-is`, `landscape`, `portrait`), and the projection (`linear`, `stereographic`, `equidistant`, `equisolid`, `orthographic`); **Use as default** writes them |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
@@ -718,7 +718,8 @@ projection. It's kept only whole, every setting at once, never one alone:
   input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). Only a
   wider view (how much the project's crop cuts off) or none, for viewing, never saved. What was saved beside the
   clip before stays in its file, not played, and comes back if the project goes.
-- **Frame**: the ratio (the video's own, 16:9, 4:3, 5:4, 1:1), landscape or portrait, and the projection: linear
+- **Frame**: the ratio (the video's own, 16:9, 4:3, 5:4, 1:1) and its orientation (**As is**: as the source is, a
+  vertical clip's 16:9 is 9:16; **Landscape**; **Portrait**), and the projection: linear
   (straight lines straight), or a fisheye, its edges more and more compressed (Gyroflow's stereographic,
   equidistant, equisolid and orthographic), for Wide footage above water. The player shows it as it'll be, and
   exports, moments, clip previews and photos are made in it. Where the clip isn't stabilized, mpv crops it; the

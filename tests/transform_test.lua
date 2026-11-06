@@ -27,10 +27,11 @@ expect("empty: aspect neutral", b.aspect, "original")
 expect("empty: projection neutral", b.projection, "linear")
 
 -- A whole bundle stays as it is
-local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "9:16", projection = "linear" }
+local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "16:9", orientation = "portrait", projection = "linear" }
 b, added = t.complete(whole, session)
 expect("whole: nothing added", added, false)
-expect("whole: aspect", b.aspect, "9:16")
+expect("whole: aspect", b.aspect, "16:9")
+expect("whole: orientation", b.orientation, "portrait")
 expect("whole: chromatic kept false-able", t.complete({ chromatic = false }, { chromatic = true }).chromatic, false)
 
 -- From before the frame: its aspect and projection neutral, not the session's
@@ -48,6 +49,30 @@ expect("project horizon, no preset known: session's", b.horizon_lock, "no")
 -- A value it doesn't know is replaced
 b = t.complete({ level = "huge" }, session)
 expect("unknown level: session's", b.level, "strong")
+
+-- The orientation: from before it, an aspect as it showed; now the ratio landscape-wise and an orientation
+b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "9:16", projection = "linear" }, session)
+expect("old portrait: ratio landscape-wise", b.aspect, "16:9")
+expect("old portrait: portrait", b.orientation, "portrait")
+expect("old portrait: added", added, true)
+b = t.complete({ aspect = "16:9" }, session)
+expect("old landscape: stays landscape", b.orientation, "landscape")
+b = t.complete({ aspect = "original" }, session)
+expect("old original: as is", b.orientation, "as-is")
+b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "4:3", orientation = "as-is", projection = "linear" }, session)
+expect("new: nothing added", added, false)
+expect("new: as is kept", b.orientation, "as-is")
+expect("a portrait ratio as an aspect isn't one", t.valid("aspect", "3:4"), false)
+-- concrete
+expect("as is, landscape source", t.concrete("16:9", "as-is", 3840, 2160), "16:9")
+expect("as is, portrait source", t.concrete("16:9", "as-is", 2160, 3840), "9:16")
+expect("portrait of a landscape source", t.concrete("4:3", "portrait", 3840, 2160), "3:4")
+expect("landscape of a portrait source", t.concrete("5:4", "landscape", 2160, 3840), "5:4")
+expect("square", t.concrete("1:1", "portrait", 3840, 2160), "1:1")
+expect("own, as is", t.concrete("original", "as-is", 4000, 3000), "original")
+expect("own, portrait of 4:3", t.concrete("original", "portrait", 4000, 3000), "3:4")
+expect("own, landscape of a landscape", t.concrete("original", "landscape", 4000, 3000), "original")
+expect("own, landscape of a portrait 9:16", t.concrete("original", "landscape", 1080, 1920), "16:9")
 
 -- pick, input_of
 expect("pick: none", t.pick({ curve = "dlogm" }), nil)
