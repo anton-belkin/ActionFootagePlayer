@@ -174,6 +174,56 @@ reads the geometry costs 0.3 ms over sampling the source alone, and reading the 
 - On the Mac the choice of layout hardly matters (all under 4 ms of 16.7); the M1 Pro's numbers for grid 8 bilinear
   are still to take.
 
+## Step 2, part 2: bicubic that fits, and the lens models
+
+Built 2026-11-07.
+
+**Gyroflow's bicubic from 9 fetches** (`--interp bicubic9`): per axis the two middle taps (both weights positive) are
+one bilinear fetch between them, the outer two stay: 3 × 3 fetches for the same Keys a = −0.75 kernel. Frame 1049 in
+mpv: 63.1 dB against the 16-tap pass (the hardware's bilinear weights are 8-bit fractions). With `--chroma-bilinear`
+the plane layout samples chroma bilinearly under bicubic luma (51.6 dB against the exact RGB pass).
+
+On the N100 (grid every 8 px, bilinear over the grid; µs average):
+
+| Layout | Warp | Frame total | Shown fps (drops / 20 s) |
+|---|---|---|---|
+| grid, bilinear | 2385 | 7250 | 60.0 (0) |
+| grid, B-spline | 3571 | 8440 | 59.9 (0) |
+| grid, bicubic 16 taps | 8397 | 13380 | 58.7 (24) |
+| **grid, bicubic 9 fetches** | **4570** | **9470** | 59.9 (0) |
+| planes, bilinear | 2259 + 2223 | 6260 | 59.9 (0) |
+| planes, B-spline | 3393 + 2844 | 7880 | 59.9 (0) |
+| planes, bicubic 9 fetches | 4259 + 4020 | 9800 | 59.9 (0) |
+| **planes, bicubic 9 fetches, bilinear chroma** | **4279 + 2043** | **7910** | 59.9 (0) |
+| planes, bicubic 16 taps, bilinear chroma | 8085 + 1959 | 11470 | 59.9 (0) |
+
+Gyroflow's own bicubic now plays 4K60 → 1080p on the N100 with half the frame's budget to spare.
+
+**Lens models.** The table now carries every lens coefficient (k[0..24]), the digital lens's parameters and the
+input stretch (15 texels a frame), and the shader takes Gyroflow's own GLSL for the clip's lens and digital lens
+(copied into `shaders/gyroflow/lens/` from gyroflow-core's `distortion_models/*.glsl`, which its Qt preview uses):
+opencv_fisheye, opencv_standard, poly3, poly5, ptlens, gopro, insta360; digital lenses gopro_superview,
+gopro6_superview, gopro_hyperview, gopro_warp, digital_stretch. With the grid, an iterative model's Newton loop runs
+only at the grid points. `gpu_table::unsupported` names what the shader can't do, for the player to keep VapourSynth:
+Sony and the generic polynomial (mesh data), IBIS/OIS and lens breathing, a lens correction below 100 %, the equirect
+output, a horizontal rolling shutter.
+
+Checked against `undistort_coord` at every pixel of a 1080p output (the naga test, synthetic 10 ms readout):
+
+| Clip | Lens | Exact | Grid 16 Catmull-Rom | Grid 8 bilinear |
+|---|---|---|---|---|
+| 0126, Osmo Action 6 4K | opencv_fisheye | ≤ 0.033 px | ≤ 0.033 | 0.058 |
+| GX010846, HERO12 4K (Egypt, a copy) | gopro | ≤ 0.026 | ≤ 0.095 | 0.035 |
+| GX010242, HERO12 5.3K 8:7 → 16:9 (Maldives, a copy) | gopro | ≤ 0.005 | ≤ 0.015 | 0.037 |
+
+Anton's clips use only these two models (the HERO7 loads opencv_fisheye from its profile) and no digital lens; the
+other models and the digital lenses compile but are unchecked for want of clips.
+
+**Found on the way, for the player (part 3):** a clip whose output aspect isn't the source's (the 8:7 HERO12 clip
+renders 16:9) needs mpv's video rectangle set to the output's shape (`video-aspect-override`, as view360 does), or
+OUTPUT is the source's shape; and a clip without a project must get its table from the same levels and smoothing the
+engine gives it (`Engine::load`'s level geometry), which `Clip::load` doesn't do yet.
+
 ## Not covered
 
 - Chromatic correction, other lens models, digital lenses, edges: step 2 and 3.

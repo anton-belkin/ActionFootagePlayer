@@ -11,7 +11,55 @@ use crate::Underwater;
 
 pub const TEMPLATE: &str = include_str!("../../shaders/gyroflow/warp.glsl");
 /// The frame's parameters before its knots, in texels (warp.glsl's table layout)
-pub const PARAM_TEXELS: usize = 5;
+pub const PARAM_TEXELS: usize = 15;
+
+/// Gyroflow's lens models and digital lenses as GLSL (shaders/gyroflow/lens, copies of gyroflow-core's
+/// distortion_models/*.glsl), by their ids. Sony's and the generic polynomial need mesh data the warp doesn't carry
+const LENSES: &[(&str, &str)] = &[
+    ("opencv_fisheye", include_str!("../../shaders/gyroflow/lens/opencv_fisheye.glsl")),
+    ("opencv_standard", include_str!("../../shaders/gyroflow/lens/opencv_standard.glsl")),
+    ("poly3", include_str!("../../shaders/gyroflow/lens/poly3.glsl")),
+    ("poly5", include_str!("../../shaders/gyroflow/lens/poly5.glsl")),
+    ("ptlens", include_str!("../../shaders/gyroflow/lens/ptlens.glsl")),
+    ("gopro", include_str!("../../shaders/gyroflow/lens/gopro.glsl")),
+    ("insta360", include_str!("../../shaders/gyroflow/lens/insta360.glsl")),
+];
+const DIGITAL_LENSES: &[(&str, &str)] = &[
+    ("gopro_superview", include_str!("../../shaders/gyroflow/lens/gopro_superview.glsl")),
+    ("gopro6_superview", include_str!("../../shaders/gyroflow/lens/gopro6_superview.glsl")),
+    ("gopro_hyperview", include_str!("../../shaders/gyroflow/lens/gopro_hyperview.glsl")),
+    ("gopro_warp", include_str!("../../shaders/gyroflow/lens/gopro_warp.glsl")),
+    ("digital_stretch", include_str!("../../shaders/gyroflow/lens/digital_stretch.glsl")),
+];
+
+/// Why the warp can't render this clip as the VapourSynth path does, if it can't: the lens or digital lens it has no
+/// GLSL for, a lens correction below 100 % (the root solve isn't ported), the equirect output, a horizontal rolling
+/// shutter, IBIS/OIS, lens breathing or a mesh (Sony)
+pub fn unsupported(clip: &Clip) -> Option<String> {
+    let p = &clip.params;
+    let lens = p.distortion_model.id();
+    if !LENSES.iter().any(|(id, _)| *id == lens) { return Some(format!("lens model {lens}")); }
+    if let Some(d) = &p.digital_lens {
+        if !DIGITAL_LENSES.iter().any(|(id, _)| *id == d.id()) { return Some(format!("digital lens {}", d.id())); }
+    }
+    if p.lens_correction_amount < 1.0 { return Some(format!("lens correction {:.0} %", p.lens_correction_amount * 100.0)); }
+    if p.output_projection == gyroflow_core::stabilization::projection::EQUIRECT { return Some("equirect output".into()); }
+    if p.frame_readout_direction.is_horizontal() && clip.rows() > 1 { return Some("horizontal rolling shutter".into()); }
+    let tr = clip.transform(clip.frame_count / 2, clip.output_size);
+    if tr.matrices.iter().any(|m| m[9..14].iter().any(|v| *v != 0.0) || (m[14] > 0.0 && m[14] != 1.0)) { return Some("IBIS, OIS or lens breathing".into()); }
+    if !tr.mesh_data.is_empty() { return Some("a lens mesh".into()); }
+    None
+}
+
+/// The clip's lens and digital lens functions, for warp.glsl's @LENS@
+fn lens_code(clip: &Clip) -> String {
+    let p = &clip.params;
+    let find = |list: &[(&str, &'static str)], id: &str| list.iter().find(|(i, _)| *i == id).map(|(_, t)| *t);
+    let mut code = find(LENSES, p.distortion_model.id()).unwrap_or(LENSES[0].1).to_string();
+    if let Some(d) = p.digital_lens.as_ref().and_then(|d| find(DIGITAL_LENSES, d.id())) { code += "\n"; code += d; }
+    // A lens file's comments may not hold directive marks (libplacebo reads them anywhere in a pass)
+    code.replace("//!", "// !")
+}
 /// The widest texture the table may be (Vulkan's maxImageDimension2D on Apple and Intel GPUs)
 pub const MAX_TEX: usize = 16384;
 
@@ -80,6 +128,8 @@ pub struct Options {
     pub grid_step: usize,
     /// The grid interpolated bilinearly (4 reads) rather than Catmull-Rom (16)
     pub grid_linear: bool,
+    /// Planes: the chroma sampled bilinearly whatever the luma's interpolation
+    pub chroma_bilinear: bool,
     /// Knots a frame; 0: every row
     pub knots: usize,
     /// warp.glsl's INTERP: 0 bilinear, 1 B-spline, 2 bicubic, 3 Lanczos4, 4 EWA
@@ -114,12 +164,16 @@ impl Table {
             let tr = clip.transform(frame, clip.output_size);
             let kp = &tr.kernel_params;
             let base = ((frame / cols) * width + (frame % cols) * block) * 4;
+            let k = |i: usize| [kp.k[i * 4], kp.k[i * 4 + 1], kp.k[i * 4 + 2], kp.k[i * 4 + 3]];
+            let dl = |i: usize| [kp.digital_lens_params[i * 4], kp.digital_lens_params[i * 4 + 1], kp.digital_lens_params[i * 4 + 2], kp.digital_lens_params[i * 4 + 3]];
             let texels: [[f32; 4]; PARAM_TEXELS] = [
                 [kp.f[0], kp.f[1], kp.c[0], kp.c[1]],
-                [kp.k[0], kp.k[1], kp.k[2], kp.k[3]],
+                k(0), k(1), k(2), k(3), k(4), k(5),
                 [kp.fov, kp.lens_correction_amount, kp.light_refraction_coefficient, kp.field_limit],
                 [kp.translation2d[0], kp.translation2d[1], kp.matrix_count as f32, 1.0],
                 [kp.translation3d[0], kp.translation3d[1], kp.translation3d[2], 0.0],
+                dl(0), dl(1), dl(2), dl(3),
+                [kp.input_horizontal_stretch, kp.input_vertical_stretch, 0.0, 0.0],
             ];
             for (i, v) in texels.iter().enumerate() { data[base + i * 4..base + i * 4 + 4].copy_from_slice(v); }
             let quats = if opts.knots == 0 { row_quats(&tr.matrices) } else { knot_quats(&tr.matrices, per_frame) };
@@ -145,10 +199,10 @@ impl Table {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, clip.frame_count.max(1), table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
@@ -170,32 +224,33 @@ fn pass_body(name: &str) -> &'static str {
 }
 
 /// One hook pass: its directives, the defines, the common code and its body
-fn hook_pass(directives: &[String], defines: &str, extra: &str, body: &str) -> String {
+fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, body: &str) -> String {
     let (_, common, _) = sections();
-    format!("{}\n\n{defines}\n{extra}\n{common}\n{body}\n", directives.join("\n"))
+    format!("{}\n\n{defines}\n{extra}\n{}\n{body}\n", directives.join("\n"), common.replace("@LENS@", &lens_code(clip)))
 }
 
 /// The passes for `opts.mode`, without the file's head
 pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let defs = defines(clip, opts, table);
     let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(&d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID",
+    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID",
         "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, extra, pass_body("sample"));
     let grid = |hook: &str| {
         let s = opts.grid_step;
         let (gw, gh) = (GRID_MAX.0.div_ceil(s) + 4, GRID_MAX.1.div_ceil(s) + 4);
         format!("//!TEXTURE GYROFLOW_GRID\n//!SIZE {gw} {gh}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}",
-            hook_pass(&d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", "//!SAVE GYROFLOW_GRID_DONE",
+            hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", "//!SAVE GYROFLOW_GRID_DONE",
                 &format!("//!WIDTH OUTPUT.w {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
                 &defs, "#define GRID_PASS", pass_body("grid")))
     };
     match opts.mode {
-        Mode::Exact => hook_pass(&d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+        Mode::Exact => hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, "", pass_body("exact")),
         Mode::Grid => format!("{}\n{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "")),
         Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
             sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)"),
-            sample("CHROMA", "gyroflow warp chroma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_OFFSET vec2(0.25, 0.0)")),
+            sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
+                if opts.chroma_bilinear { "\n#undef INTERP\n#define INTERP 0" } else { "" }))),
     }
 }
 
@@ -302,6 +357,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
             // The grid pass binds no HOOKED in mpv: none here either
             if compute { "" } else { "#define HOOKED_tex(pos) texture(sampler2D(hooked_t, hooked_s), pos)\n#define HOOKED_size hooked_size\n#define HOOKED_pt (1.0 / hooked_size)\n#define HOOKED_pos (gl_FragCoord.xy / out_size)\n" });
         let (_, common, _) = sections();
+        let common = common.replace("@LENS@", &lens_code(clip));
         let main = if compute { "void main() { hook(); }" } else { "void main() { o_color = hook(); }" };
         format!("{head}\n{defs}\n{common}\n{}\n{main}\n", pass_body(name))
     }
@@ -411,16 +467,23 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
 
     #[test]
     fn the_shader_maps_pixels_as_gyroflow_does() {
-        let Ok(project) = std::env::var("AFP_GPU_CLIP") else { eprintln!("AFP_GPU_CLIP not set: skipped"); return; };
-        let clip = Clip::load(&project, Some(10.0)).unwrap();
+        let Ok(projects) = std::env::var("AFP_GPU_CLIP") else { eprintln!("AFP_GPU_CLIP not set: skipped"); return; };
         let g = gpu();
+        // Clips separated by ';' (a project, or a video with its own motion data)
+        for project in projects.split(';') {
+        let clip = Clip::load(project, Some(10.0)).unwrap();
+        eprintln!("{project}: lens {}{}", clip.params.distortion_model.id(), clip.params.digital_lens.as_ref().map(|d| format!(" + {}", d.id())).unwrap_or_default());
+        assert_eq!(unsupported(&clip), None);
         let out = (1920usize, 1080usize);
-        let frames = [0usize, 600, 1049, 1181, clip.frame_count - 1];
-        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, knots: 33, interp: 2, shrink: false, range: None };
+        let n = clip.frame_count;
+        let mut frames: Vec<usize> = [0usize, 600, 1049, 1181, n / 2, n - 1].into_iter().filter(|f| *f < n).collect();
+        frames.dedup();
+        let fast = if n > 1049 { 1049 } else { n / 2 };
+        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, knots: 33, interp: 2, shrink: false, range: None };
         // (label, options, every frame or only the fastest)
         let cases = [
             ("exact, 33 knots", base, true),
-            ("exact, every row", Options { knots: 0, range: Some((frames[2], frames[2])), ..base }, false),
+            ("exact, every row", Options { knots: 0, range: Some((fast, fast)), ..base }, false),
             ("grid 16, 33 knots", Options { mode: Mode::Grid, ..base }, true),
             ("grid 32, 33 knots", Options { mode: Mode::Grid, grid_step: 32, ..base }, false),
             ("grid 8 bilinear, 33 knots", Options { mode: Mode::Grid, grid_step: 8, grid_linear: true, ..base }, false),
@@ -433,7 +496,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
                 _ => (Some(glsl(&clip, &opts, &table, "grid", true)), glsl(&clip, &opts, &table, "sample", true)),
             };
             for &frame in &frames {
-                if !all && frame != frames[2] { continue; }
+                if !all && frame != fast { continue; }
                 let pts = (frame as f64 / clip.fps) as f32;
                 let uv = render_uv(&g, grid.as_deref(), &fs, &table, clip.size, out, pts);
                 // Gyroflow at the same pixels, into a buffer of the output's size (the filter's dst)
@@ -465,7 +528,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         }
         // Every interpolation compiles in every pass (the picture, not the coordinates)
         let table = Table::build(&clip, &Options { range: Some((0, 0)), ..base }).unwrap();
-        for interp in 0..5 {
+        for interp in 0..6 {
             for shrink in [false, true] {
                 for (mode, name) in [(Mode::Exact, "exact"), (Mode::Grid, "sample"), (Mode::Grid, "grid")] {
                     let opts = Options { mode, interp, shrink, ..base };
@@ -476,6 +539,7 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
                     assert!(err.is_none(), "INTERP {interp}, SHRINK {shrink}, pass {name}: {err:?}");
                 }
             }
+        }
         }
     }
 }

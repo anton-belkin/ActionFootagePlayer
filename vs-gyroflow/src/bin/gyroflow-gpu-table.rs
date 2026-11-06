@@ -7,9 +7,11 @@
 //     --mode <m>         exact: one pass, the geometry at every pixel; grid (default): the geometry on a coarse grid,
 //                        one sampling pass at MAIN; planes: the grid, sampling passes at LUMA and CHROMA
 //     --grid-step <px>   the grid's step in output pixels (default 16)
+//     --chroma-bilinear  planes: the chroma bilinear whatever --interp says
 //     --grid-linear      the grid interpolated bilinearly (4 reads a pixel, not 16; use a step of 8)
 //     --knots <n>        quaternion knots per frame along its rows (default 33); 0: every row (Gyroflow's own, large)
-//     --interp <i>       bilinear, bspline, bicubic, lanczos4, ewa (default bicubic)
+//     --interp <i>       bilinear, bspline, bicubic, bicubic9 (the same from 9 bilinear fetches), lanczos4, ewa
+//                        (default bicubic)
 //     --shrink           widened taps where the warp shrinks the source (bicubic, lanczos4)
 //     --frames <a>-<b>   only these frames in the table (the rest show the background)
 //     --readout-ms <t>   the rolling shutter's readout time instead of the project's (to measure the knots on a clip
@@ -32,7 +34,7 @@ use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
+        eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|bicubic9|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
         std::process::exit(2);
     };
     let mut value = |name: &str| -> Option<String> {
@@ -47,7 +49,7 @@ fn main() {
     let grid_step: usize = value("--grid-step").map(|v| v.parse().unwrap_or_else(|_| usage())).unwrap_or(16);
     let knots: usize = value("--knots").map(|v| v.parse().unwrap_or_else(|_| usage())).unwrap_or(33);
     let interp = match value("--interp").as_deref().unwrap_or("bicubic") {
-        "bilinear" => 0, "bspline" => 1, "bicubic" => 2, "lanczos4" => 3, "ewa" => 4, _ => usage(),
+        "bilinear" => 0, "bspline" => 1, "bicubic" => 2, "lanczos4" => 3, "ewa" => 4, "bicubic9" => 5, _ => usage(),
     };
     let readout: Option<f64> = value("--readout-ms").map(|v| v.parse().unwrap_or_else(|_| usage()));
     let check: Option<usize> = value("--check").map(|v| v.parse().unwrap_or_else(|_| usage()));
@@ -57,6 +59,7 @@ fn main() {
         (a.parse().unwrap_or_else(|_| usage()), b.parse().unwrap_or_else(|_| usage()))
     });
     let shrink = if let Some(i) = args.iter().position(|a| a == "--shrink") { args.remove(i); true } else { false };
+    let chroma_bilinear = if let Some(i) = args.iter().position(|a| a == "--chroma-bilinear") { args.remove(i); true } else { false };
     let grid_linear = if let Some(i) = args.iter().position(|a| a == "--grid-linear") { args.remove(i); true } else { false };
     if args.is_empty() || (check.is_none() && check_grid.is_none() && args.len() != 2) { usage(); }
     if knots == 1 { eprintln!("--knots: 0, or at least 2"); std::process::exit(2); }
@@ -64,14 +67,11 @@ fn main() {
     let t = Instant::now();
     let clip = Clip::load(&args[0], readout).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let p = &clip.params;
-    eprintln!("Loaded {} in {:.0} ms: {}x{} -> {}x{}, {} frames at {:.3} fps, frame offset {} us, lens {}, readout {:.2} ms, correction {:.2}, projection {}",
+    eprintln!("Loaded {} in {:.0} ms: {}x{} -> {}x{}, {} frames at {:.3} fps, frame offset {} us, lens {}{}, readout {:.2} ms, correction {:.2}, projection {}",
               args[0], t.elapsed().as_secs_f64() * 1000.0, clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.frame_count, clip.fps,
-              clip.frame_offset_us, p.distortion_model.id(), p.frame_readout_time, p.lens_correction_amount, p.output_projection);
-    if p.distortion_model.id() != "opencv_fisheye" || p.digital_lens.is_some() || p.lens_correction_amount < 1.0 || p.output_projection < 0 || p.output_projection > 4 {
-        eprintln!("Warning: the spike's shader has the opencv_fisheye lens at full correction, no digital lens, no equirect; this clip differs");
-    }
-    if p.frame_readout_direction.is_horizontal() && clip.rows() > 1 {
-        eprintln!("Warning: a horizontal rolling shutter, which the spike's shader doesn't do");
+              clip.frame_offset_us, p.distortion_model.id(), p.digital_lens.as_ref().map(|d| format!(" + digital {}", d.id())).unwrap_or_default(), p.frame_readout_time, p.lens_correction_amount, p.output_projection);
+    if let Some(why) = gpu_table::unsupported(&clip) {
+        eprintln!("Warning: the GPU warp doesn't render this clip as Gyroflow does ({why}); the player keeps VapourSynth for it");
     }
 
     if let Some(out) = check_grid {
@@ -84,7 +84,7 @@ fn main() {
         return;
     }
 
-    let opts = Options { mode, grid_step, grid_linear, knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;

@@ -9,10 +9,11 @@
 // pixels. It replaces MAIN (on gpu-next the same as MAINPRESUB: after the conversion to RGB, before the looks) with a
 // texture the size of the video's rectangle on screen, so it is the scaler too.
 //
-// What it covers so far: the opencv_fisheye lens, full lens correction, no digital lens, the output projections but
-// the equirect, rolling shutter (the two-step row lookup), refraction under water, a solid background. The
+// What it covers so far: Gyroflow's lens models but Sony's and the generic polynomial (both need mesh data), its
+// digital lenses, full lens correction, the output projections but the equirect, rolling shutter (the two-step row lookup), refraction under water, a solid background. The
 // interpolation is chosen per file (INTERP): 0 bilinear, 1 B-spline (4 bilinear fetches), 2 Gyroflow's bicubic (Keys
-// a = -0.75, 16 taps), 3 Lanczos4 (64 taps), 4 EWA Robidoux (Gyroflow's, up to 9x9 taps). SHRINK 1 widens the
+// a = -0.75, 16 taps), 3 Lanczos4 (64 taps), 4 EWA Robidoux (Gyroflow's, up to 9x9 taps), 5 Gyroflow's bicubic from 9
+// bilinear fetches. SHRINK 1 widens the
 // bicubic's and Lanczos's taps where the warp shrinks the source (up to 4x, each tap a bilinear fetch).
 //
 // The passes (gpu_table.rs assembles them from the sections at the end of this file, each with the common code):
@@ -45,18 +46,31 @@
 
 // ==== common ====
 
-// The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0-4 the frame's parameters,
-// then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows (FULL_ROWS: one per row)
-//   0: f.x, f.y, c.x, c.y          1: k0, k1, k2, k3
-//   2: fov, lens correction, refraction coefficient, field limit
-//   3: translation2d.x, .y, matrix rows (1: no rolling shutter), valid (1)
-//   4: translation3d.x, .y, .z, 0
+// The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0 to PARAM_TEXELS - 1 the
+// frame's parameters, then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows
+// (FULL_ROWS: one per row)
+//   0: f.x, f.y, c.x, c.y            1-6: the lens's coefficients k[0..24]
+//   7: fov, lens correction, refraction coefficient, field limit
+//   8: translation2d.x, .y, matrix rows (1: no rolling shutter), valid (1)
+//   9: translation3d.x, .y, .z, 0    10-13: the digital lens's parameters [0..16]
+//  14: input horizontal stretch, vertical stretch, 0, 0
 
 #define PI 3.14159265358979
+#define PARAM_TEXELS 15
 
 int table_frame;
-vec4 fc, k, lens, t2;
+vec4 fc, lens, t2, stretch;
 vec3 t3;
+
+// What Gyroflow's lens functions (shaders/gyroflow/lens, its src/core/stabilization/distortion_models/*.glsl) read,
+// named as they name it
+struct GyroflowParams {
+    vec4 k1, k2, k3, k4, k5, k6;
+    vec4 digital_lens_params[4];
+    float width, height, output_width, output_height;
+    int flags;
+};
+GyroflowParams params;
 
 vec4 table(int t)
 {
@@ -79,11 +93,11 @@ vec3 qrot(vec4 q, vec3 v)
 vec4 row_rotation(int y, float rows)
 {
 #if FULL_ROWS
-    return table(5 + y);
+    return table(PARAM_TEXELS + y);
 #else
     float t = rows > 1.0 ? float(y) / (rows - 1.0) * float(KNOTS - 1) : 0.0;
     int j = min(int(t), KNOTS - 2);
-    vec4 q = mix(table(5 + j), table(6 + j), t - float(j));
+    vec4 q = mix(table(PARAM_TEXELS + j), table(PARAM_TEXELS + 1 + j), t - float(j));
     return q / length(q);
 #endif
 }
@@ -115,23 +129,13 @@ vec3 ray_to_dir(vec2 ray)
     return vec3(ray * (sin(theta) / theta), cos(theta));
 }
 
-// opencv_fisheye's distort_point
-vec2 distort(vec3 p, vec4 k)
-{
-    if (all(equal(k, vec4(0.0))))
-        return p.z > 1e-9 ? p.xy / p.z : p.xy * 1e9;
-    float r = length(p.xy);
-    float theta = atan(r, p.z);
-    float t2 = theta * theta;
-    float t4 = t2 * t2;
-    float theta_d = theta * (1.0 + k.x * t2 + k.y * t4 + k.z * t4 * t2 + k.w * t4 * t4);
-    float scale = r < 1e-12 ? 1.0 : theta_d / r;
-    return p.xy * scale;
-}
+// The clip's lens model and digital lens, Gyroflow's GLSL, put in here by gpu_table.rs: distort_point(x, y, z) and
+// undistort_point, and with a digital lens (HAS_DIGITAL) digital_distort_point and digital_undistort_point
+@LENS@
 
 // Stabilization::rotate_and_distort: a ray in the output camera, turned into the source camera by row rotation q,
 // imaged by the lens. False where the ray has no image (past the field limit, outside Snell's window)
-bool rotate_and_distort(vec3 d, vec4 q, vec4 fc, vec4 k, vec4 lens, vec3 t3, out vec2 uv)
+bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
 {
     vec3 p = qrot(q, d) + t3;
     float rxy = length(p.xy);
@@ -145,8 +149,14 @@ bool rotate_and_distort(vec3 d, vec4 q, vec4 fc, vec4 k, vec4 lens, vec3 t3, out
         float theta_d = asin(sin_d);
         p = vec3(p.xy * (sin(theta_d) / rxy), cos(theta_d));
     }
-    uv = distort(p, k) * fc.xy + fc.zw;
-    return true;
+    uv = distort_point(p.x, p.y, p.z) * fc.xy + fc.zw;
+#if HAS_DIGITAL
+    uv = digital_distort_point(uv);
+#endif
+    if (stretch.x > 0.001) uv.x /= stretch.x;
+    if (stretch.y > 0.001) uv.y /= stretch.y;
+    // The models' "no image" (-99999, from their Newton solves): no image here either
+    return uv.x > -9999.0 && uv.y > -9999.0;
 }
 
 #ifndef GRID_PASS
@@ -279,6 +289,24 @@ vec4 sample_src(vec2 uv, vec4 jac)
     }
     return wsum != 0.0 ? sum / wsum : src(uv);
 }
+#elif INTERP == 5
+vec4 sample_src(vec2 uv)
+{
+    // Gyroflow's bicubic (Keys, a = -0.75) from 9 bilinear fetches: per axis the two middle taps (both weights positive)
+    // become one fetch between them, the outer two (negative) stay, so 3 x 3 fetches instead of 16 taps
+    vec2 c = floor(uv);
+    vec2 f = uv - c;
+    vec2 w0 = vec2(cubic(1.0 + f.x), cubic(1.0 + f.y));
+    vec2 w1 = vec2(cubic(f.x), cubic(f.y));
+    vec2 w2 = vec2(cubic(1.0 - f.x), cubic(1.0 - f.y));
+    vec2 w3 = vec2(cubic(2.0 - f.x), cubic(2.0 - f.y));
+    vec2 w12 = w1 + w2;
+    vec2 p0 = c - 1.0, p12 = c + w2 / w12, p3 = c + 2.0;
+    vec4 r0 = w0.x * src(vec2(p0.x, p0.y)) + w12.x * src(vec2(p12.x, p0.y)) + w3.x * src(vec2(p3.x, p0.y));
+    vec4 r1 = w0.x * src(vec2(p0.x, p12.y)) + w12.x * src(vec2(p12.x, p12.y)) + w3.x * src(vec2(p3.x, p12.y));
+    vec4 r2 = w0.x * src(vec2(p0.x, p3.y)) + w12.x * src(vec2(p12.x, p3.y)) + w3.x * src(vec2(p3.x, p3.y));
+    return w0.y * r0 + w12.y * r1 + w3.y * r2;
+}
 #else
 vec4 sample_src(vec2 uv) { return src(uv); }
 #endif
@@ -290,10 +318,16 @@ bool frame_setup()
 {
     table_frame = clamp(int(floor(PTS * FPS + 0.5)), 0, FRAMES - 1);
     fc = table(0);
-    k = table(1);
-    lens = table(2);
-    t2 = table(3);
-    t3 = table(4).xyz;
+    params.k1 = table(1); params.k2 = table(2); params.k3 = table(3);
+    params.k4 = table(4); params.k5 = table(5); params.k6 = table(6);
+    lens = table(7);
+    t2 = table(8);
+    t3 = table(9).xyz;
+    for (int i = 0; i < 4; i++) params.digital_lens_params[i] = table(10 + i);
+    stretch = table(14);
+    params.width = float(SRC_W); params.height = float(SRC_H);
+    params.output_width = float(OUT_W); params.output_height = float(OUT_H);
+    params.flags = HAS_DIGITAL * 2;
     return t2.w >= 0.5;
 }
 
@@ -305,18 +339,18 @@ bool source_coord(vec2 j, out vec2 uv)
 {
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_pos = j * size / target_size + t2.xy;
-    vec2 out_f = fc.xy / lens.x;
+    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / lens.x;
     vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
     // The rolling shutter's row: where the middle row's rotation puts the ray, then that row's rotation
     float rows = t2.z;
     int idx = 0;
     if (rows > 1.0) {
         int mid = int(rows) / 2;
-        if (rotate_and_distort(d, row_rotation(mid, rows), fc, k, lens, t3, uv))
+        if (rotate_and_distort(d, row_rotation(mid, rows), uv))
             idx = clamp(int(floor(uv.y + 0.5)), 0, SRC_H);
         idx = min(idx, int(rows) - 1);
     }
-    return rotate_and_distort(d, row_rotation(idx, rows), fc, k, lens, t3, uv);
+    return rotate_and_distort(d, row_rotation(idx, rows), uv);
 }
 
 #ifndef GRID_PASS
