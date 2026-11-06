@@ -152,6 +152,53 @@ Needs 1, 3 and clips; 2 says how the frames get in.
 acceptable at the default distance, the head turning freely, the two modes switching instantly, paused too; at
 the fps step 2 promised. Side by side with the maker's own stitch of the same clip.
 
+**Built** 2026-11-06 (branch `claude/360-raw-x5-f4131c`), on the Insta360 X5 sample clip (2 × 3840² HEVC 8-bit, 25 fps,
+gyro and accelerometer, no GPS). Partly done: see what's open below.
+
+- **The fork** (`anton-belkin/gyroflow`, branch `360-raw-clips`, d130105, on step 3's `equirect-projection`): the
+  Insta360 model takes RadtanPro's 13 terms (the X4's and X5's `offset_v6`) on top of v3's, in every backend; a v3
+  profile renders bit for bit as before. `Cargo.toml` points at it.
+- **`vs-gyroflow/src/rig.rs`**: `CameraRig` → per lens its lens profile (camera matrix in its picture's pixels, a
+  mirror as a negative fx), `RigLens` pose and offset (about the lenses' middle: Insta360's origin is lens 0's pupil),
+  its rect in the joined tracks, validity, blend, image circle and masks (drawn once into a grid). Only Mei
+  (BrownV3, RadtanPro) yet: DJI's ThetaPoly and GoPro's EAC are refused with a reason (`gyroflow-probe` says it).
+- **`vs-gyroflow/src/sphere360.rs`**, `core.gyroflow.Sphere360`: one `Stabilization` per lens and plane (equirect,
+  no smoothing, the lens's half of the joined frame uploaded alone), the first lens into the output, the others
+  blended in by spans made once per clip, the stamp per frame. 7680×3840 and bilinear by default: the kernel's time
+  is its taps where a lens has picture (~120 ms a frame a GPU worker with bicubic, ~70 bilinear). Rendering only a
+  lens's band of longitudes doesn't help: near the poles every longitude is within a lens's 93°.
+- **`vs-gyroflow/src/heading.rs`**: the world (gravity down), the camera's yaw, in the world and along the camera.
+- **The motion in the rig's axes.** The X5's IMU isn't in the rig's axes, and its two sensors not in each other's:
+  the gyro needs half a turn about the vertical, the accelerometer x → −y, y → −x, z → −z (`sphere360.rs`
+  `imu_turn`). Found with `tools/sphere360/horizon.py` from the horizon in the sphere (the rig's own, no IMU in it),
+  not derived: to check on other X4/X5 clips. The gyro is integrated alone and the vertical comes from the
+  accelerometer averaged over 20 s: in a curve the accelerometer leans with the motorcycle (the camera rolled 50°,
+  the accelerometer barely moved), and gyroflow-core's VQF followed it, 30–60° off.
+- **The player**: `gyroflow/main.lua` joins the tracks (`lavfi-complex`), `videotoolbox-copy`, no `scale_vt`,
+  `sphere360.vpy` (VapourSynth's cache at 1.5 GB), every other frame above 31 fps; `view360.glsl` reads the stamp in
+  a `LUMA` pass; `view360/main.lua` follows the camera by default, Alt+h for in the world.
+
+What was checked:
+
+- Rust: 89 tests, the rig, the model against video-types' formula, the headings, the blend; Lua: all of `tests/`.
+- **The horizon**: the plugin's stamps against the horizon measured in the sphere every second of the clip: 9.9°
+  rms, 18° at worst (the measurement itself is good to ~5°), through braking and a curve with the camera rolling
+  50°. On screen (the app's mpv, gpu-next, Anton's OK), paused at 8 s, in both modes and at yaw 0/90/180/−90 and a
+  300° FOV: level within a few degrees. That screen test was with the earlier IMU turn; the final one is checked
+  only without the screen (rendered views, `level-*.png` of the ignored test).
+- **The head and the modes** on screen: the drag/IPC turns, both modes switch at once playing and paused, the stamp
+  reads back (`stamped`), the little planet.
+- **The seam** at the default 2 m: not visible in the rendered spheres at the clip's scale; not judged closely on
+  screen. There is no maker's stitch of this clip to put beside it: not done.
+- **Throughput**: without the screen 24–25 fps through the plugin (`--vo=null --untimed`); the same chain with a
+  copy in VapourSynth instead of the plugin, 26 fps: mpv's decoding, joining and conversion of two 3840² tracks is
+  the limit on this clip, not the plugin. **On the screen it doesn't keep up**: ~20–22 fps through the plugin, mpv
+  dropping ~12 frames a second of 25. Not solved here; options: a 5760 sphere (half the plugin's GPU time, and less to
+  upload), the plugin's GPU time traded against the view shader's, step 6's GPU route.
+
+Open: the throughput on screen; the final IMU turns on screen; travel and north (step 5); X4, X3 (two files), DJI
+Osmo 360 (ThetaPoly, quaternions only, `imu_from_rig`), GoPro MAX 2 (EAC); the mirror flag (no clip has it); 8K60.
+
 ### 5. Headings: along the way, north (3–6 days)
 
 - **Along the way you move**: in `heading.rs`, the gyro's yaw aligned to GPS (one angle and its slow drift fitted

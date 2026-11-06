@@ -146,6 +146,11 @@ the shader only picks one. Pitch and roll always come from gravity: the horizon 
 | Along the way you move | the GPS course over ground, the gyro bridging between fixes | a GPS fix, and the gyro's yaw aligned to the GPS: one angle (and its slow drift) fitted so the accelerometer's horizontal acceleration matches the GPS velocity's change. Below a speed threshold, along the camera | GoPro MAX / MAX 2 built in; Insta360 and DJI with a GPS remote |
 | North | magnetic north | MAX 2: `MNOR` with its confidence `OCNF` (telemetry-parser doesn't read them yet); MAX: `MAGN` and its calibration; elsewhere the GPS alignment above gives it too | MAX 2 without setup; MAX after calibration |
 
+Pitch and roll come from gravity, but not the accelerometer's at each moment: on a motorcycle in a curve it leans with
+the bike (the sample X5 clip: the camera rolled 50°, the accelerometer barely moved), and braking reads as a pitch. The
+gyro alone carries the orientation; the vertical is the accelerometer averaged over 20 s each way (`heading.rs`;
+9.9° rms from the horizon measured in the picture on that clip, step 4 of the plan).
+
 Along the way you move is what matters most for 360: on a stick the camera's direction means nothing, and on a
 helmet it's where the head looks. Without GPS it can only come from the picture (the focus of expansion of the
 optical flow, well defined on a full sphere), which is Gyroflow's part, later.
