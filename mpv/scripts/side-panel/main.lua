@@ -1177,7 +1177,8 @@ end
 -- The 360 view (the view360 plugin): a 360° clip as a view to look around in, the head turned by the mouse and the
 -- trackpad; the projection, the FOV, the horizon, what the view follows
 local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" } }, { { "stereographic", "Stereographic" }, { "planet", "Little planet" } } }
-local HEADING_OPTIONS = { { "world", "World" }, { "camera", "Camera" }, { "travel", "Travel" }, { "north", "North" } }
+-- Along the way you move and north come with step 5 of docs/360-implementation-plan.md (GPS, the compass)
+local HEADING_OPTIONS = { { "camera", "Camera" }, { "world", "World" } }
 local function view360_part(u, x, w, y)
     local s = u.s
     local v = state("view360")
@@ -1229,8 +1230,8 @@ local function view360_part(u, x, w, y)
     y = u:caption(x, w, y + 4 * s, "Drag, or two fingers on a trackpad: look around. Wheel or pinch: zoom. "
                                    .. "Alt+drag or turning two fingers: the horizon. Double click: ahead again")
 
-    -- What the view follows comes with the camera's motion in each frame (raw clips, later): a stitched clip has none
-    y = u:heading(x, w, y + 10 * s, "Follows")
+    -- What the view follows comes with the camera's motion in each frame (a 360 camera's own file): a stitched clip has none
+    y = u:heading(x, w, y + 10 * s, "Follows", keys["script-binding view360/heading"])
     local options, selected = {}, nil
     for i, h in ipairs(HEADING_OPTIONS) do
         table.insert(options, { h[2], msg("view360-heading", h[1]) })
