@@ -69,6 +69,7 @@
 -- preset), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
 -- spherical (a stitched 360° clip: what gyroflow-probe read of its spherical metadata, for the view360 script; false),
+-- rig360 (a 360 camera's own file, played through the plugin's 360 mode: its rig; false),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
 -- Gyroflow), exporting, last_export, live_photo, aspect, rotation (the frame's turn, on top of the file's own),
@@ -136,6 +137,19 @@
 --                elsewhere. The Save frame panel's choice sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
+--   sphere_width=0  a 360 camera's own file (below): the sphere's width (its height half of it), 0 for the plugin's
+--                   (7680)
+--   stitching_distance=0  where its lenses' seam is right, in metres; 0 for the camera's own or 2 m
+--   sphere_max_fps=31  above it, every other frame (8K60 doesn't keep up through VapourSynth: step 2 of
+--                   docs/360-implementation-plan.md); 0 every frame
+--   sphere_cache_mb=1500  VapourSynth's frame cache for it (its default, 8 GB, took mpv to 5-7 GB on 8K)
+--
+-- A 360 camera's own file (an Insta360 .insv with both lenses in it; docs/360-cameras.md): gyroflow-probe reads its
+-- rig. Its lens tracks are joined side by side (lavfi-complex hstack), the plugin's 360 mode (sphere360.vpy) makes the
+-- sphere in the camera's axes with the rolling shutter taken out and stamps each frame with the camera in the world and
+-- its headings, and the view360 plugin shows it, the horizon level. user-data/gyroflow/rig360 has its rig (brand, model,
+-- lenses, tracks), false for any other clip. Decoded with the copy mode of hwdec: zero-copy turns into software decoding
+-- under lavfi-complex, and the frames go to memory for VapourSynth anyway
 
 local mp = require 'mp'
 local options = require 'mp.options'
@@ -150,7 +164,7 @@ local function clip_path()
     return path
 end
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500 }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -169,6 +183,8 @@ local STEP_LABEL = "gyroflow-step"
 local DIR = mp.get_script_directory()
 local PLUGIN = utils.join_path(DIR, platform.library("vs_gyroflow"))
 local SCRIPT = utils.join_path(DIR, "gyroflow.vpy")
+local SPHERE_SCRIPT = utils.join_path(DIR, "sphere360.vpy")
+local SPHERE_LABEL = "gyroflow-360"
 local PROBE = utils.join_path(DIR, platform.exe("gyroflow-probe"))
 local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
@@ -179,8 +195,8 @@ local DATA = os.getenv("GYROFLOW_DATA")
 local PRESETS = {}
 if DATA and DATA ~= "" then table.insert(PRESETS, utils.join_path(DATA, "default.gyroflow")) end
 table.insert(PRESETS, utils.join_path(DIR, "default.gyroflow"))
--- Containers gyroflow-probe looks into: what DJI cameras record
-local PROBE_EXTENSIONS = { mp4 = true, mov = true }
+-- Containers gyroflow-probe looks into: what DJI cameras record, and Insta360's own (both lenses in one .insv)
+local PROBE_EXTENSIONS = { mp4 = true, mov = true, insv = true }
 -- bilinear | bicubic | lanczos. Lanczos is sharper but slower: on the M1 Pro a 4K clip plays at ~38 fps of
 -- capacity with it and ~54 with bicubic, so lanczos up to 30 fps and bicubic above (and when the rate's unknown)
 local INTERPOLATION_SLOW = "lanczos"
@@ -244,6 +260,9 @@ end
 -- script, which shows it as a sphere to look around in. Such a clip isn't stabilized: it plays as it is, with mpv's
 -- own hwdec (zero-copy), whatever motion data it has (docs/360-cameras.md, "Stitched clips")
 local spherical = false
+-- A 360 camera's own file: its rig as gyroflow-probe read it (brand, model, lenses, tracks, width, height of a track),
+-- false for any other clip
+local rig360 = false
 
 -- What to stabilize the video with, to done(): { project = <.gyroflow or the video itself>, kind, width, height,
 -- preset }, or nil. The probe isn't waited for in the script's thread: from an SD card it takes a second, and quitting
@@ -259,6 +278,13 @@ local function find_source(path, done)
     if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return done(nil) end
     mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
         local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        if info and type(info.rig360) == "table" then
+            if info.rig360.error then
+                mp.msg.warn("a 360 camera's file the player can't show yet: " .. tostring(info.rig360.error))
+                return done(nil)
+            end
+            return done({ project = path, kind = "rig360", rig = info.rig360, fps = info.fps })
+        end
         if info and type(info.spherical) == "table" then
             spherical = info.spherical
             mp.msg.verbose("not stabilizing: a stitched 360° clip (" .. tostring(spherical.projection) .. ")")
@@ -574,7 +600,7 @@ local function publish()
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
-        ask_when_slow = o.ask_when_slow, spherical = spherical, aspect = frame.aspect, rotation = frame.rotation,
+        ask_when_slow = o.ask_when_slow, spherical = spherical, rig360 = rig360, aspect = frame.aspect, rotation = frame.rotation,
         projection = frame.projection, file_rotation = current_source and current_source.rotation or 0,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
@@ -695,9 +721,44 @@ local function find_water(path, source)
     end)
 end
 
+-- A 360 camera's own file (see the top): its lens tracks joined, the plugin's 360 mode after them. None of the flat
+-- clip's settings apply (the view, level, edges, crop mode, the still frame): current_source stays nil
+local function add_sphere(source)
+    local rig = source.rig
+    rig360 = rig
+    local tracks = math.max(1, math.floor(tonumber(rig.tracks) or 1))
+    if tracks > 1 then
+        local inputs = ""
+        for i = 1, tracks do inputs = inputs .. "[vid" .. i .. "]" end
+        mp.set_property("file-local-options/lavfi-complex", inputs .. "hstack=inputs=" .. tracks .. "[vo]")
+    end
+    -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/360-throughput-spike.md)
+    if o.hwdec then mp.set_property("file-local-options/hwdec", platform.macos and "videotoolbox-copy" or "auto-copy") end
+    local vf = mp.get_property_native("vf") or {}
+    local fps = tonumber(source.fps)
+    local step = (o.sphere_max_fps > 0 and fps and fps > o.sphere_max_fps) and math.ceil(fps / o.sphere_max_fps - 0.05) or 1
+    if step > 1 then table.insert(vf, { name = "lavfi", label = STEP_LABEL, params = { graph = "framestep=" .. step } }) end
+    table.insert(vf, {
+        name = "vapoursynth",
+        label = SPHERE_LABEL,
+        params = {
+            file = SPHERE_SCRIPT,
+            ["user-data"] = utils.format_json({ plugin = PLUGIN, video = source.project, workers = o.workers, cache_mb = o.sphere_cache_mb,
+                                                width = o.sphere_width > 0 and o.sphere_width or nil,
+                                                distance = o.stitching_distance > 0 and o.stitching_distance or nil,
+                                                time_offset = time_offset() }),
+            ["concurrent-frames"] = "4",
+        },
+    })
+    mp.set_property_native("file-local-options/vf", vf)
+    mp.set_property("file-local-options/video-rotate", "no")
+    mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined%s", tostring(rig.brand), tostring(rig.model), tonumber(rig.lenses) or 0,
+                              tracks, tostring(rig.width), tostring(rig.height), step > 1 and string.format(", every %s frames", step) or ""))
+end
+
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
-    current_source, stab_off, spherical = nil, false, false
+    current_source, stab_off, spherical, rig360 = nil, false, false, false
     -- Back to the level and color fringes that stick, after a clip's own
     if level_before then level, level_before = level_before, nil end
     if chromatic_before ~= nil then chromatic, chromatic_before = chromatic_before, nil end
@@ -719,6 +780,10 @@ local function setup(done)
         return done()
     end
     find_source(path, function(source)
+        if source and source.kind == "rig360" then
+            add_sphere(source)
+            return done()
+        end
         if source then add_filter(source) end
         done()
         if source and source.kind == "project" then find_water(path, source) end

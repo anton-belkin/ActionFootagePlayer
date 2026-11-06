@@ -213,7 +213,7 @@ done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua \
-    mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-export.exe afp-cut.exe; do
     cp "$gyroflow_bin/$f" "$gyroflow/"

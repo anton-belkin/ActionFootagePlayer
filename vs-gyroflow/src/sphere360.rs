@@ -111,9 +111,11 @@ impl Spans {
 ///
 /// Insta360 X4 and X5 (IMU orientation `yzX`): telemetry-parser's orientation assumes the IMU already turned into lens
 /// 0's frame, which it does only for a clip with a crop window (a flat one, `insert_lens_profile`); a 360 file's isn't.
-/// That turn is the vendor's lens 0 pose, a quarter turn about the lens's axis less its calibration residual, and the
-/// rig's axes are that pose less the same residual (rig.rs `rotation`), so what's left is the quarter turn exactly. The
-/// sample X5 clip: up read along +x before it, along -y (the camera upright) after
+/// What that leaves between the motion's camera and the rig's axes is a quarter turn about the lens's axis and a half
+/// turn about the vertical: x to -y, y to -x, z to -z. Found on the sample X5 clip, not derived: the accelerometer read
+/// up along +x before it (the camera upright: the sphere's sky is at its top), and with the quarter turn alone the
+/// horizon came out tilted twice as much as the camera, the other way; with both it's level through the clip as the
+/// motorcycle leans. To check on other X4/X5 clips
 fn imu_turn(rig: &Rig, imu_orientation: Option<&str>) -> Option<nalgebra::UnitQuaternion<f64>> {
     match (rig.brand.as_str(), imu_orientation) {
         ("Insta360", Some("yzX")) => Some(nalgebra::UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f64::consts::PI)
@@ -361,16 +363,22 @@ impl LensPlane {
         self.stab.set_compute_params(p);
     }
 
-    /// The lens's part of `src` (the joined plane, `rect` in it) into `dst`
-    fn render<T: PixelType>(&mut self, shared: &Shared, timestamp_us: i64, src: (*const u8, usize, usize, usize), rect: (usize, usize, usize, usize), dst: (*mut u8, usize, usize, usize)) -> Result<(), String> {
+    /// The lens's part of `src` (the joined plane: its pointer, stride, height; `rect` in it) into `dst`. Only that part
+    /// goes to the GPU: its rows from where it starts, the joined plane's stride apart (a texture upload by rows reads
+    /// the last row only as far as its width)
+    fn render<T: PixelType>(&mut self, shared: &Shared, timestamp_us: i64, src: (*const u8, usize, usize), rect: (usize, usize, usize, usize), dst: (*mut u8, usize, usize, usize)) -> Result<(), String> {
         let max_value = ((1u32 << shared.cfg.depth) - 1) as f32;
-        let (sp, sstride, sw, sh) = src;
+        let bytes = if shared.cfg.kind == SampleKind::U8 { 1 } else { 2 };
+        let (sp, sstride, sh) = src;
         let (dp, dstride, dw, dh) = dst;
+        if rect.1 + rect.3 > sh || (rect.0 + rect.2) * bytes > sstride { return Err(format!("the lens's part {rect:?} is outside the input")); }
+        let offset = rect.1 * sstride + rect.0 * bytes;
         // gyroflow-core takes mutable slices for both sides, but only writes the output
-        let s = unsafe { std::slice::from_raw_parts_mut(sp as *mut u8, sstride * sh) };
+        let s = unsafe { std::slice::from_raw_parts_mut(sp.add(offset) as *mut u8, sstride * sh - offset) };
         let d = unsafe { std::slice::from_raw_parts_mut(dp, dstride * dh) };
+        let (sw, sh) = (rect.2, rect.3);
         let mut buffers = Buffers {
-            input: BufferDescription { size: (sw, sh, sstride), rect: Some(rect), data: BufferSource::Cpu { buffer: s }, ..Default::default() },
+            input: BufferDescription { size: (sw, sh, sstride), data: BufferSource::Cpu { buffer: s }, ..Default::default() },
             output: BufferDescription { size: (dw, dh, dstride), data: BufferSource::Cpu { buffer: d }, ..Default::default() },
         };
         let sizes = (sstride * sh, dstride * dh);
@@ -420,11 +428,12 @@ fn worker(shared: &Shared, num_planes: usize, rx: &Mutex<mpsc::Receiver<Job>>, r
             let (i, o) = (plane_size(joined, p), plane_size(out, p));
             PlaneJob { src: s.as_ptr(), src_stride: stride(i.0), src_w: i.0, src_h: i.1, dst: d.as_mut_ptr(), dst_stride: stride(o.0), dst_w: o.0, dst_h: o.1 }
         }).collect();
-        if let Err(e) = frame(shared, &mut gpu, &mut scratch, 0, &planes) { log::error!("360 warm-up: {e}"); }
+        if let Err(e) = frame(shared, &mut gpu, &mut scratch, 0, &planes, &mut [0.0; 3]) { log::error!("360 warm-up: {e}"); }
     }
     let _ = ready.send(());
 
     let (mut frames, mut busy) = (0u32, std::time::Duration::ZERO);
+    let mut times = [0.0f64; 3];
     loop {
         let Ok(job) = rx.lock().recv() else { break };
         let t = std::time::Instant::now();
@@ -432,19 +441,21 @@ fn worker(shared: &Shared, num_planes: usize, rx: &Mutex<mpsc::Receiver<Job>>, r
             limited_range = job.limited_range;
             for lp in gpu.iter_mut().flatten() { lp.set_range(shared, limited_range); }
         }
-        let result = frame(shared, &mut gpu, &mut scratch, job.timestamp_us, &job.planes);
+        let result = frame(shared, &mut gpu, &mut scratch, job.timestamp_us, &job.planes, &mut times);
         let _ = job.reply.send(result);
         frames += 1;
         busy += t.elapsed();
         if frames == 300 {
-            log::info!("360: {:.1} ms per frame on the GPU worker", busy.as_secs_f64() * 1000.0 / frames as f64);
-            (frames, busy) = (0, std::time::Duration::ZERO);
+            let ms = |v: f64| v * 1000.0 / frames as f64;
+            log::info!("360: {:.1} ms per frame on the GPU worker: the first lens {:.1}, the others {:.1}, their blend {:.1}",
+                       ms(busy.as_secs_f64()), ms(times[0]), ms(times[1]), ms(times[2]));
+            (frames, busy, times) = (0, std::time::Duration::ZERO, [0.0; 3]);
         }
     }
 }
 
 /// One frame: every lens of every plane, the blend, the stamp
-fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>>], timestamp_us: i64, planes: &[PlaneJob]) -> Result<(), String> {
+fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>>], timestamp_us: i64, planes: &[PlaneJob], times: &mut [f64; 3]) -> Result<(), String> {
     let cfg = shared.cfg;
     for (p, pj) in planes.iter().enumerate() {
         let (ss, sv) = if p == 0 { (0, 0) } else { cfg.subsampling };
@@ -453,14 +464,17 @@ fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>
         for (l, lens_planes) in gpu.iter_mut().enumerate() {
             let r = shared.rig.source_rect(l);
             let rect = (r.0 >> ss, r.1 >> sv, r.2 >> ss, r.3 >> sv);
-            let src = (pj.src, pj.src_stride, pj.src_w, pj.src_h);
+            let src = (pj.src, pj.src_stride, pj.src_h);
             let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
             let dst = if l == 0 { (pj.dst, pj.dst_stride, w, h) } else { (scratch[l][p].as_mut_ptr(), w * bytes, w, h) };
             let lp = &mut lens_planes[p];
+            let t = std::time::Instant::now();
             match cfg.kind {
                 SampleKind::U8 => lp.render::<Luma8>(shared, timestamp_us, src, rect, dst)?,
                 SampleKind::U16 => lp.render::<Luma16>(shared, timestamp_us, src, rect, dst)?,
             }
+            times[(l > 0) as usize] += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
             if l > 0 {
                 let spans = &shared.spans[l - 1][(p > 0) as usize];
                 match cfg.kind {
@@ -475,6 +489,7 @@ fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>
                     }
                 }
             }
+            times[2] += t.elapsed().as_secs_f64();
         }
         // Under the sphere: the stamp's rows, black, and neutral chroma under them
         let fill = if p == 0 { if cfg.is_yuv { 16u32 << (cfg.depth - 8) } else { 0 } } else { 128u32 << (cfg.depth - 8) };
@@ -498,7 +513,7 @@ fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>
 }
 
 // ---------------------------------------------------------------------------------------------------
-// The filter: `core.gyroflow.Sphere360(clip, video, width=7680, distance=0, interpolation="bicubic", workers=3,
+// The filter: `core.gyroflow.Sphere360(clip, video, width=7680, distance=0, interpolation="bilinear", workers=3,
 // start_time=0, time_offset=0)`
 
 static ENGINES: Mutex<Vec<(String, Arc<Sphere360>)>> = Mutex::new(Vec::new());
@@ -584,7 +599,10 @@ pub unsafe extern "system-unwind" fn create(input: *const VSMap, out: *mut VSMap
         return fail("only constant-size YUV or Gray clips with 8-16 bit integer samples".into());
     }
     let Some(video) = (unsafe { crate::map_get_str(api, input, c"video") }) else { return fail("video is required".into()) };
-    let interpolation = match unsafe { crate::map_get_str(api, input, c"interpolation") }.unwrap_or_else(|| "bicubic".into()).to_ascii_lowercase().as_str() {
+    // Bilinear by default: the kernel's time is its taps where a lens has picture (bicubic's 16 took an X5's frame at
+    // 7680 to ~120 ms a GPU worker, past what 25 fps leaves; bilinear's 4, ~70), and the view shader enlarges the
+    // sphere at most FOVs anyway
+    let interpolation = match unsafe { crate::map_get_str(api, input, c"interpolation") }.unwrap_or_else(|| "bilinear".into()).to_ascii_lowercase().as_str() {
         "bilinear" => Interpolation::Bilinear,
         "bicubic" => Interpolation::Bicubic,
         "lanczos" | "lanczos4" => Interpolation::Lanczos4,
@@ -673,7 +691,7 @@ mod tests {
         let rig = crate::rig::read(&clip).unwrap().unwrap();
         let (jw, jh) = rig.joined_size();
         let t = std::time::Instant::now();
-        let engine = Sphere360::load(&clip, (jw, jh), 3, (SampleKind::U8, 8, true, (1, 1)), Interpolation::Bicubic, width, distance, 1).unwrap();
+        let engine = Sphere360::load(&clip, (jw, jh), 3, (SampleKind::U8, 8, true, (1, 1)), Interpolation::Bilinear, width, distance, 1).unwrap();
         eprintln!("loaded in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         let (ow, oh) = engine.output_size();
         let inputs: String = (0..rig.pictures).map(|i| format!("[0:v:{i}]")).collect();

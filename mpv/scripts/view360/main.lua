@@ -2,12 +2,18 @@
 -- plugin: this folder goes into ~~/scripts/, next to the gyroflow plugin's folder (it uses its gestures.lua, and its
 -- gyroflow-probe tells a 360° clip). docs/360-cameras.md has the design.
 --
--- Stitched clips for now (equirectangular, with spherical metadata: Spherical Video V2's sv3d, or V1's XMP, as
--- Insta360 Studio, DJI Studio and GoPro Player export them, and as the Theta and QooCam record them): the gyroflow
--- plugin's probe reads the metadata (user-data/gyroflow/spherical) and leaves such a clip unstabilized, decoded by
--- mpv's own hwdec, zero-copy. view360.glsl draws the view from each frame on screen at the screen's rate, so the head
--- turns without waiting for the video, paused as playing. A frame without the stamp the plugin will write for raw
--- clips (camera in the world, headings) is a camera level and fixed: only the head turns.
+-- Two kinds of clip:
+-- - Stitched (equirectangular, with spherical metadata: Spherical Video V2's sv3d, or V1's XMP, as Insta360 Studio,
+--   DJI Studio and GoPro Player export them, and as the Theta and QooCam record them): the gyroflow plugin's probe
+--   reads the metadata (user-data/gyroflow/spherical) and leaves such a clip unstabilized, decoded by mpv's own hwdec,
+--   zero-copy. Its frames carry no stamp: the camera level and fixed, only the head turns.
+-- - A 360 camera's own file (user-data/gyroflow/rig360: an Insta360 X5's .insv): the gyroflow plugin's 360 mode makes
+--   the sphere in the camera's axes and stamps each frame with the camera in the world and the heading of each mode.
+--   The view turns the sphere into the world, the horizon level, and points ahead along the chosen heading: along the
+--   camera (its heading smoothed over a few seconds both ways, the default) or in the world (its heading at the start,
+--   held). Switching is instant, paused too: every mode's heading is in the frame.
+-- view360.glsl draws the view from each frame on screen at the screen's rate, so the head turns without waiting for the
+-- video, paused as playing.
 --
 -- While a 360° clip plays: a drag, or two fingers on a trackpad, turns the head, what's under the mouse staying under
 -- it; the wheel or a pinch zooms (the FOV); Alt+drag or turning two fingers rolls it; a double click or Backspace looks
@@ -18,6 +24,7 @@
 --   Alt+v   toggle      the view on/off (off: the sphere as recorded, flat)
 --   Alt+p   projection  auto (rectilinear up to 100°, the stereographic from 160°) -> rectilinear -> stereographic ->
 --                       little planet
+--   Alt+h   heading     what straight ahead follows, on a 360 camera's own file: along the camera <-> in the world
 --
 -- Script messages (`script-message-to view360 <message>`, what the side panel runs):
 --   view360 yes|no|toggle                   the view on or off
@@ -27,8 +34,8 @@
 --                                           stitched clip has none, and holds still whatever it is)
 --   view360-reset                           ahead again, at the projection's own FOV
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
--- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera: none yet), stereo, note (why
--- a 360° clip isn't shown).
+-- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
+-- camera's own file), stereo, note (why a 360° clip isn't shown).
 
 local mp = require 'mp'
 
@@ -92,7 +99,7 @@ local function publish()
     local r = view.FOV[cur.projection]
     mp.set_property_native("user-data/view360", {
         available = sphere ~= nil, active = active, yaw = cur.yaw, pitch = cur.pitch, roll = cur.roll, fov = cur.fov,
-        fov_min = r.min, fov_max = r.max, projection = cur.projection, heading = heading, stamped = false,
+        fov_min = r.min, fov_max = r.max, projection = cur.projection, heading = heading, stamped = sphere ~= nil and sphere.stamped == true,
         stereo = sphere and sphere.stereo or "mono", note = note or false,
     })
 end
@@ -219,7 +226,17 @@ end
 mp.add_hook("on_load", 60, function()
     sphere, note, heading = nil, nil, "world"
     local s = mp.get_property_native("user-data/gyroflow/spherical")
-    if type(s) == "table" then
+    local rig = mp.get_property_native("user-data/gyroflow/rig360")
+    if type(rig) == "table" then
+        -- The plugin's sphere, stamped: along the camera unless chosen otherwise
+        if shader then
+            sphere = { stereo = "mono", stamped = true }
+            heading = "camera"
+        else
+            note = "The 360 view needs mpv's gpu-next, gpu or libmpv video output"
+            mp.msg.warn(note)
+        end
+    elseif type(s) == "table" then
         if s.projection ~= "equirect" then
             note = "A 360° clip in a projection not shown yet (" .. tostring(s.projection) .. ")"
         elseif s.stereo ~= nil and not STEREO_INDEX[s.stereo] then
@@ -283,6 +300,18 @@ mp.add_key_binding("Alt+p", "projection", function()
     if not active then return end
     local i = view.PROJECTION_INDEX[cur.projection] or 0
     set_projection(view.PROJECTIONS[(i + 1) % #view.PROJECTIONS + 1])
+end)
+
+-- The stamped modes there are so far (travel and north: step 5)
+local HEADINGS = { "camera", "world" }
+local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
+
+mp.add_key_binding("Alt+h", "heading", function()
+    if not active then return end
+    if not sphere.stamped then return mp.osd_message("360°: this clip has no camera motion to follow", 2) end
+    heading = heading == HEADINGS[1] and HEADINGS[2] or HEADINGS[1]
+    apply()
+    mp.osd_message("360°: " .. HEADING_LABELS[heading], 1.5)
 end)
 
 mp.register_script_message("view360", function(v)

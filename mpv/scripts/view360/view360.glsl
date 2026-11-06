@@ -80,8 +80,61 @@
 //!MAXIMUM 2
 0
 
+//!HOOK LUMA
+//!BIND HOOKED
+//!SAVE STAMP360
+//!WIDTH 34
+//!HEIGHT 1
+//!WHEN view360_on
+//!DESC 360 stamp
+
+// The stamp under the sphere (vs-gyroflow/src/stamp.rs, docs/360-cameras.md "The stamp"), read from the raw luma
+// before anything scales or converts it: 34 codes, each a 2x2 block in the last two rows. Saved for the view pass as
+// one texel per code: texel 0 whether there's a stamp (the magic, and the check adds up), 1 the bits per fine code,
+// 9 to 32 the fields' fine levels, as whole numbers (at most 11 bits each in a 16-bit float, exact: 8- and 10-bit
+// planes). Each code is read through the black and white references (codes 7 and 8): gpu-next normalizes some formats
+// a little off (10-bit limited range reads x0.99904), which they undo whatever it does short of a curve.
+
+#define CODES 34
+#define HEADER 9
+
+float code_value(int i)
+{
+    return texelFetch(HOOKED_raw, ivec2(2 * i, int(HOOKED_size.y) - 2), 0).x * HOOKED_mul;
+}
+
+uint coarse(float v) { return uint(clamp(floor(v * 16.0), 0.0, 15.0)); }
+
+vec4 hook()
+{
+    int at = int(HOOKED_pos.x * 34.0);
+    float v[CODES];
+    for (int i = 0; i < CODES; i++)
+        v[i] = code_value(i);
+    bool magic = coarse(v[0]) == 12u && coarse(v[1]) == 3u && coarse(v[2]) == 9u && coarse(v[3]) == 6u;
+    uint depth = coarse(v[4]) + 1u, bits = coarse(v[5]) + 1u, version = coarse(v[6]);
+    float range = v[8] - v[7];
+    if (!magic || version != 1u || bits > depth || bits > 11u || !(range > 0.5))
+        return vec4(0.0);
+    float scale = float((1u << depth) - 1u);
+    uint shift = depth - bits;
+    uint level[CODES];
+    uint sum = 0u;
+    for (int i = HEADER; i < CODES; i++) {
+        uint code = uint(round(clamp((v[i] - v[7]) / range, 0.0, 1.0) * scale));
+        level[i] = code >> shift;
+        if (i < CODES - 1) sum += level[i];
+    }
+    bool check = (sum & ((1u << bits) - 1u)) == level[CODES - 1];
+    if (at == 0) return vec4(check ? 1.0 : 0.0);
+    if (at == 1) return vec4(float(bits));
+    if (at >= HEADER) return vec4(float(level[at]));
+    return vec4(0.0);
+}
+
 //!HOOK MAINPRESUB
 //!BIND HOOKED
+//!BIND STAMP360
 //!WIDTH OUTPUT.w
 //!HEIGHT OUTPUT.h
 //!WHEN view360_on
@@ -94,18 +147,39 @@
 #define PI 3.14159265358979
 #define HALF_WIDTH (16.0 / 9.0)
 
-// ---- The stamp (step 1 of docs/360-implementation-plan.md) ----
-// A LUMA pass will read the rows the plugin writes under the sphere (raw luma, texel fetches) and save them (SAVE);
-// this pass will bind that texture (BIND) and stamp_read() decode it: the camera in the world at the middle of the
-// frame, the chosen mode's heading (its yaw in the world), and how many rows of the frame are the stamp's. Until
-// then no frame is stamped: a stitched clip's camera is level and fixed (the stitching software leveled it, or it
-// was), its heading straight ahead, and the sphere is the whole frame.
+// ---- The stamp ----
+// What the LUMA pass read from the frame's stamp (STAMP360): the camera in the world at the middle of the frame
+// (q_world_from_cam), the chosen heading mode's yaw in the world, and the stamp's rows, which aren't sphere. A frame
+// without one (a stitched clip): the camera level and fixed, its heading straight ahead, the whole frame the sphere.
+// The fields' layout is stamp.rs's: from code 9, the time (4 codes), q w x y z (2 codes each, [-1, 1]), then per mode
+// its yaw (2 codes, a turn) and its confidence (1)
+#define STAMP_QUAT 13
+#define STAMP_MODES 21
+
+float stamp_level(int i) { return texelFetch(STAMP360_raw, ivec2(i, 0), 0).x * STAMP360_mul; }
+
 bool stamp_read(out mat3 world_from_cam, out float heading_yaw, out float stamp_rows)
 {
     world_from_cam = mat3(1.0);
     heading_yaw = 0.0;
     stamp_rows = 0.0;
-    return false;
+    if (stamp_level(0) < 0.5)
+        return false;
+    float step = exp2(round(stamp_level(1)));
+    float top = step * step - 1.0;
+    vec4 q;
+    for (int c = 0; c < 4; c++)
+        q[c] = (stamp_level(STAMP_QUAT + 2 * c) * step + stamp_level(STAMP_QUAT + 2 * c + 1)) / top * 2.0 - 1.0;
+    q /= length(q);
+    float w = q.x, x = q.y, y = q.z, z = q.w;
+    // Columns
+    world_from_cam = mat3(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y),
+                          2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x),
+                          2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y));
+    int m = STAMP_MODES + 3 * clamp(view360_heading, 0, 3);
+    heading_yaw = (stamp_level(m) * step + stamp_level(m + 1)) / (step * step) * 2.0 * PI;
+    stamp_rows = 2.0;
+    return true;
 }
 // ---- end of the stamp ----
 
