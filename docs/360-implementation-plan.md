@@ -214,6 +214,38 @@ Osmo 360 (ThetaPoly, quaternions only, `imu_from_rig`), GoPro MAX 2 (EAC); the m
   otherwise a setting for Gyroflow's part.
 - The panel and a key for the mode; a mode with no data greyed out, saying why.
 
+**Built for Insta360** 2026-11-06 (branch `claude/360-insta-heading-export-f71dc0`, 8ce554e), from the GoPro MAX 2
+session's camera-independent part (`claude/360-max2-headings-0d98b9`; its EAC, MAX 2 IMU turns and GPMF reading not
+taken):
+
+- **`heading.rs`**: `align` fits the world's azimuth θ, its drift and the GPS's lag (complex Procrustes of the
+  accelerometer's horizontal acceleration, turned into the world, against the GPS track's second difference, both
+  less their slow part); its confidence from σ and ρ; `travel`, the course over ground in the world, smoothed, and
+  standing (or across a GPS gap) its offset from the camera's heading from before held; true north from the fit where
+  there's no compass; the world mode held against the gyro's drift by it. For Insta360: the lag searched over ±3 s
+  (`LAG_SEARCH_S`, was ±1), fixes interpolated across gaps up to 2.5 s (1 Hz GPS), and across a gap the accelerometer
+  masked as GPS is before both lose their slow part (else a 20 s tunnel threw the drift 0.04°/s off, 5° at the ends).
+- **`nav.rs`**: telemetry-parser's `GPS/Data` (`GpsData`, unix time with ms, acquired or void) onto the video's clock
+  by `first_gps_timestamp`, which on the X5 is unix ms at the video's start (the sample: 13:36:27.993 UTC, its
+  `creation_time` "20250416143628" being BST), not a camera-clock time as its name suggests. A numeric unix
+  `creation_time` would do otherwise; a clock more than a minute after the first fix or a day before it is none.
+- **`sphere360::Motion`** (shared by the plugin and `gyroflow-probe --headings`): the report per mode, `available`,
+  `confidence`, `why`, the fit's σ, ρ, lag and drift, and per second how sure travel and north are.
+- **The player**: `view360` has the four modes (Alt+h goes through the ones the clip has, along the way first, and the
+  default when present); the panel greys out the others with the reason. North on an Insta360 says "an Insta360 has
+  no compass" (and is the GPS fit's true north when there's a track).
+
+Checked: synthetic drives (tests in `heading.rs`): turns, a stop held, a 20 s GPS tunnel and short losses (θ within
+0.5°, along the way within 4° away from the gaps and in them), 1 Hz fixes with the GPS clock 2 s off (lag found, within
+5°), a straight road and a backwards gyro and standing still refused; the clock placement (`nav.rs`). On the X5 sample
+(no GPS record at all): `--headings` says travel "no GPS in this clip (record with a GPS remote or the phone app's
+GPS)", north "an Insta360 has no compass, and no GPS track to find north by". Lua: `tests/view360_test.lua`.
+
+Open: **no Insta360 clip with GPS** was at hand: the GPS clock's placement (`first_gps_timestamp`) and the fit on real
+Insta360 data are unchecked. No public raw `.insv` with GPS was found (2026-11-06: two forum samples with GPS are
+dead links, Mapillary keeps others private, ExifTool's forum was down); a short clip with the GPS remote or the
+phone app would settle it. Nothing on screen yet (`--headings` itself: 0.5 s on the X5 clip).
+
 ### 6. Below 20 ms (3–5 days)
 
 mpv patches in `tools/mpv-patches/`, macOS:
@@ -236,6 +268,37 @@ within the margin); that's a separate change.
   metadata, for YouTube and editors.
 - A flat reframe: the view along keyframes of the head, as crop mode's photos are made now.
 - The view math in WGSL beside the GLSL; a test renders both from the same sphere and stamp and compares.
+
+**Built for Insta360** 2026-11-06 (branch `claude/360-insta-heading-export-f71dc0`: 40c9055, 8b69147):
+
+- **`vs-gyroflow/src/view360.wgsl`**: `view360.glsl`'s view pass function for function, plus projection 4, the
+  equirect (the whole sphere turned into the world and the heading). `view360.rs` draws a sphere plane through it
+  (R8 or R16 unorm in, R32 float out, its own wgpu device).
+- **The comparison test** (`view360::tests`) takes the player's GLSL from `mpv/scripts/view360/view360.glsl` as it is
+  in the file, both passes (the stamp read from the luma, then the view), declares libplacebo's names around them and
+  compiles them with naga's GLSL front end (wgpu's `glsl` feature, a dev-dependency only), on the same device. Same
+  sphere and stamp, seven views (all four projections, FOV 20-250°, every heading mode): at most 0.42/255 apart, no
+  pixel over half a code; another mode's heading or a degree of yaw shows on 5 % / 1 % of the pixels or more. A change
+  to the GLSL's view math without the WGSL fails it.
+- **`export360.rs`** and **`gyroflow-export --360` / `--reframe "t:yaw,pitch,roll,fov;..."`** (`--heading`,
+  `--sphere-width`, `--size`, `--view`): ffmpeg decodes the lens tracks joined (hstack), each frame goes through the
+  plugin's 360 mode (`Sphere360`, as in the player), its stamp is read back from the frame, then the WGSL view; HEVC
+  10-bit at the source's bits per pixel, audio copied. The heading as the player picks it (along the way when there,
+  else along the camera); asked for and missing, along the camera with the reason.
+- **`mp4meta::write_spherical`**: Spherical Video V2 (`st3d`, `sv3d`/`svhd`/`proj`/`prhd`/`equi`) at the end of the
+  video sample entry and V1's GSpherical XMP `uuid` in the track (ffmpeg can't write either from the command line).
+
+Checked on the X5 sample (release build, M-series Mac): the whole clip (24.4 s, 611 frames) as a 360 video 5760×2880
+in 62 s (~10 fps), as a 1920×1080 reframe in 45 s; audio kept. ffprobe reads `spherical_mapping: equirectangular`
+(also in a test, faststart or not), exiftool both V2 (`Stereoscopic 3D: Monoscopic`, the projection bounds) and V1
+(`XMP-GSpherical`), and the player's own `gyroflow-probe` takes the export for a stitched 360 clip (`sv3d`, mono,
+equirect), so the player would open it in the view. Frames looked at: the horizon level across the sphere on the
+straight; in the curve (12 s) ~12° off, the vertical's error step 4 measured, not the export's.
+
+Open: no player was run on the exports: VLC isn't installed here (a download), QuickTime has no 360 view, and the
+player on screen needs Anton's OK; YouTube not tried (an upload). No log LUT in the 360 export (I-Log clips would
+come out flat). Head keyframes only from the command line: nothing in the player records them yet (a director's cut,
+step 8's part). Stereo and 10-bit sources go the same way but weren't tried (no clip).
 
 ### 8. Gyroflow's part (1–2 days here, the rest with upstream)
 
