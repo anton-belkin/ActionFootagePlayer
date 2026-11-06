@@ -151,8 +151,11 @@ texture or uniform buffer each frame, and the table problem disappears. The same
 rectangle on screen (`//!WIDTH OUTPUT.w`). The looks (dlogm's, at `MAIN`) then run on the output-sized picture, which
 is cheaper than now (today they run at the stabilized size). No mpv scaling follows: the warp is the scaler.
 
-Interpolation in the warp is Gyroflow's, chosen as the plugin chooses it now: Lanczos for clips up to 31 fps, bicubic
-above (main.lua's `interpolation`).
+Interpolation in the warp is Gyroflow's, and which one is a **quality/performance setting**, not a rule by frame
+rate. Today main.lua's `interpolation` picks Lanczos up to 31 fps and bicubic above, but only because on an M1 Pro
+through VapourSynth 4K Lanczos kept up at ~38 fps and bicubic at ~54: the threshold is what that machine managed, not
+something about the clip. On the GPU the costs change, so the choice becomes an option (Right click > Quality, next
+to `fps_limit`): the best the machine keeps up with by default, the user free to trade it either way.
 Where the warp shrinks the source (4K to a 1080p window: two to one), a plain bicubic aliases; the prototype widened
 its taps for that, Gyroflow's EWA is the exact answer but costs too much in real time. **(to try: bicubic over a mip
 level, widened taps, EWA, on detail like a reef; and their cost on the N100.)**
