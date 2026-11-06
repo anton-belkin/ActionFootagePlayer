@@ -58,8 +58,17 @@
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
+--   input           the source's input, from its own file: { curve, rotation, underwater } (transform.lua)
+--   view            the transform bundle saved for it that plays (a moment's or clip preview's own, else the source's);
+--                   absent: the session's plays (the gyroflow plugin's). saved: what's saved where Save writes
+--   view_target     where Save writes: moment, preview or source (absent: nowhere); view_from: where the playing
+--                   bundle is defined (those, or session); view_status: saved, changed, none; auto_save; fresh (Auto
+--                   save wrote it as it opened: it plays as the session's to its end); autoplay
 -- Without this plugin, the gyroflow plugin looks next to the clip itself, which is the same place for now.
 --
+-- The transform and the input (the side panel's Source and Transform): view-save, view-revert, view-auto (Auto save),
+-- view-own (settings of its own), input-set <curve|rotation|underwater> <value> (the source's file at once, the dlogm
+-- and gyroflow plugins'), moment-alone <yes|no|toggle>, autoplay <yes|no|toggle>.
 -- Script messages (the right-click menu): save-moment [name] (k, or without asking with a name), moment-play <i>,
 -- moment-rename <i>, moment-remove <i> (to the Trash), moment-reveal <i>, moments-folder (show it); <i> is the
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
