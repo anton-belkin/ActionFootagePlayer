@@ -3,7 +3,7 @@
 -- twin in gyroflow-export (vs-gyroflow/src/workspace.rs): keep the two in step.
 --
 -- A project is a folder with `Project.afproject` in it, the trip folder: its footage is under it, and the player's
--- files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip. Before 0.10 the
+-- files for a clip sit at the clip's own path in it (its Gyroflow project, its marks), next to the clip. Before 0.9 the
 -- mark was a folder, `_ActionFootagePlayer/`: one still makes a project (projectfile.lua moves it into the file).
 -- Separate project folders (Sources.txt) come later; every path here is already the same for them.
 --
@@ -18,7 +18,7 @@ local M = {}
 -- The file a project's state is kept in, which also marks a folder as one, and which a double click opens in Action
 -- Footage Library. Not hidden: the project is its files, where the user sees them
 M.PROJECT_FILE = "Project.afproject"
--- The folder it was before 0.10
+-- The folder it was before 0.9
 M.LEGACY_DIR = "_ActionFootagePlayer"
 
 function M.new(fs)

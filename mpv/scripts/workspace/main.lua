@@ -1,7 +1,7 @@
 -- workspace: which project the clip that plays belongs to, where that project's files for it are, and its moments
 -- (docs/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
 --
--- A project is a trip folder with `Project.afproject` in it (or, before 0.10, `_ActionFootagePlayer/`, which moves
+-- A project is a trip folder with `Project.afproject` in it (or, before 0.9, `_ActionFootagePlayer/`, which moves
 -- into it: projectfile.lua): the nearest such folder above the clip, up to the
 -- volume's top folder, and never the home folder itself. A clip in none has no project, and plays as before. One is
 -- never made by itself: the side panel's Project tab (or the menu's Project) initializes it, in the folder chosen
@@ -242,7 +242,7 @@ local tracked_cache = setmetatable({}, {
     __newindex = function(_, k, v) cache[k] = v; cache_dirty = true end,
 })
 
--- A project of before 0.10, its state folder: moved into Project.afproject the first time it's met (once a session)
+-- A project of before 0.9, its state folder: moved into Project.afproject the first time it's met (once a session)
 local migrated = {}
 local function migrate(root)
     if not root or migrated[root] then return end

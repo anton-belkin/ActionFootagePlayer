@@ -12,7 +12,7 @@ made: the link inside an MP4 (written by ffmpeg, read by mpv), what a plain remu
 Look shows, and setting a file's dates. Not checked yet: anything on Windows, and typing names in mpv's console.
 Those are marked **(to try)**.
 
-> **Since 0.10** (Action Footage Library, step 1): the project's state is one file, `Project.afproject` (JSON:
+> **Since 0.9** (Action Footage Library, step 1): the project's state is one file, `Project.afproject` (JSON:
 > settings, what was made, the names typed; `mpv/scripts/workspace/projectfile.lua`), in place of the
 > `_ActionFootagePlayer/` folder below, which the player moves into it the first time it meets one. A double click on
 > it opens the trip in Action Footage Library (`library/`), where the batches went: clip previews (and again for

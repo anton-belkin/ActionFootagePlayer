@@ -162,7 +162,7 @@ fn count_files(dir: &Path, suffixes: &[&str], depth: u32) -> u64 {
 struct ProjectInfo {
     path: String,
     name: String,
-    // Before 0.10: the player moves the folder into Project.afproject when it next opens a clip of it
+    // Before 0.9: the player moves the folder into Project.afproject when it next opens a clip of it
     legacy: bool,
     clips_flat: bool,
     moments_alone: bool,

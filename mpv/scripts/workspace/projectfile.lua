@@ -15,7 +15,7 @@
 -- Each change reads the file again, changes it and writes it whole through a temporary file renamed over it, keeping
 -- what this doesn't know: the player and Action Footage Library write it both.
 --
--- Up to 0.9 it was a folder, `_ActionFootagePlayer/`, with a file for each (clips-made.txt, clips-failed.txt,
+-- Up to 0.8 it was a folder, `_ActionFootagePlayer/`, with a file for each (clips-made.txt, clips-failed.txt,
 -- stills-made.txt, settings.json, moment-names.txt): read when there's no file, and moved into it by migrate().
 --
 -- Plain Lua, no mpv (tests/projectfile_test.lua):

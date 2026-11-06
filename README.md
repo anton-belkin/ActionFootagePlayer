@@ -773,7 +773,7 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
   folder you choose among those above the clip (the trip's, say, so that every day's folder is in it). It's a
   `Project.afproject` file there (a double click opens the trip in [Action Footage Library](#action-footage-library)),
   and `_Moments/`, `_Clips/`, `_Exports/` and `_Stills/` (photos) once there's something to keep. A project from
-  before 0.10 has an `_ActionFootagePlayer` folder instead: the player moves it into `Project.afproject` the first
+  before 0.9 has an `_ActionFootagePlayer` folder instead: the player moves it into `Project.afproject` the first
   time it opens one of its clips. A clip under a folder that has one belongs to it. A card or folder that can't be written isn't supported
   yet.
 - **On the seek bar** a moment is two chapters, its start and its end ("Turtle", "Turtle end"). The menu's
