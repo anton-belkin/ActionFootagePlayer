@@ -315,6 +315,11 @@ vec4 hook()
 #else
     // Gyroflow's frame -> the texture's pixels (the same frame unless mpv hands over another size)
     uv = (uv + 0.5) * HOOKED_size / vec2(SRC_W, SRC_H) - 0.5;
+#ifdef PLANE_OFFSET
+    // A plane read on its own (the spike's LUMA and CHROMA passes): where its samples sit against the frame's, in its
+    // pixels (MPEG-2's left-sited chroma: +0.25 across)
+    uv += PLANE_OFFSET;
+#endif
 
 #if INTERP == 4
     vec2 ux = dFdx(uv), uy = dFdy(uv);

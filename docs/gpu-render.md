@@ -75,7 +75,8 @@ From gyroflow-core at the fork's d130105 (`src/core/`):
   and a loop up to 128 px). **Background**: solid, repeat, mirror, margin with feather.
 - **Mesh correction and focal-plane distortion** (Sony) read a third buffer; the drawing overlay a fourth.
 - **On the CPU per frame**: `FrameTransform::at_timestamp`, a quaternion product and a 3×3 matrix per row, in
-  parallel; under a millisecond **(to try: measure)**, with a cache of 100 frames. Smoothing, horizon lock and the
+  parallel; 0.13–0.14 ms a frame with 2160 rows on the M1 (measured in the spike, [gpu-render-spike.md](gpu-render-spike.md)),
+  with a cache of 100 frames. Smoothing, horizon lock and the
   adaptive zoom's per-frame FOVs are already done once per clip.
 - **License**: every kernel and model file is GPL-3.0-or-later, as this repository is; libplacebo (LGPL-2.1+) is fine
   under it. The port is a derivative of Gyroflow's code and says so.
@@ -118,8 +119,8 @@ along a frame is smooth (the camera can't change direction much in 16 ms), so th
 at, say, 33 evenly spaced row times per frame, interpolated in the shader (slerp or normalized lerp between the two
 nearest knots). That is ~600 bytes a frame with the per-frame parameters, 10 MB for a 5-minute 4K60 clip.
 
-This differs from Gyroflow's nearest-row lookup **(to try: the largest difference in pixels over a fast clip, against
-`cpu_undistort.rs`; 33 knots, 65, or the full rows if it matters)**. IBIS/OIS and breathing (Sony, some others) go
+This differs from Gyroflow's nearest-row lookup by at most 0.02 px with 33 knots, measured against `cpu_undistort.rs`
+on a vibrating HERO7 flight clip ([gpu-render-spike.md](gpu-render-spike.md)): 33 knots it is; 17 cost 0.04 px, 9 cost 0.07. IBIS/OIS and breathing (Sony, some others) go
 as further knot tracks only for clips that have them.
 
 ### Getting the numbers to the shader
@@ -129,8 +130,8 @@ texture. The table has to be a `//!TEXTURE` in a shader file, which mpv loads wi
 writes a shader file (as dlogm writes its LUT shaders) with the clip's table embedded, and puts it in
 `file-local-options/glsl-shaders`. Questions this raises:
 
-- **Size and load time**: 10 MB of floats is 20 MB of hex for libplacebo to parse **(to try: the load time; the LUT
-  shaders are 4.4 MB)**. Long clips (an hour at 60 fps: 125 MB) need windows: a table per few minutes, the next one
+- **Size and load time**: 10 MB of floats is 20 MB of hex for libplacebo to parse. Measured on the N100: a 3.2 MB table
+  shader adds 0.1 s to mpv's start, a 165 MB one 2.3 s ([gpu-render-spike.md](gpu-render-spike.md)). Long clips (an hour at 60 fps: 125 MB) need windows: a table per few minutes, the next one
   written ahead and swapped in **(to try: whether swapping `glsl-shaders` drops a frame)**.
 - **Motion streaming** (#80: a clip without a project starts after ~1 s and its motion data keeps arriving): the
   table grows as data comes in. Either the shader is rewritten a few times early in the clip (at 2 s, 8 s, then the
@@ -160,8 +161,9 @@ because on an M1 Pro through VapourSynth 4K Lanczos kept up at ~38 fps and bicub
 not something about the clip.
 
 Where the warp shrinks the source a lot (4K into a 1080p window: two to one), a plain bicubic aliases; the prototype
-widened its taps, Gyroflow's EWA is the exact answer but costs most. **(to try: those, and a prefiltered half-size
-source, on detail like a reef; and their cost on the N100.)**
+widened its taps, Gyroflow's EWA is the exact answer but costs most. Their cost on the N100 and the M1 Pro is in
+[gpu-render-spike.md](gpu-render-spike.md): widened bicubic 24 ms on the N100, EWA 42, both too much there **(to try: a
+prefiltered half-size source, on detail like a reef)**.
 
 ### Chromatic correction inside the warp, or not at all
 
@@ -315,7 +317,7 @@ What a pass costs scales with one of three things, and that decides which knob h
 | Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
 | Chromatic under water | inside the warp, every channel with the main kernel · red and blue bilinear · off | under water only: output px × 3 × taps, or × (taps + 2) | Exists as `chromatic_skip`. Never as a pass at the end (above); out of water it costs nothing |
 | Edge fill | sphere · smooth · off; the sphere's resolution; written every frame or every n-th | the composite: output px; the sphere: per frame (its texels) | Exists (`edges`, `edge_fill_rate`); on the GPU the sphere may be cheap enough that the rate goes **(to try)** |
-| Conversion before the warp | the warp reads the Y and CbCr planes and converts only what it samples · mpv converts the whole source to RGB and the warp reads that | the first: only the warp's taps; the second: source px with chroma upsampling | A design choice more than a setting, and the biggest saving on weak GPUs, which spend most of a frame on source-sized passes. Both allow the chromatic correction. **(to try: whether a pass can bind LUMA and CHROMA and replace MAIN so libplacebo skips converting the source; if mpv won't, the plane-reading warp is for our renderer only)** |
+| Conversion before the warp | the warp reads the Y and CbCr planes and converts only what it samples · mpv converts the whole source to RGB and the warp reads that | the first: only the warp's taps; the second: source px with chroma upsampling | A design choice more than a setting, and the biggest saving on weak GPUs, which spend most of a frame on source-sized passes. Both allow the chromatic correction. In mpv it works as LUMA and CHROMA passes at the output size (libplacebo then converts at 1080p); it pays only with the geometry computed once for both ([gpu-render-spike.md](gpu-render-spike.md)) |
 | HDR on an SDR screen | peak detection on · off | per frame, a compute pass | mpv's `hdr-compute-peak` |
 | The stream (server) | 2160p · 1080p · 720p; how many streams | output px | The encoder (VDEnc) is fixed-function hardware and doesn't use the shader cores; streams share the shader cores |
 
@@ -356,7 +358,7 @@ full chromatic, the video's size), as `paused_full_size` does now.
 
 ## Steps
 
-1. **Spike** (a few days): the opencv_fisheye path of the kernel as an mpv hook with `PTS` and an embedded table
+1. **Spike** (done 2026-11-06, [gpu-render-spike.md](gpu-render-spike.md)): the opencv_fisheye path of the kernel as an mpv hook with `PTS` and an embedded table
    written by a small CLI on vs-gyroflow; clip 0126 frame-exact against VapourSynth; knots vs rows; the table's load
    time; cost on the N100 and the M1, knob by knob (interpolations, shrinking, the plane-reading warp). Needs mpv 0.42 on the NAS (built in the container).
 2. **The player**: all lens models and digital lenses our cameras use, the interpolations, chromatic inside the warp,
