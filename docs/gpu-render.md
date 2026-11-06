@@ -221,7 +221,7 @@ and a denoise for screenshots and exports, can move into the renderer later. Not
 | Host | mpv | Status of `PTS` | Notes |
 |---|---|---|---|
 | Mac app | our build, pinned at mpv fba6342 with patches | has it | **The DV looks present through AVSampleBufferDisplayLayer (patch 0002), which runs no user shaders**: the warp would need to run before that layer gets its frame, a change to patch 0002, or the DV looks keep the VapourSynth path |
-| Windows app | shinchiro's build | has it (the one we ship, 20261018 at mpv 01e2533, is after the change) | nothing else needed |
+| Windows app | shinchiro's build today; our own build with our patches, as on the Mac (decided 2026-11-06) | has it (the build we ship, 20261018 at mpv 01e2533, is after the change) | the generic patches (0001, 0003, 0011) and the 360 tracks patch can then apply there too |
 | Linux | the distribution's | mpv 0.42.0, released 2026-11-05; distros will follow | **VapourSynth is no longer needed for playback**: Debian, Ubuntu and Arch's mpv lack it today; the plugin needs only gpu-next and its own binaries |
 | Streaming server | none: our renderer | n/a | below |
 
@@ -247,7 +247,7 @@ stream (1080p HDR, Dolby Vision if possible). Its render:
 
 The same renderer, writing a file instead of a stream, is the export.
 
-## 360° cameras: later, on the Mac, with the same kernel
+## 360° cameras: later, on the Mac and Windows, with the same kernel
 
 Not part of the first steps, and not for Linux or the NAS (no need there for now), but the same port is what 360
 playback on the Mac needs for 8K60.
@@ -276,19 +276,17 @@ The stamp under the sphere becomes the per-frame table, as for flat clips.
 tracks' decoders, so today they are decoded with a copy to memory and joined there. Keeping them on the GPU needs an
 mpv patch that hands both decoded tracks to libplacebo as textures, zero-copy.
 
-Only the Mac app builds its own mpv today (`tools/build_mpv.sh`, in CI). The Windows app ships shinchiro's prebuilt
-mpv, and on Linux the plugins go into the distribution's mpv. Patching there is possible, at a cost:
+Only the Mac app builds its own mpv today (`tools/build_mpv.sh`, in CI); the Windows app ships shinchiro's prebuilt
+mpv, and on Linux the plugins go into the distribution's mpv. **Decided 2026-11-06: the Windows app builds its own
+mpv too** (shinchiro's mpv-winbuild-cmake with our patches, cross-compiled in CI, x86-64 and arm64, pinned and kept up
+with mpv as the Mac build is). It changes nothing for users: the app ships an mpv either way. Linux stays as it is
+for now (shipping our own mpv there would change how the Linux version is delivered).
 
-- **Windows**: our own mpv build in CI (shinchiro's mpv-winbuild-cmake with our patches, cross-compiled from Linux,
-  x86-64 and arm64), kept up with mpv as the Mac build is. The patch's GPU side is per decoder: D3D11VA there,
-  VideoToolbox on the Mac, VAAPI and NVDEC on Linux.
-- **Linux**: shipping an mpv of our own (an AppImage or a Flatpak) instead of plugins for the user's.
-- **Better, for all three**: the patch written generally (through mpv's hwdec interop, not for one decoder) and
-  offered to mpv upstream, where the limit ("decoders not linked to vo_chain must not use the hwdec context") is a
-  known one. Taken, every build gets it; until then the Mac app carries it.
-
-Until one of those, Windows and Linux keep the VapourSynth path for 360. Our own renderer decodes the tracks itself
-and needs no patch, if 360 is ever wanted there.
+The patch's GPU side is per decoder: VideoToolbox on the Mac, D3D11VA on Windows (VAAPI and NVDEC if Linux ever
+needs it). Written generally (through mpv's hwdec interop) it can also go to mpv upstream, where the limit ("decoders
+not linked to vo_chain must not use the hwdec context") is a known one; taken, the distributions' mpv gets it too.
+Until then Linux keeps the VapourSynth path for 360; our own renderer decodes the tracks itself and needs no patch,
+if 360 is ever wanted there.
 
 ## Quality and speed
 
@@ -366,7 +364,7 @@ full chromatic, the video's size), as `paused_full_size` does now.
 3. **The edge fill** on the GPU (sphere and smooth).
 4. **The renderer and streaming** on the NAS: VAAPI → libplacebo → VDEnc, HLS, Dolby Vision 8.4.
 5. **The export** through the renderer; then the still frame, and maybe a denoise for stills and exports.
-6. **360 on the Mac**: an mpv patch for both lens tracks as textures, the sphere made on the GPU; 8K60.
+6. **360 on the Mac and Windows** (both with our own mpv): an mpv patch for both lens tracks as textures, the sphere made on the GPU; 8K60.
 
 ## Open questions
 
