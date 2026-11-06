@@ -2,10 +2,11 @@
 -- without the gyroflow plugin (its probe's user-data/gyroflow/spherical, set here before view360's hook reads it); then,
 -- once the view is up, the clip paused or playing, the gestures made up at hz (--macos-latency-test) or left to the
 -- fingers for the seconds given, and mpv quits.
---   --script-opts=latency360-hz=120,latency360-seconds=10,latency360-pause=yes
+--   --script-opts=latency360-hz=120,latency360-seconds=10,latency360-pause=yes,latency360-sync=auto
+-- sync: macos-display-sync for the run, over what view360 sets (fullscreen: no vsync wait in a window)
 local mp = require 'mp'
 local options = require 'mp.options'
-local o = { hz = 0, seconds = 10, pause = false, settle = 2 }
+local o = { hz = 0, seconds = 10, pause = false, settle = 2, sync = "" }
 options.read_options(o, "latency360")
 
 mp.add_hook("on_load", 50, function()
@@ -17,6 +18,7 @@ mp.register_event("file-loaded", function()
     if started then return end
     started = true
     mp.set_property_native("pause", o.pause)
+    if o.sync ~= "" then mp.set_property("file-local-options/macos-display-sync", o.sync) end
     mp.add_timeout(o.settle, function()
         mp.msg.info(string.format("latency run: %s, %s for %g s", o.pause and "paused" or "playing",
             o.hz > 0 and (o.hz .. " Hz of made-up scrolls") or "the trackpad", o.seconds))
