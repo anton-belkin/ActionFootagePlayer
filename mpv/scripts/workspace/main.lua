@@ -823,7 +823,62 @@ local function reveal(file, folder)
     else run({ "xdg-open", folder and file or (ws.parent(file) or ".") }) end
 end
 
+-- Windows has a Recycle Bin on local fixed drives only: what's sent there from a network share or a removable drive
+-- (a card) is deleted for good, without a word. Asked of the drive once a session
+local recycle_bins = {}
+local function has_recycle_bin(file)
+    if not windows then return true end
+    if file:match("^[/\\][/\\]") then return false end
+    local root = file:match("^(%a):")
+    if not root then return false end
+    root = root:upper()
+    if recycle_bins[root] == nil then
+        local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stdout = true,
+            args = { "powershell", "-NoProfile", "-Command", "([IO.DriveInfo]'" .. root .. ":\\').DriveType" } })
+        recycle_bins[root] = r and r.status == 0 and (r.stdout or ""):match("Fixed") ~= nil
+    end
+    return recycle_bins[root]
+end
+
+-- Where a file goes instead, on the same drive (a rename, instant): the project's _ActionFootagePlayer\Trash\ at the
+-- file's path in the project, else .Trash\ beside it (a dot folder: never taken for footage)
+local TRASH_DIR = "Trash"
+local function trash_folder(file)
+    local project = ws.project_root(file)
+    local rel = project and ws.relative(file, project)
+    if rel then
+        return ws.parent(ws.join(ws.join(ws.join(project, workspace.STATE_DIR), TRASH_DIR), (rel:gsub("/", "\\"))))
+    end
+    return ws.join(ws.parent(file), ".Trash")
+end
+
+-- Where the Trash is for a file, as the OSD says it: "the Trash", or the folder it goes to instead
+local function trash_name(file)
+    if has_recycle_bin(file) then return "the Trash" end
+    local dir = trash_folder(file)
+    local own = dir:find(workspace.STATE_DIR .. "\\" .. TRASH_DIR, 1, true)
+    return (own and (workspace.STATE_DIR .. "\\" .. TRASH_DIR) or ".Trash beside it") .. " (this drive has no Recycle Bin)"
+end
+
+local function move_aside(file)
+    local dir = trash_folder(file)
+    if not fs.is_dir(dir) and not mkdir(dir) then return false end
+    local name = ws.name(file)
+    -- A name taken already (the same moment removed twice): "Turtle (2).afplink.mp4"
+    local stem, ext = name:match("^(.-)(%.afplink%.mp4)$")
+    if not stem then stem, ext = name:match("^(.+)(%.[^.]+)$") end
+    stem, ext = stem or name, ext or ""
+    local target, n = ws.join(dir, name), 2
+    while fs.is_file(target) or fs.is_dir(target) do
+        target = ws.join(dir, stem .. " (" .. n .. ")" .. ext)
+        n = n + 1
+    end
+    return os.rename(file, target) ~= nil and not fs.is_file(file)
+end
+
+-- The file to the Trash; done(it went). Where there's none (has_recycle_bin), aside into trash_folder instead
 local function trash(file, done)
+    if not has_recycle_bin(file) then return done(move_aside(file)) end
     local args
     if macos then
         if fs.is_file("/usr/bin/trash") then
@@ -868,8 +923,9 @@ end)
 mp.register_script_message("moment-remove", function(i)
     local m = moment_at(i)
     if not m then return end
+    local where = trash_name(m.file)
     trash(m.file, function(ok)
-        mp.osd_message(ok and (m.name .. " is in the Trash") or ("Couldn't move " .. m.name .. " to the Trash"), 3)
+        mp.osd_message(ok and (m.name .. " is in " .. where) or ("Couldn't move " .. m.name .. " to " .. where), 3)
         -- Its own Gyroflow project goes with it
         local own = own_project(m.file)
         if ok and fs.is_file(own) then trash(own, function() end) end
@@ -1203,8 +1259,9 @@ mp.add_key_binding("X", "not-interesting", function()
         local info = utils.file_info(state.clip)
         local preview = preview_for(state.relative, info and info.size)
         if preview then
+            local where = trash_name(preview)
             return trash(preview, function(ok)
-                mp.osd_message(ok and "Not interesting: its preview is in the Trash (X again: made again)" or "Couldn't move the preview to the Trash", 3)
+                mp.osd_message(ok and ("Not interesting: its preview is in " .. where .. " (X again: made again)") or ("Couldn't move the preview to " .. where), 3)
                 recount()
             end)
         end
@@ -1384,6 +1441,7 @@ local function cut_finish()
         if fs.is_file(own_project(preview)) then originals[#originals + 1] = own_project(preview) end
     end
     if marks_file and fs.is_file(marks_file) then originals[#originals + 1] = marks_file end
+    local where = trash_name(c.clip)
     trash(c.clip, function(ok)
         local function restore_idle() if c.idle then mp.set_property("idle", c.idle) end end
         if not ok then
@@ -1397,7 +1455,7 @@ local function cut_finish()
             state.cutting = nil
             restore_idle()
             mp.commandv("loadfile", c.clip, "replace")
-            return mp.osd_message("The original couldn't go to the Trash: it's as it was, the parts beside it as " .. c.stem .. " (cut 1)…", 8)
+            return mp.osd_message("The original couldn't go to " .. where .. ": it's as it was, the parts beside it as " .. c.stem .. " (cut 1)…", 8)
         end
         table.remove(originals, 1)
         trash_all(originals, function(left)
@@ -1468,11 +1526,11 @@ local function cut_finish()
             mp.commandv("loadfile", at.file, "replace")
             local lines = { #c.parts == 1 and ("Cut out: " .. at.name .. " is the part kept")
                 or ("Cut out: " .. c.parts[1].name .. " and " .. c.parts[2].name .. " are the parts kept"),
-                "The original is in the Trash" }
+                "The original is in " .. where }
             if doc then lines[#lines + 1] = marks_kept .. " marks kept" end
             if #c.moments > 0 then lines[#lines + 1] = relinked .. " moments relinked" end
             if #orphans > 0 then lines[#lines + 1] = "Moments in the part cut out, to the Trash with it: " .. table.concat(orphans, ", ") end
-            if project_file then lines[#lines + 1] = "Its Gyroflow project is in the Trash too: Ctrl+e makes one again" end
+            if project_file then lines[#lines + 1] = "Its Gyroflow project went with it: Ctrl+e makes one again" end
             if #own_gone > 0 then lines[#lines + 1] = "Their own Gyroflow projects to the Trash (made for the original), they play with their settings: " .. table.concat(own_gone, ", ") end
             if #left > 0 then lines[#lines + 1] = "Not moved to the Trash: " .. table.concat(left, ", ") end
             mp.msg.info(table.concat(lines, "; "))
@@ -1546,7 +1604,7 @@ local function cut_out(a, b)
     input.select({
         prompt = "Cut " .. clock(a) .. "–" .. (b >= duration - 0.001 and "end" or clock(b)) .. " out of " .. name .. "? Kept: "
             .. table.concat(kept, " and ") .. (#parts > 1 and " (two clips; the second from the keyframe at or before " .. clock(b) .. ")" or "")
-            .. ", without re-encoding. The original goes to the Trash.",
+            .. ", without re-encoding. The original goes to " .. trash_name(state.clip) .. ".",
         items = { "Cut it out", "Keep the clip as it is" },
         submit = function(i)
             if i ~= 1 then return end

@@ -526,7 +526,8 @@ right within the trip, on the wrong day.
   old. On Windows the stars live in the file, so the writer copies the `Xtra` atom from the old file into the
   new one **(to try)**.
 - **Renaming**: in Finder, or *Rename…* in the player's menu (the same dialog), which renames the file.
-- **Removing**: in Finder, or *Remove* in the player (to the Trash, never deleted for good).
+- **Removing**: in Finder, or *Remove* in the player (to the Trash, never deleted for good: on Windows, from a
+  drive without a Recycle Bin, into the project's `_ActionFootagePlayer\Trash\`).
 
 ## Clips: the trip at a glance
 
@@ -710,7 +711,9 @@ first".
      every 5 s); what's read of each file is cached in mpv's cache folder by size and time.
    - The clip's moments are chapters beside the highlights (put back when another plugin sets the chapters) and
      a *Moments* submenu: play, rename, remove (to the Trash: macOS's `trash`, Windows' recycle bin, `gio trash`),
-     show in Finder.
+     show in Finder. Windows has a Recycle Bin on local fixed drives only, and deletes for good what's sent there
+     from a network share or a removable drive: there the file goes aside on the same drive instead, into
+     `_ActionFootagePlayer\Trash\` at its path in the project (`.Trash\` beside it outside one), and the OSD says so.
    - A moment's file plays its original (`stream-open-filename`), looping its part, titled with its name; the
      other plugins read the clip from `user-data/workspace/clip` (gyroflow and its export, dlogm, the telemetry,
      highlights, the menu, the agent's notes). Opened on its own, mpv first makes the playlist of the files beside
