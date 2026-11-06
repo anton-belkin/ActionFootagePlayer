@@ -192,13 +192,12 @@ function M.clamp_fov(projection, fov)
 end
 
 -- view360.glsl's parameters for the view (glsl-shader-opts), as strings
-function M.shader_opts(v, aspect, stereo, heading)
+function M.shader_opts(v, stereo, heading)
     return {
         view360_yaw = string.format("%.4f", v.yaw), view360_pitch = string.format("%.4f", v.pitch),
         view360_roll = string.format("%.4f", v.roll), view360_fov = string.format("%.4f", v.fov),
         view360_projection = tostring(M.PROJECTION_INDEX[v.projection] or 0),
-        view360_aspect = string.format("%.6f", aspect or 0), view360_stereo = tostring(stereo or 0),
-        view360_heading = tostring(heading or 0),
+        view360_stereo = tostring(stereo or 0), view360_heading = tostring(heading or 0),
     }
 end
 

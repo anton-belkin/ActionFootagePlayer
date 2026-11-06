@@ -76,7 +76,8 @@ local note = nil
 local crop_on = false
 local input = nil
 
--- The video's area in the window (keepaspect is off while the view is on: the video fills it), in OSD pixels
+-- The video's area in the window, less the margins (the side panel's), in OSD pixels: while the view is on, the
+-- video's aspect is this area's, so the video fills it
 local function area()
     local d = mp.get_property_native("osd-dimensions")
     if not d or d.w <= 0 or d.h <= 0 then return nil end
@@ -103,8 +104,7 @@ local function apply()
     for k in pairs(opts) do if k:match("^view360_") then opts[k] = nil end end
     local key = "off"
     if active then
-        local a = area()
-        local mine = view.shader_opts(cur, a and a.w / a.h or 0, STEREO_INDEX[sphere.stereo] or 0, HEADING_INDEX[heading])
+        local mine = view.shader_opts(cur, STEREO_INDEX[sphere.stereo] or 0, HEADING_INDEX[heading])
         mine.view360_on = "1"
         local parts = {}
         for k, v in pairs(mine) do opts[k] = v; table.insert(parts, k .. "=" .. v) end
@@ -177,25 +177,40 @@ if gestures then
     })
 end
 
--- keepaspect as it was before the view turned it off
-local keepaspect = nil
+-- The video's aspect the area's (video-aspect-override, as whole pixels), so mpv puts the view over all of it; and the
+-- window free to take any shape (keepaspect-window), which then changes the aspect. saved: both as they were
+local saved = nil
+local aspect_set = nil
+local function fit()
+    local a = area()
+    if not active or not a then return end
+    local value = string.format("%d:%d", math.floor(a.w + 0.5), math.floor(a.h + 0.5))
+    if value == aspect_set then return end
+    aspect_set = value
+    mp.set_property("file-local-options/video-aspect-override", value)
+end
 
 -- The view on or off. ending: the file's ending, and mpv puts its file-local options back itself
 local function set_active(on, ending)
     on = on and sphere ~= nil and shader
     if on == active then return end
     active = on
+    aspect_set = nil
     if on then
-        keepaspect = mp.get_property("keepaspect")
-        mp.set_property("file-local-options/keepaspect", "no")
+        saved = { aspect = mp.get_property("video-aspect-override"), window = mp.get_property("keepaspect-window") }
+        mp.set_property("file-local-options/keepaspect-window", "no")
+        fit()
         if input then
             input:set(true)
             input:pause(crop_on)
         end
     else
         if input then input:set(false) end
-        if not ending and keepaspect then mp.set_property("file-local-options/keepaspect", keepaspect) end
-        keepaspect = nil
+        if not ending and saved then
+            mp.set_property("file-local-options/video-aspect-override", saved.aspect or "-1")
+            mp.set_property("file-local-options/keepaspect-window", saved.window or "yes")
+        end
+        saved = nil
     end
     apply()
 end
@@ -239,15 +254,17 @@ mp.register_event("file-loaded", function()
 end)
 
 mp.register_event("end-file", function()
+    -- The hint isn't the next clip's
+    if active then mp.osd_message("", 0) end
     set_active(false, true)
     sphere, note = nil, nil
     publish()
 end)
 
--- The window or the side panel changing the video's area: its aspect
+-- The window or the side panel changing the video's area: the view's size
 for _, prop in ipairs({ "osd-dimensions", "video-margin-ratio-right", "video-margin-ratio-left", "video-margin-ratio-top",
                         "video-margin-ratio-bottom" }) do
-    mp.observe_property(prop, "native", function() if active then apply() end end)
+    mp.observe_property(prop, "native", function() if active then fit() end end)
 end
 
 -- Crop mode on top of the view has the gestures while it's on

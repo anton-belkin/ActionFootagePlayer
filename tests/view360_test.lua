@@ -26,7 +26,8 @@ local function fake_mp()
     f.props["osd-dimensions"] = { w = 1600, h = 900 }
     f.props["display-hidpi-scale"] = 2
     f.props["window-dragging"] = true
-    f.props["keepaspect"] = "yes"
+    f.props["keepaspect-window"] = "yes"
+    f.props["video-aspect-override"] = "-1"
     f.props["vo"] = "gpu-next"
     -- The app's mpv: the option's there
     f.props["macos-gesture-messages"] = false
@@ -196,7 +197,7 @@ end
 expect("wrap 190", view.wrap(190), -170)
 expect("wrap -190", view.wrap(-190), 170)
 do
-    local o = view.shader_opts({ yaw = 1.5, pitch = -2, roll = 0, fov = 100, projection = "planet" }, 16 / 9, 1, 2)
+    local o = view.shader_opts({ yaw = 1.5, pitch = -2, roll = 0, fov = 100, projection = "planet" }, 1, 2)
     expect("opts projection", o.view360_projection, "3")
     expect("opts yaw", o.view360_yaw, "1.5000")
     expect("opts stereo", o.view360_stereo, "1")
@@ -335,7 +336,7 @@ do
     f.load(false)
     local opts = f.props["glsl-shader-opts"] or {}
     expect("ordinary: shader off", opts.view360_on, "0")
-    expect("ordinary: keepaspect untouched", f.props["file-local-options/keepaspect"], nil)
+    expect("ordinary: aspect untouched", f.props["file-local-options/video-aspect-override"], nil)
     expect("ordinary: no forced bindings", f.forced(), 0)
     expect("ordinary: window still dragged", f.props["window-dragging"], true)
     expect("ordinary: not available", f.props["user-data/view360"].available, false)
@@ -347,16 +348,16 @@ do
     opts = f.props["glsl-shader-opts"]
     expect("360: shader on", opts.view360_on, "1")
     expect("360: others' options kept", opts.denoise_strength, "2")
-    expect("360: keepaspect off", f.props["file-local-options/keepaspect"], "no")
+    expect("360: the window's aspect", f.props["file-local-options/video-aspect-override"], "1600:900")
+    expect("360: the window free", f.props["file-local-options/keepaspect-window"], "no")
     expect("360: gestures taken", f.forced() >= 10, true)
     expect("360: initial heading", opts.view360_yaw, "30.0000")
-    near("360: aspect of the window", tonumber(opts.view360_aspect), 1600 / 900, 1e-5)
     local st = f.props["user-data/view360"]
     expect("360: available", st.available, true)
     expect("360: active", st.active, true)
     -- The side panel: the area narrower, the aspect follows
     f.set("video-margin-ratio-right", 0.25)
-    near("360: aspect beside the panel", tonumber(f.props["glsl-shader-opts"].view360_aspect), 1200 / 900, 1e-5)
+    expect("360: the aspect beside the panel", f.props["file-local-options/video-aspect-override"], "1200:900")
     f.set("video-margin-ratio-right", 0)
     -- The wheel: closer
     local fov = tonumber(f.props["glsl-shader-opts"].view360_fov)
@@ -395,7 +396,8 @@ do
     -- Off by hand: the sphere flat, keepaspect back
     f.bindings["toggle"].fn()
     expect("toggled off: shader off", f.props["glsl-shader-opts"].view360_on, "0")
-    expect("toggled off: keepaspect back", f.props["file-local-options/keepaspect"], "yes")
+    expect("toggled off: aspect back", f.props["file-local-options/video-aspect-override"], "-1")
+    expect("toggled off: window aspect back", f.props["file-local-options/keepaspect-window"], "yes")
     expect("toggled off: gestures given back", f.forced(), 0)
     expect("toggled off: window dragged", f.props["window-dragging"], true)
     f.bindings["toggle"].fn()

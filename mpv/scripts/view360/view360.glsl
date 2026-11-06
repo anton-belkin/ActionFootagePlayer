@@ -15,18 +15,22 @@
 // stereographic d = 1 (shapes kept, up to nearly the whole sphere); auto goes from one to the other between 100° and
 // 160°; the little planet is the stereographic looking straight down, the way ahead at the top.
 //
+// No directive marks (two slashes and a bang) in the comments of a pass: libplacebo takes them as directives anywhere.
+//
 // Filtering: Mitchell-Netravali bicubic where the view enlarges the sphere or keeps its size. Where it shrinks it (a
 // wide view, near the poles, the little planet's rim) the kernel widens by as much, up to 4 times, each way on its own
 // (along the longitude and the latitude), with taps half its new width apart, each a bilinear fetch, so it doesn't
 // shimmer.
 //
 // The pass replaces MAIN, before subtitles and the looks' color shaders (the dlogm plugin's, at MAIN and later), with
-// a texture the size of the output: main.lua sets keepaspect=no, so mpv shows it over the whole video area as it is.
-// view360_aspect is that area's width over its height. view360_on is 0 for any clip that isn't a sphere: the pass
-// doesn't run.
+// a texture the size of the video's rectangle on screen (OUTPUT, libplacebo's dst_rect), so mpv shows it as it is.
+// main.lua sets video-aspect-override to the shape of the video's area in the window (beside the side panel,
+// whatever its margins), so that rectangle is all of it. (keepaspect=no would fill the area too, but mpv then leaves out
+// the margins: the view would go on under the side panel.) view360_on is 0 for any clip that isn't a sphere: the
+// pass doesn't run.
 //
 // Parts of the ideas are from mpv360 by Kacper Michajłow (https://github.com/kasper93/mpv360, MIT license): the hook,
-// keepaspect off, a cubic kernel over the sphere.
+// a cubic kernel over the sphere.
 
 //!PARAM view360_on
 //!TYPE DYNAMIC int
@@ -76,12 +80,6 @@
 //!MAXIMUM 2
 0
 
-//!PARAM view360_aspect
-//!TYPE DYNAMIC float
-//!MINIMUM 0.0
-//!MAXIMUM 100.0
-0.0
-
 //!HOOK MAINPRESUB
 //!BIND HOOKED
 //!WIDTH OUTPUT.w
@@ -97,11 +95,11 @@
 #define HALF_WIDTH (16.0 / 9.0)
 
 // ---- The stamp (step 1 of docs/360-implementation-plan.md) ----
-// A LUMA pass will read the rows the plugin writes under the sphere (raw luma, texel fetches) and //!SAVE them; this
-// pass will //!BIND that texture and stamp_read() decode it: the camera in the world at the middle of the frame, the
-// chosen mode's heading (its yaw in the world), and how many rows of the frame are the stamp's. Until then no frame
-// is stamped: a stitched clip's camera is level and fixed (the stitching software leveled it, or it was), its heading
-// straight ahead, and the sphere is the whole frame.
+// A LUMA pass will read the rows the plugin writes under the sphere (raw luma, texel fetches) and save them (SAVE);
+// this pass will bind that texture (BIND) and stamp_read() decode it: the camera in the world at the middle of the
+// frame, the chosen mode's heading (its yaw in the world), and how many rows of the frame are the stamp's. Until
+// then no frame is stamped: a stitched clip's camera is level and fixed (the stitching software leveled it, or it
+// was), its heading straight ahead, and the sphere is the whole frame.
 bool stamp_read(out mat3 world_from_cam, out float heading_yaw, out float stamp_rows)
 {
     world_from_cam = mat3(1.0);
@@ -202,7 +200,7 @@ vec4 hook()
     if (view360_stereo == 1) eye_size.y = floor(frame.y * 0.5);
     if (view360_stereo == 2) eye_size.x = floor(frame.x * 0.5);
 
-    float aspect = view360_aspect > 0.0 ? view360_aspect : target_size.x / target_size.y;
+    float aspect = target_size.x / target_size.y;
     float d = projection_distance();
     float fov = radians(view360_fov) * 0.5;
     float k = HALF_WIDTH * (cos(fov) + d) / sin(fov);
