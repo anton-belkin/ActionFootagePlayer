@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Organizing your footage · Action Footage Player</title>
+<meta name="description" content="Keep a trip's best parts as moments you can see in Finder or File Explorer, mark clips, set the dull ones aside, export into one folder, cut out an accidental minute, and take it all to Final Cut Pro, DaVinci Resolve or Premiere Pro. All of it as plain files in the trip's folder.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/organizing">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/organizing">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/organizing">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/organizing">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/organizing">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="organizing.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, home">
+      <img class="brand-mark" src="icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Site">
+      <details class="navmenu"><summary>Home</summary>
+        <ul>
+          <li><a href="index.html">Home page</a></li>
+          <li><a href="index.html#features">What it does</a></li>
+          <li><a href="index.html#how">How it works</a></li>
+          <li><a href="index.html#faq">Questions</a></li>
+          <li><a href="about.html">About the maker</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Who it&rsquo;s for</summary>
+        <ul>
+          <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+          <li><a href="moments.html">Active travelers</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Features</summary>
+        <ul>
+          <li><a href="log.html">Log footage</a></li>
+          <li><a href="stabilization.html">Stabilization</a></li>
+          <li><a href="organizing.html" aria-current="page">Organizing</a></li>
+          <li><a href="photos.html">Photos</a></li>
+          <li><a href="360.html">360 video</a></li>
+          <li><a href="features.html" class="nm-all">All features</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Download</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Home</li>
+        <li><a href="index.html">Home page</a></li>
+        <li><a href="index.html#features">What it does</a></li>
+        <li><a href="index.html#how">How it works</a></li>
+        <li><a href="index.html#faq">Questions</a></li>
+        <li><a href="about.html">About the maker</a></li>
+        <li class="sm-group">Who it&rsquo;s for</li>
+        <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+        <li><a href="moments.html">Active travelers</a></li>
+        <li class="sm-group">Features</li>
+        <li><a href="log.html">Log footage</a></li>
+        <li><a href="stabilization.html">Stabilization</a></li>
+        <li><a href="organizing.html" aria-current="page">Organizing</a></li>
+        <li><a href="photos.html">Photos</a></li>
+        <li><a href="360.html">360 video</a></li>
+        <li><a href="features.html">All features</a></li>
+        <li class="sm-dl"><a href="download.html">Download</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Language: English"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>EN</summary>
+      <ul>
+        <li><a href="organizing.html" hreflang="en" lang="en" aria-current="page">English</a></li>
+        <li><a href="fr/organizing.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="ru/organizing.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="zh/organizing.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band lib-hero" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Organizing</p>
+        <h1>Organizing your footage, as plain files.</h1>
+        <p class="lede">Keep a trip's best parts as moments, mark what matters, set the dull clips aside, and export into one folder. When it's time for the proper edit, Final Cut Pro, DaVinci Resolve or Premiere Pro gets all of it, on your original clips.</p>
+        <ul class="lib-gets">
+          <li><strong>Nothing to import.</strong> Everything is a file in the trip's folder, which <span class="os-mac">Finder</span><span class="os-win">File Explorer</span> shows like any other.</li>
+          <li><strong>Viewing is never saving.</strong> Opening and watching a clip writes nothing. The player writes only when you press a key or a button for it, or turn on <strong>Auto save</strong>.</li>
+          <li><strong>No hidden files.</strong> Every file the player makes is one you can see, move and delete.</li>
+        </ul>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download free for Mac</span><span class="os-win">Download for Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download for Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The folder -->
+  <section class="section band" id="folder">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">The trip's folder</p>
+        <h2>One folder per trip. You can see all of it.</h2>
+        <p class="lede">A trip's folder, after an evening with the player. Its own folders start with an underscore, so they sort first, above your footage. Its one file, <code>Project.afproject</code>, has no underscore, so it sorts by name among your day folders.</p>
+        <p>The sizes on the right tell the story: the originals and the exports are big, the moments and the clips' flip-books are tiny. Keep hundreds of them, and copy them anywhere.</p>
+        <p>Delete a moment's file, and the moment is gone. Delete a clip's preview, and the clip is set aside. Make subfolders in <code>_Moments</code> to sort your moments: they're yours, and your editor gets them as bins.</p>
+      </div>
+      <div class="stack">
+      <ul class="lib-tree" aria-label="A trip's folder after an evening with the player">
+        <li><span class="dir">2026-10 Egypt</span><span class="c">the folder you made the project in</span>
+          <ul>
+            <li><span class="dir">_Moments</span>
+              <ul>
+                <li><span class="sz">0.3 MB</span>Turtle.afplink.mp4<span class="c">a moment: one frame to see, a link to the original inside</span></li>
+                <li><span class="sz">2 MB</span>Turtle.gyroflow<span class="c">its own Gyroflow project, when the clip had one</span></li>
+                <li><span class="dir">Reef</span><span class="c">a subfolder of your own</span>
+                  <ul><li><span class="sz">0.3 MB</span>Moray eel.afplink.mp4</li></ul>
+                </li>
+                <li><span class="sz">0.3 MB</span>export_2026-10-22 15.28.52.afplink.mp4<span class="c">saved by an export of a part that wasn't a moment yet</span></li>
+              </ul>
+            </li>
+            <li><span class="dir">_Clips</span>
+              <ul>
+                <li><span class="dir">Day 1</span>
+                  <ul><li><span class="sz">0.4 MB</span>DJI_20261022152841_0068_D.afplink.mp4<span class="c">a flip-book of the clip, in color</span></li></ul>
+                </li>
+              </ul>
+            </li>
+            <li><span class="dir">_Exports</span>
+              <ul><li><span class="sz big">115 MB</span>Turtle.mov<span class="c">and Turtle (SDR).mov, Turtle (Dolby Vision).mov</span></li></ul>
+            </li>
+            <li><span class="dir">_Stills</span>
+              <ul><li><span class="sz">3 MB</span>DJI_20261022152841_0068_D_8.00s.heic<span class="c">a photo from the clip, see <a class="text-link" href="photos.html">Photos</a></span></li></ul>
+            </li>
+            <li><span class="sz">a few KB</span>2026-10 Egypt (Final Cut Pro).fcpxml<span class="c">written by Marks for the editor</span> <span class="soon">Coming soon</span></li>
+            <li><span class="dir">Day 1</span><span class="c">your footage</span>
+              <ul>
+                <li><span class="sz big">500 MB</span>DJI_20261022152841_0068_D.MP4</li>
+                <li><span class="sz big">50 MB</span>DJI_20261022152841_0068_D.LRF<span class="c">the camera's small proxy</span></li>
+                <li><span class="sz">1 KB</span>DJI_20261022152841_0068_D.afp.json<span class="c">your marks and the clip's saved view, once you change a mark or save the view</span></li>
+                <li><span class="sz">2 MB</span>DJI_20261022152841_0068_D.gyroflow<span class="c">the clip's Gyroflow project, if it has one</span></li>
+              </ul>
+            </li>
+            <li><span class="sz">a few KB</span>Project.afproject<span class="c">the project: double-click it to open the trip in Action Footage Library. Inside: names you typed, which clips have a preview and which marks a photo, its settings</span></li>
+          </ul>
+        </li>
+      </ul>
+      <p class="note lib-tree-note">About how big each file is, as on our test trip: a 45-second 4K clip from an Osmo Action 6, and a 10-second moment of it, exported in HDR.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works: a project -->
+  <section class="section band tight-top" id="project">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">A project</p>
+        <h2>A project is just where things are.</h2>
+        <p>A project says two things. Where the trip's original clips are, which the player never changes. And where it puts what you make from them: moments in <code>_Moments</code>, the clips' flip-books in <code>_Clips</code>, exports in <code>_Exports</code>, photos in <code>_Stills</code>. That's all a project is. Everything else is files of their own in those folders, and the sections below go through them.</p>
+        <p>By default the project is the trip's folder itself, and everything in it finds the clips by where they are inside that folder. Copy or move the whole folder, footage and project together, to another disk or a NAS, and everything works as it did.</p>
+        <p>The player never makes a project on its own. The first time you save a moment, export, press <kbd>X</kbd> or open Action Footage Library, the side panel opens on its <strong>Project</strong> tab and says <strong>No project yet</strong>. Pick the folder from the list, which goes from the clip's own folder up to the top of the disk (for a card, the folder above <code>DCIM</code> is chosen for you), and press <strong>Initialize the project here</strong>. That makes one file, <code>Project.afproject</code>: the project itself, with the player's own notes in it. Double-click it to open the trip in <a class="text-link" href="#library-app">Action Footage Library</a>. The folders appear when something goes in them.</p>
+        <p>A project from an earlier version has a folder, <code>_ActionFootagePlayer</code>, instead. The player moves what's in it into <code>Project.afproject</code> the next time it opens one of the trip's clips.</p>
+        <p class="honest">Pick the trip's folder, above the day folders, so the whole trip is one project. Marks need no project at all.</p>
+        <p class="note">The side panel shows and hides with <kbd>Tab</kbd>.</p>
+      </div>
+      <figure class="media" id="shot-library-1">
+        <img src="media/library-1.jpg" alt="The side panel's Project tab with no project: No project yet, saying the project gets the folders _Moments, _Clips and _Exports and the file Project.afproject; the folder list open on Trips, 2026-10 Egypt and Day 1, 2026-10 Egypt selected, and Initialize the project here." width="584" height="848" loading="lazy">
+        <figcaption>No project yet: pick the trip's folder, then Initialize the project here.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Marks -->
+  <section class="section band tight-top" id="marks">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Marks</p>
+        <h2>The camera's highlights, then your own marks.</h2>
+        <p>A mark is a point in a clip. Pressed the highlight button while recording? Those marks are already on the seek bar: the quick switch button or remote on a DJI Osmo Action 4, Action 5 Pro or Action 6, HiLight on a GoPro HERO5 or later. <kbd>Ctrl</kbd>+<kbd>]</kbd> and <kbd>Ctrl</kbd>+<kbd>[</kbd> jump to the next and the previous one, landing 2 seconds before it.</p>
+        <p><kbd>M</kbd> adds a mark where the video is. On a mark (within half a second), <kbd>M</kbd> removes it, the camera's too.</p>
+        <p>The first change writes <code>&lt;clip&gt;.afp.json</code> beside the clip, with the camera's marks copied into it. From then on, that file is the clip's marks. It's also where the clip's saved view goes: what you keep with <strong>Save to the source</strong> in the side panel's <strong>Source</strong> and <strong>Transform</strong> tabs, so the clip opens as you saved it. Delete the file, and the camera's highlights are back as they were, and the saved view is forgotten. The clip itself is never written to.</p>
+        <p class="note">A <code>.marks.json</code> from an earlier version is read as it is, and becomes <code>.afp.json</code> at the next change.</p>
+        <p>Marks need no project. In the side panel, <strong>Marks of this clip</strong> lists them: "DJI quick switch" or "GoPro HiLight" for the camera's, "Mark 3" for yours. Click one to jump there.</p>
+      </div>
+      <figure class="media" id="shot-library-2">
+        <img src="media/library-2.jpg" alt="The bottom of the player: the seek bar with ticks for the camera's highlights, two marks and two moments, the pointer on Turtle's tick showing Chapter: Turtle." width="1600" height="300" loading="lazy">
+        <figcaption>The camera's highlights, your marks and a moment, on the seek bar.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Moments -->
+  <section class="section band dive" id="moments">
+    <div class="wrap dive-grid">
+      <div class="stack kbd-dark">
+        <p class="eyebrow">Moments</p>
+        <h2>A moment is a small file. Open it, and the original plays.</h2>
+        <p class="lede">Press <kbd>l</kbd> at the start of a part, <kbd>l</kbd> at its end, then <kbd>k</kbd>, and type a name.</p>
+        <div class="dive-points">
+          <div>
+            <h3>The name</h3>
+            <p>The player asks "Moment 0:20–0:30 name (Enter: Turtle 2):". Enter alone takes the suggestion: your last name with the next number, or, before you've typed any, the date and time it was filmed. <kbd>Tab</kbd> puts the suggestion in the field to edit, <kbd>↑</kbd> brings back earlier names, <kbd>Esc</kbd> saves nothing.</p>
+          </div>
+          <div>
+            <h3>The file</h3>
+            <p>It becomes <code>_Moments/Turtle.afplink.mp4</code>: a small MP4 that shows one color frame of the part (the first mark in it, else its middle), with a link to the original inside. <span class="os-mac">Finder and Quick Look</span><span class="os-win">File Explorer</span> show that frame. Its file dates are when it was filmed, so sorting by date puts moments in the order they happened.</p>
+          </div>
+          <div>
+            <h3>Playing it</h3>
+            <p>Opened in the player, it plays its part of the original, in full quality, then the next moment in the folder. Open the <code>_Moments</code> folder itself, and all of them play in the order they happened. A double-click does this when Action Footage Player is the app that opens MP4 files<span class="os-mac"> (Get Info → Open with → Change All…)</span>; otherwise the system plays the one-frame preview.</p>
+          </div>
+          <div>
+            <h3>Deleting the file deletes the moment</h3>
+            <p>There's no list to keep in step. Rename it, move it into a subfolder, tag it: it stays a moment. In the side panel, <strong>Moments of this clip</strong> has <strong>Rename…</strong> and <strong>Remove</strong>, which moves it to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>.</p>
+          </div>
+          <div>
+            <h3>Changing its ends</h3>
+            <p>Play the moment, move its start or end with <kbd>l</kbd>, then <kbd>k</kbd>. The player asks "Update Turtle to …? Enter, or a new name for a new one". <span class="os-mac">Its Finder tags stay.</span></p>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <figure class="media" id="shot-library-3">
+          <img src="media/library-3.jpg" alt="A paused wreck frame with the prompt Moment 0:24–0:34 name (Enter: Turtle 2) at the bottom, the side panel beside it." width="1600" height="900" loading="lazy">
+          <figcaption>Enter alone keeps the suggested name.</figcaption>
+        </figure>
+        <div class="lib-snap">
+          <h3>Viewed as it was when you saved it</h3>
+          <p>A moment is made whole, from what plays when you press <kbd>k</kbd>: its stabilization, level, horizon, lens, color aberration correction and frame. If the clip has a Gyroflow project, the moment gets its own copy, trimmed to the part. A moment never changes by itself: changing the clip, or the clip's project, later doesn't reach it. How the clip is read (its log curve, its turn, the lens under water) stays the clip's, for all its moments.</p>
+          <p>While a moment plays, the side panel's <strong>Transform</strong> tab says <strong>Transform defined in</strong> the moment. Change anything, and it's for viewing only, unless <strong>Auto save</strong> is on: "Changed for viewing. The dot marks what's saved". <strong>Save to the moment</strong> writes it, <strong>Revert to saved</strong> goes back. Switch <strong>Settings of its own</strong> off, and the moment plays as its clip is saved to play; its own settings and its Gyroflow copy go, the copy to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>.</p>
+        </div>
+        <figure class="media" id="shot-library-4">
+          <img src="media/library-4.jpg" alt="The side panel's Transform tab while the moment Turtle plays after a change: Transform defined in the moment, Settings of its own on, Changed for viewing. The dot marks what's saved, Save to the moment and Revert to saved; the level changed to Strong, the dot on Medium." width="584" height="918" loading="lazy">
+          <figcaption>Viewing is never saving: changes are for viewing until you press Save to the moment.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Clip previews -->
+  <section class="section band" id="clip-previews">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Clip previews</p>
+        <h2>The whole trip in color, and <kbd>X</kbd> for the clips you don't need.</h2>
+        <p class="lede">Log footage (a recording mode that keeps more of the light, and looks flat and grey until it's converted) is a wall of grey icons. Clip previews turn it into the trip in color.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Make clip previews</h3>
+          <p>In <a class="text-link" href="#library-app">Action Footage Library</a>, <strong>Make clip previews</strong> fills <code>_Clips</code> with one small MP4 per clip: a flip-book of the clip's marked frames, or of about 12 frames spread through it. Open the Library from the side panel's Project tab with <strong>Open in Action Footage Library</strong>. It makes them one at a time in the background, and shows how far it is. Never by themselves: only when you press it.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Browse in <span class="os-mac">Finder</span><span class="os-win">File Explorer</span></h3>
+          <p><code>_Clips</code> repeats your day folders, unless you tick <strong>All in _Clips itself, without the clips' folders</strong> in the Library. <span class="os-mac">In icon view it's the trip in color, and Quick Look (the space bar) flips through a clip in seconds.</span><span class="os-win">In large icons it's the trip in color.</span> Open a preview in the player, and the whole clip plays.</p>
+          <p>They're files: copy them, sort them into folders of your own, rename them as you like. Each one stays a link to its original clip.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Set a clip aside</h3>
+          <p><kbd>X</kbd> moves the clip's preview to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>: "Not interesting". The clip itself stays. Deleting the preview by hand does the same. <kbd>X</kbd> again makes it again. That's in the player: for a clip with no preview yet, the Project tab's <strong>Make this clip's preview</strong> makes just that one.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Deleted stays deleted</h3>
+          <p>Make clip previews only makes them for clips that never had one, so new footage gets its preview and a clip you set aside doesn't come back. The Library's <strong>Again for removed clips</strong> brings them all back.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The whole trip at once: Action Footage Library -->
+  <section class="section band dive" id="library-app">
+    <div class="wrap">
+      <div class="section-head kbd-dark">
+        <p class="eyebrow">Action Footage Library</p>
+        <h2>The whole trip at once, in an app of its own.</h2>
+        <p class="lede">What you do to one clip happens in the player. What you do to the whole trip happens in Action Footage Library, a small second app that comes with the player. It works in the background with a queue, so you can go on watching meanwhile, or close the player.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Clip previews</h3>
+          <p>A color flip-book of every clip, in <code>_Clips</code>: the trip at a glance in <span class="os-mac">Finder</span><span class="os-win">File Explorer</span>. Only for clips without one, so a preview you removed stays removed; <b>Again for removed clips</b> brings them back.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Moments of all marks</h3>
+          <p>Every mark that isn't in a moment yet becomes one, in <code>_Moments</code>: 2 seconds on each side, marks close together joined into one, each named by when it happened.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Photos of all marks</h3>
+          <p>A photo at every mark, into <code>_Stills</code>, as the clip is saved to look: stills, <span class="os-mac">Live Photos or </span>Motion Photos. Once each: a photo you deleted isn't made again.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Export all moments</h3>
+          <p>Every moment not exported yet, into <code>_Exports</code>, each with its own settings, as <kbd>Shift</kbd>+<kbd>E</kbd> exports one. In HDR as recorded, or in SDR.</p>
+        </div>
+      </div>
+      <div class="lib-cols">
+        <p>Each job shows its progress and the item it's on, and can be stopped; anything that couldn't be made is listed with the reason. Jobs run one at a time. <span class="os-mac">While they run, the Mac doesn't go to sleep.</span></p>
+        <p>To open it: <b>Open in Action Footage Library</b> in the side panel's Project tab, or double-click <code>Project.afproject</code> in the trip's folder. It makes nothing with its own code: it runs the player without a window, so everything comes out exactly as the player makes it.</p>
+      </div>
+      <p class="note">This is its first version: it makes batches, and doesn't browse your footage yet. On <span class="os-mac">a Mac it's beside the player in the download</span><span class="os-win">Windows it's installed with the player, with its own Start menu entry</span>; not on Linux yet.</p>
+    </div>
+  </section>
+
+  <!-- Favorites -->
+  <section class="section band tight-top" id="favorites">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Favorites</p>
+        <h2><kbd>K</kbd> for a favorite. <span class="soon">Coming soon</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p class="os-mac"><kbd>K</kbd> marks the moment playing as a favorite, or, on a clip, its preview in <code>_Clips</code>. It's a green <strong>Favorite</strong> tag in Finder. <kbd>K</kbd> again takes it off. Tagging a file green by hand in Finder counts too.</p>
+        <p class="os-win"><kbd>K</kbd> marks the moment playing as a favorite, or, on a clip, its preview in <code>_Clips</code>. It's 5 stars in File Explorer (Properties → Details). <kbd>K</kbd> again takes it off. A rating of 4 or 5 stars given by hand counts too.</p>
+        <p><span class="os-mac">Your other Finder tags go to the editors as keywords, and the favorites as favorites.</span><span class="os-win">The favorites go to the editors as favorites.</span> A moment or clip that exists is kept; one you deleted is not. That's the whole rating system.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exports -->
+  <section class="section band tight-top" id="exports">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Exports</p>
+        <h2>Exports go into <code>_Exports</code>, with a link back.</h2>
+      </div>
+      <div class="lib-cols">
+        <p><kbd>Shift</kbd>+<kbd>E</kbd> exports the marked part, or the whole clip, as it plays: steady and in color. It asks for a name in the same way as a moment, suggesting the moment's name when the part is one: "Export 0:20–0:30 (SDR) as (Enter: Turtle):". <kbd>Shift</kbd>+<kbd>E</kbd> again while it runs cancels it.</p>
+        <p>The file is <code>_Exports/Turtle.mov</code>. A plain name is HDR (bright highlights on screens that can show them); other looks say so: <code>Turtle (SDR).mov</code>, <code>Turtle (Dolby Vision).mov</code>. Each export carries a link to its original. A part that wasn't a moment yet is also saved as one, <code>export_Turtle</code>, so you can delete exports to make room and still play the part in full quality later.</p>
+        <p>The side panel's <strong>Output</strong> tab has the same, under <strong>Export</strong>: <strong>Export the part</strong> or <strong>Export the clip</strong>, <strong>Export in SDR</strong>, <strong>Show the last export</strong>. To export every moment of the trip in one go, use <a class="text-link" href="#library-app">Action Footage Library</a>. Old <code>stabilized</code> folders from earlier versions are left where they are. The looks and formats are on the <a class="text-link" href="log.html">Log footage</a> page.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cutting out a spoiled part -->
+  <section class="section band" id="cut">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Cutting out</p>
+        <h2>Cut out the minute filmed in your pocket.</h2>
+        <p>Mark the spoiled part with <kbd>l</kbd> and <kbd>l</kbd>, press <kbd>Ctrl</kbd>+<kbd>x</kbd>, and confirm. The clip is rewritten without that part, without re-encoding: every frame kept is copied exactly. It needs no project.</p>
+        <p>The player asks first: "Cut 0:05–0:20 out of DJI_20261024094541_0093_D.MP4? Kept: 0:00–0:05 and 0:20–end (two clips; the second from the keyframe at or before 0:20), without re-encoding. The original goes to the Trash." <strong>Cut it out</strong> or <strong>Keep the clip as it is</strong>.</p>
+        <h3>What it keeps</h3>
+        <ul class="lib-list">
+          <li>A part in the middle leaves <strong>two clips</strong>. The first keeps the original's name. The second is named by its own recording time, like <code>DJI_20261024094600_0093_D.MP4</code>.</li>
+          <li>The second clip starts at the keyframe (a full frame the others are built from) at or before the cut's end, so up to about a second of the spoiled part can stay.</li>
+          <li>Less than half a second left on a side is dropped.</li>
+          <li>The camera's data stays: lens, color mode, motion data for stabilization, timecode, sound. Each new clip is read back and checked before anything is replaced; if it doesn't match, nothing changes.</li>
+          <li>Each new clip gets the original's saved view, and the marks and moments that are in it. A moment entirely inside the cut-out part goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>.</li>
+        </ul>
+        <h3>What it changes</h3>
+        <ul class="lib-list">
+          <li><strong>The original goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span></strong>, with its side files: the <code>.LRF</code>, its Gyroflow project, its <code>.afp.json</code> and its clip preview.<span class="os-win"> On a network share or a memory card, which have no Recycle Bin, they go into the project's <code>.Trash</code> folder instead, and the message says so.</span></li>
+          <li><strong>There's no undo in the player.</strong> You can take the original back out of the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span> by hand, but the first new clip now has its name.</li>
+          <li><strong>Only DJI clips are supported for now.</strong> We're working on the others. Until then, a GoPro clip is cut only if it passes a check first, and Insta360 and iPhone clips are refused.</li>
+          <li>Exports aren't touched, and their links still point at the original. For clip previews of the new clips, press <strong>Make clip previews</strong> in <a class="text-link" href="#library-app">Action Footage Library</a>.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="media lib-diagram">
+          <svg class="cut-svg" viewBox="0 0 480 236" role="img" aria-labelledby="cut-svg-title">
+            <title id="cut-svg-title">A clip with a spoiled part from 0:05 to 0:20. After Ctrl+x: clip 1 from 0:00 to 0:05, keeping the name, and clip 2 from the keyframe just before 0:20 to the end, with its own name. The original goes to the Trash.</title>
+            <text class="lbl" x="10" y="20">The clip</text>
+            <rect class="kept" x="10" y="30" width="60" height="30" rx="4"/>
+            <rect class="spoiled" x="70" y="30" width="140" height="30"/>
+            <rect class="kept" x="210" y="30" width="260" height="30" rx="4"/>
+            <text class="in" x="140" y="50" text-anchor="middle">spoiled</text>
+            <text class="t" x="10" y="78">0:00</text>
+            <text class="t" x="70" y="78" text-anchor="middle">0:05</text>
+            <text class="t" x="210" y="78" text-anchor="middle">0:20</text>
+            <text class="t" x="470" y="78" text-anchor="end">end</text>
+            <path class="arrow" d="M240 92v22m-6-7 6 7 6-7"/>
+            <text class="lbl" x="10" y="136">After Ctrl+x</text>
+            <rect class="kept" x="10" y="146" width="60" height="30" rx="4"/>
+            <text class="in" x="40" y="166" text-anchor="middle">1</text>
+            <rect class="kf" x="196" y="146" width="14" height="30"/>
+            <rect class="kept" x="210" y="146" width="260" height="30" rx="4"/>
+            <text class="in" x="340" y="166" text-anchor="middle">2</text>
+            <text class="t" x="10" y="200">1: 0:00–0:05, the original's name</text>
+            <text class="t" x="10" y="222">2: from the keyframe to the end, its own name</text>
+          </svg>
+          <figcaption>The darker sliver before clip 2 is the bit of the spoiled part kept up to the keyframe. The original goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>.</figcaption>
+        </figure>
+        <figure class="media" id="shot-library-5">
+          <img src="media/library-5.jpg" alt="A paused wreck frame with the question Cut 0:05–0:20 out of the clip, and the choices Cut it out and Keep the clip as it is." width="1600" height="900" loading="lazy">
+          <figcaption>Nothing is cut until you choose Cut it out.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Into your editor -->
+  <section class="section band" id="editors">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Into your editor</p>
+        <h2>Your moments and marks, in Final Cut Pro, DaVinci Resolve or Premiere Pro. <span class="soon">Coming soon</span></h2>
+        <p class="lede">When you've chosen, take the trip to the edit. The editor gets your original clips, at their own timecode, with your moments, marks, favorites and folders on them. Nothing to find again, nothing to mark twice.</p>
+      </div>
+      <ol class="checklist lib-steps">
+        <li>
+          <h3>Choose the editor</h3>
+          <p>In the Project tab, <strong>Marks for the editor</strong>, then <strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong> or <strong>Premiere Pro…</strong>. By default every clip goes in except the ones you set aside with <kbd>X</kbd>; <strong>With moments or marks</strong> takes only the clips that have one.</p>
+        </li>
+        <li>
+          <h3>The player writes the file</h3>
+          <p>It goes in the project folder, named after the project: "Final Cut Pro: 14 clips, 23 moments, 41 marks → 2026-10 Egypt (Final Cut Pro).fcpxml", and <span class="os-mac">Finder shows it</span><span class="os-win">its folder opens</span>.</p>
+        </li>
+        <li>
+          <h3>Import it, once</h3>
+          <p>The editors take an import once and don't merge a second one. So do it when you've finished choosing. Writing it again replaces the file.</p>
+        </li>
+      </ol>
+      <div class="compare-wrap lib-editors-wrap">
+        <table class="lib-editors">
+          <thead><tr><th scope="col">Editor</th><th scope="col">How to import</th><th scope="col">What it gets</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">Final Cut Pro<br><span class="cam-sub">10.6 or later, Mac</span></th>
+              <td data-label="How to import"><code>… (Final Cut Pro).fcpxml</code>: File → Import → XML, or double-click it. With "Leave files in place", the clips stay where they are, on the card or the NAS.</td>
+              <td data-label="What it gets">An event named after the trip, with every clip at its timecode. Your marks as markers (the camera's noted "DJI quick switch" or "GoPro HiLight"). Each moment as a named range, in a keyword collection per folder and tag. Favorites and set-aside clips as favorites and rejects. A project "2026-10 Egypt – moments" with every moment in a row, named.</td>
+            </tr>
+            <tr>
+              <th scope="row">DaVinci Resolve<br><span class="cam-sub">the free version too</span></th>
+              <td data-label="How to import">Three files, since the free version runs no scripts:<br><code>… (Resolve).fcpxml</code>: File → Import → Timeline, with "Automatically import source clips into media pool".<br><code>… (Resolve markers).edl</code>: right-click the "clips" timeline → Timelines → Import → Timeline Markers from EDL.<br><code>… (Resolve metadata).csv</code>: File → Import Metadata To → Media Pool.</td>
+              <td data-label="What it gets">Timelines on the original clips: all the moments in a row, one per folder of moments, and every clip you kept, whole. Markers on the clips timeline: the camera's blue, yours cyan, moments green with their name and length. In the media pool: favorites green, set-aside clips red, your folders and tags as keywords, the moments listed in each clip's comments.</td>
+            </tr>
+            <tr>
+              <th scope="row">Premiere Pro</th>
+              <td data-label="How to import"><code>… (Premiere).xml</code>: File → Import.</td>
+              <td data-label="What it gets">Bins as your folders are. Each clip with its markers. Each moment as a clip with its in and out, in its folder's bin. A sequence of the moments, named. Favorites as a label color, tags in a comment. Set-aside clips are left out.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">For Final Cut Pro, an option, off by default, also makes each moment a clip of its own, so the names show in the browser: <strong>Moments as clips of their own</strong>. It doubles the clips in the event.</p>
+    </div>
+  </section>
+
+  <!-- Read-only cards -->
+  <section class="section band tight-top" id="read-only">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Read-only cards</p>
+        <h2>A locked card gets a project in Documents. <span class="soon">Coming soon</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p>A card with its lock on, or a share you can only read, can't hold a project. When the folder you chose can't be written to, the project goes to <span class="os-mac"><code>Documents/ActionFootagePlayer/</code></span><span class="os-win"><code>Documents\ActionFootagePlayer\</code></span> instead, and the player asks for its name: "The card is read-only. Project name (Enter: OSMO ACTION 2026-10-22):".</p>
+        <p>That folder holds what the trip's folder would: <code>_Moments</code>, <code>_Clips</code>, <code>_Exports</code>, and the clips' <code>.afp.json</code> files at the clips' own paths. Plus <code>Sources.txt</code>, a plain text file saying where the footage is. It also notes the card's id, so next month's trip on the same card, formatted, gets a project of its own.</p>
+        <p>Copied the card to your NAS? Add the new path as the top line of <code>Sources.txt</code>. The links inside moments and previews are relative, so they all follow. A card that stays locked can't be cut with <kbd>Ctrl</kbd>+<kbd>x</kbd>: unlock it, or cut the copy.</p>
+      </div>
+      <pre class="lib-pre" aria-label="An example Sources.txt"># Where this project's footage is. The first path that exists is used; edit it if the footage moves.
+/Volumes/video/2026-10 Egypt
+Z:\2026-10 Egypt</pre>
+    </div>
+  </section>
+
+  <!-- Settings: the Project tab -->
+  <section class="section band" id="project-tab">
+    <div class="wrap lib-two lib-two-wide">
+      <div class="stack">
+        <div class="section-head">
+          <p class="eyebrow">The Project tab</p>
+          <h2>Every control, top to bottom.</h2>
+          <p class="lede">The first tab of the side panel. It shows what fits the moment: the project, then this clip, then the part you marked.</p>
+        </div>
+        <div class="lib-settings-wrap">
+          <table class="settings">
+            <thead><tr><th scope="col">Label</th><th scope="col">What it does</th></tr></thead>
+            <tbody>
+              <tr class="grp"><th colspan="2" scope="colgroup">Before there's a project</th></tr>
+              <tr><th scope="row">No project yet</th><td>Says what a project is. Below it, the chosen folder and where it is; click it for the list of folders, from the clip's own up to the top of the disk.</td></tr>
+              <tr><th scope="row">Initialize the project here</th><td>Makes the project in the chosen folder: the file <code>Project.afproject</code>.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">The project</th></tr>
+              <tr><th scope="row">The project's name ⋯</th><td><strong><span class="os-mac">Project folder in Finder</span><span class="os-win">Project folder</span></strong>; <strong>New moments stabilized on their own</strong>: new moments are smoothed over their own part, not as part of the whole clip. Off by default.</td></tr>
+              <tr><th scope="row">3 moments · 12 of 40 clip previews</th><td>The counts.</td></tr>
+              <tr><th scope="row">Open in Action Footage Library</th><td>Opens the trip in <a class="text-link" href="#library-app">Action Footage Library</a>. Below it: "Clip previews (28 new clips), moments and photos of all marks, exports of all moments: made there, in the background". What couldn't be made is listed there, with why.</td></tr>
+              <tr><th scope="row">Show all clips <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Opens <code>_Clips</code>.</td></tr>
+              <tr><th scope="row">Show all moments <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Opens <code>_Moments</code>.</td></tr>
+              <tr><th scope="row">Marks for the editor <span class="soon">Coming soon</span></th><td><strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong>, <strong>Premiere Pro…</strong>; which clips: <strong>All but rejects</strong> (the default) or <strong>With moments or marks</strong>.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">This clip</th></tr>
+              <tr><th scope="row">Marks of this clip <kbd>M</kbd></th><td>The clip's marks with their times; the one where the video is, highlighted. Click to jump. <strong>Add a mark here</strong> / <strong>Remove the mark here</strong>.</td></tr>
+              <tr><th scope="row">Moments of this clip</th><td>Name and part; click to play. ⋯ has <strong>Play</strong>, <strong>In its clip</strong> (the whole clip, with the part marked), <strong>Rename…</strong>, <strong>Remove</strong>, <strong><span class="os-mac">Show in Finder</span><span class="os-win">Show in Explorer</span></strong>.</td></tr>
+              <tr><th scope="row">Mark this clip as not interesting <kbd>X</kbd></th><td>Moves its preview to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>. Then <strong>Not interesting · undo</strong>; for a clip with no preview, <strong>Make this clip's preview</strong>.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Selected part <kbd>l</kbd></th></tr>
+              <tr><th scope="row">Mark start · Mark end</th><td>Set the part, as <kbd>l</kbd> does; they then show its times, "Start 0:20", "End 0:30".</td></tr>
+              <tr><th scope="row">Save as moment 0:20–0:30 <kbd>k</kbd></th><td>Asks the name and saves it. On a moment opened in its clip: <strong>Update Turtle to …</strong>; inside a moment playing: <strong>Trim Turtle to …</strong>.</td></tr>
+              <tr><th scope="row">Clear the part</th><td>Forgets the start and end.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">While a moment plays</th></tr>
+              <tr><th scope="row">Open the whole clip at 0:20</th><td>The original, from the moment's start.</td></tr>
+              <tr><th scope="row">Stabilized on its own</th><td>A switch: the moment smoothed over its own part, or as part of the whole clip. Written into the moment. Below it: "Its own transform, as made: the source's, changed later, doesn't reach it". With <strong>Settings of its own</strong> off (on the <strong>Transform</strong> tab), the switch goes and the line says it plays as its source.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">While a clip preview plays</th></tr>
+              <tr><th scope="row">Its own transform · The source's transform</th><td>Where the preview's settings come from. Switch it with <strong>Settings of its own</strong> on the <strong>Transform</strong> tab. On: the preview gets its own settings, a variant of the clip's, and a copy of the clip's Gyroflow project when it has one (<kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow), to change without touching the clip. Off: it plays as the clip is saved to play, and its own copy goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>. Off by default.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <figure class="media lib-tall" id="shot-library-6">
+        <img src="media/library-6.jpg" alt="The side panel's Project tab: 2026-10 Egypt, 3 moments and 3 of 7 clip previews, Open in Action Footage Library with its caption, Show all clips in Finder and Show all moments in Finder, the clip's marks and moments with Turtle's menu open, and Save as moment 0:28–0:32." width="584" height="1594" loading="lazy">
+        <figcaption>The Project tab of a trip with a few moments.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Keys</p>
+        <h2>The keys for organizing.</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Mark a part: its start, then its end</span><span><kbd>l</kbd> twice</span></div>
+        <div class="key"><span>Save the part as a moment; on a moment: update it</span><span><kbd>k</kbd></span></div>
+        <div class="key"><span>A mark here; on a mark: remove it</span><span><kbd>M</kbd></span></div>
+        <div class="key"><span>Next mark · previous mark</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> · <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
+        <div class="key"><span>Not interesting: the clip's preview to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>; again: back</span><span><kbd>X</kbd></span></div>
+        <div class="key"><span>Favorite: the moment playing, else the clip; again: off <span class="soon">Coming soon</span></span><span><kbd>K</kbd></span></div>
+        <div class="key"><span>Export the part or the clip; again: cancel</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>Cut the marked part out of the clip, after asking</span><span><kbd>Ctrl</kbd>+<kbd>x</kbd></span></div>
+        <div class="key"><span>Show or hide the side panel</span><span><kbd>Tab</kbd></span></div>
+      </div>
+      <p class="note">The keys work in a Russian, Ukrainian or Belarusian keyboard layout too.</p>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Limits</p>
+        <h2>What to know before you rely on it.</h2>
+      </div>
+      <ul class="lib-limits">
+        <li><strong>A moment is a link.</strong> It needs its original at the same place in the project, unchanged. Moving the whole trip folder is fine; renaming or re-encoding an original breaks its moments and its preview.</li>
+        <li><strong>A moment file isn't for sending.</strong> Elsewhere it's one still frame, and messengers and re-encoding strip the link. Send an export.</li>
+        <li><strong>A moment's file shows one frame</strong>, not a video of the part.</li>
+        <li><strong>Clip previews aren't stabilized</strong>, and their frames are the nearest keyframes, up to about a second from the mark.</li>
+        <li><strong>Marks have no names you can type</strong> yet: they're "Mark 1", "Mark 2", or the camera's.</li>
+        <li><strong>Cutting replaces the clip.</strong> The original goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>, there's no undo in the player, exports keep pointing at the old original, and it's made for DJI clips.</li>
+        <li><strong>The editor's file is one go.</strong> Final Cut Pro and Resolve don't merge a second import of the same clips. So make it once you've marked what you want.</li>
+        <li><strong>On Linux, the trip is made one clip at a time for now.</strong> Action Footage Library isn't on Linux yet, so there clip previews of the whole trip, moments and photos of all marks, and exports of all moments can't be made in one go.</li>
+        <li><strong>On Windows</strong>, projects, moments, previews and Action Footage Library have had little testing so far.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Questions</p>
+        <h2>Before you start.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Does the player change my footage?</summary>
+          <div class="a"><p>Only when you cut a part out with <kbd>Ctrl</kbd>+<kbd>x</kbd> and confirm: then the clip is replaced by the parts kept, and the original goes to the <span class="os-mac">Trash</span><span class="os-win">Recycle Bin</span>. Otherwise it only reads your clips. Beside each one it writes a small file of the clip's own, <code>&lt;clip&gt;.afp.json</code>, once you change a mark or save the clip's view, and a Gyroflow project when you make one. Everything else goes in the project: its own folders and <code>Project.afproject</code>.</p></div>
+        </details>
+        <details>
+          <summary>Do I need a project for marks?</summary>
+          <div class="a"><p>No. Marks are kept beside the clip, project or not. Moments, clip previews, exports, <kbd>X</kbd> and Action Footage Library need one.</p></div>
+        </details>
+        <details>
+          <summary>I moved the trip to my NAS. Are my moments lost?</summary>
+          <div class="a"><p>No, as long as the trip folder moves whole, footage and project together. The links are relative to the project, so they still find their clips. A project in Documents gets the new path as a line in its <code>Sources.txt</code>.</p></div>
+        </details>
+        <details>
+          <summary>Can I send a moment to a friend?</summary>
+          <div class="a"><p>Send an export instead: <kbd>Shift</kbd>+<kbd>E</kbd> on the moment. The moment's own file is a frame and a link to a clip only you have.</p></div>
+        </details>
+        <details>
+          <summary>Does it work with the free DaVinci Resolve?</summary>
+          <div class="a"><p>Yes. The free version runs no scripts, so the player writes three files that it imports by hand: a timeline file, a marker list and a metadata table.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Try it</p>
+        <h2>Open a trip, keep what's worth keeping.</h2>
+        <p class="lede">Free, no account, and everything it keeps is a file you can see.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download free for Mac</span><span class="os-win">Download for Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download for Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Log footage</h3>
+          <p>Log in color, the looks, HDR and what each export looks like.</p>
+          <a href="log.html">Log footage</a>
+        </div>
+        <div class="help-card">
+          <h3>Stabilization</h3>
+          <p>How clips play steady, and the Gyroflow projects moments keep.</p>
+          <a href="stabilization.html">Stabilization</a>
+        </div>
+        <div class="help-card">
+          <h3>Everything it does</h3>
+          <p>Every key and option, and the cameras one by one.</p>
+          <a href="features.html">All features</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · <a href="about.html">Made by a diver in Geneva, Switzerland</a></span>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">All features</a>
+      <a href="download.html">Downloads</a>
+    </div>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M and GP-Log HDR LUTs derived from Zeb Gardner's shaper LUTs (used with permission), and the log curves published by DJI, GoPro and Insta360. Not affiliated with DJI, GoPro or Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision and the double-D symbol are trademarks of Dolby Laboratories Licensing Corporation. Action Footage Player is not affiliated with or endorsed by Dolby. The player writes the Dolby Vision metadata itself, with the open-source <code>dolby_vision</code> crate (MIT); no Dolby software is included.</p>
+  </div>
+</footer>
+
+<script src="top.js"></script>
+</body>
+</html>

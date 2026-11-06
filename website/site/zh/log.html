@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Log 素材的色彩与 HDR：Action Footage Player</title>
+<meta name="description" content="D-Log M、GP-Log 和 I-Log 片段直接从存储卡以彩色播放：在 HDR 屏幕上是 HDR，在普通屏幕上按你喜欢的方式做色调映射，在 Mac 上还有 Dolby Vision。然后把看到的样子导出，HDR 或 SDR 都可以。适用于 Mac 和 Windows 的免费播放器。">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/log">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/log">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/log">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/log">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/log">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../log.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player，首页">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="网站">
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">功能</summary>
+        <ul>
+          <li><a href="log.html" aria-current="page">Log 素材</a></li>
+          <li><a href="stabilization.html">防抖</a></li>
+          <li><a href="organizing.html">整理素材</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="360.html">360 视频</a></li>
+          <li><a href="features.html" class="nm-all">全部功能</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">下载</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html" aria-current="page">Log 素材</a></li>
+        <li><a href="stabilization.html">防抖</a></li>
+        <li><a href="organizing.html">整理素材</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="360.html">360 视频</a></li>
+        <li><a href="features.html">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html">下载</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
+      <ul>
+        <li><a href="../log.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/log.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/log.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/log.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../log.html" hreflang="en">阅读英文原文</a></p>
+</div>
+
+<main id="top">
+  <!-- Hero: what you get, the download, one real frame -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Log 素材</p>
+        <h1>用 Log 拍的？在这里以彩色播放。</h1>
+        <p class="lede">D-Log M、GP-Log 和 I-Log 片段在其他 App 里看起来是灰的。在这里双击一个：它以彩色播放，在 HDR 屏幕上是 HDR，无需调色。标记一段，按 <kbd>Shift</kbd>+<kbd>E</kbd>，导出的就是它看起来的样子。</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">免费下载 Mac 版</span><span class="os-win">下载 Mac 版</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>免费、开源</span>
+          <span>无需账号</span>
+          <span>除非你要求，原始文件不会被改动</span>
+        </div>
+      </div>
+
+      <figure class="media">
+        <div class="halves"><span>其他 App 中的样子</span><span>在这里播放的样子</span></div>
+        <img src="../media/log-grey-color.jpg" width="1600" height="900" fetchpriority="high" alt="Log 片段的一帧，从中间一分为二：左边平淡发灰，右边色彩完整。">
+        <figcaption>同一片段的同一帧。这张图片不是 HDR：在 HDR 屏幕上，播放器显示的画面更明亮。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- What you get -->
+  <section class="section band" id="what">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">你能得到什么</p>
+        <h2>色彩和 HDR，无需调色。</h2>
+        <p class="lede">Log 是一种录制模式，在高光和阴影中保留最多的细节。代价是画面平淡发灰，通常需要调色：在剪辑软件中调整色彩和对比度，往往还要借助 LUT（把一组颜色变成另一组颜色的查找表）。在这里，播放器替你完成这一转换。</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>立即呈现色彩</h3>
+          <p>播放器读取相机自己的元数据，发现片段是 Log，就在播放时转换它。普通片段照常播放。</p>
+        </div>
+        <div class="gap-item">
+          <h3>屏幕支持时就是 HDR</h3>
+          <p>HDR（高动态范围）屏幕能显示更亮的高光和更深的阴影：较新的 MacBook Pro、iPhone、HDR 显示器和电视。在这样的屏幕上，Log 以 HDR 播放。</p>
+        </div>
+        <div class="gap-item">
+          <h3>其他屏幕上由你选择</h3>
+          <p>普通屏幕（SDR，标准动态范围）需要对 HDR 做色调映射。做法有好几种，你挑自己喜欢的那一种。</p>
+        </div>
+        <div class="gap-item">
+          <h3>所见即所导</h3>
+          <p>按一个键，你标记的那一段就成为一个文件，画面稳定，风格相同，HDR 或 SDR 都可以。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band tight-top" id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">工作原理</p>
+        <h2>从存储卡到你的屏幕，四步。</h2>
+      </div>
+      <ol class="checklist">
+        <li>
+          <h3>片段自己说明它是 Log</h3>
+          <p>播放器读取的是相机的元数据，而不是文件名。DJI 的普通片段名字里也带 <code>_D</code>，所以从文件名看不出来。对于元数据读不出来的相机，<kbd>Ctrl</kbd>+<kbd>l</kbd> 可以手动选择 Log 曲线，<b>Save to the source</b>（保存到源）会把它和片段保存在一起。请直接从存储卡拷贝片段：经过其他 App 导出或裁剪的片段会丢失这些元数据。</p>
+        </li>
+        <li>
+          <h3>Log 变成 HDR</h3>
+          <p>片段被转换为 HLG 格式的 HDR 视频（Rec.2100 HLG，1000 尼特），这是手机和电视使用的 HDR 格式。这是技术性的转换，所有片段都一样，不添加任何创意风格，曝光保持你拍摄时的样子。正因如此，它可以自动完成。</p>
+        </li>
+        <li>
+          <h3>其余的由屏幕决定</h3>
+          <p>HDR 屏幕按原样显示 HDR。在普通屏幕上，则要做色调映射。在 Mac App 中，默认用 Dolby Vision 完成，与 QuickTime、iPhone 和 iPad 显示导出文件的方式相同。其他方式有 mpv 自己的色调映射、NBCUniversal 的中性转换，以及相机厂商的 LUT：<kbd>Ctrl</kbd>+<kbd>s</kbd> 依次切换它们。</p>
+        </li>
+        <li>
+          <h3>你的选择会保留</h3>
+          <p>你用 <kbd>Ctrl</kbd>+<kbd>s</kbd> 选的风格，就是后续片段在同类屏幕上的起始风格，直到你退出播放器。风格属于屏幕，不属于片段：它不会和片段一起保存。想让片段永久以另一种风格开始，就在<a class="text-link" href="#settings">设置文件</a>中设定。</p>
+        </li>
+      </ol>
+
+      <figure class="media lg-flow-fig">
+        <div class="lg-flow" role="img" aria-label="Log 片段被转换为 HLG 格式的 HDR。HDR 屏幕按原样显示；SDR 屏幕则得到色调映射后的画面，方式可以是 Mac App 中的 Dolby Vision、mpv、NBCU 的转换或相机厂商的 LUT。">
+          <div class="lg-node"><b>Log 片段</b><span>灰而平淡，直接来自存储卡</span></div>
+          <div class="lg-arrow" aria-hidden="true"></div>
+          <div class="lg-node lg-hl"><b>HDR, HLG</b><span>固定的转换，不加风格</span></div>
+          <div class="lg-arrow" aria-hidden="true"></div>
+          <div class="lg-split">
+            <div class="lg-node"><b>HDR 屏幕</b><span>按原样显示</span></div>
+            <div class="lg-node"><b>SDR 屏幕</b><span>色调映射：Dolby Vision（Mac App）、mpv、NBCU 或厂商的 LUT</span></div>
+          </div>
+        </div>
+        <figcaption>转换为 HDR 对每个片段都一样。只有为普通屏幕做色调映射才是口味问题。</figcaption>
+      </figure>
+
+      <h3 class="lg-sub">能识别哪些片段</h3>
+      <div class="compare-wrap">
+        <table class="settings lg-cams">
+          <thead><tr><th scope="col">相机</th><th scope="col">Log</th><th scope="col">方式</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">DJI Osmo Action 6、Osmo 360</th><td data-label="Log">D-Log M、D-Log</td><td data-label="方式">自动识别。<span class="pill ok">已验证</span> Osmo Action 6 上的 D-Log M</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black（固件 1.20 或更高）、HERO13 Black</th><td data-label="Log">GP-Log</td><td data-label="方式">自动识别。<span class="pill ok">已验证</span> 在 HERO12 Black 上</td></tr>
+            <tr><th scope="row">GoPro MISSION 1</th><td data-label="Log">GP-Log2</td><td data-label="方式">自动识别</td></tr>
+            <tr><th scope="row">其他 DJI 相机和无人机</th><td data-label="Log">D-Log M、D-Log</td><td data-label="方式">手动：<kbd>Ctrl</kbd>+<kbd>l</kbd></td></tr>
+            <tr><th scope="row">Insta360（X6、Luna）</th><td data-label="Log">10-bit I-Log</td><td data-label="方式">手动：<kbd>Ctrl</kbd>+<kbd>l</kbd>。不支持 8-bit I-Log</td></tr>
+            <tr><th scope="row">固件 1.20 之前的 GoPro HERO12 Black、MAX2</th><td data-label="Log">GP-Log</td><td data-label="方式">按原样播放：它们的 GP-Log 曝光不同（暗两档，MAX2 则亮两档）。<kbd>Ctrl</kbd>+<kbd>l</kbd> 仍可套用它</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">没有标“已验证”的曲线，是根据厂商公开的公式实现的，尚未用真实素材试过。在 <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> 中附上一段你相机拍的短片，就能让它得到检验。360 片段见：<a class="text-link" href="360.html">360 视频</a>。</p>
+    </div>
+  </section>
+
+  <!-- The looks -->
+  <section class="section band" id="looks">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">风格</p>
+        <h2>同一个片段，几种显示方式。</h2>
+        <p class="lede"><kbd>Ctrl</kbd>+<kbd>s</kbd> 切换到片段具备的下一种，侧边面板的 <b>Output</b>（输出）标签页在 <b>Display</b>（显示）下列出全部。片段具备哪些风格，取决于它是什么：Log、已经是 HDR 的文件，还是 SDR。Log 片段的风格，按 <kbd>Ctrl</kbd>+<kbd>s</kbd> 的切换顺序：</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="settings lg-looks">
+          <thead><tr><th scope="col">风格</th><th scope="col">你看到的</th><th scope="col">适用于</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">HDR, HLG</th><td data-label="你看到的">按原样显示的 HDR 画面。<span class="os-mac">在普通屏幕上，由 macOS 做色调映射。</span><span class="os-win">由 Windows 自己的 <b>使用 HDR</b> 设置决定：关闭时，由 mpv 针对屏幕做色调映射。</span> <kbd>Ctrl</kbd>+<kbd>h</kbd> 直接切换到它。</td><td data-label="适用于">全部</td></tr>
+            <tr><th scope="row">HDR, HLG+DV</th><td data-label="你看到的">每一帧都带 Dolby Vision 元数据的 HLG，由 macOS 显示：在 HDR 屏幕上是 HDR，在普通屏幕上由元数据中的 trim 参数做色调映射。QuickTime、iPhone 和 iPad 就是这样显示导出文件的。</td><td data-label="适用于">Mac App</td></tr>
+            <tr><th scope="row">SDR, HLG+DV</th><td data-label="你看到的">同上，但总是做色调映射，在 HDR 屏幕上也是：也就是普通屏幕上看到的样子。</td><td data-label="适用于">Mac App</td></tr>
+            <tr><th scope="row">SDR tone mapped from HDR by mpv（由 mpv 从 HDR 色调映射的 SDR）</th><td data-label="你看到的">由 mpv 自己做色调映射，其参考白对应 SDR 白：在所有系统和屏幕上都一样。</td><td data-label="适用于">全部</td></tr>
+            <tr><th scope="row">SDR, NBCU</th><td data-label="你看到的">NBCUniversal 的 HLG 到 SDR 转换：中性，所有相机都一样。</td><td data-label="适用于">全部</td></tr>
+            <tr><th scope="row">SDR, camera maker's LUT（相机厂商的 LUT）</th><td data-label="你看到的">DJI 自己的 D-Log M 到 Rec.709 LUT，为 Osmo Action 6 制作，在安装设置时从 DJI 下载。仅用于 D-Log M，且需已下载该 LUT。</td><td data-label="适用于">全部</td></tr>
+            <tr><th scope="row">As recorded, log（按录制原样，Log）</th><td data-label="你看到的">按原样显示文件，平淡。<kbd>L</kbd> 切换到它，只对当前片段有效；<kbd>Ctrl</kbd>+<kbd>s</kbd> 不会切换到它。</td><td data-label="适用于">全部</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Rec.709 是普通屏幕的色彩标准，所有设备都以同样的方式播放它。DJI 的 LUT 是可选的：没有它，其他风格都能用。</p>
+
+      <div class="lg-two">
+        <div class="stack">
+          <h3>片段的起始风格</h3>
+          <ul class="lg-list">
+            <li><b>在 HDR 屏幕上：</b>HDR, HLG。</li>
+            <li class="os-mac"><b>在普通屏幕上，使用 Mac App 时：</b>HDR, HLG+DV。把插件装在你自己的 mpv 中时：SDR tone mapped from HDR by mpv。</li>
+            <li class="os-win"><b>在使用普通屏幕的 Mac 上：</b>Mac App 中为 HDR, HLG+DV。</li>
+            <li><b>在 Windows 和 Linux 上：</b>不会检测屏幕类型，所以所有屏幕都视为 HDR，片段以 HDR, HLG 开始播放。</li>
+            <li>把片段的窗口移到另一类屏幕时，片段保持原来的风格。</li>
+          </ul>
+          <h3>已经是 HDR 的文件，以及 SDR 文件</h3>
+          <p class="lg-p">播放器导出的文件、手机视频和相机 HDR 模式拍的视频，无论是 HLG 还是 PQ，都按原样以 HDR 播放，绝不会被当作 Log 再转换一次。它们的风格：</p>
+          <ul class="lg-list">
+            <li><b>HDR, HLG, as recorded</b>（按录制原样；或 <b>HDR, PQ, as recorded</b>）。</li>
+            <li>在 Mac App 中，有 <b>HDR, HLG+DV</b> 和 <b>SDR, HLG+DV</b>，带播放器的 trim 参数和 Dolby Vision 8.4。PQ 文件则有 <b>HDR, PQ+DV</b> 和 <b>SDR, PQ+DV</b>，带 Dolby Vision 8.1。</li>
+            <li>自带 Dolby Vision 的文件（profile 8，比如播放器自己导出的 Dolby Vision 文件）则改为显示 <b>HDR, its own Dolby Vision</b>（HDR，用它自带的 Dolby Vision）和 <b>SDR, its own Dolby Vision</b>。Profile 5 没有 Dolby Vision 风格：由 mpv 做色调映射。</li>
+            <li>然后是 <b>SDR tone mapped from HDR by mpv</b>，对于 BT.2020 文件还有 <b>SDR, NBCU</b>：NBCU 的 HLG 或 PQ 到 SDR 转换。</li>
+          </ul>
+          <p class="lg-p">SDR 文件只有一种风格，<b>SDR, as recorded</b>（SDR，按录制原样）：按原样显示。如果它其实是 Log，就在 Source 中选择它的曲线。</p>
+        </div>
+        <figure class="media" id="shot-log-1">
+          <img src="../media/log-1.jpg" alt="一帧珊瑚礁画面，分成三条：按 Log 录制原样，平淡发灰；经 NBCU 转换的 SDR；经 DJI 的 LUT 的 SDR。" width="1600" height="900" loading="lazy">
+          <figcaption>同一帧上的录制原样和两种 SDR 风格。NBCU 的中间调比 DJI 的 LUT 更亮，色彩也更饱和。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dolby Vision -->
+  <section class="section band tight-top" id="dolby-vision">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Dolby Vision</p>
+        <h2>在 Mac 上，按 Apple 设备的方式做色调映射。</h2>
+        <p class="lede">Dolby Vision 是随 HDR 视频每一帧一起传递的元数据：场景有多亮，以及 trim 参数，即屏幕对 HDR 做色调映射时应用的调整。使用 +DV 风格时，macOS 借助它做色调映射，就像 iPhone 播放你导出的文件时那样。 <span class="pill exp lg-where">仅限 Mac App</span></p>
+      </div>
+      <div class="lg-two">
+        <div class="gap-grid lg-dv-points">
+          <div class="gap-item">
+            <h3>测量每一帧</h3>
+            <p>每一帧的最暗、平均和最亮亮度在播放时测量，因此 macOS 会按每个场景的实际内容做映射：昏暗的潜水画面和阳光下的海滩各有各的空间。导出时也以同样的方式测量每一帧。</p>
+          </div>
+          <div class="gap-item">
+            <h3>trim 参数凭口味设定，你可以改</h3>
+            <p>播放器自带的 trim 参数是作者的，凭个人口味挑选，并贴合 NBCU 的转换。侧边面板的 Dolby Vision 标签页有对应的滑块，并可以恢复为作者的设定或中性设定：Dolby 自身的映射，不加任何调整。导出时采用那里的设置。</p>
+          </div>
+          <div class="gap-item">
+            <h3>两种风格，一个文件</h3>
+            <p>HDR, HLG+DV 和 SDR, HLG+DV 是同一个视频。后者总是做色调映射，所以在 HDR 屏幕上你看到的就是普通屏幕显示的样子。两者导出的都是同一个带 Dolby Vision 8.4 的 HDR 文件。已经是 PQ 的文件同样有 PQ+DV 风格，导出时带 Dolby Vision 8.1。</p>
+          </div>
+          <div class="gap-item">
+            <h3>Windows 和 Linux 上没有</h3>
+            <p>Dolby Vision 风格和导出需要 Mac App 自带的 mpv。在 Windows 和 Linux 上，以及在 Mac 上把插件装在你自己的 mpv 中时，没有 +DV 风格，也没有 Dolby Vision 导出。</p>
+          </div>
+        </div>
+        <figure class="media lg-panel" id="shot-log-2">
+          <img src="../media/log-2.jpg" alt="侧边面板的 Dolby Vision 标签页：从 Slope 到 Chroma weight 的七个 trim 滑块，以及 These are the author's trims 和 Neutral trims: none added 两个按钮。" width="584" height="1716" loading="lazy">
+          <figcaption>侧边面板的 Dolby Vision 标签页，显示的是作者的 trim 参数。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exporting -->
+  <section class="section band" id="export">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">导出</p>
+        <h2>所见即所导。</h2>
+        <p class="lede">一个 10-bit HEVC 文件，内容就是正在播放的：它的源、它的变换，采用屏幕上的风格，带片段的声音。</p>
+      </div>
+      <div class="lg-two">
+        <ol class="checklist">
+          <li>
+            <h3>标记一段</h3>
+            <p>在开头按 <kbd>l</kbd>，在结尾再按 <kbd>l</kbd>，或者使用侧边面板 Output 标签页上的 <b>Mark start</b>（标记开头）和 <b>Mark end</b>（标记结尾）。什么都不标记，就导出整个片段。</p>
+          </li>
+          <li>
+            <h3>按 <kbd>Shift</kbd>+<kbd>E</kbd> 并起名</h3>
+            <p>输入一个名称，或按 <kbd>Enter</kbd> 采用建议的名称。在一次旅行中第一次导出时，侧边面板的 Project 标签页会打开：选择这次旅行的文件夹，然后按 <b>Initialize the project here</b>（在此初始化项目）。<a class="text-link" href="organizing.html">关于项目</a></p>
+          </li>
+          <li>
+            <h3>暂停，就能更快完成</h3>
+            <p>进度显示在右上角。暂停时，导出全速进行，在 M1 Pro 的 Mac 上处理 4K 60 fps 约每秒 35 帧。视频播放时，导出几乎停止，以保证播放流畅。<span class="os-mac">通知会告诉你文件存到了哪里。</span><span class="os-win">视频上方的消息会告诉你文件存到了哪里。</span></p>
+          </li>
+        </ol>
+        <figure class="media lg-panel" id="shot-log-3">
+          <img src="../media/log-3.jpg" alt="侧边面板 Output 标签页的 Export 部分，标记了 1:05–1:30 这一段：Start 1:05、End 1:30、Clear the part、Export the part 1:05–1:30、Export in SDR、Show the last export，以及一行 A still or a Live Photo: Save frame; In the folder below。" width="584" height="762" loading="lazy">
+          <figcaption>侧边面板中的 Output › Export，已标记一段。</figcaption>
+        </figure>
+      </div>
+
+      <h3 class="lg-sub">屏幕上的风格决定导出的文件</h3>
+      <div class="compare-wrap">
+        <table class="settings lg-out">
+          <thead><tr><th scope="col">屏幕上的风格</th><th scope="col">导出的是什么</th><th scope="col">文件名</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">HDR, HLG</th><td data-label="导出">HDR（HLG），不带 Dolby Vision。在普通屏幕上由各设备自行做色调映射；Apple 设备显示得比 NBCU 的 SDR 更暗。</td><td data-label="文件名"><code>Turtle.mov</code></td></tr>
+            <tr><th scope="row">HDR, HLG+DV <span class="lg-mac">Mac App</span></th><td data-label="导出">带 Dolby Vision 8.4 的 HDR（HLG）。iPhone、iPad 和 Mac 在任何屏幕上都会像播放器一样显示它。</td><td data-label="文件名"><code>Turtle (Dolby Vision).mov</code></td></tr>
+            <tr><th scope="row">SDR, HLG+DV <span class="lg-mac">Mac App</span></th><td data-label="导出">同样是带 Dolby Vision 的 HDR 文件。<b>不是 SDR 文件。</b></td><td data-label="文件名"><code>Turtle (Dolby Vision).mov</code></td></tr>
+            <tr><th scope="row">HDR, PQ+DV 或 SDR, PQ+DV <span class="lg-mac">Mac App</span></th><td data-label="导出">已经是 PQ 的文件：带 Dolby Vision 8.1 的 HDR（PQ）。<b>不是 SDR 文件。</b></td><td data-label="文件名"><code>Turtle (Dolby Vision).mov</code></td></tr>
+            <tr><th scope="row">SDR tone mapped from HDR by mpv</th><td data-label="导出">HDR（HLG）。<b>不是 SDR 文件。</b></td><td data-label="文件名"><code>Turtle.mov</code></td></tr>
+            <tr><th scope="row">SDR, NBCU</th><td data-label="导出">SDR（Rec.709），经 NBCU 的转换，来源可以是 Log、HLG 或 PQ</td><td data-label="文件名"><code>Turtle (SDR).mov</code></td></tr>
+            <tr><th scope="row">SDR, camera maker's LUT</th><td data-label="导出">SDR（Rec.709），经 DJI 的 LUT</td><td data-label="文件名"><code>Turtle (SDR).mov</code></td></tr>
+            <tr><th scope="row">As recorded, log，或不是 Log 的片段</th><td data-label="导出">片段自己的色彩，经过防抖。文件自带的 Dolby Vision 不会带进导出的文件。</td><td data-label="文件名"><code>Turtle.mov</code></td></tr>
+            <tr class="lg-row-alt"><th scope="row"><b>Export in SDR</b>，无论播放的是什么</th><td data-label="导出">SDR（Rec.709），经正在播放的 SDR 风格，否则经你上次选择的那一种：NBCU 或 DJI 的 LUT。适用于 Log 片段，以及已经是 HDR 的文件（经 NBCU）。</td><td data-label="文件名"><code>Turtle (SDR).mov</code></td></tr>
+            <tr class="lg-row-alt"><th scope="row">批量导出，无论播放的是什么</th><td data-label="导出">HDR（HLG）：没有 Dolby Vision，也没有 SDR。<a class="text-link" href="#batch">批量导出与 ProRes</a></td><td data-label="文件名">片段的名称，加上 <code>_stab</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="honest lg-honest">只有 +DV 风格（HLG+DV、PQ+DV）会生成带 Dolby Vision 的文件，而它们只存在于 Mac App 中。文件自带的 Dolby Vision 不会带进它导出的文件。在带 HDR 屏幕的 Mac 上，片段以 HDR, HLG 开始播放，它导出的文件不带 Dolby Vision：要给 iPhone 和 iPad 看，请在按 <kbd>Shift</kbd>+<kbd>E</kbd> 之前切换到 HDR, HLG+DV。对于其他任何屏幕、任何播放器或社交网络，SDR, NBCU、厂商的 LUT 或 <b>Export in SDR</b> 生成的文件在哪里看都一样。</p>
+
+      <div class="gap-grid lg-export-facts">
+        <div class="gap-item">
+          <h3>文件存放位置</h3>
+          <p>存到项目的 <code>_Exports</code> 文件夹，使用你起的名称：<code>Turtle.mov</code>、<code>Turtle (SDR).mov</code> 或 <code>Turtle (Dolby Vision).mov</code>。名称已被占用时会加上编号：<code>Turtle 2.mov</code>。不在项目中的片段，批量导出时会存到它旁边的 <code>stabilized</code> 文件夹。</p>
+        </div>
+        <div class="gap-item">
+          <h3>从播放中沿用什么</h3>
+          <p>风格、源的输入设置（Log 曲线、录制时的旋转、水下镜头），以及正在播放的变换：防抖开启、更宽或关闭，强度，地平线，校正或保持录制原样的镜头及其投影，画幅的比例和方向，边缘。去除水下色边仍然仅用于播放。<a class="text-link" href="stabilization.html#exports">防抖</a></p>
+        </div>
+        <div class="gap-item">
+          <h3>同时导出多个，或取消</h3>
+          <p>一个导出正在进行时，可以在另一个片段上开始导出。3 秒内按两次 <kbd>Shift</kbd>+<kbd>E</kbd>，或点 <b>Cancel export</b>，可停止正在播放的片段的导出。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Batch and ProRes -->
+  <section class="section band tight-top" id="batch">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">批量导出与 ProRes</p>
+        <h2>一次导出多个片段，或为剪辑软件导出 ProRes。</h2>
+      </div>
+      <div class="lg-two">
+        <div class="stack">
+          <h3>从<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>导出整个文件夹</h3>
+          <p class="lg-p os-mac">在访达中选择片段，右键，选择 <b>快速操作 → Stabilize + LUT</b>。它们会在后台依次导出，每完成一个都会发出通知。日志在 <code>~/Library/Logs/gyroflow-export.log</code> 中。</p>
+          <p class="lg-p os-win">在文件资源管理器中选择片段，右键，选择 <b>Stabilize + LUT</b>（Windows 11 上在 <b>显示更多选项</b> 里）。一个控制台窗口显示进度，运行期间再发送的片段会加入队列。</p>
+          <p class="lg-p">无论播放器显示的是什么，批量导出都会把 Log 片段导出为 HDR（HLG），不带 Dolby Vision，也没有 SDR。不是 Log、也没有可防抖内容的片段会被跳过。要一次导出一次旅行的所有精彩瞬间，可以用 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>。</p>
+        </div>
+        <div class="stack">
+          <h3>命令行与 ProRes</h3>
+          <p class="lg-p"><code>gyroflow-export</code> 是每次导出背后的程序，随播放器一起提供。<span class="os-mac">在 App 中，它位于 <code class="lg-path">ActionFootagePlayer.app/Contents/Resources/plugins/gyroflow/gyroflow-export</code>。</span>要得到 ProRes 422 HQ，只能用它；有些剪辑软件更喜欢 ProRes 而不是 HEVC。</p>
+          <pre class="lg-cmd"><code>gyroflow-export --prores --nbcu --from 1:20 --to 1:45 DJI_0007_D.MP4</code></pre>
+        </div>
+      </div>
+      <div class="compare-wrap">
+        <table class="settings lg-cli">
+          <thead><tr><th scope="col">选项</th><th scope="col">作用</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>--curve dlogm|dlog|gplog|gplog2|ilog|none</code></th><td data-label="作用">Log 曲线，用于无法识别的片段；<code>none</code> 保留录制时的色彩</td></tr>
+            <tr><th scope="row"><code>--sdr</code></th><td data-label="作用">经 DJI 的 LUT 导出 SDR（Rec.709）。仅限 D-Log M：其他曲线仍为 HLG</td></tr>
+            <tr><th scope="row"><code>--nbcu</code></th><td data-label="作用">经 NBCU 的转换导出 SDR（Rec.709），适用于任何曲线</td></tr>
+            <tr><th scope="row"><code>--prores</code></th><td data-label="作用">用 ProRes 422 HQ 代替 HEVC。不能与 Dolby Vision 同用</td></tr>
+            <tr><th scope="row"><code>--no-stabilize</code></th><td data-label="作用">只处理色彩</td></tr>
+            <tr><th scope="row"><code>--from</code>, <code>--to</code></th><td data-label="作用">一段，以秒或 m:ss 表示</td></tr>
+            <tr><th scope="row"><code>--out &lt;folder&gt;</code></th><td data-label="作用">文件存放位置</td></tr>
+            <tr><th scope="row"><code>--force</code></th><td data-label="作用">替换已有的导出文件；不加它，已导出过的片段会被跳过</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note"><code>gyroflow-export --help</code> 还会列出防抖选项。<kbd>Ctrl</kbd>+<kbd>C</kbd> 停止导出并删除未完成的文件。导出的文件保留片段的声音和日期。</p>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="section band" id="settings">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">设置</p>
+        <h2>侧边面板的 Source 和 Output 标签页。</h2>
+        <p class="lede"><kbd>Tab</kbd> 在视频旁边显示侧边面板。它打开时显示 Project：风格和导出，在侧栏上点 <b>Output</b>（输出）；Log 曲线，点 <b>Source</b>（源）。</p>
+      </div>
+      <div class="lg-two lg-settings-grid">
+        <dl class="lg-dl">
+          <div>
+            <dt>Output › Display（输出 › 显示） <kbd>Ctrl</kbd>+<kbd>s</kbd></dt>
+            <dd>一行说明源是什么：“From Log, D-Log M”（来自 Log，D-Log M）、“From HDR, HLG + Dolby Vision 8.4” 或 “From SDR, Rec.709”。然后是片段具备的各种<a class="text-link" href="#looks">风格</a>，Log 片段还有 <b>As recorded, log</b>（<kbd>L</kbd>），下方有几句话说明当前选中的那一种。在 HDR 屏幕上，有一行提示说 SDR 风格会以普通屏幕上的样子显示。使用 +DV 风格时，<b>Dolby Vision trims…</b> 会打开 Dolby Vision 标签页。SDR 文件只有一种风格，<b>SDR, as recorded</b>。默认：取决于屏幕，见<a class="text-link" href="#looks">片段的起始风格</a>。</dd>
+          </div>
+          <div>
+            <dt>Output › Log curve（输出 › Log 曲线）</dt>
+            <dd>一行说明，比如 “D-Log M, from the clip: the source's, saved with it”（D-Log M，来自片段：源的设置，已和它一起保存），以及 <b>Change in Source</b>（在 Source 中更改）。</dd>
+          </div>
+          <div>
+            <dt>Source › Color（源 › 色彩）</dt>
+            <dd>文件是用什么录制的：“Log, D-Log M”、“HDR, HLG · BT.2020”（或 PQ）或 “SDR, Rec.709”。HDR 文件还会显示它的 Dolby Vision：profile 8.4、8.1 或 5，或者没有。</dd>
+          </div>
+          <div>
+            <dt>Source › Log curve（源 › Log 曲线） <kbd>Ctrl</kbd>+<kbd>l</kbd></dt>
+            <dd><b>From the clip: D-Log M</b>（或 <b>None, not log</b>），然后是 D-Log M、D-Log、GP-Log、GP-Log2 和 I-Log（10-bit）中的其他曲线，供手动选择。标记为 HDR 的文件会显示 “Tagged HDR, so not taken for log”（已标记为 HDR，因此不当作 Log），<b>Grade as log by hand…</b>（手动按 Log 调色）会打开曲线列表。默认：来自片段。</dd>
+          </div>
+          <div>
+            <dt>Source › Save to the source、Revert to saved（源 › 保存到源、恢复为已保存）</dt>
+            <dd>曲线是源的输入设置的一部分。你选的曲线仅用于观看，直到 <b>Save to the source</b> 把它保存在片段旁边，用于这个片段以及它所有的精彩瞬间和片段预览。<b>Revert to saved</b> 恢复原样。关于 Source 标签页的更多内容，见<a class="text-link" href="stabilization.html#source">防抖</a>。</dd>
+          </div>
+        </dl>
+        <div class="lg-shots">
+          <figure class="media lg-panel" id="shot-log-4">
+            <img src="../media/log-4.jpg" alt="SDR 屏幕上侧边面板的 Output 标签页：From Log, D-Log M，七种风格，选中的是 HDR, HLG+DV，下面是它的说明、Dolby Vision trims 按钮，以及 Log 曲线一行 D-Log M, from the clip 和 Change in Source。" width="584" height="1145" loading="lazy">
+            <figcaption>在普通屏幕上：D-Log M 片段的全部七种风格。</figcaption>
+          </figure>
+          <figure class="media lg-panel" id="shot-log-5">
+            <img src="../media/log-5.jpg" alt="HDR 屏幕上侧边面板的 Output 标签页，Log 曲线为 GP-Log：From Log, GP-Log，选中的是 HDR, HLG，没有相机厂商的 LUT，有一行 No maker's LUT for GP-Log yet，以及带 Change in Source 的 Log 曲线一行。" width="584" height="897" loading="lazy">
+            <figcaption>在 HDR 屏幕上，使用 GP-Log 曲线：没有厂商风格。</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <h3 class="lg-sub">Dolby Vision 标签页 <span class="pill exp">仅限 Mac App</span></h3>
+      <p class="lg-p lg-measure">只有在存在 +DV 风格时才出现在侧栏上。HLG+DV 和 PQ+DV 的 trim 参数相同。播放其他风格时，会有一个按钮显示 <b>SDR, HLG+DV</b>，让你看到 trim 参数的效果。其中一些参数取极端值时，在 HDR 屏幕上也会改变画面。</p>
+      <div class="compare-wrap">
+        <table class="settings lg-trims">
+          <thead><tr><th scope="col">滑块</th><th scope="col">作用</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Slope</th><td data-label="作用">色调曲线之后的增益：更亮，高光更早溢出</td></tr>
+            <tr><th scope="row">Offset</th><td data-label="作用">整体提亮，阴影提得最多</td></tr>
+            <tr><th scope="row">Power</th><td data-label="作用">中间调更暗（向右）或更亮（向左）</td></tr>
+            <tr><th scope="row">Mid contrast</th><td data-label="作用">中间调附近的对比度</td></tr>
+            <tr><th scope="row">Highlight roll-off</th><td data-label="作用">向右：高光柔和地过渡到白色；向左：高光直接溢出</td></tr>
+            <tr><th scope="row">Saturation</th><td data-label="作用">色调映射后画面的饱和度</td></tr>
+            <tr><th scope="row">Chroma weight</th><td data-label="作用">压缩亮度时保留多少饱和色彩</td></tr>
+            <tr><th scope="row">Scene average、Scene highlights、Scene blacks</th><td data-label="作用">仅在不测量每一帧时显示（<code>dv_live_l1=no</code>）：手动设定场景的亮度</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">滑块下方的 <b>Back to the author's trims</b> 和 <b>Neutral trims: none added</b> 会重置它们。默认：作者的 trim 参数。导出时采用这里的设置。</p>
+
+      <h3 class="lg-sub">Output 标签页：导出 <kbd>Shift</kbd>+<kbd>E</kbd></h3>
+      <dl class="lg-dl lg-dl-wide">
+        <div><dt>Mark start、Mark end、Clear the part</dt><dd>要导出的一段，与 <kbd>l</kbd> 相同。它们显示开头和结尾的时间。</dd></div>
+        <div><dt>Export the clip，或 Export the part 1:20–1:45</dt><dd>与 <kbd>Shift</kbd>+<kbd>E</kbd> 相同：一个文件，内容就是正在播放的，它的源、它的变换，采用这种风格。导出期间：<b>Cancel export</b>。</dd></div>
+        <div><dt>Export in SDR</dt><dd>导出 Rec.709，无论播放的是什么。适用于 Log 片段，以及已经是 HDR 的文件（经 NBCU）。</dd></div>
+        <div><dt>Show the last export</dt><dd>在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中显示它。</dd></div>
+      </dl>
+      <p class="note">静态照片或 Live Photo 在 Save frame 中制作：见<a class="text-link" href="photos.html">照片</a>。</p>
+
+      <h3 class="lg-sub">在设置文件中</h3>
+      <p class="lg-p lg-measure">片段的起始风格保存在 <code>dlogm.conf</code> 中，位于 <span class="os-mac"><code class="lg-path">~/Library/Application Support/ActionFootagePlayer/mpv/script-opts/</code></span><span class="os-win"><code class="lg-path">%LOCALAPPDATA%\ActionFootagePlayer\mpv\script-opts\</code></span>。手动编辑它；不用侧边面板时，右键菜单中的 <b>Remember as default</b>（记为默认）会写入这两种风格：</p>
+      <div class="compare-wrap">
+        <table class="settings lg-conf">
+          <thead><tr><th scope="col">行</th><th scope="col">设定什么</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>hdr_screen=hdr</code></th><td data-label="设定什么">Log 片段在 HDR 屏幕上的起始风格：<code>hdr</code>、<code>dv</code>、<code>dvsdr</code>、<code>tonemap</code>、<code>nbcu</code> 或 <code>maker</code></td></tr>
+            <tr><th scope="row"><code>sdr_screen=dv</code></th><td data-label="设定什么">普通屏幕上的同一设置（没有 Dolby Vision 的地方为 <code>tonemap</code>）</td></tr>
+            <tr><th scope="row"><code>dv_live_l1=yes</code></th><td data-label="设定什么">播放时测量每一帧的亮度，用于 +DV 风格</td></tr>
+            <tr><th scope="row"><code>denoise=no</code></th><td data-label="设定什么"><code>yes</code>：片段播放时做轻度降噪，不用于导出。没有快捷键或菜单能开启它，只有这一行</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">快捷键</p>
+        <h2>Log 和导出的快捷键。</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>显示或隐藏侧边面板</span><span><kbd>Tab</kbd></span></div>
+        <div class="key"><span>下一种风格</span><span><kbd>Ctrl</kbd>+<kbd>s</kbd></span></div>
+        <div class="key"><span>直接切换到 HDR</span><span><kbd>Ctrl</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>按录制原样，仅当前片段</span><span><kbd>L</kbd></span></div>
+        <div class="key"><span>手动选择源的 Log 曲线（Save to the source 保存它）</span><span><kbd>Ctrl</kbd>+<kbd>l</kbd></span></div>
+        <div class="key"><span>一段的开头，然后是结尾</span><span><kbd>l</kbd></span></div>
+        <div class="key"><span>导出；3 秒内按两次则取消</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">局限</p>
+        <h2>值得了解。</h2>
+      </div>
+      <ul class="lg-limits">
+        <li><b>自动识别：</b>仅限 DJI Osmo Action 6 和 Osmo 360，GoPro HERO12 Black（固件 1.20 或更高）、HERO13 Black 和 MISSION 1。其他相机都需要 <kbd>Ctrl</kbd>+<kbd>l</kbd>。</li>
+        <li><b>用真实素材试过的：</b>Osmo Action 6 上的 D-Log M 和 HERO12 Black 上的 GP-Log。D-Log、GP-Log2 和 10-bit I-Log 只是根据厂商的公式实现。不支持 8-bit I-Log。MAX2 的 GP-Log 手动套用后，大约亮了两档。</li>
+        <li><b>厂商自己的 SDR 风格仅限 D-Log M：</b>DJI 为 Osmo Action 6 制作的 LUT，用于所有 D-Log M 片段，在安装设置时从 DJI 下载。GoPro 和 Insta360 的片段使用 NBCU 或 mpv 的 SDR。</li>
+        <li><b>Dolby Vision 仅限 Mac App。</b>而且只有以 +DV 风格（HLG+DV 或 PQ+DV）导出的文件才带有它；批量导出的文件没有，文件自带的 Dolby Vision 也不会带进它导出的文件。</li>
+        <li><b>有些“SDR”风格导出的是 HDR：</b>SDR, HLG+DV、SDR, PQ+DV 和 SDR tone mapped from HDR by mpv。要得到 SDR 文件，请用 NBCU、厂商的 LUT 或 <b>Export in SDR</b>。</li>
+        <li><b>trim 参数是口味问题：</b>作者的设定，贴合 NBCU。中性设定只需按一个按钮。</li>
+        <li><b>之前接过 HDR 显示设备的显示器：</b>在 Mac 重启之前，macOS 可能会把它上面的 HDR 显示得暗大约一档。播放器每次会话会提示一次，但无法修复；SDR 风格不受影响。</li>
+        <li><b>片段播放时，它的导出几乎停止。</b>暂停一下，让导出进行。<span class="os-win">在 Windows 上，你观看时导出以每秒几帧的速度进行。</span></li>
+        <li><b>本页的图片不是 HDR。</b>截图无法呈现 HDR 屏幕上显示的效果，所以它们用的是 SDR 风格。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">常见问题</p>
+        <h2>关于 Log、HDR 和导出。</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>我需要 HDR 屏幕吗？</summary>
+          <div class="a"><p>不需要。在普通屏幕上，片段会按你选择的风格做色调映射。HDR 屏幕能显示更多：更亮的高光，同时保留阴影。</p></div>
+        </details>
+        <details>
+          <summary>我应该导出 HDR 还是 SDR？</summary>
+          <div class="a"><p>给 iPhone、iPad 和 Mac 看，就在 Mac 上从 HDR, HLG+DV 导出：文件在它们的屏幕上显示正确，无论是不是 HDR 屏幕。其他情况（其他手机、电视、社交网络、朋友的笔记本电脑），SDR 更稳妥：SDR, NBCU、厂商的 LUT 或 <b>Export in SDR</b>。这些文件在哪里看都一样。</p></div>
+        </details>
+        <details>
+          <summary>为什么“SDR, HLG+DV”给了我一个 HDR 文件？</summary>
+          <div class="a"><p>它和 HDR, HLG+DV 是同一个视频，只是总以色调映射后的样子显示，让你看到普通屏幕上得到的效果。导出的是带 Dolby Vision 的 HDR 文件，Apple 设备会以同样的方式对它做色调映射。要得到普通的 SDR 文件，请用 <b>Export in SDR</b>。</p></div>
+        </details>
+        <details>
+          <summary>我在剪辑软件里调色。这适合我吗？</summary>
+          <div class="a"><p>适合，作为调色之前的一步：以彩色浏览片段，挑出好的，把原始文件留给剪辑。真需要一个文件时，命令行可以生成 ProRes 422 HQ，HLG 或 Rec.709 都行。HLG 转换不添加任何风格，所以你仍然可以调色。</p></div>
+        </details>
+        <details>
+          <summary>我的 Log 片段播放出来是灰的。怎么办？</summary>
+          <div class="a"><p>检查它是否直接来自存储卡：拷贝、裁剪或导出片段的 App 会丢掉播放器读取的元数据。如果你的相机不在它能识别的范围内，按 <kbd>Ctrl</kbd>+<kbd>l</kbd>，直到出现正确的曲线。在 <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub issue</a> 中附上一段简短的样片，有助于让你的相机被识别。</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">试一试</p>
+        <h2>双击一个 Log 片段。</h2>
+        <p class="lede">免费，无需账号，你的素材保持原样。</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">免费下载 Mac 版</span><span class="os-win">下载 Mac 版</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>防抖</h3>
+          <p>关闭相机防抖拍摄的片段如何稳定播放，以及你可以设置什么。</p>
+          <a href="stabilization.html">防抖</a>
+        </div>
+        <div class="help-card">
+          <h3>它能做的一切</h3>
+          <p>每个快捷键和选项，以及逐台相机的情况。</p>
+          <a href="features.html">全部功能</a>
+        </div>
+        <div class="help-card">
+          <h3>发一段你相机拍的片段</h3>
+          <p>几秒直接来自存储卡的素材，就能帮播放器正确读取你相机的 Log。</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">在 GitHub 上提交 issue</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
+      <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">全部功能</a>
+      <a href="download.html">下载</a>
+    </div>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p class="tm">Dolby、Dolby Vision 和双 D 标志是 Dolby Laboratories Licensing Corporation 的商标。Action Footage Player 与 Dolby 无关联，也未获 Dolby 认可。播放器借助开源库 <code>dolby_vision</code>（MIT）自行写入 Dolby Vision 元数据，其中不包含任何 Dolby 软件。</p>
+    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../log.html" hreflang="en">阅读英文原文</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+/* Stabilization page: the decision flow, the settings lists, the limits. Builds on styles.css. */
+
+/* How stabilization works: four short parts, two by two */
+@media (min-width: 700px) { .st-gf { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* How it decides: the ordered steps beside the flow diagram */
+.st-logic { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); align-items: start; margin-bottom: 28px; }
+@media (min-width: 980px) { .st-logic { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); } }
+.st-order { max-width: none; }
+.st-order code, .st-p code, .st-settings code, .st-moments code { overflow-wrap: anywhere; }
+
+/* The flow diagram, drawn inline: its colors follow the site's light and dark themes */
+.st-flow { max-width: 520px; width: 100%; justify-self: center; }
+.flow { display: block; width: 100%; height: auto; }
+.flow .flow-start { fill: var(--ink); }
+.flow .flow-start + .flow-t { fill: var(--bg); }
+.flow .flow-q { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.flow .flow-ok { fill: var(--ok-bg); stroke: var(--ok); stroke-width: 1.2; }
+.flow .flow-plain { fill: var(--na-bg); stroke: var(--na); stroke-width: 1.2; }
+.flow .flow-step { fill: var(--warn-bg); stroke: var(--warn); stroke-width: 1.2; }
+.flow .flow-line { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+.flow .flow-head { fill: var(--muted); }
+.flow text { font-family: var(--f-body); }
+.flow .flow-t { fill: var(--ink); font-size: 16px; font-weight: 600; }
+.flow .flow-s { fill: var(--muted); font-size: 13.5px; }
+.flow .flow-l { fill: var(--accent-ink); font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.04em; }
+
+/* Settings: a definition list, each setting with its default and key, in the panel's order */
+.st-panel { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 980px) { .st-panel { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); } }
+.st-settings { margin: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.st-settings > div { padding: 14px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.st-settings dt { font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.st-settings dd { margin: 0; color: var(--muted); }
+.st-settings dd b { color: var(--ink); font-weight: 600; }
+.st-def-val { font-family: var(--f-mono); font-size: 0.75rem; font-weight: 400; letter-spacing: 0.04em; color: var(--accent-ink); }
+.st-cols { column-gap: 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); border-top: 0; }
+.st-cols > div { border-bottom: 0; border-top: 1px solid var(--line); }
+
+.st-sub { margin-top: 48px; margin-bottom: 12px; scroll-margin-top: 90px; }
+.st-p { color: var(--muted); max-width: 70ch; margin-top: 12px; }
+.st-p b { color: var(--ink); font-weight: 600; }
+.st-p + .compare-wrap { margin-top: 18px; }
+
+/* How long a setting lasts */
+table.settings { min-width: 520px; }
+table.settings tbody th { width: 26%; }
+table.settings td { color: var(--muted); }
+
+/* Gyroflow band: paragraphs under the points */
+#gyroflow .dive-points p + p { margin-top: 6px; }
+#gyroflow .media-slot { border-color: rgba(255, 255, 255, 0.2); color: var(--deep-muted); }
+#gyroflow .media figcaption { color: var(--deep-muted); }
+
+/* When it can't keep up */
+.st-slow { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); align-items: start; margin-top: 44px; }
+@media (min-width: 900px) { .st-slow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.st-slow p { color: var(--muted); }
+
+/* Moments */
+.st-moments { display: grid; gap: 14px; max-width: 70ch; }
+.st-moments p { color: var(--muted); }
+.st-moments b { color: var(--ink); font-weight: 600; }
+
+/* Limits */
+.st-limits { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; max-width: 820px; border-top: 1px solid var(--line); }
+.st-limits li { padding: 12px 0 12px 22px; border-bottom: 1px solid var(--line); color: var(--muted); position: relative; }
+.st-limits li::before { content: ""; position: absolute; left: 4px; top: 1.15em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.st-limits b { color: var(--ink); font-weight: 600; }

@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Организация: порядок в ваших записях · Action Footage Player</title>
+<meta name="description" content="Сохраняйте лучшие фрагменты поездки как моменты, которые видны в Finder или Проводнике, ставьте метки в клипах, откладывайте скучные, экспортируйте в одну папку, вырезайте случайно снятую минуту и переносите всё это в Final Cut Pro, DaVinci Resolve или Premiere Pro. Всё — обычными файлами в папке поездки.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/organizing">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/organizing">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/organizing">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/organizing">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/organizing">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Roboto+Flex:wdth,wght@100..125,500..900&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../organizing.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, на главную">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Сайт">
+      <details class="navmenu"><summary>Главная</summary>
+        <ul>
+          <li><a href="index.html">Главная страница</a></li>
+          <li><a href="index.html#features">Что он умеет</a></li>
+          <li><a href="index.html#how">Как это работает</a></li>
+          <li><a href="index.html#faq">Вопросы</a></li>
+          <li><a href="about.html">Об авторе</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Для кого</summary>
+        <ul>
+          <li><a href="divers.html">Дайверам и снорклерам</a></li>
+          <li><a href="moments.html">Активным путешественникам</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Функции</summary>
+        <ul>
+          <li><a href="log.html">Log-записи</a></li>
+          <li><a href="stabilization.html">Стабилизация</a></li>
+          <li><a href="organizing.html" aria-current="page">Организация</a></li>
+          <li><a href="photos.html">Фото</a></li>
+          <li><a href="360.html">360-видео</a></li>
+          <li><a href="features.html" class="nm-all">Все функции</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Скачать</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Меню"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Главная</li>
+        <li><a href="index.html">Главная страница</a></li>
+        <li><a href="index.html#features">Что он умеет</a></li>
+        <li><a href="index.html#how">Как это работает</a></li>
+        <li><a href="index.html#faq">Вопросы</a></li>
+        <li><a href="about.html">Об авторе</a></li>
+        <li class="sm-group">Для кого</li>
+        <li><a href="divers.html">Дайверам и снорклерам</a></li>
+        <li><a href="moments.html">Активным путешественникам</a></li>
+        <li class="sm-group">Функции</li>
+        <li><a href="log.html">Log-записи</a></li>
+        <li><a href="stabilization.html">Стабилизация</a></li>
+        <li><a href="organizing.html" aria-current="page">Организация</a></li>
+        <li><a href="photos.html">Фото</a></li>
+        <li><a href="360.html">360-видео</a></li>
+        <li><a href="features.html">Все функции</a></li>
+        <li class="sm-dl"><a href="download.html">Скачать</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Язык: русский"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>RU</summary>
+      <ul>
+        <li><a href="../organizing.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/organizing.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/organizing.html" hreflang="ru" lang="ru" aria-current="page">Русский</a></li>
+        <li><a href="../zh/organizing.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../organizing.html" hreflang="en">Читать оригинал на английском</a></p>
+</div>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band lib-hero" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Организация</p>
+        <h1>Порядок в ваших записях — обычными файлами.</h1>
+        <p class="lede">Сохраняйте лучшие фрагменты поездки как моменты, отмечайте важное, откладывайте скучные клипы и экспортируйте в одну папку. Когда придёт время для настоящего монтажа, Final Cut Pro, DaVinci Resolve или Premiere Pro получат всё это — на ваших оригинальных клипах.</p>
+        <ul class="lib-gets">
+          <li><strong>Ничего не нужно импортировать.</strong> Всё — это файлы в папке поездки, которые <span class="os-mac">Finder</span><span class="os-win">Проводник</span> показывает как любые другие.</li>
+          <li><strong>Просмотр — это не сохранение.</strong> Если открыть клип и посмотреть его, ничего не записывается. Плеер записывает, только когда вы нажимаете для этого клавишу или кнопку или включаете <strong>Auto save</strong> (автосохранение).</li>
+          <li><strong>Никаких скрытых файлов.</strong> Любой файл, который создаёт плеер, можно увидеть, переместить и удалить.</li>
+        </ul>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The folder -->
+  <section class="section band" id="folder">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Папка поездки</p>
+        <h2>Одна папка на поездку. Всё в ней на виду.</h2>
+        <p class="lede">Папка поездки после вечера с плеером. Собственные папки плеера начинаются с подчёркивания, поэтому при сортировке идут первыми, над вашими записями. Его единственный файл, <code>Project.afproject</code>, без подчёркивания, поэтому он стоит по алфавиту среди ваших папок дней.</p>
+        <p>Размеры справа говорят сами за себя: оригиналы и экспорт большие, моменты и флипбуки клипов крошечные. Храните их сотнями и копируйте куда угодно.</p>
+        <p>Удалите файл момента — и момента нет. Удалите превью клипа — и клип отложен. Создавайте вложенные папки в <code>_Moments</code>, чтобы раскладывать моменты: они ваши, и монтажная программа получит их как бины.</p>
+      </div>
+      <div class="stack">
+      <ul class="lib-tree" aria-label="Папка поездки после вечера с плеером">
+        <li><span class="dir">2026-10 Egypt</span><span class="c">папка, в которой вы создали проект</span>
+          <ul>
+            <li><span class="dir">_Moments</span>
+              <ul>
+                <li><span class="sz">0,3 МБ</span>Turtle.afplink.mp4<span class="c">момент: один кадр для просмотра, внутри ссылка на оригинал</span></li>
+                <li><span class="sz">2 МБ</span>Turtle.gyroflow<span class="c">его собственный проект Gyroflow, если он был у клипа</span></li>
+                <li><span class="dir">Reef</span><span class="c">ваша собственная вложенная папка</span>
+                  <ul><li><span class="sz">0,3 МБ</span>Moray eel.afplink.mp4</li></ul>
+                </li>
+                <li><span class="sz">0,3 МБ</span>export_2026-10-22 15.28.52.afplink.mp4<span class="c">сохранён при экспорте фрагмента, который ещё не был моментом</span></li>
+              </ul>
+            </li>
+            <li><span class="dir">_Clips</span>
+              <ul>
+                <li><span class="dir">Day 1</span>
+                  <ul><li><span class="sz">0,4 МБ</span>DJI_20261022152841_0068_D.afplink.mp4<span class="c">флипбук клипа, в цвете</span></li></ul>
+                </li>
+              </ul>
+            </li>
+            <li><span class="dir">_Exports</span>
+              <ul><li><span class="sz big">115 МБ</span>Turtle.mov<span class="c">а также Turtle (SDR).mov, Turtle (Dolby Vision).mov</span></li></ul>
+            </li>
+            <li><span class="dir">_Stills</span>
+              <ul><li><span class="sz">3 МБ</span>DJI_20261022152841_0068_D_8.00s.heic<span class="c">фото из клипа, см. <a class="text-link" href="photos.html">Фото</a></span></li></ul>
+            </li>
+            <li><span class="sz">несколько КБ</span>2026-10 Egypt (Final Cut Pro).fcpxml<span class="c">записан командой Marks for the editor</span> <span class="soon">Скоро</span></li>
+            <li><span class="dir">Day 1</span><span class="c">ваши записи</span>
+              <ul>
+                <li><span class="sz big">500 МБ</span>DJI_20261022152841_0068_D.MP4</li>
+                <li><span class="sz big">50 МБ</span>DJI_20261022152841_0068_D.LRF<span class="c">маленькая прокси-копия от камеры</span></li>
+                <li><span class="sz">1 КБ</span>DJI_20261022152841_0068_D.afp.json<span class="c">ваши метки и сохранённый вид клипа — появляется, как только вы измените метку или сохраните вид</span></li>
+                <li><span class="sz">2 МБ</span>DJI_20261022152841_0068_D.gyroflow<span class="c">проект Gyroflow клипа, если он есть</span></li>
+              </ul>
+            </li>
+            <li><span class="sz">несколько КБ</span>Project.afproject<span class="c">сам проект: дважды щёлкните, чтобы открыть поездку в Action Footage Library. Внутри — введённые вами названия, у каких клипов есть превью и у каких меток фото, его настройки</span></li>
+          </ul>
+        </li>
+      </ul>
+      <p class="note lib-tree-note">Примерный размер каждого файла, как в нашей тестовой поездке: 45-секундный клип 4K с Osmo Action 6 и 10-секундный момент из него, экспортированный в HDR.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works: a project -->
+  <section class="section band tight-top" id="project">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Проект</p>
+        <h2>Проект — это просто то, где что лежит.</h2>
+        <p>Проект говорит две вещи. Где лежат оригинальные клипы поездки, которые плеер никогда не меняет. И куда он кладёт то, что вы из них делаете: моменты — в <code>_Moments</code>, флипбуки клипов — в <code>_Clips</code>, экспорт — в <code>_Exports</code>, фото — в <code>_Stills</code>. Вот и всё, что такое проект. Всё остальное — отдельные файлы в этих папках, и о них рассказано в разделах ниже.</p>
+        <p>По умолчанию проект — это сама папка поездки, и всё в ней находит клипы по тому, где они лежат внутри этой папки. Скопируйте или перенесите папку целиком, записи вместе с проектом, на другой диск или на NAS, и всё будет работать как прежде.</p>
+        <p>Плеер никогда не создаёт проект сам. Когда вы в первый раз сохраняете момент, экспортируете, нажимаете <kbd>X</kbd> или открываете Action Footage Library, боковая панель открывается на вкладке <strong>Project</strong> (проект) и пишет <strong>No project yet</strong> (проекта пока нет). Выберите папку из списка — от собственной папки клипа до корня диска (для карты папка над <code>DCIM</code> выбирается за вас) — и нажмите <strong>Initialize the project here</strong> (создать проект здесь). Появится один файл, <code>Project.afproject</code>: это и есть проект, с собственными заметками плеера внутри. Дважды щёлкните по нему, чтобы открыть поездку в <a class="text-link" href="#library-app">Action Footage Library</a>. Папки появляются, когда в них что-то попадает.</p>
+        <p>У проекта из прежней версии вместо этого файла есть папка <code>_ActionFootagePlayer</code>. Плеер переносит её содержимое в <code>Project.afproject</code>, когда в следующий раз открывает один из клипов поездки.</p>
+        <p class="honest">Выбирайте папку поездки, над папками дней, чтобы вся поездка была одним проектом. Меткам проект вообще не нужен.</p>
+        <p class="note">Боковая панель показывается и скрывается клавишей <kbd>Tab</kbd>.</p>
+      </div>
+      <figure class="media" id="shot-library-1">
+        <img src="../media/library-1.jpg" alt="Вкладка Project боковой панели без проекта: No project yet и пояснение, что проект получит папки _Moments, _Clips и _Exports и файл Project.afproject; список папок открыт на Trips, 2026-10 Egypt и Day 1, выбрана 2026-10 Egypt, ниже кнопка Initialize the project here." width="584" height="848" loading="lazy">
+        <figcaption>Проекта пока нет: выберите папку поездки, затем Initialize the project here.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Marks -->
+  <section class="section band tight-top" id="marks">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Метки</p>
+        <h2>Сначала хайлайты камеры, потом ваши собственные метки.</h2>
+        <p>Метка — это точка в клипе. Нажимали кнопку хайлайта во время записи? Эти метки уже на шкале воспроизведения: кнопка быстрого переключения или пульт на DJI Osmo Action 4, Action 5 Pro или Action 6, HiLight на GoPro HERO5 и новее. <kbd>Ctrl</kbd>+<kbd>]</kbd> и <kbd>Ctrl</kbd>+<kbd>[</kbd> переходят к следующей и предыдущей, за 2 секунды до неё.</p>
+        <p><kbd>M</kbd> ставит метку там, где сейчас видео. На метке (в пределах половины секунды) <kbd>M</kbd> убирает её, в том числе метку камеры.</p>
+        <p>Первое изменение записывает рядом с клипом файл <code>&lt;clip&gt;.afp.json</code> и копирует в него метки камеры. С этого момента метки клипа — это этот файл. В него же попадает сохранённый вид клипа: то, что вы сохраняете кнопкой <strong>Save to the source</strong> (сохранить в источник) на вкладках <strong>Source</strong> и <strong>Transform</strong> боковой панели, чтобы клип открывался таким, каким вы его сохранили. Удалите этот файл — и хайлайты камеры вернутся как были, а сохранённый вид забудется. В сам клип ничего не записывается.</p>
+        <p class="note">Файл <code>.marks.json</code> из прежней версии читается как есть, а при следующем изменении становится <code>.afp.json</code>.</p>
+        <p>Меткам проект не нужен. В боковой панели их перечисляет <strong>Marks of this clip</strong> (метки этого клипа): «DJI quick switch» или «GoPro HiLight» — метки камеры, «Mark 3» — ваши. Щёлкните по метке, чтобы перейти к ней.</p>
+      </div>
+      <figure class="media" id="shot-library-2">
+        <img src="../media/library-2.jpg" alt="Низ окна плеера: шкала воспроизведения с засечками хайлайтов камеры, двух меток и двух моментов; указатель на засечке Turtle показывает Chapter: Turtle." width="1600" height="300" loading="lazy">
+        <figcaption>Хайлайты камеры, ваши метки и момент на шкале воспроизведения.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Moments -->
+  <section class="section band dive" id="moments">
+    <div class="wrap dive-grid">
+      <div class="stack kbd-dark">
+        <p class="eyebrow">Моменты</p>
+        <h2>Момент — небольшой файл. Откройте его, и заиграет оригинал.</h2>
+        <p class="lede">Нажмите <kbd>l</kbd> в начале фрагмента, <kbd>l</kbd> в его конце, затем <kbd>k</kbd> и введите название.</p>
+        <div class="dive-points">
+          <div>
+            <h3>Название</h3>
+            <p>Плеер спрашивает «Moment 0:20–0:30 name (Enter: Turtle 2):». Один Enter принимает подсказку: ваше последнее название со следующим номером или, пока вы ещё ничего не вводили, дату и время съёмки. <kbd>Tab</kbd> переносит подсказку в поле для правки, <kbd>↑</kbd> возвращает прежние названия, <kbd>Esc</kbd> ничего не сохраняет.</p>
+          </div>
+          <div>
+            <h3>Файл</h3>
+            <p>Момент становится файлом <code>_Moments/Turtle.afplink.mp4</code>: это небольшой MP4, который показывает один цветной кадр фрагмента (первую метку в нём, а если её нет — середину), со ссылкой на оригинал внутри. <span class="os-mac">Finder и Быстрый просмотр</span><span class="os-win">Проводник</span> показывают этот кадр. Даты файла — время съёмки, так что при сортировке по дате моменты идут в том порядке, в каком происходили.</p>
+          </div>
+          <div>
+            <h3>Воспроизведение</h3>
+            <p>Открытый в плеере, момент играет свой фрагмент оригинала в полном качестве, затем следующий момент в папке. Откройте саму папку <code>_Moments</code>, и все они сыграют в том порядке, в каком происходили. Двойной щелчок делает это, если Action Footage Player — приложение, которое открывает файлы MP4<span class="os-mac"> (Свойства → Открывать в программе → Заменить все…)</span>; иначе система показывает превью из одного кадра.</p>
+          </div>
+          <div>
+            <h3>Удалили файл — удалили момент</h3>
+            <p>Никакого списка, который надо держать в согласии с файлами. Переименуйте его, переместите во вложенную папку, поставьте тег: он остаётся моментом. В боковой панели в <strong>Moments of this clip</strong> (моменты этого клипа) есть <strong>Rename…</strong> (переименовать) и <strong>Remove</strong> (убрать), который перемещает его в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>.</p>
+          </div>
+          <div>
+            <h3>Как изменить его границы</h3>
+            <p>Включите момент, сдвиньте его начало или конец клавишей <kbd>l</kbd>, затем <kbd>k</kbd>. Плеер спросит «Update Turtle to …? Enter, or a new name for a new one» (обновить Turtle или ввести название для нового). <span class="os-mac">Его теги Finder сохраняются.</span></p>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <figure class="media" id="shot-library-3">
+          <img src="../media/library-3.jpg" alt="Кадр с затонувшим судном на паузе, внизу вопрос Moment 0:24–0:34 name (Enter: Turtle 2), рядом боковая панель." width="1600" height="900" loading="lazy">
+          <figcaption>Один Enter оставляет предложенное название.</figcaption>
+        </figure>
+        <div class="lib-snap">
+          <h3>Выглядит так же, как при сохранении</h3>
+          <p>Момент сохраняется целиком, из того, что играет в ту секунду, когда вы нажимаете <kbd>k</kbd>: его стабилизация, сглаживание (Level), горизонт, объектив, коррекция хроматической аберрации и кадр. Если у клипа есть проект Gyroflow, момент получает собственную копию, обрезанную по фрагменту. Сам по себе момент никогда не меняется: последующие изменения клипа или его проекта до него не доходят. То, как читается клип (его кривая log, поворот, объектив под водой), остаётся за клипом — для всех его моментов.</p>
+          <p>Пока момент играет, вкладка <strong>Transform</strong> боковой панели показывает в строке <strong>Transform defined in</strong> (где задано преобразование) — момент. Всё, что вы меняете, действует только для просмотра, если не включено <strong>Auto save</strong>: «Changed for viewing. The dot marks what's saved» (изменено для просмотра, точка отмечает сохранённое). <strong>Save to the moment</strong> (сохранить в момент) записывает изменения, <strong>Revert to saved</strong> (вернуть сохранённое) возвращает как было. Выключите <strong>Settings of its own</strong> (собственные настройки), и момент будет играть так, как сохранён его клип; собственные настройки момента и его копия Gyroflow пропадут, копия — в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>.</p>
+        </div>
+        <figure class="media" id="shot-library-4">
+          <img src="../media/library-4.jpg" alt="Вкладка Transform боковой панели, пока после изменения играет момент Turtle: Transform defined in — момент, Settings of its own включено, Changed for viewing. The dot marks what's saved, кнопки Save to the moment и Revert to saved; Level изменён на Strong, точка стоит на Medium." width="584" height="918" loading="lazy">
+          <figcaption>Просмотр — это не сохранение: изменения действуют только для просмотра, пока вы не нажмёте Save to the moment.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Clip previews -->
+  <section class="section band" id="clip-previews">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Превью клипов</p>
+        <h2>Вся поездка в цвете, и <kbd>X</kbd> для клипов, которые не нужны.</h2>
+        <p class="lede">Записи в log (режим съёмки, который сохраняет больше света и выглядит плоским и серым, пока его не преобразуют) — это стена серых значков. Превью клипов превращают её в поездку в цвете.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Make clip previews</h3>
+          <p>В <a class="text-link" href="#library-app">Action Footage Library</a> кнопка <strong>Make clip previews</strong> (создать превью клипов) заполняет <code>_Clips</code> небольшими MP4, по одному на клип: флипбук из отмеченных кадров клипа или примерно из 12 кадров, разбросанных по нему. Library открывается с вкладки Project боковой панели кнопкой <strong>Open in Action Footage Library</strong> (открыть в Action Footage Library). Превью создаются по одному в фоне, и видно, сколько уже готово. Никогда сами по себе: только когда вы нажмёте кнопку.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Просмотр в <span class="os-mac">Finder</span><span class="os-win">Проводнике</span></h3>
+          <p><code>_Clips</code> повторяет ваши папки дней, если только вы не отметите в Library <strong>All in _Clips itself, without the clips' folders</strong> (всё прямо в _Clips, без папок клипов). <span class="os-mac">В режиме значков это поездка в цвете, а Быстрый просмотр (пробел) пролистывает клип за секунды.</span><span class="os-win">В режиме крупных значков это поездка в цвете.</span> Откройте превью в плеере, и заиграет весь клип.</p>
+          <p>Это файлы: копируйте их, раскладывайте по своим папкам, переименовывайте как хотите. Каждый остаётся ссылкой на свой оригинальный клип.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Отложить клип</h3>
+          <p><kbd>X</kbd> перемещает превью клипа в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>: «Not interesting» (неинтересно). Сам клип остаётся на месте. Удалить превью вручную — то же самое. Повторное <kbd>X</kbd> создаёт его снова. Это делается в плеере: для клипа, у которого превью ещё нет, кнопка <strong>Make this clip's preview</strong> (создать превью этого клипа) на вкладке Project создаёт только его.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Удалённое остаётся удалённым</h3>
+          <p>Make clip previews создаёт превью только для клипов, у которых его никогда не было, так что новые записи получают превью, а отложенный клип не возвращается. Кнопка <strong>Again for removed clips</strong> (заново для убранных клипов) в Library возвращает их все.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The whole trip at once: Action Footage Library -->
+  <section class="section band dive" id="library-app">
+    <div class="wrap">
+      <div class="section-head kbd-dark">
+        <p class="eyebrow">Action Footage Library</p>
+        <h2>Вся поездка сразу — в отдельном приложении.</h2>
+        <p class="lede">То, что вы делаете с одним клипом, происходит в плеере. То, что вы делаете со всей поездкой, — в Action Footage Library, небольшом втором приложении, которое идёт вместе с плеером. Оно работает в фоне, по очереди заданий, так что тем временем можно смотреть дальше или вообще закрыть плеер.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Превью клипов</h3>
+          <p>Цветной флипбук для каждого клипа, в <code>_Clips</code>: вся поездка с одного взгляда в <span class="os-mac">Finder</span><span class="os-win">Проводнике</span>. Только для клипов, у которых его ещё нет, так что убранное превью остаётся убранным; <b>Again for removed clips</b> возвращает их.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Моменты из всех меток</h3>
+          <p>Каждая метка, которая ещё не входит в момент, становится моментом в <code>_Moments</code>: по 2 секунды с каждой стороны, близкие метки объединяются в один момент, и каждый называется по времени, когда это произошло.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Фото из всех меток</h3>
+          <p>Фото на каждой метке, в <code>_Stills</code>, таким, каким клип сохранён выглядеть: обычные снимки, <span class="os-mac">Live Photo или </span>Motion Photo. Каждое по одному разу: удалённое фото заново не создаётся.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Экспорт всех моментов</h3>
+          <p>Каждый ещё не экспортированный момент — в <code>_Exports</code>, каждый со своими настройками, так же, как <kbd>Shift</kbd>+<kbd>E</kbd> экспортирует один. В HDR, как записано, или в SDR.</p>
+        </div>
+      </div>
+      <div class="lib-cols">
+        <p>У каждого задания видно, сколько сделано и над чем оно сейчас работает, и его можно остановить; всё, что не удалось сделать, перечисляется с причиной. Задания выполняются по одному. <span class="os-mac">Пока они идут, Mac не уходит в сон.</span></p>
+        <p>Как открыть: <b>Open in Action Footage Library</b> на вкладке Project боковой панели или двойной щелчок по <code>Project.afproject</code> в папке поездки. Своим кодом оно ничего не создаёт: оно запускает плеер без окна, так что всё получается в точности таким, каким его делает плеер.</p>
+      </div>
+      <p class="note">Это его первая версия: оно выполняет пакетные задания, а просматривать ваши записи пока не умеет. <span class="os-mac">На Mac оно лежит рядом с плеером в скачанном файле</span><span class="os-win">В Windows оно устанавливается вместе с плеером и получает свой пункт в меню «Пуск»</span>; для Linux его пока нет.</p>
+    </div>
+  </section>
+
+  <!-- Favorites -->
+  <section class="section band tight-top" id="favorites">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Избранное</p>
+        <h2><kbd>K</kbd> — в избранное. <span class="soon">Скоро</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p class="os-mac"><kbd>K</kbd> отмечает как избранный момент, который играет, а на клипе — его превью в <code>_Clips</code>. Это зелёный тег <strong>Favorite</strong> в Finder. Повторное <kbd>K</kbd> снимает его. Зелёный тег, поставленный в Finder вручную, тоже считается.</p>
+        <p class="os-win"><kbd>K</kbd> отмечает как избранный момент, который играет, а на клипе — его превью в <code>_Clips</code>. Это 5 звёзд в Проводнике (Свойства → Подробно). Повторное <kbd>K</kbd> снимает отметку. Оценка в 4 или 5 звёзд, поставленная вручную, тоже считается.</p>
+        <p><span class="os-mac">Остальные ваши теги Finder уходят в монтажные программы как ключевые слова, а избранное — как избранное.</span><span class="os-win">Избранное уходит в монтажные программы как избранное.</span> Момент или клип, который существует, оставлен; тот, что вы удалили, — нет. Вот и вся система оценок.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exports -->
+  <section class="section band tight-top" id="exports">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Экспорт</p>
+        <h2>Экспорт попадает в <code>_Exports</code>, со ссылкой на оригинал.</h2>
+      </div>
+      <div class="lib-cols">
+        <p><kbd>Shift</kbd>+<kbd>E</kbd> экспортирует отмеченный фрагмент или весь клип так, как он играет: ровно и в цвете. Название спрашивается так же, как для момента, а если фрагмент — момент, предлагается его название: «Export 0:20–0:30 (SDR) as (Enter: Turtle):». Повторное <kbd>Shift</kbd>+<kbd>E</kbd> во время экспорта отменяет его.</p>
+        <p>Файл называется <code>_Exports/Turtle.mov</code>. Простое название — это HDR (яркие блики на экранах, которые умеют их показывать); другие стили указываются в скобках: <code>Turtle (SDR).mov</code>, <code>Turtle (Dolby Vision).mov</code>. Каждый экспорт несёт ссылку на свой оригинал. Фрагмент, который ещё не был моментом, тоже сохраняется как момент, <code>export_Turtle</code>, так что экспорт можно удалить, чтобы освободить место, и потом всё равно проиграть фрагмент в полном качестве.</p>
+        <p>На вкладке <strong>Output</strong> (вывод) боковой панели, в разделе <strong>Export</strong>, есть то же самое: <strong>Export the part</strong> или <strong>Export the clip</strong> (экспорт фрагмента или клипа), <strong>Export in SDR</strong>, <strong>Show the last export</strong> (показать последний экспорт). Чтобы экспортировать все моменты поездки за один раз, воспользуйтесь <a class="text-link" href="#library-app">Action Footage Library</a>. Старые папки <code>stabilized</code> от прежних версий остаются на месте. Стили и форматы описаны на странице <a class="text-link" href="log.html">Съёмка в log</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cutting out a spoiled part -->
+  <section class="section band" id="cut">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">Вырезание</p>
+        <h2>Вырежьте минуту, снятую в кармане.</h2>
+        <p>Отметьте испорченный фрагмент клавишами <kbd>l</kbd> и <kbd>l</kbd>, нажмите <kbd>Ctrl</kbd>+<kbd>x</kbd> и подтвердите. Клип перезаписывается без этого фрагмента, без перекодирования: каждый оставшийся кадр копируется в точности. Проект для этого не нужен.</p>
+        <p>Сначала плеер спрашивает: «Cut 0:05–0:20 out of DJI_20261024094541_0093_D.MP4? Kept: 0:00–0:05 and 0:20–end (two clips; the second from the keyframe at or before 0:20), without re-encoding. The original goes to the Trash.» (вырезать 0:05–0:20; останутся 0:00–0:05 и 0:20–конец, два клипа, второй — с ключевого кадра на 0:20 или раньше, без перекодирования; оригинал уйдёт в Корзину). <strong>Cut it out</strong> (вырезать) или <strong>Keep the clip as it is</strong> (оставить клип как есть).</p>
+        <h3>Что остаётся</h3>
+        <ul class="lib-list">
+          <li>Фрагмент в середине оставляет <strong>два клипа</strong>. Первый сохраняет имя оригинала. Второй называется по собственному времени записи, например <code>DJI_20261024094600_0093_D.MP4</code>.</li>
+          <li>Второй клип начинается с ключевого кадра (полного кадра, из которого строятся остальные) в конце вырезанного фрагмента или раньше, так что может остаться до секунды испорченного фрагмента.</li>
+          <li>Если с какой-то стороны остаётся меньше половины секунды, она отбрасывается.</li>
+          <li>Данные камеры сохраняются: объектив, цветовой режим, данные движения для стабилизации, таймкод, звук. Каждый новый клип читается обратно и проверяется, прежде чем что-либо заменить; если он не совпадает, ничего не меняется.</li>
+          <li>Каждый новый клип получает сохранённый вид оригинала, а также метки и моменты, которые в него попали. Момент, целиком попавший в вырезанный фрагмент, уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>.</li>
+        </ul>
+        <h3>Что меняется</h3>
+        <ul class="lib-list">
+          <li><strong>Оригинал уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span></strong> вместе с сопутствующими файлами: <code>.LRF</code>, его проектом Gyroflow, его <code>.afp.json</code> и превью клипа.<span class="os-win"> На сетевой папке или карте памяти, где Корзины нет, они вместо этого попадают в папку проекта <code>.Trash</code>, и сообщение об этом говорит.</span></li>
+          <li><strong>Отменить в плеере нельзя.</strong> Оригинал можно вручную достать из <span class="os-mac">Корзины</span><span class="os-win">Корзины</span>, но его имя теперь у первого нового клипа.</li>
+          <li><strong>Пока поддерживаются только клипы DJI.</strong> Мы работаем над остальными. До тех пор клип GoPro вырезается, только если сначала пройдёт проверку, а клипы Insta360 и iPhone не принимаются.</li>
+          <li>Экспорт не затрагивается, и его ссылки по-прежнему указывают на оригинал. Чтобы у новых клипов появились превью, нажмите <strong>Make clip previews</strong> в <a class="text-link" href="#library-app">Action Footage Library</a>.</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="media lib-diagram">
+          <svg class="cut-svg" viewBox="0 0 480 236" role="img" aria-labelledby="cut-svg-title">
+            <title id="cut-svg-title">Клип с испорченным фрагментом от 0:05 до 0:20. После Ctrl+x: клип 1 от 0:00 до 0:05, с прежним именем, и клип 2 от ключевого кадра незадолго до 0:20 до конца, со своим именем. Оригинал уходит в Корзину.</title>
+            <text class="lbl" x="10" y="20">Клип</text>
+            <rect class="kept" x="10" y="30" width="60" height="30" rx="4"/>
+            <rect class="spoiled" x="70" y="30" width="140" height="30"/>
+            <rect class="kept" x="210" y="30" width="260" height="30" rx="4"/>
+            <text class="in" x="140" y="50" text-anchor="middle">испорчено</text>
+            <text class="t" x="10" y="78">0:00</text>
+            <text class="t" x="70" y="78" text-anchor="middle">0:05</text>
+            <text class="t" x="210" y="78" text-anchor="middle">0:20</text>
+            <text class="t" x="470" y="78" text-anchor="end">конец</text>
+            <path class="arrow" d="M240 92v22m-6-7 6 7 6-7"/>
+            <text class="lbl" x="10" y="136">После Ctrl+x</text>
+            <rect class="kept" x="10" y="146" width="60" height="30" rx="4"/>
+            <text class="in" x="40" y="166" text-anchor="middle">1</text>
+            <rect class="kf" x="196" y="146" width="14" height="30"/>
+            <rect class="kept" x="210" y="146" width="260" height="30" rx="4"/>
+            <text class="in" x="340" y="166" text-anchor="middle">2</text>
+            <text class="t" x="10" y="200">1: 0:00–0:05, имя оригинала</text>
+            <text class="t" x="10" y="222">2: от ключевого кадра до конца, своё имя</text>
+          </svg>
+          <figcaption>Тёмная полоска перед клипом 2 — часть испорченного фрагмента, оставшаяся до ключевого кадра. Оригинал уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>.</figcaption>
+        </figure>
+        <figure class="media" id="shot-library-5">
+          <img src="../media/library-5.jpg" alt="Кадр с затонувшим судном на паузе с вопросом Cut 0:05–0:20 out of the clip и вариантами Cut it out и Keep the clip as it is." width="1600" height="900" loading="lazy">
+          <figcaption>Ничего не вырезается, пока вы не выберете Cut it out.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Into your editor -->
+  <section class="section band" id="editors">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">В монтажную программу</p>
+        <h2>Ваши моменты и метки — в Final Cut Pro, DaVinci Resolve или Premiere Pro. <span class="soon">Скоро</span></h2>
+        <p class="lede">Когда выбор сделан, переносите поездку в монтаж. Монтажная программа получает ваши оригинальные клипы, с их собственным таймкодом, а на них — ваши моменты, метки, избранное и папки. Ничего не нужно искать заново, ничего не нужно отмечать дважды.</p>
+      </div>
+      <ol class="checklist lib-steps">
+        <li>
+          <h3>Выберите программу</h3>
+          <p>На вкладке Project — <strong>Marks for the editor</strong> (метки для монтажа), затем <strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong> или <strong>Premiere Pro…</strong>. По умолчанию попадают все клипы, кроме тех, что вы отложили клавишей <kbd>X</kbd>; <strong>With moments or marks</strong> берёт только клипы, в которых есть момент или метка.</p>
+        </li>
+        <li>
+          <h3>Плеер записывает файл</h3>
+          <p>Файл попадает в папку проекта и называется по проекту: «Final Cut Pro: 14 clips, 23 moments, 41 marks → 2026-10 Egypt (Final Cut Pro).fcpxml», и <span class="os-mac">Finder показывает его</span><span class="os-win">открывается его папка</span>.</p>
+        </li>
+        <li>
+          <h3>Импортируйте его один раз</h3>
+          <p>Монтажные программы принимают импорт один раз и не объединяют его со вторым. Поэтому делайте это, когда закончите выбирать. Повторная запись заменяет файл.</p>
+        </li>
+      </ol>
+      <div class="compare-wrap lib-editors-wrap">
+        <table class="lib-editors">
+          <thead><tr><th scope="col">Программа</th><th scope="col">Как импортировать</th><th scope="col">Что она получает</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">Final Cut Pro<br><span class="cam-sub">10.6 и новее, Mac</span></th>
+              <td data-label="Как импортировать"><code>… (Final Cut Pro).fcpxml</code>: Файл → Импортировать → XML или двойной щелчок по файлу. С параметром «Оставить файлы на месте» клипы остаются там, где лежат, — на карте или на NAS.</td>
+              <td data-label="Что она получает">Событие с названием поездки, в котором каждый клип стоит на своём таймкоде. Ваши метки — маркерами (метки камеры подписаны «DJI quick switch» или «GoPro HiLight»). Каждый момент — именованный диапазон, в коллекции ключевых слов по каждой папке и тегу. Избранное и отложенные клипы — как избранное и отклонённое. Проект «2026-10 Egypt – moments» со всеми моментами подряд, с названиями.</td>
+            </tr>
+            <tr>
+              <th scope="row">DaVinci Resolve<br><span class="cam-sub">и бесплатная версия</span></th>
+              <td data-label="Как импортировать">Три файла, потому что бесплатная версия не запускает скрипты:<br><code>… (Resolve).fcpxml</code>: File → Import → Timeline, с параметром «Automatically import source clips into media pool».<br><code>… (Resolve markers).edl</code>: правый щелчок по таймлайну «clips» → Timelines → Import → Timeline Markers from EDL.<br><code>… (Resolve metadata).csv</code>: File → Import Metadata To → Media Pool.</td>
+              <td data-label="Что она получает">Таймлайны на оригинальных клипах: все моменты подряд, по одному таймлайну на папку моментов, и каждый оставленный клип целиком. Маркеры на таймлайне клипов: метки камеры синие, ваши голубые, моменты зелёные, с названием и длительностью. В медиапуле: избранное зелёное, отложенные клипы красные, ваши папки и теги — ключевыми словами, моменты перечислены в комментариях каждого клипа.</td>
+            </tr>
+            <tr>
+              <th scope="row">Premiere Pro</th>
+              <td data-label="Как импортировать"><code>… (Premiere).xml</code>: Файл → Импорт.</td>
+              <td data-label="Что она получает">Бины — как ваши папки. Каждый клип со своими маркерами. Каждый момент — клип со своими точками входа и выхода, в бине своей папки. Секвенция из моментов, с названием. Избранное — цветом метки, теги — в комментарии. Отложенные клипы не включаются.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Для Final Cut Pro есть параметр, по умолчанию выключенный, который делает каждый момент ещё и отдельным клипом, чтобы названия были видны в браузере: <strong>Moments as clips of their own</strong>. Он удваивает число клипов в событии.</p>
+    </div>
+  </section>
+
+  <!-- Read-only cards -->
+  <section class="section band tight-top" id="read-only">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Карты только для чтения</p>
+        <h2>Заблокированная карта получает проект в «Документах». <span class="soon">Скоро</span></h2>
+      </div>
+      <div class="lib-cols">
+        <p>Карта с включённой блокировкой или общая папка, доступная только для чтения, не может хранить проект. Если в выбранную папку нельзя записывать, проект создаётся в <span class="os-mac"><code>Documents/ActionFootagePlayer/</code></span><span class="os-win"><code>Documents\ActionFootagePlayer\</code></span>, и плеер спрашивает его название: «The card is read-only. Project name (Enter: OSMO ACTION 2026-10-22):» (карта только для чтения; название проекта).</p>
+        <p>В этой папке лежит то же, что лежало бы в папке поездки: <code>_Moments</code>, <code>_Clips</code>, <code>_Exports</code> и файлы <code>.afp.json</code> клипов — по тем же путям, что и у самих клипов. Плюс <code>Sources.txt</code> — простой текстовый файл, в котором сказано, где лежат записи. В нём также записан идентификатор карты, так что поездка через месяц на той же, отформатированной карте получит собственный проект.</p>
+        <p>Скопировали карту на NAS? Добавьте новый путь первой строкой в <code>Sources.txt</code>. Ссылки внутри моментов и превью относительные, поэтому все они последуют за ним. Карту, которая остаётся заблокированной, нельзя резать через <kbd>Ctrl</kbd>+<kbd>x</kbd>: разблокируйте её или режьте копию.</p>
+      </div>
+      <pre class="lib-pre" aria-label="Пример файла Sources.txt"># Where this project's footage is. The first path that exists is used; edit it if the footage moves.
+/Volumes/video/2026-10 Egypt
+Z:\2026-10 Egypt</pre>
+    </div>
+  </section>
+
+  <!-- Settings: the Project tab -->
+  <section class="section band" id="project-tab">
+    <div class="wrap lib-two lib-two-wide">
+      <div class="stack">
+        <div class="section-head">
+          <p class="eyebrow">Вкладка Project</p>
+          <h2>Все элементы, сверху вниз.</h2>
+          <p class="lede">Первая вкладка боковой панели. Она показывает то, что подходит к ситуации: проект, затем этот клип, затем отмеченный фрагмент.</p>
+        </div>
+        <div class="lib-settings-wrap">
+          <table class="settings">
+            <thead><tr><th scope="col">Надпись</th><th scope="col">Что делает</th></tr></thead>
+            <tbody>
+              <tr class="grp"><th colspan="2" scope="colgroup">Пока проекта нет</th></tr>
+              <tr><th scope="row">No project yet</th><td>Объясняет, что такое проект. Ниже — выбранная папка и где она находится; щёлкните, чтобы открыть список папок, от папки клипа до корня диска.</td></tr>
+              <tr><th scope="row">Initialize the project here</th><td>Создаёт проект в выбранной папке: файл <code>Project.afproject</code>.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Проект</th></tr>
+              <tr><th scope="row">Название проекта ⋯</th><td><strong><span class="os-mac">Project folder in Finder</span><span class="os-win">Project folder</span></strong> (папка проекта); <strong>New moments stabilized on their own</strong>: новые моменты сглаживаются по собственному фрагменту, а не как часть всего клипа. По умолчанию выключено.</td></tr>
+              <tr><th scope="row">3 moments · 12 of 40 clip previews</th><td>Счётчики.</td></tr>
+              <tr><th scope="row">Open in Action Footage Library</th><td>Открывает поездку в <a class="text-link" href="#library-app">Action Footage Library</a>. Под кнопкой: «Clip previews (28 new clips), moments and photos of all marks, exports of all moments: made there, in the background» (превью клипов, моменты и фото по всем меткам, экспорт всех моментов делаются там, в фоне). Что не удалось сделать, перечислено там же, с причиной.</td></tr>
+              <tr><th scope="row">Show all clips <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Открывает <code>_Clips</code>.</td></tr>
+              <tr><th scope="row">Show all moments <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>Открывает <code>_Moments</code>.</td></tr>
+              <tr><th scope="row">Marks for the editor <span class="soon">Скоро</span></th><td><strong>Final Cut Pro…</strong>, <strong>DaVinci Resolve…</strong>, <strong>Premiere Pro…</strong>; какие клипы: <strong>All but rejects</strong> (все, кроме отклонённых; по умолчанию) или <strong>With moments or marks</strong> (с моментами или метками).</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Этот клип</th></tr>
+              <tr><th scope="row">Marks of this clip <kbd>M</kbd></th><td>Метки клипа с их временем; та, на которой сейчас видео, подсвечена. Щёлкните, чтобы перейти. <strong>Add a mark here</strong> / <strong>Remove the mark here</strong> (поставить / убрать метку здесь).</td></tr>
+              <tr><th scope="row">Moments of this clip</th><td>Название и фрагмент; щёлкните, чтобы воспроизвести. В ⋯ есть <strong>Play</strong>, <strong>In its clip</strong> (весь клип с отмеченным фрагментом), <strong>Rename…</strong>, <strong>Remove</strong>, <strong><span class="os-mac">Show in Finder</span><span class="os-win">Show in Explorer</span></strong>.</td></tr>
+              <tr><th scope="row">Mark this clip as not interesting <kbd>X</kbd></th><td>Перемещает его превью в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>. Затем <strong>Not interesting · undo</strong> (неинтересно · отменить); для клипа без превью — <strong>Make this clip's preview</strong> (создать превью этого клипа).</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Выбранный фрагмент <kbd>l</kbd></th></tr>
+              <tr><th scope="row">Mark start · Mark end</th><td>Задают фрагмент, как <kbd>l</kbd>; затем показывают его время: «Start 0:20», «End 0:30».</td></tr>
+              <tr><th scope="row">Save as moment 0:20–0:30 <kbd>k</kbd></th><td>Спрашивает название и сохраняет. На моменте, открытом в своём клипе: <strong>Update Turtle to …</strong>; внутри играющего момента: <strong>Trim Turtle to …</strong>.</td></tr>
+              <tr><th scope="row">Clear the part</th><td>Забывает начало и конец.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Пока играет момент</th></tr>
+              <tr><th scope="row">Open the whole clip at 0:20</th><td>Оригинал, с начала момента.</td></tr>
+              <tr><th scope="row">Stabilized on its own</th><td>Переключатель: момент сглаживается по собственному фрагменту или как часть всего клипа. Записывается в момент. Под ним: «Its own transform, as made: the source's, changed later, doesn't reach it» (собственное преобразование, как при создании: последующие изменения источника до него не доходят). Если <strong>Settings of its own</strong> выключено (на вкладке <strong>Transform</strong>), переключателя нет, а строка говорит, что момент играет как его источник.</td></tr>
+              <tr class="grp"><th colspan="2" scope="colgroup">Пока играет превью клипа</th></tr>
+              <tr><th scope="row">Its own transform · The source's transform</th><td>Откуда берутся настройки превью. Переключается кнопкой <strong>Settings of its own</strong> на вкладке <strong>Transform</strong>. Вкл.: превью получает собственные настройки — вариант настроек клипа — и копию проекта Gyroflow клипа, если он есть (<kbd>Ctrl</kbd>+<kbd>e</kbd> открывает её в Gyroflow), чтобы менять их, не трогая клип. Выкл.: превью играет так, как сохранён клип, а его собственная копия уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>. По умолчанию выключено.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <figure class="media lib-tall" id="shot-library-6">
+        <img src="../media/library-6.jpg" alt="Вкладка Project боковой панели: 2026-10 Egypt, 3 moments и 3 of 7 clip previews, кнопка Open in Action Footage Library с подписью, Show all clips in Finder и Show all moments in Finder, метки и моменты клипа с открытым меню Turtle и Save as moment 0:28–0:32." width="584" height="1594" loading="lazy">
+        <figcaption>Вкладка Project у поездки с несколькими моментами.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Клавиши</p>
+        <h2>Клавиши для наведения порядка.</h2>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Отметить фрагмент: его начало, затем конец</span><span><kbd>l</kbd> дважды</span></div>
+        <div class="key"><span>Сохранить фрагмент как момент; на моменте — обновить его</span><span><kbd>k</kbd></span></div>
+        <div class="key"><span>Метка здесь; на метке — убрать её</span><span><kbd>M</kbd></span></div>
+        <div class="key"><span>Следующая метка · предыдущая метка</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> · <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
+        <div class="key"><span>Неинтересно: превью клипа в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>; повторно — вернуть</span><span><kbd>X</kbd></span></div>
+        <div class="key"><span>Избранное: играющий момент, иначе клип; повторно — снять <span class="soon">Скоро</span></span><span><kbd>K</kbd></span></div>
+        <div class="key"><span>Экспорт фрагмента или клипа; повторно — отмена</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>Вырезать отмеченный фрагмент из клипа, после вопроса</span><span><kbd>Ctrl</kbd>+<kbd>x</kbd></span></div>
+        <div class="key"><span>Показать или скрыть боковую панель</span><span><kbd>Tab</kbd></span></div>
+      </div>
+      <p class="note">Клавиши работают и в русской, украинской или белорусской раскладке.</p>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Ограничения</p>
+        <h2>Что стоит знать, прежде чем на это полагаться.</h2>
+      </div>
+      <ul class="lib-limits">
+        <li><strong>Момент — это ссылка.</strong> Ему нужен оригинал на том же месте в проекте, без изменений. Перенести всю папку поездки можно; переименование или перекодирование оригинала ломает его моменты и превью.</li>
+        <li><strong>Файл момента не для отправки.</strong> В другом месте это один неподвижный кадр, а мессенджеры и перекодирование удаляют ссылку. Отправляйте экспорт.</li>
+        <li><strong>Файл момента показывает один кадр</strong>, а не видео фрагмента.</li>
+        <li><strong>Превью клипов не стабилизированы</strong>, а их кадры — ближайшие ключевые, до секунды от метки.</li>
+        <li><strong>Метки пока нельзя назвать</strong>: они называются «Mark 1», «Mark 2» или как у камеры.</li>
+        <li><strong>Вырезание заменяет клип.</strong> Оригинал уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>, отменить в плеере нельзя, экспорт по-прежнему указывает на старый оригинал, и это сделано для клипов DJI.</li>
+        <li><strong>Файл для монтажной программы — за один раз.</strong> Final Cut Pro и Resolve не объединяют повторный импорт тех же клипов. Поэтому создавайте его, когда отметите всё, что хотели.</li>
+        <li><strong>В Linux поездка пока обрабатывается по одному клипу.</strong> Action Footage Library для Linux пока нет, так что превью клипов всей поездки, моменты и фото по всем меткам и экспорт всех моментов там за один раз не сделать.</li>
+        <li><strong>В Windows</strong> проекты, моменты, превью и Action Footage Library пока мало проверены.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Вопросы</p>
+        <h2>Прежде чем начать.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Меняет ли плеер мои записи?</summary>
+          <div class="a"><p>Только когда вы вырезаете фрагмент клавишами <kbd>Ctrl</kbd>+<kbd>x</kbd> и подтверждаете: тогда клип заменяется оставшимися частями, а оригинал уходит в <span class="os-mac">Корзину</span><span class="os-win">Корзину</span>. В остальном он только читает ваши клипы. Рядом с каждым он записывает маленький файл этого клипа, <code>&lt;clip&gt;.afp.json</code>, — как только вы измените метку или сохраните вид клипа, — и проект Gyroflow, когда вы его создаёте. Всё остальное попадает в проект: в его собственные папки и <code>Project.afproject</code>.</p></div>
+        </details>
+        <details>
+          <summary>Нужен ли проект для меток?</summary>
+          <div class="a"><p>Нет. Метки хранятся рядом с клипом, есть проект или нет. Он нужен моментам, превью клипов, экспорту, <kbd>X</kbd> и Action Footage Library.</p></div>
+        </details>
+        <details>
+          <summary>Я перенёс поездку на NAS. Мои моменты пропали?</summary>
+          <div class="a"><p>Нет, если папка поездки переехала целиком, записи вместе с проектом. Ссылки заданы относительно проекта, поэтому по-прежнему находят свои клипы. Проект в «Документах» получает новый путь строкой в своём <code>Sources.txt</code>.</p></div>
+        </details>
+        <details>
+          <summary>Можно ли отправить момент другу?</summary>
+          <div class="a"><p>Лучше отправьте экспорт: <kbd>Shift</kbd>+<kbd>E</kbd> на моменте. Собственный файл момента — это кадр и ссылка на клип, который есть только у вас.</p></div>
+        </details>
+        <details>
+          <summary>Работает ли это с бесплатной DaVinci Resolve?</summary>
+          <div class="a"><p>Да. Бесплатная версия не запускает скрипты, поэтому плеер записывает три файла, которые она импортирует вручную: файл таймлайна, список маркеров и таблицу метаданных.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Попробуйте</p>
+        <h2>Откройте поездку, оставьте то, что стоит оставить.</h2>
+        <p class="lede">Бесплатно, без учётной записи, и всё, что он сохраняет, — это файлы, которые видно.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Скачать для Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Съёмка в log</h3>
+          <p>Log в цвете, стили, HDR и то, как выглядит каждый экспорт.</p>
+          <a href="log.html">Съёмка в log</a>
+        </div>
+        <div class="help-card">
+          <h3>Стабилизация</h3>
+          <p>Как клипы играют ровно и какие проекты Gyroflow сохраняют моменты.</p>
+          <a href="stabilization.html">Стабилизация</a>
+        </div>
+        <div class="help-card">
+          <h3>Всё, что он умеет</h3>
+          <p>Все клавиши и настройки и камеры по отдельности.</p>
+          <a href="features.html">Все функции</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · <a href="about.html">Сделано дайвером из Женевы, Швейцария</a></span>
+      <a href="index.html">Главная</a>
+      <a href="about.html">Об авторе</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">Все функции</a>
+      <a href="download.html">Загрузки</a>
+    </div>
+    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M и GP-Log, построенными на shaper LUT от Zeb Gardner (используются с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision и символ двойного D являются товарными знаками Dolby Laboratories Licensing Corporation. Action Footage Player не связан с Dolby и не одобрен ею. Плеер сам записывает метаданные Dolby Vision с помощью открытой библиотеки <code>dolby_vision</code> (MIT); никакого ПО Dolby в его составе нет.</p>
+    <p class="mt-foot">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../organizing.html" hreflang="en">Читать оригинал на английском</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

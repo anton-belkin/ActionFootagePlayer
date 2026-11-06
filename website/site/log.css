@@ -1,0 +1,94 @@
+/* Log footage page: the path from log to the screen as a small flow, the settings tables (cards on phones), text
+   beside a panel screenshot on wide screens, and the limits list. Loaded after styles.css. */
+
+.hero .wrap > * { min-width: 0; }
+
+/* A heading inside a section, above a table or a list */
+.lg-sub { margin: 48px 0 16px; }
+.lg-p { color: var(--muted); max-width: 70ch; }
+.lg-p b, .lg-list b, .lg-limits b { color: var(--ink); font-weight: 600; }
+.lg-measure { margin-bottom: 16px; }
+.lg-where { vertical-align: 0.15em; margin-left: 4px; }
+
+/* Text beside a picture on wide screens, one under the other on narrow ones */
+.lg-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; margin-top: 36px; }
+.lg-two > * { min-width: 0; }
+.lg-two:first-child, .section-head + .lg-two { margin-top: 0; }
+@media (min-width: 900px) {
+  .lg-two { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 48px; align-items: start; }
+}
+.lg-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; color: var(--muted); }
+.lg-two .stack h3 + .lg-list, .lg-two .stack h3 + .lg-p { margin-top: -6px; }
+
+/* The flow: log, HDR, then the two kinds of screen */
+.lg-flow-fig { margin-top: 36px; }
+.lg-flow { display: grid; gap: 10px; align-items: center; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.lg-node { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: calc(var(--radius) - 4px); background: var(--bg); }
+.lg-node b { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; color: var(--ink); }
+.lg-node span { font-size: 0.88rem; color: var(--muted); }
+.lg-node.lg-hl { border-color: var(--accent); }
+.lg-split { display: grid; gap: 10px; }
+.lg-arrow { justify-self: center; width: 2px; height: 18px; background: var(--muted); position: relative; }
+.lg-arrow::after { content: ""; position: absolute; left: 50%; bottom: -2px; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateX(-50%) rotate(45deg); }
+@media (min-width: 760px) {
+  .lg-flow { grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 28px minmax(0, 1.3fr); }
+  .lg-arrow { width: 100%; height: 2px; }
+  .lg-arrow::after { left: auto; right: 0; bottom: auto; top: 50%; transform: translateY(-50%) rotate(-45deg); }
+}
+
+/* Settings tables: no minimum width; on phones each row is a card with its labels */
+.compare-wrap + .note, .compare-wrap + .lg-honest { margin-top: 14px; }
+table.settings { min-width: 0; }
+.settings tbody th { width: 28%; }
+.settings code { overflow-wrap: anywhere; }
+.settings .pill { margin-left: 2px; }
+.lg-out tbody th, .lg-looks tbody th { width: 24%; }
+.lg-out td:last-child { width: 24%; }
+.lg-looks td:last-child { width: 96px; white-space: nowrap; }
+.lg-cli tbody th, .lg-conf tbody th { width: 40%; font-weight: 400; }
+.lg-row-alt th, .lg-row-alt td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.lg-mac { display: inline-block; margin-left: 4px; font-family: var(--f-mono); font-weight: 400; font-size: 0.72rem; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; color: var(--warn); background: var(--warn-bg); white-space: nowrap; }
+@media (max-width: 640px) {
+  .settings thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .settings, .settings tbody, .settings tr { display: block; }
+  .settings tr { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .settings tr:last-child { border-bottom: 0; }
+  .settings tbody th, .settings td, .lg-out td:last-child, .lg-looks td:last-child { display: block; width: auto; padding: 0; border: 0; white-space: normal; }
+  .settings td { margin-top: 8px; }
+  .settings td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px;
+    font-family: var(--f-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
+}
+
+/* The honest line under the export table, and the facts under it */
+.lg-honest { margin-top: 20px; }
+.lg-honest b { color: var(--ink); font-weight: 600; }
+.lg-export-facts { margin-top: 40px; }
+.lg-dv-points { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+
+/* Side-panel screenshots: the panel is tall and narrow */
+.lg-panel { max-width: 420px; }
+.lg-panel .media-slot { aspect-ratio: 4 / 5; }
+.lg-shots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.lg-panel, .lg-panel .media-slot { min-width: 0; overflow-wrap: anywhere; }
+
+/* The command line */
+.lg-path { overflow-wrap: anywhere; }
+.lg-cmd { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-family: var(--f-mono); font-size: 0.85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+#batch .compare-wrap { margin-top: 32px; }
+
+/* Settings as a definition list: the label, then what it does */
+.lg-dl { margin: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.lg-dl div { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.lg-dl dt { font-weight: 600; color: var(--ink); }
+.lg-dl dd { margin: 0; color: var(--muted); }
+.lg-dl dd b { color: var(--ink); font-weight: 600; }
+.lg-dl-wide { max-width: 820px; }
+
+/* Limits: a plain list, each with its point in bold */
+.lg-limits { margin: 0; padding-left: 1.2em; display: grid; gap: 12px; max-width: 820px; color: var(--muted); }
+
+/* The last row's heading cell has no line under it either; camera table's log column on one line */
+.settings tr:last-child th { border-bottom: 0; }
+.lg-cams td:nth-child(2) { width: 150px; }
