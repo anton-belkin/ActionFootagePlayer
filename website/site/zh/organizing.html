@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>素材库：整理你的素材 · Action Footage Player</title>
 <meta name="description" content="把一次旅行中最好的片段留成精彩瞬间，在访达或文件资源管理器中就能看到；标记片段，把无聊的放到一边，导出到同一个文件夹，剪掉不小心拍下的一分钟，再把这一切带进 Final Cut Pro、DaVinci Resolve 或 Premiere Pro。全都是旅行文件夹里的普通文件。">
-<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/library">
-<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/library">
-<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/library">
-<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/library">
-<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/library">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/organizing">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/organizing">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/organizing">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/organizing">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/organizing">
 <link rel="icon" href="../favicon.ico" sizes="32x32">
 <link rel="icon" href="../icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
@@ -23,7 +23,7 @@
   [hidden] { display: none !important; }
 </style>
 <link rel="stylesheet" href="../styles.css">
-<link rel="stylesheet" href="../library.css">
+<link rel="stylesheet" href="../organizing.css">
 </head>
 <body>
 
@@ -53,8 +53,9 @@
         <ul>
           <li><a href="log.html">Log 素材</a></li>
           <li><a href="stabilization.html">防抖</a></li>
-          <li><a href="library.html" aria-current="page">素材库</a></li>
+          <li><a href="organizing.html" aria-current="page">素材库</a></li>
           <li><a href="photos.html">照片</a></li>
+          <li><a href="360.html">360 视频</a></li>
           <li><a href="features.html" class="nm-all">全部功能</a></li>
         </ul>
       </details>
@@ -75,8 +76,9 @@
         <li class="sm-group">功能</li>
         <li><a href="log.html">Log 素材</a></li>
         <li><a href="stabilization.html">防抖</a></li>
-        <li><a href="library.html" aria-current="page">素材库</a></li>
+        <li><a href="organizing.html" aria-current="page">素材库</a></li>
         <li><a href="photos.html">照片</a></li>
+        <li><a href="360.html">360 视频</a></li>
         <li><a href="features.html">全部功能</a></li>
         <li class="sm-dl"><a href="download.html">下载</a></li>
       </ul>
@@ -84,16 +86,16 @@
     <details class="lang">
       <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
       <ul>
-        <li><a href="../library.html" hreflang="en" lang="en">English</a></li>
-        <li><a href="../fr/library.html" hreflang="fr" lang="fr">Français</a></li>
-        <li><a href="../ru/library.html" hreflang="ru" lang="ru">Русский</a></li>
-        <li><a href="../zh/library.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
+        <li><a href="../organizing.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/organizing.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/organizing.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/organizing.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
       </ul>
     </details>
   </div>
 </header>
 <div class="mt-notice band" role="note">
-  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../library.html" hreflang="en">阅读英文原文</a></p>
+  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../organizing.html" hreflang="en">阅读英文原文</a></p>
 </div>
 
 <main id="top">
@@ -619,7 +621,7 @@ Z:\2026-10 Egypt</pre>
     </div>
     <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
     <p class="tm">Dolby、Dolby Vision 和双 D 标志是 Dolby Laboratories Licensing Corporation 的商标。Action Footage Player 与 Dolby 无关联，也未获 Dolby 认可。播放器借助开源库 <code>dolby_vision</code>（MIT）自行写入 Dolby Vision 元数据，其中不包含任何 Dolby 软件。</p>
-    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../library.html" hreflang="en">阅读英文原文</a></p>
+    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../organizing.html" hreflang="en">阅读英文原文</a></p>
   </div>
 </footer>
 

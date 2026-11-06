@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>360 video: look around, the horizon held · Action Footage Player</title>
+<meta name="description" content="Open a 360 camera's clip and look around in it as it plays: drag or two fingers to turn, the horizon held level from the camera's gyroscope, the view turned at your screen's rate. Insta360 X5 first, on a Mac. Free.">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="stabilization.css">
+<link rel="stylesheet" href="v360.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, home">
+      <img class="brand-mark" src="icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Site">
+      <details class="navmenu"><summary>Home</summary>
+        <ul>
+          <li><a href="index.html">Home page</a></li>
+          <li><a href="index.html#features">What it does</a></li>
+          <li><a href="index.html#how">How it works</a></li>
+          <li><a href="index.html#faq">Questions</a></li>
+          <li><a href="about.html">About the maker</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Who it&rsquo;s for</summary>
+        <ul>
+          <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+          <li><a href="moments.html">Active travelers</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Features</summary>
+        <ul>
+          <li><a href="log.html">Log footage</a></li>
+          <li><a href="stabilization.html">Stabilization</a></li>
+          <li><a href="organizing.html">Organizing</a></li>
+          <li><a href="photos.html">Photos</a></li>
+          <li><a href="360.html" aria-current="page">360 video</a></li>
+          <li><a href="features.html" class="nm-all">All features</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Download</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Home</li>
+        <li><a href="index.html">Home page</a></li>
+        <li><a href="index.html#features">What it does</a></li>
+        <li><a href="index.html#how">How it works</a></li>
+        <li><a href="index.html#faq">Questions</a></li>
+        <li><a href="about.html">About the maker</a></li>
+        <li class="sm-group">Who it&rsquo;s for</li>
+        <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+        <li><a href="moments.html">Active travelers</a></li>
+        <li class="sm-group">Features</li>
+        <li><a href="log.html">Log footage</a></li>
+        <li><a href="stabilization.html">Stabilization</a></li>
+        <li><a href="organizing.html">Organizing</a></li>
+        <li><a href="photos.html">Photos</a></li>
+        <li><a href="360.html" aria-current="page">360 video</a></li>
+        <li><a href="features.html">All features</a></li>
+        <li class="sm-dl"><a href="download.html">Download</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Language: English"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>EN</summary>
+      <ul>
+        <li><a href="360.html" hreflang="en" lang="en" aria-current="page">English</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">360 video</p>
+        <h1>Look around inside a 360° clip, as it plays.</h1>
+        <p class="lede">Open a clip from a 360 camera and drag, or move two fingers on the trackpad: you look around the scene while it plays. The horizon stays level, and the view turns as fast as your screen can show it.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download free for Mac</span><span class="os-win">Download for Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download for Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>Insta360 X5 first</span>
+          <span>On a Mac</span>
+          <span>New: tell us how it plays</span>
+        </div>
+      </div>
+      <figure class="media v360-fig">
+        <svg class="v360-svg" viewBox="0 0 640 360" role="img" aria-labelledby="v360-title">
+          <title id="v360-title">The whole sphere a 360 camera records, unrolled flat, and the window you see on screen, which you move around it by dragging.</title>
+          <rect class="sky" x="0" y="0" width="640" height="180"/>
+          <rect class="sea" x="0" y="180" width="640" height="180"/>
+          <path class="horizon" d="M0 180 H640"/>
+          <path class="grid" d="M80 0V360M160 0V360M240 0V360M320 0V360M400 0V360M480 0V360M560 0V360M0 60H640M0 120H640M0 240H640M0 300H640"/>
+          <rect class="view" x="250" y="110" width="176" height="99" rx="6"/>
+          <text class="lbl" x="338" y="102" text-anchor="middle">what you see</text>
+          <path class="arrow" d="M224 160h-28m6-6-6 6 6 6M452 160h28m-6-6 6 6-6 6M338 236v26m-6-6 6 6 6-6"/>
+          <text class="cap" x="320" y="344" text-anchor="middle">the whole sphere the camera recorded, unrolled</text>
+        </svg>
+        <figcaption>Drag to move the window around the sphere; the horizon stays level as the camera tilts.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band" id="how-it-works">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How it works</p>
+        <h2>The sphere comes from the camera. Your view is turned on the screen.</h2>
+        <p class="lede">A 360 camera records two very wide lenses, back to back. The player makes one sphere of them as the clip plays, then shows you the part you're looking at.</p>
+      </div>
+      <div class="gap-grid v360-two">
+        <div class="gap-item">
+          <h3>One sphere from two lenses</h3>
+          <p>For a clip straight from an Insta360 X5, Gyroflow's engine, the same that steadies the player's other clips, stitches both lenses into one sphere. It knows each lens from the file, and it takes out the wobble of the camera's rolling shutter.</p>
+        </div>
+        <div class="gap-item">
+          <h3>The horizon held</h3>
+          <p>The camera's gyroscope says how it was tilted in every frame. The player turns the sphere back by as much, so the horizon stays level wherever you look, even when the camera leaned.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Your view, at the screen's rate</h3>
+          <p>Turning your view doesn't go through the stabilization. It's done on the graphics card just before each picture is shown. On a Mac with a 120 Hz screen, a turn reaches the screen in about 9 ms in a window: it feels attached to your fingers.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Already stitched clips too</h3>
+          <p>A 360 video exported from the camera maker's app, with the usual 360 metadata, is built to open the same way. It has no motion data any more, so it plays as it was stitched, and only your view turns.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Looking around -->
+  <section class="section band tight-top" id="look">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Looking around</p>
+        <h2>Drag, pinch, and look ahead again.</h2>
+        <p class="lede">The view turns on by itself when a 360 clip opens, playing or paused. The side panel opens on its <b>360° view</b> part.</p>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Look around</span><span>drag, or two fingers on a trackpad</span></div>
+        <div class="key"><span>Closer or wider</span><span>wheel, or pinch</span></div>
+        <div class="key"><span>Tilt the horizon</span><span><kbd>Alt</kbd>+drag, or turn two fingers</span></div>
+        <div class="key"><span>Look ahead again</span><span>double click, or <kbd>Backspace</kbd></span></div>
+        <div class="key"><span>The view, or the whole sphere flat</span><span><kbd>Alt</kbd>+<kbd>v</kbd></span></div>
+        <div class="key"><span>The next projection</span><span><kbd>Alt</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>What straight ahead follows</span><span><kbd>Alt</kbd>+<kbd>h</kbd></span></div>
+        <div class="key"><span>Hide or show the panel</span><span><kbd>Tab</kbd></span></div>
+      </div>
+      <p class="note">Trackpad gestures go straight to the view in the Mac app. A mouse drag works too, a little less directly.</p>
+    </div>
+  </section>
+
+  <!-- Projections -->
+  <section class="section band" id="projections">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Projections</p>
+        <h2>From a normal view to a little planet.</h2>
+        <p class="lede">How the sphere is laid flat on your screen. <b>Projection</b> in the panel, or <kbd>Alt</kbd>+<kbd>p</kbd>.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Auto</h3>
+          <p>Straight lines stay straight up to a 100° view, like a normal camera; zoom out further and more and more of the sphere shows, all of it from 160°. The default.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Rectilinear</h3>
+          <p>Straight lines straight, as through a camera's lens. Stretched toward the edges in a wide view.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Stereographic</h3>
+          <p>Shapes kept right to the edges, up to nearly the whole sphere at once.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Little planet</h3>
+          <p>Looking straight down, with the way ahead at the top: the world as a small round planet. Drag around the middle to spin it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Straight ahead -->
+  <section class="section band tight-top" id="follows">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Straight ahead</p>
+        <h2>Ahead along the camera, or held in the world.</h2>
+        <p class="lede">When you let go, the view keeps facing the same way. <b>Follows</b> in the panel, or <kbd>Alt</kbd>+<kbd>h</kbd>, says which way that is. Modes the clip can't give are greyed, with the reason.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Camera</h3>
+          <p>Where the camera points, smoothed over a few seconds, so a mounted camera's turns don't jerk the view. The default for a clip without GPS.</p>
+        </div>
+        <div class="gap-item">
+          <h3>World</h3>
+          <p>Where the camera looked at the start, held. Without a compass or GPS to hold it, it slowly drifts with the gyroscope.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Way</h3>
+          <p>Along the way you're moving, from the GPS track. It needs a clip recorded with GPS: on an Insta360, with its GPS remote or the phone app's GPS on.</p>
+        </div>
+        <div class="gap-item">
+          <h3>North</h3>
+          <p>True north, from the GPS track. Insta360 cameras have no compass, so it needs GPS there too.</p>
+        </div>
+      </div>
+      <p class="honest">Camera and World are tried on a real clip. Way and North are built and tested on made-up motion, not yet on a real clip with GPS: a short one from you would help.</p>
+    </div>
+  </section>
+
+  <!-- Cameras -->
+  <section class="section band" id="cameras">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Cameras</p>
+        <h2>Which 360 cameras work.</h2>
+        <p class="lede">This is the first version. It's been tried on an Insta360 X5 clip; the rest is built for and waiting for clips.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="cams">
+          <thead><tr><th scope="col">Camera or file</th><th scope="col">Plays</th><th scope="col">Notes</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Insta360 X5, its own <code>.insv</code></th><td><span class="pill ok">Tried</span></td><td>Both lenses in one file, stitched and level as it plays. Up to 30 fps at full detail; faster clips play every other frame.</td></tr>
+            <tr><th scope="row">Insta360 X4, its own <code>.insv</code></th><td><span class="pill exp">Expected</span></td><td>The same lens model as the X5; no clip tried yet.</td></tr>
+            <tr><th scope="row">A stitched 360 video</th><td><span class="pill exp">Expected</span></td><td>An MP4 or MOV with 360 metadata, as Insta360 Studio, DJI Studio or GoPro Player export it. Plays as stitched, without stabilization.</td></tr>
+            <tr><th scope="row">Insta360 X3</th><td><span class="pill part">Not yet</span></td><td>It records each lens in its own file.</td></tr>
+            <tr><th scope="row">DJI Osmo 360, its own <code>.OSV</code></th><td><span class="pill part">Not yet</span></td><td>Its lens model and motion data aren't read yet. Its stitched exports should play.</td></tr>
+            <tr><th scope="row">GoPro MAX 2, its own <code>.360</code></th><td><span class="pill part">Not yet</span></td><td>In progress.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">On a Mac with Apple Silicon. The Windows app has it too, not tried yet.</p>
+    </div>
+  </section>
+
+  <!-- Exports -->
+  <section class="section band tight-top" id="export">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Exporting</p>
+        <h2>A level 360 video, or a normal one along your view. <span class="soon">Coming soon</span></h2>
+        <p class="lede">The export engine can already write both: the whole sphere as a 360 video with the horizon held, for YouTube or a headset, or a normal 16:9 video that follows where you looked. Saving them from the player with a key, as other clips, is next.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band tight-top" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Limits</p>
+        <h2>Good to know.</h2>
+      </div>
+      <ul class="st-limits">
+        <li><b>Tried on few clips so far.</b> Clips from your camera are the fastest way to make it work well with it.</li>
+        <li><b>The horizon in hard turns.</b> When the camera leans far in a fast curve, the horizon can be off by about 10°.</li>
+        <li><b>Opening an <code>.insv</code> file:</b> drag it onto the player's window. Double-clicking it in <span class="os-mac">Finder</span><span class="os-win">File Explorer</span> isn't set up yet.</li>
+        <li><b>The first second.</b> Right after a clip opens, while the motion data loads, a few frames can be skipped.</li>
+        <li><b>Clips over 30 fps</b> play every other frame: an 8K camera at 60 fps is more than a sphere can keep up with as it plays.</li>
+        <li><b>Full screen</b> turns a little slower than a window (about 30 ms instead of 9), because macOS then waits for the screen's refresh.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Try it</p>
+        <h2>Drop a 360 clip on the player, and look around.</h2>
+        <p class="lede">Free, no account, and your footage stays as it is.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download free for Mac</span><span class="os-win">Download for Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Download for Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Send a 360 clip</h3>
+          <p>A few seconds straight from your camera, with GPS on if you can, help most.</p>
+          <a href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a>
+        </div>
+        <div class="help-card">
+          <h3>Stabilization</h3>
+          <p>How the player steadies a normal clip, from the same motion data.</p>
+          <a href="stabilization.html">Stabilization</a>
+        </div>
+        <div class="help-card">
+          <h3>Everything it does</h3>
+          <p>Every key and option, and the cameras one by one.</p>
+          <a href="features.html">All features</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · open source, GPL-3.0 · <a href="about.html">Made by a diver in Geneva, Switzerland</a></span>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">All features</a>
+      <a href="download.html">Downloads</a>
+    </div>
+    <p>Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M and GP-Log HDR LUTs derived from Zeb Gardner's shaper LUTs (used with permission), and the log curves published by DJI, GoPro and Insta360. Not affiliated with DJI, GoPro or Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision and the double-D symbol are trademarks of Dolby Laboratories Licensing Corporation. Action Footage Player is not affiliated with or endorsed by Dolby. The player writes the Dolby Vision metadata itself, with the open-source <code>dolby_vision</code> crate (MIT); no Dolby software is included.</p>
+  </div>
+</footer>
+
+<script src="top.js"></script>
+</body>
+</html>

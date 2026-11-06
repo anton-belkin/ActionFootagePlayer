@@ -53,8 +53,9 @@
         <ul>
           <li><a href="log.html">Log footage</a></li>
           <li><a href="stabilization.html">Stabilization</a></li>
-          <li><a href="library.html">Library</a></li>
+          <li><a href="organizing.html">Organizing</a></li>
           <li><a href="photos.html">Photos</a></li>
+          <li><a href="360.html">360 video</a></li>
           <li><a href="features.html" class="nm-all">All features</a></li>
         </ul>
       </details>
@@ -75,8 +76,9 @@
         <li class="sm-group">Features</li>
         <li><a href="log.html">Log footage</a></li>
         <li><a href="stabilization.html">Stabilization</a></li>
-        <li><a href="library.html">Library</a></li>
+        <li><a href="organizing.html">Organizing</a></li>
         <li><a href="photos.html">Photos</a></li>
+        <li><a href="360.html">360 video</a></li>
         <li><a href="features.html">All features</a></li>
         <li class="sm-dl"><a href="download.html">Download</a></li>
       </ul>
@@ -100,7 +102,7 @@
       <div class="hero-text">
         <p class="eyebrow">Free video player for action-camera footage · Mac and Windows</p>
         <h1>Your action-camera clips, in color and steady. Just double-click.</h1>
-        <p class="lede">Action Footage Player plays footage from GoPro, DJI and Insta360 cameras on your computer. Clips shot in log, your camera's richest color setting, play in full color instead of flat grey. Shaky clips play steady, even under water. And the moment worth sharing is ready for your phone with one key.</p>
+        <p class="lede">Action Footage Player plays footage from GoPro, DJI and Insta360 cameras on your computer. Shoot in log, your camera's richest color setting, and watch it here in full color, not flat grey. Shaky clips play steady, even under water. And the moment worth sharing is ready for your phone with one key.</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -111,6 +113,7 @@
             <span class="btn-label"><span class="os-mac">Windows</span><span class="os-win">Download free for Windows</span> <small>10 / 11 · alpha</small></span>
           </a>
         </div>
+        <p class="hub-feedback">This is an early version. Try it on your own clips and tell us what's wrong: <a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> or <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>.</p>
         <div class="status">
           <span>Free and open source</span>
           <span>No account, no upload</span>
@@ -120,9 +123,9 @@
       </div>
 
       <figure class="media">
-        <div class="halves"><span><span class="os-mac">A log clip, as Finder shows it</span><span class="os-win">A log clip, as File Explorer shows it</span></span><span>As it plays here</span></div>
-        <img src="media/log-grey-color.jpg" width="1600" height="900" fetchpriority="high" alt="One frame of a log clip, split down the middle: flat and grey on the left, in full color on the right.">
-        <figcaption>One frame of the same clip. This picture isn't HDR: on an HDR screen, the player shows it with more light.</figcaption>
+        <div class="halves"><span>As recorded: log, stabilization off</span><span>As it plays here</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="media/log-steady.jpg" width="1920" height="540" src="media/log-steady.mp4" aria-label="The same dive side by side: flat, grey and shaky as the camera recorded it in log on the left; in color and steady as it plays here on the right."></video>
+        <figcaption>DJI Osmo Action 6, D-Log M, its stabilization off. Same clip, both sides; this video isn't HDR: on an HDR screen the player shows it with more light.</figcaption>
       </figure>
     </div>
   </section>
@@ -179,12 +182,17 @@
         <div class="feature">
           <h3>Your highlights, a key away</h3>
           <p>The moments you marked with the camera's button sit on the timeline. Jump to the turtle instead of scrubbing an hour of blue.</p>
-          <a class="text-link feature-more" href="library.html#marks">How it works →</a>
+          <a class="text-link feature-more" href="organizing.html#marks">How it works →</a>
+        </div>
+        <div class="feature">
+          <h3>What the camera measured</h3>
+          <p>Depth, speed and GPS on screen while the clip plays, when the camera recorded them. More of what happened than the picture shows.</p>
+          <a class="text-link feature-more" href="features.html#telemetry">How it works →</a>
         </div>
         <div class="feature">
           <h3>Keep the best parts</h3>
           <p>A part you keep becomes a small file in a <code>_Moments</code> folder, in color in <span class="os-mac">Finder and Quick Look</span><span class="os-win">File Explorer and its preview pane</span>.</p>
-          <a class="text-link feature-more" href="library.html#moments">How it works →</a>
+          <a class="text-link feature-more" href="organizing.html#moments">How it works →</a>
         </div>
         <div class="feature">
           <h3>Share the same evening</h3>
@@ -192,14 +200,8 @@
           <p class="os-win">Mark a part and press one key: you get an HDR file for your phone, your TV or YouTube.</p>
           <a class="text-link feature-more" href="log.html#export">How it works →</a>
         </div>
-        <div class="feature">
-          <h3>On to your editor, later <span class="soon">Coming soon</span></h3>
-          <p>Final Cut Pro, DaVinci Resolve and Premiere Pro get your moments and marks, on the original files.</p>
-          <a class="text-link feature-more" href="library.html#editors">How it works →</a>
-        </div>
       </div>
-      <p class="hub-measured"><strong>What the camera measured:</strong> depth, speed and GPS on screen, when the camera recorded them.</p>
-      <p class="note hub-guides">Step by step: <a class="text-link" href="log.html">Log footage</a> · <a class="text-link" href="stabilization.html">Stabilization</a> · <a class="text-link" href="library.html">Library</a> · <a class="text-link" href="photos.html">Photos</a> · <a class="text-link" href="features.html">All features, in detail →</a></p>
+      <p class="note hub-guides">Step by step: <a class="text-link" href="log.html">Log footage</a> · <a class="text-link" href="stabilization.html">Stabilization</a> · <a class="text-link" href="organizing.html">Organizing</a> · <a class="text-link" href="photos.html">Photos</a> · <a class="text-link" href="360.html">360 video</a> · <a class="text-link" href="features.html">All features, in detail →</a></p>
     </div>
   </section>
 
@@ -315,6 +317,8 @@
               </table>
             </div>
             <p class="note"><span class="pill ok">Verified</span> played in the player on real footage. <span class="pill exp">Expected</span> built for it from the maker's published metadata or sample clips, but not yet checked on real footage. <span class="pill exp">Expected*</span> the same, with a step by hand, explained in its row. <span class="pill part">Not yet</span> doesn't work yet.</p>
+            <p>360 cameras, from the Insta360 X5: see <a class="text-link" href="360.html">360 video</a>.</p>
+            <p>Have a camera marked Expected, or one that isn't listed? Send us a short clip from it, and it can move to Verified: <a class="text-link" href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a> or <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">GitHub</a>.</p>
           </div>
         </details>
         <details>
@@ -327,7 +331,7 @@
         </details>
         <details>
           <summary>Does it change my original files?</summary>
-          <div class="a"><p>Only if you ask. To cut a spoiled part out of a clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), the player rewrites the clip without it, with nothing re-encoded, and the original goes to the Trash. Otherwise your originals stay as they are.</p><p>What it makes goes into the trip's project folder, which you pick once in the side panel's Project tab: <code>_Moments</code> for the parts you keep, <code>_Clips</code> for a preview of each clip, <code>_Exports</code> for the videos you export, and <code>_ActionFootagePlayer</code> for its own notes. Your own marks and a clip's Gyroflow project are small files beside the clip. On a locked card or a folder it can't write to, the project folder goes in Documents instead.</p></div>
+          <div class="a"><p>Only if you ask. To cut a spoiled part out of a clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), the player rewrites the clip without it, with nothing re-encoded, and the original goes to the Trash. Otherwise your originals stay as they are.</p><p>What it makes goes into the trip's project folder, which you pick once in the side panel's Project tab: <code>_Moments</code> for the parts you keep, <code>_Clips</code> for a preview of each clip, <code>_Exports</code> for the videos you export, and <code>Project.afproject</code>, which opens the trip in <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>. Beside each clip go two small files of its own: <code>&lt;clip&gt;.afp.json</code>, with your marks and the clip's saved view, and its Gyroflow project, if it has one. On a locked card or a folder it can't write to, the project folder goes in Documents instead.</p></div>
         </details>
         <details>
           <summary>Is it really free?</summary>
