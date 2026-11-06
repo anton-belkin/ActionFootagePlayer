@@ -9,11 +9,12 @@
 //                                                       stabilize it with the default preset
 //   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
-// DJI file, or a model whose metadata layout isn't known here), and "water": whether the camera records when it's in
-// the water, for the lens under water to follow it (water.rs).
+// DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
+// the water, for the lens under water to follow it (water.rs), and "spherical": what a stitched 360° video says it is
+// (its projection, stereo layout, pose or initial view: probe::spherical), null for any other video.
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 
-use vs_gyroflow::{ probe::{ probe, color_profile }, water };
+use vs_gyroflow::{ probe::{ probe, color_profile, spherical }, water };
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
@@ -30,5 +31,6 @@ fn main() {
     };
     out["color"] = color_profile(&path).into();
     out["water"] = water::recorded(&path).into();
+    out["spherical"] = spherical(&path).into();
     println!("{out}");
 }

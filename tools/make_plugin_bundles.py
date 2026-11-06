@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """tools/make_plugin_bundles.py <dist>: all the plugins in one zip per system, from the release's zips in <dist>
 
-  mpv-plugins-<version>-macos-arm64.zip      dlogm, dji-telemetry, highlights, footage-menu, side-panel, workspace and
-  mpv-plugins-<version>-linux-x86_64.zip     gyroflow, each a folder at the zip's top, as in their own zips: unzipped into mpv's
-  mpv-plugins-<version>-windows-x86_64.zip   scripts/ folder (~/.config/mpv/scripts/, %APPDATA%\\mpv\\scripts\\)
-  mpv-plugins-<version>-windows-arm64.zip
+  mpv-plugins-<version>-macos-arm64.zip      dlogm, dji-telemetry, highlights, footage-menu, side-panel, workspace,
+  mpv-plugins-<version>-linux-x86_64.zip     gyroflow and view360 (both in gyroflow's zip), each a folder at the zip's
+  mpv-plugins-<version>-windows-x86_64.zip   top, as in their own zips: unzipped into mpv's scripts/ folder
+  mpv-plugins-<version>-windows-arm64.zip    (~/.config/mpv/scripts/, %APPDATA%\\mpv\\scripts\\)
 
 One for each mpv-gyroflow-<version>-<os>-<arch>.zip there (tools/make_release.sh's and tools/make_plugin_zip.sh's),
 with the plain plugins' zips of the same version. The entries are copied as they are, with their executable bits.

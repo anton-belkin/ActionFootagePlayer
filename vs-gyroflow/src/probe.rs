@@ -216,6 +216,118 @@ pub fn gopro_color(path: &str) -> Option<(String, Option<String>, Option<f64>)> 
     Some((text(klv(gpmf, b"PTCL")?)?, klv(gpmf, b"MINF").and_then(text), firmware))
 }
 
+/// What a stitched 360° video says it is, from its first video track: Spherical Video V2 (`sv3d` and `st3d` in the
+/// sample entry: the projection, its pose and, for an equirect, the bounds it covers) or V1 (the XMP in the track's
+/// `uuid` box: Spherical, the projection, the stereo mode and the initial view). None for any other video. The view360
+/// mpv script shows it as a sphere to look around in (docs/360-cameras.md, "Stitched clips")
+pub fn spherical(path: &str) -> Option<serde_json::Value> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    spherical_in_moov(&read_moov(&mut file, size)?)
+}
+
+fn spherical_in_moov(moov: &[u8]) -> Option<serde_json::Value> {
+    for (kind, trak) in mp4_children(moov) {
+        if kind != *b"trak" { continue; }
+        let Some(mdia) = mp4_child(trak, b"mdia") else { continue };
+        // hdlr: version and flags, pre_defined, then the handler type
+        if mp4_child(mdia, b"hdlr").and_then(|h| h.get(8..12)) != Some(b"vide") { continue; }
+        let stereo_v2 = |entry: &[u8]| mp4_child(entry, b"st3d").and_then(|b| b.get(4)).map(|&m| match m {
+            0 => "mono", 1 => "top-bottom", 2 => "left-right", _ => "other",
+        });
+        // The first sample entry's children, after the visual sample entry's 78 bytes (ISO 14496-12, 12.1.3)
+        let entry = mp4_child(mdia, b"minf").and_then(|m| mp4_child(m, b"stbl")).and_then(|m| mp4_child(m, b"stsd"))
+            .and_then(|stsd| stsd.get(8..)).and_then(|entries| mp4_children(entries).next()).and_then(|(_, e)| e.get(78..));
+        if let Some(sv3d) = entry.and_then(|e| mp4_child(e, b"sv3d")) {
+            let entry = entry.unwrap_or_default();
+            let proj = mp4_child(sv3d, b"proj").unwrap_or_default();
+            // prhd: version and flags, then yaw, pitch and roll in degrees, 16.16 fixed point
+            let pose = mp4_child(proj, b"prhd").and_then(|p| p.get(4..16)).map(|p| {
+                let at = |i: usize| i32::from_be_bytes(p[i..i + 4].try_into().unwrap()) as f64 / 65536.0;
+                serde_json::json!({ "yaw": at(0), "pitch": at(4), "roll": at(8) })
+            });
+            let mut out = serde_json::json!({ "source": "sv3d", "stereo": stereo_v2(entry).unwrap_or("mono"), "pose": pose });
+            if let Some(equi) = mp4_child(proj, b"equi") {
+                out["projection"] = "equirect".into();
+                // The share of the full sphere's picture cropped off each side, 0.32 fixed point; all 0 for a whole one
+                if let Some(b) = equi.get(4..20) {
+                    let at = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap()) as f64 / 4294967296.0;
+                    if b.iter().any(|&x| x != 0) {
+                        out["bounds"] = serde_json::json!({ "top": at(0), "bottom": at(4), "left": at(8), "right": at(12) });
+                    }
+                }
+            } else if mp4_child(proj, b"cbmp").is_some() {
+                out["projection"] = "cubemap".into();
+            } else if mp4_child(proj, b"mshp").is_some() {
+                out["projection"] = "mesh".into();
+            } else {
+                out["projection"] = "other".into();
+            }
+            return Some(out);
+        }
+        // V1: an XMP packet in trak/uuid with this UUID
+        const V1_UUID: [u8; 16] = [0xff, 0xcc, 0x82, 0x63, 0xf8, 0x55, 0x4a, 0x93, 0x88, 0x14, 0x58, 0x7a, 0x02, 0x52, 0x1f, 0xdd];
+        for (kind, uuid) in mp4_children(trak) {
+            if kind != *b"uuid" || uuid.get(..16) != Some(&V1_UUID[..]) { continue; }
+            let xmp = String::from_utf8_lossy(&uuid[16..]);
+            if xmp_value(&xmp, "Spherical").is_none_or(|v| !v.eq_ignore_ascii_case("true")) { continue; }
+            let projection = match xmp_value(&xmp, "ProjectionType").map(|v| v.to_ascii_lowercase()).as_deref() {
+                Some("equirectangular") | None => "equirect",
+                _ => "other",
+            };
+            let stereo = match xmp_value(&xmp, "StereoMode").map(|v| v.to_ascii_lowercase()).as_deref() {
+                Some("top-bottom") => "top-bottom",
+                Some("left-right") => "left-right",
+                Some("mono") | None => "mono",
+                _ => "other",
+            };
+            let degrees = |key: &str| xmp_value(&xmp, key).and_then(|v| v.trim().parse::<f64>().ok());
+            let view = match (degrees("InitialViewHeadingDegrees"), degrees("InitialViewPitchDegrees"), degrees("InitialViewRollDegrees")) {
+                (None, None, None) => serde_json::Value::Null,
+                (h, p, r) => serde_json::json!({ "heading": h.unwrap_or(0.0), "pitch": p.unwrap_or(0.0), "roll": r.unwrap_or(0.0) }),
+            };
+            return Some(serde_json::json!({ "source": "xmp", "projection": projection, "stereo": stereo,
+                                            "stitched": xmp_value(&xmp, "Stitched").map(|v| v.eq_ignore_ascii_case("true")),
+                                            "initial_view": view }));
+        }
+    }
+    None
+}
+
+// A GSpherical value in Spherical Video V1's XMP, as an element (<GSpherical:Key>value</GSpherical:Key>) or an
+// attribute (GSpherical:Key="value")
+fn xmp_value<'a>(xmp: &'a str, key: &str) -> Option<&'a str> {
+    let open = format!("<GSpherical:{key}>");
+    if let Some(i) = xmp.find(&open) {
+        let rest = &xmp[i + open.len()..];
+        return rest.find('<').map(|j| rest[..j].trim());
+    }
+    let attr = format!("GSpherical:{key}=");
+    let i = xmp.find(&attr)?;
+    let rest = &xmp[i + attr.len()..];
+    let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let rest = &rest[1..];
+    rest.find(quote).map(|j| rest[..j].trim())
+}
+
+// The boxes in s (a box's payload), in order: their type and payload. Stops at the first that doesn't fit
+fn mp4_children(s: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    let mut pos = 0usize;
+    std::iter::from_fn(move || {
+        if pos + 8 > s.len() { return None; }
+        let (size, header) = match u32::from_be_bytes(s[pos..pos + 4].try_into().ok()?) {
+            1 => (usize::try_from(u64::from_be_bytes(s.get(pos + 8..pos + 16)?.try_into().ok()?)).ok()?, 16),
+            0 => (s.len() - pos, 8),
+            n => (n as usize, 8),
+        };
+        let end = pos.checked_add(size).filter(|&e| size >= header && e <= s.len())?;
+        let kind: [u8; 4] = s[pos + 4..pos + 8].try_into().ok()?;
+        let payload = &s[pos + header..end];
+        pos = end;
+        Some((kind, payload))
+    })
+}
+
 // moov is read whole; a camera's is a few MB at most
 const MAX_MOOV: u64 = 64 * 1024 * 1024;
 
@@ -248,18 +360,7 @@ fn read_moov<R: Read + Seek>(f: &mut R, file_size: u64) -> Option<Vec<u8>> {
 
 // The payload of the first box of this type in s (a box's payload)
 fn mp4_child<'a>(s: &'a [u8], wanted: &[u8; 4]) -> Option<&'a [u8]> {
-    let mut pos = 0usize;
-    while pos + 8 <= s.len() {
-        let (size, header) = match u32::from_be_bytes(s[pos..pos + 4].try_into().ok()?) {
-            1 => (usize::try_from(u64::from_be_bytes(s.get(pos + 8..pos + 16)?.try_into().ok()?)).ok()?, 16),
-            0 => (s.len() - pos, 8),
-            n => (n as usize, 8),
-        };
-        let end = pos.checked_add(size).filter(|&e| size >= header && e <= s.len())?;
-        if &s[pos + 4..pos + 8] == wanted { return Some(&s[pos + header..end]); }
-        pos = end;
-    }
-    None
+    mp4_children(s).find(|(kind, _)| kind == wanted).map(|(_, payload)| payload)
 }
 
 // The data of the first KLV item with the key, looking into nested ones (type 0). An item: the key (4 bytes), its
@@ -380,5 +481,71 @@ mod tests {
         // Truncated: no moov
         let mut cut = file[..20].to_vec();
         assert!(read_moov(&mut std::io::Cursor::new(&mut cut), 20).is_none());
+    }
+
+    // A video track with these boxes after its sample entry's 78 bytes, and these next to its mdia
+    fn video_trak(entry_children: &[u8], beside: &[u8]) -> Vec<u8> {
+        let mut entry = vec![0u8; 78];
+        entry.extend(entry_children);
+        let stsd = [vec![0, 0, 0, 0, 0, 0, 0, 1], mp4_box(b"hvc1", &entry)].concat();
+        let stbl = mp4_box(b"stbl", &mp4_box(b"stsd", &stsd));
+        let hdlr = mp4_box(b"hdlr", &[&[0u8; 8][..], b"vide", &[0u8; 13]].concat());
+        let mdia = mp4_box(b"mdia", &[hdlr, mp4_box(b"minf", &stbl)].concat());
+        mp4_box(b"trak", &[mdia, beside.to_vec()].concat())
+    }
+
+    #[test]
+    fn spherical_v2() {
+        let fixed = |v: f64| ((v * 65536.0) as i32).to_be_bytes();
+        let prhd = mp4_box(b"prhd", &[&[0u8; 4][..], &fixed(90.0), &fixed(-10.5), &fixed(0.0)].concat());
+        let equi = mp4_box(b"equi", &[0u8; 20]);
+        let sv3d = mp4_box(b"sv3d", &[mp4_box(b"svhd", b"\0\0\0\0test\0"), mp4_box(b"proj", &[prhd, equi].concat())].concat());
+        let st3d = mp4_box(b"st3d", &[0, 0, 0, 0, 1]);
+        // An audio track first: only video counts
+        let audio = mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"hdlr", &[&[0u8; 8][..], b"soun"].concat())));
+        let moov = [audio, video_trak(&[st3d, sv3d].concat(), b"")].concat();
+        let v = spherical_in_moov(&moov).unwrap();
+        assert_eq!(v["source"], "sv3d");
+        assert_eq!(v["projection"], "equirect");
+        assert_eq!(v["stereo"], "top-bottom");
+        assert_eq!(v["pose"]["yaw"], 90.0);
+        assert_eq!(v["pose"]["pitch"], -10.5);
+        assert!(v.get("bounds").is_none());
+        // A partial one: its bounds
+        let mut b = vec![0u8; 4];
+        for share in [0.25f64, 0.25, 0.0, 0.0] { b.extend(((share * 4294967296.0) as u32).to_be_bytes()); }
+        let sv3d = mp4_box(b"sv3d", &mp4_box(b"proj", &mp4_box(b"equi", &b)));
+        let v = spherical_in_moov(&video_trak(&sv3d, b"")).unwrap();
+        assert_eq!(v["stereo"], "mono");
+        assert_eq!(v["bounds"]["top"], 0.25);
+        assert_eq!(v["bounds"]["left"], 0.0);
+        // A cubemap
+        let sv3d = mp4_box(b"sv3d", &mp4_box(b"proj", &mp4_box(b"cbmp", &[0u8; 12])));
+        assert_eq!(spherical_in_moov(&video_trak(&sv3d, b"")).unwrap()["projection"], "cubemap");
+        // An ordinary video
+        assert!(spherical_in_moov(&video_trak(b"", b"")).is_none());
+    }
+
+    #[test]
+    fn spherical_v1() {
+        let xmp = "<?xml version=\"1.0\"?><rdf:SphericalVideo xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" \
+                   xmlns:GSpherical=\"http://ns.google.com/videos/1.0/spherical/\"><GSpherical:Spherical>true</GSpherical:Spherical>\
+                   <GSpherical:Stitched>true</GSpherical:Stitched><GSpherical:StitchingSoftware>test</GSpherical:StitchingSoftware>\
+                   <GSpherical:ProjectionType>equirectangular</GSpherical:ProjectionType>\
+                   <GSpherical:InitialViewHeadingDegrees>45</GSpherical:InitialViewHeadingDegrees></rdf:SphericalVideo>";
+        let uuid = [&[0xff, 0xcc, 0x82, 0x63, 0xf8, 0x55, 0x4a, 0x93, 0x88, 0x14, 0x58, 0x7a, 0x02, 0x52, 0x1f, 0xdd][..], xmp.as_bytes()].concat();
+        let v = spherical_in_moov(&video_trak(b"", &mp4_box(b"uuid", &uuid))).unwrap();
+        assert_eq!(v["source"], "xmp");
+        assert_eq!(v["projection"], "equirect");
+        assert_eq!(v["stereo"], "mono");
+        assert_eq!(v["stitched"], true);
+        assert_eq!(v["initial_view"]["heading"], 45.0);
+        assert_eq!(xmp_value("<x GSpherical:Spherical='true'/>", "Spherical"), Some("true"));
+        // Another uuid box, or Spherical false: not a sphere
+        let other = [&[0u8; 16][..], xmp.as_bytes()].concat();
+        assert!(spherical_in_moov(&video_trak(b"", &mp4_box(b"uuid", &other))).is_none());
+        let flat = xmp.replace(">true</GSpherical:Spherical>", ">false</GSpherical:Spherical>");
+        let uuid = [&uuid[..16], flat.as_bytes()].concat();
+        assert!(spherical_in_moov(&video_trak(b"", &mp4_box(b"uuid", &uuid))).is_none());
     }
 }

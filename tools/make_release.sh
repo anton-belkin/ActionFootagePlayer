@@ -20,7 +20,8 @@
 #                                                       gyroflow plugin's projects), the same way (plain Lua)
 #   mpv-gyroflow-<version>-macos-arm64.zip              the gyroflow plugin alone, with its binaries, for Homebrew's
 #                                                       mpv: unzipped into ~~/scripts/ (Linux's and Windows' are
-#                                                       tools/make_plugin_zip.sh's)
+#                                                       tools/make_plugin_zip.sh's); with view360 beside it, which
+#                                                       uses its probe and gestures
 #   ActionFootagePlayer-<version>-macos-arm64.tar.gz  the committed tree plus the Rust binaries prebuilt in bin/, so
 #                                                       install.sh needs no Rust (it uses bin/ when it's there)
 #
@@ -82,10 +83,10 @@ rm -rf "$stage"
 gyroflow="mpv-gyroflow-$version-macos-arm64"
 rm -rf "dist/$gyroflow" "dist/$gyroflow.zip"
 mkdir -p "dist/$gyroflow/gyroflow"
-git archive HEAD mpv/scripts/gyroflow | tar -x --strip-components 2 -C "dist/$gyroflow"
+git archive HEAD mpv/scripts/gyroflow mpv/scripts/view360 | tar -x --strip-components 2 -C "dist/$gyroflow"
 mv "dist/$gyroflow/gyroflow/underwater.gyroflow" "dist/$gyroflow/gyroflow/default.gyroflow"
 cp -p "dist/$name/bin/"* "dist/$gyroflow/gyroflow/"
-(cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow)
+(cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow view360)
 rm -rf "dist/$gyroflow" "dist/$name"
 
 dlogm="mpv-dlogm-$version"

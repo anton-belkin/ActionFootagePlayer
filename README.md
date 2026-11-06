@@ -254,6 +254,9 @@ switches and buttons, scrolled with the wheel:
   denoise), what fills the edges and how often the trail is written, whether it asks when the GPU can't keep up.
 - **Telemetry**: whether it shows, the corner, the units, the fields.
 - **Dolby Vision** (Mac, the app): the trims, as sliders; back to the author's, or neutral ones.
+- **360° view**, for a 360° clip: looking around on or off, the projection, the field of view, the horizon, **Look
+  ahead again**, and what the view follows (it needs the camera's motion in the frames, which a stitched clip doesn't
+  have: for raw clips, later).
 - **Support**, at the bottom: the version, Keys…, Note for the agent…, Report this camera…, Set up again…, and links
   to the website and GitHub.
 
@@ -290,6 +293,9 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
+| drag, wheel | On a 360° clip (stitched, with spherical metadata: Insta360 Studio's, DJI Studio's, GoPro Player's exports), the view to look around in: a drag, or two fingers on a trackpad, turns your head, what's under the mouse staying under it; the wheel or a pinch zooms; `Alt`+drag or a two-finger rotation turns the horizon; a double click or `Backspace` looks ahead again. Paused as playing. The window isn't dragged by the video meanwhile | |
+| `Alt+v` | A 360° clip: the view to look around in, or the sphere as recorded, unrolled flat | `view360/toggle` |
+| `Alt+p` | A 360° clip: the projection, auto (straight lines straight up to 100°, the whole sphere from 160°) → rectilinear → stereographic → little planet | `view360/projection` |
 | right click | The plugins' menu, when there's no side panel (mpv's own menu with it) | `footage_menu/menu` |
 | `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
 
@@ -800,7 +806,8 @@ Each plugin is a folder in mpv's `scripts/` folder (`~/.config/mpv/scripts/`) an
 - `mpv-workspace-<version>.zip`, on any system: the project a clip belongs to, for the other plugins (plain Lua).
 
 - `mpv-gyroflow-<version>-macos-arm64.zip`, for Homebrew's mpv on Apple Silicon (`brew install mpv ffmpeg`), with
-  its binaries. Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
+  its binaries, and view360 (360° clips as a view to look around in) beside it, which uses its probe and gestures.
+  Downloaded with a browser, they carry the quarantine flag, and macOS would refuse them:
   `xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow`. Linux's and Windows': below.
 
 ### With install.sh
@@ -1162,6 +1169,10 @@ mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses an
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
+mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
+mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
+                              rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
+                              ~/.config/mpv/scripts/view360, and in ActionFootagePlayer
 mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
 mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
                               markers.lua reads them from the file
@@ -1179,7 +1190,8 @@ mpv/scripts/workspace/        the project a clip belongs to, for the other plugi
 tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
                               `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
                               files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export;
-                              moments_test.lua
+                              moments_test.lua; view360_test.lua, the 360 view's geometry, gestures and what it does
+                              with a 360° clip and any other; make_equirect.py, synthetic 360° clips to try it on
 mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
 shaders/*.glsl.in             shader templates; the LUT goes in at install
 shaders/denoise.glsl          the noise reduction (Ctrl+n), installed with the log plugin as it is

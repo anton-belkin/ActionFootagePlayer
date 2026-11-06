@@ -68,6 +68,7 @@
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available, kind (project, default: the
 -- preset), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
 -- horizon_lock (yes, no, project), underwater (yes, auto, project, no), water (the camera records when it's in the water),
+-- spherical (a stitched 360° clip: what gyroflow-probe read of its spherical metadata, for the view360 script; false),
 -- chromatic (the color fringes taken out), chromatic_available (the shader is there: a gpu vo),
 -- edges, edges_blur, fps_limit, resolution, paused_full_size, edge_fill_rate, ask_when_slow, waiting (for a project from
 -- Gyroflow), exporting, last_export, live_photo.
@@ -237,6 +238,12 @@ local function project_video_size(project)
     return info.width, info.height, info.fps, tonumber(out.output_width), tonumber(out.output_height)
 end
 
+-- What a stitched 360° clip without a project says it is (gyroflow-probe's "spherical": its projection, stereo
+-- layout, pose or initial view), false for any other: published as user-data/gyroflow/spherical, for the view360
+-- script, which shows it as a sphere to look around in. Such a clip isn't stabilized: it plays as it is, with mpv's
+-- own hwdec (zero-copy), whatever motion data it has (docs/360-cameras.md, "Stitched clips")
+local spherical = false
+
 -- What to stabilize the video with, to done(): { project = <.gyroflow or the video itself>, kind, width, height,
 -- preset }, or nil. The probe isn't waited for in the script's thread: from an SD card it takes a second, and quitting
 -- or the next clip ends it (playback_only)
@@ -251,6 +258,11 @@ local function find_source(path, done)
     if not PROBE_EXTENSIONS[ext] or not file_exists(PROBE) then return done(nil) end
     mp.command_native_async({ name = "subprocess", args = { PROBE, path }, capture_stdout = true, playback_only = true }, function(_, r)
         local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        if info and type(info.spherical) == "table" then
+            spherical = info.spherical
+            mp.msg.verbose("not stabilizing: a stitched 360° clip (" .. tostring(spherical.projection) .. ")")
+            return done(nil)
+        end
         if not info or not info.mode then
             mp.msg.verbose("not stabilizing: " .. (info and info.reason or "probe failed"))
             return done(nil)
@@ -524,7 +536,7 @@ local function publish()
         chromatic = chromatic, chromatic_available = chromatic_shader,
         edges_blur = edge_blur,
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
-        ask_when_slow = o.ask_when_slow,
+        ask_when_slow = o.ask_when_slow, spherical = spherical,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -624,7 +636,7 @@ end
 
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
-    current_source, stab_off = nil, false
+    current_source, stab_off, spherical = nil, false, false
     -- Back to the level that sticks, after a moment's own
     if level_before then level, level_before = level_before, nil end
     clip_settings(nil)
