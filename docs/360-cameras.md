@@ -90,20 +90,49 @@ smoothing of the picture: a 360 view has no frame to keep filled.
 ### The stamp
 
 Rows appended under the sphere, which the view shader reads and never shows. Written by the plugin per frame,
-in the luma plane only (chroma is subsampled and left alone).
+in the luma plane only (chroma is subsampled and left alone). `vs-gyroflow/src/stamp.rs` writes and reads it;
+`shaders/stamp_probe.glsl` is the shader's side, as a probe.
 
-- Each value is a fixed-point number in two luma codes: 20 bits at 10-bit depth, more at 16. Over a quaternion
-  component's range of [−1, 1] that's ~2·10⁻⁶, a ten-thousandth of a degree.
-- Each code fills a block of 2×2 pixels, read from its middle, so that nothing short of a scaler can blur it.
-- **Fields, version 1:**
-  - magic and version, so the shader can tell a stamped frame from any other;
-  - the frame's time (µs), for checking that stamp and picture go together;
-  - `q_world_from_cam`: the camera at mid-frame, in the world (gravity down, yaw arbitrary unless a mode has an
-    absolute reference);
-  - per heading mode: the heading's yaw in the world, and whether it's valid there (confidence 0–1).
-- The shader has to read the luma plane **raw**: a `LUMA` hook, texel fetches, before any color conversion or
-  scaling, with the plane's bit depth and range known. **(to try: that gpu-next hands the plane over unchanged;
-  `r16f`-style surprises have bitten us before.)**
+- **Where**: the last 2 rows, from the left: 34 codes, each a block of 2×2 pixels of one value (68 pixels across).
+  The shader reads a block with one texel fetch; the block keeps a code whole through anything short of a scaler.
+- **The header**, codes 0–6, in coarse codes: 16 levels, each in the middle of its sixteenth, so the shader reads
+  them as `floor(v · 16)` before it knows the plane's depth: the magic 12, 3, 9, 6; the depth written at, less one;
+  the bits per fine code, less one; the version (1).
+- **Two references**, codes 7 and 8: black (code 0) and white (the depth's top code, 1023 at 10-bit). The shader
+  reads every code through them, `round((v − black) / (white − black) · (2^depth − 1))`: gpu-next doesn't normalize
+  every format to `code / (2^depth − 1)` (below), and the references make the reading exact whatever it does short
+  of a curve.
+- **The fields**, codes 9–33, in fine codes of the depth's bits (at most 16), fixed point, most significant code
+  first:
+  - the frame's time in µs, 4 codes (modulo 2^(4·bits): 40 bits at 10-bit), for checking that stamp and picture go
+    together;
+  - `q_world_from_cam`, w x y z, 2 codes a component over [−1, 1]: the camera at mid-frame, in the world (gravity
+    down, yaw arbitrary unless a mode has an absolute reference). 20 bits at 10-bit: ~2·10⁻⁶, a ten-thousandth of
+    a degree;
+  - per heading mode (in the world, along the camera, along the way you move, north): the heading's yaw in the
+    world, 2 codes over a turn (wrapping), then whether it's valid there, 1 code over [0, 1];
+  - a check: the sum of the fields' codes, modulo 2^bits.
+- A frame without the magic (any other clip) is no stamp; the shader passes it through.
+
+**What reaches the shader** (measured with `tools/stamp360/`, step 1 of the plan; the app's mpv 0.41, libplacebo
+7.387, an M-series Mac): synthetic 1080p clips, 8- and 10-bit, limited and full range; decoded in software and with
+`videotoolbox-copy`; through VapourSynth as the player has them (the plugin's test filter `Stamp360Test` stamps
+known values) and, to get VideoToolbox's p010/nv12 to the renderer as they are, stamped lossless HEVC with no
+VapourSynth; and through VapourSynth converted to nv12/p010 after it. The probe reads the stamp in a `LUMA` hook
+and paints what it decoded; a screenshot of each frame is compared with what the plugin logged.
+
+- The planes reach gpu-next unchanged: every code of every block reads back, in all 24 cases, with the references.
+- Without them, 10-bit is off by one at the top: limited range (any format) reads `v = code / 1023 × 0.99904`
+  (`65472 / 65535` exactly), p010 converted from full-range planar `× 1.00096`. 8-bit reads
+  `code / 255` everywhere. What the shader gets is linear in the code in every case (residuals under 0.02 of a
+  code), which is what two references undo.
+- VapourSynth has no semi-planar formats, so in the player gpu-next gets planar `yuv420p` / `yuv420p10` whatever the
+  decoder gives; nv12 and p010 reach it only without the plugin.
+- The vo's own screenshots fail now and then ("Unknown error occurred while trying to take screenshot!") and fall
+  back to one without shaders; the test plays the case again then.
+- mpv's conversion to p010 from full-range planar dithers (zimg), which the test turns off; nothing in the player
+  converts so.
+- The AVFoundation sample-buffer vo (patch 0002) runs no user shaders: the stamp, like the view, needs gpu-next.
 
 ### The heading modes
 
@@ -205,7 +234,8 @@ from the table above.
 In detail, with what each step touches and when it's done: [360-implementation-plan.md](360-implementation-plan.md).
 
 0. **Stitched clips**: the view shader with the head, gestures, FOV; spherical metadata recognized.
-1. **The stamp**: read raw luma in gpu-next (the to-try above), on a synthetic stamped clip.
+1. **The stamp**: read raw luma in gpu-next, on a synthetic stamped clip. Done: exact with the references
+   ("What reaches the shader" above).
 2. **A throughput spike**: two 8K HEVC 10-bit tracks through lavfi-complex into VapourSynth, no render.
 3. **Raw clips**: the equirect output projection in the fork, the per-lens render from `CameraRig`, the stamp,
    the modes in the world and along the camera. One camera first, the one we have clips from.
