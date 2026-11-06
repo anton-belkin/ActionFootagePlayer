@@ -36,6 +36,8 @@ pub mod mp4meta;
 pub mod cut;
 pub mod photo;
 pub mod stamp;
+pub mod rig;
+pub mod heading;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
