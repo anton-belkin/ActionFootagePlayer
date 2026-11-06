@@ -4,9 +4,14 @@
 // camera in a world with gravity down, and per heading mode the yaw the view's "straight ahead" points along.
 //
 // - The world: video-types' axes (+x right, +y down, +z forward), +y along gravity. gyroflow-core integrates the gyro
-//   with the accelerometer (VQF) into a world of its own, with its own vertical; `World::new` finds that vertical as the
-//   accelerometer's mean direction in it (what the integrator itself leveled to) and turns it onto -y. Its yaw is
-//   arbitrary: no mode needs an absolute one yet (north is step 5).
+//   alone (sphere360.rs asks it so) into a world of its own; the vertical comes from the accelerometer turned into that
+//   world, averaged over GRAVITY_SIGMA_S each way, and is turned onto -y frame by frame (`World::new`). An AHRS that
+//   trusts the accelerometer within a second or two (gyroflow-core's VQF) is fooled by a motorcycle: in a curve the
+//   accelerometer leans with the bike (on the sample X5 clip the camera rolled 50° in one while the accelerometer barely
+//   moved), and braking reads as a pitch. Averaged over many seconds both ways these mostly cancel; the gyro's drift over
+//   that time is what's left. On the sample clip, against the horizon measured in the sphere every second: 10° rms, 18°
+//   at worst (8 s: 10.6 and 17.8; the whole clip: 10.0 and 18.3). Its yaw is arbitrary:
+//   no mode needs an absolute one yet (north is step 5).
 // - The camera: gyroflow-core's quaternion takes its camera axes (x right, y up, z back) into its world; OpenCV's are
 //   those turned half a turn about x. So world_from_cam = align · q · flip.
 // - Yaw: about the world's vertical, positive to the right (video-types' R_y: +z → (sin a, 0, cos a)), the view shader's
@@ -23,26 +28,56 @@ use crate::stamp::{ Heading, HeadingStamp, HEADINGS };
 
 /// How long the camera's heading is smoothed over: a Gaussian's sigma, seconds (it reaches about 2.5 sigma each way)
 pub const CAMERA_SIGMA_S: f64 = 1.0;
+/// How long the accelerometer is averaged over for the vertical, a Gaussian's sigma, seconds
+pub const GRAVITY_SIGMA_S: f64 = 20.0;
 
-/// gyroflow-core's world into video-types' (gravity along +y), and its camera axes into OpenCV's
-#[derive(Clone, Copy, Debug)]
+/// gyroflow-core's world into video-types' (gravity along +y) per frame, and its camera axes into OpenCV's
+#[derive(Clone, Debug)]
 pub struct World {
-    align: UnitQuaternion<f64>,
+    align: Vec<UnitQuaternion<f64>>,
+}
+
+/// The turn that puts `up` (gyroflow-core's world) on video-types' up, -y, about a horizontal axis
+fn leveling(up: &Vector3<f64>) -> UnitQuaternion<f64> {
+    UnitQuaternion::rotation_between(&up.normalize(), &-Vector3::y())
+        // Exactly opposite: half a turn about any horizontal axis
+        .unwrap_or_else(|| UnitQuaternion::from_axis_angle(&Vector3::x_axis(), PI))
 }
 
 impl World {
-    /// `up`: the up direction in gyroflow-core's world (the accelerometer's mean there: it reads up when still)
-    pub fn new(up: Vector3<f64>) -> World {
-        let target = -Vector3::y();
-        let align = UnitQuaternion::rotation_between(&up.normalize(), &target)
-            // Exactly opposite: half a turn about any horizontal axis
-            .unwrap_or_else(|| UnitQuaternion::from_axis_angle(&Vector3::x_axis(), PI));
+    /// `ups`: per frame, the accelerometer turned into gyroflow-core's world (summed over the frame's samples: it reads
+    /// up when still), at `fps`; averaged over GRAVITY_SIGMA_S each way. Frames without samples take their neighbours'
+    pub fn new(ups: &[Vector3<f64>], fps: f64) -> World { World::with_sigma(ups, fps, GRAVITY_SIGMA_S) }
+
+    /// The same averaged over `sigma_s` seconds each way
+    pub fn with_sigma(ups: &[Vector3<f64>], fps: f64, sigma_s: f64) -> World {
+        let sigma = sigma_s * fps.max(1.0);
+        let reach = (sigma * 3.0).ceil() as i64;
+        let kernel: Vec<f64> = (-reach..=reach).map(|k| (-0.5 * (k as f64 / sigma).powi(2)).exp()).collect();
+        let n = ups.len() as i64;
+        let mut align = Vec::with_capacity(ups.len());
+        let mut last = UnitQuaternion::identity();
+        for i in 0..n {
+            let mut sum = Vector3::zeros();
+            for (k, g) in (-reach..=reach).zip(&kernel) {
+                let j = i + k;
+                if j >= 0 && j < n { sum += ups[j as usize] * *g; }
+            }
+            if sum.norm() > 1e-9 { last = leveling(&sum); }
+            align.push(last);
+        }
+        if align.is_empty() { align.push(UnitQuaternion::identity()); }
         World { align }
     }
 
-    /// The camera in video-types' world from gyroflow-core's quaternion (its camera axes into its world)
-    pub fn world_from_cam(&self, q: &UnitQuaternion<f64>) -> UnitQuaternion<f64> {
-        self.align * q * flip()
+    /// One vertical for the whole clip
+    pub fn constant(up: Vector3<f64>) -> World { World { align: vec![leveling(&up)] } }
+
+    /// The camera in video-types' world at frame `frame` (between frames: the turn of the nearest), from gyroflow-core's
+    /// quaternion (its camera axes into its world)
+    pub fn world_from_cam(&self, frame: f64, q: &UnitQuaternion<f64>) -> UnitQuaternion<f64> {
+        let i = (frame.round().max(0.0) as usize).min(self.align.len() - 1);
+        self.align[i] * q * flip()
     }
 }
 
@@ -129,14 +164,37 @@ mod tests {
     fn the_world_has_gravity_down() {
         // gyroflow-core's world with z up (VQF's): a camera whose quaternion is identity looks along its -z (back is +z),
         // which there is the world's -z: straight down
-        let w = World::new(Vector3::z());
-        let cam = w.world_from_cam(&UnitQuaternion::identity());
+        let w = World::constant(Vector3::z());
+        let cam = w.world_from_cam(0.0, &UnitQuaternion::identity());
         assert!((cam * Vector3::z() - Vector3::y()).norm() < 1e-12, "{}", cam * Vector3::z());
         // Whatever the up, it ends on -y
         for up in [Vector3::new(0.3, -0.2, 0.9), Vector3::new(0.0, 0.0, -1.0), Vector3::x()] {
-            let w = World::new(up);
-            assert!((w.align * up.normalize() + Vector3::y()).norm() < 1e-12);
+            let w = World::constant(up);
+            assert!((w.align[0] * up.normalize() + Vector3::y()).norm() < 1e-12);
         }
+    }
+
+    #[test]
+    fn braking_doesnt_tilt_the_horizon_much() {
+        // A camera still, level, at 30 fps for 40 s: the accelerometer reads up (z in this world), 9.81 m/s². From 15 to
+        // 18 s it brakes at 4 m/s² along x: an AHRS that trusts the accelerometer sees ~22° of pitch
+        let fps = 30.0;
+        let ups: Vec<Vector3<f64>> = (0..1200).map(|i| {
+            let t = i as f64 / fps;
+            Vector3::new(if (15.0..18.0).contains(&t) { 4.0 } else { 0.0 }, 0.0, 9.81)
+        }).collect();
+        let w = World::new(&ups, fps);
+        let tilt = |i: usize| (w.align[i] * Vector3::z()).angle(&-Vector3::y()).to_degrees();
+        let worst = (0..1200).map(tilt).fold(0.0, f64::max);
+        assert!(worst < 4.0, "{worst}°");
+        // Spread over the clip instead: a little everywhere
+        assert!(tilt(100) < 3.0 && tilt(1150) < 3.0, "{} {}", tilt(100), tilt(1150));
+        // A vertical that turns for good (the gyro's world drifting): followed over the sigma
+        let n = 30 * 300;
+        let ups: Vec<Vector3<f64>> = (0..n).map(|i| if i < n / 2 { Vector3::z() } else { Vector3::new(0.5, 0.0, 0.866) }).collect();
+        let w = World::new(&ups, fps);
+        let level = |i: usize, up: Vector3<f64>| (w.align[i] * up).angle(&-Vector3::y()).to_degrees();
+        assert!(level(100, Vector3::z()) < 0.1 && level(n - 100, Vector3::new(0.5, 0.0, 0.866)) < 0.1);
     }
 
     #[test]

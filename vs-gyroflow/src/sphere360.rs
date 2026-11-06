@@ -106,22 +106,35 @@ impl Spans {
     }
 }
 
-/// How the motion data's camera (gyroflow-core's, after its IMU orientation) turns into the rig's axes, where they
-/// differ: q_rig_from_imu-camera, OpenCV axes.
+/// How the motion data (gyroflow-core's, after its IMU orientation) turns into the rig's axes, where it doesn't match:
+/// the gyro's turn and the accelerometer's, each q_rig_from_sensor in OpenCV axes.
 ///
 /// Insta360 X4 and X5 (IMU orientation `yzX`): telemetry-parser's orientation assumes the IMU already turned into lens
 /// 0's frame, which it does only for a clip with a crop window (a flat one, `insert_lens_profile`); a 360 file's isn't.
-/// What that leaves between the motion's camera and the rig's axes is a quarter turn about the lens's axis and a half
-/// turn about the vertical: x to -y, y to -x, z to -z. Found on the sample X5 clip, not derived: the accelerometer read
-/// up along +x before it (the camera upright: the sphere's sky is at its top), and with the quarter turn alone the
-/// horizon came out tilted twice as much as the camera, the other way; with both it's level through the clip as the
-/// motorcycle leans. To check on other X4/X5 clips
-fn imu_turn(rig: &Rig, imu_orientation: Option<&str>) -> Option<nalgebra::UnitQuaternion<f64>> {
+/// Found on the sample X5 clip, not derived, and to check on other X4/X5 clips:
+/// - the gyro: half a turn about the vertical (x to -x, z to -z). Of the 24 axis turns, the one with which the gyro
+///   alone and one vertical explain the horizon measured in the sphere every second (the sky's lower edge fitted with a
+///   great circle): 5.4° rms over 23 s, the next 8.1°, the others 23° and more;
+/// - the accelerometer: x to -y, y to -x, z to -z, a quarter turn from the gyro's. Gravity turned into the world by the
+///   gyro stays the steadiest with it, and its mean is 2.9° from the vertical the horizon gives
+fn imu_turn(rig: &Rig, imu_orientation: Option<&str>) -> (Option<nalgebra::UnitQuaternion<f64>>, Option<nalgebra::UnitQuaternion<f64>>) {
     match (rig.brand.as_str(), imu_orientation) {
-        ("Insta360", Some("yzX")) => Some(nalgebra::UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f64::consts::PI)
-            * nalgebra::UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -std::f64::consts::FRAC_PI_2)),
-        _ => None,
+        ("Insta360", Some("yzX")) => (axes("-x,y,-z"), axes("-y,-x,-z")),
+        _ => (None, None),
     }
+}
+
+/// A turn given as the images of x, y and z, each an axis with its sign ("-y,-x,-z"); None for anything else
+fn axes(v: &str) -> Option<nalgebra::UnitQuaternion<f64>> {
+    let cols: Vec<Vector3<f64>> = v.split(',').map(|a| {
+        let a = a.trim();
+        let (sign, name) = if let Some(n) = a.strip_prefix('-') { (-1.0, n) } else { (1.0, a.trim_start_matches('+')) };
+        match name { "x" => Some(Vector3::x() * sign), "y" => Some(Vector3::y() * sign), "z" => Some(Vector3::z() * sign), _ => None }
+    }).collect::<Option<_>>()?;
+    if cols.len() != 3 { return None; }
+    let m = nalgebra::Matrix3::from_columns(&cols);
+    // Not from_matrix: it iterates from the identity and stays there for a half turn
+    (m.determinant() > 0.5).then(|| nalgebra::UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(m)))
 }
 
 /// What the stamp needs per frame: gyroflow-core's motion, turned into the world, and the headings
@@ -135,8 +148,8 @@ struct Stamps {
 
 impl Stamps {
     fn at(&self, timestamp_us: i64) -> Stamp {
-        let q = self.world.world_from_cam(&self.stab.gyro.read().org_quat_at_timestamp(timestamp_us as f64 / 1000.0));
         let frame = (((timestamp_us - self.frame_offset_us) as f64) * self.fps / 1e6).round() as i64;
+        let q = self.world.world_from_cam(frame as f64, &self.stab.gyro.read().org_quat_at_timestamp(timestamp_us as f64 / 1000.0));
         Stamp { time_us: timestamp_us, q_world_from_cam: [q.w, q.i, q.j, q.k], headings: self.headings.at(frame) }
     }
 }
@@ -208,10 +221,21 @@ impl Sphere360 {
         // The motion in the rig's axes: gyroflow-core's camera is the rig's (RigLens), for the rolling shutter as much as
         // for the stamp
         let imu_orientation = stab.gyro.read().file_metadata.read().imu_orientation.clone();
-        if let Some(turn) = imu_turn(&rig, imu_orientation.as_deref()) {
-            stab.gyro.write().imu_transforms.imu_rotation = Some((flip() * turn * flip()).to_rotation_matrix());
-            stab.recompute_gyro();
+        let (gyro_turn, acc_turn) = match std::env::var("AFP_360_IMU").ok() {
+            // For checking another body (tools/sphere360/): the gyro's and the accelerometer's turns, each as the images
+            // of x, y, z, "x,y,z;-y,-x,-z"
+            Some(v) => { let mut it = v.split(';').map(axes); (it.next().flatten(), it.next().flatten()) }
+            None => imu_turn(&rig, imu_orientation.as_deref()),
+        };
+        {
+            let mut g = stab.gyro.write();
+            g.imu_transforms.imu_rotation = gyro_turn.map(|t| (flip() * t * flip()).to_rotation_matrix());
+            g.imu_transforms.acc_rotation = acc_turn.or(gyro_turn).map(|t| (flip() * t * flip()).to_rotation_matrix());
         }
+        // The gyro alone: the vertical comes from the accelerometer averaged over seconds (heading.rs), not within the
+        // integration, which takes braking for a pitch
+        stab.gyro.write().integration_method = 3;
+        stab.recompute_gyro();
         stab.set_smoothing_method(0);
         stab.recompute_blocking();
         let (fps, frame_count, frame_offset_us) = {
@@ -219,18 +243,21 @@ impl Sphere360 {
             (p.fps, p.frame_count, (p.frame_offset as f64 / p.fps * 1_000_000.0).round() as i64)
         };
 
-        // The world: gyroflow-core's own leveled to the accelerometer's mean (heading.rs)
-        let up = {
+        // The world: gyroflow-core's, leveled frame by frame to the accelerometer averaged over seconds (heading.rs).
+        // Per frame its samples turned into gyroflow-core's world (by their own time: the averaging is over seconds)
+        let ups = {
             let gyro = stab.gyro.read();
             let md = gyro.file_metadata.read();
-            let mut sum = Vector3::zeros();
+            let mut ups = vec![Vector3::zeros(); frame_count.max(1)];
             for x in gyro.raw_imu(&md) {
                 let (Some(a), ts) = (x.accl, (x.timestamp_ms * 1000.0).round() as i64) else { continue };
-                if let Some((_, q)) = gyro.quaternions.range(..=ts).next_back() { sum += q * Vector3::from(a); }
+                let Some((_, q)) = gyro.quaternions.range(..=ts).next_back() else { continue };
+                let frame = (x.timestamp_ms / 1000.0 * fps).round();
+                if frame >= 0.0 && (frame as usize) < ups.len() { ups[frame as usize] += q * Vector3::from(a); }
             }
-            sum
+            ups
         };
-        if up.norm() < 1e-9 { return Err(format!("{video}: no accelerometer to level the horizon with")); }
+        if ups.iter().all(|u| u.norm() < 1e-9) { return Err(format!("{video}: no accelerometer to level the horizon with")); }
         {
             // Where the accelerometer says up, in the rig's axes: -y for a camera held upright, as most are
             let gyro = stab.gyro.read();
@@ -239,12 +266,12 @@ impl Sphere360 {
             let tilt = mean.angle(&-Vector3::y()).to_degrees();
             log::info!("{video}: up in the rig's axes on average {:.3?}, {tilt:.0}° from the rig's own (IMU orientation {imu_orientation:?})", mean.normalize().as_slice());
         }
-        let world = World::new(up);
+        let world = World::new(&ups, fps);
         let headings = {
             let gyro = stab.gyro.read();
             let yaws: Vec<(f64, f64)> = (0..frame_count).map(|i| {
                 let us = (i as f64 * 1e6 / fps).round() as i64 + frame_offset_us;
-                yaw(&world.world_from_cam(&gyro.org_quat_at_timestamp(us as f64 / 1000.0)))
+                yaw(&world.world_from_cam(i as f64, &gyro.org_quat_at_timestamp(us as f64 / 1000.0)))
             }).collect();
             Headings::new(&yaws, fps)
         };
@@ -715,6 +742,11 @@ mod tests {
             let t = std::time::Instant::now();
             engine.process(ts, planes, false).unwrap();
             eprintln!("{time} s: rendered in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+            let st = engine.shared.stamps.at(ts);
+            let qq = nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(st.q_world_from_cam[0], st.q_world_from_cam[1], st.q_world_from_cam[2], st.q_world_from_cam[3]));
+            let up = qq.inverse() * -Vector3::y();
+            // The camera's up in the rig's axes, for tools/sphere360/horizon.py
+            eprintln!("UP {time} {:.4} {:.4} {:.4}", up.x, up.y, up.z);
             let fixed = stamp::read(&dst[..dy], ow, ow, oh, 8).unwrap();
             let s = fixed.to_stamp();
             let q = nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(s.q_world_from_cam[0], s.q_world_from_cam[1], s.q_world_from_cam[2], s.q_world_from_cam[3]));
@@ -754,6 +786,79 @@ mod tests {
                 .arg(&yuv).args(["-vf", "scale=2048:-1", "-frames:v", "1"]).arg(&png).status().unwrap();
             assert!(status.success());
             let _ = std::fs::remove_file(&yuv);
+        }
+    }
+}
+
+#[cfg(test)]
+mod imu_frames {
+    use nalgebra::{ Matrix3, UnitQuaternion, Vector3 };
+    /// Which turn of the accelerometer makes it agree with the gyro: the gravity it reads, turned into the world by the
+    /// gyro alone, the steadiest over the clip
+    #[test]
+    #[ignore]
+    fn accelerometer_against_gyro() {
+        let clip = std::env::var("AFP_360_CLIP").expect("AFP_360_CLIP");
+        let stab = gyroflow_core::StabilizationManager::default();
+        let mut file = std::fs::File::open(&clip).unwrap();
+        let size = file.metadata().unwrap().len() as usize;
+        stab.load_video_file(&mut file, size, &gyroflow_core::filesystem::path_to_url(&clip), None, true).unwrap();
+        stab.gyro.write().integration_method = 3;
+        stab.recompute_gyro();
+        let gyro = stab.gyro.read();
+        let md = gyro.file_metadata.read();
+        let samples: Vec<(UnitQuaternion<f64>, Vector3<f64>, f64)> = gyro.raw_imu(&md).iter().filter_map(|x| {
+            let a = x.accl?;
+            let ts = (x.timestamp_ms * 1000.0).round() as i64;
+            let (_, q) = gyro.quaternions.range(..=ts).next_back()?;
+            Some((*q, Vector3::from(a), x.timestamp_ms))
+        }).collect();
+        let axes = [Vector3::x(), Vector3::y(), Vector3::z(), -Vector3::x(), -Vector3::y(), -Vector3::z()];
+        let mut results = Vec::new();
+        for a in &axes { for b in &axes {
+            let c = a.cross(b);
+            if c.norm() < 0.5 { continue; }
+            let m = Matrix3::from_columns(&[*a, *b, c]);
+            // Half-second bins of the world's specific force, their mean resultant length
+            let mut bins: std::collections::BTreeMap<i64, Vector3<f64>> = Default::default();
+            for (q, acc, t) in &samples { *bins.entry((t / 500.0).floor() as i64).or_insert(Vector3::zeros()) += q * (m * acc); }
+            let units: Vec<Vector3<f64>> = bins.values().filter(|v| v.norm() > 0.0).map(|v| v.normalize()).collect();
+            let r = (units.iter().sum::<Vector3<f64>>() / units.len() as f64).norm();
+            results.push((r, format!("{a:?} {b:?}").replace("[[", "").replace("]]", "")));
+        }}
+        results.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (r, m) in results.iter().take(6) { eprintln!("ACCM R={r:.4} x->{m}"); }
+    }
+
+    /// Per second, the gyro alone's camera (OpenCV axes into its world, a matrix row by row) and the accelerometer's
+    /// direction (OpenCV axes), with no turn of either: tools/sphere360/horizon.py matches them with the horizon
+    #[test]
+    #[ignore]
+    fn gyro_by_second() {
+        let clip = std::env::var("AFP_360_CLIP").expect("AFP_360_CLIP");
+        let stab = gyroflow_core::StabilizationManager::default();
+        let mut file = std::fs::File::open(&clip).unwrap();
+        let size = file.metadata().unwrap().len() as usize;
+        stab.load_video_file(&mut file, size, &gyroflow_core::filesystem::path_to_url(&clip), None, true).unwrap();
+        stab.gyro.write().integration_method = 3;
+        stab.recompute_gyro();
+        let gyro = stab.gyro.read();
+        let f = crate::heading::flip();
+        let md = gyro.file_metadata.read();
+        let seconds = (gyro.duration_ms / 1000.0).floor() as i64;
+        for t in 1..seconds {
+            let mut s = nalgebra::Vector3::zeros();
+            for x in gyro.raw_imu(&md) {
+                if let Some(a) = x.accl { if (x.timestamp_ms / 1000.0 - t as f64).abs() < 0.4 { s += f * nalgebra::Vector3::from(a); } }
+            }
+            let s = s.normalize();
+            eprintln!("ACC {t} {:.4} {:.4} {:.4}", s.x, s.y, s.z);
+        }
+        for t in 1..seconds {
+            let q = gyro.org_quat_at_timestamp(t as f64 * 1000.0) * f;
+            let m = q.to_rotation_matrix();
+            let m = m.matrix();
+            eprintln!("GYRO {t} {}", (0..3).flat_map(|r| (0..3).map(move |c| (r, c))).map(|(r, c)| format!("{:.6}", m[(r, c)])).collect::<Vec<_>>().join(" "));
         }
     }
 }

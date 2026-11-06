@@ -253,7 +253,7 @@ mp.add_hook("on_load", 60, function()
     end
     local projection = cur.projection
     start = view.default(projection)
-    local iv = sphere and type(s.initial_view) == "table" and s.initial_view
+    local iv = sphere and type(s) == "table" and type(s.initial_view) == "table" and s.initial_view
     if iv then
         start.yaw = view.wrap(tonumber(iv.heading) or 0)
         start.pitch = math.max(-view.PITCH_MAX, math.min(view.PITCH_MAX, tonumber(iv.pitch) or 0))
