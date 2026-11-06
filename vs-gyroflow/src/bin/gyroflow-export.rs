@@ -129,6 +129,19 @@ shows and plays, the frame also their cover art (the icon)
                    `hash` added as for an export
   --dates <time>   its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00): the MP4's creation time,
                    QuickTime's creation date (Photos' day) and the file's dates; without it, the video's dates
+A 360 camera's own file (an Insta360 .insv: docs/360-cameras.md), as the player shows it (the sphere stitched from its
+lenses, the horizon level by gravity, pointed along a heading mode); --from, --to, --out, --output, --force,
+--encoder, --progress as above:
+  --360            a stabilized 360 video: the whole sphere turned into the world and the heading, equirect, with
+                   spherical metadata (YouTube, editors, VLC): <name>_360.mp4
+  --reframe <keys> a flat video looking along the head's keyframes, \"t:yaw,pitch,roll,fov;...\" (seconds of the
+                   clip, degrees: yaw right, pitch up, roll counterclockwise, the FOV across a 16:9 picture as in the
+                   player; eased between keys, held before the first and after the last): <name>_reframe.mp4
+  --heading <mode> what straight ahead follows: travel (along the way you move: GPS), camera, north, world. By
+                   default travel where the clip has it, else camera, as the player picks
+  --sphere-width <px>  the sphere's width (default 5760; the 360 video's size, its height half of it)
+  --size <WxH>     a reframe's size (default 1920x1080)
+  --view <p>       a reframe's projection: auto (default), rectilinear, stereographic, planet
 Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
 rendition as the image, the HDR one (HLG) above it
   --sdr-image <maker|nbcu|macos>  the SDR image: DJI's LUT (D-Log M; the default for it), NBCU's conversion of the
@@ -195,6 +208,21 @@ struct Options {
     quality: u8,
     sdr_image: Option<String>,
     live: bool,
+    // A 360 camera's file: --360 or --reframe (export_360)
+    sphere360: Option<Mode360>,
+}
+
+struct Mode360 {
+    // None: the whole sphere (--360); else the head's keyframes (--reframe)
+    keys: Option<Vec<vs_gyroflow::export360::HeadKey>>,
+    heading: Option<vs_gyroflow::stamp::Heading>,
+    sphere_width: usize,
+    size: (usize, usize),
+    projection: vs_gyroflow::view360::Projection,
+}
+
+impl Default for Mode360 {
+    fn default() -> Self { Mode360 { keys: None, heading: None, sphere_width: 0, size: (1920, 1080), projection: vs_gyroflow::view360::Projection::Auto } }
 }
 
 // What --preview makes (flipbooks and video previews come later)
@@ -224,7 +252,7 @@ fn main() {
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None,
-                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false };
+                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false, sphere360: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -310,6 +338,22 @@ fn main() {
             "--format" => opts.jpeg = match value("--format").as_str() { "jpeg" | "jpg" => true, "heic" => false, f => fail(&format!("unknown format {f} (heic, jpeg)")) },
             "--quality" => opts.quality = value("--quality").parse::<u8>().ok().filter(|q| (1..=100).contains(q)).unwrap_or_else(|| fail("--quality takes 1-100")),
             "--live" => opts.live = true,
+            "--360" => { opts.sphere360.get_or_insert_with(Mode360::default); }
+            "--reframe" => {
+                let keys = vs_gyroflow::export360::parse_keys(&value("--reframe")).unwrap_or_else(|e| fail(&format!("--reframe: {e}")));
+                opts.sphere360.get_or_insert_with(Mode360::default).keys = Some(keys);
+            }
+            "--heading" => { let v = value("--heading"); opts.sphere360.get_or_insert_with(Mode360::default).heading = Some(vs_gyroflow::export360::parse_heading(&v)
+                .unwrap_or_else(|| fail(&format!("--heading {v}: travel, camera, north or world")))); }
+            "--sphere-width" => opts.sphere360.get_or_insert_with(Mode360::default).sphere_width = value("--sphere-width").parse::<usize>().ok()
+                .filter(|w| (1024..=16384).contains(w)).map(|w| w / 4 * 4).unwrap_or_else(|| fail("--sphere-width takes 1024-16384")),
+            "--size" => { let v = value("--size"); opts.sphere360.get_or_insert_with(Mode360::default).size = v.split_once('x')
+                .and_then(|(w, h)| Some((w.trim().parse::<usize>().ok()?, h.trim().parse::<usize>().ok()?)))
+                .filter(|(w, h)| (64..=8192).contains(w) && (64..=8192).contains(h)).map(|(w, h)| (w / 2 * 2, h / 2 * 2))
+                .unwrap_or_else(|| fail(&format!("--size {v}: WxH, such as 1920x1080"))); }
+            "--view" => { let v = value("--view"); opts.sphere360.get_or_insert_with(Mode360::default).projection = vs_gyroflow::view360::Projection::from_name(&v)
+                .filter(|p| *p != vs_gyroflow::view360::Projection::Equirect)
+                .unwrap_or_else(|| fail(&format!("--view {v}: auto, rectilinear, stereographic or planet"))); }
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
             "-h" | "--help" => { println!("{USAGE}"); return; }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
@@ -332,7 +376,8 @@ fn main() {
     for file in &files {
         // The original's fingerprint in its link, to find it again once it's moved (workspace::fingerprint)
         opts.link = link.as_deref().map(|l| vs_gyroflow::workspace::with_fingerprint(l, Path::new(file)));
-        let outcome = if let Some(t) = opts.photo { photo(file, &opts, t) }
+        let outcome = if let Some(m) = &opts.sphere360 { export_360(file, &opts, m) }
+            else if let Some(t) = opts.photo { photo(file, &opts, t) }
             else if opts.preview == Some(Preview::Flipbook) { flipbook(file, &opts) } else { export(file, &opts, None) };
         match outcome {
             Ok(Outcome::Done(out)) => eprintln!("  -> {}", out.display()),
@@ -1951,4 +1996,155 @@ mod tests {
         assert_eq!(preview_size(640, 360), (640, 360));
         assert_eq!(preview_size(2688, 1512), (960, 540));
     }
+}
+
+/// A 360 camera's file as a stabilized 360 video or a flat reframe (vs_gyroflow::export360): ffmpeg decodes the lens
+/// tracks joined side by side (as the player's lavfi-complex), the frames go through the plugin's 360 mode and the
+/// view, ffmpeg encodes them (HEVC 10-bit, the source's audio copied); a 360 video gets its spherical metadata after
+fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, String> {
+    use vs_gyroflow::export360::{ Output, Render360, heading_name };
+    let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
+    let video = path.to_string_lossy().to_string();
+    let rig = match vs_gyroflow::rig::read(&video) {
+        Some(Ok(r)) => r,
+        Some(Err(e)) => return Err(e),
+        None => return Ok(Outcome::Skipped("not a 360 camera's file (--360 and --reframe are for those)".into())),
+    };
+    let info = ffprobe(&path)?;
+    let out_dir = match (&opts.output, &opts.out) {
+        (Some(f), _) => f.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf(),
+        (None, Some(d)) => d.clone(),
+        (None, None) => default_out_dir(&path),
+    };
+    let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+    let range = match (opts.from, opts.to) {
+        (None, None) => String::new(),
+        (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
+    };
+    let kind = if mode.keys.is_some() { "reframe" } else { "360" };
+    let out_path = opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}_{kind}{range}.mp4")));
+    if out_path.exists() && !opts.force { return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display()))); }
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+
+    // 8-bit sources as 8-bit frames, the others as 16-bit samples
+    let depth_probe = ffmpeg_command("ffprobe").args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=pix_fmt", "-of", "csv=p=0"]).arg(&path).output().map_err(|e| e.to_string())?;
+    let src_fmt = String::from_utf8_lossy(&depth_probe.stdout).trim().to_string();
+    let depth = if src_fmt.contains("10") || src_fmt.contains("12") || src_fmt.contains("16") { 10 } else { 8 };
+    let raw_fmt = match (depth, info.full_range) { (8, true) => "yuvj420p", (8, false) => "yuv420p", _ => "yuv420p10le" };
+    let out = match &mode.keys {
+        None => Output::Sphere { width: if mode.sphere_width > 0 { mode.sphere_width } else { vs_gyroflow::sphere360::DEFAULT_WIDTH } },
+        Some(keys) => Output::Flat { size: mode.size, projection: mode.projection, keys: keys.clone() },
+    };
+    let t0 = Instant::now();
+    let render = Render360::new(&video, depth, !info.full_range, out, mode.heading, mode.sphere_width)?;
+    if let Some(note) = &render.heading_note { eprintln!("{}: {note}", file_name(file)); }
+    eprintln!("{}: {} {}, {} lenses; {}, along {} ({:.1} s to load)", file_name(file), rig.brand, rig.model, rig.lenses.len(),
+              if kind == "360" { "a 360 video" } else { "a reframe" }, heading_name(render.heading), t0.elapsed().as_secs_f64());
+    let fps = info.fps.0 as f64 / info.fps.1 as f64;
+    let from = opts.from.unwrap_or(0.0).max(0.0);
+    let to = opts.to.unwrap_or(info.duration).min(info.duration.max(from));
+    let first = (from * fps - 1e-6).ceil() as u64;
+    let total_frames = (((to * fps) - 1e-6).ceil() as u64).saturating_sub(first).max(1);
+    let (in_bytes, out_bytes) = render.frame_bytes();
+    let (ow, oh) = render.out.size();
+
+    // Decoding: the tracks joined, from the first frame on
+    let inputs: String = (0..rig.pictures).map(|i| format!("[0:v:{i}]")).collect();
+    let mut dec_cmd = ffmpeg_command("ffmpeg");
+    dec_cmd.args(["-nostdin", "-v", "error"]);
+    if first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", first as f64 / fps)]); }
+    dec_cmd.arg("-i").arg(&path).args(["-filter_complex", &format!("{inputs}hstack=inputs={},format={raw_fmt}[v]", rig.pictures),
+        "-map", "[v]", "-frames:v", &total_frames.to_string(), "-f", "rawvideo", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+    let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+    // Encoding: HEVC 10-bit at the source's bits per pixel, BT.709 limited range, the source's audio
+    let enc = pick_encoder(opts, false)?;
+    let src_px = (rig.picture.0 * rig.picture.1 * rig.pictures) as f64;
+    let bit_rate = (info.bit_rate.unwrap_or(60_000_000) as f64 * rig.pictures as f64 * (ow * oh) as f64 / src_px).clamp(4e6, 200e6);
+    let tmp_path = out_dir.join(format!(".{}.partial.mp4", out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default()));
+    let mut enc_cmd = ffmpeg_command("ffmpeg");
+    enc_cmd.args(["-nostdin", "-v", "error", "-y"]).args(&enc.global)
+        .args(["-f", "rawvideo", "-pix_fmt", raw_fmt, "-s", &format!("{ow}x{oh}"), "-r", &format!("{}/{}", info.fps.0, info.fps.1),
+               "-color_range", if info.full_range { "pc" } else { "tv" }, "-i", "-"]);
+    if first > 0 { enc_cmd.args(["-ss", &format!("{:.6}", first as f64 / fps)]); }
+    enc_cmd.args(["-t", &format!("{:.6}", total_frames as f64 / fps)]).arg("-i").arg(&path)
+        .args(["-map", "0:v", "-map", "1:a?", "-c:a", "copy",
+               "-vf", &format!("scale=out_range=tv:out_color_matrix=bt709,format={},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv{}", enc.pix_fmt, enc.upload),
+               "-c:v", &enc.name]).args(&enc.args)
+        .args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64),
+               "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv", "-f", "mp4"]).arg(&tmp_path)
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::inherit());
+    let mut encoder = enc_cmd.spawn().map_err(|e| { let _ = decoder.kill(); format!("ffmpeg: {e}") })?;
+    if BACKGROUND.load(Relaxed) { set_background(&[decoder.id(), encoder.id()], true); }
+
+    // Frames in order: read here, rendered by two threads (the plugin's GPU workers and the view in turn), written
+    // in order
+    let mut dec_out = decoder.stdout.take().ok_or("no decoder output")?;
+    let mut enc_in = encoder.stdin.take().ok_or("no encoder input")?;
+    let (in_tx, in_rx) = mpsc::sync_channel::<(u64, Vec<u8>)>(2);
+    let in_rx = Arc::new(Mutex::new(in_rx));
+    let (done_tx, done_rx) = mpsc::sync_channel::<(u64, Result<(Vec<u8>, f64), String>)>(4);
+    let render = Arc::new(render);
+    let reader = std::thread::spawn(move || {
+        for n in 0..total_frames {
+            let mut buf = vec![0u8; in_bytes];
+            if dec_out.read_exact(&mut buf).is_err() { break; }
+            if in_tx.send((n, buf)).is_err() { break; }
+        }
+    });
+    let workers: Vec<_> = (0..2).map(|_| {
+        let (rx, tx, render) = (in_rx.clone(), done_tx.clone(), render.clone());
+        std::thread::spawn(move || loop {
+            let Ok((n, buf)) = rx.lock().recv() else { break };
+            let t = (first + n) as f64 / fps;
+            let mut dst = vec![0u8; out_bytes];
+            let r = render.render(t, &buf, &mut dst).map(|st| (dst, st.headings[render.heading as usize].confidence));
+            if tx.send((n, r)).is_err() { break; }
+        })
+    }).collect();
+    drop(done_tx);
+    let mut pending = BTreeMap::new();
+    let (mut next, mut error) = (0u64, None);
+    let (mut last_report, mut last_control) = (Instant::now(), Instant::now());
+    let mut sure = (0.0, 0u64);
+    for (n, result) in done_rx {
+        if let Some(control) = &opts.control {
+            if last_control.elapsed().as_millis() >= 250 { read_control(control); last_control = Instant::now(); }
+        }
+        if stopped() { error = Some("cancelled".to_string()); break; }
+        match result {
+            Ok(r) => { pending.insert(n, r); }
+            Err(e) => { error = Some(format!("frame {n}: {e}")); break; }
+        }
+        while let Some((buf, c)) = pending.remove(&next) {
+            sure = (sure.0 + c, sure.1 + 1);
+            if let Err(e) = enc_in.write_all(&buf) { error = Some(format!("encoder stopped: {e}")); break; }
+            next += 1;
+        }
+        if error.is_some() { break; }
+        if last_report.elapsed().as_millis() >= 500 {
+            last_report = Instant::now();
+            let rate = next as f64 / t0.elapsed().as_secs_f64();
+            let eta = ((total_frames - next.min(total_frames)) as f64 / rate.max(1e-3)).min(359_999.0) as u64;
+            eprint!("\r  {:3.0}%  {rate:4.1} fps  ETA {}:{:02}   ", next as f64 / total_frames as f64 * 100.0, eta / 60, eta % 60);
+            opts.progress.write(serde_json::json!({ "pid": std::process::id(), "done": next, "total": total_frames, "fps": rate, "eta": eta, "partial": tmp_path }));
+        }
+    }
+    drop(enc_in);
+    eprintln!();
+    if error.is_some() || stopped() { let _ = decoder.kill(); let _ = encoder.kill(); }
+    let _ = reader.join();
+    for w in workers { let _ = w.join(); }
+    let _ = decoder.wait();
+    let status = encoder.wait().map_err(|e| e.to_string())?;
+    if let Some(e) = error.or_else(|| (!status.success()).then(|| "the encoder failed".to_string()))
+        .or_else(|| (next < total_frames).then(|| format!("{next} of {total_frames} frames decoded"))) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    if kind == "360" { vs_gyroflow::mp4meta::write_spherical(&tmp_path, "ActionFootagePlayer")?; }
+    std::fs::rename(&tmp_path, &out_path).map_err(|e| format!("{}: {e}", out_path.display()))?;
+    eprintln!("{}: {next} frames in {:.0} s, along {} (sure on {:.0} % of them on average)", file_name(file), t0.elapsed().as_secs_f64(),
+              heading_name(render.heading), sure.0 / sure.1.max(1) as f64 * 100.0);
+    Ok(Outcome::Done(out_path))
 }

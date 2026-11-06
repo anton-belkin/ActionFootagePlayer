@@ -44,6 +44,10 @@ dolby_vision = { version = "=3.4.0", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 jpeg-encoder = "0.7"
 
+[dev-dependencies]
+# view360.rs's test: the player's view shader (GLSL) through naga's GLSL front end, beside the export's WGSL
+wgpu = { version = "30", features = ["glsl"] }
+
 [profile.release]
 debug = 1
 

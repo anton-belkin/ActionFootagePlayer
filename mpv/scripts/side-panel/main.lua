@@ -1177,8 +1177,8 @@ end
 -- The 360 view (the view360 plugin): a 360° clip as a view to look around in, the head turned by the mouse and the
 -- trackpad; the projection, the FOV, the horizon, what the view follows
 local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" } }, { { "stereographic", "Stereographic" }, { "planet", "Little planet" } } }
--- Along the way you move and north come with step 5 of docs/360-implementation-plan.md (GPS, the compass)
-local HEADING_OPTIONS = { { "camera", "Camera" }, { "world", "World" } }
+-- What the view follows: along the way you move (GPS), the camera, north (the compass, or GPS), the world
+local HEADING_OPTIONS = { { "travel", "Way" }, { "camera", "Camera" }, { "north", "North" }, { "world", "World" } }
 local function view360_part(u, x, w, y)
     local s = u.s
     local v = state("view360")
@@ -1230,17 +1230,55 @@ local function view360_part(u, x, w, y)
     y = u:caption(x, w, y + 4 * s, "Drag, or two fingers on a trackpad: look around. Wheel or pinch: zoom. "
                                    .. "Alt+drag or turning two fingers: the horizon. Double click: ahead again")
 
-    -- What the view follows comes with the camera's motion in each frame (a 360 camera's own file): a stitched clip has none
+    -- What the view follows comes with the camera's motion in each frame (a 360 camera's own file): a stitched clip has none.
+    -- Along the way and north need what the clip records besides (GPS, a compass): greyed out without it, saying why
     y = u:heading(x, w, y + 10 * s, "Follows", keys["script-binding view360/heading"])
+    local modes = type(v.modes) == "table" and v.modes or nil
+    local function has(m) return m == "camera" or m == "world" or (modes and type(modes[m]) == "table" and modes[m].available == true) end
     local options, selected = {}, nil
     for i, h in ipairs(HEADING_OPTIONS) do
-        table.insert(options, { h[2], msg("view360-heading", h[1]) })
+        table.insert(options, { h[2], msg("view360-heading", h[1]), v.stamped and not has(h[1]) })
         if h[1] == v.heading then selected = i end
     end
     y = u:segmented(x, w, y, "view360-heading", options, selected, not v.stamped)
     if not v.stamped then
-        y = u:caption(x, w, y, "This clip has no motion data in its frames: the camera as it was stitched, level and still, "
-                               .. "and only your head turns")
+        return u:caption(x, w, y, "This clip has no motion data in its frames: the camera as it was stitched, level and still, "
+                                  .. "and only your head turns")
+    end
+    local function pct(c) return string.format("%d %%", math.floor((tonumber(c) or 0) * 100 + 0.5)) end
+    local m = modes and modes[v.heading] or {}
+    local now = tonumber(v.heading_confidence)
+    local text
+    if v.heading == "travel" then
+        text = "Along the way you move: the GPS course, the camera's turns tied to it"
+               .. (m.sigma and string.format(" within ±%.1f°", m.sigma) or "") .. ". Standing, the way it went is held"
+        if now then text = text .. (now < 0.05 and " (standing, or no GPS fix, now)" or ("; sure now: " .. pct(now))) end
+    elseif v.heading == "camera" then
+        text = "Along the camera: where it points, smoothed over a few seconds"
+    elseif v.heading == "north" then
+        text = m.source == "gps" and "True north, from the GPS track" or "Magnetic north, by the camera's compass"
+        if m.source ~= "gps" and m.against_gps then text = text .. string.format(" (%.0f° from the GPS's true north)", m.against_gps) end
+        if now then text = text .. "; sure now: " .. pct(now) end
+    else
+        local wm = modes and modes.world or {}
+        text = "In the world: where the camera looked at the start, held"
+        if wm.held_by == "north" or wm.held_by == "gps" then
+            text = text .. " in the real world, the gyro's drift taken out by " .. (wm.held_by == "north" and "the compass" or "GPS")
+        elseif modes then
+            text = text .. ": turns slowly with the gyro's drift (no compass or GPS to hold it)"
+        end
+    end
+    y = u:caption(x, w, y, text)
+    -- The modes this clip hasn't, and why
+    if not modes then
+        y = u:caption(x, w, y, "Reading the clip's GPS and compass…")
+    else
+        for _, h in ipairs(HEADING_OPTIONS) do
+            local mm = modes[h[1]]
+            if type(mm) == "table" and mm.available ~= true then
+                y = u:caption(x, w, y, h[2] .. ": " .. tostring(mm.why or "not in this clip"))
+            end
+        end
     end
     return y
 end

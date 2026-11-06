@@ -282,7 +282,6 @@ pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
     let meta = meta_box(keys);
     let body_len: usize = kept.iter().map(|k| k.size).sum::<usize>() + meta.len();
     let new_size = 8 + body_len;
-    let delta = new_size as i64 - moov_size as i64;
     let moov_end = moov_at + moov_size;
     // `shift`: what the media after the moov moves by
     let build = |shift: i64| -> Result<Vec<u8>, String> {
@@ -298,6 +297,28 @@ pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
         Ok(new_moov)
     };
 
+    put_moov(path, f, len, &top, moov_at, moov_size, new_size, build)
+}
+
+/// The file's moov replaced by one of `new_size` bytes that `build(shift)` makes (`shift`: what the media after the
+/// moov moves by, for its tracks' chunk offsets). With room after the moov (a `free` box, as ffmpeg's `-moov_size`
+/// leaves), the moov grows into it in place, and nothing else moves. Else the file is written anew next to it and
+/// renamed over it
+#[allow(clippy::too_many_arguments)]
+fn put_moov(path: &Path, mut f: File, len: u64, top: &[(u64, u64, [u8; 4])], moov_at: u64, moov_size: u64, new_size: usize,
+            build: impl Fn(i64) -> Result<Vec<u8>, String>) -> Result<(), String> {
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let moov_end = moov_at + moov_size;
+    let delta = new_size as i64 - moov_size as i64;
+    // The moov last in the file (ffmpeg's default): written over, the file's length changed, nothing else moves
+    if moov_end == len {
+        let new_moov = build(0)?;
+        let mut out = File::options().write(true).open(path).map_err(err)?;
+        out.seek(SeekFrom::Start(moov_at)).map_err(err)?;
+        out.write_all(&new_moov).map_err(err)?;
+        out.set_len(moov_at + new_moov.len() as u64).map_err(err)?;
+        return out.flush().map_err(err);
+    }
     // In place: the free box right after the moov takes the difference, and keeps 8 bytes at least to stay a box
     // (or is taken whole)
     if let Some(&(free_at, free_size, _)) = top.iter().find(|b| b.0 == moov_end && matches!(&b.2, b"free" | b"skip")) {
@@ -318,9 +339,10 @@ pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
             return out.flush().map_err(err);
         }
     }
-    let new_moov = build(delta)?;
+    // At the end of the file, nothing after it moves
+    let new_moov = build(if moov_end == len { 0 } else { delta })?;
 
-    let tmp = PathBuf::from(format!("{}.keys.tmp", path.display()));
+    let tmp = PathBuf::from(format!("{}.moov.tmp", path.display()));
     let result = (|| -> Result<(), String> {
         let mut out = std::io::BufWriter::new(File::create(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?);
         f.seek(SeekFrom::Start(0)).map_err(err)?;
@@ -333,6 +355,140 @@ pub fn write_keys(path: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
     })();
     if let Err(e) = result { let _ = std::fs::remove_file(&tmp); return Err(e); }
     std::fs::rename(&tmp, path).map_err(err)
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Spherical video metadata (a 360 export, export360.rs), both versions players read:
+// - Spherical Video V2 (github.com/google/spatial-media, docs/spherical-video-v2-rfc.md): `st3d` (mono) and `sv3d` (svhd,
+//   proj: prhd with no turn, equi with no crop) at the end of the video track's sample entry (hvc1 / avc1). ffmpeg
+//   reads it as side data ("spherical: equirectangular"), YouTube and VLC by it;
+// - V1: the GSpherical XMP in a `uuid` box in the video track, for what reads only that (older YouTube uploads,
+//   Spatial Media Metadata Injector).
+// ffmpeg can't write them from the command line (only from a stream that carries them), so they're added after.
+
+const SPHERICAL_V1_UUID: [u8; 16] = [0xff, 0xcc, 0x82, 0x63, 0xf8, 0x55, 0x4a, 0x93, 0x88, 0x14, 0x58, 0x7a, 0x02, 0x52, 0x1f, 0xdd];
+
+fn full_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; 4];
+    b.extend_from_slice(body);
+    make_box(kind, &b)
+}
+
+/// `st3d` and `sv3d` for a mono equirect, made by `software`
+pub fn spherical_v2_boxes(software: &str) -> Vec<u8> {
+    let mut out = full_box(b"st3d", &[0]);
+    let mut source = software.as_bytes().to_vec();
+    source.push(0);
+    let mut proj = full_box(b"prhd", &[0u8; 12]);
+    proj.extend(full_box(b"equi", &[0u8; 16]));
+    let mut sv3d = full_box(b"svhd", &source);
+    sv3d.extend(make_box(b"proj", &proj));
+    out.extend(make_box(b"sv3d", &sv3d));
+    out
+}
+
+fn spherical_v1_box(software: &str) -> Vec<u8> {
+    let xml = format!("<?xml version=\"1.0\"?><rdf:SphericalVideo xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" \
+xmlns:GSpherical=\"http://ns.google.com/videos/1.0/spherical/\"><GSpherical:Spherical>true</GSpherical:Spherical>\
+<GSpherical:Stitched>true</GSpherical:Stitched><GSpherical:StitchingSoftware>{software}</GSpherical:StitchingSoftware>\
+<GSpherical:ProjectionType>equirectangular</GSpherical:ProjectionType></rdf:SphericalVideo>");
+    let mut body = SPHERICAL_V1_UUID.to_vec();
+    body.extend_from_slice(xml.as_bytes());
+    make_box(b"uuid", &body)
+}
+
+/// The box `bx` of `b` with `edit` applied to its descendant along `path` (box types), every box on the way resized.
+/// None if the path isn't there
+fn edit_along(b: &[u8], bx: &Box_, path: &[[u8; 4]], edit: &dyn Fn(&[u8], &Box_) -> Result<Vec<u8>, String>) -> Result<Option<Vec<u8>>, String> {
+    let Some((first, rest)) = path.split_first() else { return edit(b, bx).map(Some) };
+    let mut body = Vec::with_capacity(bx.size);
+    let mut found = false;
+    for kid in boxes(b, bx.at + bx.header, bx.at + bx.size)? {
+        if !found && &kid.kind == first {
+            if let Some(e) = edit_along(b, &kid, rest, edit)? { body.extend(e); found = true; continue; }
+        }
+        body.extend_from_slice(&b[kid.at..kid.at + kid.size]);
+    }
+    Ok(found.then(|| make_box(&bx.kind, &body)))
+}
+
+/// Whether a track is video (its mdia/hdlr's handler)
+fn is_video(b: &[u8], trak: &Box_) -> Result<bool, String> {
+    for m in boxes(b, trak.at + trak.header, trak.at + trak.size)?.iter().filter(|k| &k.kind == b"mdia") {
+        for h in boxes(b, m.at + m.header, m.at + m.size)?.iter().filter(|k| &k.kind == b"hdlr") {
+            let r = h.body();
+            if r.len() >= 12 && &b[r.start + 8..r.start + 12] == b"vide" { return Ok(true); }
+        }
+    }
+    Ok(false)
+}
+
+/// Marks the file's video track as a mono equirect 360 video (both versions above), made by `software`. Its spherical
+/// boxes from before are replaced
+pub fn write_spherical(path: &Path, software: &str) -> Result<(), String> {
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut f = File::open(path).map_err(err)?;
+    let len = f.metadata().map_err(err)?.len();
+    let top = top_level(&mut f)?;
+    let &(moov_at, moov_size, _) = top.iter().find(|b| &b.2 == b"moov").ok_or("no moov")?;
+    let mut moov = vec![0u8; moov_size as usize];
+    f.seek(SeekFrom::Start(moov_at)).map_err(err)?;
+    f.read_exact(&mut moov).map_err(err)?;
+    let head = boxes(&moov, 0, moov.len())?[0];
+    let v2 = spherical_v2_boxes(software);
+    // The sample entry (the first in stsd): its own boxes start after the visual sample entry's 78 bytes
+    let stsd_edit = |b: &[u8], stsd: &Box_| -> Result<Vec<u8>, String> {
+        let r = stsd.body();
+        if r.len() < 8 { return Err("a broken stsd".into()); }
+        let entries = boxes(b, r.start + 8, r.end)?;
+        let entry = entries.first().ok_or("no sample entry")?;
+        let kids_at = entry.at + entry.header + 78;
+        if kids_at > entry.at + entry.size { return Err("a broken video sample entry".into()); }
+        let mut e = b[entry.at + entry.header..kids_at].to_vec();
+        for kid in boxes(b, kids_at, entry.at + entry.size)? {
+            if matches!(&kid.kind, b"st3d" | b"sv3d") { continue; }
+            e.extend_from_slice(&b[kid.at..kid.at + kid.size]);
+        }
+        e.extend_from_slice(&v2);
+        let mut body = b[r.start..r.start + 8].to_vec();
+        body.extend(make_box(&entry.kind, &e));
+        for other in &entries[1..] { body.extend_from_slice(&b[other.at..other.at + other.size]); }
+        Ok(make_box(b"stsd", &body))
+    };
+    let mut kids: Vec<Vec<u8>> = Vec::new();
+    let mut done = false;
+    for kid in boxes(&moov, head.header, moov.len())? {
+        if !done && &kid.kind == b"trak" && is_video(&moov, &kid)? {
+            let edited = edit_along(&moov, &kid, &[*b"mdia", *b"minf", *b"stbl", *b"stsd"], &stsd_edit)?.ok_or("no video sample description")?;
+            // The V1 uuid at the end of the track, in place of one from before
+            let t = boxes(&edited, 0, edited.len())?[0];
+            let mut body = Vec::new();
+            for k in boxes(&edited, t.header, t.size)? {
+                if &k.kind == b"uuid" && k.size >= 24 && edited[k.at + 8..k.at + 24] == SPHERICAL_V1_UUID { continue; }
+                body.extend_from_slice(&edited[k.at..k.at + k.size]);
+            }
+            body.extend(spherical_v1_box(software));
+            kids.push(make_box(b"trak", &body));
+            done = true;
+            continue;
+        }
+        kids.push(moov[kid.at..kid.at + kid.size].to_vec());
+    }
+    if !done { return Err("no video track".into()); }
+    let new_size = 8 + kids.iter().map(Vec::len).sum::<usize>();
+    let moov_end = moov_at + moov_size;
+    let build = |shift: i64| -> Result<Vec<u8>, String> {
+        let mut out = Vec::with_capacity(new_size);
+        out.extend_from_slice(&u32::try_from(new_size).map_err(|_| "a moov over 4 GB")?.to_be_bytes());
+        out.extend_from_slice(b"moov");
+        for k in &kids {
+            let mut b = k.clone();
+            if &b[4..8] == b"trak" && shift != 0 { let n = b.len(); shift_chunks(&mut b, 8, n, moov_end, shift)?; }
+            out.extend(b);
+        }
+        Ok(out)
+    };
+    put_moov(path, f, len, &top, moov_at, moov_size, new_size, build)
 }
 
 /// The mdta keys of the file, from `moov/meta` and `moov/udta/meta` (ffmpeg's `use_metadata_tags`), in that order
@@ -570,5 +726,29 @@ mod tests {
         assert!(out.windows(4).any(|w| w == b"covr"), "the cover art is kept");
         assert_eq!(read_keys(&p).unwrap(), vec![(LINK_KEY.to_string(), "{}".to_string()), ("from.ffmpeg".to_string(), "yes".to_string())]);
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn a_360_video_says_so() {
+        // A real encode (ffmpeg's own HEVC or H.264, faststart and not): ffprobe reads the spherical side data back, the
+        // video still decodes, and doing it twice leaves one of each
+        for (codec, faststart) in [("libx264", false), ("libx264", true)] {
+            let p = std::env::temp_dir().join(format!("afp-spherical-{}-{faststart}.mp4", std::process::id()));
+            let mut cmd = std::process::Command::new("ffmpeg");
+            cmd.args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=256x128:rate=25:duration=1", "-c:v", codec]);
+            if faststart { cmd.args(["-movflags", "+faststart"]); }
+            if !cmd.arg(&p).status().is_ok_and(|s| s.success()) { eprintln!("no ffmpeg with {codec}: skipped"); return; }
+            write_spherical(&p, "ActionFootagePlayer").unwrap();
+            write_spherical(&p, "ActionFootagePlayer").unwrap();
+            let out = std::process::Command::new("ffprobe").args(["-v", "error", "-select_streams", "v:0", "-show_streams", "-of", "json"]).arg(&p).output().unwrap();
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(text.contains("\"projection\": \"equirectangular\""), "{text}");
+            let bytes = std::fs::read(&p).unwrap();
+            assert_eq!(bytes.windows(4).filter(|w| w == b"sv3d").count(), 1);
+            assert_eq!(bytes.windows(16).filter(|w| *w == SPHERICAL_V1_UUID).count(), 1);
+            let decoded = std::process::Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(&p).args(["-f", "null", "-"]).output().unwrap();
+            assert!(decoded.status.success() && decoded.stderr.is_empty(), "{}", String::from_utf8_lossy(&decoded.stderr));
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }

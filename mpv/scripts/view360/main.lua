@@ -7,11 +7,15 @@
 --   DJI Studio and GoPro Player export them, and as the Theta and QooCam record them): the gyroflow plugin's probe
 --   reads the metadata (user-data/gyroflow/spherical) and leaves such a clip unstabilized, decoded by mpv's own hwdec,
 --   zero-copy. Its frames carry no stamp: the camera level and fixed, only the head turns.
--- - A 360 camera's own file (user-data/gyroflow/rig360: an Insta360 X5's .insv): the gyroflow plugin's 360 mode makes
---   the sphere in the camera's axes and stamps each frame with the camera in the world and the heading of each mode.
---   The view turns the sphere into the world, the horizon level, and points ahead along the chosen heading: along the
---   camera (its heading smoothed over a few seconds both ways, the default) or in the world (its heading at the start,
---   held). Switching is instant, paused too: every mode's heading is in the frame.
+-- - A 360 camera's own file (user-data/gyroflow/rig360: an Insta360 X5's .insv): the gyroflow
+--   plugin's 360 mode makes the sphere in the camera's axes and stamps each frame with the camera in the world and the
+--   heading of each mode. The view turns the sphere into the world, the horizon level, and points ahead along the
+--   chosen heading: along the way you move (the GPS course, the gyro tied to it; standing, the way it went held against
+--   the camera), along the camera (its heading smoothed over a few seconds both ways), north (the camera's compass, or
+--   the GPS's true north), or in the world (its heading at the start, held: in the real world where north or GPS say
+--   how the gyro drifts). Along the way when the clip has it, else along the camera. Switching is instant, paused too:
+--   every mode's heading is in the frame. Which modes a clip has, how sure they are and why not comes from
+--   user-data/gyroflow/headings360 (gyroflow-probe --headings, a second or so after the clip opens).
 -- view360.glsl draws the view from each frame on screen at the screen's rate, so the head turns without waiting for the
 -- video, paused as playing.
 --
@@ -24,7 +28,8 @@
 --   Alt+v   toggle      the view on/off (off: the sphere as recorded, flat)
 --   Alt+p   projection  auto (rectilinear up to 100°, the stereographic from 160°) -> rectilinear -> stereographic ->
 --                       little planet
---   Alt+h   heading     what straight ahead follows, on a 360 camera's own file: along the camera <-> in the world
+--   Alt+h   heading     what straight ahead follows, on a 360 camera's own file: along the way -> along the camera ->
+--                       north -> in the world, the ones the clip has
 --
 -- Script messages (`script-message-to view360 <message>`, what the side panel runs):
 --   view360 yes|no|toggle                   the view on or off
@@ -35,7 +40,9 @@
 --   view360-reset                           ahead again, at the projection's own FOV
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
 -- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
--- camera's own file), stereo, note (why a 360° clip isn't shown).
+-- camera's own file), stereo, note (why a 360° clip isn't shown), modes (per heading mode: available, why not,
+-- confidence, and what it's from: false until the clip's been read), heading_confidence (the chosen mode's, now: 0-1,
+-- or false).
 
 local mp = require 'mp'
 
@@ -79,6 +86,11 @@ local active = false
 local cur = view.default()
 local start = view.default()
 local heading = "world"
+-- The heading modes a stamped clip has (from the gyroflow plugin's headings360), and whether the viewer chose one
+local modes = false
+local seconds = nil
+local heading_chosen = false
+local confidence_now = false
 local note = nil
 local crop_on = false
 local input = nil
@@ -100,7 +112,7 @@ local function publish()
     mp.set_property_native("user-data/view360", {
         available = sphere ~= nil, active = active, yaw = cur.yaw, pitch = cur.pitch, roll = cur.roll, fov = cur.fov,
         fov_min = r.min, fov_max = r.max, projection = cur.projection, heading = heading, stamped = sphere ~= nil and sphere.stamped == true,
-        stereo = sphere and sphere.stereo or "mono", note = note or false,
+        stereo = sphere and sphere.stereo or "mono", note = note or false, modes = modes, heading_confidence = confidence_now,
     })
 end
 
@@ -257,6 +269,7 @@ end
 -- A clip is a sphere this shows when the gyroflow plugin's probe says so (before this hook: its on_load is at 50)
 mp.add_hook("on_load", 60, function()
     sphere, note, heading = nil, nil, "world"
+    modes, seconds, heading_chosen, confidence_now = false, nil, false, false
     local s = mp.get_property_native("user-data/gyroflow/spherical")
     local rig = mp.get_property_native("user-data/gyroflow/rig360")
     if type(rig) == "table" then
@@ -340,16 +353,87 @@ mp.add_key_binding("Alt+p", "projection", function()
     set_projection(view.PROJECTIONS[(i + 1) % #view.PROJECTIONS + 1])
 end)
 
--- The stamped modes there are so far (travel and north: step 5)
-local HEADINGS = { "camera", "world" }
+-- The heading modes in the order Alt+h goes through them: along the way first (for a 360 camera what matters most:
+-- on a stick or a helmet the camera's own direction means little), then the camera's, north, the world
+local HEADINGS = { "travel", "camera", "north", "world" }
 local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
+
+-- How sure the chosen mode is now (the probe's confidence per second), for the panel
+local function update_confidence()
+    local c = false
+    local col = heading == "travel" and 1 or heading == "north" and 2 or nil
+    local t = mp.get_property_number("time-pos")
+    if col and seconds and t then
+        local row = seconds[math.max(1, math.min(#seconds, math.floor(t) + 1))]
+        c = type(row) == "table" and tonumber(row[col]) or false
+    end
+    if c ~= confidence_now then
+        confidence_now = c
+        publish()
+    end
+end
+
+local function available(mode)
+    if mode == "camera" or mode == "world" then return true end
+    return type(modes) == "table" and type(modes[mode]) == "table" and modes[mode].available == true
+end
+
+local function set_heading(mode, by_viewer)
+    if not HEADING_INDEX[mode] then return false end
+    if sphere and sphere.stamped and not available(mode) then
+        local why = type(modes) == "table" and type(modes[mode]) == "table" and modes[mode].why
+        mp.osd_message("360°: " .. HEADING_LABELS[mode] .. ": " .. (why or (modes and "not in this clip" or "reading the clip…")), 3)
+        return false
+    end
+    heading = mode
+    if by_viewer then heading_chosen = true end
+    update_confidence()
+    apply()
+    return true
+end
+
+-- What the clip has for the modes: the gyroflow plugin's probe, a second or so after the clip opens. Along the way
+-- becomes the mode if it's there and nothing else was chosen meanwhile
+mp.observe_property("user-data/gyroflow/headings360", "native", function(_, h)
+    if type(h) ~= "table" or not (sphere and sphere.stamped) then
+        if modes then modes, seconds = false, nil; publish() end
+        return
+    end
+    local function mode(m, fallback)
+        local v = type(h[m]) == "table" and h[m] or {}
+        return { available = v.available == true, why = v.why or (h.error and tostring(h.error)) or (v.available ~= true and fallback) or false,
+                 confidence = tonumber(v.confidence) or false, source = v.source or false, sigma = tonumber(v.sigma_deg) or false,
+                 against_gps = tonumber(v.against_gps_deg) or false }
+    end
+    local world = type(h.world) == "table" and h.world or {}
+    modes = {
+        travel = mode("travel", "no GPS in this clip"),
+        north = mode("north", "no compass or GPS in this clip"),
+        camera = { available = true },
+        world = { available = true, held_by = world.held_by or false, drift = tonumber(world.drift_deg_min) or false },
+    }
+    seconds = type(h.seconds) == "table" and h.seconds or nil
+    if not heading_chosen and modes.travel.available then heading = "travel" end
+    update_confidence()
+    apply()
+end)
+
+mp.observe_property("time-pos", "number", function()
+    if active and (heading == "travel" or heading == "north") then update_confidence() end
+end)
 
 mp.add_key_binding("Alt+h", "heading", function()
     if not active then return end
     if not sphere.stamped then return mp.osd_message("360°: this clip has no camera motion to follow", 2) end
-    heading = heading == HEADINGS[1] and HEADINGS[2] or HEADINGS[1]
-    apply()
-    mp.osd_message("360°: " .. HEADING_LABELS[heading], 1.5)
+    local at = 1
+    for i, m in ipairs(HEADINGS) do if m == heading then at = i end end
+    for k = 1, #HEADINGS do
+        local m = HEADINGS[(at + k - 1) % #HEADINGS + 1]
+        if available(m) then
+            set_heading(m, true)
+            return mp.osd_message("360°: " .. HEADING_LABELS[m], 1.5)
+        end
+    end
 end)
 
 mp.register_script_message("view360", function(v)
@@ -376,9 +460,7 @@ mp.register_script_message("view360-projection", function(name)
 end)
 
 mp.register_script_message("view360-heading", function(mode)
-    if not HEADING_INDEX[mode] then return end
-    heading = mode
-    apply()
+    set_heading(mode, true)
 end)
 
 mp.register_script_message("view360-reset", reset)
