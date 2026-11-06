@@ -93,6 +93,43 @@ In `anton-belkin/gyroflow` (the fork the plugin builds from), on a branch of its
 
 **Done when** the tests pass and a flat clip renders into an equirect where its picture lands in the right place.
 
+**Done** 2026-11-06: fork branch `equirect-projection` (fb35b07, on top of f42a7dd), local in
+`~/VSCode workspaces/gyroflow-equirect`, not pushed yet. What step 4 gets from it:
+
+- **The sphere.** `ComputeParams::output_projection = OutputProjection::Equirect as i32` (5). The output's width is
+  360° and its height 180° at `fov_scale` 1, whatever the lens and the output size (2:1 for square pixels; the
+  sphere's scale is `projection::equirect_focal`, not the lens's focal length). `fov_scale` < 1 shows a part of the
+  sphere around its middle; leave it 1 with `fovs` empty (no adaptive zoom). `lens_correction_amount` is ignored:
+  an equirect is always fully corrected. Axes as `video-types`: longitude 0 at +z, +90° at +x, latitude +90° up.
+- **Pixel centers.** wgpu (the player's backend) draws pixel `(i, j)` at its middle: longitude
+  `((i + 0.5) / W − 0.5) · 360°`, latitude up `(0.5 − (j + 0.5) / H) · 180°`, the usual convention. The CPU kernel
+  draws pixel `i` at `i`, half a pixel off; that's gyroflow-core's, for every projection.
+- **A lens of a rig.** `ComputeParams::rig_lens = RigLens { rotation, translation, stitching_distance, validity }`:
+  - `rotation`: the lens in the rig, turning a direction in the lens's axes into the rig's (OpenCV axes, Hamilton);
+  - `translation`: the lens's entrance pupil from the rig's center, metres, rig axes;
+  - `stitching_distance`: R in metres, 0 = infinity (no parallax); the lens sees the point `R·d` along `R·d − t`;
+  - `validity`: radians from the lens's axis, past which rays are background (never clamped); 0 = the lens model's
+    own field limit.
+  The rig's axes are those of the camera the motion data describes (after `imu_orientation`). `RigLens::default()`
+  changes nothing: a flat clip renders bit for bit as before.
+- **The camera at mid-frame.** For the sphere in the camera's own axes: smoothing method 0 (none), so the output
+  camera is the camera at the middle of the frame and only the rolling shutter is taken out (the readout from the
+  rig). `view_rotation` stays 0.
+- **One `Stabilization` per lens**, each with its own `ComputeParams` (lens profile, `rig_lens`), the same output
+  size, rendered into its own buffer and blended afterwards. `background_mode` 0: the edge modes would smear the
+  lens's border over the sphere. The lens's half of the joined frame: the input's `BufferDescription::rect` (the
+  kernel's source rect), outside which it reads background (to check on wgpu with two lenses side by side).
+- **Under water**: `light_refraction_coefficient` works with the equirect; past Snell's window is background.
+- **The point path** (`undistort_points_with_rolling_shutter`) knows both: a source pixel to its place in the
+  sphere, with the lens's turn and offset.
+- **Not checked**: `framebuffer_inverted` with a `RigLens` (the turn and offset are flipped in y, untested); the
+  OpenCL kernel wasn't run (same math, read by eye); the precompiled Qt `.qsb` and rust-gpu `.spv` weren't rebuilt,
+  so Gyroflow's own preview draws an equirect project as rectilinear until they are (the GLSL source passes
+  `glslangValidator`).
+- **Tests**: `src/core/tests/equirect.rs` in the fork (`cargo test --test equirect`, a minute in debug). The ignored
+  `a_clip_in_the_sphere` renders a real clip's frame, see its doc comment.
+  `output_projection::a_project_from_before_the_setting_…` fails at f42a7dd already, unrelated.
+
 ### 4. Raw clips, one camera (5–8 days)
 
 Needs 1, 3 and clips; 2 says how the frames get in.
