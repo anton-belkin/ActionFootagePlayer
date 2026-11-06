@@ -40,9 +40,9 @@
 -- A file tagged HDR has its own: as it is, in HDR (hdr; L too), or in SDR by NBCU's conversion for its transfer
 -- (nbcu: nbcu_hlg2sdr.glsl, nbcu_pq2sdr.glsl, in BT.2020), or by mpv's tone mapping (tonemap), or, signaled as
 -- Dolby Vision (a dvvC box, as the player's own Dolby Vision exports have), by macOS with its own RPU (dv). Ctrl+l still grades one with a log curve by hand.
--- Noise reduction, with any of them and on any YUV video, log or not: shaders/denoise.glsl, on the video's planes
--- before mpv turns them into RGB (so before the LUT lifts log's shadows, and their noise with them): the color noise
--- mostly goes, the brightness keeps its detail. Off by default; playback only, exports are as before.
+-- Noise reduction while it plays (shaders/denoise.glsl, on the video's planes before mpv turns them into RGB) is off and
+-- out of the menus: at the frame rates it plays at, the eye evens the noise out anyway. The code stays, for denoise=yes
+-- in dlogm.conf; the paused frame's clean-up (the gyroflow plugin's Ctrl+p) is what does the job.
 --
 -- What a file starts in depends on the screen the window is on, HDR or SDR (macOS's EDR headroom, read once with
 -- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
@@ -56,14 +56,13 @@
 --                  maker's SDR
 --   Ctrl+h  hdr    the hdr look, as Ctrl+s chooses one
 --   L       off    this file only
---   Ctrl+l  curve  this file's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn
---   Ctrl+n  denoise  noise reduction on / off, for this file and the ones after it
+--   Ctrl+l  curve  the source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. Input:
+--                  written into the source's own file at once (the workspace plugin's), for all its moments and clips
 --
 -- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
 --   look <look>       this file's look: hdr, dv, dvsdr, tonemap, nbcu or maker, as Ctrl+s would
---   curve <id>|auto   this file's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
---   remember          the looks files start in on each kind of screen, and the noise reduction, as the default, in
---                     dlogm.conf
+--   curve <id>|auto   the source's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
+--   remember          the looks files start in on each kind of screen, as the default, in dlogm.conf
 --   dv-trim <name> <0..4095>  one of the dv look's trims (slope, offset, power, midContrast, clipTrim, saturation,
 --                     chromaWeight, l3Min, l3Avg, l3Max; 2048 neutral): the look is kept in $DLOGM_DATA/dv (else
 --                     ~~/dlogm-dv) and its RPU made by afp-rpu; the dv look and its exports use it
@@ -83,8 +82,8 @@
 --   (mode=sdr, as before these: maker on both)
 --   dv_live_l1=yes   the dv looks write each frame's own L1 into the RPU (--macos-dovi-live-l1: measured as it's shown),
 --                    instead of the RPU file's fixed one; no for the fixed one
---   denoise=no   whether files start with the noise reduction on. How strong it is is the shader's:
---                glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
+--   denoise=no   the noise reduction while it plays, yes only by hand here (not in the menus). How strong it is is the
+--                shader's: glsl-shader-opts=denoise_strength=2 in mpv.conf (1 by default)
 --
 -- Its files are looked for in $DLOGM_DATA first, then in this folder: an app that ships the plugin read-only
 -- (ActionFootagePlayer) keeps what it can't ship there, DJI's LUT and the maker shader made from it, under the same
@@ -617,12 +616,18 @@ local function ask_screens(done)
 end
 ask_screens()
 
--- The log curve the file is saved to play with (the workspace plugin's view, docs/moments-and-workspaces.md):
--- a curve's id, auto (its metadata's), or nil (nothing saved)
+-- The log curve the source is read with (the workspace plugin's input, from its own file; docs/moments-and-workspaces.md
+-- "Source and transform"): a curve's id, auto (its metadata's), or nil (nothing set)
 local function saved_curve()
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.view) == "table" then return ws.view.curve end
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.input) == "table" then return ws.input.curve end
     return nil
+end
+
+-- The curve chosen by hand, into the source's own file at once: auto when it's the one the metadata says
+local function keep_curve()
+    local id = (curve == nil or curve == recorded) and "auto" or curve.id
+    mp.commandv("script-message-to", "workspace", "input-set", "curve", id)
 end
 
 -- After the file is opened (its metadata is known), before the video output is set up for it
@@ -751,7 +756,10 @@ local function next_curve()
     end
     curve = CURVES[i % #CURVES + 1]
     local m = kept_look()
-    if apply(m) then mp.osd_message(label(m), 2) end
+    if apply(m) then
+        mp.osd_message(label(m), 2)
+        keep_curve()
+    end
 end
 
 -- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
@@ -786,7 +794,8 @@ mp.add_key_binding("Ctrl+s", "sdr", next_look)
 mp.add_key_binding("Ctrl+h", "hdr", function() choose("hdr", true) end)
 mp.add_key_binding("L", "off", function() choose("off", false) end)
 mp.add_key_binding("Ctrl+l", "curve", next_curve)
-mp.add_key_binding("Ctrl+n", "denoise", toggle_denoise)
+-- The noise reduction while it plays: no key, no menu item (denoise=yes in dlogm.conf still turns it on)
+mp.register_script_message("denoise", toggle_denoise)
 
 -- This file's curve by name, or the one its metadata says (auto: for a file it says isn't log, as it is again; an
 -- HDR file in HDR)
@@ -797,11 +806,13 @@ mp.register_script_message("curve", function(id)
         if hdr then
             curve = nil
             if apply(resolve(chosen[screen()])) then mp.osd_message(label(current), 2) end
+            keep_curve()
             return
         end
         if current then apply("off") end
         curve, current = nil, nil
         publish()
+        keep_curve()
         mp.osd_message("Not log, as the camera says: the file as it is", 2)
         return
     end
@@ -810,7 +821,12 @@ mp.register_script_message("curve", function(id)
     local before = curve
     curve = c
     local m = kept_look()
-    if apply(m) then mp.osd_message(label(m), 2) else curve = before end
+    if apply(m) then
+        mp.osd_message(label(m), 2)
+        keep_curve()
+    else
+        curve = before
+    end
 end)
 
 -- This file's look by name, as Ctrl+s would choose it
@@ -929,10 +945,10 @@ mp.register_script_message("dv-reset", function()
 end)
 
 mp.register_script_message("remember", function()
-    local saved = save_options({ hdr_screen = chosen.hdr, sdr_screen = chosen.sdr, denoise = denoise and "yes" or "no" })
+    local saved = save_options({ hdr_screen = chosen.hdr, sdr_screen = chosen.sdr })
     local NAMES = { hdr = "HDR, HLG", maker = "the maker's SDR", nbcu = "NBCU's SDR", tonemap = "mpv's tone mapping to SDR",
                     dv = "HDR, HLG+DV", dvsdr = "SDR, HLG+DV" }
     mp.osd_message(saved and ("Log clips start in " .. NAMES[chosen.hdr] .. " on HDR screens, in " .. NAMES[chosen.sdr]
-                              .. " on SDR screens, noise reduction " .. (denoise and "on" or "off") .. " (dlogm.conf)")
+                              .. " on SDR screens (dlogm.conf)")
                    or "Couldn't write dlogm.conf", 3)
 end)

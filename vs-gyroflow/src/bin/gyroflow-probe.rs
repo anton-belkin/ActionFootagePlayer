@@ -14,14 +14,26 @@
 // show it upright, clockwise, 0, 90, 180 or 270 (its display matrix, mp4meta.rs: a camera held vertical), which the
 // plugin's output already has.
 // A .gyroflow next to the video is the Lua script's own check, before this one.
+//
+// `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
+// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" a profile's name from
+// Gyroflow's database, or "" when it has none (Unknown: pick one in Gyroflow).
 
-use vs_gyroflow::{ probe::{ probe, color_profile }, water };
+use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens }, water };
 
 fn main() {
-    let Some(path) = std::env::args().nth(1) else {
-        eprintln!("usage: gyroflow-probe <video>");
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let lens = args.first().map(|a| a == "--lens").unwrap_or(false);
+    if lens { args.remove(0); }
+    let Some(path) = args.into_iter().next() else {
+        eprintln!("usage: gyroflow-probe [--lens] <video>");
         std::process::exit(2);
     };
+    if lens {
+        let (camera, lens) = camera_and_lens(&path).unwrap_or_default();
+        println!("{}", serde_json::json!({ "camera": camera, "lens": lens }));
+        return;
+    }
     let path = match vs_gyroflow::canonicalize(&path) {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => { println!("{}", serde_json::json!({ "mode": null, "reason": e.to_string(), "color": null })); return; }

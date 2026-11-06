@@ -149,7 +149,7 @@ local function clip_path()
     return path
 end
 
-local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
+local o = { hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", projection = "linear", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -361,26 +361,60 @@ local edge_blur = o.edges_blur
 
 -- What the clip plays stabilized with (find_source), nil: not stabilized
 local current_source = nil
+-- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
+local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
 -- at the project's or the video's own size
 local full_size = false
 -- mpv's auto-window-resize while the chain is at full size (place_filters)
 local window_resize = nil
 
--- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov); off is per clip. The view clips
--- without a project start in sticks (sticky_view); a clip with a project starts in it as Gyroflow has it (normal), the
--- wider view a choice for that clip only
-local sticky_view = o.view == "wide" and "wide" or "normal"
-local view = sticky_view
+-- On, or on with a wider view (the plugin's wide FOV, see vs-gyroflow's wide_fov); off is per clip
+local view = "normal"
 
--- The level of a clip without a project (Ctrl+k); sticks for the next clips
+-- The level of a clip without a project (Ctrl+k)
 local LEVELS = { "weak", "medium", "strong" }
 local LEVEL_LABELS = { weak = "weak (10 % crop, smoothness 50 %)", medium = "medium (20 % crop, smoothness 75 %)",
                        strong = "strong (30 % crop, smoothness 100 %)" }
-local level = LEVEL_LABELS[o.level] and o.level or "medium"
+local level = "medium"
 
--- The water's color fringes taken out (Ctrl+a), or left as recorded; sticks for the next clips
+-- The water's color fringes taken out (Ctrl+a), or left as recorded
 local chromatic = o.chromatic
+
+-- The horizon lock the preset has (default.gyroflow's, else Gyroflow's own: none), for "as the preset says" from
+-- before the horizon was Level or Free only
+local function preset_horizon()
+    for _, p in ipairs(PRESETS) do
+        if file_exists(p) then
+            local j = read_json(p)
+            local amount = type(j) == "table" and type(j.stabilization) == "table" and tonumber(j.stabilization.horizon_lock_amount)
+            return (amount and amount > 0) and "yes" or "no"
+        end
+    end
+    return "no"
+end
+
+-- The transform bundle (docs/moments-and-workspaces.md, "Source and transform"): the stabilization (normal, wide; off is
+-- a saved bundle's or this viewing's), level, horizon lock, color fringes, aspect, projection. The app's defaults are
+-- gyroflow.conf's; the session's start as them and change only by hand, on a file that plays with them (nothing saved
+-- for it: the workspace plugin publishes no view). A file with a bundle of its own plays with it, and a change there is
+-- for viewing only (or Save, Auto save)
+local function defaults_bundle()
+    local horizon_default = (o.horizon_lock == "yes" or o.horizon_lock == "no") and o.horizon_lock or preset_horizon()
+    return {
+        view = o.view == "wide" and "wide" or "normal",
+        level = LEVEL_LABELS[o.level] and o.level or "medium",
+        horizon_lock = horizon_default,
+        chromatic = o.chromatic == true,
+        aspect = ASPECTS[o.aspect] and o.aspect or "original",
+        projection = PROJECTIONS[o.projection] and o.projection or "linear",
+        preset_horizon = preset_horizon(),
+    }
+end
+local DEFAULTS = defaults_bundle()
+local session = {}
+for k, v in pairs(DEFAULTS) do session[k] = v end
+level = session.level
 
 -- The mode, then the blur, the view, the level, the color fringes and the edge fill rate: "sphere blur=2 view=wide
 -- level=medium chromatic=yes fill_rate=auto". The plugin renders both views from one engine, and switches between
@@ -388,7 +422,8 @@ local chromatic = o.chromatic
 local function write_edge_control()
     local f = io.open(EDGE_CONTROL, "w")
     if not f then return mp.msg.warn("can't write " .. EDGE_CONTROL) end
-    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, chromatic and "yes" or "no", o.edge_fill_rate)
+    -- Quality's skip: not on this computer's screen, whatever the clip's transform says
+    f:write(string.format("%s blur=%g view=%s level=%s chromatic=%s fill_rate=%s", edge_mode, edge_blur, view, level, (chromatic and not o.chromatic_skip) and "yes" or "no", o.edge_fill_rate)
             .. crop.control_words())
     f:close()
 end
@@ -400,40 +435,65 @@ local function view_label(v)
     if v == "normal" then return has_project(current_source) and "on (Gyroflow project)" or "on" end
     return "off"
 end
--- true or false: locked or not, whatever the project says; nil: the project's. Like the view, what clips without a
--- project start with sticks (sticky_horizon); a clip with a project starts with the project's, a change for that clip only
+-- true or false: locked or not; nil: the project's (a clip with a Gyroflow project, which decides it)
 local HORIZON = { yes = true, no = false }
-local sticky_horizon = HORIZON[o.horizon_lock]
-local horizon = sticky_horizon
--- The lens under water (yes), above water (no), as the camera says (auto), or as the project or preset says
--- (project); sticks for the next clips without a project like the horizon lock, and a clip with a project starts
--- with the project's. A clip's camera that doesn't record it (source.water) leaves auto to the project or preset
-local UNDERWATER_LABELS = { yes = "lens under water", no = "lens above water", auto = "lens under water as the camera says",
+local horizon = session.horizon_lock == "yes"
+-- The lens under water with a flat port (yes), above water or behind a dome port (no), as the camera's telemetry says
+-- (auto), or as the project says (project, a clip with one). Input: the source's own correction (the workspace
+-- plugin's input), written there as it's changed; the app's default (underwater=) for sources without one. A clip's
+-- camera that doesn't record it (source.water) leaves auto to the preset
+local UNDERWATER_LABELS = { yes = "lens under water (flat port)", no = "lens above water", auto = "lens under water as the camera says",
                             project = "lens under water or not as the project says" }
-local sticky_underwater = UNDERWATER_LABELS[o.underwater] and o.underwater or "auto"
-local underwater = sticky_underwater
+local default_underwater = (UNDERWATER_LABELS[o.underwater] and o.underwater ~= "project") and o.underwater or "auto"
+local underwater = default_underwater
 -- Under water, auto or the project's, before Ctrl+u took the lens out of the water
 local underwater_back = underwater ~= "no" and underwater or "auto"
 
--- The workspace plugin's settings for the file playing, when it has some saved (a moment's or clip preview's own, as
--- it was made, else the clip's own file's: view, level, horizon_lock, underwater, chromatic, aspect, rotation), the
--- part stabilized on its own (trim: { in, out }, a moment's without a project), and its switch as it's viewed (alone:
--- its project's "only within the trim range"). They don't stick for the next clips
+-- The workspace plugin's bundle for the file playing, when one is saved for it (a moment's or clip preview's own,
+-- else the source's own file's), the part stabilized on its own (trim: { in, out }, a moment's without a project),
+-- and its switch (alone: its project's "only within the trim range"). nil: the session's plays
 local function fixed()
     local ws = mp.get_property_native("user-data/workspace")
     if type(ws) == "table" and ws.path == mp.get_property("path") then return ws.view, ws.trim, ws.alone end
     return nil, nil, nil
 end
--- What sticks, while a clip plays with its own saved level and color fringes
-local level_before, chromatic_before = nil, nil
 
+-- The source's input (the workspace plugin's, from its own file): curve, rotation, underwater
+local function input()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.input) == "table" then return ws.input end
+    return {}
+end
 
--- The horizon lock and the lens a clip starts with: a project's own, or what sticks
+-- A bundle taken as what plays: true when it has the stabilization off
+local function take(b)
+    b = type(b) == "table" and b or session
+    view = b.view == "wide" and "wide" or "normal"
+    level = LEVEL_LABELS[b.level] and b.level or session.level
+    local h = b.horizon_lock
+    if h == "project" then h = DEFAULTS.preset_horizon end
+    if h ~= "yes" and h ~= "no" then h = session.horizon_lock end
+    horizon = h == "yes"
+    if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
+    frame.aspect = ASPECTS[b.aspect] and b.aspect or "original"
+    frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
+    return b.view == "off"
+end
+
+-- A change by hand to what plays: the session's too when the session's plays (nothing saved for the file, no project)
+local function sticks(k, v)
+    if not fixed() then session[k] = v end
+end
+
+-- The input's turn and lens a clip starts with, and the horizon: a project's own, or the source's
 local function clip_settings(source)
+    local i = input()
+    local r = tonumber(i.rotation)
+    frame.rotation = (r == 90 or r == 180 or r == 270) and r or 0
     if has_project(source) then
         horizon, underwater = nil, "project"
     else
-        horizon, underwater = sticky_horizon, sticky_underwater
+        underwater = (UNDERWATER_LABELS[i.underwater] and i.underwater ~= "project") and i.underwater or default_underwater
     end
     underwater_back = underwater ~= "no" and underwater or (has_project(source) and "project" or "auto")
 end
@@ -564,6 +624,11 @@ local function publish()
         fps_limit = o.fps_limit, resolution = o.resolution, paused_full_size = o.paused_full_size, edge_fill_rate = o.edge_fill_rate,
         ask_when_slow = o.ask_when_slow, aspect = frame.aspect, rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
+        chromatic_skip = o.chromatic_skip,
+        -- The session's bundle and the app's defaults (the workspace plugin fills and makes bundles with them)
+        session = session, defaults = DEFAULTS,
+        -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
+        lens = current_lens or false,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
 end
@@ -609,27 +674,13 @@ local function add_filter(source)
         mp.set_property("auto-window-resize", window_resize)
         window_resize = nil
     end
-    view = has_project(source) and "normal" or sticky_view
+    -- The bundle saved for it, else the session's; then the input's turn and lens. With a Gyroflow project, what it
+    -- has is its own: the view, horizon, frame and projection (a wider view or none is for viewing only)
+    local off = take(fixed())
     clip_settings(source)
-    -- A moment's own settings, as it was made
-    local own = fixed()
-    local off = false
-    if type(own) == "table" then
-        -- With a project, its level and lens are the project's (the workspace plugin leaves out what a project has; a
-        -- horizon here is one forced for every moment this session)
-        local project = has_project(source)
-        if own.view == "normal" or own.view == "wide" then view = own.view elseif own.view == "off" then off = true end
-        if LEVEL_LABELS[own.level] and not project then level_before = level_before or level; level = own.level end
-        if own.horizon_lock == "yes" or own.horizon_lock == "no" then horizon = own.horizon_lock == "yes"
-        elseif own.horizon_lock == "project" then horizon = nil end
-        if UNDERWATER_LABELS[own.underwater] and own.underwater ~= "project" and not project then
-            underwater = own.underwater
-            underwater_back = underwater ~= "no" and underwater or "auto"
-        end
-        if type(own.chromatic) == "boolean" and own.chromatic ~= chromatic then
-            if chromatic_before == nil then chromatic_before = chromatic end
-            chromatic = own.chromatic
-        end
+    if has_project(source) then
+        view, off, horizon = "normal", false, nil
+        frame.aspect, frame.projection, frame.rotation = "original", "linear", 0
     end
     stab_off = off
     write_edge_control()
@@ -686,19 +737,11 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off = nil, false
-    -- Back to the level and color fringes that stick, after a clip's own
-    if level_before then level, level_before = level_before, nil end
-    if chromatic_before ~= nil then chromatic, chromatic_before = chromatic_before, nil end
-    clip_settings(nil)
-    -- The frame: the clip's saved one, else its own
-    local own = fixed()
+    -- What's saved for it, else the session's; the source's input (a clip without motion data shows the frame and turn
+    -- too, by mpv's own crop and rotation)
     frame = { aspect = "original", rotation = 0, projection = "linear" }
-    if type(own) == "table" then
-        if ASPECTS[own.aspect] then frame.aspect = own.aspect end
-        if PROJECTIONS[own.projection] then frame.projection = own.projection end
-        local r = tonumber(own.rotation)
-        if r == 90 or r == 180 or r == 270 then frame.rotation = r end
-    end
+    stab_off = take(fixed())
+    clip_settings(nil)
     if resume and resume.path == mp.get_property("path") and resume.pos then mp.set_property("file-local-options/start", tostring(resume.pos)) end
     resume = nil
     local path = clip_path()
@@ -732,6 +775,18 @@ local function play_again()
 end
 
 mp.register_event("file-loaded", function()
+    -- The lens, for the Source tab: read after it starts, so the start doesn't wait for it
+    current_lens = nil
+    local lens_for = clip_path()
+    if file_exists(PROBE) and lens_for and not lens_for:find("://", 1, true) then
+        mp.command_native_async({ name = "subprocess", args = { PROBE, "--lens", lens_for }, capture_stdout = true, playback_only = true }, function(_, r)
+            local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+            if type(info) == "table" and clip_path() == lens_for then
+                current_lens = { camera = info.camera or "", lens = info.lens or "" }
+                publish()
+            end
+        end)
+    end
     if current_source then
         mp.osd_message("Gyroflow: stabilized" .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
                        .. (view == "wide" and ", wider view" or ""), 1.5)
@@ -882,7 +937,7 @@ local function show(v)
     local was_on = not stab_off
     local enabled = v ~= "off"
     if enabled then view = v end
-    if enabled and not has_project(current_source) and not fixed() then sticky_view = v end
+    if enabled and not has_project(current_source) then sticks("view", v) end
     stab_off = not enabled
     write_edge_control()
     -- Between the two views the plugin switches by itself, on the next frame: the chain stays as it is. Not for a fast
@@ -941,18 +996,34 @@ local function set_frame(aspect, rotation, projection)
     publish()
 end
 
+-- What a Gyroflow project has is changed only there
+local function project_owns(what)
+    if not has_project(current_source) then return false end
+    mp.osd_message("Gyroflow: " .. what .. " as defined in the Gyroflow project (Ctrl+e edits it in Gyroflow)", 2.5)
+    return true
+end
+
 mp.register_script_message("projection", function(p)
-    if PROJECTIONS[p] then set_frame(frame.aspect, frame.rotation, p) end
+    if not PROJECTIONS[p] or project_owns("the projection") then return end
+    set_frame(frame.aspect, frame.rotation, p)
+    sticks("projection", p)
+    publish()
 end)
 
 mp.register_script_message("aspect", function(a)
-    if ASPECTS[a] then set_frame(a, frame.rotation) end
+    if not ASPECTS[a] or project_owns("the frame") then return end
+    set_frame(a, frame.rotation)
+    sticks("aspect", a)
+    publish()
 end)
 
--- right, left: a quarter turn clockwise or back; 0, 90, 180, 270: that turn
+-- The source turned as it was recorded (input): right, left, a quarter turn clockwise or back; 0, 90, 180, 270: that
+-- turn. Written into the source's own file at once (the workspace plugin), for all its moments and clips
 mp.register_script_message("rotate", function(v)
     local r = v == "right" and (frame.rotation + 90) % 360 or v == "left" and (frame.rotation + 270) % 360 or tonumber(v)
-    if ROTATION_LABELS[r] then set_frame(frame.aspect, r) end
+    if not ROTATION_LABELS[r] or project_owns("the turn") then return end
+    set_frame(frame.aspect, r)
+    mp.commandv("script-message-to", "workspace", "input-set", "rotation", tostring(r))
 end)
 
 -- on -> wider view -> off -> on
@@ -970,9 +1041,8 @@ local function set_level(l)
     if has_project(current_source) then
         return mp.osd_message("Gyroflow: the project's own smoothing and zoom (edit them in Gyroflow, Ctrl+e)", 2)
     end
-    -- A moment's own level doesn't stick: the one before it comes back after it
-    if fixed() and not level_before then level_before = level end
     level = l
+    sticks("level", l)
     write_edge_control()
     publish()
     mp.msg.info("level " .. level)
@@ -990,27 +1060,29 @@ mp.register_script_message("level", function(l)
     if LEVEL_LABELS[l] then set_level(l) end
 end)
 
+-- Level (locked) or Free; "project", from before, as the preset has it
 mp.register_script_message("horizon-lock", function(value)
+    if project_owns("the horizon") then return end
+    if value == "project" then value = DEFAULTS.preset_horizon end
     if value == "toggle" then
         horizon = not horizon
-    elseif value == "project" then
-        horizon = nil
     elseif HORIZON[value] ~= nil then
         horizon = HORIZON[value]
     else
         return
     end
-    if not has_project(current_source) and not fixed() then sticky_horizon = horizon end
+    sticks("horizon_lock", horizon and "yes" or "no")
     rebuild_filter()
     publish()
-    local says = current_source and current_source.kind == "default" and "preset" or "project"
-    mp.osd_message("Gyroflow: horizon " .. (horizon == nil and "as the " .. says .. " says" or (horizon and "locked" or "not locked")), 1.5)
+    mp.osd_message("Gyroflow: horizon " .. (horizon and "level" or "free"), 1.5)
 end)
 
 local function set_underwater(value)
+    if value == "project" or project_owns("the lens") then return end
     underwater = value
     if value ~= "no" then underwater_back = value end
-    if not has_project(current_source) and not fixed() then sticky_underwater = value end
+    -- Input: the source's correction, into its own file at once
+    mp.commandv("script-message-to", "workspace", "input-set", "underwater", value)
     rebuild_filter()
     publish()
     local says = current_source and current_source.kind == "default" and "preset" or "project"
@@ -1039,9 +1111,8 @@ local function set_chromatic(value)
     if not chromatic_shader then
         return mp.osd_message("Gyroflow: color fringes are taken out only with vo=gpu-next or gpu", 2)
     end
-    -- On a clip with its own saved, the one that sticks comes back after it
-    if fixed() and chromatic_before == nil then chromatic_before = chromatic end
     chromatic = value
+    sticks("chromatic", value)
     write_edge_control()
     publish()
     if current_source and not stab_off and mp.get_property_native("pause") then
@@ -1074,7 +1145,7 @@ local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
     resolution = { display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
     edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
-    chromatic = { yes = "color fringes under water taken out", no = "color fringes under water left as recorded" },
+    chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
     paused_full_size = { off = "paused, the frame as it played (Ctrl+f: at full size)", auto = "paused, the frame at full size" },
     edges = EDGE_LABELS,
@@ -1091,8 +1162,9 @@ local function set_quality(key, value)
     elseif key == "edge_fill_rate" then
         o.edge_fill_rate = value
         write_edge_control()
-    elseif key == "chromatic" then
-        set_chromatic(value == "yes")
+    elseif key == "chromatic_skip" then
+        o.chromatic_skip = value == "yes"
+        write_edge_control()
     elseif key == "paused_full_size" then
         o.paused_full_size = value
     else
@@ -1105,7 +1177,7 @@ local function set_quality(key, value)
     local message = "Gyroflow: " .. (key == "edges" and "edges: " or "") .. QUALITY[key][value]
     if (key == "fps_limit" or key == "resolution") and current_source and not stab_off then
         with_pause(message .. "…", function() place_filters(true) end)
-    elseif key ~= "edges" and key ~= "chromatic" then
+    elseif key ~= "edges" then
         mp.osd_message(message, 2)
     end
 end
@@ -1123,21 +1195,59 @@ quality.init(o, {
     end,
     edges = function() return edge_mode end,
     -- The color fringes being taken out where it can: the shader there, the lens not set above water
-    chromatic = function() return chromatic and chromatic_shader and underwater ~= "no" end,
+    chromatic = function() return chromatic and chromatic_shader and underwater ~= "no" and not o.chromatic_skip end,
     set = set_quality,
 })
 
+-- The transform as it plays, whole, as the app's defaults and the session's (the panel's Use as default); what a
+-- Gyroflow project has stays the session's. With the edge fill and the clean still frame, which aren't a clip's
+local function as_plays()
+    local project = has_project(current_source)
+    return {
+        view = project and session.view or view,
+        level = project and session.level or level,
+        horizon_lock = (project or horizon == nil) and session.horizon_lock or (horizon and "yes" or "no"),
+        chromatic = chromatic == true,
+        aspect = project and session.aspect or frame.aspect,
+        projection = project and session.projection or frame.projection,
+    }
+end
+
 mp.register_script_message("remember", function()
+    local b = as_plays()
     local saved = platform.save_options("gyroflow", {
-        { "view", sticky_view },
-        { "level", level },
-        { "horizon_lock", sticky_horizon == nil and "project" or (sticky_horizon and "yes" or "no") },
-        { "underwater", sticky_underwater },
-        { "chromatic", chromatic and "yes" or "no" },
+        { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
+        { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "projection", b.projection },
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
         { "still", still.enabled() and "yes" or "no" },
     })
-    mp.osd_message(saved and "Gyroflow: saved as the defaults (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
+    if saved then
+        o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.projection = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.projection
+        DEFAULTS = defaults_bundle()
+        for k, v in pairs(b) do session[k] = v end
+        publish()
+    end
+    mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
+end)
+
+-- A bundle played now, for this viewing (the panel's Revert to saved): what a Gyroflow project has stays its own
+mp.register_script_message("apply-view", function(json)
+    local b = utils.parse_json(json or "")
+    if type(b) ~= "table" then return end
+    local turn = frame.rotation
+    local off = take(b)
+    frame.rotation = turn
+    if has_project(current_source) then
+        view, off, horizon = "normal", false, nil
+        frame.aspect, frame.projection = "original", "linear"
+    end
+    stab_off = off
+    write_edge_control()
+    if current_source then
+        with_pause("Gyroflow: as saved…", function() place_filters(not stab_off) end)
+    end
+    mpv_frame()
+    publish()
 end)
 
 -- Edit in Gyroflow. The project goes next to the video (or where the workspace plugin says), where find_project()
@@ -1325,3 +1435,6 @@ do
     mp.set_property_native("user-data/gyroflow/live_photo", v)
 end
 require 'export'
+
+-- The session's bundle and the app's defaults, for the workspace plugin before the first file loads
+publish()
