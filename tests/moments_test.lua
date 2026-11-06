@@ -74,11 +74,12 @@ local fs = {
         if dirs[p] then return { is_dir = true, mtime = 7 } end
     end,
     readdir = function(d, what)
-        local out = {}
-        local set = what == "files" and files or dirs
-        for p in pairs(set) do
-            local parent, name = p:match("^(.*)/([^/]+)$")
-            if parent == d then out[#out + 1] = name end
+        local out = what == "all" and { ".", ".." } or {}
+        for _, set in ipairs({ (what == "files" or what == "all") and files or {}, (what == "dirs" or what == "all") and dirs or {} }) do
+            for p in pairs(set) do
+                local parent, name = p:match("^(.*)/([^/]+)$")
+                if parent == d then out[#out + 1] = name end
+            end
         end
         table.sort(out)
         return out
@@ -169,6 +170,7 @@ local clips = m.footage("/T/Egypt")
 local rels = {}
 for _, c in ipairs(clips) do rels[#rels + 1] = c.relative end
 expect("footage", table.concat(rels, ","), "Day 1/A.MP4,Day 1/B.MP4")
+expect("footage: its size from the walk", clips[1].size, files["/T/Egypt/Day 1/A.MP4"].size)
 -- Clip previews found by their link, whatever their name
 file("/T/Egypt/_Clips/Reef/my favourite.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/B.MP4","size":100}')
 local previews = m.scan("/T/Egypt", {}, "_Clips", "clip").list

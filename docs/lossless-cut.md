@@ -100,7 +100,7 @@ ends it's another clip's start. The same render twice is identical, the motion d
   `<name> (cut 1)`, the original as it was.
 - **A drive without a Trash** (Windows: a network share or a removable drive, a card; Windows deletes for good what's
   sent to the Recycle Bin from there): the original goes aside on the same drive instead, into the project's
-  `_ActionFootagePlayer\Trash\` at its path in the project, else into `.Trash\` beside it. The question says where
+  `.Trash\` at its path in the project, else into `.Trash\` beside it. The question says where
   before the cut, and so does the message after it.
 - **Names**: the first part takes the original's name; a second one its own recording time the camera's way
   (`DJI_20261024094541_0093_D.MP4` cut from 19 s on: `DJI_20261024094600_0093_D.MP4`), sorting as it happened;

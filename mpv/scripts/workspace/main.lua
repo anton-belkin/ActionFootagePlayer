@@ -106,18 +106,33 @@ local macos = platform == "darwin"
 -- How often the _Moments/ folders are looked at for files added, removed or renamed in Finder
 local WATCH_SECONDS = 5
 
+-- The project counted for the side panel (extras, further down) runs as a coroutine that gives mpv a turn every
+-- TURN_CALLS of these file calls: on a NAS each is a round trip, a few hundred clips take a minute, and mpv waits for
+-- a script to finish what it's doing before it quits or the next clip's hooks run
+local TURN_CALLS = 16
+local counting = { co = nil, calls = 0 }
+local function turn()
+    if counting.co and coroutine.running() == counting.co then
+        counting.calls = counting.calls + 1
+        if counting.calls % TURN_CALLS == 0 then coroutine.yield() end
+    end
+end
+
 local fs = {
     is_dir = function(p)
+        turn()
         local info = utils.file_info(p)
         return info ~= nil and info.is_dir
     end,
     is_file = function(p)
+        turn()
         local info = utils.file_info(p)
         return info ~= nil and info.is_file
     end,
-    info = function(p) return utils.file_info(p) end,
-    readdir = function(p, what) return utils.readdir(p, what) end,
+    info = function(p) turn(); return utils.file_info(p) end,
+    readdir = function(p, what) turn(); return utils.readdir(p, what) end,
     read_link = function(p)
+        turn()
         local ok, raw = pcall(link.read, p)
         return ok and raw or nil
     end,
@@ -844,24 +859,24 @@ local function has_recycle_bin(file)
     return recycle_bins[root]
 end
 
--- Where a file goes instead, on the same drive (a rename, instant): the project's _ActionFootagePlayer\Trash\ at the
--- file's path in the project, else .Trash\ beside it (a dot folder: never taken for footage)
-local TRASH_DIR = "Trash"
+-- Where a file goes instead, on the same drive (a rename, instant): the project's .Trash\ at the file's path in the
+-- project, else .Trash\ beside it (a dot folder: never taken for footage)
+local TRASH_DIR = ".Trash"
 local function trash_folder(file)
     local project = ws.project_root(file)
     local rel = project and ws.relative(file, project)
     if rel then
-        return ws.parent(ws.join(ws.join(ws.join(project, workspace.STATE_DIR), TRASH_DIR), (rel:gsub("/", "\\"))))
+        return ws.parent(ws.join(ws.join(project, TRASH_DIR), (rel:gsub("/", "\\"))))
     end
-    return ws.join(ws.parent(file), ".Trash")
+    return ws.join(ws.parent(file), TRASH_DIR)
 end
 
 -- Where the Trash is for a file, as the OSD says it: "the Trash", or the folder it goes to instead
 local function trash_name(file)
     if has_recycle_bin(file) then return "the Trash" end
-    local dir = trash_folder(file)
-    local own = dir:find(workspace.STATE_DIR .. "\\" .. TRASH_DIR, 1, true)
-    return (own and (workspace.STATE_DIR .. "\\" .. TRASH_DIR) or ".Trash beside it") .. " (this drive has no Recycle Bin)"
+    local file_project = ws.project_root(file)
+    local own = file_project and ws.relative(file, file_project)
+    return (own and "the project's .Trash" or ".Trash beside it") .. " (this drive has no Recycle Bin)"
 end
 
 local function move_aside(file)
@@ -1231,8 +1246,6 @@ local function make_clips(again, root)
     local made = read_made(root)
     local queue = {}
     for _, c in ipairs(moments.footage(root)) do
-        local info = utils.file_info(c.file)
-        c.size = info and info.size
         local listed = made[moments_lib.made_line(c.relative, c.size)]
         if (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
             queue[#queue + 1] = c
@@ -1281,40 +1294,64 @@ mp.register_event("shutdown", function()
     if clips_job and clips_job.id then clips_job.stopping = true; mp.abort_async_command(clips_job.id) end
 end)
 
--- The project's clips counted (a walk of its folders, kept a minute), and this clip's preview
+-- The project's clips counted (a walk of its folders, kept a minute), and this clip's preview. A step at a time (turn,
+-- with the file calls): the first one now, the rest on mpv's next turns, published when it's through. A count asked
+-- for again replaces the one under way; a quit, or another clip, doesn't wait for it
 local stats_cache = {}
-extras = function(force)
-    local project = state.project
-    if not project or not state.clip then
-        state.clips_stats, state.clip_preview = nil, nil
-        return
-    end
+local function count(project, force, s)
     local made = read_made()
     local cached = stats_cache[project]
     if force or not cached or mp.get_time() - cached.time > 60 then
         local total, previews, new = 0, 0, 0
         for _, c in ipairs(moments.footage(project)) do
             total = total + 1
-            local info = utils.file_info(c.file)
-            if preview_for(c.relative, info and info.size) then previews = previews + 1 end
-            if not made[moments_lib.made_line(c.relative, info and info.size)] then new = new + 1 end
+            if preview_for(c.relative, c.size) then previews = previews + 1 end
+            if not made[moments_lib.made_line(c.relative, c.size)] then new = new + 1 end
         end
         cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
         stats_cache[project] = cached
     end
+    -- Another clip by now: its own count tells it
+    if s ~= state then return end
     state.clips_stats = cached.stats
-    local info = utils.file_info(state.clip)
-    local doc = pf.read(project)
-    state.moments_alone = doc.settings.moments_alone == true
-    state.clips_failed = #doc.clips_failed > 0 and #doc.clips_failed or nil
+    local info = fs.info(state.clip)
     if state.relative and preview_for(state.relative, info and info.size) then state.clip_preview = "made"
     elseif state.relative and made[moments_lib.made_line(state.relative, info and info.size)] then state.clip_preview = "removed"
     else state.clip_preview = "none" end
 end
 
+local function step(co)
+    if counting.co ~= co then return end
+    local ok, err = coroutine.resume(co)
+    if not ok then
+        counting.co = nil
+        return mp.msg.warn("counting the project's clips: " .. tostring(err))
+    end
+    if coroutine.status(co) == "dead" then
+        counting.co = nil
+        return true
+    end
+    mp.add_timeout(0, function() if step(co) then publish() end end)
+end
+
+extras = function(force)
+    local project = state.project
+    if not project or not state.clip then
+        counting.co = nil
+        state.clips_stats, state.clip_preview = nil, nil
+        return
+    end
+    local s = state
+    counting.co, counting.calls = coroutine.create(function() count(project, force, s) end), 0
+    step(counting.co)
+    local doc = pf.read(project)
+    state.moments_alone = doc.settings.moments_alone == true
+    state.clips_failed = #doc.clips_failed > 0 and #doc.clips_failed or nil
+end
+
 -- Counted again after clip previews are made or removed
 recount = function()
-    previews(true)
+    previews_cache.time = -1e9
     extras(true)
     publish()
 end
