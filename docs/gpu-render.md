@@ -247,6 +247,37 @@ stream (1080p HDR, Dolby Vision if possible). Its render:
 
 The same renderer, writing a file instead of a stream, is the export.
 
+## 360° cameras: later, on the Mac, with the same kernel
+
+Not part of the first steps, and not for Linux or the NAS (no need there for now), but the same port is what 360
+playback on the Mac needs for 8K60.
+
+**Today** ([360-cameras.md](360-cameras.md)): sphere360.rs renders each lens with gyroflow-core into an
+equirectangular sphere (5760 wide by default) in the camera's axes, with the rolling shutter taken out, blends the
+lenses on the CPU along feather spans, and stamps the camera's orientation and the headings under it; view360.glsl
+turns the view at the screen's rate. Through VapourSynth that is 5.7K30 with room, 8K30 just, 8K60 not: four or more
+full-frame copies of 90–100 MB frames, and VapourSynth's cache ([360-throughput-spike.md](360-throughput-spike.md)).
+
+**On the GPU**, the per-lens part is the kernel this design ports: the lens model (insta360's is the most iterative,
+so the lens table of "Quality and speed" matters most here), the rig's pose per lens, the rolling shutter per lens,
+and the blend along the feather spans. Two shapes:
+
+- **The sphere kept, made on the GPU**: a pass at the video's rate renders both lenses into a sphere texture, and
+  view360.glsl reads it as now. It keeps the decided architecture as it is (the sphere close to the source, the view
+  in a shader at the screen's rate, turning the head never waits for the video); only where the sphere is made moves.
+  The sphere costs its own size once per video frame.
+- **No sphere**: the view pass goes from the screen's ray straight to a lens and its pixel. Only the window's pixels,
+  but at the screen's rate (120 Hz on the XDR) and with the lens solve in every refresh.
+
+The first is the one to build; the second only if the sphere's size per frame turns out to be the cost **(to try)**.
+The stamp under the sphere becomes the per-frame table, as for flat clips.
+
+**What it needs: both lens tracks on the GPU.** Under `lavfi-complex` mpv gives no hardware decoding device to the
+tracks' decoders, so today they are decoded with a copy to memory and joined there. Keeping them on the GPU needs an
+mpv patch that hands both decoded tracks to libplacebo as textures (VideoToolbox frames, zero-copy): possible only in
+the Mac app, which builds its own mpv. Windows and Linux keep the VapourSynth path for 360. Our own renderer decodes
+the tracks itself and needs no patch, if 360 is ever wanted there.
+
 ## Quality and speed
 
 The same clip will run on an N100 at 6 W, a laptop that halves its GPU after half a minute at boost, an M-series Mac,
@@ -323,6 +354,7 @@ full chromatic, the video's size), as `paused_full_size` does now.
 3. **The edge fill** on the GPU (sphere and smooth).
 4. **The renderer and streaming** on the NAS: VAAPI → libplacebo → VDEnc, HLS, Dolby Vision 8.4.
 5. **The export** through the renderer; then the still frame, and maybe a denoise for stills and exports.
+6. **360 on the Mac**: an mpv patch for both lens tracks as textures, the sphere made on the GPU; 8K60.
 
 ## Open questions
 
