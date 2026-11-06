@@ -38,8 +38,10 @@ use crate::{ PlaneJob, SampleKind, rig::{ Rig, equirect_direction }, heading::{ 
 /// this far from the camera: on an X5 (31.9 mm between the lenses) a subject at 1 m is ~0.9° off at infinity, ~0.5°
 /// at 2 m, and the horizon ~0.9° at 1 m. A stick or handlebars put the camera's surroundings at 0.5-2 m
 pub const DEFAULT_DISTANCE: f64 = 2.0;
-/// The sphere's width, its height half of it: an X5's lens has ~19 px per degree over its field, 6912 across 360°
-pub const DEFAULT_WIDTH: usize = 7680;
+/// The sphere's width, its height half of it: 16 px a degree. An X5's lens has ~19 px a degree over its field (6912
+/// across 360°), but on screen with the view shader (gpu-next) an M1 Pro played the sample X5 clip at 25 fps with no
+/// frame dropped up to 6400 wide; 6912 dropped 17 frames in 15 s, 7680 ~140. 5760 leaves room
+pub const DEFAULT_WIDTH: usize = 5760;
 
 /// Where one lens is blended in, per row of a plane: copied where it's alone, mixed by its share elsewhere
 struct Spans {
@@ -540,7 +542,7 @@ fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>
 }
 
 // ---------------------------------------------------------------------------------------------------
-// The filter: `core.gyroflow.Sphere360(clip, video, width=7680, distance=0, interpolation="bilinear", workers=3,
+// The filter: `core.gyroflow.Sphere360(clip, video, width=5760, distance=0, interpolation="bilinear", workers=3,
 // start_time=0, time_offset=0)`
 
 static ENGINES: Mutex<Vec<(String, Arc<Sphere360>)>> = Mutex::new(Vec::new());

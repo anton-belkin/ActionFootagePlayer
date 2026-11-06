@@ -164,7 +164,7 @@ gyro and accelerometer, no GPS). Partly done: see what's open below.
   (BrownV3, RadtanPro) yet: DJI's ThetaPoly and GoPro's EAC are refused with a reason (`gyroflow-probe` says it).
 - **`vs-gyroflow/src/sphere360.rs`**, `core.gyroflow.Sphere360`: one `Stabilization` per lens and plane (equirect,
   no smoothing, the lens's half of the joined frame uploaded alone), the first lens into the output, the others
-  blended in by spans made once per clip, the stamp per frame. 7680×3840 and bilinear by default: the kernel's time
+  blended in by spans made once per clip, the stamp per frame. 5760×2880 and bilinear by default: the kernel's time
   is its taps where a lens has picture (~120 ms a frame a GPU worker with bicubic, ~70 bilinear). Rendering only a
   lens's band of longitudes doesn't help: near the poles every longitude is within a lens's 93°.
 - **`vs-gyroflow/src/heading.rs`**: the world (gravity down), the camera's yaw, in the world and along the camera.
@@ -193,11 +193,14 @@ What was checked:
   screen. There is no maker's stitch of this clip to put beside it: not done.
 - **Throughput**: without the screen 24–25 fps through the plugin (`--vo=null --untimed`); the same chain with a
   copy in VapourSynth instead of the plugin, 26 fps: mpv's decoding, joining and conversion of two 3840² tracks is
-  the limit on this clip, not the plugin. **On the screen it doesn't keep up**: ~20–22 fps through the plugin, mpv
-  dropping 7–12 frames a second of 25 (69 in 10 s in the last run). Not solved here; options: a 5760 sphere (half the plugin's GPU time, and less to
-  upload), the plugin's GPU time traded against the view shader's, step 6's GPU route.
+  the limit on this clip, not the plugin: mpv decodes the two tracks one after the other in its playback thread (one
+  track alone: ~70 fps; both: ~31). `vd-queue-enable=yes` gives each track's decoder a thread of its own: both
+  tracks then ~65 fps, through the plugin 30 fps at 7680 and 53 at 5760 without the screen. **On the screen** (the
+  app's mpv, gpu-next, the view on, 15 s of the clip from 1 s): 7680 dropped 143 frames, 6912 17, 6400 and 5760
+  none; 5760 with the head turning all the while (IPC, 20 times a second), none. So 5760 by default
+  (`sphere_width` raises it), the queue on in 360 mode.
 
-Open: the throughput on screen; the final IMU turns on screen; travel and north (step 5); X4, X3 (two files), DJI
+Open: travel and north (step 5); X4, X3 (two files), DJI
 Osmo 360 (ThetaPoly, quaternions only, `imu_from_rig`), GoPro MAX 2 (EAC); the mirror flag (no clip has it); 8K60.
 
 ### 5. Headings: along the way, north (3–6 days)

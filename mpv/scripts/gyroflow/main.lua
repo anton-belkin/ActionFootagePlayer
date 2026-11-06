@@ -138,7 +138,7 @@
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 --   sphere_width=0  a 360 camera's own file (below): the sphere's width (its height half of it), 0 for the plugin's
---                   (7680)
+--                   (5760: an X5 clip at 25 fps plays with no frame dropped up to 6400 on an M1 Pro)
 --   stitching_distance=0  where its lenses' seam is right, in metres; 0 for the camera's own or 2 m
 --   sphere_max_fps=31  above it, every other frame (8K60 doesn't keep up through VapourSynth: step 2 of
 --                   docs/360-implementation-plan.md); 0 every frame
@@ -734,6 +734,10 @@ local function add_sphere(source)
     end
     -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/360-throughput-spike.md)
     if o.hwdec then mp.set_property("file-local-options/hwdec", platform.macos and "videotoolbox-copy" or "auto-copy") end
+    -- Each track decoded on a thread of its own: in the playback thread mpv decodes them one after the other, and two
+    -- X5 tracks came at ~31 fps together where one alone comes at ~70 (with it, ~65 both; through the plugin 24 -> 30 fps
+    -- at 7680, 27 -> 53 at 5760, without the screen)
+    mp.set_property("file-local-options/vd-queue-enable", "yes")
     local vf = mp.get_property_native("vf") or {}
     local fps = tonumber(source.fps)
     local step = (o.sphere_max_fps > 0 and fps and fps > o.sphere_max_fps) and math.ceil(fps / o.sphere_max_fps - 0.05) or 1
