@@ -24,6 +24,9 @@ marked **(to try)**.
 - **The frame's identity is no longer a problem in mpv**: since mpv 0.42.0 a user shader can declare `//!PARAM PTS`
   and mpv fills it with the time of the frame being drawn. The stamps in the pixels (chromatic, crop mode, 360) were
   workarounds for its absence.
+- **Quality is a setting per machine, measured**: interpolation, shrinking, render size, the lens's exactness,
+  chromatic, the edge fill and the frame rate are knobs in one Best-to-Lightest list, its default picked from mpv's
+  per-pass GPU times, not fixed by frame rate.
 - **One shader source, three hosts**: mpv's gpu-next (the player), a small libplacebo renderer of our own (the
   streaming server, later the export), and checks against Gyroflow's own CPU reference.
 
@@ -151,14 +154,14 @@ texture or uniform buffer each frame, and the table problem disappears. The same
 rectangle on screen (`//!WIDTH OUTPUT.w`). The looks (dlogm's, at `MAIN`) then run on the output-sized picture, which
 is cheaper than now (today they run at the stabilized size). No mpv scaling follows: the warp is the scaler.
 
-Interpolation in the warp is Gyroflow's, and which one is a **quality/performance setting**, not a rule by frame
-rate. Today main.lua's `interpolation` picks Lanczos up to 31 fps and bicubic above, but only because on an M1 Pro
-through VapourSynth 4K Lanczos kept up at ~38 fps and bicubic at ~54: the threshold is what that machine managed, not
-something about the clip. On the GPU the costs change, so the choice becomes an option (Right click > Quality, next
-to `fps_limit`): the best the machine keeps up with by default, the user free to trade it either way.
-Where the warp shrinks the source (4K to a 1080p window: two to one), a plain bicubic aliases; the prototype widened
-its taps for that, Gyroflow's EWA is the exact answer but costs too much in real time. **(to try: bicubic over a mip
-level, widened taps, EWA, on detail like a reef; and their cost on the N100.)**
+Interpolation in the warp is Gyroflow's, and which one is a quality/performance setting, not a rule by frame rate
+(see "Quality and speed"). Today main.lua's `interpolation` picks Lanczos up to 31 fps and bicubic above only
+because on an M1 Pro through VapourSynth 4K Lanczos kept up at ~38 fps and bicubic at ~54: what that machine managed,
+not something about the clip.
+
+Where the warp shrinks the source a lot (4K into a 1080p window: two to one), a plain bicubic aliases; the prototype
+widened its taps, Gyroflow's EWA is the exact answer but costs most. **(to try: those, and a prefiltered half-size
+source, on detail like a reef; and their cost on the N100.)**
 
 ### Chromatic correction inside the warp
 
@@ -231,6 +234,60 @@ stream (1080p HDR, Dolby Vision if possible). Its render:
 
 The same renderer, writing a file instead of a stream, is the export.
 
+## Quality and speed
+
+The same clip will run on an N100 at 6 W, a laptop that halves its GPU after half a minute at boost, an M-series Mac,
+a desktop card, and a NAS serving two streams at once. So nearly everything that costs GPU time is a setting with a
+default chosen per machine, not a constant. What exists now (quality.lua: when more than a tenth of the frames drop
+for 2 s, playback pauses and offers lighter settings, the pick kept in gyroflow.conf as this computer's) stays the
+mechanism; on the GPU it gets more knobs, a different order, and measurements instead of only dropped frames.
+
+### What each knob costs
+
+What a pass costs scales with one of three things, and that decides which knob helps where:
+
+- **source pixels** (a 4K source: 8.3 M a frame, whatever the window): decoding, the conversion to RGB with chroma
+  upsampling, any prefilter of the source;
+- **output pixels** (the window's or the stream's size): the warp and its taps, chromatic, the edge composite, the look;
+- **per frame**, fixed: the table lookup, the sphere's update, peak detection.
+
+| Knob | Choices, best first | Costs | Note |
+|---|---|---|---|
+| Interpolation | EWA (Robidoux) · Lanczos4 · bicubic · bilinear | output px × taps: EWA up to hundreds, Lanczos 64, bicubic 16 (or 4 fetches as a B-spline, softer), bilinear 1 | The biggest single knob at a given size |
+| Shrinking a large source | EWA · a prefiltered half-size source (one pass over the source) · widened taps · none (aliasing) | the prefilter: source px; widened taps: output px × 4 | Whenever the window is much smaller than the video (4K in a 1080p window, 8K 360). mpv's default downscaler cost the N100 half its frames (35 vs 75 fps) |
+| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`); on a 4K or 5K screen a factor of 4 or more |
+| Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | Exists (`fps_limit`); the most visible (judder), so last |
+| Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
+| Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
+| Chromatic under water | red and blue with the main kernel · bilinear · off | output px × 2 × taps, or × 2 | Exists as `chromatic_skip`; bilinear for the two channels is the middle step the eye shouldn't tell under water **(to try)** |
+| Edge fill | sphere · smooth · off; the sphere's resolution; written every frame or every n-th | the composite: output px; the sphere: per frame (its texels) | Exists (`edges`, `edge_fill_rate`); on the GPU the sphere may be cheap enough that the rate goes **(to try)** |
+| Conversion before the warp | mpv converts the whole source to RGB and the warp reads that · the warp reads the Y and CbCr planes and converts only what it samples | the first: source px with chroma upsampling; the second: only the warp's taps | A design choice more than a setting, but the biggest saving on weak GPUs, which spend most of a frame on source-sized passes **(to try: whether a MAINPRESUB pass can bind LUMA and CHROMA, and whether libplacebo then skips converting MAIN)** |
+| HDR on an SDR screen | peak detection on · off | per frame, a compute pass | mpv's `hdr-compute-peak` |
+| The stream (server) | 2160p · 1080p · 720p; how many streams | output px | The encoder (VDEnc) is fixed-function hardware and doesn't use the shader cores; streams share the shader cores |
+
+Paused, none of this has to keep up: the paused frame is rendered again at the best settings (EWA, the exact lens,
+full chromatic, the video's size), as `paused_full_size` does now.
+
+### Choosing them
+
+- **Presets, not twelve switches.** The menu's Quality keeps one list from Best to Lightest; each step is a set of the
+  knobs above. What goes first, least visible first (the order to confirm on the N100 and a laptop **(to try)**): the
+  sphere's rate → chromatic to bilinear → the lens to its table → the shrinking to widened taps → interpolation one
+  step down (Lanczos → bicubic → bilinear) → render size → frame rate. Each knob can still be set in gyroflow.conf;
+  one set by hand is left alone by the presets.
+- **Measured, not guessed.** mpv reports each GPU pass's time for fresh frames (`vo-passes/fresh`: last, average and
+  peak, per pass by its `//!DESC`). The plugin reads them while the clip plays, so it knows a frame's GPU time against
+  the frame's interval, not only whether frames dropped, and what each of our passes costs on this machine. A
+  machine's default is the best preset whose measured time leaves a margin (say 25 %) at the clip's rate and the
+  window's size, measured again when either changes a lot (a 4K60 clip after 1080p30, the window moved to a 5K
+  screen).
+- **Down quickly, up slowly, never in the middle of a shot.** A small step down (a knob nobody will see change) is
+  taken without pausing; before the frame rate or the size goes, it asks, as now. Back up only after some seconds with
+  room to spare, and at a seek, a new clip or a pause, so the picture doesn't change sharpness while you watch. A
+  laptop that slows after its boost settles on the step it can hold.
+- **The server** picks per stream when the stream starts, from the measured cost and the streams already running, and
+  lowers the render (not the encode, which is separate hardware) when another stream joins.
+
 ## Checking it
 
 - **Against Gyroflow**: render chosen frames of clips with each lens model we play (DJI opencv_fisheye, GoPro with
@@ -247,7 +304,7 @@ The same renderer, writing a file instead of a stream, is the export.
 
 1. **Spike** (a few days): the opencv_fisheye path of the kernel as an mpv hook with `PTS` and an embedded table
    written by a small CLI on vs-gyroflow; clip 0126 frame-exact against VapourSynth; knots vs rows; the table's load
-   time; cost on the N100 and the M1. Needs mpv 0.42 on the NAS (built in the container).
+   time; cost on the N100 and the M1, knob by knob (interpolations, shrinking, the plane-reading warp). Needs mpv 0.42 on the NAS (built in the container).
 2. **The player**: all lens models and digital lenses our cameras use, the interpolations, chromatic inside the warp,
    edges `off`; the VapourSynth path stays as the fallback (old mpv, DV looks on the Mac, the still frame).
 3. **The edge fill** on the GPU (sphere and smooth).
