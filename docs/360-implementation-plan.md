@@ -236,6 +236,80 @@ mpv patches in `tools/mpv-patches/`, macOS:
 The same route can serve crop mode on flat clips afterwards (a stamped camera per frame, corrected in the shader
 within the margin); that's a separate change.
 
+**Measured** 2026-11-06 (branch `claude/360-latency-957079`), M1 Pro: the built-in XDR (ProMotion, 120 Hz) and a
+DELL P2217H (60 Hz, the main display); a synthetic stitched clip (2880×1440, 30 fps, `tests/make_equirect.py`), the
+window 1280×720, made-up two-finger scrolls 97 times a second (`--macos-latency-test`). "Input → light" is from the
+gesture's event time to the drawable's `presentedTime`, p50 / p90 in ms, from the first frame that shows the input
+rendered fresh. Not in it: the trackpad's own scan and the HID path before the event's time, and the scan-out down
+the screen after `presentedTime` (half a refresh to the middle) — the camera's part, below.
+
+| Input → light, ms | XDR 120 Hz paused | XDR playing | DELL 60 Hz paused | DELL playing |
+|---|---|---|---|---|
+| Before (the app's mpv as it was, step 0's path) | 29.1 / 33.3 | 189 / 493 | 31.7 / 38.6 | 2627 / 4668 |
+| `video-sync=display-resample` | — | 43.8 / 58.6 | — | 426 / 893 |
+| + 0011 (frames rendered again) and 0012 (gestures in the VO), `video-sync=audio` | 29.1 / 33.5 | 38.3 / 62.5 | 32.9 / 41.7 | 45.5 / 60.7 |
+| + `video-timing-offset` a refresh ahead | — | 32.8 / 39.2 | — | 46.2 / 50.1 |
+| + no vsync wait in a window (0013): **what view360 sets now** | **8.3 / 10.3** | **8.9–10.0 / 15.5–17.5** | 13.7–42.5 | 31.5–46.0 |
+| the same, full screen (vsync kept there) | 30–32, twice 15 | 34 | 35 | 59 |
+| full screen without the vsync wait (may tear) | 8.7–9.7 | 17.2 | 9.2 | 15.8 |
+
+What each change did, and why:
+
+- **The log first** (mpv patch 0010, `--macos-latency-log`): per frame the input it shows (view360 passes the
+  gesture's event time in `glsl-shader-opts` as `afp_input_time`), when the VO began it, took the Metal drawable
+  (`CAMetalLayer.nextDrawable` overridden, with `addPresentedHandler`), submitted it, and `presentedTime`.
+  `tools/latency360/run.sh` runs one measurement, `summarize.py` splits it into stages.
+- **Before**: paused, the script's path was nearly free (input → VO 0.5 ms); ~27 ms of the 29 went after the submit.
+  Playing, the VO drew only the video's frames, and setting `glsl-shader-opts` waits for the VO (up to a refresh),
+  so the script fell behind gestures coming faster than the screen's rate: by seconds at 60 Hz.
+- **`display-resample`** drew 115 frames/s at 120 Hz, but **the view still moved 30 times a second**: libplacebo
+  keeps a frame in its cache by a hash of the render params that leaves out DYNAMIC parameters' values, so a frame
+  shown for several vsyncs came from the cache with the old view (the log counts it: 512 of 832 frames with a new
+  input came from the cache). Patch **0011** makes the values part of the frames' signatures. And
+  `display-resample` keeps the swapchain full: 65 ms after the submit at 60 Hz. Not used.
+- **Patch 0012**: gesture messages are numbered; view360 says which one its values include (`afp_input_seq`) and
+  applies the messages waiting together once; the VO turns the view by the later ones itself just before it draws
+  (the same geometry near the picture's middle, a pixel or two off for a frame until the script's exact values
+  come), and is woken (`vo_redraw`) as each comes in, playing or paused. The backlog is gone.
+- **`video-timing-offset`**: mpv hands the VO a video frame 50 ms before its time, and the VO draws it at once and
+  waits, with no redraws meanwhile and the head as it was 50 ms earlier. view360 sets a refresh + 4 ms: 89 frames
+  shown a second instead of 44 while playing at 120 Hz.
+- **The vsync wait** is most of what's left: with the Metal layer waiting for the vsync (`displaySyncEnabled`, FIFO)
+  a frame reaches the glass 2–3 refreshes after its submit whatever else is done (`swapchain-depth` 1 or 2 and
+  `macos-render-timer=system` changed nothing, at 60 Hz they made it worse; mailbox worse). Without it, in a window,
+  macOS composites the newest frame at its next refresh: 6 ms after the submit at 120 Hz. Patch **0013**
+  (`--macos-display-sync=no|fullscreen`, at runtime); view360 sets `fullscreen` while the view is on: no wait in a
+  window, the wait kept in full screen, where macOS may show the layer directly and it could tear (not seen yet).
+- **Full screen** with the wait was 15 ms in two runs and 30–32 in five others, the same build: whether macOS gives
+  the layer direct-to-display isn't ours to choose.
+- **The DELL at 60 Hz** without the wait is bimodal from one run to the next: 10 or 40 ms after the submit, as if the
+  compositor's deadline were missed or met for the whole run. Its p50 stays ≤ 46 ms, the target's edge.
+- **The sample buffer layer** (`--macos-sample-buffer-layer`, HDR and Dolby Vision): it says nothing of when it
+  shows a frame. Input → enqueued: 7.0 / 9.9 ms paused, 9.4 / 14.7 playing (XDR); its light is the camera's to say.
+
+So: **at 120 Hz in a window, ~9 ms to `presentedTime`, under the 25 ms target** with room for the trackpad and the
+scan-out; in full screen 30 ms unless macOS shows the layer directly (or the wait is dropped there too, if it doesn't
+tear). **At 60 Hz, 14–46 ms**, at the 45 ms target. To check with the camera: that `presentedTime` without the vsync
+wait is the light (it could be the compositor's latch), the trackpad's own part, tearing in full screen.
+
+Mouse drags still go through the script (no number on `mouse-pos`): only the trackpad's gestures (scroll, pinch,
+rotation, a smooth wheel) are in the VO. The little planet's pan too. Not measured: 8K clips through the plugin (the
+VO's frame is heavier, `video-timing-offset` may need more), HDR swapchains, external 120 Hz screens.
+
+**The camera** (Anton, a 240 fps phone), per variant a run of 30 s with the fingers (no `--hz`):
+
+```
+tools/latency360/run.sh /tmp/lat-win.log <clip> --seconds=30 "--screen=Built-in Retina Display"
+tools/latency360/run.sh /tmp/lat-win-vsync.log <clip> --seconds=30 "--screen=Built-in Retina Display" --sync=auto
+tools/latency360/run.sh /tmp/lat-fs-novsync.log <clip> --seconds=30 "--screen=Built-in Retina Display" --fs --sync=no
+tools/latency360/run.sh /tmp/lat-sb.log <clip> --seconds=30 "--screen=Built-in Retina Display" -- --macos-sample-buffer-layer=yes
+```
+
+The trackpad and the screen in one shot, brightness up; ten short two-finger flicks, each from fingers held still for
+half a second. Per flick, the frames from the fingers starting to move to the grid on screen starting to move, ÷ 240
+(±4 ms). Against the run's own input → light p50: the difference is the trackpad, HID and scan-out. In full screen
+with `--sync=no`, a turning grid is where tearing shows (a line across the picture, the halves offset).
+
 ### 7. Exports (3–5 days)
 
 - `gyroflow-export --360`: the stabilized sphere (turned into the world and the chosen heading) with spherical

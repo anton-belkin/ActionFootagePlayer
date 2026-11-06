@@ -181,9 +181,13 @@ The shader alone makes it responsive within mpv's own display latency. Below tha
 | A short swapchain (`swapchain-depth` 1–2), full screen with direct scanout | one to two refreshes |
 | 120 Hz (ProMotion) | half of everything that counts refreshes |
 
-Estimated, not measured: ~18–30 ms at 120 Hz, ~35–45 ms at 60 Hz. Through the macOS sample-buffer layer
-(patch 0002, HDR and Dolby Vision) the latency is unknown. **(to try: measure with the gesture event's time against
-the drawable's `presentedTime`, and with a 240 fps camera on finger and screen.)**
+Estimated at first: ~18–30 ms at 120 Hz, ~35–45 ms at 60 Hz. **Measured** (step 6 of
+[the plan](360-implementation-plan.md), from the gesture's event time to the drawable's `presentedTime`): ~9 ms at
+120 Hz in a window, playing or paused, 14–46 ms at 60 Hz. What did it differs from the table above: the swapchain's
+depth changed nothing; the vsync wait (the Metal layer's `displaySyncEnabled`, off in a window), the video frame
+drawn a refresh ahead instead of 50 ms, and the gestures in the VO did; display-resample didn't (it also showed
+libplacebo's frame cache ignoring DYNAMIC parameters, fixed in patch 0011). The sample-buffer layer's own part, and
+the trackpad's, are a 240 fps camera's to measure.
 
 ## What goes where: player or Gyroflow
 

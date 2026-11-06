@@ -108,11 +108,15 @@ end
 local opts_set = nil
 local function apply()
     local opts = mp.get_property_native("glsl-shader-opts") or {}
-    for k in pairs(opts) do if k:match("^view360_") then opts[k] = nil end end
+    for k in pairs(opts) do if k:match("^view360_") or k:match("^afp_input_") then opts[k] = nil end end
     local key = "off"
     if active then
         local mine = view.shader_opts(cur, STEREO_INDEX[sphere.stereo] or 0, HEADING_INDEX[heading])
         mine.view360_on = "1"
+        -- For the app's mpv (no shader reads them): the last gesture's time (--macos-latency-log) and number, after
+        -- which its VO turns the view by the gestures itself, until they come here (tools/mpv-patches/0012)
+        if input and input.input_time then mine.afp_input_time = string.format("%.6f", input.input_time) end
+        if input and input:acting() then mine.afp_input_seq = tostring(input.input_seq) end
         local parts = {}
         for k, v in pairs(mine) do opts[k] = v; table.insert(parts, k .. "=" .. v) end
         table.sort(parts)
@@ -127,6 +131,18 @@ local function apply()
     publish()
 end
 
+-- The gestures' changes applied once the messages waiting are handled: setting glsl-shader-opts waits for the VO
+-- (up to a refresh), and the gestures come faster than that
+local apply_pending = false
+local function apply_soon()
+    if apply_pending then return end
+    apply_pending = true
+    mp.add_timeout(0, function()
+        apply_pending = false
+        apply()
+    end)
+end
+
 -- The head turned so that what's at x - dx, y - dy (OSD pixels; the area's middle when nil) comes to x, y
 local function pan(dx, dy, x, y)
     local a = area()
@@ -135,19 +151,19 @@ local function pan(dx, dy, x, y)
     x, y = x or cx, y or cy
     local yaw, pitch = view.pan(cur, (x - dx - cx) / half, (y - dy - cy) / half, (x - cx) / half, (y - cy) / half)
     cur.yaw, cur.pitch = yaw, pitch
-    apply()
+    apply_soon()
 end
 
 local function zoom(factor)
     if not active or not factor or factor <= 0 then return end
     cur.fov = view.clamp_fov(cur.projection, cur.fov / factor)
-    apply()
+    apply_soon()
 end
 
 local function roll(degrees)
     if not active then return end
     cur.roll = view.wrap(cur.roll + degrees)
-    apply()
+    apply_soon()
 end
 
 -- Ahead again (where the clip's metadata says to look first), at the projection's own FOV
@@ -197,6 +213,17 @@ local function fit()
     mp.set_property("file-local-options/video-aspect-override", value)
 end
 
+-- Turning the head shows sooner (docs/360-implementation-plan.md, step 6): a video frame is drawn a refresh before its
+-- time rather than 50 ms ahead (video-timing-offset), so the VO is free to redraw the view meanwhile and the frame has
+-- the newest head; and in a window the frames are shown as they come, not at a vsync first (the app's mpv,
+-- macos-display-sync: macOS composites a window at its refresh anyway; in full screen it would tear)
+local function pace()
+    if not active then return end
+    local fps = mp.get_property_number("display-fps")
+    local offset = (fps and fps > 0) and math.max(0.008, math.min(0.05, 1 / fps + 0.004)) or 0.02
+    mp.set_property("file-local-options/video-timing-offset", string.format("%.4f", offset))
+end
+
 -- The view on or off. ending: the file's ending, and mpv puts its file-local options back itself
 local function set_active(on, ending)
     on = on and sphere ~= nil and shader
@@ -204,9 +231,12 @@ local function set_active(on, ending)
     active = on
     aspect_set = nil
     if on then
-        saved = { aspect = mp.get_property("video-aspect-override"), window = mp.get_property("keepaspect-window") }
+        saved = { aspect = mp.get_property("video-aspect-override"), window = mp.get_property("keepaspect-window"),
+                  timing = mp.get_property("video-timing-offset"), sync = mp.get_property("macos-display-sync") }
         mp.set_property("file-local-options/keepaspect-window", "no")
+        if saved.sync then mp.set_property("file-local-options/macos-display-sync", "fullscreen") end
         fit()
+        pace()
         if input then
             input:set(true)
             input:pause(crop_on)
@@ -216,6 +246,8 @@ local function set_active(on, ending)
         if not ending and saved then
             mp.set_property("file-local-options/video-aspect-override", saved.aspect or "-1")
             mp.set_property("file-local-options/keepaspect-window", saved.window or "yes")
+            if saved.timing then mp.set_property("file-local-options/video-timing-offset", saved.timing) end
+            if saved.sync then mp.set_property("file-local-options/macos-display-sync", saved.sync) end
         end
         saved = nil
     end
@@ -284,10 +316,16 @@ for _, prop in ipairs({ "osd-dimensions", "video-margin-ratio-right", "video-mar
     mp.observe_property(prop, "native", function() if active then fit() end end)
 end
 
+mp.observe_property("display-fps", "native", function() pace() end)
+
 -- Crop mode on top of the view has the gestures while it's on
 mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
     crop_on = type(c) == "table" and c.active == true
-    if input and active then input:pause(crop_on) end
+    if input and active then
+        input:pause(crop_on)
+        -- The VO turns the view by the gestures only while the view has them
+        apply()
+    end
 end)
 
 mp.add_key_binding("Alt+v", "toggle", function()
