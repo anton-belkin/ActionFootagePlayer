@@ -20,7 +20,9 @@ local function shoot()
         shot = path, pts = mp.get_property_number("time-pos"),
         hwdec = mp.get_property("hwdec-current"),
         decoded = mp.get_property_native("video-dec-params"),
-        filtered = mp.get_property_native("video-params"),
+        params = mp.get_property_native("video-params"),
+        -- after the filters: what gpu-next gets
+        filtered = mp.get_property_native("video-out-params"),
         vo = mp.get_property("current-vo"),
     }
     count = count + 1

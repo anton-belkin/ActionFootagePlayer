@@ -11,7 +11,11 @@
 // - The header, codes 0-6, in coarse codes: 16 levels from black to white, each at the middle of its sixteenth, so the
 //   shader reads them without knowing the plane's depth (floor(v * 16)): the magic 12, 3, 9, 6, then the depth the
 //   stamp was written at less one, the bits per fine code less one, the version.
-// - The fields, codes 7-31, in fine codes of `bits` bits each (the depth's, at most MAX_BITS). A fine code with fewer
+// - Two references, codes 7 and 8: black (code 0) and white (the depth's top code). The shader reads every code
+//   through them, (v - black) / (white - black): gpu-next doesn't normalize every format alike (10-bit limited range
+//   reads ×0.99904, p010 full range ×1.00096: off by one at the top, tools/stamp360/), and the references make the
+//   reading exact whatever it does short of a curve.
+// - The fields, codes 9-33, in fine codes of `bits` bits each (the depth's, at most MAX_BITS). A fine code with fewer
 //   bits than the depth sits at the middle of its step, as a coarse one does. Fixed point, most significant code first:
 //   - the frame's time in µs, 4 codes (modulo 2^(4·bits): 32 bits at 8-bit, 40 at 10, 64 at 16);
 //   - q_world_from_cam, [w, x, y, z], 2 codes a component, [-1, 1] over the codes' range;
@@ -35,14 +39,19 @@ pub const VERSION: u32 = 1;
 pub const ROWS: usize = 2;
 /// A code's block is BLOCK x BLOCK pixels
 pub const BLOCK: usize = 2;
-pub const CODES: usize = 32;
+pub const CODES: usize = 34;
 /// Pixels the stamp takes across
 pub const WIDTH: usize = CODES * BLOCK;
 /// Bits a fine code carries at most, whatever the depth
 pub const MAX_BITS: u32 = 16;
 
 pub const MAGIC: [u32; 4] = [12, 3, 9, 6];
-const HEADER: usize = 7;
+/// The coarse codes
+const COARSE: usize = 7;
+/// The references, black and white
+const BLACK: usize = COARSE;
+const WHITE: usize = COARSE + 1;
+const HEADER: usize = COARSE + 2;
 const TIME: usize = HEADER;
 const QUAT: usize = TIME + 4;
 const MODES: usize = QUAT + 8;
@@ -143,6 +152,8 @@ impl Fixed {
         let mut codes = [0u32; CODES];
         let header = MAGIC.into_iter().chain([depth - 1, self.bits - 1, VERSION]);
         for (c, level) in codes.iter_mut().zip(header) { *c = coarse_code(level, depth); }
+        codes[BLACK] = 0;
+        codes[WHITE] = mask(depth) as u32;
         let levels = self.levels();
         let check = levels.iter().sum::<u64>() & mask(self.bits);
         for (c, level) in codes[HEADER..].iter_mut().zip(levels.into_iter().chain([check])) {
@@ -153,10 +164,11 @@ impl Fixed {
 
     /// From the codes of a stamp at `depth`
     pub fn from_codes(codes: &[u32; CODES], depth: u32) -> Result<Self, ReadError> {
-        let header: Vec<u32> = codes[..HEADER].iter().map(|&c| coarse_level(c, depth)).collect();
+        let header: Vec<u32> = codes[..COARSE].iter().map(|&c| coarse_level(c, depth)).collect();
         if header[..4] != MAGIC { return Err(ReadError::NoStamp); }
         if header[4] + 1 != depth { return Err(ReadError::Depth(header[4] + 1)); }
         if header[6] != VERSION { return Err(ReadError::Version(header[6])); }
+        if codes[BLACK] != 0 || codes[WHITE] as u64 != mask(depth) { return Err(ReadError::References); }
         let bits = header[5] + 1;
         if bits > depth { return Err(ReadError::Bits(bits)); }
         let l: Vec<u64> = codes[HEADER..].iter().map(|&c| fine_level(c, bits, depth) as u64).collect();
@@ -185,6 +197,8 @@ pub enum ReadError {
     Depth(u32),
     Bits(u32),
     Version(u32),
+    /// The references aren't black and white
+    References,
     /// The check doesn't add up
     Check,
 }
@@ -416,10 +430,29 @@ mod tests {
             let codes = Fixed::from_stamp(&test_stamp(1, -1), bits_for(depth)).codes(depth);
             assert!(codes.iter().all(|&c| c < 1 << depth));
             // As the shader reads the header: floor(v * 16) of the normalized value
-            for (i, &c) in codes[..HEADER].iter().enumerate() {
+            for (i, &c) in codes[..COARSE].iter().enumerate() {
                 let v = c as f64 / ((1u32 << depth) - 1) as f64;
                 let want = [MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], depth - 1, bits_for(depth) - 1, VERSION][i];
                 assert_eq!(((v * 16.0).floor() as u32).min(15), want);
+            }
+            assert_eq!((codes[BLACK], codes[WHITE]), (0, (1 << depth) - 1));
+        }
+    }
+
+    #[test]
+    fn the_references_undo_what_gpu_next_does() {
+        // What tools/stamp360/ measured on screen at 10-bit (v = a * code / white + b), and worse; read as the probe
+        // shader does, in f32, through the references
+        for depth in [8, 10, 12, 16] {
+            let white = mask(depth) as f32;
+            for (a, b) in [(1.0, 0.0), (0.999_039, 0.0), (1.000_962, 0.000_35 / 1023.0), (0.98, 0.003), (1.02, -0.002)] {
+                for n in 0..50 {
+                    let codes = Fixed::from_stamp(&test_stamp(n, n * 1000), bits_for(depth)).codes(depth);
+                    let v = codes.map(|c| a * c as f32 / white + b);
+                    let (v0, v1) = (v[BLACK], v[WHITE]);
+                    let read = v.map(|v| ((v - v0) / (v1 - v0) * white).round() as u32);
+                    assert_eq!(read, codes, "{depth} bits, ×{a} {b:+}");
+                }
             }
         }
     }
@@ -430,7 +463,9 @@ mod tests {
         let (depth, bits) = (10, 8);
         let f = Fixed::from_stamp(&test_stamp(7, 123_456), bits);
         let mut codes = f.codes(depth);
-        for (i, c) in codes.iter_mut().enumerate() { *c = if i % 2 == 0 { *c + 1 } else { *c - 2 }; }
+        for (i, c) in codes.iter_mut().enumerate().filter(|(i, _)| ![BLACK, WHITE].contains(i)) {
+            *c = if i % 2 == 0 { *c + 1 } else { *c - 2 };
+        }
         assert_eq!(Fixed::from_codes(&codes, depth), Ok(f));
     }
 

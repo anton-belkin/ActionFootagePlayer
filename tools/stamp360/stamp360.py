@@ -40,7 +40,8 @@ W, H, FPS, FRAMES = 1920, 1080, 30, 12
 SHOTS = 6
 
 # As vs-gyroflow/src/stamp.rs
-CODES, HEADER, BLOCK, ROWS = 32, 7, 2, 2
+CODES, COARSE, HEADER, BLOCK, ROWS = 34, 7, 9, 2, 2
+BLACK, WHITE = 7, 8
 MAGIC = [12, 3, 9, 6]
 VERSION = 1
 
@@ -95,7 +96,7 @@ def fine_code(level, bits, depth):
 def expected_codes(e, depth):
     """The codes stamp.rs writes for a logged frame"""
     b = e['bits']
-    codes = [fine_code(level, 4, depth) for level in MAGIC + [depth - 1, b - 1, VERSION]]
+    codes = [fine_code(level, 4, depth) for level in MAGIC + [depth - 1, b - 1, VERSION]] + [0, mask(depth)]
     levels = [(e['time'] >> (b * (3 - i))) & mask(b) for i in range(4)]
     for q in e['q']:
         levels += [q >> b, q & mask(b)]
@@ -107,13 +108,15 @@ def expected_codes(e, depth):
 
 def decode_codes(codes, depth):
     """stamp.rs's Fixed::from_codes, as a dict like the log's; or the reason it isn't one"""
-    header = [c >> (depth - 4) for c in codes[:HEADER]]
+    header = [c >> (depth - 4) for c in codes[:COARSE]]
     if header[:4] != MAGIC:
         return 'no magic'
     if header[4] + 1 != depth:
         return f'written at {header[4] + 1} bits'
     if header[6] != VERSION:
         return f'version {header[6]}'
+    if codes[BLACK] != 0 or codes[WHITE] != mask(depth):
+        return 'references'
     b = header[5] + 1
     levels = [c >> (depth - b) for c in codes[HEADER:]]
     if sum(levels[:-1]) & mask(b) != levels[-1]:
@@ -219,12 +222,11 @@ def encode(out):
         # The stamped clip the screen test plays without VapourSynth: lossless HEVC, which VideoToolbox may decode
         stamped = out / f'stamped-{name}.mp4'
         log = out / f'stamped-{name}.log'
-        if not stamped.exists():
-            log.unlink(missing_ok=True)
-            pix = 'yuv420p' if depth == 8 else 'yuv420p10le'
-            run([MPV, '--no-config', '--load-scripts=no', '--hwdec=no', f'--vf={vf_stamp(log)}', out / f'src-{name}.mp4',
-                 f'--o={stamped}', '--ovc=libx265', f'--ovcopts=x265-params=lossless=1:log-level=error,tag=hvc1',
-                 f'--vf-append=format=fmt={pix}', '--no-audio'])
+        log.unlink(missing_ok=True)
+        pix = 'yuv420p' if depth == 8 else 'yuv420p10le'
+        run([MPV, '--no-config', '--load-scripts=no', '--hwdec=no', f'--vf={vf_stamp(log)}', out / f'src-{name}.mp4',
+             f'--o={stamped}', '--ovc=libx265', f'--ovcopts=x265-params=lossless=1:log-level=error,tag=hvc1',
+             f'--vf-append=format=fmt={pix}', '--no-audio'])
         frames = read_raw_frames(stamped, depth)
         bad = [k for k, (c, alike) in enumerate(frames) if compare(decode_codes(c, depth), load_log(log), depth) or not alike]
         ok &= not bad
@@ -245,15 +247,16 @@ def screen_cases(out):
     return cases
 
 
-def screen(out):
-    if not (out / 'stamped-10bit-full.mp4').exists():
+def screen(out, only=''):
+    stamped = out / 'stamped-10bit-full.mp4'
+    if not stamped.exists() or stamped.stat().st_mtime < PLUGIN.stat().st_mtime:
         encode(out)
     for case, depth, src, hwdec, upload, log in screen_cases(out):
+        if only not in case:
+            continue
         through_vs = upload is not None
         d = out / f'screen-{case}'
         d.mkdir(exist_ok=True)
-        for f in d.glob('*'):
-            f.unlink()
         args = [MPV, '--no-config', '--load-scripts=no', '--vo=gpu-next', f'--hwdec={hwdec}', '--pause', '--keep-open=yes',
                 '--autocreate-playlist=no', '--osc=no', '--osd-level=0', '--autofit=40%', '--no-audio',
                 f'--glsl-shaders={PROBE}', f'--script={HERE / "collect.lua"}',
@@ -261,11 +264,20 @@ def screen(out):
         if through_vs:
             args.append(f'--vf={vf_stamp(log)}')
             if upload != 'planar':
-                args.append(f'--vf-append=format=fmt={upload}')
-        r = subprocess.run([str(a) for a in args], capture_output=True, text=True, env=env(), timeout=120)
-        (d / 'mpv.log').write_text(r.stdout + r.stderr)
-        print(f'{case:42} played ({r.returncode})')
-    return check(out)
+                # Undithered: full range into p010's 16 bits isn't a plain shift, and zimg's dither would differ
+                # pixel to pixel (below a code, but not alike)
+                args += [f'--vf-append=format=fmt={upload}', '--zimg-dither=no']
+        # gpu-next fails a screenshot now and then ("Unknown error occurred while trying to take screenshot!") and
+        # mpv falls back to one without the shaders: played again then
+        for attempt in range(3):
+            for f in d.glob('*'):
+                f.unlink()
+            r = subprocess.run([str(a) for a in args], capture_output=True, text=True, env=env(), timeout=120)
+            (d / 'mpv.log').write_text(r.stdout + r.stderr)
+            if not any(read_shot(s, depth)[0] != 0xF0F0F0F0 for s in d.glob('shot_*.png')):
+                break
+        print(f'{case:42} played ({r.returncode}){f", {attempt + 1} times" if attempt else ""}')
+    return check(out, only)
 
 
 def read_shot(path, depth):
@@ -278,7 +290,7 @@ def read_shot(path, depth):
     h = len(data) // w
     sx, sy = w / W, h / H
     words = []
-    for row in range(65):
+    for row in range(68):
         word = 0
         for bit in range(32):
             x, y = int((32 + 8 * bit + 4) * sx), int((32 + 8 * row + 4) * sy)
@@ -287,9 +299,11 @@ def read_shot(path, depth):
     return words
 
 
-def check(out):
+def check(out, only=''):
     ok, rows = True, []
     for case, depth, src, hwdec, upload, log_path in screen_cases(out):
+        if only not in case:
+            continue
         d = out / f'screen-{case}'
         props = json.loads((d / 'props.json').read_text()) if (d / 'props.json').exists() else []
         log = load_log(log_path) if log_path.exists() else {}
@@ -303,7 +317,7 @@ def check(out):
             got = {'bits': (status >> 8) & 0xFF, 'time': (words[2] << 32) | words[3], 'q': words[4:8], 'yaw': words[8:12],
                    'confidence': words[12:16]}
             codes = []
-            for wd in words[17:33]:
+            for wd in words[17:34]:
                 codes += [wd >> 16, wd & 0xFFFF]
             why = None
             if not status >> 31 & 1:
@@ -316,8 +330,10 @@ def check(out):
                 why = f'depth {status & 0xFF}'
             else:
                 why = compare(got, log, depth)
-            if why and not why.startswith('no magic'):
-                e = log.get(got['time'])
+            if why and not why.startswith('no magic') and log:
+                # The frame logged with this time, or (the time misread too) the one whose codes are nearest
+                e = log.get(got['time']) or min(log.values(), key=lambda e: sum(
+                    abs(g - x) for g, x in zip(codes, expected_codes(e, depth))))
                 if e:
                     want = expected_codes(e, depth)
                     why += f'; codes off by {[g - x for g, x in zip(codes, want)]}'
@@ -341,13 +357,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('what', choices=['clips', 'encode', 'screen', 'check'])
     ap.add_argument('--out', type=Path, default=Path(os.environ.get('TMPDIR', '/tmp')) / 'stamp360')
+    ap.add_argument('--only', default='', help='screen, check: only the cases whose names contain this')
     a = ap.parse_args()
     if not MPV.exists():
         sys.exit(f'no app mpv at {MPV} (AFP_APP=the app; tools/dev_app.sh builds one)')
     if not PLUGIN.exists():
         sys.exit(f'no plugin at {PLUGIN}: cargo build --release in vs-gyroflow/')
     a.out.mkdir(parents=True, exist_ok=True)
-    ok = {'clips': lambda o: clips(o) or True, 'encode': encode, 'screen': screen, 'check': check}[a.what](a.out)
+    ok = {'clips': lambda o: clips(o) or True, 'encode': encode, 'screen': lambda o: screen(o, a.only),
+          'check': lambda o: check(o, a.only)}[a.what](a.out)
     sys.exit(0 if ok else 1)
 
 
