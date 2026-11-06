@@ -48,7 +48,10 @@ local VALID = {
 }
 
 local function valid(k, v)
-    return v ~= nil and VALID[k][v] == true
+    if v == nil then return false end
+    -- The frame's own ratio turned to portrait is any W:H
+    if k == "aspect" and type(v) == "string" and v:match("^%d+:%d+$") then return true end
+    return VALID[k][v] == true
 end
 M.valid = valid
 

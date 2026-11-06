@@ -290,7 +290,11 @@ end
 -- degrees, then cut to an aspect ("original": the frame's own). Where it's stabilized, Gyroflow's output size and
 -- rotation (vs-gyroflow), its zoom fitting the picture into it; elsewhere mpv's video-rotate and video-crop. A clip
 -- with a project has the project's own unless changed here, for viewing
-local ASPECTS = { original = true, ["16:9"] = true, ["4:3"] = true, ["1:1"] = true, ["4:5"] = true, ["3:4"] = true, ["9:16"] = true }
+local ASPECTS = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true, ["4:5"] = true, ["3:4"] = true, ["9:16"] = true }
+-- Those, or any W:H (the source's own ratio turned to portrait: 4:3 -> 3:4, 16:9 -> 9:16, 1920:1440 reduced)
+local function aspect_ok(a)
+    return a ~= nil and (ASPECTS[a] == true or tostring(a):match("^%d+:%d+$") ~= nil)
+end
 -- And the output's lens where it's stabilized, Gyroflow's output projection: linear (rectilinear, straight lines
 -- straight), or a fisheye, its edges more and more compressed: stereographic, equidistant, equisolid, orthographic. For
 -- Wide footage above water, too wide for linear: its center squeezed, its edges thin
@@ -406,7 +410,7 @@ local function defaults_bundle()
         level = LEVEL_LABELS[o.level] and o.level or "medium",
         horizon_lock = horizon_default,
         chromatic = o.chromatic == true,
-        aspect = ASPECTS[o.aspect] and o.aspect or "original",
+        aspect = aspect_ok(o.aspect) and o.aspect or "original",
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
         preset_horizon = preset_horizon(),
     }
@@ -475,7 +479,7 @@ local function take(b)
     if h ~= "yes" and h ~= "no" then h = session.horizon_lock end
     horizon = h == "yes"
     if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
-    frame.aspect = ASPECTS[b.aspect] and b.aspect or "original"
+    frame.aspect = aspect_ok(b.aspect) and b.aspect or "original"
     frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
     return b.view == "off"
 end
@@ -611,6 +615,23 @@ crop.init({
     shader = crop_shader,
 })
 
+-- The upright source's ratio, W:H reduced
+local function source_aspect()
+    local src = current_source
+    local w, h = src and src.width, src and src.height
+    if not (w and h and w > 0 and h > 0) then
+        local d = mp.get_property_native("video-dec-params")
+        if type(d) ~= "table" or not d.w or not d.h then return nil end
+        w, h = d.w, d.h
+        if ((tonumber(d.rotate) or 0) % 180) == 90 then w, h = h, w end
+    elseif (((src.rotation or 0) + frame.rotation) % 180) == 90 then
+        w, h = h, w
+    end
+    local function gcd(a, b) while b ~= 0 do a, b = b, a % b end return a end
+    local g = gcd(math.floor(w), math.floor(h))
+    return string.format("%d:%d", math.floor(w) / g, math.floor(h) / g)
+end
+
 -- For the right-click menu (mpv/menu.conf)
 local function publish()
     local state = {
@@ -625,6 +646,9 @@ local function publish()
         ask_when_slow = o.ask_when_slow, aspect = frame.aspect, rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
+        -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
+        source_aspect = source_aspect() or false,
+        project_info = has_project(current_source) and current_source.info or false,
         -- The session's bundle and the app's defaults (the workspace plugin fills and makes bundles with them)
         session = session, defaults = DEFAULTS,
         -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
@@ -681,6 +705,11 @@ local function add_filter(source)
     if has_project(source) then
         view, off, horizon = "normal", false, nil
         frame.aspect, frame.projection, frame.rotation = "original", "linear", 0
+        -- What it has, for the panel: its horizon lock, output size and projection
+        local j = read_json(source.project) or {}
+        local st, out = type(j.stabilization) == "table" and j.stabilization or {}, type(j.output) == "table" and j.output or {}
+        source.info = { horizon = tonumber(st.horizon_lock_amount) or 0, width = tonumber(out.output_width), height = tonumber(out.output_height),
+                        projection = type(st.output_projection) == "string" and st.output_projection or nil }
     end
     stab_off = off
     write_edge_control()
@@ -1011,7 +1040,7 @@ mp.register_script_message("projection", function(p)
 end)
 
 mp.register_script_message("aspect", function(a)
-    if not ASPECTS[a] or project_owns("the frame") then return end
+    if not aspect_ok(a) or project_owns("the frame") then return end
     set_frame(a, frame.rotation)
     sticks("aspect", a)
     publish()
@@ -1228,6 +1257,15 @@ mp.register_script_message("remember", function()
         publish()
     end
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
+end)
+
+-- The edge fill and the clean still frame as the defaults (Performance & Quality's): this computer's, not a clip's
+mp.register_script_message("remember-quality", function()
+    local saved = platform.save_options("gyroflow", {
+        { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
+        { "still", still.enabled() and "yes" or "no" },
+    })
+    mp.osd_message(saved and "Gyroflow: the edge fill and the clean still frame are the defaults now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
 -- A bundle played now, for this viewing (the panel's Revert to saved): what a Gyroflow project has stays its own
