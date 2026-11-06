@@ -373,6 +373,10 @@ pub struct Sphere360 {
     tx: mpsc::Sender<Job>,
     shared: Arc<Shared>,
     pub frame_offset_us: i64,
+    /// What the heading modes found (Motion's report)
+    pub report: serde_json::Value,
+    /// The clip's frame rate, as gyroflow-core has it
+    pub fps: f64,
     throughput: Mutex<(u32, std::time::Instant)>,
 }
 
@@ -391,7 +395,7 @@ impl Sphere360 {
         let sphere_w = (width.max(512) / 4) * 4;
         let sphere = (sphere_w, sphere_w / 2);
 
-        let Motion { stab, world, headings, fps, frame_offset_us, .. } = Motion::load(video, &rig)?;
+        let Motion { stab, world, headings, fps, frame_offset_us, report, .. } = Motion::load(video, &rig)?;
 
         // Per lens, its parameters
         let base = ComputeParams::from_manager(&stab);
@@ -449,7 +453,7 @@ impl Sphere360 {
         }
         for _ in 0..workers { let _ = ready_rx.recv(); }
         log::info!("{video}: 360 mode ready after {:.0} ms, {workers} GPU workers", t.elapsed().as_secs_f64() * 1000.0);
-        Ok(Sphere360 { tx, shared, frame_offset_us, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Sphere360 { tx, shared, frame_offset_us, report, fps, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
     /// The output's size: the sphere and the stamp's rows under it
