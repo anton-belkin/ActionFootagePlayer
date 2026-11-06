@@ -78,6 +78,8 @@ pub struct Options {
     pub mode: Mode,
     /// The grid's step in output pixels
     pub grid_step: usize,
+    /// The grid interpolated bilinearly (4 reads) rather than Catmull-Rom (16)
+    pub grid_linear: bool,
     /// Knots a frame; 0: every row
     pub knots: usize,
     /// warp.glsl's INTERP: 0 bilinear, 1 B-spline, 2 bicubic, 3 Lanczos4, 4 EWA
@@ -146,7 +148,7 @@ pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
         "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, clip.frame_count.max(1), table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}", opts.grid_step) }
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
@@ -414,13 +416,14 @@ layout(set = 0, binding = 5, rgba32f) uniform {} image2D grid_img;
         let g = gpu();
         let out = (1920usize, 1080usize);
         let frames = [0usize, 600, 1049, 1181, clip.frame_count - 1];
-        let base = Options { mode: Mode::Exact, grid_step: 16, knots: 33, interp: 2, shrink: false, range: None };
+        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, knots: 33, interp: 2, shrink: false, range: None };
         // (label, options, every frame or only the fastest)
         let cases = [
             ("exact, 33 knots", base, true),
             ("exact, every row", Options { knots: 0, range: Some((frames[2], frames[2])), ..base }, false),
             ("grid 16, 33 knots", Options { mode: Mode::Grid, ..base }, true),
             ("grid 32, 33 knots", Options { mode: Mode::Grid, grid_step: 32, ..base }, false),
+            ("grid 8 bilinear, 33 knots", Options { mode: Mode::Grid, grid_step: 8, grid_linear: true, ..base }, false),
         ];
         for (label, opts, all) in cases {
             // The full rows only for the frames compared: the whole clip would be 5 M texels

@@ -96,9 +96,10 @@ budget at 60 fps is 16.7 ms.
   at the display's 60 Hz, so only the pass times say how much room.)
 - **The N100 fits bilinear and B-spline** with room (≈10–11 ms of 16.7), Gyroflow's bicubic only just not (16.3 ms,
   4 % dropped), nothing heavier. The prototype's 60 fps (gpu-render.md, "What was measured") was B-spline-like too.
-- **On the N100 most of the warp is the geometry, not the taps**: bilinear (one fetch) already costs 5.0 ms. The lens
-  and projection math (atan, sin, cos per pixel) and the table fetches, at 2 M pixels. The rolling shutter's second
-  projection adds 2.3 ms; knots against every row cost the same (the nlerp is free, the second projection isn't).
+- **On the N100 bilinear (one tap) already costs 5.0 ms**: not the lens math, as first thought, but the fetches per
+  pixel: 5 parameter texels and 2 knots from the table (see "Step 2, part 1" below: without them the warp costs what
+  sampling the source alone does). The rolling shutter's second projection adds 2.3 ms; knots against every row cost
+  the same.
 - **The plane-reading warp as two passes does not pay**: it saves the 4K conversion (≈4 ms) but each plane's pass
   does the whole geometry again (≈4.5 ms). LUMA and CHROMA hooks at the output size do work in mpv (frame 1049 through
   them: 53.8 dB against the single-pass shader's, 33.5 against VapourSynth's; libplacebo converts at 1080p and doesn't
@@ -124,6 +125,54 @@ fast, and the Mac has room for the best settings. Two things change in the plan,
 Interpolation defaults from these numbers (gpu-render.md, "Quality and speed"): bicubic on the M1 Pro and up (EWA or
 Lanczos4 fit too), B-spline on the N100 until the coarse geometry lands. The widened taps cost as much as Lanczos4:
 the shrinking question (4K into a 1080p window) needs the half-size prefilter measured instead **(to try)**.
+
+## Step 2, part 1: the geometry on a coarse grid
+
+Built 2026-11-07 (same branch). warp.glsl is now sections that gyroflow-gpu-table assembles into one of three layouts
+(`--mode`): **exact** (the spike's single pass), **grid** (a compute pass writes each grid point's source coordinate
+into an rgba32f storage texture, once a frame; a sampling pass at MAIN interpolates it) and **planes** (the grid, then
+sampling passes at LUMA and CHROMA at the output size, so libplacebo converts at 1080p). A sampling pass reads the
+table only where a grid point has no image (past the lens's field), where it falls back to the exact geometry.
+
+**Accuracy.** On the CPU (`--check-grid`, every pixel of a 1080p output, the fastest frames of 0126 and the HERO7
+flight clip with synthetic readouts): Catmull-Rom over the grid stays within 0.04 px of the exact coordinates even at a
+32 px step; bilinear needs 8 px (≤ 0.06 px; 16 px gives 0.17). On the GPU (the naga test): grid 16 Catmull-Rom 0.034 px
+from `undistort_coord` at every pixel, grid 8 bilinear 0.058 px. In mpv on the NAS, frame 1049: grid 16 against the
+exact pass 67.5 dB (the same picture), grid 32 64.6 dB, planes 53.7 dB (chroma read once, at its own siting); passes
+in order grid → luma → chroma → color decoding.
+
+**Cost on the N100** (per-pass GPU times, µs average; the whole frame adds libplacebo's own passes):
+
+| Layout | Grid | Warp | Frame total | Shown fps (drops / 20 s) |
+|---|---|---|---|---|
+| floor: one bilinear tap of MAIN, no geometry | — | 2120 | 7240 | 59.9 (0) |
+| floor: one tap each of LUMA and CHROMA | — | 1180 + 1080 | 4100 | 59.9 (1) |
+| exact, bilinear (stage 1) | — | 5000 | 9700 | 60.0 (0) |
+| grid 16 Catmull-Rom, bilinear, table read per pixel | 40 | 6200 | 10850 | 60.0 (0) |
+| grid 16 Catmull-Rom, bilinear, no table read | 39 | 5860 | 10740 | 59.9 (2) |
+| **grid 8 bilinear, bilinear** | 95 | **2400** | **7330** | 59.9 (2) |
+| **planes, grid 8 bilinear, bilinear** | 113 | **2180 + 2150** | **6130** | 60.0 (0) |
+| exact, Gyroflow's bicubic (stage 1) | — | 10900 | 16340 | 55.8 (83) |
+| grid 16 Catmull-Rom, bicubic | 40 | 11660 | 16890 | 54.6 (109) |
+| grid 8 bilinear, bicubic | 100 | 8570 | 13580 | 58.4 (30) |
+| planes, grid 16 Catmull-Rom, bicubic | 66 | 11950 + 11040 | 24360 | 38.3 (433) |
+
+**On the M1 Pro** (same clip, the app's mpv, fullscreen 1920×1080): everything at 60 fps; the grid doesn't help there
+(grid 16 Catmull-Rom bicubic 3.3 ms against exact 2.6; planes bicubic 3.1 + 3.0): its GPU does the lens math cheaply,
+and 16 storage-image reads a pixel cost more. Not measured there yet: grid 8 bilinear.
+
+What it shows: on the N100 a warp pass costs its **fetches**, not its math. Per pixel, every texel read counts: the 7
+table fetches of the exact pass cost ~3 ms, 16 grid reads ~3.5, 16 bicubic taps ~6. With 4 grid reads and no table
+reads the geometry costs 0.3 ms over sampling the source alone, and reading the planes saves the 4K conversion
+(≈ 1.2 ms net at bilinear). So for step 2:
+
+- **The default layout is planes with a grid every 8 px, bilinear** (0.06 px): 6.1 ms a frame on the N100 at
+  bilinear, a third of the budget. Catmull-Rom over the grid stays as an option for larger steps.
+- **Gyroflow's bicubic needs fewer fetches**: 16 taps cost 6 ms on the N100 (and twice in the planes layout). The
+  9-fetch form (bilinear fetches combining the middle taps, as for Catmull-Rom) and bilinear chroma under bicubic luma
+  are the next things to measure **(to try)**; B-spline (4 fetches) is the cheap smooth option.
+- On the Mac the choice of layout hardly matters (all under 4 ms of 16.7); the M1 Pro's numbers for grid 8 bilinear
+  are still to take.
 
 ## Not covered
 

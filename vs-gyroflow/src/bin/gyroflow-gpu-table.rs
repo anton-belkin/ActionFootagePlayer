@@ -7,6 +7,7 @@
 //     --mode <m>         exact: one pass, the geometry at every pixel; grid (default): the geometry on a coarse grid,
 //                        one sampling pass at MAIN; planes: the grid, sampling passes at LUMA and CHROMA
 //     --grid-step <px>   the grid's step in output pixels (default 16)
+//     --grid-linear      the grid interpolated bilinearly (4 reads a pixel, not 16; use a step of 8)
 //     --knots <n>        quaternion knots per frame along its rows (default 33); 0: every row (Gyroflow's own, large)
 //     --interp <i>       bilinear, bspline, bicubic, lanczos4, ewa (default bicubic)
 //     --shrink           widened taps where the warp shrinks the source (bicubic, lanczos4)
@@ -56,6 +57,7 @@ fn main() {
         (a.parse().unwrap_or_else(|_| usage()), b.parse().unwrap_or_else(|_| usage()))
     });
     let shrink = if let Some(i) = args.iter().position(|a| a == "--shrink") { args.remove(i); true } else { false };
+    let grid_linear = if let Some(i) = args.iter().position(|a| a == "--grid-linear") { args.remove(i); true } else { false };
     if args.is_empty() || (check.is_none() && check_grid.is_none() && args.len() != 2) { usage(); }
     if knots == 1 { eprintln!("--knots: 0, or at least 2"); std::process::exit(2); }
 
@@ -82,7 +84,7 @@ fn main() {
         return;
     }
 
-    let opts = Options { mode, grid_step, knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, grid_linear, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;

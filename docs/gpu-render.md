@@ -361,7 +361,8 @@ full chromatic, the video's size), as `paused_full_size` does now.
 1. **Spike** (done 2026-11-06, [gpu-render-spike.md](gpu-render-spike.md)): the opencv_fisheye path of the kernel as an mpv hook with `PTS` and an embedded table
    written by a small CLI on vs-gyroflow; clip 0126 frame-exact against VapourSynth; knots vs rows; the table's load
    time; cost on the N100 and the M1, knob by knob (interpolations, shrinking, the plane-reading warp). Needs mpv 0.42 on the NAS (built in the container).
-2. **The player**: all lens models and digital lenses our cameras use, the interpolations, chromatic inside the warp,
+2. **The player** (part 1, the geometry on a coarse grid and the plane passes, done 2026-11-07,
+   [gpu-render-spike.md](gpu-render-spike.md)): all lens models and digital lenses our cameras use, the interpolations, chromatic inside the warp,
    edges `off`; the VapourSynth path stays as the fallback (old mpv, DV looks on the Mac, the still frame).
 3. **The edge fill** on the GPU (sphere and smooth).
 4. **The renderer and streaming** on the NAS: VAAPI → libplacebo → VDEnc, HLS, Dolby Vision 8.4.
