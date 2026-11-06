@@ -10,8 +10,10 @@
 //   {"mode":null,"reason":"...",...}                    nothing to stabilize it with
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
-// the water, for the lens under water to follow it (water.rs), and "spherical": what a stitched 360° video says it is
-// (its projection, stereo layout, pose or initial view: probe::spherical), null for any other video.
+// the water, for the lens under water to follow it (water.rs), "rotation": how much a player turns the video to
+// show it upright, clockwise, 0, 90, 180 or 270 (its display matrix, mp4meta.rs: a camera held vertical), which the
+// plugin's output already has, and "spherical": what a stitched 360° video says it is (its projection, stereo
+// layout, pose or initial view: probe::spherical), null for any other video.
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 
 use vs_gyroflow::{ probe::{ probe, color_profile, spherical }, water };
@@ -31,6 +33,7 @@ fn main() {
     };
     out["color"] = color_profile(&path).into();
     out["water"] = water::recorded(&path).into();
+    out["rotation"] = vs_gyroflow::mp4meta::display_rotation(std::path::Path::new(&path)).unwrap_or(0).into();
     out["spherical"] = spherical(&path).into();
     println!("{out}");
 }

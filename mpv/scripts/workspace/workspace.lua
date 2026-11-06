@@ -182,11 +182,11 @@ function M.new(fs)
         return ws.gyroflow_projects(clip)[1]
     end
 
-    -- The clip's marks, once changed: <name>.marks.json next to it (in a separate project folder, later, at its place
-    -- there)
-    function ws.marks_file(clip)
+    -- The clip's own file, its marks and the view it's saved to play in: <name>.afp.json next to it (sidecar.lua; in
+    -- a separate project folder, later, at its place there)
+    function ws.sidecar_file(clip)
         local base = clip:match(windows and "^(.*)%.[^./\\]+$" or "^(.*)%.[^./]+$") or clip
-        return base .. ".marks.json"
+        return base .. ".afp.json"
     end
 
     return ws

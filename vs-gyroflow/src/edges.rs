@@ -160,6 +160,9 @@ pub struct Edges {
     /// Whether the clip has frames the stabilized frame doesn't cover (Engine's `uncovered_frames`): the sphere trail is
     /// written only then, and every frame, to have what the camera saw when they show
     expected: AtomicBool,
+    /// Frames whose stabilized picture left part of the output uncovered (their mask said so), of those the fill was
+    /// asked for: a photo checks its frames with it before it writes the sphere for them
+    filled: AtomicUsize,
     /// The view the frames are rendered in (VIEW_NORMAL, VIEW_WIDE: lib.rs's Views), as the control file says
     view: AtomicU8,
     /// The level of a clip without a project (levels.rs), as the control file says: Level::index
@@ -201,7 +204,7 @@ impl Edges {
             control: Mutex::new(Control { path: None, modified: None, checked: None }),
             settings: Mutex::new(EdgeSettings::default()),
             sphere: OnceLock::new(), sphere_written: Mutex::new(None), seeks: AtomicU32::new(0), rejoin: AtomicBool::new(false),
-            expected: AtomicBool::new(true), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
+            expected: AtomicBool::new(true), filled: AtomicUsize::new(0), view: AtomicU8::new(VIEW_NORMAL), level: AtomicU8::new(crate::Level::Medium as u8), chromatic: AtomicBool::new(true),
             fill_rate: AtomicU32::new(0), camera: Mutex::new(crate::Camera::default()), crop_mark: AtomicU8::new(0),
             realtime: AtomicBool::new(false), writer: AtomicBool::new(false),
             feed: Feed { frame: Mutex::new(None), posted: AtomicU64::new(0), seeks: AtomicU32::new(0), ready: Condvar::new(), stop: AtomicBool::new(false) },
@@ -216,6 +219,11 @@ impl Edges {
 
     pub fn set_expected(&self, expected: bool) {
         self.expected.store(expected, Ordering::Relaxed);
+    }
+
+    /// Frames so far that left edges (`filled`)
+    pub fn filled(&self) -> usize {
+        self.filled.load(Ordering::Relaxed)
     }
 
     /// Playback (the VapourSynth filter): the sphere written on its own thread, as the GPU has room. Off, as in an
@@ -827,6 +835,29 @@ impl EdgeWorker {
         self.params = base.clone();
     }
 
+    /// The sphere written from the frame alone (Engine::write_sphere), as `apply` writes it in an export
+    pub(crate) fn write_sphere(&mut self, edges: &Edges, cfg: WorkerConfig, job: &EdgeJob, timestamp_us: i64) -> Result<(), String> {
+        match cfg.kind {
+            SampleKind::U8  => self.write_sphere_t::<u8, Luma8>(edges, cfg, job, timestamp_us),
+            SampleKind::U16 => self.write_sphere_t::<u16, Luma16>(edges, cfg, job, timestamp_us),
+        }
+    }
+
+    fn write_sphere_t<T: Sample, P: PixelType>(&mut self, edges: &Edges, cfg: WorkerConfig, job: &EdgeJob, timestamp_us: i64) -> Result<(), String> {
+        let g = &edges.geometry;
+        let wide = self.wide.get_or_insert_with(|| self.wide_setup.view(g));
+        let (planes, coverage) = wide.render::<T, P>(&job.src_lo, timestamp_us, cfg.max_value)?;
+        wide.write(edges, &planes, &coverage, timestamp_us, job.seeks);
+        Ok(())
+    }
+
+    /// The frame's mask alone (Engine::leaves_edges_at): counted in Edges::filled if it leaves edges
+    pub(crate) fn probe(&mut self, edges: &Edges, timestamp_us: i64) -> Result<(), String> {
+        process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
+        if Blocks::new(self.mask_buf.output_of::<u8>(), edges.geometry.mask).any { edges.filled.fetch_add(1, Ordering::Relaxed); }
+        Ok(())
+    }
+
     /// Sets up the GPU side before playback, like the planes' own warm-up
     pub(crate) fn warm_up(&mut self, cfg: WorkerConfig) -> Result<(), String> {
         process_plane::<Luma8>(&mut self.mask, 0, 255.0, &self.mask_buf.job())?;
@@ -855,6 +886,7 @@ impl EdgeWorker {
         process_plane::<Luma8>(&mut self.mask, timestamp_us, 255.0, &self.mask_buf.job())?;
         lap(0, &mut self.timing);
         let blocks = Blocks::new(self.mask_buf.output_of::<u8>(), g.mask);
+        if blocks.any { edges.filled.fetch_add(1, Ordering::Relaxed); }
 
         // In a clip with edges the sphere is written every frame, edges or not: what the camera sees while the output
         // covers is what fills the edges later. A clip without any doesn't need it, and it costs a fifth of 4K60.

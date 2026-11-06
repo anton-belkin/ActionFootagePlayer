@@ -10,7 +10,8 @@
 #   Contents/Resources/plugins/          the plugins: dlogm (without DJI's LUT, which isn't redistributed: the setup
 #                                        downloads it), gyroflow, with the underwater preset as default.gyroflow,
 #                                        dji-telemetry, highlights, footage-menu (the right-click menu),
-#                                        side-panel (the settings beside the video) and agent (notes for an AI agent)
+#                                        side-panel (the settings beside the video), agent (notes for an AI agent)
+#                                        and any-layout (the keys in a Cyrillic keyboard layout too)
 #   Contents/Resources/app.conf          the app's mpv settings (mpv/app.conf)
 #   Contents/Resources/VERSION           its version, which the menu shows
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
@@ -77,7 +78,8 @@ sdrcheck="$res/plugins/sdr-check"
 agent="$res/plugins/agent"
 workspace="$res/plugins/workspace"
 view360="$res/plugins/view360"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace" "$view360"
+anylayout="$res/plugins/any-layout"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace" "$view360" "$anylayout"
 install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
 install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
@@ -109,7 +111,8 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
-install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua "$workspace/"
+install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua "$workspace/"
 install -m 644 mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/view360.glsl "$view360/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)

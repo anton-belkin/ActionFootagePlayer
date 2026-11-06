@@ -68,6 +68,7 @@ jobs:
           luajit tests/link_test.lua
           luajit tests/moments_test.lua
           luajit tests/cut_test.lua
+          luajit tests/sidecar_test.lua
           luajit tests/view360_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe::)
 

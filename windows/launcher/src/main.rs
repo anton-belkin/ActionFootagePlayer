@@ -12,7 +12,8 @@
 //   plugins\                  the plugins: dlogm, gyroflow (with ffmpeg.exe and ffprobe.exe for its exports),
 //                             dji-telemetry, highlights, footage-menu (their right-click menu), side-panel (their
 //                             settings beside the video), agent (notes for an AI agent, and its IPC), workspace
-//                             (the project a clip belongs to) and view360 (360° clips as a view to look around in)
+//                             (the project a clip belongs to), any-layout (the keys in a Cyrillic keyboard layout
+//                             too) and view360 (360° clips as a view to look around in)
 //   vulkan\vulkan-1.dll       the Vulkan loader, which mpv.exe can't start without, for a PC whose GPU driver hasn't
 //                             installed one (last in mpv's PATH: the system's comes first)
 //   tools\setup.py            what fetches DJI's LUT
@@ -40,7 +41,9 @@ use std::process::Command;
 const NAME: &str = "ActionFootagePlayer";
 // The playing one's IPC pipe: videos opened with the app go there while it plays
 const PIPE: &str = r"\\.\pipe\ActionFootagePlayer";
-const PLUGINS: [&str; 9] = ["workspace", "gyroflow", "view360", "dlogm", "dji-telemetry", "highlights", "footage-menu", "side-panel", "agent"];
+const PLUGINS: [&str; 10] = [
+    "workspace", "gyroflow", "view360", "dlogm", "dji-telemetry", "highlights", "footage-menu", "side-panel", "agent", "any-layout",
+];
 // Their settings' files, in script-opts\
 const PLUGIN_OPTS: [&str; 7] = ["gyroflow", "dlogm", "dji_telemetry", "highlights", "footage_menu", "side_panel", "agent"];
 // A video sent to a player started less than this long ago goes into its playlist (several opened together), later

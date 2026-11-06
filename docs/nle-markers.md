@@ -53,7 +53,7 @@ From the project ([the model](moments-and-workspaces.md)):
 | A clip | the footage under the sources root (not `_Moments/`, `_Clips/`, `_Exports/`) | a clip, at its timecode |
 | A clip's rating | `_Clips/**/<clip>.afplink.mp4`, and `_ActionFootagePlayer/clips-made.txt` | made and deleted: a reject; tagged *Favorite*: a favorite; never made: no rating |
 | A clip's folders and tags | `_Clips/Day 1/…`, Finder tags | a bin, keywords |
-| Marks | `<clip>.marks.json` in the project, else the clip's highlights | markers; a camera's with its note ("DJI quick switch") |
+| Marks | `<clip>.afp.json` beside the clip (`.marks.json` before 0.9), else the clip's highlights | markers; a camera's with its note ("DJI quick switch") |
 
 Nothing more is read from the clips than their header: timecode, frame rate, size, duration and highlights.
 The moments' links are in the first 16 KB of each moment file. The player's cache of them (the other design's)

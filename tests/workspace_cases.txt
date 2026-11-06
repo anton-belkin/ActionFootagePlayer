@@ -10,7 +10,7 @@
 #   new <dir>        where a project for it would be made
 #   gyroflow <file>  its Gyroflow project (- for none)
 #   gyroflow-new <file>  where a new one is written
-#   marks <file>     where its marks file is
+#   sidecar <file>   where its own file is (its marks and view)
 # volume <unix|windows> <path> <yes|no>   whether the path is a volume's top folder (no tree: plain strings)
 #
 # Paths are relative to the case's folder and use /.
@@ -27,7 +27,7 @@ clip Egypt/Day 1/DJI_0068_D.MP4
   new Egypt/Day 1
   gyroflow Egypt/Day 1/DJI_0068_D.gyroflow
   gyroflow-new Egypt/Day 1/DJI_0068_D.gyroflow
-  marks Egypt/Day 1/DJI_0068_D.marks.json
+  sidecar Egypt/Day 1/DJI_0068_D.afp.json
 clip Egypt/Day 2/GX011057.MP4
   project Egypt
   relative Day 2/GX011057.MP4
@@ -117,7 +117,7 @@ tree
 clip Egypt/A.MP4
   gyroflow Egypt/A.MP4.gyroflow
   gyroflow-new Egypt/A.gyroflow
-  marks Egypt/A.marks.json
+  sidecar Egypt/A.afp.json
 
 case both Gyroflow names: the short one first
 tree

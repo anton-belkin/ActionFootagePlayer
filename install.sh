@@ -8,8 +8,9 @@
 #                          scripts/footage-menu (their right-click menu, mpv 0.41 and later), scripts/side-panel
 #                          (their settings in a panel beside the video, Tab), scripts/agent (notes for an AI
 #                          agent: areas of the frame and a comment), scripts/workspace (the project a clip
-#                          belongs to: its trip folder) and scripts/view360 (360° clips as a view to look around
-#                          in); and mpv.conf when there's none yet
+#                          belongs to: its trip folder), scripts/any-layout (the keys in a Cyrillic keyboard
+#                          layout too) and scripts/view360 (360° clips as a view to look around in); and mpv.conf
+#                          when there's none yet
 #   ./install.sh --apps    also ActionFootagePlayer.app in ~/Applications (the plugins in it, tools/make_app.sh), set up as
 #                          the default app for MP4 videos, with the Finder Quick Actions (see README). On Linux,
 #                          ActionFootagePlayer in the applications menu instead: the system's mpv with the plugins
@@ -123,6 +124,7 @@ MENU="$MPV_DIR/scripts/footage-menu"
 PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 WORKSPACE="$MPV_DIR/scripts/workspace"
+ANYLAYOUT="$MPV_DIR/scripts/any-layout"
 VIEW360="$MPV_DIR/scripts/view360"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -270,6 +272,10 @@ put mpv/scripts/workspace/workspace.lua "$WORKSPACE/workspace.lua" 644
 put mpv/scripts/workspace/link.lua      "$WORKSPACE/link.lua" 644
 put mpv/scripts/workspace/moments.lua   "$WORKSPACE/moments.lua" 644
 put mpv/scripts/workspace/cut.lua       "$WORKSPACE/cut.lua" 644
+put mpv/scripts/workspace/sidecar.lua   "$WORKSPACE/sidecar.lua" 644
+
+# The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
+put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
 
 # 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
 put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644

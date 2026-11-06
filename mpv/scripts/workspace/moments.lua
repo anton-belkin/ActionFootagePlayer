@@ -9,6 +9,7 @@
 --   moments.of_clip(list, clip)        -> the moments of a clip ({relative, size, created})
 --   moments.original(link, project)    -> the original's path, nil when it isn't found
 --   moments.safe_name(name), moments.next_name(last, taken), moments.unique_file(dir, name)
+--   moments_lib.loose_parts(marks, taken, duration, around) -> the parts for marks in no moment
 
 local STATE_DIR = require('workspace').STATE_DIR
 
@@ -24,7 +25,9 @@ M.EXPORTS = "_Exports"
 M.CLIPS = "_Clips"
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
-local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, moments = true, clips = true, exports = true, stabilized = true }
+-- (and the photos' folder, whose Live Photos' .mov files aren't footage either)
+local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills = true, moments = true, clips = true, exports = true,
+                      stabilized = true }
 
 -- A clip preview's path in _Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
 -- a camera's own folders (DCIM and the one in it). `flat`: all in _Clips/ itself ("A.afplink.mp4")
@@ -194,6 +197,34 @@ function M.moment_time(link)
     local created = link and M.parse_time(link.created)
     if not created or type(link["in"]) ~= "number" then return nil end
     return created + link["in"]
+end
+
+-- The parts for a clip's marks that are in none of its moments: `around` seconds on each side of each, inside the
+-- clip (0 to `duration`, when known), those that overlap joined into one. marks: times; taken: { {in, out} } of its
+-- moments. Each part: { a, b, marks = { t... } }, in order
+function M.loose_parts(marks, taken, duration, around)
+    local loose = {}
+    for _, t in ipairs(marks) do
+        local inside = false
+        for _, r in ipairs(taken) do
+            if t >= r[1] - 0.001 and t <= r[2] + 0.001 then inside = true end
+        end
+        if not inside then loose[#loose + 1] = t end
+    end
+    table.sort(loose)
+    local parts = {}
+    for _, t in ipairs(loose) do
+        local a, b = math.max(0, t - around), t + around
+        if duration then b = math.min(duration, b) end
+        local last = parts[#parts]
+        if last and a <= last.b then
+            last.b = math.max(last.b, b)
+            last.marks[#last.marks + 1] = t
+        elseif b > a then
+            parts[#parts + 1] = { a = a, b = b, marks = { t } }
+        end
+    end
+    return parts
 end
 
 function M.new(ws, fs)

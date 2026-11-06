@@ -55,7 +55,11 @@ function M.part_marks(doc, from, to, clip)
             marks[#marks + 1] = copy
         end
     end
-    if #marks == 0 then return nil end
+    -- None in this part: the camera's again (no list); the clip's saved view goes with every part
+    if #marks == 0 then
+        if doc.view == nil then return nil end
+        marks = nil
+    end
     local out = {}
     for k, v in pairs(doc) do out[k] = v end
     local c = {}

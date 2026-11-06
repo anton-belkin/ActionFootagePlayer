@@ -4,11 +4,12 @@
 --
 -- The camera's are read from the file when it's loaded (markers.lua, plain Lua: a few small reads). Cameras: GoPro
 -- HERO5 and later, DJI Osmo Action 4, 5 Pro and 6. While you've changed none, those are the marks. The first change
--- (M) writes <clip>.marks.json beside the clip (docs/moments-and-workspaces.md, "Marks"), with the camera's copied in
--- and flagged ("camera": "dji"), and from then on that file is the marks: a camera mark removed is gone from it.
--- Delete the file, and the camera's are the marks again. A marks file for a clip of another size (GoPro's GX010123
--- names come back on every card) is renamed .marks.json.old rather than applied. The workspace plugin says where the
--- file is (user-data/workspace/marks_file). Marks need no project: the file is beside the clip.
+-- (M) writes them into the clip's own file beside it, <clip>.afp.json (docs/moments-and-workspaces.md, "Marks"; the
+-- workspace plugin's sidecar.lua, which keeps the file's other part, the view it plays in), with the camera's copied
+-- in and flagged ("camera": "dji"), and from then on that list is the marks: a camera mark removed is gone from it.
+-- Delete the file (or its marks), and the camera's are the marks again. A file for a clip of another size (GoPro's
+-- GX010123 names come back on every card) is renamed .afp.json.old rather than applied. A <clip>.marks.json from
+-- before is read too, and moved over at the next change. Marks need no project: the file is beside the clip.
 --
 -- Keys (rebind with `<key> script-binding highlights/<name>` in input.conf):
 --   Ctrl+]  next   the next mark
@@ -21,7 +22,7 @@
 --   go <n>     the n-th mark
 --   mark       as M
 -- The state is in user-data/highlights/ for the menu: camera (GoPro, DJI: the clip's own), times (seconds, in order),
--- marks ({ t, camera (dji, gopro: one of the camera's), name }, in order), edited (yes: from the marks file). A moment
+-- marks ({ t, camera (dji, gopro: one of the camera's), name }, in order), edited (yes: from the clip's file). A moment
 -- playing as a video of its own (the workspace plugin's offset and length): only the marks inside it, in its time;
 -- offset: where it starts in the clip.
 --
@@ -33,6 +34,14 @@ local mp = require 'mp'
 local utils = require 'mp.utils'
 local options = require 'mp.options'
 local markers = require 'markers'
+-- The clip's file (the workspace plugin's sidecar.lua, beside this plugin's folder)
+package.path = package.path .. ";" .. utils.join_path(utils.join_path(mp.get_script_directory(), "../workspace"), "?.lua")
+local platform = mp.get_property("platform") or ""
+local has_sidecar, sidecar_lib = pcall(require, 'sidecar')
+if not has_sidecar then mp.msg.warn("the workspace plugin's sidecar.lua isn't beside this plugin: marks can't be written") end
+local sidecar = has_sidecar and sidecar_lib.new({ parse_json = function(s) return (utils.parse_json(s)) end, format_json = utils.format_json,
+                                                  windows = platform == "windows" or package.config:sub(1, 1) == "\\" })
+    or { read = function() return nil end, update = function() return false, "the workspace plugin isn't installed" end }
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
 -- user-data/workspace/clip, docs/moments-and-workspaces.md)
@@ -58,11 +67,9 @@ local PROBED_EXTENSIONS = { mp4 = true, mov = true, lrv = true }
 local AGAIN = 2
 -- M within this long of a mark removes it
 local NEAR = 0.5
-local FORMAT = "actionfootageplayer-marks"
 local CAMERA_NOTES = { dji = "DJI quick switch", gopro = "GoPro HiLight" }
 
--- The clip's: { path, camera, marks = { {t, camera, name} }, file (the marks file), doc (what it holds, unknown
--- fields kept) }
+-- The clip's: { path, camera, marks = { {t, camera, name} }, doc (its file's, when it has marks there) }
 local found = nil
 -- The mark last jumped to: a jump lands `before` seconds ahead of it, and until it's passed that's the mark "here"
 local jumped = nil
@@ -78,7 +85,7 @@ end
 
 local function publish()
     if not found or #found.marks == 0 then
-        mp.set_property_native("user-data/highlights", found and found.doc and { marks = {}, times = {}, edited = true } or {})
+        mp.set_property_native("user-data/highlights", found and found.doc and { marks = {}, times = {}, edited = true, offset = found.offset } or {})
         return
     end
     mp.set_property_native("user-data/highlights", { camera = found.camera, times = times(), marks = found.marks, edited = found.doc ~= nil,
@@ -138,23 +145,11 @@ mp.observe_property("chapter-list", "native", function(_, chapters)
     end
 end)
 
--- Where the clip's marks file is: the workspace plugin's, else beside the clip
-local function marks_file(path)
-    local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) == "table" and ws.path == mp.get_property("path") and ws.clip == path and ws.marks_file then return ws.marks_file end
-    if type(ws) == "table" and ws.path == path and ws.marks_file then return ws.marks_file end
-    return (path:match("^(.*)%.[^./\\]+$") or path) .. ".marks.json"
-end
-
-local function read_doc(file, size)
-    local f = io.open(file, "r")
-    if not f then return nil end
-    local doc = utils.parse_json(f:read("*a") or "")
-    f:close()
-    if type(doc) ~= "table" or doc.format ~= FORMAT then
-        mp.msg.warn(file .. ": not a marks file, left alone")
-        return nil
-    end
+-- The marks in the clip's file (nil: none there, the camera's are the marks), each a { t } at least, in order
+local function read_doc(path, size)
+    local doc, file, problem = sidecar.read(path)
+    if problem then mp.msg.warn(problem) end
+    if not doc or type(doc.marks) ~= "table" then return nil end
     -- Another clip's (a reused name): moved aside, not applied
     if type(doc.clip) == "table" and doc.clip.size and size and doc.clip.size ~= size then
         os.remove(file .. ".old")
@@ -163,7 +158,7 @@ local function read_doc(file, size)
         return nil
     end
     local marks = {}
-    for _, m in ipairs(type(doc.marks) == "table" and doc.marks or {}) do
+    for _, m in ipairs(doc.marks) do
         if type(m) == "table" and type(m.t) == "number" then marks[#marks + 1] = m end
     end
     table.sort(marks, function(a, b) return a.t < b.t end)
@@ -210,32 +205,14 @@ local function load()
         end
         if #marks > 0 then camera = m.camera end
     end
-    local file = marks_file(path)
-    local doc = read_doc(file, info and info.size)
+    local doc = read_doc(path, info and info.size)
     local off, len = window()
     local all = doc and doc.marks or marks
     -- all: in the clip's time; marks: what shows (a moment playing: those inside it, in its time)
-    found = { path = path, camera = camera, all = all, marks = visible(all, off, len), offset = off, length = len, file = file,
+    found = { path = path, camera = camera, all = all, marks = visible(all, off, len), offset = off, length = len,
               doc = doc, camera_times = camera_times, size = info and info.size }
-    mp.msg.verbose(#found.marks .. " marks" .. (doc and (" from " .. file) or (camera and (" from the " .. camera) or "")))
+    mp.msg.verbose(#found.marks .. " marks" .. (doc and " from the clip's file" or (camera and (" from the " .. camera) or "")))
     if #found.marks > 0 or #ours > 0 then apply_chapters() end
-end
-
--- The marks file written whole: next to it, then renamed over it
-local function write(doc)
-    local json = utils.format_json(doc)
-    if not json then return false, "couldn't make the file" end
-    -- An empty list is an array
-    json = json:gsub('"marks":{}', '"marks":[]')
-    local tmp = found.file .. ".tmp"
-    local f, err = io.open(tmp, "w")
-    if not f then return false, err end
-    f:write(json, "\n")
-    f:close()
-    os.remove(found.file)
-    local ok, rerr = os.rename(tmp, found.file)
-    if not ok then os.remove(tmp); return false, rerr end
-    return true
 end
 
 -- M: a mark here, or the one here removed. The first change copies the camera's into the file
@@ -249,21 +226,14 @@ local function mark()
     if not pos then return end
     -- In the clip's time
     pos = pos + found.offset
-    local doc = found.doc
-    if not doc then
-        local copy = {}
-        for _, m in ipairs(found.all) do copy[#copy + 1] = { t = math.floor(m.t * 1000 + 0.5) / 1000, camera = m.camera } end
-        local ws = mp.get_property_native("user-data/workspace")
-        doc = {
-            format = FORMAT, version = 1,
-            -- hash: the clip's fingerprint, to find it again once it's moved (the workspace plugin's)
-            clip = { file = found.path:match("([^/\\]+)$"), size = found.size,
-                     hash = clip_hash(),
-                     duration = found.offset == 0 and mp.get_property_number("duration") or nil,
-                     created = mp.get_property("metadata/by-key/creation_time") or (type(ws) == "table" and ws.created) or nil },
-            marks = copy,
-        }
+    -- The marks as they are: the file's, else the camera's (copied in, flagged)
+    local list = {}
+    if found.doc then
+        for _, m in ipairs(found.doc.marks) do list[#list + 1] = m end
+    else
+        for _, m in ipairs(found.all) do list[#list + 1] = { t = math.floor(m.t * 1000 + 0.5) / 1000, camera = m.camera } end
     end
+    local doc = { marks = list }
     -- The mark here: within half a second, or the one just jumped to, from its landing to just after it
     local near, best = nil, NEAR
     for i, m in ipairs(doc.marks) do
@@ -285,9 +255,18 @@ local function mark()
         table.sort(doc.marks, function(a, b) return a.t < b.t end)
         message = "Mark at " .. clock(t)
     end
-    -- A file written before fingerprints: the clip's too, once it's known
-    if type(doc.clip) == "table" and doc.clip.hash == nil then doc.clip.hash = clip_hash() end
-    local ok, err = write(doc)
+    -- Into the clip's file, its other part (the view) kept: which clip it's for, the first time (hash: its fingerprint,
+    -- to find it again once it's moved; the workspace plugin's), and a file from before fingerprints gets it now
+    local ws = mp.get_property_native("user-data/workspace")
+    local ok, err = sidecar.update(found.path, function(d)
+        d.marks = list
+        if type(d.clip) ~= "table" then
+            d.clip = { file = found.path:match("([^/\\]+)$"), size = found.size,
+                       duration = found.offset == 0 and mp.get_property_number("duration") or nil,
+                       created = mp.get_property("metadata/by-key/creation_time") or (type(ws) == "table" and ws.created) or nil }
+        end
+        if d.clip.hash == nil then d.clip.hash = clip_hash() end
+    end)
     if not ok then return mp.osd_message("Couldn't write the marks: " .. tostring(err), 4) end
     found.doc, found.all, found.marks = doc, doc.marks, visible(doc.marks, found.offset, found.length)
     mp.osd_message(message .. " (" .. (#doc.marks == 1 and "1 mark" or (#doc.marks .. " marks")) .. ")", 2)
