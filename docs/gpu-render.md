@@ -274,9 +274,21 @@ The stamp under the sphere becomes the per-frame table, as for flat clips.
 
 **What it needs: both lens tracks on the GPU.** Under `lavfi-complex` mpv gives no hardware decoding device to the
 tracks' decoders, so today they are decoded with a copy to memory and joined there. Keeping them on the GPU needs an
-mpv patch that hands both decoded tracks to libplacebo as textures (VideoToolbox frames, zero-copy): possible only in
-the Mac app, which builds its own mpv. Windows and Linux keep the VapourSynth path for 360. Our own renderer decodes
-the tracks itself and needs no patch, if 360 is ever wanted there.
+mpv patch that hands both decoded tracks to libplacebo as textures, zero-copy.
+
+Only the Mac app builds its own mpv today (`tools/build_mpv.sh`, in CI). The Windows app ships shinchiro's prebuilt
+mpv, and on Linux the plugins go into the distribution's mpv. Patching there is possible, at a cost:
+
+- **Windows**: our own mpv build in CI (shinchiro's mpv-winbuild-cmake with our patches, cross-compiled from Linux,
+  x86-64 and arm64), kept up with mpv as the Mac build is. The patch's GPU side is per decoder: D3D11VA there,
+  VideoToolbox on the Mac, VAAPI and NVDEC on Linux.
+- **Linux**: shipping an mpv of our own (an AppImage or a Flatpak) instead of plugins for the user's.
+- **Better, for all three**: the patch written generally (through mpv's hwdec interop, not for one decoder) and
+  offered to mpv upstream, where the limit ("decoders not linked to vo_chain must not use the hwdec context") is a
+  known one. Taken, every build gets it; until then the Mac app carries it.
+
+Until one of those, Windows and Linux keep the VapourSynth path for 360. Our own renderer decodes the tracks itself
+and needs no patch, if 360 is ever wanted there.
 
 ## Quality and speed
 
