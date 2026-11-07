@@ -887,6 +887,8 @@ local function gpu_table(source, done)
     ud.input_width, ud.input_height = source.width, source.height
     ud.gpu_chromatic = chromatic and not o.chromatic_skip
     ud.edges, ud.edges_blur = edge_mode, edge_blur
+    -- Ctrl+p (the clean frame): on the GPU path the temporal denoise, while it plays and paused (warp.glsl's dn_ passes)
+    ud.gpu_denoise = still.enabled()
     gpu_count = gpu_count + 1
     local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
     local t = mp.get_time()
@@ -1224,6 +1226,8 @@ gpu_refresh = function()
     end)
 end
 mp.register_event("shutdown", function() if gpu and gpu.shader then os.remove(gpu.shader) end end)
+-- Ctrl+p on the GPU path: the denoise in or out of the shader
+mp.observe_property("user-data/gyroflow/still", "native", function() if gpu then gpu_refresh() end end)
 
 -- A change that sets the chain up again while it plays, paused through it with a word on screen: it plays on once
 -- the first frame is through (or after a few seconds), instead of dropping frames to catch up

@@ -53,7 +53,8 @@ fn player(json: &str, out: &str) {
     let sphere = s("edges") == "sphere" && j.get("gpu_sphere").and_then(|v| v.as_bool()).unwrap_or(true);
     let rgb = wet || sphere;
     let opts = Options { mode: if rgb { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
-                         chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset, knots: 33, interp, shrink: false, range: None };
+                         chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset,
+                         denoise: j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), knots: 33, interp, shrink: false, range: None };
     let table = match Table::build(&clip, &opts) { Ok(t) => t, Err(e) => reply(serde_json::json!({ "error": e })) };
     if let Err(e) = std::fs::write(out, gpu_table::shader(&clip, &opts, &table)) { reply(serde_json::json!({ "error": format!("{out}: {e}") })); }
     reply(serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
@@ -114,7 +115,7 @@ fn main() {
         return;
     }
 
-    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, knots, interp, shrink, range };
+    let opts = Options { mode, grid_step, grid_linear, chroma_bilinear, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, denoise: false, knots, interp, shrink, range };
     let t = Instant::now();
     let table = Table::build(&clip, &opts).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
     let built = t.elapsed().as_secs_f64() * 1000.0;

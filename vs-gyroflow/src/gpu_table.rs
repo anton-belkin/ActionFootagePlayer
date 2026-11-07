@@ -170,6 +170,8 @@ pub struct Options {
     pub sphere: bool,
     /// A moment played as a video of its own: where it starts in the clip, seconds
     pub time_offset: f64,
+    /// The temporal denoise after the warp (the clean frame while it plays: warp.glsl's dn_ passes)
+    pub denoise: bool,
     /// Knots a frame; 0: every row
     pub knots: usize,
     /// warp.glsl's INTERP: 0 bilinear, 1 B-spline, 2 bicubic, 3 Lanczos4, 4 EWA
@@ -302,7 +304,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
                 &format!("//!WIDTH OUTPUT.w {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
                 &defs, "#define GRID_PASS", pass_body("grid")))
     };
-    match opts.mode {
+    let warp = match opts.mode {
         Mode::Exact => hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, "", pass_body("exact")),
         Mode::Grid => format!("{}\n{}{}", grid("MAIN"), sample("MAIN", "gyroflow warp", ""), if sphere {
@@ -316,7 +318,32 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
             sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA"),
             sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
                 if opts.chromatic_bilinear_planes() { "\n#undef INTERP\n#define INTERP 0" } else { "" }))),
-    }
+    };
+    if !opts.denoise { return warp; }
+    // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
+    let common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }, rb_bind, sphere_bind];
+    let with = |mut v: Vec<&str>| { let at = 2.min(v.len()); for (k, c) in common.iter().enumerate() { v.insert(at + k, c); } d(&v) };
+    const PAST: usize = 4;
+    const RING: usize = PAST + 1;
+    const SLOT: (usize, usize) = (3840, 2160);
+    let dn_defs = format!("{defs}\n#define DN_STRENGTH 1.5\n#define DN_KEEP 0.2\n#define DN_PAST {PAST}\n#define DN_RING {RING}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
+    let dn = |extra: &str, name: &str| format!("{extra}\n{}", pass_body("dn_common")) + pass_body(name);
+    let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[4096]\n//!VAR float gdn_sigma[16]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR int gdn_head\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
+    let texture = |name: &str, w: usize, h: usize, fmt: &str| format!("//!TEXTURE {name}\n//!SIZE {w} {h}\n//!FORMAT {fmt}\n//!STORAGE\n\n");
+    let nb = (SLOT.0.div_ceil(32) + 1, SLOT.1.div_ceil(32) + 1);
+    format!("{warp}\n{state}{}{}{}{}\n{}\n{}\n{}",
+        texture("GDN_FRAMES", SLOT.0, SLOT.1 * RING, "rgba16f"), texture("GDN_QUART", SLOT.0 / 4, SLOT.1 / 4 * RING, "rgba16f"),
+        texture("GDN_VEC", nb.0, nb.1 * PAST, "rgba32f"),
+        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!SAVE GDN_CUR4", "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /",
+            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise luma"]), &dn_defs, "", pass_body("dn_luma")),
+        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN_VEC", "//!BIND GDN",
+            "//!SAVE GDN_MOTION_DONE", "//!WIDTH OUTPUT.w 32 / 1 +", &format!("//!HEIGHT OUTPUT.h 32 / 1 + {PAST} *"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise motion"]),
+            &dn_defs, "#define DN_COMPUTE", &dn("#define DN_MOTION", "dn_motion")),
+        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN_VEC", "//!BIND GDN",
+            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise"]), &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
+        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN", "//!SAVE GDN_STATE_DONE", "//!WIDTH 16", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
+            "//!COMPUTE 16 1", "//!DESC gyroflow denoise state"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STATE", "dn_state")))
+
 }
 
 impl Options {
@@ -557,7 +584,7 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
         let mut frames: Vec<usize> = [0usize, 600, 1049, 1181, n / 2, n - 1].into_iter().filter(|f| *f < n).collect();
         frames.dedup();
         let fast = if n > 1049 { 1049 } else { n / 2 };
-        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, knots: 33, interp: 2, shrink: false, range: None };
+        let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, denoise: false, knots: 33, interp: 2, shrink: false, range: None };
         // (label, options, every frame or only the fastest)
         let cases = [
             ("exact, 33 knots", base, true),
