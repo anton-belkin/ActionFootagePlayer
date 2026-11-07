@@ -1,0 +1,389 @@
+From 71ccb7967e475543534509aa3a03b57221e99892 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <antbelkin@gmail.com>
+Date: Sat, 7 Nov 2026 18:08:42 +0100
+Subject: [PATCH] player, vo_gpu_next: --video-join, two video tracks shown
+ side by side
+
+A 360 camera records each lens in a video track of its own. With
+--video-join the first two video tracks of the same size and codec
+are one picture: the second becomes a dependent track of the first,
+as a Dolby Vision enhancement layer is, so the demuxer reads it along
+and f_enhancement_pair decodes it with the same hardware decoding and
+attaches each frame to the first track's of the same time. vo_gpu_next
+maps both hardware surfaces and draws them side by side into planes of
+the frame's own, on the GPU.
+
+lavfi-complex's hstack did the same in memory: its tracks' decoders get
+no hardware decoding device, so they decode to memory (VideoToolbox's
+copy mode at best), and the joined frame is uploaded again.
+---
+ demux/stheader.h             |  1 +
+ filters/f_enhancement_pair.c | 34 +++++++++++++
+ options/options.c            |  1 +
+ options/options.h            |  1 +
+ player/loadfile.c            | 39 +++++++++++++++
+ video/mp_image.h             |  4 ++
+ video/out/vo_gpu_next.c      | 97 ++++++++++++++++++++++++++++++++++--
+ 7 files changed, 174 insertions(+), 3 deletions(-)
+
+diff --git a/demux/stheader.h b/demux/stheader.h
+index 18f274aed..d2833b439 100644
+--- a/demux/stheader.h
++++ b/demux/stheader.h
+@@ -62,6 +62,7 @@ struct sh_stream {
+     bool default_track;         // container default track flag
+     bool forced_track;          // container forced track flag
+     bool dependent_track;       // container dependent track flag
++    bool join_right;            // --video-join: decoded beside its group's base track and shown at its right
+     bool visual_impaired_track; // container flag
+     bool hearing_impaired_track;// container flag
+     bool original_track;        // container flag
+diff --git a/filters/f_enhancement_pair.c b/filters/f_enhancement_pair.c
+index 7b74d10fc..8fc2edfd3 100644
+--- a/filters/f_enhancement_pair.c
++++ b/filters/f_enhancement_pair.c
+@@ -15,6 +15,8 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <limits.h>
++
+ #include <libavutil/buffer.h>
+ 
+ #include "common/common.h"
+@@ -44,8 +46,28 @@ struct priv {
+     bool bl_eof;
+     bool el_eof;
+     bool el_seen;
++    // --video-join: the EL is another picture, shown at the BL's right (sh_stream.join_right)
++    bool join;
+ };
+ 
++// A joined pair: the params of the two side by side, the BL's own width kept. Square pixels stay square (the picture
++// twice as wide); pixels made otherwise (--video-aspect-override, which each decoder applies to its own picture) keep
++// the display aspect it set
++static void join_pair(struct mp_image *bl, struct mp_image *el)
++{
++    bl->join_el = true;
++    bl->join_w = bl->params.w;
++    int total = bl->params.w + el->params.w;
++    if (bl->params.p_w > 0 && bl->params.p_h > 0 && bl->params.p_w != bl->params.p_h) {
++        int64_t pw = (int64_t)bl->params.p_w * bl->params.w, ph = (int64_t)bl->params.p_h * total;
++        while (pw > INT_MAX || ph > INT_MAX) { pw /= 2; ph /= 2; }
++        bl->params.p_w = pw;
++        bl->params.p_h = ph;
++    }
++    bl->params.w = total;
++    bl->params.crop = (struct mp_rect){0, 0, bl->params.w, bl->params.h};
++}
++
+ static int pts_cmp(double a, double b)
+ {
+     if (a == MP_NOPTS_VALUE || b == MP_NOPTS_VALUE)
+@@ -151,6 +173,12 @@ static void pair_process(struct mp_filter *f)
+         if (p->num_el_pending > 0 && cmp == 0) {
+             struct mp_image *el = take_head(&p->el_pending, &p->num_el_pending);
+             take_head(&p->bl_pending, &p->num_bl_pending);
++            if (p->join) {
++                bl->enhancement_layer = el;
++                join_pair(bl, el);
++                mp_pin_in_write(out, MAKE_FRAME(MP_FRAME_VIDEO, bl));
++                continue;
++            }
+             inherit_dovi_from_el(bl, el);
+             if (bl->params.no_enhancement_layer) {
+                 talloc_free(el);
+@@ -177,6 +205,11 @@ static void pair_process(struct mp_filter *f)
+                    p->num_el_pending > 0 ? p->el_pending[0]->pts : -1.0);
+ 
+         take_head(&p->bl_pending, &p->num_bl_pending);
++        if (p->join) {
++            // Half a picture would set the VO up at another size: left out
++            talloc_free(bl);
++            continue;
++        }
+         bl->enhancement_layer = NULL;
+         mp_pin_in_write(out, MAKE_FRAME(MP_FRAME_VIDEO, bl));
+     }
+@@ -225,6 +258,7 @@ struct mp_filter *mp_enhancement_pair_create(struct mp_filter *parent,
+     mp_filter_add_pin(f, MP_PIN_OUT, "out");
+ 
+     struct priv *p = f->priv;
++    p->join = el_sh->join_right;
+     p->el_dec = mp_decoder_wrapper_create(f, el_sh);
+     if (p->el_dec)
+         mp_decoder_wrapper_set_extra_hw_frames(p->el_dec, QUEUE_MAX);
+diff --git a/options/options.c b/options/options.c
+index a43241455..e62c6c9ab 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -597,6 +597,7 @@ static const m_option_t mp_opts[] = {
+     {"flatten-editions", OPT_BOOL(flatten_editions)},
+     {"disc-menu", OPT_BOOL(disc_menu)},
+     {"show-dependent-tracks", OPT_BOOL(show_dependent_tracks)},
++    {"video-join", OPT_BOOL(video_join)},
+ #if HAVE_LIBBLURAY
+     {"bluray", OPT_SUBSTRUCT(stream_bluray_opts, stream_bluray_conf)},
+ #endif /* HAVE_LIBBLURAY */
+diff --git a/options/options.h b/options/options.h
+index 1f8e7cb09..036d4c194 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -266,6 +266,7 @@ typedef struct MPOpts {
+     bool flatten_editions;
+     bool disc_menu;
+     bool show_dependent_tracks;
++    bool video_join;
+     bool initial_audio_sync;
+     double sync_max_video_change;
+     double sync_max_audio_change;
+diff --git a/player/loadfile.c b/player/loadfile.c
+index d4427dff1..cea9581b4 100644
+--- a/player/loadfile.c
++++ b/player/loadfile.c
+@@ -1808,6 +1808,43 @@ done:
+ 
+ // Start playing the current playlist entry.
+ // Handle initialization and deinitialization.
++// --video-join: a file's first two video tracks of the same size and codec (a 360 camera's lenses, one a track) as
++// one picture, side by side. The second becomes a dependent track of the first, as a Dolby Vision enhancement layer
++// is: the demuxer reads it along, f_enhancement_pair decodes it (with the same hardware decoding) and attaches each
++// frame to the first track's of the same time, and the VO joins the two on the GPU. In place of lavfi-complex's
++// hstack, which decodes both to memory and joins them there
++static void join_video_tracks(struct MPContext *mpctx, struct demuxer *demuxer)
++{
++    struct sh_stream *v[2] = {0};
++    int n = 0;
++    for (int i = 0; i < demux_get_num_stream(demuxer) && n < 2; i++) {
++        struct sh_stream *sh = demux_get_stream(demuxer, i);
++        if (sh->type != STREAM_VIDEO || sh->image || sh->attached_picture || sh->dependent_track || sh->group)
++            continue;
++        v[n++] = sh;
++    }
++    if (n < 2)
++        return;
++    struct mp_codec_params *a = v[0]->codec, *b = v[1]->codec;
++    if (!a->codec || !b->codec || strcmp(a->codec, b->codec) != 0 ||
++        a->disp_w != b->disp_w || a->disp_h != b->disp_h || a->disp_w <= 0)
++    {
++        MP_WARN(mpctx, "--video-join: tracks %d and %d differ (%s %dx%d, %s %dx%d), not joined.\n",
++                v[0]->index, v[1]->index, a->codec ? a->codec : "?", a->disp_w, a->disp_h,
++                b->codec ? b->codec : "?", b->disp_w, b->disp_h);
++        return;
++    }
++    struct sh_stream_group *group = talloc_zero(v[0], struct sh_stream_group);
++    MP_TARRAY_APPEND(group, group->members, group->num_members, v[0]);
++    MP_TARRAY_APPEND(group, group->members, group->num_members, v[1]);
++    v[0]->group = group;
++    v[1]->group = group;
++    v[1]->dependent_track = true;
++    v[1]->join_right = true;
++    MP_INFO(mpctx, "Video tracks %d and %d joined side by side (%dx%d each).\n",
++            v[0]->index, v[1]->index, a->disp_w, a->disp_h);
++}
++
+ static void play_current_file(struct MPContext *mpctx)
+ {
+     struct MPOpts *opts = mpctx->opts;
+@@ -1948,6 +1985,8 @@ static void play_current_file(struct MPContext *mpctx)
+ 
+     if (mpctx->opts->rebase_start_time)
+         demux_set_ts_offset(mpctx->demuxer, -mpctx->demuxer->start_time);
++    if (mpctx->opts->video_join)
++        join_video_tracks(mpctx, mpctx->demuxer);
+     enable_demux_thread(mpctx, mpctx->demuxer);
+ 
+     add_demuxer_tracks(mpctx, mpctx->demuxer);
+diff --git a/video/mp_image.h b/video/mp_image.h
+index f5c156281..6f4ec198a 100644
+--- a/video/mp_image.h
++++ b/video/mp_image.h
+@@ -131,6 +131,10 @@ typedef struct mp_image {
+     int num_ff_side_data;
+     // Optional decoded enhancement-layer frame
+     struct mp_image *enhancement_layer;
++    // --video-join: enhancement_layer is another picture of the same size, shown at the right of this one. The
++    // params' size is the two side by side; join_w is this image's own width
++    bool join_el;
++    int join_w;
+ } mp_image_t;
+ 
+ struct mp_ff_side_data {
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index f6b75225a..de99181ed 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -24,7 +24,9 @@
+ #include <libavutil/frame.h>
+ #include <libplacebo/colorspace.h>
+ #include <libplacebo/options.h>
++#include <libplacebo/dispatch.h>
+ #include <libplacebo/renderer.h>
++#include <libplacebo/shaders/sampling.h>
+ #include <libplacebo/shaders/lut.h>
+ #include <libplacebo/shaders/icc.h>
+ #include <libplacebo/utils/libav.h>
+@@ -149,6 +151,8 @@ struct priv {
+     struct ra_hwdec_ctx hwdec_ctx;
+     struct hwdec_slot hwdec;
+     struct hwdec_slot el_hwdec;
++    // --video-join: draws the two pictures of a joined frame side by side
++    pl_dispatch join_dp;
+     struct timer_pool *sw_upload_timer;
+     struct mp_pass_perf sw_upload_perf;
+ 
+@@ -632,6 +636,8 @@ struct frame_priv {
+     struct ra_hwdec *el_hwdec;
+     pl_tex el_tex[4];
+     struct pl_frame el_frame;
++    // --video-join: the joined frame's planes, this frame's own
++    pl_tex join_tex[4];
+ };
+ 
+ static int plane_data_from_imgfmt(struct pl_plane_data out_data[4],
+@@ -904,6 +910,72 @@ static void slot_release(struct hwdec_slot *s)
+     s->acquired = false;
+ }
+ 
++// A frame's own params: a joined frame's (--video-join) are of the two side by side, the hardware surface only of its
++// own picture
++static struct mp_image_params own_params(struct mp_image *mpi)
++{
++    struct mp_image_params par = mpi->params;
++    if (mpi->join_el && mpi->join_w > 0) {
++        par.w = mpi->join_w;
++        par.crop = (struct mp_rect){0, 0, par.w, par.h};
++    }
++    return par;
++}
++
++// --video-join: the frame and the picture joined to it (enhancement_layer), both mapped from their hardware surfaces
++// and drawn side by side into planes of their own (the mapped textures can be sampled, not blitted), the mappings
++// released at once: the frame's planes are then textures like any uploaded frame's
++static bool map_joined(struct priv *p, pl_gpu gpu, struct mp_image *mpi, struct pl_frame *frame)
++{
++    struct frame_priv *fp = mpi->priv;
++    struct mp_image *el = mpi->enhancement_layer;
++    fp->el_hwdec = ra_hwdec_get(&p->hwdec_ctx, el->imgfmt);
++    if (!fp->el_hwdec || !slot_reconfig(p, &p->el_hwdec, fp->el_hwdec, &el->params))
++        return false;
++    if (!p->join_dp)
++        p->join_dp = pl_dispatch_create(p->pllog, gpu);
++
++    struct pl_frame a = *frame, b = *frame;
++    bool ok = slot_acquire(p, &p->hwdec, mpi, mpi, &a) && slot_acquire(p, &p->el_hwdec, mpi, el, &b);
++    for (int n = 0; ok && n < frame->num_planes; n++) {
++        pl_tex ta = a.planes[n].texture, tb = b.planes[n].texture;
++        if (!ta || !tb || ta->params.h != tb->params.h || ta->params.format != tb->params.format) {
++            MP_ERR(p, "--video-join: the pictures' planes differ.\n");
++            ok = false;
++            break;
++        }
++        ok = pl_tex_recreate(gpu, &fp->join_tex[n], pl_tex_params(
++            .w = ta->params.w + tb->params.w,
++            .h = ta->params.h,
++            .format = ta->params.format,
++            .sampleable = true,
++            .renderable = true,
++        ));
++        if (!ok) {
++            MP_ERR(p, "--video-join: can't make a joined plane of %s.\n", ta->params.format->name);
++            break;
++        }
++        pl_tex parts[2] = {ta, tb};
++        int x = 0;
++        for (int i = 0; i < 2; i++) {
++            pl_shader sh = pl_dispatch_begin(p->join_dp);
++            pl_shader_sample_direct(sh, pl_sample_src(.tex = parts[i]));
++            ok = ok && pl_dispatch_finish(p->join_dp, pl_dispatch_params(
++                .shader = &sh,
++                .target = fp->join_tex[n],
++                .rect = {x, 0, x + parts[i]->params.w, parts[i]->params.h},
++            ));
++            x += parts[i]->params.w;
++        }
++        frame->planes[n].texture = fp->join_tex[n];
++    }
++    slot_release(&p->hwdec);
++    slot_release(&p->el_hwdec);
++    slot_unmap(p, &p->hwdec);
++    slot_unmap(p, &p->el_hwdec);
++    return ok;
++}
++
+ static bool hwdec_acquire(pl_gpu gpu, struct pl_frame *frame)
+ {
+     struct mp_image *mpi = frame->user_data;
+@@ -1044,17 +1116,23 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex, const struct pl_source_frame *src
+     struct priv *p = vo->priv;
+ 
+     fp->hwdec = ra_hwdec_get(&p->hwdec_ctx, mpi->imgfmt);
++    bool join = mpi->join_el && mpi->enhancement_layer;
+     if (fp->hwdec) {
+         // Note: We don't actually need the mapper to map the frame yet, we
+         // only reconfig the mapper here (potentially creating it) to access
+         // `dst_params`. In practice, though, this should not matter unless the
+         // image format changes mid-stream.
+-        if (!slot_reconfig(p, &p->hwdec, fp->hwdec, &mpi->params)) {
++        struct mp_image_params own = own_params(mpi);
++        if (!slot_reconfig(p, &p->hwdec, fp->hwdec, &own)) {
+             talloc_free(mpi);
+             return false;
+         }
+ 
+         par = p->hwdec.mapper->dst_params;
++        if (join) {
++            par.w = mpi->params.w;
++            par.crop = mpi->params.crop;
++        }
+     }
+ 
+     mp_image_params_guess_csp(&par);
+@@ -1081,7 +1159,17 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex, const struct pl_source_frame *src
+         frame->color.transfer = PL_COLOR_TRC_GAMMA22;
+     }
+ 
+-    if (fp->hwdec) {
++    if (fp->hwdec && join) {
++        p->sw_upload_perf.count = 0;
++
++        struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(par.imgfmt);
++        setup_hwdec_plane_mapping(frame, &desc);
++        if (!map_joined(p, gpu, mpi, frame)) {
++            MP_ERR(vo, "Failed joining the frame's pictures!\n");
++            talloc_free(mpi);
++            return false;
++        }
++    } else if (fp->hwdec) {
+         p->sw_upload_perf.count = 0;
+ 
+         struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(par.imgfmt);
+@@ -1110,7 +1198,7 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex, const struct pl_source_frame *src
+     // Update chroma location, must be done after initializing planes
+     pl_frame_set_chroma_location(frame, par.chroma_location);
+ 
+-    if (mpi->enhancement_layer) {
++    if (mpi->enhancement_layer && !join) {
+         struct mp_image *el = mpi->enhancement_layer;
+         fp->el_hwdec = ra_hwdec_get(&p->hwdec_ctx, el->imgfmt);
+ 
+@@ -1177,6 +1265,8 @@ static void unmap_frame(pl_gpu gpu, struct pl_frame *frame,
+         if (tex)
+             MP_TARRAY_APPEND(p, p->sub_tex, p->num_sub_tex, tex);
+     }
++    for (int i = 0; i < MP_ARRAY_SIZE(fp->join_tex); i++)
++        pl_tex_destroy(gpu, &fp->join_tex[i]);
+     for (int i = 0; i < MP_ARRAY_SIZE(fp->el_tex); i++) {
+         if (fp->el_tex[i])
+             pl_tex_destroy(gpu, &fp->el_tex[i]);
+@@ -2684,6 +2774,7 @@ static void uninit(struct vo *vo)
+ 
+     pl_icc_close(&p->icc_profile);
+     pl_renderer_destroy(&p->rr);
++    pl_dispatch_destroy(&p->join_dp);
+ 
+     for (int i = 0; i < VO_PASS_PERF_MAX; ++i) {
+         pl_shader_info_deref(&p->perf_fresh.info[i].shader);
+-- 
+2.42.0
+

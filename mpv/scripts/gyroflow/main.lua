@@ -1117,13 +1117,27 @@ local function add_sphere(source)
     local rig = source.rig
     rig360 = rig
     local tracks = math.max(1, math.floor(tonumber(rig.tracks) or 1))
-    if tracks > 1 then
-        local inputs = ""
-        for i = 1, tracks do inputs = inputs .. "[vid" .. i .. "]" end
-        mp.set_property("file-local-options/lavfi-complex", inputs .. "hstack=inputs=" .. tracks .. "[vo]")
+    local vo = mp.get_property("vo") or ""
+    local gpu_ok = o.gpu ~= "no" and file_exists(GPU_TABLE) and mpv_has_pts() and (vo == "" or vo:find("gpu-next", 1, true)) and not gpu_blocked[mp.get_property("path") or ""]
+    -- The app's mpv joins two lens tracks itself (tools/mpv-patches/0014, --video-join): each decoded on the GPU
+    -- (VideoToolbox's zero-copy) and drawn side by side there, for the GPU path's sphere shader. Elsewhere lavfi-complex's
+    -- hstack joins them in memory
+    local join = gpu_ok and tracks == 2 and mp.get_property_native("option-info/video-join") ~= nil
+    if join then
+        mp.set_property("file-local-options/video-join", "yes")
+        -- The joined frame keeps the aspect view360 sets (the window's area, video-aspect-override), where the filter's
+        -- sphere was a frame of its own: a window resized to it would change the area, and the aspect again
+        mp.set_property("file-local-options/auto-window-resize", "no")
+        if o.hwdec then mp.set_property("file-local-options/hwdec", "auto") end
+    else
+        if tracks > 1 then
+            local inputs = ""
+            for i = 1, tracks do inputs = inputs .. "[vid" .. i .. "]" end
+            mp.set_property("file-local-options/lavfi-complex", inputs .. "hstack=inputs=" .. tracks .. "[vo]")
+        end
+        -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/360-throughput-spike.md)
+        if o.hwdec then mp.set_property("file-local-options/hwdec", platform.macos and "videotoolbox-copy" or "auto-copy") end
     end
-    -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/360-throughput-spike.md)
-    if o.hwdec then mp.set_property("file-local-options/hwdec", platform.macos and "videotoolbox-copy" or "auto-copy") end
     -- Each track decoded on a thread of its own: in the playback thread mpv decodes them one after the other, and two
     -- X5 tracks came at ~31 fps together where one alone comes at ~70 (with it, ~65 both; through the plugin 24 -> 30 fps
     -- at 7680, 27 -> 53 at 5760, without the screen)
@@ -1138,8 +1152,7 @@ local function add_sphere(source)
     -- The GPU path (docs/gpu-render.md, "360 on the GPU"): the sphere made by a shader from the joined tracks
     -- (gyroflow-gpu-table --sphere360: each lens through gyroflow-core's kernel, blended by its share, the stamp for the
     -- view shader), every frame, no VapourSynth. The clip opens meanwhile, paused on black
-    local vo = mp.get_property("vo") or ""
-    if o.gpu ~= "no" and file_exists(GPU_TABLE) and mpv_has_pts() and (vo == "" or vo:find("gpu-next", 1, true)) and not gpu_blocked[mp.get_property("path") or ""] then
+    if gpu_ok then
         gpu_set_shader(gpu and gpu.shader, GPU_HOLD_SHADER)
         gpu = { shader = GPU_HOLD_SHADER, hold = true, sphere = true }
         if not mp.get_property_native("pause") then
@@ -1163,8 +1176,8 @@ local function add_sphere(source)
                 mp.set_property_native("glsl-shader-opts", opts)
                 mp.set_property_native("user-data/gyroflow/gpu", { mode = "sphere", chromatic = false })
                 gpu_unhold()
-                mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined; the sphere %sx%s on the GPU, its table in %d ms", tostring(rig.brand),
-                    tostring(rig.model), tonumber(rig.lenses) or 0, tracks, tostring(rig.width), tostring(rig.height), tostring(reply.output and reply.output[1]),
+                mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined %s; the sphere %sx%s on the GPU, its table in %d ms", tostring(rig.brand),
+                    tostring(rig.model), tonumber(rig.lenses) or 0, tracks, tostring(rig.width), tostring(rig.height), join and "on the GPU" or "in memory", tostring(reply.output and reply.output[1]),
                     tostring(reply.output and reply.output[2]), math.floor((mp.get_time() - t) * 1000)))
                 return
             end

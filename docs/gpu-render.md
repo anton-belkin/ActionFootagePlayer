@@ -345,9 +345,20 @@ texture a tenth of the sphere's size); under the sphere the stamp's two rows, as
 its own (libplacebo keeps them per file), so view360.glsl reads the stamp from the picture: a second stamp pass at MAIN
 when `gyroflow_stamp360` is 1, its luma pass otherwise. On the X5 sample against Sphere360 at the same frame: the
 sphere differs by 1.05 of 255 on average (bilinear here, Sphere360's bicubic; blended in RGB, not per plane), the view
-by 2.97; its table in 0.6-0.85 s; 25 fps with no frame dropped in 15 s (19 dropped through VapourSynth). The tracks
-are still decoded with a copy to memory and joined there (lavfi-complex hstack): the part the mpv patch below takes
-away, needed for 8K60.
+by 2.97; its table in 0.6-0.85 s; 25 fps with no frame dropped in 15 s (19 dropped through VapourSynth).
+
+**The tracks on the GPU** (tools/mpv-patches/0014, `--video-join`; same day): upstream mpv now pairs a second video
+track with the first for Dolby Vision's enhancement layer (f_enhancement_pair: a dependent track the demuxer reads
+along, decoded with the same hardware decoding, each frame attached to the first track's of the same time, and mapped
+by vo_gpu_next). The patch makes a file's first two video tracks of the same size and codec such a pair, and
+vo_gpu_next maps both VideoToolbox surfaces and draws them side by side into planes of the frame's own (the mapped
+textures can be sampled, not blitted): the frame the sphere shader reads, as hstack's was, without the copy to memory
+and back. The joined frame keeps the aspect view360 sets (--video-aspect-override, which each decoder applies to its own
+picture), and main.lua keeps the window's size for it (auto-window-resize no: resized to the aspect it would change
+the area view360 sets it from, and again). On the X5 sample (two 3840x3840 HEVC tracks, 25 fps): ~29 % of a core
+against ~50 % joined in memory and 350-430 % through VapourSynth, no frame dropped; not held to the clock ~48 frames
+a second with the view (~50 with no shader at all: the decoding and the join are the ceiling). An X5 records 8K at 30
+at most and 5.7K60 is half the pixels: both fit. Not tried: three or more tracks, other cameras' files.
 
 **What it needs: both lens tracks on the GPU.** Under `lavfi-complex` mpv gives no hardware decoding device to the
 tracks' decoders, so today they are decoded with a copy to memory and joined there. Keeping them on the GPU needs an
