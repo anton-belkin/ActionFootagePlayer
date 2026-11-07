@@ -222,7 +222,7 @@ and a denoise for screenshots and exports, can move into the renderer later. Not
 
 | Host | mpv | Status of `PTS` | Notes |
 |---|---|---|---|
-| Mac app | our build, pinned at mpv fba6342 with patches | has it | **The DV looks present through AVSampleBufferDisplayLayer (patch 0002), which runs no user shaders**: the warp would need to run before that layer gets its frame, a change to patch 0002, or the DV looks keep the VapourSynth path |
+| Mac app | our build, pinned at mpv fba6342 with patches | has it | The DV looks present through AVSampleBufferDisplayLayer (patch 0002), which renders through libplacebo like the swapchain, user shaders included: the warp runs under them (checked 2026-11-07) |
 | Windows app | shinchiro's build today; our own build with our patches, as on the Mac (decided 2026-11-06) | has it (the build we ship, 20261018 at mpv 01e2533, is after the change) | the generic patches (0001, 0003, 0011) and the 360 tracks patch can then apply there too |
 | Linux | the distribution's | mpv 0.42.0, released 2026-11-05; distros will follow | **VapourSynth is no longer needed for playback**: Debian, Ubuntu and Arch's mpv lack it today; the plugin needs only gpu-next and its own binaries |
 | Streaming server | none: our renderer | n/a | below |

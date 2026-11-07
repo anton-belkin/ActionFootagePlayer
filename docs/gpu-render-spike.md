@@ -224,6 +224,53 @@ renders 16:9) needs mpv's video rectangle set to the output's shape (`video-aspe
 OUTPUT is the source's shape; and a clip without a project must get its table from the same levels and smoothing the
 engine gives it (`Engine::load`'s level geometry), which `Clip::load` doesn't do yet.
 
+## Step 2, part 3 and step 4 (first cut): the player on the GPU, and a stream from the NAS
+
+Built the night of 2026-11-06/07, at Anton's request ("a working build of the player on my Mac that works fully via
+GPU, and a service that streams a selected clip stabilized and in HDR").
+
+### The player (macOS app, Linux with mpv ≥ 0.42)
+
+- **gpu=auto** (gyroflow.conf; `no` keeps VapourSynth): for a clip the shader can render, main.lua runs
+  `gyroflow-gpu-table --player` with the very arguments it would give the VapourSynth filter, and puts the shader it
+  writes in mpv's glsl-shaders instead of adding the filter. `Engine::load`'s loading half is now `prepare()` (lib.rs),
+  shared by both, so the views, levels, horizon lock, underwater and lens modes are the same code. The table is
+  written in 0.15-0.5 s (a project; all of a clip's own motion data is read first).
+- **Changes while playing** (view, level, horizon, lens, under water, edges, fringes, a project saved in Gyroflow)
+  write the shader again and swap it in within ~2 s, the dlogm plugin told so it keeps it under its looks
+  (`gyroflow-shader` message). What the shader can't do loads the clip again through VapourSynth: a frame turned or cut
+  (the side panel's Frame), a file's own display turn (mpv turns it again), lens correction below 100 % (as recorded),
+  Sony lenses, IBIS/OIS, the equirect output (`gpu_table::unsupported`). Crop mode's camera and the clean still frame
+  need the filter: on the GPU path crop mode uses mpv's own pan and zoom, and Ctrl+p has nothing to clean.
+- **The Dolby Vision looks work**: the sample-buffer layer (patch 0002) renders through libplacebo like the swapchain
+  does, user shaders included (gpu-render.md's note that it runs none was wrong). Anton's setup (dv on both screens,
+  wider view, smooth fill) runs on the GPU path.
+- **Chromatic correction inside the warp**: under water, the grid pass also finds red's and blue's coordinates (each
+  refracted by its own index, dispersion.rs's ratios) and the sampling pass reads each channel there, once, from the
+  source. It needs the RGB layout (the whole source converted first); out of the water, or with Ctrl+a off, the plane
+  layout. mpv's chroma upscaling before the warp is set to bilinear on the RGB layout (the app's Lanczos took 10 ms of a
+  5.3K frame on the M1 Pro; 2.2 ms after).
+- **Edge fill**: *smooth* is the frame's edge colors where it's nearest, blurred wider further out and muted with the
+  distance; where a ray has no image at all (past the lens's field, outside Snell's window under water), from the edge of
+  what the lens sees. *sphere* (the trail by direction) is a 2048×1024 rgba32f equirect storage texture: a compute pass
+  after the warp writes every covered output pixel's color by its direction in the world (each frame's output camera
+  in the world, sphere.rs's View, is a texel of the table), with its time; the fill reads it with a 2.5 s half-life over
+  the smooth fill. RGB layout. 0.1 ms a frame on the M1 Pro.
+- **Measured in the app on the M1 Pro** (clip 0126, its project, dv look, 1080p screen): GPU path 0 drops in 20 s at 34 %
+  CPU; VapourSynth 0 drops at 86 % CPU. Warp 0.6 ms (grid, chromatic), sphere trail 0.1 ms. HERO12 5.3K 8:7 dive clip
+  (default preset, levels, wider view, chromatic): 0 drops, 16:9 output shown as such (video-aspect-override).
+- Not done on the GPU path yet: the paused frame at full size (the window's size is the render size anyway), the
+  quality menu's GPU knobs (interpolation stays main.lua's), Windows (postponed).
+
+### The stream (tools/stream, on the NAS)
+
+afp-render: VAAPI decode → the planes imported into Vulkan (mpv's way) → libplacebo with the warp and look shaders,
+PTS set per frame → rendered straight into the encoder's VAAPI P010 surfaces (imported as render targets: works on the
+N100's ANV) → hevc_vaapi low-power Main10, HLG BT.2020 → HLS fMP4. Three frames in flight (waiting for the GPU after each
+frame cost 20 %). afp_stream.py: the clip list, the M3U for Jellyfin's Live TV, a stream per clip rendered on demand.
+Real time on the N100 with the plane layout and bilinear (67-69 fps for 4K60 → 1080p with the look); see
+tools/stream/README.md. Running on the NAS as the container `afp-stream` (port 8099), the library read-only.
+
 ## Not covered
 
 - Chromatic correction, other lens models, digital lenses, edges: step 2 and 3.
