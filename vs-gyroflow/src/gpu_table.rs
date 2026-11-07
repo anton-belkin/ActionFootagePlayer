@@ -461,6 +461,15 @@ pub fn knot_quats(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 4]> {
     }).collect()
 }
 
+/// Crop mode's camera as warp.glsl turns the output ray by it (gyroflow_cam_x..w): gyroflow-core's view rotation in
+/// its matrices' axes (y and z turned), which each row's rotation is multiplied by on the right
+pub fn camera_quat(cam: &crate::Camera) -> UnitQuaternion<f64> {
+    let mut p = ComputeParams::default();
+    p.view_rotation = (cam.yaw, cam.pitch, cam.roll);
+    let v = gyroflow_core::stabilization::FrameTransform::view_rotation(&p);
+    UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(v.w, v.i, -v.j, -v.k))
+}
+
 pub fn nlerp(a: [f32; 4], b: [f32; 4], f: f32) -> [f32; 4] {
     let q = [0, 1, 2, 3].map(|i| a[i] + (b[i] - a[i]) * f);
     let l = q.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -502,7 +511,7 @@ mod tests {
 
     #[repr(C)]
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, _pad: [f32; 2] }
+    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, cam: [f32; 4], zoom: f32, _pad: f32 }
 
     const GRID_TEX: (u32, u32) = (600, 340);
 
@@ -516,7 +525,7 @@ mod tests {
         if uv_out { defs += "\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)"; }
         let head = format!("#version 450
 {}
-layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; }};
+layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; float gyroflow_cam_x; float gyroflow_cam_y; float gyroflow_cam_z; float gyroflow_cam_w; float gyroflow_cam_zoom; }};
 layout(set = 0, binding = 1) uniform texture2D hooked_t;
 layout(set = 0, binding = 2) uniform sampler hooked_s;
 layout(set = 0, binding = 3) uniform texture2D table_t;
@@ -579,13 +588,15 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
 
     /// Each output pixel's (u, v) as the shader computes it, out.0 x out.1, for the frame at `pts`: the grid pass first
     /// when `grid` is given, then `fs` (a fragment pass's GLSL)
-    fn render_uv(g: &Gpu, grid: Option<&str>, fs: &str, table: &Table, src_size: (usize, usize), out: (usize, usize), pts: f32) -> Vec<[f32; 4]> {
+    fn render_uv(g: &Gpu, grid: Option<&str>, fs: &str, table: &Table, src_size: (usize, usize), out: (usize, usize), pts: f32, cam: Option<&crate::Camera>) -> Vec<[f32; 4]> {
         let d = &g.device;
         let hooked = texture(g, 4, 4, Some(&[0.5; 64]), wgpu::TextureUsages::TEXTURE_BINDING);
         let table_tex = texture(g, table.width, table.height, Some(&table.data), wgpu::TextureUsages::TEXTURE_BINDING);
         let grid_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
         let grid_rb_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
-        let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1, _pad: [0.0; 2] };
+        let q = cam.map(camera_quat).unwrap_or_else(UnitQuaternion::identity);
+        let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1,
+                    cam: [q.i as f32, q.j as f32, q.k as f32, q.w as f32], zoom: cam.map(|c| c.zoom as f32).unwrap_or(1.0), _pad: 0.0 };
         let buf = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<U>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         g.queue.write_buffer(&buf, 0, bytemuck::bytes_of(&u));
         let sampler = d.create_sampler(&wgpu::SamplerDescriptor::default());
@@ -648,6 +659,35 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
     }
 
     #[test]
+    fn the_camera_is_a_rotation_after_the_rows() {
+        // Crop mode's camera (view_rotation): each row's rotation with it is the row's without it times C, C the view
+        // rotation in the matrices' axes (y and z turned: i V i^-1), so the shader turns the output ray by C first;
+        // the output camera in the world (the sphere trail's) times C too; the zoom is the FOV's
+        let Ok(projects) = std::env::var("AFP_GPU_CLIP") else { eprintln!("AFP_GPU_CLIP not set: skipped"); return; };
+        let project = projects.split(';').next().unwrap();
+        let clip = Clip::load(project, Some(10.0)).unwrap();
+        let cam = crate::Camera { yaw: 12.0, pitch: -7.0, roll: 4.0, zoom: 1.25 };
+        let turned = Clip { params: cam.apply(&clip.params), size: clip.size, output_size: clip.output_size, fps: clip.fps, frame_count: clip.frame_count, frame_offset_us: clip.frame_offset_us };
+        let c = camera_quat(&cam);
+        let q = |m: &[f32; 16]| {
+            let mat = Matrix3::new(m[0] as f64, m[1] as f64, m[2] as f64, m[3] as f64, m[4] as f64, m[5] as f64, m[6] as f64, m[7] as f64, m[8] as f64);
+            UnitQuaternion::from_rotation_matrix(&Rotation3::from_matrix_unchecked(mat))
+        };
+        for f in [0usize, clip.frame_count / 2] {
+            let (a, b) = (clip.transform(f, clip.output_size), turned.transform(f, turned.output_size));
+            assert!((b.kernel_params.fov / a.kernel_params.fov - 1.25).abs() < 1e-4, "fov {} -> {}", a.kernel_params.fov, b.kernel_params.fov);
+            for r in [0usize, a.matrices.len() / 2, a.matrices.len() - 1] {
+                let err = (q(&a.matrices[r]) * c).angle_to(&q(&b.matrices[r])).to_degrees();
+                assert!(err < 0.001, "frame {f} row {r}: {err}°");
+            }
+            let ts = (f as f64 * 1e6 / clip.fps) as i64 + clip.frame_offset_us;
+            let w = |p: &ComputeParams| { let m: Matrix3<f64> = nalgebra::convert(crate::sphere::View::at(p, ts).rotation()); UnitQuaternion::from_rotation_matrix(&Rotation3::from_matrix_unchecked(m)) };
+            let err = (w(&clip.params) * c).angle_to(&w(&turned.params)).to_degrees();
+            assert!(err < 0.001, "frame {f}: the world's {err}°");
+        }
+    }
+
+    #[test]
     fn the_shader_maps_pixels_as_gyroflow_does() {
         let Ok(projects) = std::env::var("AFP_GPU_CLIP") else { eprintln!("AFP_GPU_CLIP not set: skipped"); return; };
         let g = gpu();
@@ -663,6 +703,8 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
         let fast = if n > 1049 { 1049 } else { n / 2 };
         let base = Options { mode: Mode::Exact, grid_step: 16, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false, edge_fill: None, sphere: false, time_offset: 0.0, denoise: false, knots: 33, interp: 2, shrink: false, range: None };
         // (label, options, every frame or only the fastest)
+        let cam = crate::Camera { yaw: 12.0, pitch: -7.0, roll: 4.0, zoom: 1.25 };
+        let turned = Clip { params: cam.apply(&clip.params), size: clip.size, output_size: clip.output_size, fps: clip.fps, frame_count: clip.frame_count, frame_offset_us: clip.frame_offset_us };
         let cases = [
             ("exact, 33 knots", base, true),
             ("exact, every row", Options { knots: 0, range: Some((fast, fast)), ..base }, false),
@@ -670,9 +712,13 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
             ("grid 32, 33 knots", Options { mode: Mode::Grid, grid_step: 32, ..base }, false),
             ("grid 8 bilinear, 33 knots", Options { mode: Mode::Grid, grid_step: 8, grid_linear: true, ..base }, false),
         ];
-        for (label, opts, all) in cases {
+        // Crop mode's camera, as shader parameters on the table without it, against Gyroflow with it
+        let with_camera = [("exact, 33 knots, a camera", base), ("grid 8 bilinear, 33 knots, a camera", Options { mode: Mode::Grid, grid_step: 8, grid_linear: true, ..base })];
+        let cases = cases.into_iter().map(|(l, o, a)| (l, o, a, false)).chain(with_camera.into_iter().map(|(l, o)| (l, o, false, true)));
+        for (label, opts, all, camera) in cases {
             // The full rows only for the frames compared: the whole clip would be 5 M texels
             let table = Table::build(&clip, &opts).unwrap();
+            let reference = if camera { &turned } else { &clip };
             let (grid, fs) = match opts.mode {
                 Mode::Exact => (None, glsl(&clip, &opts, &table, "exact", true)),
                 _ => (Some(glsl(&clip, &opts, &table, "grid", true)), glsl(&clip, &opts, &table, "sample", true)),
@@ -680,9 +726,9 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
             for &frame in &frames {
                 if !all && frame != fast { continue; }
                 let pts = (frame as f64 / clip.fps) as f32;
-                let uv = render_uv(&g, grid.as_deref(), &fs, &table, clip.size, out, pts);
+                let uv = render_uv(&g, grid.as_deref(), &fs, &table, clip.size, out, pts, camera.then_some(&cam));
                 // Gyroflow at the same pixels, into a buffer of the output's size (the filter's dst)
-                let tr = clip.transform(frame, out);
+                let tr = reference.transform(frame, out);
                 let kp = &tr.kernel_params;
                 let out_c = Vector2::new(kp.output_width as f32 / 2.0, kp.output_height as f32 / 2.0);
                 let f = gyroflow_core::stabilization::projection::output_focal(kp);
@@ -704,7 +750,8 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
                 }
                 eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out", sum / n.max(1) as f64);
                 assert!(n > out.0 * out.1 / 2, "frame {frame}: too few pixels compared");
-                assert!(worst < 0.1, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
+                // The bilinear grid with a camera zoomed out (wider than the clip, more of the lens's curve): up to 0.2 px
+                assert!(worst < if camera && opts.grid_linear { 0.25 } else { 0.1 }, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
                 assert!(mismatched < out.0, "frame {frame}: {mismatched} pixels the shader left out");
             }
         }

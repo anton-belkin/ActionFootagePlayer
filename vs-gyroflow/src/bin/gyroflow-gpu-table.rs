@@ -146,8 +146,11 @@ fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &st
     lap("shader");
     if let Err(e) = std::fs::write(out, text) { return serde_json::json!({ "error": format!("{out}: {e}") }); }
     lap("written");
+    // Crop mode's camera model (crop.lua): the output camera's focal length in output widths and heights, mid-clip
+    let mid = (clip.frame_count / 2) as f64 * 1_000_000.0 / clip.fps;
+    let (fx, fy) = vs_gyroflow::sphere::View::at(&clip.params, mid.round() as i64 + clip.frame_offset_us).focal();
     serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
-                        "chromatic": wet, "sphere": sphere, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
+                        "chromatic": wet, "sphere": sphere, "focal": [fx, fy], "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
 }
 
 /// The request to a server: one line of { json, out }, one line back. None: no server there (the caller does it).

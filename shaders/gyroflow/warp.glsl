@@ -36,6 +36,26 @@
 //!MAXIMUM 1
 1
 
+//!PARAM gyroflow_cam_x
+//!TYPE DYNAMIC float
+0.0
+
+//!PARAM gyroflow_cam_y
+//!TYPE DYNAMIC float
+0.0
+
+//!PARAM gyroflow_cam_z
+//!TYPE DYNAMIC float
+0.0
+
+//!PARAM gyroflow_cam_w
+//!TYPE DYNAMIC float
+1.0
+
+//!PARAM gyroflow_cam_zoom
+//!TYPE DYNAMIC float
+1.0
+
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
 //!FORMAT rgba32f
@@ -360,13 +380,17 @@ bool frame_setup()
 // (SRC_W x SRC_H, centers at whole numbers): Stabilization::undistort_coord. False where the ray has no image. The
 // output pixel goes into the kernel's output frame (OUT_W x OUT_H) as the VapourSynth path maps its pixel j there:
 // j * OUT_W / width
-// Output pixel j's ray, in the output camera
+// Output pixel j's ray, in the output camera. Crop mode's camera (main.lua's gyroflow_cam_ parameters, set as it turns:
+// no new table) turns it first, and zooms by the FOV: gyroflow-core's view_rotation multiplies each row's rotation on
+// the right by the view's quaternion in its matrices' axes (gpu_table::camera_quat), the world's too, and its zoom is
+// the FOV's (Camera::apply)
 vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_pos = j * size / target_size + t2.xy;
-    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / lens.x;
-    return ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom);
+    vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+    return qrot(vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w), d);
 }
 
 bool source_coord(vec2 j, out vec2 uv)
@@ -734,10 +758,11 @@ float cur1(ivec2 p) { return lum(HOOKED_mul * texelFetch(HOOKED_raw, clamp(p, iv
 vec2 predict(vec2 j, vec4 qp)
 {
     vec3 w = qrot(table(15), output_ray(j));
-    vec3 d = qrot(vec4(-qp.xyz, qp.w), w);
+    // Out of the world by that frame's camera, then crop mode's (output_ray's turn, undone)
+    vec3 d = qrot(vec4(-gyroflow_cam_x, -gyroflow_cam_y, -gyroflow_cam_z, gyroflow_cam_w), qrot(vec4(-qp.xyz, qp.w), w));
     if (d.z < 1e-3) return j;
     vec2 size = vec2(OUT_W, OUT_H);
-    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / lens.x;
+    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom);
     float rxy = max(length(d.xy), 1e-9);
 #if PROJ == 0
     vec2 n = d.xy / d.z;

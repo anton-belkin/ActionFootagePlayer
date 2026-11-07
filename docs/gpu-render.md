@@ -185,6 +185,31 @@ What changed:
 Left: gyroflow-core's zoom search (0.2 s of a project's load) and the rows' transforms (0.3 s of a no-project table),
 done once per clip and settings now; mpv's own 0.4-0.8 s.
 
+### Save frame (crop mode and the photo) on the GPU path
+
+**Crop mode's camera** is the warp's own: `gyroflow_cam_x..w` and `gyroflow_cam_zoom` (DYNAMIC parameters, set through
+glsl-shader-opts by main.lua's gpu_camera as it turns). gyroflow-core's view_rotation multiplies each row's rotation
+on the right by the view's quaternion in its matrices' axes (y and z turned), and the output camera's in the world
+too; the zoom is the FOV's (`Camera::apply`). So the shader turns the output ray by it first, and the sphere trail and
+the denoise's motion prediction follow. Checked against gyroflow-core with the camera (gpu_table's tests: each row's
+rotation to 0.001°; the shader's coordinates within 0.004-0.04 px exact, 0.04-0.17 px through the 8 px grid, which
+bends more with the camera zoomed out). Turning it costs nothing: no table, no render of the paused frame again, no
+seek, no preview standing in (the VapourSynth path's crop_preview.glsl and its parity marks): the next refresh has it,
+paused or playing.
+
+**The photo** (Alt+s; Enter in crop mode) is the frame as the player renders it, where that's the photo: mpv's
+screenshot of the video at its size, through the warp, in the video's own colors (BT.2020 HLG: `screenshot-format=png`
+with `screenshot-tag-colorspace`; `screenshot-raw` converts to sRGB whatever it's asked), an uncompressed 16-bit PNG
+(0.36-0.44 s), and `gyroflow-export --photo --image` makes the SDR image from it and writes the HEIC with its gain map
+(or the Ultra HDR JPEG), its metadata and the Live Photo's motion as before. Measured on clip 0068 with a camera
+turned: **1.2 s from Enter to the photo saved** (gyroflow-export alone 0.63 s, against 1.69 s rendering the frame
+itself, and 4.5-5.2 s with the clean frame); a Live Photo 4.3 s, its 3 s of motion (2.9 s, rendered as before)
+taking the most. Against the photo rendered the old way at the same moment: the same picture, a mean difference of 2.4
+of 255 inside it; the edges are the warp's own fill, as on screen. Only for the looks whose frame is the HLG (hdr,
+tonemap, dv, dvsdr; maker and nbcu end in SDR) and with the clean frame off (it takes the frames around it at full
+size: gyroflow-export's own). The photo has the video's pixels across the view (a 0.8 frame of 4K: 3072x1728), where
+the old way renders the view bigger by the camera's zoom.
+
 ### Where the warp sits in mpv's chain
 
 `MAINPRESUB`, as the 360 view does: after the conversion to RGB, before the looks, and at the size of the video's

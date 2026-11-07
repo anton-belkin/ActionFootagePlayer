@@ -463,6 +463,8 @@ local gpu_refresh
 local gpu_pending = false
 -- The clip loaded again from where it plays (further down)
 local play_again
+-- Crop mode's camera in the warp (further down)
+local gpu_camera
 -- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
 local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
@@ -732,6 +734,7 @@ end, function() return filtering() and frame_step(current_source) or 1 end)
 crop.init({
     stabilizing = function()
         if not filtering() then return false end
+        if gpu then return true end
         for _, f in ipairs(mp.get_property_native("vf") or {}) do
             if f.label == LABEL and f.enabled ~= false then return true end
         end
@@ -740,6 +743,10 @@ crop.init({
     write = function() write_edge_control() end,
     control_path = function() return EDGE_CONTROL end,
     shader = crop_shader,
+    -- The GPU path: the camera in the warp itself, at once (gpu_camera), its focal length from the table
+    gpu = function() return gpu ~= nil and gpu.shader ~= nil and not gpu.hold end,
+    camera = function(c) gpu_camera(c) end,
+    focal = function() return gpu and gpu.focal end,
 })
 
 -- The upright source's ratio, W:H reduced
@@ -950,8 +957,38 @@ local function gpu_apply(reply)
     -- The RGB layout has mpv convert the whole source first: its chroma upscaled bilinearly, the warp resamples it
     -- anyway (the app's Lanczos took 10 ms of a 5.3K frame on an M1 Pro)
     mp.set_property("file-local-options/cscale", reply.mode == "grid" and "bilinear" or (mp.get_property("options/cscale") or "bilinear"))
-    gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic }
+    gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic,
+            focal = type(reply.focal) == "table" and reply.focal or nil }
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
+end
+
+-- Crop mode's camera on the GPU path (crop.lua): the warp's gyroflow_cam_ parameters, set as it turns (no table
+-- written again, nothing rendered again but the frame): gyroflow-core's view rotation (yaw about y, pitch about x, roll
+-- about z, each turned the other way: FrameTransform::view_rotation) in its matrices' axes, y and z turned
+-- (gpu_table::camera_quat), and the zoom times the FOV. nil: none
+gpu_camera = function(c)
+    local function axis(x, y, z, deg)
+        local a = math.rad(deg) / 2
+        return { x * math.sin(a), y * math.sin(a), z * math.sin(a), math.cos(a) }
+    end
+    local function mul(a, b)
+        return { a[4] * b[1] + b[4] * a[1] + a[2] * b[3] - a[3] * b[2], a[4] * b[2] + b[4] * a[2] + a[3] * b[1] - a[1] * b[3],
+                 a[4] * b[3] + b[4] * a[3] + a[1] * b[2] - a[2] * b[1], a[4] * b[4] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3] }
+    end
+    local q, zoom = { 0, 0, 0, 1 }, 1
+    if c then
+        q = mul(mul(axis(0, 1, 0, -c.yaw), axis(1, 0, 0, -c.pitch)), axis(0, 0, 1, -c.roll))
+        q = { q[1], -q[2], -q[3], q[4] }
+        zoom = c.zoom
+    end
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    opts.gyroflow_cam_x, opts.gyroflow_cam_y, opts.gyroflow_cam_z, opts.gyroflow_cam_w = string.format("%.9g", q[1]), string.format("%.9g", q[2]),
+        string.format("%.9g", q[3]), string.format("%.9g", q[4])
+    opts.gyroflow_cam_zoom = string.format("%.9g", zoom)
+    if not c then
+        for _, k in ipairs({ "gyroflow_cam_x", "gyroflow_cam_y", "gyroflow_cam_z", "gyroflow_cam_w", "gyroflow_cam_zoom" }) do opts[k] = nil end
+    end
+    mp.set_property_native("glsl-shader-opts", opts)
 end
 
 local function add_filter(source, done)
@@ -1125,6 +1162,8 @@ local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
     if gpu then gpu_set_shader(gpu.shader, nil) end
     gpu = nil
+    -- Crop mode's camera stays with the clip it was turned on
+    if (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_cam_w then gpu_camera(nil) end
     mp.set_property_native("user-data/gyroflow/gpu", false)
     mp.set_property_native("user-data/gyroflow/headings360", false)
     -- What's saved for it, else the session's; the source's input (a clip without motion data shows the frame and turn
