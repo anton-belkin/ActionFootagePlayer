@@ -335,6 +335,20 @@ and the blend along the feather spans. Two shapes:
 The first is the one to build; the second only if the sphere's size per frame turns out to be the cost **(to try)**.
 The stamp under the sphere becomes the per-frame table, as for flat clips.
 
+**Built (2026-11-07), the sphere on the GPU** (`gyroflow-gpu-table --sphere360`, gpu_table::sphere_shader, warp.glsl's
+sphere360 pass; main.lua's add_sphere): from sphere360::prepare, what Sphere360 renders with (the rig, each lens's
+gyroflow-core parameters: the equirect output, RigLens, no smoothing), the table has per frame each lens's block (its
+parameters and knots: RigLens is in them already, its turn in the rows' rotations, its offset in translation3d, its
+validity the field limit) and the stamp's 34 codes. The pass maps each sphere pixel through each lens's kernel (the
+fork's equirect projection, ported) and blends them by their shares (rig.rs's weights, with the masks, baked into a
+texture a tenth of the sphere's size); under the sphere the stamp's two rows, as gray. A shader's saved textures are
+its own (libplacebo keeps them per file), so view360.glsl reads the stamp from the picture: a second stamp pass at MAIN
+when `gyroflow_stamp360` is 1, its luma pass otherwise. On the X5 sample against Sphere360 at the same frame: the
+sphere differs by 1.05 of 255 on average (bilinear here, Sphere360's bicubic; blended in RGB, not per plane), the view
+by 2.97; its table in 0.6-0.85 s; 25 fps with no frame dropped in 15 s (19 dropped through VapourSynth). The tracks
+are still decoded with a copy to memory and joined there (lavfi-complex hstack): the part the mpv patch below takes
+away, needed for 8K60.
+
 **What it needs: both lens tracks on the GPU.** Under `lavfi-complex` mpv gives no hardware decoding device to the
 tracks' decoders, so today they are decoded with a copy to memory and joined there. Keeping them on the GPU needs an
 mpv patch that hands both decoded tracks to libplacebo as textures, zero-copy.

@@ -1128,6 +1128,56 @@ local function add_sphere(source)
     -- X5 tracks came at ~31 fps together where one alone comes at ~70 (with it, ~65 both; through the plugin 24 -> 30 fps
     -- at 7680, 27 -> 53 at 5760, without the screen)
     mp.set_property("file-local-options/vd-queue-enable", "yes")
+    -- What it has for the view's heading modes, for view360 and its panel (the plugin finds the same for its stamp,
+    -- reading the whole clip's motion and GPS: about a second for a few minutes of a clip)
+    mp.command_native_async({ name = "subprocess", args = { PROBE, "--headings", source.project }, capture_stdout = true, playback_only = true }, function(_, r)
+        if rig360 ~= rig then return end
+        local h = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+        mp.set_property_native("user-data/gyroflow/headings360", type(h) == "table" and h or { error = "gyroflow-probe --headings failed" })
+    end)
+    -- The GPU path (docs/gpu-render.md, "360 on the GPU"): the sphere made by a shader from the joined tracks
+    -- (gyroflow-gpu-table --sphere360: each lens through gyroflow-core's kernel, blended by its share, the stamp for the
+    -- view shader), every frame, no VapourSynth. The clip opens meanwhile, paused on black
+    local vo = mp.get_property("vo") or ""
+    if o.gpu ~= "no" and file_exists(GPU_TABLE) and mpv_has_pts() and (vo == "" or vo:find("gpu-next", 1, true)) and not gpu_blocked[mp.get_property("path") or ""] then
+        gpu_set_shader(gpu and gpu.shader, GPU_HOLD_SHADER)
+        gpu = { shader = GPU_HOLD_SHADER, hold = true, sphere = true }
+        if not mp.get_property_native("pause") then
+            gpu_held = true
+            mp.set_property_native("pause", true)
+        end
+        gpu_count = gpu_count + 1
+        local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
+        local args = { GPU_TABLE, "--sphere360", source.project, out, tostring(o.sphere_width > 0 and o.sphere_width or 0),
+                       tostring(o.stitching_distance > 0 and o.stitching_distance or 0), string.format("%.6f", time_offset() or 0) }
+        local t = mp.get_time()
+        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
+            local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
+            if rig360 ~= rig then return end
+            if reply and reply.shader then
+                gpu_set_shader(GPU_HOLD_SHADER, reply.shader)
+                gpu = { shader = reply.shader, sphere = true }
+                -- The stamp is the shader's own (view360.glsl's LUMA pass would read none from the joined tracks)
+                local opts = mp.get_property_native("glsl-shader-opts") or {}
+                opts.gyroflow_stamp360 = "1"
+                mp.set_property_native("glsl-shader-opts", opts)
+                mp.set_property_native("user-data/gyroflow/gpu", { mode = "sphere", chromatic = false })
+                gpu_unhold()
+                mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined; the sphere %sx%s on the GPU, its table in %d ms", tostring(rig.brand),
+                    tostring(rig.model), tonumber(rig.lenses) or 0, tracks, tostring(rig.width), tostring(rig.height), tostring(reply.output and reply.output[1]),
+                    tostring(reply.output and reply.output[2]), math.floor((mp.get_time() - t) * 1000)))
+                return
+            end
+            local why = reply and reply.error or "gyroflow-gpu-table failed"
+            gpu_blocked[mp.get_property("path") or ""] = why
+            mp.msg.info("360: the GPU path can't: " .. tostring(why) .. "; through VapourSynth")
+            gpu_set_shader(GPU_HOLD_SHADER, nil)
+            gpu = nil
+            gpu_unhold()
+            play_again()
+        end)
+        return
+    end
     local vf = mp.get_property_native("vf") or {}
     local fps = tonumber(source.fps)
     local step = (o.sphere_max_fps > 0 and fps and fps > o.sphere_max_fps) and math.ceil(fps / o.sphere_max_fps - 0.05) or 1
@@ -1148,13 +1198,6 @@ local function add_sphere(source)
     mp.set_property("file-local-options/video-rotate", "no")
     mp.msg.info(string.format("360: %s %s, %d lenses in %d tracks of %sx%s, joined%s", tostring(rig.brand), tostring(rig.model), tonumber(rig.lenses) or 0,
                               tracks, tostring(rig.width), tostring(rig.height), step > 1 and string.format(", every %s frames", step) or ""))
-    -- What it has for the view's heading modes, for view360 and its panel (the plugin finds the same for its stamp,
-    -- reading the whole clip's motion and GPS: about a second for a few minutes of a clip)
-    mp.command_native_async({ name = "subprocess", args = { PROBE, "--headings", source.project }, capture_stdout = true, playback_only = true }, function(_, r)
-        if rig360 ~= rig then return end
-        local h = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
-        mp.set_property_native("user-data/gyroflow/headings360", type(h) == "table" and h or { error = "gyroflow-probe --headings failed" })
-    end)
 end
 
 -- The filter for the clip, to done() once it's decided
@@ -1164,6 +1207,11 @@ local function setup(done)
     gpu = nil
     -- Crop mode's camera stays with the clip it was turned on
     if (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_cam_w then gpu_camera(nil) end
+    if (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_stamp360 then
+        local opts = mp.get_property_native("glsl-shader-opts")
+        opts.gyroflow_stamp360 = nil
+        mp.set_property_native("glsl-shader-opts", opts)
+    end
     mp.set_property_native("user-data/gyroflow/gpu", false)
     mp.set_property_native("user-data/gyroflow/headings360", false)
     -- What's saved for it, else the session's; the source's input (a clip without motion data shows the frame and turn

@@ -276,11 +276,29 @@ fn geometry_key(j: &serde_json::Value) -> String {
     key.join("|")
 }
 
+/// `--sphere360 <video> <out.glsl> [<width> [<distance> [<time offset>]]]`: the GPU path's 360 mode (main.lua's
+/// add_sphere): the sphere shader for a 360 camera's file, its lens tracks joined side by side. Prints one JSON line:
+/// { shader, output: [w, h], ms } or { error }
+fn sphere360(args: &[String]) -> ! {
+    let t = Instant::now();
+    fn reply(v: serde_json::Value) -> ! { println!("{v}"); std::process::exit(0) }
+    let (Some(video), Some(out)) = (args.first(), args.get(1)) else { reply(serde_json::json!({ "error": "usage: --sphere360 <video> <out.glsl> [width [distance [time offset]]]" })) };
+    let num = |i: usize| args.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+    let width = if num(2) > 0.0 { num(2) as usize } else { vs_gyroflow::sphere360::DEFAULT_WIDTH };
+    if std::env::var_os("AFP_TIMES").is_some() { let _ = simplelog::TermLogger::init(log::LevelFilter::Info, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never); }
+    let prep = match vs_gyroflow::sphere360::prepare(video, width, num(3)) { Ok(p) => p, Err(e) => reply(serde_json::json!({ "error": e })) };
+    let (text, size) = match gpu_table::sphere_shader(&prep, num(4)) { Ok(v) => v, Err(e) => reply(serde_json::json!({ "error": e })) };
+    if let Err(e) = std::fs::write(out, text) { reply(serde_json::json!({ "error": format!("{out}: {e}") })); }
+    reply(serde_json::json!({ "shader": out, "output": [size.0, size.1], "joined": [prep.rig.joined_size().0, prep.rig.joined_size().1],
+                              "ms": (t.elapsed().as_secs_f64() * 1000.0).round() }))
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 3 { player(&args[1], &args[2], None); }
     if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 5 && args[3] == "--server" { player(&args[1], &args[2], Some(&args[4])); }
     if args.first().map(|a| a == "--serve").unwrap_or(false) && args.len() == 2 { serve(&args[1]); return; }
+    if args.first().map(|a| a == "--sphere360").unwrap_or(false) { sphere360(&args[1..]); }
     let usage = || -> ! {
         eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|bicubic9|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
         std::process::exit(2);

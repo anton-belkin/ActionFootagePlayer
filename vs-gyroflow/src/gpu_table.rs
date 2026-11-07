@@ -428,6 +428,71 @@ pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String {
         .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table))
 }
 
+/// The GPU path's 360 mode: a 360 camera's sphere shader (warp.glsl's sphere360 and stamp360 passes) for its lens
+/// tracks joined side by side, from what Sphere360 would render it with (sphere360::prepare): per frame each lens's
+/// block (its parameters and knots, as a flat clip's) and the stamp's levels after them; each lens's share of every
+/// direction (rig.rs's weights) as a texture of a tenth of the sphere's size. Returns the shader and its output's size
+/// (the sphere and the stamp's two rows)
+pub fn sphere_shader(prep: &crate::sphere360::Prepared360, time_offset: f64) -> Result<(String, (usize, usize)), String> {
+    // The stamp's codes at 10 bits (34 of them, in 9 texels), drawn under the sphere as gray, as Sphere360 draws them
+    // into the luma: view360.glsl reads them from the RGB sphere (its MAIN stamp pass, gyroflow_stamp360)
+    const STAMP_DEPTH: u32 = 10;
+    const STAMP_TEXELS: usize = 9;
+    let n = prep.rig.lenses.len();
+    if n == 0 || n > 4 { return Err(format!("{n} lenses: the sphere shader takes 1 to 4")); }
+    let opts = Options { mode: Mode::Exact, grid_step: 8, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false, edge_fill: None,
+                         sphere: false, time_offset, denoise: false, knots: 33, interp: 0, shrink: false, range: None };
+    let clips: Vec<Clip> = prep.params.iter().zip(&prep.rig.lenses).map(|(p, l)| Clip {
+        params: p.clone(), size: (l.rect.2, l.rect.3), output_size: prep.sphere, fps: prep.fps, frame_count: prep.frame_count, frame_offset_us: prep.frame_offset_us,
+    }).collect();
+    for c in &clips {
+        let tr = c.transform(c.frame_count / 2, c.output_size);
+        if !tr.mesh_data.is_empty() { return Err("a lens mesh".into()); }
+    }
+    let tables = clips.iter().map(|c| Table::build(c, &opts)).collect::<Result<Vec<_>, _>>()?;
+    let lens_block = tables[0].block;
+    let block = n * lens_block + STAMP_TEXELS;
+    let frames = prep.frame_count.max(1);
+    let cols = (MAX_TEX / block).max(1);
+    let (width, height) = (cols * block, frames.div_ceil(cols));
+    let mut data = vec![0f32; width * height * 4];
+    for f in 0..frames {
+        let base = ((f / cols) * width + (f % cols) * block) * 4;
+        for (l, t) in tables.iter().enumerate() {
+            let src = ((f / t.cols) * t.width + (f % t.cols) * t.block) * 4;
+            data[base + l * lens_block * 4..base + (l + 1) * lens_block * 4].copy_from_slice(&t.data[src..src + lens_block * 4]);
+        }
+        let at = base + n * lens_block * 4;
+        for (i, c) in prep.stamp_codes(f, STAMP_DEPTH).into_iter().enumerate() { data[at + i] = c as f32 / ((1u32 << STAMP_DEPTH) - 1) as f32; }
+    }
+    let table = Table { width, height, data, block, cols, per_frame: opts.knots };
+
+    // Each lens's share, at the middle of each texel (a tenth of the sphere each way), in 255ths
+    let (ww, wh) = ((prep.sphere.0 / 10).max(4), (prep.sphere.1 / 10).max(2));
+    let mut weights = vec![0u8; ww * wh * 4];
+    let (sx, sy) = (prep.sphere.0 as f64 / ww as f64, prep.sphere.1 as f64 / wh as f64);
+    for y in 0..wh {
+        for x in 0..ww {
+            let d = crate::rig::equirect_direction((x as f64 + 0.5) * sx - 0.5, (y as f64 + 0.5) * sy - 0.5, prep.sphere.0, prep.sphere.1);
+            for (l, v) in prep.rig.weights(d, prep.distance).into_iter().enumerate().take(4) { weights[(y * ww + x) * 4 + l] = (v * 255.0).round() as u8; }
+        }
+    }
+    let hex: String = weights.iter().map(|b| format!("{b:02x}")).collect();
+
+    let clip = &clips[0];
+    let defs = defines(clip, &opts, &table) + &format!("\n#define LENSES {n}\n#define LENS_BLOCK {lens_block}\n#define STAMP_BASE {}\nconst vec2 LENS_OFFSET[{n}] = vec2[]({});",
+        n * lens_block, prep.rig.lenses.iter().map(|l| format!("vec2({}.0, {}.0)", l.input as usize * prep.rig.picture.0 + l.rect.0, l.rect.1)).collect::<Vec<_>>().join(", "));
+    let (sw, sh) = (prep.sphere.0, prep.sphere.1 + 2);
+    let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let passes = format!("//!TEXTURE GYROFLOW_WEIGHTS\n//!SIZE {ww} {wh}\n//!FORMAT rgba8\n//!FILTER LINEAR\n{hex}\n\n{}",
+        hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_WEIGHTS", &format!("//!WIDTH {sw}"), &format!("//!HEIGHT {sh}"),
+                            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
+    let (head, _, _) = sections();
+    let text = head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
+        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes);
+    Ok((text, (sw, sh)))
+}
+
 /// Each row's 3x3 (row-major, `M·d`) as a quaternion (x, y, z, w), signs kept continuous along the rows
 pub fn row_quats(m: &[[f32; 16]]) -> Vec<[f32; 4]> {
     let mut out: Vec<[f32; 4]> = Vec::with_capacity(m.len());

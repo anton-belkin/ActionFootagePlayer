@@ -95,10 +95,13 @@ struct GyroflowParams {
 };
 GyroflowParams params;
 
+// A 360 camera's sphere (pass sphere360) has a block of the table per lens: lens_base is where the lens's begins
+int lens_base = 0;
+
 vec4 table(int t)
 {
     int col = table_frame % COLS;
-    return texelFetch(GYROFLOW_TABLE, ivec2(col * BLOCK + t, table_frame / COLS), 0);
+    return texelFetch(GYROFLOW_TABLE, ivec2(col * BLOCK + lens_base + t, table_frame / COLS), 0);
 }
 
 vec4 qmul(vec4 a, vec4 b)
@@ -388,8 +391,17 @@ vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_pos = j * size / target_size + t2.xy;
+#if PROJ == 5
+    // The equirect (a 360 camera's sphere): its plane is the sphere's, all of it 360 x 180 degrees at zoom (fov) 1;
+    // longitude across, latitude down, +z at the middle, +x at +90 degrees, up (-y) at the top (the fork's
+    // equirect_to_dir)
+    vec2 n = (out_pos - 0.5 * size) / (vec2(float(OUT_W) / 6.2831853, float(OUT_H) / 3.1415927) / max(lens.x, 1e-6));
+    float cl = cos(n.y);
+    vec3 d = vec3(cl * sin(n.x), sin(n.y), cl * cos(n.x));
+#else
     vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom);
     vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+#endif
     return qrot(vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w), d);
 }
 
@@ -944,3 +956,45 @@ void hook()
     }
 }
 #endif
+
+// ==== pass sphere360 ====
+// A 360 camera's sphere (the GPU path's 360 mode: gpu_table::sphere_shader; docs/gpu-render.md, "360 on the GPU"):
+// the lens tracks joined side by side (mpv's lavfi-complex hstack) in, the equirect sphere in the camera's axes out,
+// as vs-gyroflow's Sphere360 renders it: each lens through gyroflow-core's kernel (the equirect output, its RigLens
+// folded into its rows' rotations and translation3d, its validity the field limit, its rolling shutter), blended by
+// its share of each direction (rig.rs's weights, a texture a tenth of the sphere's size). Under it the stamp's two
+// rows, its codes as gray (view360.glsl reads them at MAIN, gyroflow_stamp360; a shader's saved textures are its own,
+// so the stamp goes in the picture as Sphere360's does). target_size is the sphere's, without them (gpu_table defines
+// it so, ahead of the common code)
+
+vec4 hook()
+{
+    vec2 px = HOOKED_pos * vec2(OUT_W, OUT_H + 2);
+    if (px.y > float(OUT_H)) {
+        // The stamp: code i a 2x2 block of gray from the left (stamp.rs's layout), its value from the table
+        int i = int(px.x) / 2;
+        if (i >= 34) return vec4(0.0, 0.0, 0.0, 1.0);
+        lens_base = 0;
+        frame_setup();
+        lens_base = STAMP_BASE;
+        float v = table(i / 4)[i % 4];
+        return vec4(v, v, v, 1.0);
+    }
+    vec2 j = px - 0.5;
+    vec4 w = texture(GYROFLOW_WEIGHTS, px / vec2(OUT_W, OUT_H));
+    vec4 sum = vec4(0.0);
+    float total = 0.0;
+    for (int l = 0; l < LENSES; l++) {
+        float wl = w[l];
+        if (wl <= 0.0) continue;
+        lens_base = l * LENS_BLOCK;
+        if (!frame_setup()) continue;
+        vec2 uv;
+        if (!source_coord(j, uv)) continue;
+        if (any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5))) continue;
+        // The lens's part of the joined frame, bilinear
+        sum += wl * HOOKED_tex((uv + 0.5 + LENS_OFFSET[l]) / HOOKED_size);
+        total += wl;
+    }
+    return total > 0.0 ? vec4(sum.rgb / total, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
+}

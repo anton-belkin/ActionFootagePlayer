@@ -380,60 +380,92 @@ pub struct Sphere360 {
     throughput: Mutex<(u32, std::time::Instant)>,
 }
 
+/// A 360 clip set up for its sphere, before anything renders it: its rig, each lens's gyroflow-core parameters
+/// (the equirect output, its RigLens, no smoothing: only the rolling shutter taken out), the sphere's size, the
+/// stitching distance and the stamp per frame. Sphere360 (VapourSynth) and the GPU path's sphere shader
+/// (gpu_table::sphere_shader) both start from it
+pub struct Prepared360 {
+    pub rig: Rig,
+    pub params: Vec<ComputeParams>,
+    pub sphere: (usize, usize),
+    pub distance: f64,
+    stamps: Stamps,
+    pub fps: f64,
+    pub frame_count: usize,
+    pub frame_offset_us: i64,
+    pub report: serde_json::Value,
+}
+
+impl Prepared360 {
+    /// Frame `i`'s stamp as its codes at `depth` (stamp.rs's, as Sphere360 writes them under the sphere)
+    pub fn stamp_codes(&self, i: usize, depth: u32) -> [u32; stamp::CODES] {
+        let us = (i as f64 * 1e6 / self.fps).round() as i64 + self.frame_offset_us;
+        stamp::Fixed::from_stamp(&self.stamps.at(us), stamp::bits_for(depth)).codes(depth)
+    }
+}
+
+/// `video`: the camera's file; `width`: the sphere's; `distance`: the stitching distance in metres (0: the rig's own,
+/// else DEFAULT_DISTANCE)
+pub fn prepare(video: &str, width: usize, distance: f64) -> Result<Prepared360, String> {
+    let t = std::time::Instant::now();
+    let rig = crate::rig::read(video).ok_or_else(|| format!("{video}: not a 360 camera's file (no rig in its metadata)"))??;
+    let distance = if distance > 0.0 { distance } else { rig.convergence.unwrap_or(DEFAULT_DISTANCE) };
+    let sphere_w = (width.max(512) / 4) * 4;
+    let sphere = (sphere_w, sphere_w / 2);
+    let Motion { stab, world, headings, fps, frame_count, frame_offset_us, report } = Motion::load(video, &rig)?;
+    // Per lens, its parameters
+    let base = ComputeParams::from_manager(&stab);
+    let params = rig.lenses.iter().map(|l| {
+        let mut p = base.clone();
+        let mut lens = LensProfile::from_value(l.lens_profile(&rig.brand, &rig.model)).map_err(|e| format!("lens {}: {e}", l.index))?;
+        lens.init();
+        p.lens = lens;
+        p.distortion_model = DistortionModel::from_name("insta360");
+        p.digital_lens = None;
+        p.digital_lens_params = None;
+        p.width = l.rect.2;
+        p.height = l.rect.3;
+        p.output_width = sphere.0;
+        p.output_height = sphere.1;
+        p.output_projection = OutputProjection::Equirect as i32;
+        p.fov_scale = 1.0;
+        p.fovs.clear();
+        p.minimal_fovs.clear();
+        p.adaptive_zoom_window = 0.0;
+        p.lens_correction_amount = 1.0;
+        p.video_rotation = 0.0;
+        p.view_rotation = (0.0, 0.0, 0.0);
+        p.additional_rotation = (0.0, 0.0, 0.0);
+        p.additional_translation = (0.0, 0.0, 0.0);
+        p.focal_lengths.clear();
+        p.smoothed_focal_lengths.clear();
+        p.focal_length_smoothing_enabled = false;
+        p.lens_breathing_enabled = false;
+        p.background_mode = BackgroundMode::from(0);
+        p.background = nalgebra::Vector4::new(0.0, 0.0, 0.0, 0.0);
+        let (ms, top) = l.readout.unwrap_or((0.0, true));
+        p.frame_readout_time = ms;
+        p.frame_readout_direction = if top { ReadoutDirection::TopToBottom } else { ReadoutDirection::BottomToTop };
+        p.rig_lens = RigLens { rotation: l.rotation, translation: l.translation, stitching_distance: distance, validity: l.validity };
+        Ok(p)
+    }).collect::<Result<Vec<_>, String>>()?;
+    log::info!("{video}: {} {} rig, {} lenses in {} tracks of {}x{}; the sphere {}x{} at a stitching distance of {distance} m, ready in {:.0} ms",
+        rig.brand, rig.model, rig.lenses.len(), rig.pictures, rig.picture.0, rig.picture.1, sphere.0, sphere.1, t.elapsed().as_secs_f64() * 1000.0);
+    Ok(Prepared360 { rig, params, sphere, distance, stamps: Stamps { stab, world, headings, fps, frame_offset_us }, fps, frame_count, frame_offset_us, report })
+}
+
 impl Sphere360 {
     /// `video`: the camera's file; `input_size`: the joined frame mpv hands over; `width`: the sphere's; `distance`:
     /// the stitching distance in metres (0: the rig's own, else DEFAULT_DISTANCE)
     pub fn load(video: &str, input_size: (usize, usize), num_planes: usize, cfg_in: (SampleKind, u32, bool, (usize, usize)), interpolation: Interpolation, width: usize, distance: f64, workers: usize) -> Result<Sphere360, String> {
         let t = std::time::Instant::now();
         let (kind, depth, is_yuv, subsampling) = cfg_in;
-        let rig = crate::rig::read(video).ok_or_else(|| format!("{video}: not a 360 camera's file (no rig in its metadata)"))??;
+        let Prepared360 { rig, params, sphere, distance, stamps, fps, frame_offset_us, report, .. } = prepare(video, width, distance)?;
         if rig.joined_size() != input_size {
             return Err(format!("{video}: {} tracks of {}x{} joined are {:?}, the clip is {:?} (the tracks side by side in order, unscaled)",
                 rig.pictures, rig.picture.0, rig.picture.1, rig.joined_size(), input_size));
         }
-        let distance = if distance > 0.0 { distance } else { rig.convergence.unwrap_or(DEFAULT_DISTANCE) };
-        let sphere_w = (width.max(512) / 4) * 4;
-        let sphere = (sphere_w, sphere_w / 2);
-
-        let Motion { stab, world, headings, fps, frame_offset_us, report, .. } = Motion::load(video, &rig)?;
-
-        // Per lens, its parameters
-        let base = ComputeParams::from_manager(&stab);
-        let params = rig.lenses.iter().map(|l| {
-            let mut p = base.clone();
-            let mut lens = LensProfile::from_value(l.lens_profile(&rig.brand, &rig.model)).map_err(|e| format!("lens {}: {e}", l.index))?;
-            lens.init();
-            p.lens = lens;
-            p.distortion_model = DistortionModel::from_name("insta360");
-            p.digital_lens = None;
-            p.digital_lens_params = None;
-            p.width = l.rect.2;
-            p.height = l.rect.3;
-            p.output_width = sphere.0;
-            p.output_height = sphere.1;
-            p.output_projection = OutputProjection::Equirect as i32;
-            p.fov_scale = 1.0;
-            p.fovs.clear();
-            p.minimal_fovs.clear();
-            p.adaptive_zoom_window = 0.0;
-            p.lens_correction_amount = 1.0;
-            p.video_rotation = 0.0;
-            p.view_rotation = (0.0, 0.0, 0.0);
-            p.additional_rotation = (0.0, 0.0, 0.0);
-            p.additional_translation = (0.0, 0.0, 0.0);
-            p.focal_lengths.clear();
-            p.smoothed_focal_lengths.clear();
-            p.focal_length_smoothing_enabled = false;
-            p.lens_breathing_enabled = false;
-            p.background_mode = BackgroundMode::from(0);
-            p.background = nalgebra::Vector4::new(0.0, 0.0, 0.0, 0.0);
-            let (ms, top) = l.readout.unwrap_or((0.0, true));
-            p.frame_readout_time = ms;
-            p.frame_readout_direction = if top { ReadoutDirection::TopToBottom } else { ReadoutDirection::BottomToTop };
-            p.rig_lens = RigLens { rotation: l.rotation, translation: l.translation, stitching_distance: distance, validity: l.validity };
-            Ok(p)
-        }).collect::<Result<Vec<_>, String>>()?;
-
+        let stab = stamps.stab.clone();
         let chroma = (sphere.0 >> subsampling.0, sphere.1 >> subsampling.1);
         let spans = (1..rig.lenses.len()).map(|i| [Spans::new(&rig, i, distance, sphere.0, sphere.1), Spans::new(&rig, i, distance, chroma.0, chroma.1)]).collect();
         log::info!("{video}: {} {} rig, {} lenses in {} tracks of {}x{}; the sphere {}x{} at a stitching distance of {distance} m; weights in {:.0} ms",
@@ -441,7 +473,7 @@ impl Sphere360 {
 
         let device = stab.params.read().current_device as isize;
         let cfg = Config { kind, depth, is_yuv, interpolation, subsampling };
-        let shared = Arc::new(Shared { rig, params, spans, sphere, stamps: Stamps { stab, world, headings, fps, frame_offset_us }, device, cfg });
+        let shared = Arc::new(Shared { rig, params, spans, sphere, stamps, device, cfg });
 
         let (tx, rx) = mpsc::channel::<Job>();
         let rx = Arc::new(Mutex::new(rx));

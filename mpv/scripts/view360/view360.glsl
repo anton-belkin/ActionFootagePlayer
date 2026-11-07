@@ -80,20 +80,76 @@
 //!MAXIMUM 2
 0
 
+//!PARAM gyroflow_stamp360
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 1
+0
+
 //!HOOK LUMA
 //!BIND HOOKED
 //!SAVE STAMP360
 //!WIDTH 34
 //!HEIGHT 1
-//!WHEN view360_on
+//!WHEN view360_on gyroflow_stamp360 ! *
 //!DESC 360 stamp
 
 // The stamp under the sphere (vs-gyroflow/src/stamp.rs, docs/360-cameras.md "The stamp"), read from the raw luma
+// (not where the gyroflow plugin's GPU path makes the sphere: gyroflow_stamp360 1, its shader saves STAMP360 itself)
 // before anything scales or converts it: 34 codes, each a 2x2 block in the last two rows. Saved for the view pass as
 // one texel per code: texel 0 whether there's a stamp (the magic, and the check adds up), 1 the bits per fine code,
 // 9 to 32 the fields' fine levels, as whole numbers (at most 11 bits each in a 16-bit float, exact: 8- and 10-bit
 // planes). Each code is read through the black and white references (codes 7 and 8): gpu-next normalizes some formats
 // a little off (10-bit limited range reads x0.99904), which they undo whatever it does short of a curve.
+
+#define CODES 34
+#define HEADER 9
+
+float code_value(int i)
+{
+    return texelFetch(HOOKED_raw, ivec2(2 * i, int(HOOKED_size.y) - 2), 0).x * HOOKED_mul;
+}
+
+uint coarse(float v) { return uint(clamp(floor(v * 16.0), 0.0, 15.0)); }
+
+vec4 hook()
+{
+    int at = int(HOOKED_pos.x * 34.0);
+    float v[CODES];
+    for (int i = 0; i < CODES; i++)
+        v[i] = code_value(i);
+    bool magic = coarse(v[0]) == 12u && coarse(v[1]) == 3u && coarse(v[2]) == 9u && coarse(v[3]) == 6u;
+    uint depth = coarse(v[4]) + 1u, bits = coarse(v[5]) + 1u, version = coarse(v[6]);
+    float range = v[8] - v[7];
+    if (!magic || version != 1u || bits > depth || bits > 11u || !(range > 0.5))
+        return vec4(0.0);
+    float scale = float((1u << depth) - 1u);
+    uint shift = depth - bits;
+    uint level[CODES];
+    uint sum = 0u;
+    for (int i = HEADER; i < CODES; i++) {
+        uint code = uint(round(clamp((v[i] - v[7]) / range, 0.0, 1.0) * scale));
+        level[i] = code >> shift;
+        if (i < CODES - 1) sum += level[i];
+    }
+    bool check = (sum & ((1u << bits) - 1u)) == level[CODES - 1];
+    if (at == 0) return vec4(check ? 1.0 : 0.0);
+    if (at == 1) return vec4(float(bits));
+    if (at >= HEADER) return vec4(float(level[at]));
+    return vec4(0.0);
+}
+
+//!HOOK MAIN
+//!BIND HOOKED
+//!SAVE STAMP360
+//!WIDTH 34
+//!HEIGHT 1
+//!WHEN view360_on gyroflow_stamp360 *
+//!DESC 360 stamp (the GPU path's)
+
+// The same stamp where the gyroflow plugin's GPU path makes the sphere from the lens tracks (its shader, ahead of this
+// one): its codes are gray in the sphere's last two rows, read after the conversion to RGB (16-bit floats: a 10-bit
+// code is exact), the luma pass's reading of them otherwise
 
 #define CODES 34
 #define HEADER 9
