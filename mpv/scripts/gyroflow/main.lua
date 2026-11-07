@@ -828,9 +828,8 @@ end
 -- place of the VapourSynth filter. gyroflow-gpu-table loads the clip as the filter would, from the filter's own
 -- arguments, and writes a shader with every frame's parameters in it; mpv's PTS finds the frame (mpv 0.42, or the
 -- app's mpv, 0.41.0 + 499 commits or later). The warp is the scaler too: it renders at the size of the video's rectangle
--- on screen. What it doesn't do yet keeps the filter: a clip turned or cut to another frame, a lens or setting the
--- shader doesn't have (gyroflow-gpu-table says which), the clean still frame and crop mode's camera; the sphere trail
--- fills the edges as the smooth fill does. gpu (declared further up): nil on the filter's path
+-- on screen, turned and cut as the frame says. What it doesn't do yet keeps the filter: a lens or setting the shader
+-- doesn't have (gyroflow-gpu-table says which); crop mode's camera is mpv's own pan and zoom on it. gpu (declared further up): nil on the filter's path
 -- Files the GPU path couldn't do, and why: they play through the filter when loaded again
 local gpu_blocked = {}
 local gpu_count = 0
@@ -851,7 +850,8 @@ local function gpu_eligible(source)
     if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end
     if not source or (source.kind ~= "project" and source.kind ~= "default" and source.kind ~= "lens") then return false end
     if gpu_blocked[mp.get_property("path") or ""] then return false end
-    if (source.rotation or 0) ~= 0 or frame.rotation ~= 0 or frame.projection ~= "linear" or shown_aspect() ~= "original" then return false end
+    -- The file's own turn, the frame's turn, cut and projection are the warp's (vs-gyroflow's Frame, from the same
+    -- arguments): mpv turns nothing more (video-rotate no) and shows the output's shape (video-aspect-override)
     return filter_lens(source) ~= nil
 end
 
