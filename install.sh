@@ -239,6 +239,7 @@ put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/sphere360.vpy "$GYROFLOW/sphere360.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
 put mpv/scripts/gyroflow/crop_preview.glsl "$GYROFLOW/crop_preview.glsl" 644
+put mpv/scripts/gyroflow/gpu_hold.glsl "$GYROFLOW/gpu_hold.glsl" 644
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
 if [ ! -e "$GYROFLOW/default.gyroflow" ]; then
     install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$GYROFLOW/default.gyroflow"

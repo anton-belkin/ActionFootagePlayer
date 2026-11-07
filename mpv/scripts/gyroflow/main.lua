@@ -205,6 +205,7 @@ local PROJECT_WRITER = utils.join_path(DIR, platform.exe("gyroflow-project"))
 local GPU_TABLE = utils.join_path(DIR, platform.exe("gyroflow-gpu-table"))
 local CHROMATIC_SHADER = utils.join_path(DIR, "chromatic.glsl")
 local CROP_SHADER = utils.join_path(DIR, "crop_preview.glsl")
+local GPU_HOLD_SHADER = utils.join_path(DIR, "gpu_hold.glsl")
 local GYROFLOW_APP = "xyz.gyroflow"
 -- Applied on top of Gyroflow's default preset to videos stabilized without a project: the first that exists
 local DATA = os.getenv("GYROFLOW_DATA")
@@ -458,6 +459,10 @@ local current_source = nil
 -- and what writes its shader again after a change
 local gpu = nil
 local gpu_refresh
+-- A table on its way: true, or "again" when a change came meanwhile (written again once it's there)
+local gpu_pending = false
+-- The clip loaded again from where it plays (further down)
+local play_again
 -- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
 local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
@@ -876,7 +881,32 @@ local function gpu_set_shader(old, new)
     end
     mp.set_property_native("file-local-options/glsl-shaders", list)
     mp.commandv("script-message-to", "dlogm", "gyroflow-shader", old or "", new or "")
-    if old and old ~= new then os.remove(old) end
+    if old and old ~= new and old ~= GPU_HOLD_SHADER then os.remove(old) end
+end
+
+-- The player's table server (gyroflow-gpu-table --serve): it keeps the clips it loaded, so a change of the view, the
+-- edges, the color fringes or the denoise writes the shader alone (~40 ms, not ~0.4 s). One per player, going with
+-- it; a request it can't take, the table tool does by itself. Not on Windows (a Unix socket)
+local GPU_SERVER = not platform.windows and utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.sock", utils.getpid())) or nil
+local gpu_server_running = false
+local function gpu_server()
+    if not GPU_SERVER or gpu_server_running or o.gpu == "no" or not file_exists(GPU_TABLE) or not mpv_has_pts() then return end
+    gpu_server_running = true
+    mp.command_native_async({ name = "subprocess", args = { GPU_TABLE, "--serve", GPU_SERVER }, playback_only = false }, function()
+        gpu_server_running = false
+    end)
+end
+mp.register_event("shutdown", function() if GPU_SERVER then os.remove(GPU_SERVER) end end)
+gpu_server()
+
+-- A clip opening on the GPU path doesn't wait for its table: mpv opens it meanwhile (its decoder, window and audio,
+-- ~0.7 s), paused on black (gpu_hold.glsl) until the warp is there. held: the pause is the plugin's
+local gpu_held = false
+local function gpu_unhold()
+    if gpu_held then
+        gpu_held = false
+        mp.set_property_native("pause", false)
+    end
 end
 
 -- Asks gyroflow-gpu-table for the clip's shader with the current settings, to done(reply): reply.shader, or nil and
@@ -892,7 +922,12 @@ local function gpu_table(source, done)
     gpu_count = gpu_count + 1
     local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
     local t = mp.get_time()
-    mp.command_native_async({ name = "subprocess", args = { GPU_TABLE, "--player", utils.format_json(ud), out }, capture_stdout = true, playback_only = false }, function(_, r)
+    local args = { GPU_TABLE, "--player", utils.format_json(ud), out }
+    if gpu_server_running then
+        table.insert(args, "--server")
+        table.insert(args, GPU_SERVER)
+    end
+    mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
         local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
         if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
         reply.ms = math.floor((mp.get_time() - t) * 1000)
@@ -943,20 +978,50 @@ local function add_filter(source, done)
     write_edge_control()
 
     if gpu_eligible(source) then
-        return gpu_table(source, function(reply)
+        if o.hwdec then mp.set_property("file-local-options/hwdec", "auto") end
+        mp.set_property("file-local-options/video-rotate", "no")
+        -- Opening: mpv opens the clip while the table is written, paused on black; the window in the shape it will
+        -- have (the project's output, or the frame's), corrected if the table says otherwise
+        local opening = mp.get_property_native("time-pos") == nil
+        if opening then
+            gpu_set_shader(gpu and gpu.shader, GPU_HOLD_SHADER)
+            gpu = { shader = GPU_HOLD_SHADER, hold = true }
+            local sz = render_sizes(source)
+            local w, h = source.out_width or source.width, source.out_height or source.height
+            if sz.output then w, h = sz.output[1], sz.output[2] end
+            if w and h and source.width and source.height and math.abs(w / h - source.width / source.height) > 0.005 then
+                mp.set_property("file-local-options/video-aspect-override", string.format("%d:%d", w, h))
+            end
+            if not mp.get_property_native("pause") then
+                gpu_held = true
+                mp.set_property_native("pause", true)
+            end
+        end
+        gpu_pending = true
+        gpu_table(source, function(reply)
+            local again = gpu_pending == "again"
+            gpu_pending = false
             if reply.shader and current_source == source then
                 gpu_apply(reply)
-                if o.hwdec then mp.set_property("file-local-options/hwdec", "auto") end
-                mp.set_property("file-local-options/video-rotate", "no")
+                gpu_unhold()
                 mp.msg.info(string.format("stabilizing on the GPU with %s%s (%s%s), its table in %d ms", source.project, KIND_LABELS[source.kind],
                     reply.mode or "", reply.chromatic and ", color fringes taken out" or "", reply.ms or 0))
-                return done()
+                if again then gpu_refresh() end
+                if not opening then done() end
+                return
             end
+            if current_source ~= source then return end
             gpu_blocked[mp.get_property("path") or ""] = reply.unsupported or reply.error or "?"
             mp.msg.info("the GPU path can't: " .. tostring(reply.unsupported or reply.error) .. "; through VapourSynth")
+            gpu_unhold()
+            if opening then return play_again() end
+            gpu = nil
             add_filter(source, done)
         end)
+        if opening then done() end
+        return
     end
+    gpu_unhold()
 
     local sizes = render_sizes(source)
     source.sizes = sizes.key
@@ -1094,13 +1159,15 @@ mp.add_hook("on_load", 50, function(hook)
     setup(function()
         if not slow:is_enabled() then mp.osd_message("", 0) end
         slow:kill()
+        -- Held for a clip before this one that didn't get to play on the GPU path
+        if not (gpu and gpu.hold) then gpu_unhold() end
         publish()
         hook:cont()
     end)
 end)
 
 -- The clip loaded again from where it plays: to stabilize it with a project that wasn't there when it loaded
-local function play_again()
+play_again = function()
     resume = { path = mp.get_property("path"), pos = mp.get_property_number("time-pos") }
     mp.commandv("playlist-play-index", "current")
 end
@@ -1193,8 +1260,7 @@ end
 
 -- The GPU path after a change (view, level, horizon, lens, edges, color fringes, the frame): the shader written again
 -- with the new settings and put in place of the old, the playing frame redrawn with it. Settings the shader can't do
--- (stabilization off, a frame turned or cut) load the file again through the filter, from where it plays
-local gpu_pending = false
+-- load the file again through the filter, from where it plays
 gpu_refresh = function()
     if not gpu or not current_source then return end
     if gpu_pending then gpu_pending = "again" return end
@@ -1232,6 +1298,9 @@ mp.observe_property("user-data/gyroflow/still", "native", function() if gpu then
 -- A change that sets the chain up again while it plays, paused through it with a word on screen: it plays on once
 -- the first frame is through (or after a few seconds), instead of dropping frames to catch up
 local function with_pause(message, change)
+    -- The GPU path writes a shader in a tenth of a second, and mpv sets nothing up again (no playback-restart to wait
+    -- for): it plays on
+    if gpu then return change() end
     local paused = mp.get_property_native("pause")
     if not paused then mp.set_property_native("pause", true) end
     mp.osd_message(message, 10)
@@ -1287,7 +1356,8 @@ local function display_changed()
     if display_timer then display_timer:kill() end
     display_timer = mp.add_timeout(0.5, function()
         display_timer = nil
-        if not filtering() or o.resolution == "video" then return end
+        -- The GPU path's warp renders at whatever size the video has on screen: nothing to set up
+        if not filtering() or o.resolution == "video" or gpu then return end
         local sizes = render_sizes(current_source)
         if sizes.key == current_source.sizes then return end
         mp.msg.info(string.format("display %dx%d: stabilizing at %s", w, h, sizes.key))

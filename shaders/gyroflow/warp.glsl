@@ -52,7 +52,7 @@
 //   0: f.x, f.y, c.x, c.y            1-6: the lens's coefficients k[0..24]
 //   7: fov, lens correction, refraction coefficient, field limit
 //   8: translation2d.x, .y, matrix rows (1: no rolling shutter), valid (1)
-//   9: translation3d.x, .y, .z, 0    10-13: the digital lens's parameters [0..16]
+//   9: translation3d.x, .y, .z, the clip's frame count    10-13: the digital lens's parameters [0..16]
 //  14: input horizontal stretch, vertical stretch, red's and blue's refractive index over green's (1 out of the water)
 //  15: the output camera in the world (a quaternion: the sphere trail's directions)
 
@@ -339,7 +339,9 @@ vec4 sample_src(vec2 uv) { return src(uv); }
 bool frame_setup()
 {
     // A moment played as a video of its own starts TIME_OFFSET seconds into the clip
-    table_frame = clamp(int(floor((PTS + TIME_OFFSET) * FPS + 0.5)), 0, FRAMES - 1);
+    // The frame count is frame 0's texel 9's w
+    int frames = int(texelFetch(GYROFLOW_TABLE, ivec2(9, 0), 0).w);
+    table_frame = clamp(int(floor((PTS + TIME_OFFSET) * FPS + 0.5)), 0, max(frames - 1, 0));
     fc = table(0);
     params.k1 = table(1); params.k2 = table(2); params.k3 = table(3);
     params.k4 = table(4); params.k5 = table(5); params.k6 = table(6);

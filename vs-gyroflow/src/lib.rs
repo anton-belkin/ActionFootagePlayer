@@ -508,6 +508,7 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
         let lens_only = lens == LensMode::Only;
         let horizon_lock = if lens_only { Some(0.0) } else { horizon_lock };
         let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead, lens_only)?;
+        log::debug!("prepare: loaded in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         match lens {
             LensMode::Only => {
                 // No smoothing (gyroflow-core's first algorithm, None), no rolling shutter correction, a zoom that holds
@@ -581,8 +582,14 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
         });
         if level_geometry.is_none() {
             stab.invalidate_smoothing();
-            stab.recompute_blocking();
+            let lap = |w: &str| log::debug!("prepare: {w} at {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+            lap("before");
+            stab.refresh_optical_correction(); lap("optical");
+            stab.recompute_smoothness(); lap("smoothness");
+            stab.recompute_adaptive_zoom(); lap("zoom");
+            stab.recompute_undistortion(); lap("undistortion");
         }
+        log::debug!("prepare: smoothed in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         let views = {
             // A FOV of its own (gyroflow-export --fov) in place of the levels'
             let set_fov = if let Fov::Set(f) = fov { Some(f) } else { None };
@@ -606,6 +613,7 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
                 }
             }
         };
+        log::debug!("prepare: views in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         let view = if fov == Fov::Wide { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
         let view_index = views.index(view, level);
         let uncovered_frames = views.uncovered[view_index];
@@ -889,13 +897,62 @@ fn add_motion_data(json: &mut serde_json::Value, project: &str) {
     }
     let t = std::time::Instant::now();
     let url = filesystem::path_to_url(&video);
+    // Read once per file: from a NAS it's many small reads through the file (a second or two), kept on this computer.
+    // A file without motion data too (an optical project's: DJI records none with EIS on): its metadata as a full
+    // project has it, so gyroflow-core doesn't read the file for it either
+    let cached = motion_cache(&video);
+    if let Some(data) = cached.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|d| !d.is_empty()) {
+        set_file_metadata(json, data, url);
+        log::info!("{project}: the video's motion data from the cache in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        return;
+    }
+    let keep = |data: &str| if let Some(c) = cached.as_ref() {
+        let tmp = c.with_extension("tmp");
+        if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, data).is_ok() { let _ = std::fs::rename(&tmp, c); }
+    };
     let Ok((m, size)) = motion::Motion::open(&video, &url, 0.0) else { return };
     let stab = StabilizationManager::default();
-    if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() || !stab.gyro.read().has_motion() { return; }
+    if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() { return; }
     let Some(data) = gyroflow_core::util::compress_to_base91_cbor(&*stab.gyro.read().file_metadata.read()) else { return };
+    keep(&data);
+    set_file_metadata(json, data, url);
+    log::info!("{project}: the video's motion data read ahead for it in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+}
+
+/// The video's metadata into its project, as a full project has it. Without motion data in it, gyroflow-core reads
+/// the video's motion data again anyway when the motion file is the video (its import): there, the motion file is
+/// named apart from the video, a file that isn't, and the metadata given is what it takes
+fn set_file_metadata(json: &mut serde_json::Value, data: String, url: String) {
+    let motion = gyroflow_core::util::decompress_from_base91_cbor::<gyroflow_core::gyro_source::FileMetadata>(&data).map(|m| m.has_motion()).unwrap_or(true);
+    if !motion {
+        json["gyro_source"]["filepath"] = format!("{url}.afp-no-motion-data").into();
+        if let Some(g) = json["gyro_source"].as_object_mut() { g.remove("filepath_bookmark"); }
+    }
     json["gyro_source"]["file_metadata"] = data.into();
     json["videofile"] = url.into();
-    log::info!("{project}: the video's motion data read ahead for it in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+}
+
+/// Where a video's motion data read for its project is kept (add_motion_data)
+fn motion_cache(video: &str) -> Option<std::path::PathBuf> {
+    file_cache("motion", video, "")
+}
+
+/// A file's answer kept in the app's cache folder (`kind`'s folder), by the file's path, size and time and `extra`
+/// (a version); None where there's no home to keep it in, or no such file
+pub fn file_cache(kind: &str, file: &str, extra: &str) -> Option<std::path::PathBuf> {
+    use sha2::{ Digest, Sha256 };
+    let meta = std::fs::metadata(file).ok()?;
+    let base = if cfg!(target_os = "macos") {
+        std::path::PathBuf::from(std::env::var_os("HOME")?).join("Library/Caches/ActionFootagePlayer")
+    } else if cfg!(windows) {
+        std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("ActionFootagePlayer/cache")
+    } else {
+        std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?.join("ActionFootagePlayer")
+    };
+    let key = format!("{file}|{}|{:?}|{extra}", meta.len(), meta.modified().ok());
+    let hash: String = Sha256::digest(key.as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
+    Some(base.join(kind).join(hash))
 }
 
 fn is_project_file(path: &str) -> bool {

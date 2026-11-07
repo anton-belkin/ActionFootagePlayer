@@ -76,25 +76,83 @@ pub struct Clip {
 /// The player's choices for a clip, as main.lua hands them to the VapourSynth filter (gyroflow.vpy's user-data JSON),
 /// plus the video's own size (`input_width`, `input_height`), which the filter learns from its input
 pub fn from_player_json(j: &serde_json::Value) -> Result<(Clip, f64), String> {
-    use crate::{ Fov, Frame, LensMode, Level };
-    let s = |k: &str| j.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
-    let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
-    let project = s("project").ok_or("no project")?;
-    let fov = if j.get("wide").and_then(|v| v.as_bool().or(v.as_i64().map(|i| i != 0))).unwrap_or(false) { Fov::Wide }
-              else { f("fov").filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project) };
-    let underwater = match s("underwater") { None => Underwater::Auto, Some(v) => Underwater::parse(v).ok_or(format!("underwater {v}"))? };
-    let level = match s("level") { None => Level::Medium, Some(v) => Level::parse(v).ok_or(format!("level {v}"))? };
-    let trim = match (f("trim_start"), f("trim_end")) { (Some(a), Some(b)) if b > a => Some((a, b)), _ => None };
-    let alone = j.get("alone").and_then(|v| v.as_bool());
-    let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
-    let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
-    let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
-    // All of a clip's own motion data before it plays (lookahead 0): the table is written once
-    let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
-    let params = p.views.params[p.view_index].clone();
-    let sp = p.stab.params.read();
-    let clip = Clip { size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, params };
-    Ok((clip, f("time_offset").unwrap_or(0.0)))
+    let loaded = PlayerClip::load(j)?;
+    Ok((loaded.clip(j), j.get("time_offset").and_then(|v| v.as_f64()).unwrap_or(0.0)))
+}
+
+/// A clip loaded for the player with every view it has (lib.rs's Views: normal and wide, and per level for a clip
+/// without a project), so the view is picked without loading it again (gyroflow-gpu-table --serve keeps these)
+pub struct PlayerClip {
+    pub views: std::sync::Arc<crate::Views>,
+    /// Built tables, by view, the fringes taken out or not and the knots; whether the view's lens is under water
+    tables: std::sync::Mutex<Vec<((usize, bool, usize), std::sync::Arc<Table>)>>,
+    wet: std::sync::Mutex<Vec<(usize, bool)>>,
+    pub size: (usize, usize),
+    pub output_size: (usize, usize),
+    pub fps: f64,
+    pub frame_count: usize,
+    pub frame_offset_us: i64,
+}
+
+/// The JSON's keys that change what PlayerClip::load computes; the rest (the view, the edges, the color fringes, the
+/// denoise, the interpolation, the time offset) are the shader's, or a pick among the views
+pub const PLAYER_GEOMETRY_KEYS: &[&str] = &["project", "preset", "fov", "level", "horizon_lock", "underwater", "trim_start", "trim_end", "alone",
+                                            "rotation", "aspect", "projection", "lens", "input_width", "input_height"];
+
+impl PlayerClip {
+    pub fn load(j: &serde_json::Value) -> Result<PlayerClip, String> {
+        use crate::{ Fov, Frame, LensMode, Level };
+        let s = |k: &str| j.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+        let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
+        let project = s("project").ok_or("no project")?;
+        // Wide or not is a pick among the views: Fov::Project computes them all
+        let fov = f("fov").filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project);
+        let underwater = match s("underwater") { None => Underwater::Auto, Some(v) => Underwater::parse(v).ok_or(format!("underwater {v}"))? };
+        let level = match s("level") { None => Level::Medium, Some(v) => Level::parse(v).ok_or(format!("level {v}"))? };
+        let trim = match (f("trim_start"), f("trim_end")) { (Some(a), Some(b)) if b > a => Some((a, b)), _ => None };
+        let alone = j.get("alone").and_then(|v| v.as_bool());
+        let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
+        let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
+        let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
+        // All of a clip's own motion data before it plays (lookahead 0): the table is written once
+        let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
+        let sp = p.stab.params.read();
+        Ok(PlayerClip { views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us })
+    }
+
+    /// The index of the view the JSON asks for (wide, level) in `views`
+    pub fn view(&self, j: &serde_json::Value) -> usize {
+        let wide = j.get("wide").and_then(|v| v.as_bool().or(v.as_i64().map(|i| i != 0))).unwrap_or(false);
+        let level = j.get("level").and_then(|v| v.as_str()).and_then(crate::Level::parse).unwrap_or(crate::Level::Medium);
+        self.views.index(if wide { crate::edges::VIEW_WIDE } else { crate::edges::VIEW_NORMAL }, level).min(self.views.params.len() - 1)
+    }
+
+    /// Whether the lens is under water anywhere in the clip, in view `view` (every 15th frame), kept
+    pub fn wet(&self, view: usize, clip: &Clip) -> bool {
+        if let Some(w) = self.wet.lock().unwrap().iter().find(|(v, _)| *v == view).map(|(_, w)| *w) { return w; }
+        let w = (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
+        self.wet.lock().unwrap().push((view, w));
+        w
+    }
+
+    /// The table for `clip` (view `view`) with these options, built once (it depends on the view, the fringes and the
+    /// knots; the whole clip's)
+    pub fn table(&self, view: usize, clip: &Clip, opts: &Options) -> Result<std::sync::Arc<Table>, String> {
+        let key = (view, opts.chromatic, opts.knots);
+        if opts.range.is_some() { return Table::build(clip, opts).map(std::sync::Arc::new); }
+        if let Some(t) = self.tables.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()) { return Ok(t); }
+        let t = std::sync::Arc::new(Table::build(clip, opts)?);
+        let mut tables = self.tables.lock().unwrap();
+        tables.push((key, t.clone()));
+        if tables.len() > 4 { tables.remove(0); }
+        Ok(t)
+    }
+
+    /// The clip in the view the JSON asks for (wide, level)
+    pub fn clip(&self, j: &serde_json::Value) -> Clip {
+        let index = self.view(j);
+        Clip { params: self.views.params[index].clone(), size: self.size, output_size: self.output_size, fps: self.fps, frame_count: self.frame_count, frame_offset_us: self.frame_offset_us }
+    }
 }
 
 impl Clip {
@@ -198,22 +256,24 @@ impl Table {
         let block = PARAM_TEXELS + per_frame;
         if block > MAX_TEX { return Err(format!("{block} texels a frame don't fit a {MAX_TEX}-wide texture")); }
         let frames = clip.frame_count.max(1);
-        let cols = (MAX_TEX / block).max(1).min(frames);
+        // As many frames a row as fit whatever the clip's length, and the frame count in the table (texel 9's w): the
+        // shader's text is then the same for clips alike, and mpv compiles it once
+        let cols = (MAX_TEX / block).max(1);
         let (width, height) = (cols * block, frames.div_ceil(cols));
         let mut data = vec![0f32; width * height * 4];
         let (first, last) = opts.range.unwrap_or((0, frames - 1));
-        for frame in first..=last.min(frames - 1) {
+        // Each frame's block on its own (a rolling shutter's transform is a matrix a row: ~0.2 ms a frame), on every core
+        let block_of = |frame: usize| -> Vec<[f32; 4]> {
             let tr = clip.transform(frame, clip.output_size);
             let kp = &tr.kernel_params;
-            let base = ((frame / cols) * width + (frame % cols) * block) * 4;
             let k = |i: usize| [kp.k[i * 4], kp.k[i * 4 + 1], kp.k[i * 4 + 2], kp.k[i * 4 + 3]];
             let dl = |i: usize| [kp.digital_lens_params[i * 4], kp.digital_lens_params[i * 4 + 1], kp.digital_lens_params[i * 4 + 2], kp.digital_lens_params[i * 4 + 3]];
-            let texels: [[f32; 4]; PARAM_TEXELS] = [
+            let mut texels: Vec<[f32; 4]> = vec![
                 [kp.f[0], kp.f[1], kp.c[0], kp.c[1]],
                 k(0), k(1), k(2), k(3), k(4), k(5),
                 [kp.fov, kp.lens_correction_amount, kp.light_refraction_coefficient, kp.field_limit],
                 [kp.translation2d[0], kp.translation2d[1], kp.matrix_count as f32, 1.0],
-                [kp.translation3d[0], kp.translation3d[1], kp.translation3d[2], 0.0],
+                [kp.translation3d[0], kp.translation3d[1], kp.translation3d[2], frames as f32],
                 dl(0), dl(1), dl(2), dl(3),
                 {
                     // Red's and blue's index over green's where the frame is under water and the fringes are taken out
@@ -229,13 +289,24 @@ impl Table {
                     [q.i as f32, q.j as f32, q.k as f32, q.w as f32]
                 },
             ];
-            for (i, v) in texels.iter().enumerate() { data[base + i * 4..base + i * 4 + 4].copy_from_slice(v); }
+            debug_assert_eq!(texels.len(), PARAM_TEXELS);
             let quats = if opts.knots == 0 { row_quats(&tr.matrices) } else { knot_quats(&tr.matrices, per_frame) };
-            for i in 0..per_frame {
-                let at = base + (PARAM_TEXELS + i) * 4;
-                data[at..at + 4].copy_from_slice(&quats[i.min(quats.len() - 1)]);
-            }
+            texels.extend((0..per_frame).map(|i| quats[i.min(quats.len() - 1)]));
+            texels
+        };
+        let list: Vec<usize> = (first..=last.min(frames - 1)).collect();
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
+        let chunk = list.len().div_ceil(threads).max(1);
+        let blocks: Vec<(usize, Vec<[f32; 4]>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = list.chunks(chunk).map(|part| scope.spawn(|| part.iter().map(|&f| (f, block_of(f))).collect::<Vec<_>>())).collect();
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        });
+        for (frame, texels) in blocks {
+            let base = ((frame / cols) * width + (frame % cols) * block) * 4;
+            for (i, v) in texels.iter().enumerate() { data[base + i * 4..base + i * 4 + 4].copy_from_slice(v); }
         }
+        // Frame 0's block says how many frames there are, whatever the range
+        data[9 * 4 + 3] = frames as f32;
         Ok(Table { width, height, data, block, cols, per_frame })
     }
 
@@ -253,8 +324,8 @@ impl Table {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define FRAMES {}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET {:.6}\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
-        clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, clip.frame_count.max(1), table.cols, table.block,
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET {:.6}\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
+        clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
         bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32, opts.time_offset,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
@@ -374,13 +445,19 @@ pub fn row_quats(m: &[[f32; 16]]) -> Vec<[f32; 4]> {
 
 /// `knots` quaternions evenly over the rows, knot j at row j·(rows−1)/(knots−1)
 pub fn knot_quats(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 4]> {
-    let all = row_quats(m);
-    let rows = all.len();
+    let rows = m.len();
+    let at = |j: usize| { let y = if rows > 1 { j as f64 * (rows - 1) as f64 / (knots - 1) as f64 } else { 0.0 }; ((y.floor() as usize).min(rows - 1), y) };
+    // Only the rows around the knots made quaternions (row_quats' sign kept from one to the next: the rows between turn
+    // a frame by a fraction of a degree, so the signs come out as with every row)
+    let mut wanted: Vec<usize> = (0..knots).flat_map(|j| { let (a, _) = at(j); [a, (a + 1).min(rows - 1)] }).collect();
+    wanted.dedup();
+    let picked: Vec<[f32; 16]> = wanted.iter().map(|&r| m[r]).collect();
+    let quats = row_quats(&picked);
+    let q = |r: usize| quats[wanted.iter().position(|&w| w == r).unwrap_or(0)];
     (0..knots).map(|j| {
-        let y = if rows > 1 { j as f64 * (rows - 1) as f64 / (knots - 1) as f64 } else { 0.0 };
+        let (a, y) = at(j);
         // Between two rows: their nlerp (a knot falls on a row only when (rows-1) divides evenly)
-        let a = (y.floor() as usize).min(rows - 1);
-        nlerp(all[a], all[(a + 1).min(rows - 1)], (y - y.floor()) as f32)
+        nlerp(q(a), q((a + 1).min(rows - 1)), (y - y.floor()) as f32)
     }).collect()
 }
 

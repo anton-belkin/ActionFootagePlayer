@@ -149,6 +149,42 @@ writes a shader file (as dlogm writes its LUT shaders) with the clip's table emb
 texture or uniform buffer each frame, and the table problem disappears. The same GLSL is wrapped with
 `pl_mpv_user_shader_parse` and its parameters set per frame, or called as a `pl_shader` of our own.
 
+### Opening a clip and changing a setting
+
+Measured 2026-11-07 on the M1 Pro (the app built from this branch, logs of its own runs, tools in the session's
+scratchpad: open/run.sh + report.py), clip 0126 (a project) and three clips without one:
+
+| | Before | Now |
+|---|---|---|
+| The app started on a clip, to its first frame | 1.1-1.9 s; 3.0 s with the project's video on the NAS | 0.81-0.96 s, stabilized from that frame |
+| Another clip in the same player: one seen before | the table again, 0.35-1 s, then mpv's own 0.4 s | 0.1 s for the warp, mpv's first frame at ~0.42 s |
+| ... one never opened | the same, and 4-7 s when its motion data came from the NAS | 0.4-1.2 s |
+| Edges, color fringes, Ctrl+p, the view | 0.46-0.5 s (each wrote the whole table again) | 0.08-0.12 s |
+| A new shader variant's first compile in mpv | 0.3-0.6 s | once per variant (mpv's shader cache keeps it across runs; clips alike share one) |
+
+What changed:
+
+- **The table server** (`gyroflow-gpu-table --serve`, one per player, started by main.lua): it keeps the clips it
+  loaded with every view (normal, wide, the levels) and their tables, by the settings that move the geometry
+  (`PLAYER_GEOMETRY_KEYS` and the project's file as it is). A change of the edges, the fringes, the denoise, the
+  interpolation or the view writes the shader alone: ~10 ms there, ~0.1 s in all with mpv taking the 4 MB file.
+- **Shaders kept on disk** (`~/Library/Caches/ActionFootagePlayer/gpu`, 400 MB, the least used first): by every
+  setting and the clip's files as they are; a clip opened again, in any session, gets its shader in ~15 ms.
+- **The clip opens while its table is written**: mpv's own opening (decoder, window, audio: ~0.4 s, at the app's
+  start ~0.8 s) no longer waits for it; the clip is paused on black (gpu_hold.glsl) until the warp is in place.
+- **Motion data and the probe's answer kept per file** (`motion/`, `probe/`): a project's video was read again at each
+  load to fill in its motion data, and an optical project's (DJI with EIS on, no motion data) was read by
+  gyroflow-core itself again too: 1-2 s from the NAS, 7 s cold. Now its metadata is taken as a full project has it.
+- **The shader's text is the same for clips alike** (the frame count is in the table, texel 9's w; a row holds as
+  many frames as fit, whatever the clip's length): mpv compiles a camera's shader once.
+- **The table built on every core**, only the knots' rows made quaternions: a clip with a rolling shutter (2160
+  matrices a frame) 0.75 s → 0.43 s.
+- **No pause after opening**: on the GPU path main.lua paused for a "set up for this display" that never came (the
+  VapourSynth path's playback-restart), up to 5 s after a clip opened.
+
+Left: gyroflow-core's zoom search (0.2 s of a project's load) and the rows' transforms (0.3 s of a no-project table),
+done once per clip and settings now; mpv's own 0.4-0.8 s.
+
 ### Where the warp sits in mpv's chain
 
 `MAINPRESUB`, as the 360 view does: after the conversion to RGB, before the looks, and at the size of the video's

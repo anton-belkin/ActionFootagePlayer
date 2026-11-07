@@ -17,8 +17,12 @@
 //     --readout-ms <t>   the rolling shutter's readout time instead of the project's (to measure the knots on a clip
 //                        that has none)
 //
-//   gyroflow-gpu-table --player <json> <out.glsl>
-//     The player's GPU path (main.lua): its filter arguments in, the shader out, one JSON line printed (see player())
+//   gyroflow-gpu-table --player <json> <out.glsl> [--server <socket>]
+//     The player's GPU path (main.lua): its filter arguments in, the shader out, one JSON line printed (see player());
+//     asked of the server at <socket> when one listens there
+//
+//   gyroflow-gpu-table --serve <socket>
+//     The player's table server: keeps the clips it loaded, for changes that don't move the geometry (see serve())
 //
 //   gyroflow-gpu-table --check-grid <W>x<H> [--readout-ms <t>] <project.gyroflow | video>
 //     No shader: the source coordinates on a coarse grid of a W x H output, interpolated (bilinear, Catmull-Rom),
@@ -34,20 +38,101 @@ use gyroflow_core::stabilization::Stabilization;
 use nalgebra::Vector2;
 use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 
-/// The player's GPU path (mpv/scripts/gyroflow/main.lua): `--player <json> <out.glsl>`, the JSON main.lua hands the
-/// VapourSynth filter plus input_width/height, interpolation, chromatic (on/off), edges and edges_blur. Writes the shader
-/// and prints one JSON line: { shader, output: [w, h], mode, chromatic, ms } or { unsupported: why } or { error }
-fn player(json: &str, out: &str) {
+/// The player's GPU path (mpv/scripts/gyroflow/main.lua): `--player <json> <out.glsl> [--server <socket>]`, the JSON
+/// main.lua hands the VapourSynth filter plus input_width/height, interpolation, chromatic (on/off), edges and
+/// edges_blur. Writes the shader and prints one JSON line: { shader, output: [w, h], mode, chromatic, ms } or
+/// { unsupported: why } or { error }. With a server (--serve) listening, it answers: the clip is loaded there already
+/// for a change of the view, the edges, the color fringes, the denoise or the interpolation
+fn player(json: &str, out: &str, server: Option<&str>) {
     let t = Instant::now();
-    fn reply(v: serde_json::Value) -> ! { println!("{v}"); std::process::exit(0) }
-    let j: serde_json::Value = match serde_json::from_str(json) { Ok(j) => j, Err(e) => reply(serde_json::json!({ "error": format!("bad JSON: {e}") })) };
-    let (clip, time_offset) = match gpu_table::from_player_json(&j) { Ok(c) => c, Err(e) => reply(serde_json::json!({ "error": e })) };
-    if let Some(why) = gpu_table::unsupported(&clip) { reply(serde_json::json!({ "unsupported": why })); }
+    // Written before with these settings, for this clip as it is now: kept on disk (a clip opened again)
+    let kept = serde_json::from_str::<serde_json::Value>(json).ok().and_then(|j| disk_cache(&j));
+    if let Some((shader, reply)) = kept.as_ref().and_then(|(c, r)| std::fs::read_to_string(r).ok().map(|r| (c, r))) {
+        if std::fs::copy(shader, out).is_ok() {
+            if let Ok(mut r) = serde_json::from_str::<serde_json::Value>(&reply) {
+                r["shader"] = out.into();
+                r["ms"] = (t.elapsed().as_secs_f64() * 1000.0).round().into();
+                println!("{r}");
+                let now = std::fs::FileTimes::new().set_modified(std::time::SystemTime::now());
+                let _ = std::fs::File::options().write(true).open(shader).and_then(|f| f.set_times(now));
+                std::process::exit(0);
+            }
+        }
+    }
+    let keep = |reply: &str| if let Some((shader, r)) = kept.as_ref() {
+        if !reply.contains("\"shader\"") { return; }
+        if shader.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::copy(out, shader).is_ok() {
+            let _ = std::fs::write(r, reply);
+            trim_disk_cache(shader.parent().unwrap());
+        }
+    };
+    if let Some(sock) = server {
+        if let Some(reply) = ask_server(sock, json, out) { keep(&reply); println!("{reply}"); std::process::exit(0); }
+    }
+    // AFP_TIMES: each step's time and gyroflow-core's log, on stderr
+    let times = std::env::var_os("AFP_TIMES").is_some();
+    if times { let _ = simplelog::TermLogger::init(log::LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never); }
+    let reply = match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(j) => match gpu_table::PlayerClip::load(&j) {
+            Ok(loaded) => {
+                if times { eprintln!("  [{:7.1} ms] prepared", t.elapsed().as_secs_f64() * 1000.0); }
+                player_shader(&loaded, &j, out, t)
+            }
+            Err(e) => serde_json::json!({ "error": e }),
+        },
+        Err(e) => serde_json::json!({ "error": format!("bad JSON: {e}") }),
+    };
+    keep(&reply.to_string());
+    println!("{reply}");
+    std::process::exit(0);
+}
+
+/// Where the shader for these settings is kept on disk, and its reply: by every setting but the per-player control
+/// files' names, the project's (or video's) and preset's files as they are now, and this tool's build
+fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut j = j.clone();
+    let obj = j.as_object_mut()?;
+    for k in ["still_control", "edges_control", "workers", "lookahead"] { obj.remove(k); }
+    let project = obj.get("project")?.as_str()?.to_string();
+    let stamp = |p: &str| std::fs::metadata(p).ok().map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
+    let preset = obj.get("preset").and_then(|v| v.as_str()).map(stamp).unwrap_or_default();
+    let build = std::env::current_exe().ok().map(|e| stamp(&e.to_string_lossy())).unwrap_or_default();
+    // In key order: the player's JSON comes from a Lua table, in an order of its own each run
+    let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
+    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}", serde_json::to_string(&sorted).ok()?))?;
+    Some((base.with_extension("glsl"), base.with_extension("json")))
+}
+
+/// The kept shaders under 400 MB (~100 of them), the least used going first
+fn trim_disk_cache(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = entries.flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "glsl"))
+        .filter_map(|e| e.metadata().ok().map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), e.path()))).collect();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    files.sort();
+    for (_, len, path) in files {
+        if total <= 400 << 20 { break; }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("json"));
+        total -= len;
+    }
+}
+
+/// The shader for a loaded clip, with the JSON's view, edges, fringes, denoise and interpolation: the reply
+fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &str, t: Instant) -> serde_json::Value {
+    let lap = |what: &str| if std::env::var_os("AFP_TIMES").is_some() { eprintln!("  [{:7.1} ms] {what}", t.elapsed().as_secs_f64() * 1000.0) };
+    let clip = loaded.clip(j);
+    lap("the view's clip");
+    let time_offset = j.get("time_offset").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    if let Some(why) = gpu_table::unsupported(&clip) { return serde_json::json!({ "unsupported": why }); }
     let s = |k: &str| j.get(k).and_then(|v| v.as_str()).unwrap_or("");
     let interp = match s("interpolation") { "bilinear" => 0, "lanczos" | "lanczos4" => 3, "ewa" => 4, "bspline" => 1, _ => 5 };
     let chromatic = j.get("gpu_chromatic").and_then(|v| v.as_bool()).unwrap_or(false);
     // Under water with the fringes taken out, the colors are read apart: the RGB layout. Else the planes
-    let wet = chromatic && (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
+    let view = loaded.view(j);
+    let wet = chromatic && loaded.wet(view, &clip);
+    lap("under water?");
     let edge_fill = match s("edges") { "smooth" | "sphere" => Some(j.get("edges_blur").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32 / 100.0), _ => None };
     // The sphere trail needs the RGB layout too (gpu_sphere: the player's say, where its GPU has the room)
     let sphere = s("edges") == "sphere" && j.get("gpu_sphere").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -55,15 +140,144 @@ fn player(json: &str, out: &str) {
     let opts = Options { mode: if rgb { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
                          chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset,
                          denoise: j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), knots: 33, interp, shrink: false, range: None };
-    let table = match Table::build(&clip, &opts) { Ok(t) => t, Err(e) => reply(serde_json::json!({ "error": e })) };
-    if let Err(e) = std::fs::write(out, gpu_table::shader(&clip, &opts, &table)) { reply(serde_json::json!({ "error": format!("{out}: {e}") })); }
-    reply(serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
-                              "chromatic": wet, "sphere": sphere, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() }));
+    let table = match loaded.table(view, &clip, &opts) { Ok(t) => t, Err(e) => return serde_json::json!({ "error": e }) };
+    lap("table");
+    let text = gpu_table::shader(&clip, &opts, &table);
+    lap("shader");
+    if let Err(e) = std::fs::write(out, text) { return serde_json::json!({ "error": format!("{out}: {e}") }); }
+    lap("written");
+    serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
+                        "chromatic": wet, "sphere": sphere, "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
+}
+
+/// The request to a server: one line of { json, out }, one line back. None: no server there (the caller does it).
+/// One just started gets a moment to listen
+#[cfg(not(unix))]
+fn ask_server(_sock: &str, _json: &str, _out: &str) -> Option<String> { None }
+#[cfg(unix)]
+fn ask_server(sock: &str, json: &str, out: &str) -> Option<String> {
+    use std::io::{ BufRead, Write };
+    let started = Instant::now();
+    let debug = std::env::var_os("AFP_TIMES").is_some();
+    let mut stream = loop {
+        match std::os::unix::net::UnixStream::connect(sock) {
+            Ok(s) => break s,
+            Err(_) if started.elapsed().as_millis() < 300 => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Err(e) => { if debug { eprintln!("no server at {sock}: {e}"); } return None }
+        }
+    };
+    if debug { eprintln!("connected in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0); }
+    let req = serde_json::json!({ "json": json, "out": out });
+    stream.write_all(format!("{req}\n").as_bytes()).ok()?;
+    let mut line = String::new();
+    std::io::BufReader::new(stream).read_line(&mut line).ok()?;
+    let line = line.trim();
+    (!line.is_empty()).then(|| line.to_string())
+}
+
+/// `--serve <socket>`: the player's table server (main.lua starts one per player). It keeps the clips it loaded, by
+/// the settings that change the geometry (gpu_table::PLAYER_GEOMETRY_KEYS and the project's file as it is now), so a
+/// change of the view, the edges, the color fringes, the denoise or the interpolation writes the shader alone. It
+/// goes with the player: when its parent is gone, or idle for an hour
+#[cfg(not(unix))]
+fn serve(_sock: &str) { std::process::exit(1) }
+#[cfg(unix)]
+fn serve(sock: &str) {
+    use std::io::{ BufRead, Write };
+    use std::sync::{ Arc, Mutex };
+    // AFP_GPU_SERVER_LOG: gyroflow-core's log and each request's time, in that file
+    if let Some(f) = std::env::var_os("AFP_GPU_SERVER_LOG").and_then(|p| std::fs::File::create(p).ok()) {
+        // Info: at debug the telemetry parser logs every sample (seconds for a clip)
+        let _ = simplelog::WriteLogger::init(log::LevelFilter::Info, simplelog::Config::default(), f);
+    }
+    let _ = std::fs::remove_file(sock);
+    let listener = match std::os::unix::net::UnixListener::bind(sock) { Ok(l) => l, Err(e) => { eprintln!("{sock}: {e}"); std::process::exit(1) } };
+    let parent = unsafe { libc::getppid() };
+    let last = Arc::new(Mutex::new(Instant::now()));
+    {
+        let (sock, last) = (sock.to_string(), last.clone());
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if unsafe { libc::getppid() } != parent || last.lock().unwrap().elapsed().as_secs() > 3600 {
+                let _ = std::fs::remove_file(&sock);
+                std::process::exit(0);
+            }
+        });
+    }
+    // The clips loaded, the latest last; a few: a clip's views hold its whole motion
+    let cache: Arc<Mutex<Vec<(String, Arc<gpu_table::PlayerClip>)>>> = Arc::new(Mutex::new(Vec::new()));
+    // One load per key at a time: a second request for it waits for the first's
+    let loading: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        let (cache, loading, last) = (cache.clone(), loading.clone(), last.clone());
+        std::thread::spawn(move || {
+            let t = Instant::now();
+            *last.lock().unwrap() = t;
+            log::info!("gyroflow-gpu-table server: a request");
+            let mut line = String::new();
+            let mut reader = std::io::BufReader::new(&stream);
+            if reader.read_line(&mut line).is_err() { return; }
+            let req: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+            let out = req.get("out").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let reply = match req.get("json").and_then(|v| v.as_str()).map(serde_json::from_str::<serde_json::Value>) {
+                Some(Ok(j)) => {
+                    let key = geometry_key(&j);
+                    let found = cache.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone());
+                    let loaded = match found {
+                        Some(c) => Ok(c),
+                        None => {
+                            let _one = loading.lock().unwrap();
+                            let found = cache.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone());
+                            match found {
+                                Some(c) => Ok(c),
+                                None => gpu_table::PlayerClip::load(&j).map(|c| {
+                                    let c = Arc::new(c);
+                                    let mut cache = cache.lock().unwrap();
+                                    cache.retain(|(k, _)| *k != key);
+                                    cache.push((key.clone(), c.clone()));
+                                    if cache.len() > 4 { cache.remove(0); }
+                                    c
+                                }),
+                            }
+                        }
+                    };
+                    match loaded {
+                        Ok(c) => {
+                            // The latest used last
+                            let mut list = cache.lock().unwrap();
+                            if let Some(i) = list.iter().position(|(k, _)| *k == key) { let e = list.remove(i); list.push(e); }
+                            drop(list);
+                            player_shader(&c, &j, &out, t)
+                        }
+                        Err(e) => serde_json::json!({ "error": e }),
+                    }
+                }
+                Some(Err(e)) => serde_json::json!({ "error": format!("bad JSON: {e}") }),
+                None => serde_json::json!({ "error": "no json" }),
+            };
+            log::info!("gyroflow-gpu-table server: {:.0} ms for {out}", t.elapsed().as_secs_f64() * 1000.0);
+            let _ = (&stream).write_all(format!("{reply}\n").as_bytes());
+        });
+    }
+}
+
+/// What a loaded clip is kept by: its settings that change the geometry, and its project's file (and preset's) as
+/// it is now, so a project saved again in Gyroflow loads again
+fn geometry_key(j: &serde_json::Value) -> String {
+    let stamp = |k: &str| j.get(k).and_then(|v| v.as_str()).and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
+    let mut key: Vec<String> = gpu_table::PLAYER_GEOMETRY_KEYS.iter().map(|k| format!("{k}={}", j.get(*k).map(|v| v.to_string()).unwrap_or_default())).collect();
+    key.push(stamp("project"));
+    key.push(stamp("preset"));
+    key.join("|")
 }
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 3 { player(&args[1], &args[2]); }
+    if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 3 { player(&args[1], &args[2], None); }
+    if args.first().map(|a| a == "--player").unwrap_or(false) && args.len() == 5 && args[3] == "--server" { player(&args[1], &args[2], Some(&args[4])); }
+    if args.first().map(|a| a == "--serve").unwrap_or(false) && args.len() == 2 { serve(&args[1]); return; }
     let usage = || -> ! {
         eprintln!("usage: gyroflow-gpu-table [--mode exact|grid|planes] [--grid-step px] [--knots n] [--interp bilinear|bspline|bicubic|bicubic9|lanczos4|ewa] [--shrink] [--frames a-b] [--readout-ms t] <project.gyroflow> <out.glsl>\n       gyroflow-gpu-table --check n [--readout-ms t] <project.gyroflow>");
         std::process::exit(2);
