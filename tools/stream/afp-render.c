@@ -239,6 +239,22 @@ int main(int argc, char **argv)
     params.hooks = hooks; params.num_hooks = nhooks;
     params.upscaler = &pl_filter_bilinear; params.downscaler = &pl_filter_bilinear;
     AVPacket *pkt = av_packet_alloc(), *opkt = av_packet_alloc();
+    // Frames in flight: rendered, waiting for the GPU before the encoder takes them; their decoded sources held until then
+#define DEPTH 3
+    struct { AVFrame *src, *out; pl_tex tex; } queue[DEPTH];
+    int qn = 0;
+#define DRAIN_ONE() do { \
+        while (pl_tex_poll(gpu, queue[0].tex, UINT64_MAX)) ; \
+        if (avcodec_send_frame(ec, queue[0].out) < 0) DIE("encoding failed"); \
+        av_frame_free(&queue[0].out); av_frame_free(&queue[0].src); \
+        memmove(&queue[0], &queue[1], sizeof(queue[0]) * (DEPTH - 1)); qn--; \
+        while (avcodec_receive_packet(ec, opkt) == 0) { \
+            if (!opkt->duration) opkt->duration = 1; \
+            av_packet_rescale_ts(opkt, ec->time_base, ovs->time_base); \
+            opkt->stream_index = ovs->index; \
+            av_interleaved_write_frame(oc, opkt); \
+        } \
+    } while (0)
     AVFrame *f = av_frame_alloc();
     int64_t frames = 0; double tstart = now(), first_pts = -1;
     bool eof = false;
@@ -297,19 +313,16 @@ int main(int argc, char **argv)
             };
             pl_frame_set_chroma_location(&dst, PL_CHROMA_LEFT);
             if (!pl_render_image(rr, &src, &dst, &params)) DIE("rendering failed");
-            pl_gpu_finish(gpu);
+            pl_gpu_flush(gpu);
 
             of->pts = av_rescale_q((int64_t) llround((pts - start) * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
             of->color_primaries = ec->color_primaries; of->color_trc = ec->color_trc; of->colorspace = ec->colorspace; of->color_range = AVCOL_RANGE_MPEG;
-            if (avcodec_send_frame(ec, of) < 0) DIE("encoding failed");
-            av_frame_free(&of);
+            if (qn == DEPTH) DRAIN_ONE();
+            queue[qn].src = av_frame_clone(f);
+            queue[qn].out = of;
+            queue[qn].tex = dst_tex[1];
+            qn++;
             av_frame_unref(f);
-            while (avcodec_receive_packet(ec, opkt) == 0) {
-                if (!opkt->duration) opkt->duration = 1;
-                av_packet_rescale_ts(opkt, ec->time_base, ovs->time_base);
-                opkt->stream_index = ovs->index;
-                av_interleaved_write_frame(oc, opkt);
-            }
             frames++;
             if (realtime) {
                 double ahead = (pts - first_pts) - (now() - tstart);
@@ -319,6 +332,7 @@ int main(int argc, char **argv)
                 fprintf(stderr, "afp-render: %lld frames, %.1f fps\n", (long long) frames, frames / (now() - tstart));
         }
     }
+    while (qn > 0) DRAIN_ONE();
     avcodec_send_frame(ec, NULL);
     while (avcodec_receive_packet(ec, opkt) == 0) {
         av_packet_rescale_ts(opkt, ec->time_base, ovs->time_base);

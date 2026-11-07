@@ -12,7 +12,9 @@
 #   GET /clip/<id>/<file>      its init segment and segments
 #
 # Environment: AFP_LIBRARY (folders, ':'-separated; default /clips), AFP_CACHE (/stream/cache), AFP_BIN (/stream: afp-render,
-# gyroflow-gpu-table, the shaders), AFP_PORT (8099), AFP_HEIGHT (1080), AFP_BITRATE (12M)
+# gyroflow-gpu-table, the shaders), AFP_PORT (8099), AFP_HEIGHT (1080), AFP_BITRATE (12M), AFP_CHROMATIC (0; 1: the water's
+# color fringes taken out, the RGB layout: 48 fps on the N100, not real time at 4K60), AFP_INTERP (bilinear, bspline,
+# bicubic, lanczos)
 import hashlib, html, json, os, re, shutil, subprocess, threading, time, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -22,6 +24,10 @@ BIN = os.environ.get("AFP_BIN", "/stream")
 PORT = int(os.environ.get("AFP_PORT", "8099"))
 HEIGHT = int(os.environ.get("AFP_HEIGHT", "1080"))
 BITRATE = os.environ.get("AFP_BITRATE", "12M")
+# The water's color fringes taken out (the RGB layout: the whole source converted first, slower), or not (the planes)
+CHROMATIC = os.environ.get("AFP_CHROMATIC", "0") == "1"
+# The warp's interpolation: bilinear plays 4K60 -> 1080p at 67 fps on the N100 (bspline 61, bicubic 59: no margin)
+INTERP = os.environ.get("AFP_INTERP", "bilinear")
 MAX_JOBS = 2
 VIDEO = re.compile(r"\.(mp4|mov)$", re.I)
 
@@ -33,7 +39,7 @@ def clips():
     out = []
     for root in LIBRARY:
         for d, _, files in os.walk(root):
-            if "/_" in d or "/." in d:
+            if "/_" in d or "/." in d or "#recycle" in d:
                 continue
             for f in sorted(files):
                 if VIDEO.search(f) and not f.startswith("."):
@@ -73,6 +79,11 @@ def start_job(clip, start):
         while len(running) >= MAX_JOBS:
             old = running.pop(0)
             old["proc"].terminate()
+        # Renders not asked for in 12 hours go
+        for d in os.listdir(CACHE):
+            p = os.path.join(CACHE, d)
+            if d != key and os.path.isdir(p) and time.time() - os.path.getmtime(p) > 12 * 3600 and not any(v["dir"] == p and v["proc"].poll() is None for v in jobs.values()):
+                shutil.rmtree(p, ignore_errors=True)
         out = os.path.join(CACHE, key)
         shutil.rmtree(out, ignore_errors=True)
         os.makedirs(out, exist_ok=True)
@@ -82,8 +93,8 @@ def start_job(clip, start):
         shaders = []
         # The warp: the clip's project, else its own motion data with the underwater preset (the player's default.gyroflow)
         project = project_of(clip["path"])
-        ud = {"project": project or clip["path"], "input_width": w, "input_height": h, "interpolation": "bicubic",
-              "gpu_chromatic": True, "edges": "smooth", "edges_blur": 2, "underwater": "project" if project else "auto",
+        ud = {"project": project or clip["path"], "input_width": w, "input_height": h, "interpolation": INTERP,
+              "gpu_chromatic": CHROMATIC, "edges": "smooth", "edges_blur": 2, "underwater": "project" if project else "auto",
               "level": "medium", "lookahead": 0}
         if not project:
             ud["preset"] = os.path.join(BIN, "underwater.gyroflow")
@@ -103,7 +114,7 @@ def start_job(clip, start):
         height = min(HEIGHT, oh)
         width = int(round(height * ow / oh / 2)) * 2
         # DJI's D-Log M (10-bit, untagged): its look to HLG, as the player's hdr look
-        if os.path.basename(clip["path"]).startswith("DJI_") and "10" in (s.get("pix_fmt") or "") and s.get("color_transfer") in (None, "", "unknown", "bt709"):
+        if os.path.basename(clip["path"]).startswith("DJI_") and "10" in (s.get("pix_fmt") or "") and s.get("color_transfer") not in ("arib-std-b67", "smpte2084"):
             shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
             args.append("--hlg")
         args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-ss", str(start), clip["path"], out] + shaders
