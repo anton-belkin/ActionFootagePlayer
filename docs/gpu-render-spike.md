@@ -240,8 +240,8 @@ GPU, and a service that streams a selected clip stabilized and in HDR").
   write the shader again and swap it in within ~2 s, the dlogm plugin told so it keeps it under its looks
   (`gyroflow-shader` message). What the shader can't do loads the clip again through VapourSynth: a frame turned or cut
   (the side panel's Frame), a file's own display turn (mpv turns it again), lens correction below 100 % (as recorded),
-  Sony lenses, IBIS/OIS, the equirect output (`gpu_table::unsupported`). Crop mode's camera and the clean still frame
-  need the filter: on the GPU path crop mode uses mpv's own pan and zoom, and Ctrl+p has nothing to clean.
+  Sony lenses, IBIS/OIS, the equirect output (`gpu_table::unsupported`); turned files and the Frame: below. Crop mode's camera
+  need the filter: on the GPU path crop mode uses mpv's own pan and zoom (Ctrl+p: below).
 - **The Dolby Vision looks work**: the sample-buffer layer (patch 0002) renders through libplacebo like the swapchain
   does, user shaders included (gpu-render.md's note that it runs none was wrong). Anton's setup (dv on both screens,
   wider view, smooth fill) runs on the GPU path.
@@ -261,6 +261,24 @@ GPU, and a service that streams a selected clip stabilized and in HDR").
   (default preset, levels, wider view, chromatic): 0 drops, 16:9 output shown as such (video-aspect-override).
 - Not done on the GPU path yet: the paused frame at full size (the window's size is the render size anyway), the
   quality menu's GPU knobs (interpolation stays main.lua's), Windows (postponed).
+
+### Turned clips, the frame, and the temporal denoise (2026-11-07, later)
+
+- **Turned files and the side panel's Frame** (turn, aspect cut, projection) play on the GPU path too: the table tool
+  loads them through the filter's own `prepare()`, so the warp turns and cuts as the filter does; mpv turns nothing
+  more and shows the output's shape. A 90°-turned copy of the HERO12 clip renders upright (4648×5312), the panel's turn
+  with a 1:1 cut gives 4648×4648, and the VapourSynth path shows the same.
+- **The clean frame while it plays (Ctrl+p)**: four passes after the warp (warp.glsl's dn_): the last 4 frames as
+  decoded and warped, in a ring of storage slots; per 32 px block and past frame, the gyro's prediction (the smoothed
+  camera's turn between them) and a search around it on a quarter-size luma, a candidate having to beat the prediction
+  by a fifth of its cost, then to the pixel at full size; each pixel fused with the 4 where the vectors put them,
+  weighted by how much their 3×3 patches (every other pixel) differ beyond the noise, measured by brightness from the
+  frame against the one before (still.rs's rules); a fifth of the grain kept. Nothing is carried from frame to frame, so
+  what moves on its own keeps its own pixel: no trails (Anton: a plain recursive filter is no good under water).
+  Paused, the same fusion on the paused frame. M1 Pro: 1080p fullscreen, motion 2.5 ms and fusion 5.8 ms; in the app's
+  window, 1.9 + 4.2 ms with the warp at 0.7 and the DV look; 0 drops. Frame-exact on clip 0126 (frame 959, no look),
+  the fine noise −17 % in open water and −30 % on the reef, the fish without ghosts. A first tuning: the strength,
+  the frames and the grain kept are defines (DN_STRENGTH 1.5, 4 past frames, DN_KEEP 0.2) to set by eye.
 
 ### The stream (tools/stream, on the NAS)
 
