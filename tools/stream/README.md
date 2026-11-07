@@ -5,14 +5,20 @@ Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for DJI's D-Log M, given the p
 (BT.2020), fMP4 segments of 2 s, the audio copied. Nothing leaves the GPU: VAAPI decodes, libplacebo renders into the
 encoder's own surfaces, VDEnc encodes (docs/gpu-render.md, "The streaming server").
 
-- `http://<nas>:8099/`: the clips, each with its stream (Safari and Apple TV play HLS by themselves; `watch` opens a
-  page with a player)
+- `http://<nas>:8099/`: the clips by folder, each with its stream (Safari and Apple TV play HLS by themselves; `watch`
+  opens a page with a player) and how much of it is rendered; per folder, **pre-render openings** (the first 8 s of each
+  clip, `AFP_OPENING`) and **pre-render whole clips**: queued, rendered one clip at a time at low priority, and only
+  while nobody watches (a viewer's render stops the background one). `/status` says what renders and what's queued
 - `http://<nas>:8099/playlist.m3u`: every clip as a channel, for Jellyfin: Dashboard → Live TV → Tuner Devices → Add →
   M3U Tuner, this URL. Or any player that takes an M3U (VLC, Infuse)
 - `http://<nas>:8099/clip/<id>/index.m3u8`: one clip's stream, as VOD: every segment listed at once (from the clip's
   rate and length, a GOP of 2 s each), so players start at the beginning and can seek. The render starts with the
-  playlist; a segment request waits until it's rendered (a player starts after ~6 s), and one far ahead of the render (a
-  seek) starts it again from there. An EVENT playlist that grew as it rendered made Safari start near its end and stall
+  playlist; a segment request waits until it's rendered, and one far ahead of the render (a seek) starts it again from
+  there. Segments of a second (`AFP_SEGMENT`). **What played stays** in the cache, up to `AFP_CACHE_GB` (40; the clips
+  used longest ago go first), and goes when the clip's project or the service's settings change; the render picks up a
+  few segments before the end of what's cached.
+- Time to the first picture in AVFoundation: a clip never played ~5 s (the renderer's start, ~1.4 s, then its first
+  segments while the player builds a buffer); a pre-rendered opening ~1.9 s with 4 s of it; a clip played before 0.4 s. An EVENT playlist that grew as it rendered made Safari start near its end and stall
   at that edge. Byte ranges and HTTP/1.1 keep-alive as AVFoundation likes them
 
 Checked 2026-11-07 with AVFoundation itself (tools/stream/hlsplay.swift, what Safari and iOS play HLS with): clip 0126
@@ -35,14 +41,15 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
       -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox afp-stream:f43 \
-      bash -c "cd /stream && cc -O2 afp-render.c -o /usr/local/bin/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
+      bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
-The library is mounted read-only: the service writes only its renders (`/stream/cache`, gone after 12 h unasked).
+The library is mounted read-only: the service writes only its renders (`/stream/cache`).
 The memory cap keeps it from pushing the Home Assistant VM out.
 
 Settings (environment): `AFP_INTERP` (bilinear; bspline, bicubic, lanczos), `AFP_CHROMATIC` (0; 1 takes the water's
-color fringes out), `AFP_HEIGHT` (1080), `AFP_BITRATE` (12M), `AFP_LIBRARY`, `AFP_PORT` (8099).
+color fringes out), `AFP_HEIGHT` (1080), `AFP_BITRATE` (12M), `AFP_SEGMENT` (1 s), `AFP_CACHE_GB` (40), `AFP_OPENING`
+(8 s), `AFP_LIBRARY`, `AFP_PORT` (8099).
 
 Measured on the N100, clip 0126 (Osmo Action 6, 4K60 D-Log M), 1080p HLG out, with the look:
 

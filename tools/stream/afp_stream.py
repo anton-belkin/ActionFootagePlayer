@@ -11,7 +11,10 @@
 #   GET /clip/<id>/index.m3u8  the clip's stream as VOD: every segment listed at once (from the clip's rate and length),
 #                              the render started from the first
 #   GET /clip/<id>/<file>      its init segment and segments: a request waits until it's rendered; one far ahead of the
-#                              render (a seek) starts it again from there
+#                              render (a seek) starts it again from there. What played stays (AFP_CACHE_GB)
+#   GET /prerender?folder=<f>&what=opening|whole   a folder's clips queued to be rendered in the background (their first
+#                              AFP_OPENING seconds, or all), one at a time, while nobody watches
+#   GET /status                what renders and what's queued
 #
 # Environment: AFP_LIBRARY (folders, ':'-separated; default /clips), AFP_CACHE (/stream/cache), AFP_BIN (/stream: afp-render,
 # gyroflow-gpu-table, the shaders), AFP_PORT (8099), AFP_HEIGHT (1080), AFP_BITRATE (12M), AFP_CHROMATIC (0; 1: the water's
@@ -31,6 +34,12 @@ CHROMATIC = os.environ.get("AFP_CHROMATIC", "0") == "1"
 # The warp's interpolation: bilinear plays 4K60 -> 1080p at 67 fps on the N100 (bspline 61, bicubic 59: no margin)
 INTERP = os.environ.get("AFP_INTERP", "bilinear")
 MAX_JOBS = 2
+# Segments of a second: the first is there ~1 s after the render starts, and a player's buffer fills in small steps
+SEGMENT = float(os.environ.get("AFP_SEGMENT", "1"))
+# What played stays, up to this many GB of renders (the clips played longest ago go first)
+CACHE_GB = float(os.environ.get("AFP_CACHE_GB", "40"))
+# Pre-rendered openings (a folder's, on demand): this many seconds of each clip
+OPENING = float(os.environ.get("AFP_OPENING", "8"))
 VIDEO = re.compile(r"\.(mp4|mov)$", re.I)
 
 jobs = {}  # key -> {proc, dir, started}
@@ -95,7 +104,7 @@ def info(clip):
         s, duration = probe(clip["path"])
         num, _, den = (s.get("r_frame_rate") or "30/1").partition("/")
         fps = float(num) / float(den or 1) if float(den or 1) else 30.0
-        gop = int(fps * 2 + 0.5)
+        gop = int(fps * SEGMENT + 0.5)
         seg = gop / fps
         infos[clip["id"]] = {"stream": s, "duration": duration, "fps": fps, "seg": seg, "count": max(1, math.ceil(duration / seg - 1e-6))}
     return infos[clip["id"]]
@@ -161,48 +170,150 @@ def shader_for(clip, out, s):
     return reply
 
 
+def fingerprint(clip):
+    """What a clip's renders depend on: when it changes (the project saved in Gyroflow, the service's settings), what was
+    rendered goes"""
+    def stamp(p):
+        try:
+            st = os.stat(p)
+            return f"{st.st_size}:{int(st.st_mtime)}"
+        except OSError:
+            return "-"
+    return f"v3|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{stamp(clip['path'])}|{stamp(project_of(clip['path']) or '')}"
+
+
+def clip_dir(clip):
+    """The clip's renders, as they are now (stale ones gone); marked used now, for the cache's limit"""
+    out = os.path.join(CACHE, clip["id"])
+    os.makedirs(out, exist_ok=True)
+    fp, mark = fingerprint(clip), os.path.join(out, "fingerprint")
+    old = open(mark).read() if os.path.exists(mark) else None
+    if old != fp and not any(v["dir"] == out and v["proc"].poll() is None for v in jobs.values()):
+        shutil.rmtree(out, ignore_errors=True)
+        os.makedirs(out, exist_ok=True)
+        with open(mark, "w") as f:
+            f.write(fp)
+    os.utime(out)
+    return out
+
+
+def trim_cache():
+    """Over CACHE_GB: the clips used longest ago go, but none being rendered"""
+    dirs = []
+    for d in os.listdir(CACHE):
+        p = os.path.join(CACHE, d)
+        if os.path.isdir(p):
+            size = sum(os.path.getsize(os.path.join(p, f)) for f in os.listdir(p) if os.path.isfile(os.path.join(p, f)))
+            dirs.append((os.path.getmtime(p), size, p))
+    total = sum(s for _, s, _ in dirs)
+    for _, size, p in sorted(dirs):
+        if total <= CACHE_GB * 1e9:
+            break
+        if any(v["dir"] == p and v["proc"].poll() is None for v in jobs.values()):
+            continue
+        shutil.rmtree(p, ignore_errors=True)
+        total -= size
+        log("cache: dropped", os.path.basename(p))
+
+
+def start_render(clip, n, upto=None, background=False):
+    """afp-render from segment n (to segment `upto`, else the end) into the clip's folder"""
+    out = clip_dir(clip)
+    i = info(clip)
+    s = i["stream"]
+    reply = shader_for(clip, out, s)
+    shaders = [reply["shader"]] if reply.get("shader") else []
+    ow, oh = reply["output"]
+    height = min(HEIGHT, oh)
+    width = int(round(height * ow / oh / 2)) * 2
+    args = [os.path.join(BIN, "afp-render")]
+    # DJI's D-Log M (10-bit, not tagged HLG or PQ): its look to HLG, as the player's hdr look
+    if os.path.basename(clip["path"]).startswith("DJI_") and "10" in (s.get("pix_fmt") or "") and s.get("color_transfer") not in ("arib-std-b67", "smpte2084"):
+        shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
+        args.append("--hlg")
+    args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-seg", str(SEGMENT), "-ss", f"{n * i['seg']:.6f}", "-start_number", str(n)]
+    if upto is not None:
+        args += ["-t", f"{(upto - n) * i['seg'] - 0.5 / i['fps']:.6f}"]
+    args += [clip["path"], out] + shaders
+    logf = open(os.path.join(out, "render.log"), "a")
+    proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),
+                            preexec_fn=(lambda: os.nice(10)) if background else None)
+    log("rendering", clip["name"], "from segment", n, "to", upto if upto is not None else "the end", ":", reply.get("mode", "no warp"),
+        "(in the background)" if background else "")
+    j = {"proc": proc, "dir": out, "started": time.time(), "from": n, "background": background, "clip": clip["id"]}
+    jobs[clip["id"]] = j
+    trim_cache()
+    return j
+
+
 def ensure(clip, n):
     """A render that has segment n or will have it soon: the running one when it's at most a few segments short of n,
-    else a new one from n (a seek), the old one stopped"""
+    else a new one from n (a seek), the old one stopped. Someone watching comes first: a background render stops"""
     with lock:
+        out = clip_dir(clip)
         j = jobs.get(clip["id"])
         if os.path.exists(segment_path(clip, n)):
             return j
-        if j and j["proc"].poll() is None and j["from"] <= n <= highest(clip, j["from"]) + 4:
+        if j and j["proc"].poll() is None and j["from"] <= n <= highest(clip, j["from"]) + 6 and not j["background"]:
             return j
         if j and j["proc"].poll() is None:
             j["proc"].terminate()
-        # At most MAX_JOBS renders at once: the oldest running one stops
+        for v in jobs.values():
+            if v["background"] and v["proc"].poll() is None:
+                v["proc"].terminate()
         running = sorted((v for v in jobs.values() if v["proc"].poll() is None), key=lambda v: v["started"])
         while len(running) >= MAX_JOBS:
             running.pop(0)["proc"].terminate()
-        # Renders not asked for in 12 hours go
-        for d in os.listdir(CACHE):
-            p = os.path.join(CACHE, d)
-            if d != clip["id"] and os.path.isdir(p) and time.time() - os.path.getmtime(p) > 12 * 3600 and not any(v["dir"] == p and v["proc"].poll() is None for v in jobs.values()):
-                shutil.rmtree(p, ignore_errors=True)
-        out = os.path.join(CACHE, clip["id"])
-        os.makedirs(out, exist_ok=True)
-        i = info(clip)
-        s = i["stream"]
-        reply = shader_for(clip, out, s)
-        shaders = [reply["shader"]] if reply.get("shader") else []
-        ow, oh = reply["output"]
-        height = min(HEIGHT, oh)
-        width = int(round(height * ow / oh / 2)) * 2
-        args = [os.path.join(BIN, "afp-render")]
-        # DJI's D-Log M (10-bit, not tagged HLG or PQ): its look to HLG, as the player's hdr look
-        if os.path.basename(clip["path"]).startswith("DJI_") and "10" in (s.get("pix_fmt") or "") and s.get("color_transfer") not in ("arib-std-b67", "smpte2084"):
-            shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
-            args.append("--hlg")
-        args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-ss", f"{n * i['seg']:.6f}", "-start_number", str(n),
-                 clip["path"], out] + shaders
-        logf = open(os.path.join(out, "render.log"), "a")
-        proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"))
-        log("rendering", clip["name"], "from segment", n, ":", reply.get("mode", "no warp"))
-        j = {"proc": proc, "dir": out, "started": time.time(), "from": n}
-        jobs[clip["id"]] = j
-        return j
+        # From n to the end, skipping what's rendered: up to the next segment that's there, then on from there later
+        upto = n
+        count = info(clip)["count"]
+        while upto < count and not os.path.exists(segment_path(clip, upto)):
+            upto += 1
+        return start_render(clip, n, upto if upto < count else None)
+
+
+# ---- Pre-rendering on demand, per folder ----
+queue = []  # [{"clip", "what": "opening" | "whole"}]
+current = {"name": None}
+
+
+def interactive_running():
+    return any(not v["background"] and v["proc"].poll() is None for v in jobs.values())
+
+
+def prerender_worker():
+    """One clip at a time, at low priority, and only while nobody's watching: the missing segments of its opening (or of
+    all of it), from the first missing one"""
+    while True:
+        time.sleep(1)
+        if not queue or interactive_running():
+            continue
+        with lock:
+            if not queue or interactive_running():
+                continue
+            item = queue[0]
+            clip = item["clip"]
+            i = info(clip)
+            last = i["count"] if item["what"] == "whole" else min(i["count"], math.ceil(OPENING / i["seg"]))
+            clip_dir(clip)
+            first = next((k for k in range(last) if not os.path.exists(segment_path(clip, k))), None)
+            if first is None:
+                queue.pop(0)
+                continue
+            upto = first
+            while upto < last and not os.path.exists(segment_path(clip, upto)):
+                upto += 1
+            current["name"] = clip["name"]
+            j = start_render(clip, first, upto if upto < i["count"] else None, background=True)
+        j["proc"].wait()
+        current["name"] = None
+
+
+threading.Thread(target=prerender_worker, daemon=True).start()
+
+
+def folder_of(clip):
+    return os.path.dirname(clip["name"]) or "."
 
 
 def wait_for(path, j, timeout=60):
@@ -250,11 +361,42 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         parts = [p for p in u.path.split("/") if p]
         if not parts:
-            rows = "".join(f'<li><a href="/clip/{c["id"]}/index.m3u8">{html.escape(c["name"])}</a> '
-                           f'<a href="/watch/{c["id"]}">watch</a></li>' for c in clips())
+            folders = {}
+            for c in clips():
+                folders.setdefault(folder_of(c), []).append(c)
+            status = (f"Pre-rendering {html.escape(current['name'])}, {len(queue)} clips queued" if current["name"] else
+                      f"{len(queue)} clips queued for pre-rendering" if queue else "Nothing being pre-rendered")
+            body = ""
+            for folder, cs in sorted(folders.items()):
+                q = urllib.parse.quote(folder)
+                body += (f"<h2>{html.escape(folder)}</h2><p><a href='/prerender?folder={q}&what=opening'>pre-render openings</a> · "
+                         f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a></p><ul>")
+                for c in cs:
+                    i = infos.get(c["id"])
+                    done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
+                    have = f" <small>({done} s rendered)</small>" if done else ""
+                    body += f'<li><a href="/clip/{c["id"]}/index.m3u8">{html.escape(os.path.basename(c["name"]))}</a> <a href="/watch/{c["id"]}">watch</a>{have}</li>'
+                body += "</ul>"
             return self.send(200, f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Action Footage streams</title>"
-                                  f"<body style='font-family:system-ui;background:#111;color:#ddd'><h1>Clips</h1><p>Stabilized, HDR (HLG). "
-                                  f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV.</p><ul>{rows}</ul>", "text/html; charset=utf-8")
+                                  f"<body style='font-family:system-ui;background:#111;color:#ddd'><style>a{{color:#8cf}}</style><h1>Clips</h1><p>Stabilized, HDR (HLG). "
+                                  f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV. {status}.</p>{body}", "text/html; charset=utf-8")
+        if parts == ["prerender"]:
+            q = urllib.parse.parse_qs(u.query)
+            folder, what = (q.get("folder") or [""])[0], (q.get("what") or ["opening"])[0]
+            if what not in ("opening", "whole"):
+                return self.send(400, "what: opening or whole", "text/plain")
+            added = 0
+            with lock:
+                for c in clips():
+                    if folder_of(c) == folder and not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
+                        queue.append({"clip": c, "what": what})
+                        added += 1
+            log("pre-render", what, folder, added, "clips")
+            return self.send(303, "", "text/plain", {"Location": "/"})
+        if parts == ["status"]:
+            return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue),
+                                              "rendering": [{"clip": v["clip"], "from": v["from"], "background": v["background"]} for v in jobs.values() if v["proc"].poll() is None]}),
+                             "application/json")
         if parts == ["playlist.m3u"]:
             lines = ["#EXTM3U"]
             for c in clips():
@@ -270,8 +412,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(404, "no such clip", "text/plain")
             name = os.path.basename(parts[2])
             if name == "index.m3u8":
-                # The whole clip's segments at once (VOD); the render starts from the first
-                ensure(clip, 0)
+                # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
+                first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                if first is not None:
+                    ensure(clip, first)
                 return self.send(200, playlist(clip), "application/vnd.apple.mpegurl")
             m = re.match(r"seg(\d+)\.m4s$", name)
             if m:
@@ -279,6 +423,11 @@ class Handler(BaseHTTPRequestHandler):
                 if n >= info(clip)["count"]:
                     return self.send(404, "past the end", "text/plain")
                 j = ensure(clip, n)
+                # A cached stretch (a pre-rendered opening, what played before) ends somewhere: the render picks up a
+                # few segments before the player gets there
+                ahead = next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                if ahead is not None:
+                    ensure(clip, ahead)
                 path = segment_path(clip, n)
                 if not wait_for(path, j):
                     return self.send(503, "not rendered", "text/plain", {"Retry-After": "2"})

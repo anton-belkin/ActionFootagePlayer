@@ -12,6 +12,7 @@
 //     -w <width> -h <height>   output size (default 1920x1080)
 //     -ss <seconds>            start there
 //     -t <seconds>             only this long
+//     -seg <seconds>           segment length (default 1): a keyframe every round(fps * seg) frames, a segment each
 //     -start_number <n>        the first segment's number (a render from -ss into a VOD playlist's segments: the
 //                              timestamps are the clip's own, so the segments of several renders fit together)
 //     -b <bitrate>             video bitrate, e.g. 12M (default 12M)
@@ -114,7 +115,7 @@ static char *read_file(const char *path, size_t *len)
 
 int main(int argc, char **argv)
 {
-    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
+    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
@@ -122,6 +123,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-ss") && i + 1 < argc) start = atof(argv[++i]);
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) duration = atof(argv[++i]);
         else if (!strcmp(argv[i], "-start_number") && i + 1 < argc) start_number = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-seg") && i + 1 < argc) seg = atof(argv[++i]);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) bitrate = argv[++i];
         else if (!strcmp(argv[i], "--hlg")) hlg = true;
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
@@ -183,7 +185,7 @@ int main(int argc, char **argv)
     ec->framerate = fr;
     ec->pix_fmt = AV_PIX_FMT_VAAPI;
     ec->profile = AV_PROFILE_HEVC_MAIN_10;
-    ec->gop_size = (int) (fps * 2 + 0.5);
+    ec->gop_size = (int) (fps * seg + 0.5);
     ec->max_b_frames = 0;
     ec->bit_rate = 0;
     av_opt_set(ec, "b", bitrate, AV_OPT_SEARCH_CHILDREN);
@@ -204,7 +206,7 @@ int main(int argc, char **argv)
     ec->hw_frames_ctx = av_buffer_ref(ef);
     if (avcodec_open2(ec, enc, NULL) < 0) DIE("can't open hevc_vaapi");
 
-    // ---- HLS out: fMP4 segments of 2 s, the playlist growing as they come ----
+    // ---- HLS out: fMP4 segments of a second, the playlist growing as they come ----
     char playlist[1024], segs[1024];
     snprintf(playlist, sizeof playlist, "%s/render.m3u8", outdir);
     snprintf(segs, sizeof segs, "%s/seg%%05d.m4s", outdir);
@@ -222,7 +224,9 @@ int main(int argc, char **argv)
         oas->time_base = ic->streams[as]->time_base;
     }
     AVDictionary *mo = NULL;
-    av_dict_set(&mo, "hls_time", "2", 0);
+    char hls_time[32];
+    snprintf(hls_time, sizeof hls_time, "%g", seg);
+    av_dict_set(&mo, "hls_time", hls_time, 0);
     av_dict_set(&mo, "hls_segment_type", "fmp4", 0);
     av_dict_set(&mo, "hls_playlist_type", "event", 0);
     av_dict_set(&mo, "hls_flags", "independent_segments+temp_file", 0);
