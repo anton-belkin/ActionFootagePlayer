@@ -9,16 +9,24 @@ encoder's own surfaces, VDEnc encodes (docs/gpu-render.md, "The streaming server
   page with a player)
 - `http://<nas>:8099/playlist.m3u`: every clip as a channel, for Jellyfin: Dashboard → Live TV → Tuner Devices → Add →
   M3U Tuner, this URL. Or any player that takes an M3U (VLC, Infuse)
-- `http://<nas>:8099/clip/<id>/index.m3u8`: one clip's stream. The render starts at the first request, from the start
-  (`?t=<seconds>` from elsewhere), and the playlist grows as it goes (an EVENT playlist): the first answer comes after
-  ~6 s, when two segments are there
+- `http://<nas>:8099/clip/<id>/index.m3u8`: one clip's stream, as VOD: every segment listed at once (from the clip's
+  rate and length, a GOP of 2 s each), so players start at the beginning and can seek. The render starts with the
+  playlist; a segment request waits until it's rendered (a player starts after ~6 s), and one far ahead of the render (a
+  seek) starts it again from there. An EVENT playlist that grew as it rendered made Safari start near its end and stall
+  at that edge. Byte ranges and HTTP/1.1 keep-alive as AVFoundation likes them
+
+Checked 2026-11-07 with AVFoundation itself (tools/stream/hlsplay.swift, what Safari and iOS play HLS with): clip 0126
+and two library clips start in 6-8 s, play at real time without a stall, seek ahead, end cleanly.
 
 Files:
 
 - `afp-render.c`: the renderer (VAAPI decode → each plane imported into Vulkan as a dmabuf → libplacebo with mpv user
   shaders, PTS set per frame → the encoder's VAAPI P010 surfaces → hevc_vaapi low-power → HLS)
 - `afp_stream.py`: the service; per clip, `gyroflow-gpu-table --player` writes the warp from the clip's project (else its
-  own motion data with the underwater preset, at the medium level), then afp-render runs
+  own motion data with the underwater preset, at the medium level; else the lens alone; else the planes just scaled,
+  which also keeps a clip without motion data faster than real time: 75-80 fps against 43 through libplacebo's own
+  conversion of the whole 4K source), then afp-render runs. The first play of a clip without motion data waits ~10 s
+  for those tries; their answer is kept
 - `Dockerfile`: the image, on top of tools/gpu-spike's (mpv 0.42 + libplacebo 7.387 on Fedora 43 with RPM Fusion's ffmpeg)
 
 On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` built for Linux there (15 min on the N100),

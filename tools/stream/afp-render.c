@@ -12,6 +12,8 @@
 //     -w <width> -h <height>   output size (default 1920x1080)
 //     -ss <seconds>            start there
 //     -t <seconds>             only this long
+//     -start_number <n>        the first segment's number (a render from -ss into a VOD playlist's segments: the
+//                              timestamps are the clip's own, so the segments of several renders fit together)
 //     -b <bitrate>             video bitrate, e.g. 12M (default 12M)
 //     --hlg                    the source is log made HLG by a look shader (the dlogm plugin's way): tagged
 //                              BT.2020/HLG in and out, no conversion between; else the file's own tags
@@ -112,13 +114,14 @@ static char *read_file(const char *path, size_t *len)
 
 int main(int argc, char **argv)
 {
-    int W = 1920, H = 1080; double start = 0, duration = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
+    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-h") && i + 1 < argc) H = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-ss") && i + 1 < argc) start = atof(argv[++i]);
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) duration = atof(argv[++i]);
+        else if (!strcmp(argv[i], "-start_number") && i + 1 < argc) start_number = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) bitrate = argv[++i];
         else if (!strcmp(argv[i], "--hlg")) hlg = true;
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
@@ -203,7 +206,7 @@ int main(int argc, char **argv)
 
     // ---- HLS out: fMP4 segments of 2 s, the playlist growing as they come ----
     char playlist[1024], segs[1024];
-    snprintf(playlist, sizeof playlist, "%s/index.m3u8", outdir);
+    snprintf(playlist, sizeof playlist, "%s/render.m3u8", outdir);
     snprintf(segs, sizeof segs, "%s/seg%%05d.m4s", outdir);
     AVFormatContext *oc = NULL;
     avformat_alloc_output_context2(&oc, NULL, "hls", playlist);
@@ -225,6 +228,9 @@ int main(int argc, char **argv)
     av_dict_set(&mo, "hls_flags", "independent_segments+temp_file", 0);
     av_dict_set(&mo, "hls_segment_filename", segs, 0);
     av_dict_set(&mo, "hls_fmp4_init_filename", "init.mp4", 0);
+    char sn[32];
+    snprintf(sn, sizeof sn, "%d", start_number);
+    av_dict_set(&mo, "start_number", sn, 0);
     if (avformat_write_header(oc, &mo) < 0) DIE("can't start the HLS output");
 
     // ---- The frames ----
@@ -265,7 +271,7 @@ int main(int argc, char **argv)
             double ts = pkt->pts * av_q2d(ic->streams[as]->time_base) - t0;
             if (ts >= start - 0.05) {
                 av_packet_rescale_ts(pkt, ic->streams[as]->time_base, oas->time_base);
-                int64_t off = av_rescale_q((int64_t) ((start + t0) * 1e6), (AVRational) { 1, 1000000 }, oas->time_base);
+                int64_t off = av_rescale_q((int64_t) (t0 * 1e6), (AVRational) { 1, 1000000 }, oas->time_base);
                 pkt->pts -= off; pkt->dts -= off;
                 pkt->stream_index = oas->index;
                 av_interleaved_write_frame(oc, pkt);
@@ -315,7 +321,8 @@ int main(int argc, char **argv)
             if (!pl_render_image(rr, &src, &dst, &params)) DIE("rendering failed");
             pl_gpu_flush(gpu);
 
-            of->pts = av_rescale_q((int64_t) llround((pts - start) * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
+            // The clip's own time: segments of renders from different points fit one playlist
+            of->pts = av_rescale_q((int64_t) llround(pts * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
             of->color_primaries = ec->color_primaries; of->color_trc = ec->color_trc; of->colorspace = ec->colorspace; of->color_range = AVCOL_RANGE_MPEG;
             if (qn == DEPTH) DRAIN_ONE();
             queue[qn].src = av_frame_clone(f);
