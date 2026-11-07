@@ -602,10 +602,20 @@ local function gpu_frame()
     return { "--image", file }, file
 end
 
+-- The time of the frame on screen: on the GPU path with the denoise, up to its delay before time-pos, not before where
+-- it last started (main.lua's dn_sync, user-data/gyroflow/gpu_delay)
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    local restart = (d.restart and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
+
 local function photo()
     local path = local_path()
     if not path or not installed("Photo") then return end
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if not t then return end
     -- A moment plays as a video of its own: its time plus where it starts in the clip
     local ws = mp.get_property_native("user-data/workspace")

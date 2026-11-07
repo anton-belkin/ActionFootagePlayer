@@ -56,6 +56,16 @@
 //!TYPE DYNAMIC float
 1.0
 
+//!PARAM gyroflow_dn_after
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 5
+5
+
+//!PARAM gyroflow_dn_epoch
+//!TYPE DYNAMIC int
+0
+
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
 //!FORMAT rgba32f
@@ -721,16 +731,20 @@ void hook()
 }
 
 // ==== pass dn_luma ====
-// Temporal denoise (the clean frame while it plays: Ctrl+p), after the warp at MAIN, in RGB. The paused frame's way
-// (vs-gyroflow/src/still.rs), with the frames before it only: each pixel is the average of it and the last DN_PAST
-// frames' pixels where the motion found between them puts them, each weighted by how much the patches around them
+// Temporal denoise (the clean frame: Ctrl+p), after the warp at MAIN, in RGB. The paused frame's way
+// (vs-gyroflow/src/still.rs): each pixel is the average of it and its pixels in the DN_RADIUS frames before it and the
+// DN_RADIUS after it, where the motion found between them puts them, each weighted by how much the patches around them
 // differ beyond the noise. Where something moved in a way the motion doesn't follow, the patches differ and the frame
-// keeps its own pixel: no trails, and nothing carried over from frame to frame. The motion: per 32 px block and past
-// frame, the gyro's prediction (the smoothed camera's turn between them, what the stabilized picture moves by), a search
-// around it on a quarter-size luma, then to the pixel at full size. The noise: by brightness, from how the frame differs
-// from the one before where they match. The frames, as decoded and warped, in a ring of DN_RING slots in one texture
-// (GDN_FRAMES, slots one under the other) and their quarter-size luma in another (GDN_QUART), which keeps the storage
-// images per pass few (MoltenVK's limit). This pass: the frame's luma at a quarter of its size, for the search
+// keeps its own pixel: no trails. The frames after it are frames played already: the picture shown is the one
+// gyroflow_dn_after frames before the newest (main.lua delays the audio as much; 0 in crop mode, whose camera turns the
+// newest frame as it is dragged), and after a seek the first frame stays until the ones after it are there.
+// The frames, as decoded and warped, in a ring of DN_RING slots in one texture (GDN_FRAMES, DN_COLS slots across) and
+// their quarter-size luma in another (GDN_QUART), which keeps the storage images per pass few (MoltenVK's limit).
+// The motion is searched once per frame, between it and the one before (per 32 px block: the gyro's prediction, a
+// search around it on the quarter-size luma, then at full size; GDN_VEC, a field per slot, kept). The motion from the
+// shown frame to each other one is those steps chained (backwards; forwards, each step inverted), then checked within
+// a pixel at full size (GDN_NV, a texture the blend reads through the sampler's filter). The noise: by brightness, from how the shown frame differs from the one before
+// it where they match. This pass: the frame's luma at a quarter of its size, for the search
 vec4 hook()
 {
     vec2 p = HOOKED_pos;
@@ -743,21 +757,68 @@ vec4 hook()
 // ==== pass dn_common ====
 #ifdef DN_PASS
 #define DN_SLOT ivec2(DN_SLOT_W, DN_SLOT_H)
-#define DN_QSLOT ivec2(DN_SLOT_W / 4, DN_SLOT_H / 4)
+#define DN_MAGIC 0x5E21u
 float lum(vec3 c) { return dot(c, vec3(0.2627, 0.678, 0.0593)); }
-// This render's frame is new (else the same frame drawn again: paused, a redraw), and where its past frames are
-bool dn_same() { return gdn_magic == 0x5E1Fu && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
-// The slot of the k-th frame before this one (k = 0: the one just before)
-int dn_slot(int k) { int base = dn_same() ? gdn_head - 1 : gdn_head; return (base - k + 2 * DN_RING) % DN_RING; }
-bool dn_valid(int k)
+ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
+// The ring holds frames of this render's kind: not after a reset (main.lua's epoch: the camera's mode, a realign) or a
+// change of the output's size
+bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, target_size)); }
+// This render's frame is the newest one again (paused, a redraw)
+bool dn_same() { return dn_ok() && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
+int dn_after() { return clamp(gyroflow_dn_after, 0, DN_RADIUS); }
+// This render writes its frame: a new one, or the same one again where none is shown after it (crop mode's camera
+// turns it as it's dragged)
+bool dn_fresh() { return !dn_same() || dn_after() == 0; }
+int dn_newest() { return !dn_ok() ? 0 : dn_same() ? gdn_head : (gdn_head + 1) % DN_RING; }
+
+// The window (dn_window sets it, once a pass): the newest frame's slot, the shown frame (dn_kc before the newest), how
+// many it has before it and after it. Only frames in a row (none missing past a dropped one, none from before a seek)
+int dn_nw, dn_kc, dn_nb_back, dn_nb_fwd;
+// The slot of the frame k before the newest
+int dn_back_slot(int k) { return (dn_nw - k + 2 * DN_RING) % DN_RING; }
+void dn_window()
 {
-    if (gdn_magic != 0x5E1Fu) return false;
-    int s = dn_slot(k);
-    float dt = PTS - gdn_pts[s];
-    return dt > 1e-4 && dt < (float(k) + 1.6) / FPS;
+    bool ok = dn_ok();
+    dn_nw = dn_newest();
+    float pts[2 * DN_RADIUS + 1];
+    for (int k = 0; k <= 2 * DN_RADIUS; k++) {
+        int s = dn_back_slot(k);
+        pts[k] = k == 0 ? PTS : ok ? gdn_pts[s] : -1e9;
+    }
+    int back = 0;
+    for (int k = 0; k < 2 * DN_RADIUS; k++) {
+        float dt = pts[k] - pts[k + 1];
+        if (!(dt > 1e-4 && dt < 2.6 / FPS)) break;
+        back++;
+    }
+    dn_kc = min(dn_after(), back);
+    dn_nb_fwd = dn_kc;
+    dn_nb_back = min(DN_RADIUS, back - dn_kc);
 }
-vec3 dn_frame(int slot, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size) - 1); return imageLoad(GDN_FRAMES, p + ivec2(0, slot * DN_SLOT_H)).rgb; }
-float dn_quart(int slot, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size / 4.0) - 1); return imageLoad(GDN_QUART, p + ivec2(0, slot * (DN_SLOT_H / 4))).x; }
+int dn_center() { return dn_back_slot(dn_kc); }
+// The slot o frames after the shown one (o < 0: before it)
+int dn_slot_at(int o) { return dn_back_slot(dn_kc - o); }
+// Neighbor n of the shown frame: 0 .. DN_RADIUS - 1 the frames before it, nearest first, then those after it
+int dn_offset(int n) { return n < DN_RADIUS ? -(n + 1) : n - DN_RADIUS + 1; }
+bool dn_has(int n) { int o = dn_offset(n); return o < 0 ? -o <= dn_nb_back : o <= dn_nb_fwd; }
+
+vec3 dn_frame(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size) - 1); return imageLoad(GDN_FRAMES, p + dn_cell(s) * DN_SLOT).rgb; }
+float dn_quart(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size / 4.0) - 1); return imageLoad(GDN_QUART, p + dn_cell(s) * (DN_SLOT / 4)).x; }
+ivec2 dn_blocks() { return ivec2(ceil(target_size / 32.0)); }
+#endif
+
+// ==== pass dn_store ====
+#ifdef DN_STORE
+void hook()
+{
+    // The frame into its slot, as decoded and warped; its quarter-size luma too
+    ivec2 j = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(j, ivec2(target_size))) || any(greaterThan(ivec2(target_size), DN_SLOT)) || !dn_fresh()) return;
+    int s = dn_newest();
+    imageStore(GDN_FRAMES, j + dn_cell(s) * DN_SLOT, vec4((HOOKED_mul * texelFetch(HOOKED_raw, j, 0)).rgb, 1.0));
+    if (all(equal(j % 4, ivec2(0))))
+        imageStore(GDN_QUART, j / 4 + dn_cell(s) * (DN_SLOT / 4), vec4(texelFetch(GDN_CUR4_raw, j / 4, 0).x * GDN_CUR4_mul));
+}
 #endif
 
 // ==== pass dn_motion ====
@@ -765,16 +826,15 @@ float dn_quart(int slot, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size / 4
 float cur4(ivec2 p) { return texelFetch(GDN_CUR4_raw, clamp(p, ivec2(0), ivec2(GDN_CUR4_size) - 1), 0).x * GDN_CUR4_mul; }
 float cur1(ivec2 p) { return lum(HOOKED_mul * texelFetch(HOOKED_raw, clamp(p, ivec2(0), ivec2(HOOKED_size) - 1), 0).rgb); }
 
-// Where output pixel j was in a past frame (its camera q) by the gyro alone: its ray turned into the world by this
-// frame's camera, out of it by that one's
-vec2 predict(vec2 j, vec4 qp)
+// Where output pixel j was in the frame before (its camera q; crop mode's camera cam and zoom as it was rendered) by
+// the gyro alone: its ray turned into the world by this frame's camera, out of it by that one's
+vec2 predict(vec2 j, vec4 qp, vec4 cam, float zoom)
 {
     vec3 w = qrot(table(15), output_ray(j));
-    // Out of the world by that frame's camera, then crop mode's (output_ray's turn, undone)
-    vec3 d = qrot(vec4(-gyroflow_cam_x, -gyroflow_cam_y, -gyroflow_cam_z, gyroflow_cam_w), qrot(vec4(-qp.xyz, qp.w), w));
+    vec3 d = qrot(vec4(-cam.xyz, cam.w), qrot(vec4(-qp.xyz, qp.w), w));
     if (d.z < 1e-3) return j;
     vec2 size = vec2(OUT_W, OUT_H);
-    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom);
+    vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * zoom);
     float rxy = max(length(d.xy), 1e-9);
 #if PROJ == 0
     vec2 n = d.xy / d.z;
@@ -786,17 +846,17 @@ vec2 predict(vec2 j, vec4 qp)
 
 void hook()
 {
-    // x: the block across, y: the block down and the past frame (blocks of frame k below those of k - 1)
-    ivec2 nb = ivec2(ceil(target_size / 32.0));
-    ivec2 g = ivec2(gl_GlobalInvocationID.xy);
-    int k = g.y / nb.y;
-    ivec2 b = ivec2(g.x, g.y % nb.y);
-    if (g.x >= nb.x || k >= DN_PAST) return;
+    // The newest frame's blocks: where each is in the frame before it
+    ivec2 nb = dn_blocks();
+    ivec2 b = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(b, nb)) || !dn_fresh()) return;
+    dn_window();
+    int s = dn_nw;
     vec4 res = vec4(0.0, 0.0, 1e9, 0.0);
-    if (dn_valid(k) && frame_setup()) {
-        int slot = dn_slot(k);
+    if (dn_kc + dn_nb_back >= 1 && frame_setup()) {
+        int slot = dn_back_slot(1);
         vec2 c = (vec2(b) + 0.5) * 32.0;
-        vec2 pred = predict(c, gdn_quat[slot]) - c;
+        vec2 pred = predict(c, gdn_quat[slot], gdn_cam[slot], gdn_zoom[slot]) - c;
         // Quarter size: 8x8 of the block, within 2 of the prediction, the block and its window read once; a candidate
         // has to beat the prediction by a fifth of its cost (flat noisy water would follow the noise, or the light's fall)
         ivec2 o = b * 8;
@@ -815,25 +875,118 @@ void hook()
                 if (sad < best) { best = sad; bv = pq + ivec2(dx, dy); }
             }
         }
-        // Full size: within 1 px of it, every fourth pixel of the 32x32 block
+        // Full size: every fourth pixel of the 32x32 block
         ivec2 o1 = b * 32;
         ivec2 base = bv * 4;
         float c1[64];
         for (int t = 0; t < 64; t++) c1[t] = cur1(o1 + 4 * ivec2(t % 8, t / 8));
+        // Within 2 px (5x5), and between whole pixels where the best has costs on both sides each way: the steps are
+        // chained, so their halves of a pixel would add up
+        float cost[25];
         float best1 = 1e9;
-        ivec2 bv1 = base;
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
+        int bi = 12;
+        for (int t = 0; t < 25; t++) cost[t] = 0.0;
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
                 ivec2 cand = base + ivec2(dx, dy);
                 float sad = 0.0;
                 for (int t = 0; t < 64; t++) sad += abs(c1[t] - lum(dn_frame(slot, o1 + 4 * ivec2(t % 8, t / 8) + cand)));
                 if (dx == 0 && dy == 0) sad *= 0.9;
-                if (sad < best1) { best1 = sad; bv1 = cand; }
+                int i = (dy + 2) * 5 + dx + 2;
+                cost[i] = sad;
+                if (sad < best1) { best1 = sad; bi = i; }
             }
         }
-        res = vec4(vec2(bv1), best1 / 64.0, 1.0);
+        ivec2 bc = ivec2(bi % 5, bi / 5);
+        vec2 sub = vec2(0.0);
+        if (bc.x > 0 && bc.x < 4) {
+            float l = cost[bi - 1], r = cost[bi + 1], den = l - 2.0 * best1 + r;
+            if (den > 1e-6) sub.x = clamp(0.5 * (l - r) / den, -0.5, 0.5);
+        }
+        if (bc.y > 0 && bc.y < 4) {
+            float u = cost[bi - 5], d = cost[bi + 5], den = u - 2.0 * best1 + d;
+            if (den > 1e-6) sub.y = clamp(0.5 * (u - d) / den, -0.5, 0.5);
+        }
+        res = vec4(vec2(base + bc - 2) + sub, best1 / 64.0, 1.0);
     }
-    imageStore(GDN_VEC, g, res);
+    imageStore(GDN_VEC, ivec2(b.x, b.y + s * nb.y), res);
+}
+#endif
+
+// ==== pass dn_compose ====
+#ifdef DN_COMPOSE
+// Slot s's motion (its blocks: where they are in the frame before it) at its pixel p, between the four blocks around
+// it. False where one of them has none
+bool dn_step(int s, vec2 p, out vec2 v)
+{
+    ivec2 nb = dn_blocks();
+    vec2 bp = p / 32.0 - 0.5;
+    ivec2 b0 = ivec2(floor(bp));
+    vec2 f = clamp(bp - vec2(b0), 0.0, 1.0);
+    ivec2 c0 = clamp(b0, ivec2(0), nb - 1), c1 = clamp(b0 + 1, ivec2(0), nb - 1);
+    int r = s * nb.y;
+    vec4 v00 = imageLoad(GDN_VEC, ivec2(c0.x, c0.y + r)), v10 = imageLoad(GDN_VEC, ivec2(c1.x, c0.y + r));
+    vec4 v01 = imageLoad(GDN_VEC, ivec2(c0.x, c1.y + r)), v11 = imageLoad(GDN_VEC, ivec2(c1.x, c1.y + r));
+    v = mix(mix(v00.xy, v10.xy, f.x), mix(v01.xy, v11.xy, f.x), f.y);
+    return v00.w > 0.5 && v10.w > 0.5 && v01.w > 0.5 && v11.w > 0.5;
+}
+
+vec4 hook()
+{
+    // x: the block across, y: the block down and the neighbor (the blocks of neighbor n below those of n - 1, a band
+    // of a row more than the blocks down each)
+    ivec2 nb = dn_blocks();
+    ivec2 g = ivec2(gl_FragCoord.xy);
+    int band = nb.y + 1;
+    int n = g.y / band;
+    ivec2 b = ivec2(g.x, g.y % band);
+    if (any(greaterThanEqual(b, nb)) || n >= 2 * DN_RADIUS) return vec4(0.0);
+    dn_window();
+    if (!dn_has(n)) return vec4(0.0);
+    int o = dn_offset(n);
+    vec2 c = (vec2(b) + 0.5) * 32.0;
+    vec2 p = c;
+    if (o < 0) {
+        // Back: each frame's own step to the one before it
+        for (int i = 0; i < -o; i++) {
+            vec2 v;
+            if (!dn_step(dn_slot_at(-i), p, v)) return vec4(0.0);
+            p += v;
+        }
+    } else {
+        // Ahead: the step of the frame after, inverted (the point q of it that its step brings to p)
+        for (int i = 1; i <= o; i++) {
+            int s = dn_slot_at(i);
+            vec2 q = p;
+            for (int it = 0; it < 3; it++) {
+                vec2 v;
+                if (!dn_step(s, q, v)) return vec4(0.0);
+                q = p - v;
+            }
+            p = q;
+        }
+    }
+    // Within a pixel of the chain's answer at full size, 32 pixels of the 32x32 block (every fourth across, every
+    // eighth down, the rows shifted by two); the answer itself kept unless another place is clearly better
+    int sc = dn_center(), sn = dn_slot_at(o);
+    ivec2 o1 = b * 32;
+    vec2 v0 = p - c;
+    ivec2 base = ivec2(floor(v0));
+    vec2 fr = v0 - vec2(base);
+    float c1[32];
+    for (int t = 0; t < 32; t++) c1[t] = lum(dn_frame(sc, o1 + ivec2(4 * (t % 8) + 2 * ((t / 8) % 2), 8 * (t / 8) + 2)));
+    float best = 1e9;
+    vec2 bv = v0;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 cand = ivec2(round(v0)) + ivec2(dx, dy);
+            float sad = 0.0;
+            for (int t = 0; t < 32; t++) sad += abs(c1[t] - lum(dn_frame(sn, o1 + ivec2(4 * (t % 8) + 2 * ((t / 8) % 2), 8 * (t / 8) + 2) + cand)));
+            if (dx == 0 && dy == 0) sad *= 0.85;
+            if (sad < best) { best = sad; bv = (dx == 0 && dy == 0) ? v0 : vec2(cand); }
+        }
+    }
+    return vec4(bv, best / 32.0, 1.0);
 }
 #endif
 
@@ -855,62 +1008,57 @@ vec3 frame_bilinear(int slot, vec2 p)
 vec4 hook()
 {
     ivec2 j = ivec2(HOOKED_pos * HOOKED_size);
-    vec4 cur = HOOKED_tex(HOOKED_pos);
-    if (any(greaterThan(ivec2(target_size), DN_SLOT))) return cur;
-    bool same = dn_same();
-    // A new frame goes into the next slot, as decoded, for the frames after it; its quarter-size luma too
-    if (!same) {
-        int ns = (gdn_magic == 0x5E1Fu ? gdn_head + 1 : 0) % DN_RING;
-        imageStore(GDN_FRAMES, j + ivec2(0, ns * DN_SLOT_H), vec4(cur.rgb, 1.0));
-        if (all(equal(j % 4, ivec2(0))))
-            imageStore(GDN_QUART, j / 4 + ivec2(0, ns * (DN_SLOT_H / 4)), vec4(texelFetch(GDN_CUR4_raw, j / 4, 0).x * GDN_CUR4_mul));
-    }
-    ivec2 nb = ivec2(ceil(target_size / 32.0));
-    vec2 bp = (vec2(j) + 0.5) / 32.0 - 0.5;
-    ivec2 b0 = ivec2(floor(bp));
-    vec2 f = bp - vec2(b0);
-    // The frame's own patch: 3x3, every other pixel (5x5 pixels), luma
-    float own[9];
-    for (int t = 0; t < 9; t++)
-        own[t] = lum(HOOKED_mul * texelFetch(HOOKED_raw, clamp(j + 2 * ivec2(t % 3 - 1, t / 3 - 1), ivec2(0), ivec2(HOOKED_size) - 1), 0).rgb);
-    float l = lum(cur.rgb);
+    if (any(greaterThan(ivec2(target_size), DN_SLOT))) return HOOKED_tex(HOOKED_pos);
+    dn_window();
+    int sc = dn_center();
+    vec3 cur = dn_frame(sc, j);
+    ivec2 nb = dn_blocks();
+    int band = nb.y + 1;
+    // Where the pixel is among the blocks' centers (texels of GDN_NV), kept within the blocks
+    vec2 bt = clamp((vec2(j) + 0.5) / 32.0, vec2(0.5), vec2(nb) - 0.5);
+    // The shown frame's own patch: the pixel and those 2 px from it each way, luma
+#if DN_TAPS == 9
+    const ivec2 taps[9] = ivec2[9](ivec2(0), ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2), ivec2(-2), ivec2(2, -2), ivec2(-2, 2), ivec2(2));
+#else
+    const ivec2 taps[5] = ivec2[5](ivec2(0), ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2));
+#endif
+    float own[DN_TAPS];
+    for (int t = 0; t < DN_TAPS; t++) own[t] = lum(dn_frame(sc, j + taps[t]));
+    float l = lum(cur);
     float s = max(sigma_at(l), 1e-4);
-    vec3 sum = cur.rgb;
+    vec3 sum = cur;
     float wsum = 1.0;
     float noise_diff = -1.0;
-    for (int k = 0; k < DN_PAST; k++) {
-        if (!dn_valid(k)) continue;
-        int slot = dn_slot(k);
-        // The pixel's vector, between the four blocks around it
-        ivec2 c00 = clamp(b0, ivec2(0), nb - 1), c11 = clamp(b0 + 1, ivec2(0), nb - 1);
-        vec4 v00 = imageLoad(GDN_VEC, ivec2(c00.x, c00.y + k * nb.y)), v10 = imageLoad(GDN_VEC, ivec2(c11.x, c00.y + k * nb.y));
-        vec4 v01 = imageLoad(GDN_VEC, ivec2(c00.x, c11.y + k * nb.y)), v11 = imageLoad(GDN_VEC, ivec2(c11.x, c11.y + k * nb.y));
-        if (v00.w < 0.5 || v10.w < 0.5 || v01.w < 0.5 || v11.w < 0.5) continue;
-        vec2 v = mix(mix(v00.xy, v10.xy, f.x), mix(v01.xy, v11.xy, f.x), f.y);
+    for (int n = 0; n < 2 * DN_RADIUS; n++) {
+        if (!dn_has(n)) continue;
+        int slot = dn_slot_at(dn_offset(n));
+        // The pixel's vector, between the four blocks around it (the sampler's filter), none where one has none
+        vec4 vv = GDN_NV_tex((bt + vec2(0.0, float(n * band))) / GDN_NV_size);
+        if (vv.w < 0.999) continue;
+        vec2 v = vv.xy;
         float d = 0.0;
         ivec2 pr = ivec2(round(vec2(j) + v));
-        for (int t = 0; t < 9; t++) {
-            float e = own[t] - lum(dn_frame(slot, pr + 2 * ivec2(t % 3 - 1, t / 3 - 1)));
+        for (int t = 0; t < DN_TAPS; t++) {
+            float e = own[t] - lum(dn_frame(slot, pr + taps[t]));
             d += e * e;
         }
-        vec2 p = vec2(j) + v;
-        d /= 9.0;
+        d /= float(DN_TAPS);
         // still.rs's weight: full where the patches differ by the noise alone, none past three times it
         float w = 1.0 - smoothstep(1.0 * DN_STRENGTH, 3.0 * DN_STRENGTH, d / (2.0 * s * s));
-        vec3 h = frame_bilinear(slot, p);
+        vec3 h = frame_bilinear(slot, vec2(j) + v);
         sum += w * h;
         wsum += w;
-        if (k == 0) noise_diff = abs(l - lum(h));
+        if (n == 0) noise_diff = abs(l - lum(h));
     }
     vec3 den = sum / wsum;
-    // The noise, from this frame against the one before where they match
-    if (!same && noise_diff >= 0.0 && all(equal(j % 4, ivec2(0)))) {
+    // The noise, from the shown frame against the one before where they match
+    if (!dn_same() && noise_diff >= 0.0 && all(equal(j % 4, ivec2(0)))) {
         uint bin = uint(clamp(l * 16.0, 0.0, 15.0));
         uint st = uint(clamp(noise_diff * 4096.0, 0.0, 255.0));
         atomicAdd(gdn_hist[bin * 256u + st], 1u);
     }
     // Some of the grain kept, so it doesn't look smeared
-    return vec4(den + DN_KEEP * (cur.rgb - den), cur.a);
+    return vec4(den + DN_KEEP * (cur - den), 1.0);
 }
 #endif
 
@@ -920,7 +1068,9 @@ void hook()
 {
     // One workgroup of 16: brightness bin i each
     uint i = gl_LocalInvocationID.x;
-    bool same = dn_same();
+    bool same = dn_same(), ok = dn_ok(), fresh = dn_fresh();
+    int nw = dn_newest();
+    bool first = gdn_magic != DN_MAGIC;
     memoryBarrierBuffer();
     barrier();
     if (!same) {
@@ -937,22 +1087,25 @@ void hook()
                 seen += h;
             }
             gdn_sigma[i] = max(q / 0.4506, 0.0005);
-        } else if (gdn_magic != 0x5E1Fu) {
+        } else if (first) {
             gdn_sigma[i] = 0.004;
         }
         for (uint st = 0u; st < 256u; st++) gdn_hist[i * 256u + st] = 0u;
     }
     memoryBarrierBuffer();
     barrier();
-    if (i == 0u && !same) {
-        // The new frame is in the next slot now (the blend put it there): its time and camera, for the frames after it
-        int ns = (gdn_magic == 0x5E1Fu ? gdn_head + 1 : 0) % DN_RING;
-        if (gdn_magic != 0x5E1Fu)
+    if (i == 0u && fresh) {
+        // The frame in its slot now (dn_store put it there): its time and cameras, for the frames after it
+        if (!ok)
             for (int k = 0; k < DN_RING; k++) gdn_pts[k] = -1e9;
-        gdn_head = ns;
-        gdn_pts[ns] = PTS;
-        if (frame_setup()) gdn_quat[ns] = table(15);
-        gdn_magic = 0x5E1Fu;
+        gdn_head = nw;
+        gdn_pts[nw] = PTS;
+        if (frame_setup()) gdn_quat[nw] = table(15);
+        gdn_cam[nw] = vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w);
+        gdn_zoom[nw] = gyroflow_cam_zoom;
+        gdn_size = target_size;
+        gdn_epoch = gyroflow_dn_epoch;
+        gdn_magic = DN_MAGIC;
     }
 }
 #endif

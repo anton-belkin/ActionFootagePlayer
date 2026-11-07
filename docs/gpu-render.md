@@ -271,13 +271,44 @@ This is a redesign, not a port: the GPU version should look the same, but will n
 Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
 N100.)**
 
-### Later: temporal denoise and the still frame
+### Temporal denoise (Ctrl+p) on the GPU path: 5 frames on each side
 
 A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:
-−62 % noise on water at 4K60 on an M1 Pro), but Anton froze it for playback (the eye averages at 60 fps). Two things
-make it different here: in the warp pass the motion between frames is known exactly from the gyro (no motion search
-for the camera's own motion), and in our renderer a window of frames on both sides can be read. So the still frame,
-and a denoise for screenshots and exports, can move into the renderer later. Not part of this work.
+−62 % noise on water at 4K60 on an M1 Pro), but Anton froze it for playback (the eye averages at 60 fps), and a plain
+recursive filter is no good under water: it has to follow what moves. The GPU path's Ctrl+p is the paused frame's way
+(vs-gyroflow's still.rs, its radius of 5) in warp.glsl's `dn_` passes, after the warp at MAIN:
+
+- **The window:** each frame is the average of itself and its pixels in the 5 frames before and the 5 after, each
+  weighted by how much a 3x3 patch (every other pixel) differs beyond the noise (still.rs's weight; the noise measured
+  by brightness from the shown frame against the one before). The frames after it are frames already decoded: the
+  shader keeps the last 11 warped frames in a ring (`GDN_FRAMES`, rgb10a2, slots up to 4K two across: 400 MB) and
+  **shows the one 5 frames back**. main.lua delays the audio as much (`audio-delay` + 5/fps, taken off again when it
+  goes); after a seek the first frame stays until the frames after it are there.
+- **The motion is searched once per frame:** between the new frame and the one before it, per 32 px block (the gyro's
+  prediction from both frames' cameras, a search within 8 px on a quarter-size luma, then within 2 px at full size with
+  a sub-pixel fit). Those steps stay in the ring with their frames (`GDN_VEC`). The motion from the shown frame to each
+  of its 10 neighbours is the steps chained (backwards as they are, forwards each one inverted by a fixed-point
+  iteration), then checked within a pixel at full size (`GDN_NV`, read by the blend through the sampler's filter).
+- **Crop mode** shows no frames after (`gyroflow_dn_after` 0): its camera turns the newest frame as it's dragged, and
+  the frames before it are matched with the cameras they were rendered with. Where the window changes (crop mode on or
+  off, Ctrl+p, a new shader, a new window size) the ring starts again (`gyroflow_dn_epoch`); paused, main.lua seeks to
+  the frame on screen exactly, so the picture stays. Save frame takes the time of the frame on screen
+  (`user-data/gyroflow/gpu_delay`).
+
+Measured 2026-11-07 on the M1 Pro, clip 0126 (4K60 D-Log M, under water), a 1080p window:
+
+| | the old one (4 frames before, a search per frame) | 5 + 5, the motion chained |
+|---|---|---|
+| GPU time a frame (warp + denoise) | 8.7 ms | 8.0 ms (chained motion 1.7, blend 4.3) |
+| grain taken out of open water (10-bit codes; 8.0 without) | 3.1 | 4.0 |
+| low-pass change against the frame without denoise | 1.53 | 1.34 |
+
+The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
+18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once
+it plays on (its ring starts again from it; stepping 5 frames on would fill half of it); frame-back-step while paused
+lands on the frame before time-pos, 4 frames after the one shown; with Ctrl+p on, Save frame stays gyroflow-export's
+own (a screenshot at the video's size renders at another size, which would start the ring again); the last 5 frames
+of a clip are never shown.
 
 ## Hosts and platforms
 

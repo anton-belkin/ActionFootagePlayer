@@ -465,6 +465,8 @@ local gpu_pending = false
 local play_again
 -- Crop mode's camera in the warp (further down)
 local gpu_camera
+-- The denoise's delay kept in step (further down)
+local dn_sync
 -- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
 local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
@@ -924,7 +926,8 @@ local function gpu_table(source, done)
     ud.input_width, ud.input_height = source.width, source.height
     ud.gpu_chromatic = chromatic and not o.chromatic_skip
     ud.edges, ud.edges_blur = edge_mode, edge_blur
-    -- Ctrl+p (the clean frame): on the GPU path the temporal denoise, while it plays and paused (warp.glsl's dn_ passes)
+    -- Ctrl+p (the clean frame): on the GPU path the temporal denoise, 5 frames on each side, while it plays and paused
+    -- (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
     gpu_count = gpu_count + 1
     local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
@@ -938,6 +941,7 @@ local function gpu_table(source, done)
         local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
         if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
         reply.ms = math.floor((mp.get_time() - t) * 1000)
+        reply.denoise = ud.gpu_denoise
         done(reply)
     end)
 end
@@ -945,6 +949,8 @@ end
 -- What the shader renders, applied: the warp in the list, the video's rectangle in the output's shape, no
 -- interpolation (PTS is the frame's, not the mix's)
 local function gpu_apply(reply)
+    -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
+    local shown = dn_sync.shown()
     gpu_set_shader(gpu and gpu.shader, reply.shader)
     local w, h = tonumber(reply.output and reply.output[1]), tonumber(reply.output and reply.output[2])
     local sw, sh = current_source.width, current_source.height
@@ -958,8 +964,9 @@ local function gpu_apply(reply)
     -- anyway (the app's Lanczos took 10 ms of a 5.3K frame on an M1 Pro)
     mp.set_property("file-local-options/cscale", reply.mode == "grid" and "bilinear" or (mp.get_property("options/cscale") or "bilinear"))
     gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic,
-            focal = type(reply.focal) == "table" and reply.focal or nil }
+            focal = type(reply.focal) == "table" and reply.focal or nil, denoise = reply.denoise or false }
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
+    dn_sync(shown)
 end
 
 -- Crop mode's camera on the GPU path (crop.lua): the warp's gyroflow_cam_ parameters, set as it turns (no table
@@ -990,6 +997,61 @@ gpu_camera = function(c)
     end
     mp.set_property_native("glsl-shader-opts", opts)
 end
+
+-- The denoise on the GPU path (Ctrl+p; warp.glsl's dn_ passes) averages each frame with DN_AFTER frames after it and as
+-- many before: the picture shown is DN_AFTER frames behind the newest decoded, so the audio is delayed as much
+-- (audio-delay, by what this adds to it), and after a seek the first frame stays until the frames after it are there.
+-- In crop mode none after it (gyroflow_dn_after 0): its camera turns the newest frame as it's dragged. Where that
+-- changes, or the shader is new, the shader's ring of frames starts again from the newest frame: paused, the frame on
+-- screen is sought to exactly, so the picture stays where it was. user-data/gyroflow/gpu_delay: { delay, restart } for
+-- what's on screen (export.lua's photo)
+local DN_AFTER = 5
+local dn = { after = DN_AFTER, epoch = 0, delay = 0, restart = nil }
+local function dn_publish() mp.set_property_native("user-data/gyroflow/gpu_delay", { delay = dn.delay, restart = dn.restart or -1 }) end
+local function dn_shown()
+    local t = mp.get_property_number("time-pos")
+    if not t or dn.delay <= 0 then return t end
+    return math.max(math.min(dn.restart or t, t), t - dn.delay)
+end
+-- shown: the frame on screen before a new shader (gpu_apply), nil otherwise
+dn_sync = setmetatable({ shown = dn_shown }, { __call = function(_, shown)
+    local crop_on = (mp.get_property_native("user-data/gyroflow/crop") or {}).active == true
+    local after = crop_on and 0 or DN_AFTER
+    local fps = current_source and tonumber(current_source.fps)
+    local on = gpu ~= nil and gpu.shader ~= nil and gpu.denoise and fps and fps > 0
+    local before = shown or dn_shown()
+    local restart = shown ~= nil
+    if after ~= dn.after then
+        dn.after, dn.epoch = after, dn.epoch + 1
+        local opts = mp.get_property_native("glsl-shader-opts") or {}
+        opts.gyroflow_dn_after, opts.gyroflow_dn_epoch = tostring(after), tostring(dn.epoch)
+        mp.set_property_native("glsl-shader-opts", opts)
+        restart = true
+    end
+    local delay = on and after / fps or 0
+    if delay ~= dn.delay then
+        mp.set_property_number("audio-delay", (mp.get_property_number("audio-delay") or 0) - dn.delay + delay)
+        dn.delay = delay
+    end
+    if restart then
+        local t = mp.get_property_number("time-pos")
+        if before and t and mp.get_property_native("pause") and fps and math.abs(t - before) > 0.25 / fps then
+            mp.commandv("seek", string.format("%.6f", before), "absolute+exact")
+            t = before
+        end
+        dn.restart = t
+    end
+    dn_publish()
+end })
+mp.register_event("playback-restart", function()
+    dn.restart = mp.get_property_number("time-pos")
+    dn_publish()
+end)
+mp.observe_property("user-data/gyroflow/crop", "native", function() dn_sync() end)
+-- A new size of the picture starts the ring again too
+mp.observe_property("osd-dimensions", "native", function()
+    if dn.delay > 0 then dn_sync(dn_shown()) end
+end)
 
 local function add_filter(source, done)
     done = done or function() end
@@ -1053,6 +1115,7 @@ local function add_filter(source, done)
             gpu_unhold()
             if opening then return play_again() end
             gpu = nil
+            dn_sync()
             add_filter(source, done)
         end)
         if opening then done() end
@@ -1186,6 +1249,7 @@ local function add_sphere(source)
             mp.msg.info("360: the GPU path can't: " .. tostring(why) .. "; through VapourSynth")
             gpu_set_shader(GPU_HOLD_SHADER, nil)
             gpu = nil
+            dn_sync()
             gpu_unhold()
             play_again()
         end)
@@ -1218,6 +1282,7 @@ local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
     if gpu then gpu_set_shader(gpu.shader, nil) end
     gpu = nil
+    dn_sync()
     -- Crop mode's camera stays with the clip it was turned on
     if (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_cam_w then gpu_camera(nil) end
     if (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_stamp360 then
@@ -1366,9 +1431,11 @@ gpu_refresh = function()
     if gpu_pending then gpu_pending = "again" return end
     if not filter_lens() then
         -- Off, as recorded: the video as it is
+        local shown = dn_sync.shown()
         gpu_set_shader(gpu.shader, nil)
         gpu.shader = nil
         mp.set_property("file-local-options/video-aspect-override", "no")
+        dn_sync(shown)
         return
     end
     if not gpu_eligible(current_source) then

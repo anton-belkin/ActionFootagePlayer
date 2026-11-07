@@ -356,6 +356,9 @@ fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, bod
     format!("{}\n\n{defines}\n{extra}\n{}\n{body}\n", directives.join("\n"), common.replace("@LENS@", &lens_code(clip)))
 }
 
+/// The denoise's ring of frames: 10 bits a channel (half of rgba16f's memory: 11 slots of 4K)
+const FRAME_FORMAT: &str = "rgb10a2";
+
 /// The passes for `opts.mode`, without the file's head
 pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let defs = defines(clip, opts, table);
@@ -394,25 +397,36 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
     let common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }, rb_bind, sphere_bind];
     let with = |mut v: Vec<&str>| { let at = 2.min(v.len()); for (k, c) in common.iter().enumerate() { v.insert(at + k, c); } d(&v) };
-    const PAST: usize = 4;
-    const RING: usize = PAST + 1;
+    // The shown frame and DN_RADIUS frames on each side of it: a ring of 2 x DN_RADIUS + 1 slots, two across (a
+    // texture's height is at most 16384), each the size of the largest output it takes
+    const RADIUS: usize = 5;
+    const RING: usize = 2 * RADIUS + 1;
+    const COLS: usize = 2;
     const SLOT: (usize, usize) = (3840, 2160);
-    let dn_defs = format!("{defs}\n#define DN_STRENGTH 1.5\n#define DN_KEEP 0.2\n#define DN_PAST {PAST}\n#define DN_RING {RING}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
+    let rows = RING.div_ceil(COLS);
+    let dn_defs = format!("{defs}\n#define DN_STRENGTH 1.5\n#define DN_KEEP 0.2\n#define DN_TAPS 9\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {COLS}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
     let dn = |extra: &str, name: &str| format!("{extra}\n{}", pass_body("dn_common")) + pass_body(name);
-    let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[4096]\n//!VAR float gdn_sigma[16]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR int gdn_head\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
+    let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[4096]\n//!VAR float gdn_sigma[16]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR vec4 gdn_cam[{RING}]\n//!VAR float gdn_zoom[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR vec2 gdn_size\n//!VAR int gdn_head\n//!VAR int gdn_epoch\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
     let texture = |name: &str, w: usize, h: usize, fmt: &str| format!("//!TEXTURE {name}\n//!SIZE {w} {h}\n//!FORMAT {fmt}\n//!STORAGE\n\n");
     let nb = (SLOT.0.div_ceil(32) + 1, SLOT.1.div_ceil(32) + 1);
-    format!("{warp}\n{state}{}{}{}{}\n{}\n{}\n{}",
-        texture("GDN_FRAMES", SLOT.0, SLOT.1 * RING, "rgba16f"), texture("GDN_QUART", SLOT.0 / 4, SLOT.1 / 4 * RING, "rgba16f"),
-        texture("GDN_VEC", nb.0, nb.1 * PAST, "rgba32f"),
+    let ring = ["//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN"];
+    let pass = |head: &[&str], tail: &[&str]| with(head.iter().chain(ring.iter()).chain(tail.iter()).copied().collect());
+    format!("{warp}\n{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        texture("GDN_FRAMES", SLOT.0 * COLS, SLOT.1 * rows, FRAME_FORMAT), texture("GDN_QUART", SLOT.0 / 4 * COLS, SLOT.1 / 4 * rows, "rgba16f"),
+        texture("GDN_VEC", nb.0, nb.1 * RING, "rgba32f"),
         hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!SAVE GDN_CUR4", "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise luma"]), &dn_defs, "", pass_body("dn_luma")),
-        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN_VEC", "//!BIND GDN",
-            "//!SAVE GDN_MOTION_DONE", "//!WIDTH OUTPUT.w 32 / 1 +", &format!("//!HEIGHT OUTPUT.h 32 / 1 + {PAST} *"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise motion"]),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4"], &["//!SAVE GDN_STORE_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+            "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise store"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STORE", "dn_store")),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_VEC"], &["//!SAVE GDN_MOTION_DONE", "//!WIDTH OUTPUT.w 32 / 1 +",
+            "//!HEIGHT OUTPUT.h 32 / 1 +", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise motion"]),
             &dn_defs, "#define DN_COMPUTE", &dn("#define DN_MOTION", "dn_motion")),
-        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN_VEC", "//!BIND GDN",
-            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise"]), &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
-        hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN", "//!SAVE GDN_STATE_DONE", "//!WIDTH 16", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_VEC"], &["//!SAVE GDN_NV", "//!WIDTH OUTPUT.w 32 / 1 +",
+            &format!("//!HEIGHT OUTPUT.h 32 / 2 + {} *", 2 * RADIUS), "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise motion chained"]),
+            &dn_defs, "#define DN_COMPUTE", &dn("#define DN_COMPOSE", "dn_compose")),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_NV"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise"]),
+            &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED"], &["//!SAVE GDN_STATE_DONE", "//!WIDTH 16", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
             "//!COMPUTE 16 1", "//!DESC gyroflow denoise state"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STATE", "dn_state")))
 
 }
