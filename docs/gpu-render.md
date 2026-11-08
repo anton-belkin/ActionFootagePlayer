@@ -360,6 +360,16 @@ Measured 2026-11-07 on the M1 Pro, clip 0126 (4K60 D-Log M, under water), a 1080
 | grain taken out of open water (10-bit codes; 8.0 without) | 3.1 | 4.0 |
 | low-pass change against the frame without denoise | 1.53 | 1.34 |
 
+**Lighter, 2026-11-08** (Anton: "it doesn't always keep up"; the built-in XDR full screen, 3024x1898, dropped 105
+frames in 8 s with it, none without): the patch is the pixel and the quarter-size luma around it (4x4 pixels at one
+read; its noise taken as 1/1.8 of a pixel's, measured: the warp's interpolation ties neighbours together) instead of
+5 or 9 pixels; the pixel itself is the nearest of the four the bilinear sample reads; the per-frame search's full-size
+step is 3x3 (the sub-pixel fit where the best is in the middle); the chain's check reads 16 pixels of a block, and
+not at all for the frame just before (its own step as searched). On the XDR full screen: the denoise 9.3 -> 6.0 ms,
+2 frames dropped in 8 s. On clip 0126 it takes out 3.7 codes of grain in open water against 3.9 at a calm moment, 5.8
+against 7.0 in a fast turn (Transform's Loose motion takes out more), and changes the picture's structure a little
+less (1.19 against 1.27).
+
 The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
 18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once
 it plays on (its ring starts again from it; stepping 5 frames on would fill half of it); frame-back-step while paused

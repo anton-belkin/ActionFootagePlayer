@@ -1026,34 +1026,33 @@ void hook()
         ivec2 base = bv * 4;
         float c1[64];
         for (int t = 0; t < 64; t++) c1[t] = cur1(o1 + 4 * ivec2(t % 8, t / 8));
-        // Within 2 px (5x5), and between whole pixels where the best has costs on both sides each way: the steps are
-        // chained, so their halves of a pixel would add up
-        float cost[25];
+        // Within a pixel (3x3), and between whole pixels where the best has costs on both sides each way: the steps
+        // are chained, so their halves of a pixel would add up
+        float cost[9];
         float best1 = 1e9;
-        int bi = 12;
-        for (int t = 0; t < 25; t++) cost[t] = 0.0;
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
+        int bi = 4;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
                 ivec2 cand = base + ivec2(dx, dy);
                 float sad = 0.0;
                 for (int t = 0; t < 64; t++) sad += abs(c1[t] - lum(dn_frame(slot, o1 + 4 * ivec2(t % 8, t / 8) + cand)));
                 if (dx == 0 && dy == 0) sad *= 0.9;
-                int i = (dy + 2) * 5 + dx + 2;
+                int i = (dy + 1) * 3 + dx + 1;
                 cost[i] = sad;
                 if (sad < best1) { best1 = sad; bi = i; }
             }
         }
-        ivec2 bc = ivec2(bi % 5, bi / 5);
+        ivec2 bc = ivec2(bi % 3, bi / 3);
         vec2 sub = vec2(0.0);
-        if (bc.x > 0 && bc.x < 4) {
+        if (bc.x == 1) {
             float l = cost[bi - 1], r = cost[bi + 1], den = l - 2.0 * best1 + r;
             if (den > 1e-6) sub.x = clamp(0.5 * (l - r) / den, -0.5, 0.5);
         }
-        if (bc.y > 0 && bc.y < 4) {
-            float u = cost[bi - 5], d = cost[bi + 5], den = u - 2.0 * best1 + d;
+        if (bc.y == 1) {
+            float u = cost[bi - 3], d = cost[bi + 3], den = u - 2.0 * best1 + d;
             if (den > 1e-6) sub.y = clamp(0.5 * (u - d) / den, -0.5, 0.5);
         }
-        res = vec4(vec2(base + bc - 2) + sub, best1 / 64.0, 1.0);
+        res = vec4(vec2(base + bc - 1) + sub, best1 / 64.0, 1.0);
     }
     imageStore(GDN_VEC, ivec2(b.x, b.y + s * nb.y), res);
 }
@@ -1112,27 +1111,28 @@ vec4 hook()
             p = q;
         }
     }
-    // Within a pixel of the chain's answer at full size, 32 pixels of the 32x32 block (every fourth across, every
-    // eighth down, the rows shifted by two); the answer itself kept unless another place is clearly better
+    // The frame just before: its own step, searched and fitted between pixels already (dn_motion), as it is
+    if (o == -1) return vec4(p - c, 0.0, 1.0);
+    // Within a pixel of the chain's answer at full size (3x3), 16 pixels of the 32x32 block (every eighth across and
+    // down, the rows shifted by four); the answer itself kept unless another place is clearly better
     int sc = dn_center(), sn = dn_slot_at(o);
     ivec2 o1 = b * 32;
     vec2 v0 = p - c;
-    ivec2 base = ivec2(floor(v0));
-    vec2 fr = v0 - vec2(base);
-    float c1[32];
-    for (int t = 0; t < 32; t++) c1[t] = lum(dn_frame(sc, o1 + ivec2(4 * (t % 8) + 2 * ((t / 8) % 2), 8 * (t / 8) + 2)));
+    float c1[16];
+    for (int t = 0; t < 16; t++) c1[t] = lum(dn_frame(sc, o1 + ivec2(8 * (t % 4) + 4 * ((t / 4) % 2) + 2, 8 * (t / 4) + 2)));
     float best = 1e9;
     vec2 bv = v0;
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            ivec2 cand = ivec2(round(v0)) + ivec2(dx, dy);
-            float sad = 0.0;
-            for (int t = 0; t < 32; t++) sad += abs(c1[t] - lum(dn_frame(sn, o1 + ivec2(4 * (t % 8) + 2 * ((t / 8) % 2), 8 * (t / 8) + 2) + cand)));
-            if (dx == 0 && dy == 0) sad *= 0.85;
-            if (sad < best) { best = sad; bv = (dx == 0 && dy == 0) ? v0 : vec2(cand); }
-        }
+    for (int k = 0; k < 9; k++) {
+        // The answer first, then the eight around it
+        ivec2 off = k == 0 ? ivec2(0) : ivec2((k - 1) % 3 - 1, (k - 1) / 3 - 1);
+        if (k > 0 && off == ivec2(0)) off = ivec2(1, 1);
+        ivec2 cand = ivec2(round(v0)) + off;
+        float sad = 0.0;
+        for (int t = 0; t < 16; t++) sad += abs(c1[t] - lum(dn_frame(sn, o1 + ivec2(8 * (t % 4) + 4 * ((t / 4) % 2) + 2, 8 * (t / 4) + 2) + cand)));
+        if (k == 0) sad *= 0.85;
+        if (sad < best) { best = sad; bv = k == 0 ? v0 : vec2(cand); }
     }
-    return vec4(bv, best / 32.0, 1.0);
+    return vec4(bv, best / 16.0, 1.0);
 }
 #endif
 
@@ -1162,15 +1162,11 @@ vec4 hook()
     int band = nb.y + 1;
     // Where the pixel is among the blocks' centers (texels of GDN_NV), kept within the blocks
     vec2 bt = clamp((vec2(j) + 0.5) / 32.0, vec2(0.5), vec2(nb) - 0.5);
-    // The shown frame's own patch: the pixel and those 2 px from it each way, luma
-#if DN_TAPS == 9
-    const ivec2 taps[9] = ivec2[9](ivec2(0), ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2), ivec2(-2), ivec2(2, -2), ivec2(-2, 2), ivec2(2));
-#else
-    const ivec2 taps[5] = ivec2[5](ivec2(0), ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2));
-#endif
-    float own[DN_TAPS];
-    for (int t = 0; t < DN_TAPS; t++) own[t] = lum(dn_frame(sc, j + taps[t]));
+    // The shown frame's own patch: the pixel, and the 4x4 pixels around it (the quarter-size luma: a match of what's
+    // around is told from the noise better, at one read; its noise ~1/1.8 of a pixel's, the warp's interpolation
+    // having tied neighbors together, as measured on clip 0126)
     float l = lum(cur);
+    float own_q = dn_quart(sc, j / 4);
     float s = max(sigma_at(l), 1e-4);
     vec3 sum = cur;
     float wsum = 1.0;
@@ -1181,18 +1177,19 @@ vec4 hook()
         // The pixel's vector, between the four blocks around it (the sampler's filter), none where one has none
         vec4 vv = GDN_NV_tex((bt + vec2(0.0, float(n * band))) / GDN_NV_size);
         if (vv.w < 0.999) continue;
-        vec2 v = vv.xy;
-        float d = 0.0;
-        ivec2 pr = ivec2(round(vec2(j) + v));
-        for (int t = 0; t < DN_TAPS; t++) {
-            float e = own[t] - lum(dn_frame(slot, pr + taps[t]));
-            d += e * e;
-        }
-        d /= float(DN_TAPS);
+        vec2 p = vec2(j) + vv.xy;
+        // The four pixels around where it is: its color between them, and the nearest one for the patch
+        vec2 f = fract(p);
+        ivec2 i = ivec2(floor(p));
+        vec3 a00 = dn_frame(slot, i), a10 = dn_frame(slot, i + ivec2(1, 0)), a01 = dn_frame(slot, i + ivec2(0, 1)), a11 = dn_frame(slot, i + ivec2(1, 1));
+        vec3 h = mix(mix(a00, a10, f.x), mix(a01, a11, f.x), f.y);
+        vec3 near = f.y < 0.5 ? (f.x < 0.5 ? a00 : a10) : (f.x < 0.5 ? a01 : a11);
+        float e = l - lum(near);
+        float eq = 1.8 * (own_q - dn_quart(slot, ivec2(floor((p + 0.5) / 4.0))));
+        float d = 0.5 * (e * e + eq * eq);
         // still.rs's weight: full where the patches differ by the noise alone, none past three times it (times the
         // motion tolerance: higher averages more of what moved, lower keeps more of the frame's own)
         float w = 1.0 - smoothstep(1.0 * gyroflow_dn_tolerance, 3.0 * gyroflow_dn_tolerance, d / (2.0 * s * s));
-        vec3 h = frame_bilinear(slot, vec2(j) + v);
         sum += w * h;
         wsum += w;
         if (n == 0) noise_diff = abs(l - lum(h));
