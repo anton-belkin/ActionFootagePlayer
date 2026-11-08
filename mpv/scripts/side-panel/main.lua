@@ -1023,6 +1023,37 @@ local function transform_part(u, x, w, y)
                  nil, not g.chromatic_available or g.underwater == "no" or not filtering_note(g), saved_fringes)
     y = u:caption(x, w, y - 2 * s, g.chromatic_skip and "Skipped on this screen (Performance & Quality): exports and photos have it"
         or "The water's color fringes, where the lens is under water")
+
+    -- The temporal denoise: on or off is this computer's (Ctrl+p); how it cleans is the transform's, kept with it
+    y = u:heading(x, w, y + 8 * s, "Temporal denoise", keys["script-binding gyroflow/still"])
+    y = u:switch(x, w, y, "still", "Clean the noise", g.still, "script-binding gyroflow/still")
+    local gpu = type(g.gpu) == "table"
+    y = u:caption(x, w, y - 2 * s, gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows"
+        or "The paused frame from the frames around it, moved onto it")
+    local off = not g.still
+    local function pick(list, value)
+        for i, v in ipairs(list) do if math.abs(v[1] - (value or -1)) < 1e-3 then return i end end
+        return nil
+    end
+    local function picked(list, key, value)
+        local out = {}
+        for _, v in ipairs(list) do table.insert(out, { v[2], string.format("script-message-to gyroflow denoise %s %g", key, v[1]) }) end
+        return u:segmented(x, w, y, "denoise:" .. key, out, pick(list, value), off, saved and pick(list, saved["denoise_" .. key]) or nil)
+    end
+    local FRAMES = { { 1, "1" }, { 2, "2" }, { 3, "3" }, { 4, "4" }, { 5, "5" } }
+    local GRAIN = { { 0.4, "Light" }, { 0.25, "Medium" }, { 0.1, "Strong" }, { 0, "Full" } }
+    local TOLERANCE = { { 1, "Strict" }, { 1.5, "Normal" }, { 2.5, "Loose" } }
+    y = u:caption(x, w, y + 4 * s, "Frames on each side", { color = C.text })
+    y = picked(FRAMES, "frames", g.denoise_frames)
+    y = u:caption(x, w, y, "More: cleaner. On the GPU path also the picture's delay, a frame each")
+    y = u:caption(x, w, y + 4 * s, "Strength", { color = C.text })
+    y = picked(GRAIN, "grain", g.denoise_grain)
+    y = u:caption(x, w, y, "How much of the grain goes: Full takes it all, Light keeps some so it doesn't look smoothed")
+    if gpu then
+        y = u:caption(x, w, y + 4 * s, "Motion", { color = C.text })
+        y = picked(TOLERANCE, "tolerance", g.denoise_tolerance)
+        y = u:caption(x, w, y, "How different a spot in the frames around may be and still be taken in: Loose cleans more of what moves, and may smear it")
+    end
     return y
 end
 
@@ -1059,8 +1090,6 @@ local function quality_part(u, x, w, y)
         { "Full size", "script-message-to gyroflow quality paused_full_size auto" },
     }, paused[tostring(g.paused_full_size or "off")])
     y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
-    y = u:switch(x, w, y, "still", "Temporal denoise", g.still, "script-binding gyroflow/still", keys["script-binding gyroflow/still"])
-    y = u:caption(x, w, y, "The paused frame rebuilt from the 5 frames on each side of it: its noise and the particles in the water go, the detail stays")
     y = u:heading(x, w, y + 8 * s, "Edges", keys["script-binding gyroflow/edges"])
     for _, e in ipairs({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }) do
         y = u:radio(x, w, y, "edges:" .. e[1], e[2], g.edges == e[1], "script-message-to gyroflow edges " .. e[1])
