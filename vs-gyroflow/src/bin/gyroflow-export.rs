@@ -1438,7 +1438,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let mut enc_out = encoder.stdout.take().unwrap();
         rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
             let mut injector = RpuInjector::new(rpus, first_frame).step(step);
-            if live_l1 { injector = injector.live_l1(l1_rx); }
+            if live_l1 { injector = injector.live_l1(l1_rx, fps); }
             let mut buf = vec![0u8; 1 << 20];
             loop {
                 let n = enc_out.read(&mut buf).map_err(|e| format!("reading the encoder: {e}"))?;
