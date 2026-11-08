@@ -345,6 +345,13 @@ recursive filter is no good under water: it has to follow what moves. The GPU pa
   the frame on screen exactly, so the picture stays. Save frame takes the time of the frame on screen
   (`user-data/gyroflow/gpu_delay`).
 
+**Its settings** (the panel's Transform, kept with a clip's transform as `denoise_frames`, `denoise_grain` and
+`denoise_tolerance`; the app's defaults gyroflow.conf's `still_radius`, `still_grain`, `still_tolerance`): the frames
+on each side (1-5; fewer also shortens the delay), the grain kept (`gyroflow_dn_keep`) and the motion tolerance
+(`gyroflow_dn_tolerance`, still.rs's weight's scale: how much a patch may differ and still be averaged in). DYNAMIC
+parameters of the shader: a change takes nothing written again, only the frames on each side start the ring again (the
+delay changes). The VapourSynth path's paused frame takes the frames and the grain (still.rs has no tolerance).
+
 Measured 2026-11-07 on the M1 Pro, clip 0126 (4K60 D-Log M, under water), a 1080p window:
 
 | | the old one (4 frames before, a search per frame) | 5 + 5, the motion chained |

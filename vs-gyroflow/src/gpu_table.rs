@@ -453,7 +453,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     const COLS: usize = 2;
     const SLOT: (usize, usize) = (3840, 2160);
     let rows = RING.div_ceil(COLS);
-    let dn_defs = format!("{defs}\n#define DN_STRENGTH 1.5\n#define DN_KEEP 0.2\n#define DN_TAPS 9\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {COLS}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
+    let dn_defs = format!("{defs}\n#define DN_TAPS 9\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {COLS}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
     let dn = |extra: &str, name: &str| format!("{extra}\n{}", pass_body("dn_common")) + pass_body(name);
     let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[4096]\n//!VAR float gdn_sigma[16]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR vec4 gdn_cam[{RING}]\n//!VAR float gdn_zoom[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR vec2 gdn_size\n//!VAR int gdn_head\n//!VAR int gdn_epoch\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
     let texture = |name: &str, w: usize, h: usize, fmt: &str| format!("//!TEXTURE {name}\n//!SIZE {w} {h}\n//!FORMAT {fmt}\n//!STORAGE\n\n");

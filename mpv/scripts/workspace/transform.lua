@@ -8,8 +8,8 @@
 --
 -- Transform: how it's shown, a matter of taste, always kept whole, all its keys at once (a bundle): the
 -- stabilization (normal, wide, off), its level, the horizon lock, the water's color fringes, the frame's aspect and
--- orientation, the lens's projection, and the lens corrected or as recorded (apart from the stabilization: corrected
--- with it off is the lens alone). A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
+-- orientation, the lens's projection, the lens corrected or as recorded (apart from the stabilization: corrected
+-- with it off is the lens alone), and the temporal denoise's frames on each side, grain kept and motion tolerance. A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
 -- `stab`, with "settings of its own"); with none, the session's plays (the gyroflow plugin's, from the app's defaults
 -- and changed only by hand). The topmost bundle there is plays, and bundles never mix.
 --
@@ -35,7 +35,7 @@
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens" }
+M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise_frames", "denoise_grain", "denoise_tolerance" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle; a wider view or none over it is for viewing only, so the view too
 M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
@@ -52,8 +52,13 @@ local VALID = {
     lens = { corrected = true, ["as-recorded"] = true },
 }
 
+-- The numbers: their range (frames whole)
+local RANGES = { denoise_frames = { 1, 5, true }, denoise_grain = { 0, 1 }, denoise_tolerance = { 0.25, 8 } }
+
 local function valid(k, v)
     if v == nil then return false end
+    local r = RANGES[k]
+    if r then return type(v) == "number" and v >= r[1] and v <= r[2] and (not r[3] or v == math.floor(v)) end
     -- Any other ratio, landscape-wise (W >= H)
     if k == "aspect" and type(v) == "string" then
         local w, h = v:match("^(%d+):(%d+)$")
