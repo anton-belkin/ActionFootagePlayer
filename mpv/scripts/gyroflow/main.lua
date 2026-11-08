@@ -181,7 +181,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500 }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -925,12 +925,19 @@ end
 
 -- Asks gyroflow-gpu-table for the clip's shader with the current settings, to done(reply): reply.shader, or nil and
 -- reply.unsupported / reply.error
-local function gpu_table(source, done)
+-- What gyroflow-gpu-table --player is asked for the clip as it plays now (the filter's own arguments): its project or
+-- preset, the transform, the moment's part, the lens
+local function gpu_user_data(source)
     local ud = utils.parse_json(gyroflow_filter(source, true).params["user-data"]) or {}
     ud.width, ud.height, ud.fast = nil, nil, nil
     ud.input_width, ud.input_height = source.width, source.height
     ud.gpu_chromatic = chromatic and not o.chromatic_skip
     ud.edges, ud.edges_blur = edge_mode, edge_blur
+    return ud
+end
+
+local function gpu_table(source, done)
+    local ud = gpu_user_data(source)
     -- Ctrl+p (the clean frame): on the GPU path the temporal denoise, 5 frames on each side, while it plays and paused
     -- (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
@@ -1058,6 +1065,9 @@ mp.observe_property("osd-dimensions", "native", function()
     if dn.delay > 0 then dn_sync(dn_shown()) end
 end)
 
+-- What add_filter would play the clip with, when render_args asks for it instead
+local render_dump = nil
+
 local function add_filter(source, done)
     done = done or function() end
     current_source, full_size = source, false
@@ -1080,6 +1090,12 @@ local function add_filter(source, done)
     end
     stab_off = off
     write_edge_control()
+
+    -- render_args (afp-stream, tools/stream): what it would play with, written down instead of played
+    if o.render_args ~= "" then
+        render_dump = { stabilize = filter_lens(source) ~= nil, kind = source.kind, user_data = gpu_user_data(source) }
+        return done()
+    end
 
     if gpu_eligible(source) then
         if o.hwdec then mp.set_property("file-local-options/hwdec", "auto") end
@@ -1285,6 +1301,7 @@ end
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
+    render_dump = nil
     if gpu then gpu_set_shader(gpu.shader, nil) end
     gpu = nil
     dn_sync()
@@ -2105,3 +2122,34 @@ require 'export'
 
 -- The session's bundle and the app's defaults, for the workspace plugin before the first file loads
 publish()
+
+-- render_args=<file> (script-opts gyroflow-render_args, afp-stream's: tools/stream/README.md): the player, without a
+-- window, says how it would play the file and quits. It writes JSON: clip (the original, also for a moment's or clip
+-- preview's file), offset and length (a moment's part of it), render (stabilize, kind, user_data: gyroflow-gpu-table
+-- --player's request; absent: not stabilized), dlogm (the log curve and look), title, duration. Each of the player's
+-- choices is its own: what's saved for the file, its moment's, its Gyroflow project, the defaults (gyroflow.conf)
+if o.render_args ~= "" then
+    local written = false
+    local function dump()
+        if written then return end
+        written = true
+        local ws = mp.get_property_native("user-data/workspace")
+        ws = type(ws) == "table" and ws.path == mp.get_property("path") and ws or {}
+        local dl = mp.get_property_native("user-data/dlogm") or {}
+        local moment = type(ws.moment) == "table" and { name = ws.moment.name, ["in"] = ws.moment["in"], out = ws.moment.out, missing = ws.moment.missing } or nil
+        local out = { clip = clip_path(), offset = ws.offset, length = ws.length, moment = moment, render = render_dump,
+                      dlogm = { curve = dl.curve or "", look = dl.look or "", log = dl.log == true },
+                      title = mp.get_property("media-title"), duration = mp.get_property_number("duration") }
+        local f = io.open(o.render_args, "w")
+        if f then
+            f:write(utils.format_json(out))
+            f:close()
+        else
+            mp.msg.error("can't write " .. o.render_args)
+        end
+        mp.command("quit")
+    end
+    -- After the first frame: every plugin has had its say (the dlogm plugin's curve comes with the file)
+    mp.register_event("playback-restart", function() mp.add_timeout(0.05, dump) end)
+    mp.register_event("end-file", function() dump() end)
+end

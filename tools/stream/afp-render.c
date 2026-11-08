@@ -12,6 +12,8 @@
 //     -w <width> -h <height>   output size (default 1920x1080)
 //     -ss <seconds>            start there
 //     -t <seconds>             only this long
+//     -offset <seconds>        the stream's time starts there in the clip (a moment: its part, from 0): the shaders and
+//                              the segments get the clip's time minus this, as mpv plays a moment's EDL
 //     -seg <seconds>           segment length (default 1): a keyframe every round(fps * seg) frames, a segment each
 //     -start_number <n>        the first segment's number (a render from -ss into a VOD playlist's segments: the
 //                              timestamps are the clip's own, so the segments of several renders fit together)
@@ -115,13 +117,14 @@ static char *read_file(const char *path, size_t *len)
 
 int main(int argc, char **argv)
 {
-    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
+    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-h") && i + 1 < argc) H = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-ss") && i + 1 < argc) start = atof(argv[++i]);
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) duration = atof(argv[++i]);
+        else if (!strcmp(argv[i], "-offset") && i + 1 < argc) offset = atof(argv[++i]);
         else if (!strcmp(argv[i], "-start_number") && i + 1 < argc) start_number = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-seg") && i + 1 < argc) seg = atof(argv[++i]);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) bitrate = argv[++i];
@@ -129,7 +132,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
         else if (npos < 64) pos[npos++] = argv[i];
     }
-    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -b RATE --hlg --realtime] <in> <out dir> [shader.glsl ...]");
+    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -b RATE --hlg --realtime] <in> <out dir> [shader.glsl ...]");
     W &= ~1; H &= ~1;
     const char *in = pos[0], *outdir = pos[1];
     mkdir(outdir, 0755);
@@ -275,7 +278,7 @@ int main(int argc, char **argv)
             double ts = pkt->pts * av_q2d(ic->streams[as]->time_base) - t0;
             if (ts >= start - 0.05) {
                 av_packet_rescale_ts(pkt, ic->streams[as]->time_base, oas->time_base);
-                int64_t off = av_rescale_q((int64_t) (t0 * 1e6), (AVRational) { 1, 1000000 }, oas->time_base);
+                int64_t off = av_rescale_q((int64_t) ((t0 + offset) * 1e6), (AVRational) { 1, 1000000 }, oas->time_base);
                 pkt->pts -= off; pkt->dts -= off;
                 pkt->stream_index = oas->index;
                 av_interleaved_write_frame(oc, pkt);
@@ -290,7 +293,7 @@ int main(int argc, char **argv)
             if (duration > 0 && pts >= start + duration) { av_frame_unref(f); eof = true; break; }
             if (first_pts < 0) first_pts = pts;
             // The shaders find the frame by mpv's PTS: the file's time from its start
-            for (int i = 0; i < npts; i++) pts_vars[i]->f = (float) pts;
+            for (int i = 0; i < npts; i++) pts_vars[i]->f = (float) (pts - offset);
             VASurfaceID sid = (VASurfaceID) (uintptr_t) f->data[3];
             vaSyncSurface(va, sid);
             pl_tex *src_tex = map_surface(0, sid, f->width, f->height, false);
@@ -326,7 +329,7 @@ int main(int argc, char **argv)
             pl_gpu_flush(gpu);
 
             // The clip's own time: segments of renders from different points fit one playlist
-            of->pts = av_rescale_q((int64_t) llround(pts * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
+            of->pts = av_rescale_q((int64_t) llround((pts - offset) * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
             of->color_primaries = ec->color_primaries; of->color_trc = ec->color_trc; of->colorspace = ec->colorspace; of->color_range = AVCOL_RANGE_MPEG;
             if (qn == DEPTH) DRAIN_ONE();
             queue[qn].src = av_frame_clone(f);
