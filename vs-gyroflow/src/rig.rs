@@ -329,15 +329,25 @@ pub fn equirect_direction(x: f64, y: f64, w: usize, h: usize) -> Vector3<f64> {
 
 /// The rig a file describes, as telemetry-parser reads it (`Lens/Rig`); None for any other video
 pub fn camera_rig(path: &str) -> Option<CameraRig> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), InputOptions::default()).ok()?;
-    for s in input.samples.as_deref().unwrap_or_default() {
-        if let Some(TagValue::CameraRig(v)) = s.tag_map.as_ref().and_then(|m| m.get(&GroupId::Lens)).and_then(|g| g.get(&TagId::Rig)).map(|t| &t.value) {
-            return Some(v.get().clone());
-        }
-    }
-    None
+    // First only as far as the first metadata frame: which camera it is (and the rig, where it's there already). The
+    // whole file only for a camera that has one: every other camera's telemetry is spread over the file, and reading
+    // all of it took 23-43 s for a DJI clip on a NAS, which a clip opened from Finder waited for (gyroflow-probe)
+    let parse = |probe_only: bool| -> Option<Input> {
+        let mut file = std::fs::File::open(path).ok()?;
+        let size = file.metadata().ok()?.len() as usize;
+        Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)),
+                                        InputOptions { probe_only, dont_look_for_sidecar_files: true, ..Default::default() }).ok()
+    };
+    let rig_in = |input: &Input| -> Option<CameraRig> {
+        input.samples.as_deref().unwrap_or_default().iter().find_map(|s| match s.tag_map.as_ref().and_then(|m| m.get(&GroupId::Lens)).and_then(|g| g.get(&TagId::Rig)).map(|t| &t.value) {
+            Some(TagValue::CameraRig(v)) => Some(v.get().clone()),
+            _ => None,
+        })
+    };
+    let first = parse(true)?;
+    if let Some(rig) = rig_in(&first) { return Some(rig); }
+    if !first.camera_type().to_ascii_lowercase().contains("insta360") { return None; }
+    rig_in(&parse(false)?)
 }
 
 /// The rig of a video and the size of its tracks, ready to render; None for any other video, an error for a rig the
