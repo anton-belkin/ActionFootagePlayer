@@ -1,0 +1,122 @@
+From aeedfc06c9eff00f56154d4bd554e0cfd761dbaf Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Sun, 8 Nov 2026 21:35:10 +0100
+Subject: [PATCH] mac/vulkan: smooth the live Dolby Vision L1 over time
+
+--macos-dovi-live-l1 wrote each frame's measured L1 as it was. macOS's
+display management maps each frame by its L1, and on an EDR screen an L1
+that moves from frame to frame (the brightest pixel's noise, what comes
+into the frame and goes) shows as flicker. The L1 is now smoothed as a
+mastering tool's per-shot L1 would be: the average over ~0.4 s, the max
+rising within ~0.15 s and falling over ~0.6 s, the min over ~0.6 s;
+a scene cut (the average jumping by more than 200 codes), a seek or
+time going back starts it again from the frame.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/mac/dovi_l1.c       | 19 +++++++++++++++++++
+ video/out/mac/dovi_l1.h       | 13 +++++++++++++
+ video/out/mac/sample_buffer.m | 10 +++++++++-
+ 3 files changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/video/out/mac/dovi_l1.c b/video/out/mac/dovi_l1.c
+index 46e2ce4fa..c22a7e53c 100644
+--- a/video/out/mac/dovi_l1.c
++++ b/video/out/mac/dovi_l1.c
+@@ -19,6 +19,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include <math.h>
++
+ #include "dovi_l1.h"
+ 
+ // An extension block starts byte-aligned with ext_block_length ue(v) and ext_block_level u(8): L1's length 5 is
+@@ -135,3 +137,20 @@ size_t mp_dovi_rpu_set_l1(const uint8_t *rpu, size_t size, int min_pq, int avg_p
+     free(raw);
+     return o;
+ }
++
++void mp_dovi_l1_smooth(struct mp_dovi_l1_smooth *s, double pts, int l1[3])
++{
++    double dt = pts - s->pts;
++    bool cut = !s->have || !(dt > 0 && dt < 0.5) || fabs(l1[1] - s->v[1]) > 200;
++    for (int i = 0; i < 3; i++) {
++        if (cut) {
++            s->v[i] = l1[i];
++            continue;
++        }
++        double tau = i == 0 ? 0.6 : i == 1 ? 0.4 : (l1[i] > s->v[i] ? 0.15 : 0.6);
++        s->v[i] += (l1[i] - s->v[i]) * (1.0 - exp(-dt / tau));
++        l1[i] = lrint(s->v[i]);
++    }
++    s->pts = pts;
++    s->have = 1;
++}
+diff --git a/video/out/mac/dovi_l1.h b/video/out/mac/dovi_l1.h
+index 4e571f7a0..ab4bfb6d0 100644
+--- a/video/out/mac/dovi_l1.h
++++ b/video/out/mac/dovi_l1.h
+@@ -29,3 +29,16 @@
+ // RPU has no L1 block (the first CM v2.9 extension block, where dovi_tool's generator puts it) or doesn't parse.
+ size_t mp_dovi_rpu_set_l1(const uint8_t *rpu, size_t size, int min_pq, int avg_pq, int max_pq,
+                           uint8_t *out, size_t out_size);
++
++// Each frame's L1, measured, smoothed over time as a mastering tool's per-shot L1 would be: macOS's display management
++// maps each frame by its L1, and on an EDR screen a measured L1 that moves from frame to frame (the brightest pixel's
++// noise, what comes into the frame and goes) shows as flicker. The average follows the picture over ~0.4 s, the max
++// rises within ~0.15 s (a highlight isn't clipped for long) and falls over ~0.6 s, the min over ~0.6 s. A scene cut
++// (the average jumping by more than 200 codes), a seek (a gap over half a second) or time going back starts it again
++// from the frame. `pts` in seconds.
++struct mp_dovi_l1_smooth {
++    double v[3];
++    double pts;
++    int have;
++};
++void mp_dovi_l1_smooth(struct mp_dovi_l1_smooth *s, double pts, int l1[3]);
+diff --git a/video/out/mac/sample_buffer.m b/video/out/mac/sample_buffer.m
+index 2f9bd113f..053a39315 100644
+--- a/video/out/mac/sample_buffer.m
++++ b/video/out/mac/sample_buffer.m
+@@ -138,6 +138,7 @@ struct mac_sample_buffer {
+     id<MTLBuffer> l1_parts;
+     uint8_t *l1_rpu;
+     size_t l1_rpu_size;
++    struct mp_dovi_l1_smooth l1_smooth;
+ };
+ 
+ struct mac_sample_buffer *mac_sample_buffer_create(struct mp_log *log, void *layer)
+@@ -238,6 +239,7 @@ void mac_sample_buffer_set_live_l1(struct mac_sample_buffer *sb, bool live)
+     if (sb && sb->live_l1 != live) {
+         sb->live_l1 = live;
+         sb->last_index = -1;
++        sb->l1_smooth.have = 0;
+     }
+ }
+ 
+@@ -248,8 +250,10 @@ bool mac_sample_buffer_failed(struct mac_sample_buffer *sb)
+ 
+ void mac_sample_buffer_flush(struct mac_sample_buffer *sb)
+ {
+-    if (sb)
++    if (sb) {
++        sb->l1_smooth.have = 0;
+         [sb->layer.sampleBufferRenderer flushWithRemovalOfDisplayedImage:YES completionHandler:nil];
++    }
+ }
+ 
+ // The Metal device behind libplacebo's Vulkan one (MoltenVK), to make textures of the buffers on
+@@ -630,6 +634,10 @@ void mac_sample_buffer_submit(struct mac_sample_buffer *sb, pl_gpu gpu, struct r
+     int l1[3];
+     bool live = sb->live_l1 && sb->file_rpus && sb->rpu && l1_measure(sb, s, &info->color, info->video, l1);
+     if (live) {
++        int raw[3] = { l1[0], l1[1], l1[2] };
++        if (info->pts != MP_NOPTS_VALUE)
++            mp_dovi_l1_smooth(&sb->l1_smooth, info->pts, l1);
++        MP_TRACE(sb, "L1 measured %d %d %d.\n", raw[0], raw[1], raw[2]);
+         size_t n = CFDataGetLength(sb->rpu), cap = n + n / 2 + 8;
+         if (sb->l1_rpu_size < cap) {
+             sb->l1_rpu = talloc_realloc_size(sb, sb->l1_rpu, cap);
+-- 
+2.42.0
+

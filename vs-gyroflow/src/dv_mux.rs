@@ -45,8 +45,10 @@ pub struct RpuInjector {
     first_frame: u64,
     /// Source frames from one picture to the next (an export at a lower frame rate: `step`)
     step: u64,
-    /// Each frame's own L1, in frame order, written into its RPU (`live_l1`)
+    /// Each frame's own L1, in frame order, written into its RPU (`live_l1`), smoothed over time at `fps`
     l1: Option<std::sync::mpsc::Receiver<Option<[i32; 3]>>>,
+    l1_smooth: L1Smooth,
+    fps: f64,
     buf: Vec<u8>,
     /// The NALs of the access unit being gathered, and whether it has a slice yet
     au: Vec<Vec<u8>>,
@@ -57,17 +59,18 @@ pub struct RpuInjector {
 impl RpuInjector {
     /// `first_frame`: the source frame the stream starts at (an export of a part)
     pub fn new(rpus: Vec<Vec<u8>>, first_frame: u64) -> Self {
-        RpuInjector { rpus, first_frame, step: 1, l1: None, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
+        RpuInjector { rpus, first_frame, step: 1, l1: None, l1_smooth: L1Smooth::default(), fps: 30.0, buf: Vec::new(), au: Vec::new(), au_has_vcl: false, frames: 0 }
     }
 
     /// Every `step`th source frame is a picture of the stream (an export at a lower frame rate): its RPU is that frame's
     pub fn step(mut self, step: u64) -> Self { self.step = step.max(1); self }
 
     /// Each frame's own L1 (min, avg, max in 12-bit PQ), one per access unit in order, written into the file's RPU
-    /// for it as the player does (set_l1). A frame sent None, or whose L1 doesn't come (the sender gone), keeps the
-    /// file's.
-    pub fn live_l1(mut self, l1: std::sync::mpsc::Receiver<Option<[i32; 3]>>) -> Self {
+    /// for it as the player does (set_l1), smoothed over time as the player does (L1Smooth; `fps`: the source's frame
+    /// rate). A frame sent None, or whose L1 doesn't come (the sender gone), keeps the file's.
+    pub fn live_l1(mut self, l1: std::sync::mpsc::Receiver<Option<[i32; 3]>>, fps: f64) -> Self {
         self.l1 = Some(l1);
+        if fps > 0.0 { self.fps = fps; }
         self
     }
 
@@ -117,12 +120,43 @@ impl RpuInjector {
         if self.au_has_vcl {
             let i = ((self.first_frame + self.frames * self.step) as usize).min(self.rpus.len() - 1);
             out.write_all(&[0, 0, 0, 1, 0x7c, 0x01])?;
-            let own = self.l1.as_ref().and_then(|rx| rx.recv().ok().flatten()).and_then(|l| set_l1(&self.rpus[i], l[0], l[1], l[2]));
+            let t = (self.first_frame + self.frames * self.step) as f64 / self.fps;
+            let measured = self.l1.as_ref().and_then(|rx| rx.recv().ok().flatten());
+            let own = measured.map(|l| self.l1_smooth.next(t, l)).and_then(|l| set_l1(&self.rpus[i], l[0], l[1], l[2]));
             out.write_all(own.as_deref().unwrap_or(&self.rpus[i]))?;
             self.frames += 1;
         }
         self.au_has_vcl = false;
         Ok(())
+    }
+}
+
+/// Each frame's L1, measured, smoothed over time as a mastering tool's per-shot L1 would be, the same as the player's
+/// mpv does (tools/mpv-patches/0016, video/out/mac/dovi_l1.c): macOS maps each frame by its L1, and on an EDR screen an
+/// L1 that moves from frame to frame shows as flicker. The average follows over ~0.4 s, the max rises within ~0.15 s
+/// and falls over ~0.6 s, the min over ~0.6 s; a scene cut (the average jumping by more than 200 codes), a gap over
+/// half a second or time going back starts it again from the frame
+#[derive(Default)]
+pub struct L1Smooth {
+    v: [f64; 3],
+    t: f64,
+    have: bool,
+}
+
+impl L1Smooth {
+    pub fn next(&mut self, t: f64, l1: [i32; 3]) -> [i32; 3] {
+        let dt = t - self.t;
+        let cut = !self.have || !(dt > 0.0 && dt < 0.5) || (l1[1] as f64 - self.v[1]).abs() > 200.0;
+        let mut out = l1;
+        for i in 0..3 {
+            if cut { self.v[i] = l1[i] as f64; continue; }
+            let tau = match i { 0 => 0.6, 1 => 0.4, _ => if l1[i] as f64 > self.v[i] { 0.15 } else { 0.6 } };
+            self.v[i] += (l1[i] as f64 - self.v[i]) * (1.0 - (-dt / tau).exp());
+            out[i] = self.v[i].round() as i32;
+        }
+        self.t = t;
+        self.have = true;
+        out
     }
 }
 
@@ -395,6 +429,30 @@ mod tests {
                             nal(19, false, b"b"), ours(b"R1"), nal(1, true, b"c"), ours(b"R2")]);
         assert_eq!(out, want);
         assert_eq!(inj.frames, 2);
+    }
+
+    #[test]
+    fn l1_is_smoothed_and_starts_again_at_a_cut() {
+        let mut s = L1Smooth::default();
+        let dt = 1.0 / 60.0;
+        assert_eq!(s.next(0.0, [10, 1800, 2600]), [10, 1800, 2600]);
+        // Noise on the max, frame to frame: the output moves far less
+        let mut lo: i32 = 4095;
+        let mut hi: i32 = 0;
+        for k in 1..120 {
+            let m = if k % 2 == 0 { 2680 } else { 2520 };
+            let o = s.next(k as f64 * dt, [10, 1800, m]);
+            if k > 30 { lo = lo.min(o[2]); hi = hi.max(o[2]); }
+        }
+        assert!(hi - lo < 40, "max swings {lo}..{hi}");
+        // A brighter highlight comes in within ~0.15 s; the average follows slower
+        let mut o = [0; 3];
+        for k in 120..135 { o = s.next(k as f64 * dt, [10, 1850, 3000]); }
+        assert!(o[2] > 2900, "{o:?}");
+        // A cut: the frame's own at once
+        assert_eq!(s.next(135.0 * dt, [10, 2300, 3200]), [10, 2300, 3200]);
+        // A seek: the same
+        assert_eq!(s.next(10.0, [10, 1700, 2500]), [10, 1700, 2500]);
     }
 
     #[test]
