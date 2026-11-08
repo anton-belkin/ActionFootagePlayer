@@ -66,6 +66,24 @@
 //!TYPE DYNAMIC int
 0
 
+//!PARAM gyroflow_dn_radius
+//!TYPE DYNAMIC int
+//!MINIMUM 1
+//!MAXIMUM 5
+5
+
+//!PARAM gyroflow_dn_keep
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.25
+
+//!PARAM gyroflow_dn_tolerance
+//!TYPE DYNAMIC float
+//!MINIMUM 0.25
+//!MAXIMUM 8.0
+1.5
+
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
 //!FORMAT rgba32f
@@ -891,7 +909,9 @@ ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
 bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, target_size)); }
 // This render's frame is the newest one again (paused, a redraw)
 bool dn_same() { return dn_ok() && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
-int dn_after() { return clamp(gyroflow_dn_after, 0, DN_RADIUS); }
+// The frames on each side it takes (the panel's Transform: 1-5), and of them the ones after the shown frame
+int dn_radius() { return clamp(gyroflow_dn_radius, 1, DN_RADIUS); }
+int dn_after() { return clamp(gyroflow_dn_after, 0, dn_radius()); }
 // This render writes its frame: a new one, or the same one again where none is shown after it (crop mode's camera
 // turns it as it's dragged)
 bool dn_fresh() { return !dn_same() || dn_after() == 0; }
@@ -919,7 +939,7 @@ void dn_window()
     }
     dn_kc = min(dn_after(), back);
     dn_nb_fwd = dn_kc;
-    dn_nb_back = min(DN_RADIUS, back - dn_kc);
+    dn_nb_back = min(dn_radius(), back - dn_kc);
 }
 int dn_center() { return dn_back_slot(dn_kc); }
 // The slot o frames after the shown one (o < 0: before it)
@@ -1169,8 +1189,9 @@ vec4 hook()
             d += e * e;
         }
         d /= float(DN_TAPS);
-        // still.rs's weight: full where the patches differ by the noise alone, none past three times it
-        float w = 1.0 - smoothstep(1.0 * DN_STRENGTH, 3.0 * DN_STRENGTH, d / (2.0 * s * s));
+        // still.rs's weight: full where the patches differ by the noise alone, none past three times it (times the
+        // motion tolerance: higher averages more of what moved, lower keeps more of the frame's own)
+        float w = 1.0 - smoothstep(1.0 * gyroflow_dn_tolerance, 3.0 * gyroflow_dn_tolerance, d / (2.0 * s * s));
         vec3 h = frame_bilinear(slot, vec2(j) + v);
         sum += w * h;
         wsum += w;
@@ -1183,8 +1204,8 @@ vec4 hook()
         uint st = uint(clamp(noise_diff * 4096.0, 0.0, 255.0));
         atomicAdd(gdn_hist[bin * 256u + st], 1u);
     }
-    // Some of the grain kept, so it doesn't look smeared
-    return vec4(den + DN_KEEP * (cur - den), 1.0);
+    // Some of the grain kept, so it doesn't look smeared (the panel's strength)
+    return vec4(den + gyroflow_dn_keep * (cur - den), 1.0);
 }
 #endif
 

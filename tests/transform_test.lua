@@ -134,5 +134,21 @@ expect("migrate: source's curve wins", doc.source.curve, "hlg")
 expect("migrate: project water dropped", doc.source.underwater, nil)
 expect("migrate: emptied view removed", doc.view, nil)
 
+-- The temporal denoise's keys: a bundle from before them takes the session's; out of range or not whole, the session's
+local dsession = { view = "normal", denoise_frames = 5, denoise_grain = 0.25, denoise_tolerance = 1.5 }
+b = t.complete({ view = "wide" }, dsession)
+expect("denoise: old bundle takes the session's frames", b.denoise_frames, 5)
+expect("denoise: old bundle takes the session's grain", b.denoise_grain, 0.25)
+b = t.complete({ view = "wide", denoise_frames = 3, denoise_grain = 0.1, denoise_tolerance = 2.5 }, dsession)
+expect("denoise: its own frames kept", b.denoise_frames, 3)
+expect("denoise: its own grain kept", b.denoise_grain, 0.1)
+expect("denoise: its own tolerance kept", b.denoise_tolerance, 2.5)
+b = t.complete({ denoise_frames = 7, denoise_grain = 2.5, denoise_tolerance = "x" }, dsession)
+expect("denoise: frames out of range", b.denoise_frames, 5)
+expect("denoise: grain out of range", b.denoise_grain, 0.25)
+expect("denoise: tolerance not a number", b.denoise_tolerance, 1.5)
+expect("denoise: frames not whole", t.complete({ denoise_frames = 2.5 }, dsession).denoise_frames, 5)
+expect("denoise: a change is a change", t.status({ denoise_grain = 0.25 }, { denoise_grain = 0.1 }, false), "changed")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
