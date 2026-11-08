@@ -77,6 +77,13 @@ expect("still there with a view", exists(s.path(clip)), true)
 s.update(clip, function(d) d.view = nil end)
 expect("removed", exists(s.path(clip)), false)
 
+-- The source's input alone (the Source tab's Save on a clip with no marks and no transform saved): written
+s.update(clip, function(d) d.source = { curve = "auto", rotation = 90, underwater = "auto" } end)
+expect("input alone written", exists(s.path(clip)), true)
+expect("input alone: the turn", s.read(clip).source.rotation, 90)
+s.update(clip, function(d) d.source = nil end)
+expect("nothing left: removed", exists(s.path(clip)), false)
+
 -- Someone else's file of that name: left alone
 write(s.path(clip), serialize({ format = "something-else" }))
 local d2, f2, problem = s.read(clip)

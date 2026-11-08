@@ -78,7 +78,8 @@ function M.new(env)
     end
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
-    -- nothing written. A doc left with neither marks nor view: the file removed
+    -- nothing written. A doc left with no marks, no view and no source (the input: curve, turn, lens under water):
+    -- the file removed
     function s.update(clip, fn)
         local doc, from, problem = s.read(clip)
         if problem then return false, problem end
@@ -86,7 +87,7 @@ function M.new(env)
         if fn(doc) == false then return true end
         doc.format = M.FORMAT
         local file = s.path(clip)
-        if doc.marks == nil and doc.view == nil then
+        if doc.marks == nil and doc.view == nil and doc.source == nil then
             if from then os.remove(from) end
             return true
         end
