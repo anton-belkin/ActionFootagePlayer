@@ -673,7 +673,8 @@ vec4 hook()
     want_boundary = EDGE_FILL == 1;
     if (!source_coord(j, uv)) {
 #if EDGE_FILL && !defined(UV_OUT)
-        if (boundary_uv) return edge_fill(uv);
+        // Past the lens's field: the fill too, muted fully where the ray has no place in the frame at all
+        return fill_at(boundary_uv ? uv : vec2(-1e4));
 #endif
         return BACKGROUND;
     }
@@ -732,8 +733,9 @@ vec4 hook()
     if (!ok) {
         want_boundary = EDGE_FILL == 1;
         ok = frame_setup() && source_coord(j, uv);
-#if EDGE_FILL
-        if (!ok && boundary_uv) return edge_fill(uv);
+#if EDGE_FILL && !defined(UV_OUT)
+        // Past the lens's field: the fill too, muted fully where the ray has no place in the frame at all
+        if (!ok) return fill_at(boundary_uv ? uv : vec2(-1e4));
 #endif
     }
 #endif
