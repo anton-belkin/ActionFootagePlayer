@@ -106,6 +106,12 @@ reads each stream when it plays: HEVC Main10 HLG 1080p, direct play where the de
 from afp-stream itself, so the device must reach `--stream`'s address; else Jellyfin converts it (H.264 SDR, checked).
 The library's runtime shows once an item has played (Jellyfin reads a .strm only then).
 
+Older TVs play HLS only in MPEG-TS segments (Samsung's Tizen before 5, 2020: jellyfin-web's `canPlayNativeHlsInFmp4`;
+LG's webOS before 3.5), and Jellyfin can't tell TS from fMP4 inside its "hls" container, so it hands them the stream to
+play directly. A 2017 Samsung (Tizen 3.0) hung on the fMP4 one. afp-stream gives those players (by their User-Agent, or
+`?fmt=ts`) the same segments remuxed to TS (`seg<n>.ts`, made once from `seg<n>.m4s`, HEVC with its parameter sets in
+band, the timestamps kept). Every request is logged with the client and its User-Agent (`AFP_LOG_REQUESTS=0`: none).
+
 To remove it all: the library in Jellyfin's dashboard, `docker rm -f afp-jellyfin`, the folder `_Action Footage`.
 
 Measured on the N100, clip 0126 (Osmo Action 6, 4K60 D-Log M), 1080p HLG out, with the look:

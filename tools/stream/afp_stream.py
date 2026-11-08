@@ -235,15 +235,51 @@ def info(clip):
     return infos[clip["id"]]
 
 
-def playlist(clip):
+# Players that take HLS only in MPEG-TS segments: TVs before fMP4 HLS (Samsung's Tizen before 5, 2020; LG's webOS
+# before 3.5). Jellyfin can't tell a TS stream from an fMP4 one (both are its "hls" container), so it hands them ours to
+# play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
+TS_PLAYERS = re.compile(r"Tizen [1-4]\.|SMART-TV.*Tizen [1-4]|Web0S|webOS", re.I)
+
+
+def wants_ts(headers, query):
+    if "ts" in (urllib.parse.parse_qs(query).get("fmt") or []):
+        return True
+    return bool(TS_PLAYERS.search(headers.get("User-Agent") or ""))
+
+
+def playlist(clip, ts=False):
     i = info(clip)
-    lines = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{math.ceil(i['seg'])}", "#EXT-X-MEDIA-SEQUENCE:0",
-             "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS", '#EXT-X-MAP:URI="init.mp4"']
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3" if ts else "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{math.ceil(i['seg'])}",
+             "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD"]
+    if not ts:
+        lines += ["#EXT-X-INDEPENDENT-SEGMENTS", '#EXT-X-MAP:URI="init.mp4"']
     for n in range(i["count"]):
         d = min(i["seg"], i["duration"] - n * i["seg"]) if n == i["count"] - 1 else i["seg"]
-        lines += [f"#EXTINF:{max(d, 0.001):.6f},", f"seg{n:05d}.m4s"]
+        lines += [f"#EXTINF:{max(d, 0.001):.6f},", f"seg{n:05d}.{'ts' if ts else 'm4s'}"]
     lines.append("#EXT-X-ENDLIST")
     return "\n".join(lines) + "\n"
+
+
+def ts_segment(clip, n):
+    """Segment n remuxed to MPEG-TS (init + segment through ffmpeg, timestamps kept), made once beside it"""
+    m4s = segment_path(clip, n)
+    out = m4s[:-4] + ".ts"
+    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(m4s):
+        with open(out, "rb") as f:
+            return f.read()
+    with open(os.path.join(CACHE, clip["id"], "init.mp4"), "rb") as f:
+        data = f.read()
+    with open(m4s, "rb") as f:
+        data += f.read()
+    r = subprocess.run(["ffmpeg", "-v", "error", "-f", "mp4", "-i", "pipe:0", "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0",
+                        "-muxpreload", "0", "-f", "mpegts", "pipe:1"], input=data, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        log("no TS for", clip["name"], n, r.stderr.decode(errors="replace")[-200:])
+        return None
+    with open(out + ".tmp", "wb") as f:
+        f.write(r.stdout)
+    os.replace(out + ".tmp", out)
+    return r.stdout
 
 
 def segment_path(clip, n):
@@ -568,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
                          f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a></p><ul>")
                 for c in cs:
                     i = infos.get(c["id"])
-                    done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
+                    done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg") and f.endswith(".m4s")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
                     have = f" <small>({done} s rendered)</small>" if done else ""
                     body += f'<li><a href="/clip/{c["id"]}/index.m3u8">{html.escape(os.path.basename(c["name"]))}</a> <a href="/watch/{c["id"]}">watch</a>{have}</li>'
                 body += "</ul>"
@@ -631,8 +667,8 @@ class Handler(BaseHTTPRequestHandler):
                 first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if first is not None:
                     ensure(clip, first)
-                return self.send(200, playlist(clip), "application/vnd.apple.mpegurl")
-            m = re.match(r"seg(\d+)\.m4s$", name)
+                return self.send(200, playlist(clip, wants_ts(self.headers, u.query)), "application/vnd.apple.mpegurl")
+            m = re.match(r"seg(\d+)\.(m4s|ts)$", name)
             if m:
                 n = int(m.group(1))
                 if n >= info(clip)["count"]:
@@ -644,8 +680,13 @@ class Handler(BaseHTTPRequestHandler):
                 if ahead is not None:
                     ensure(clip, ahead)
                 path = segment_path(clip, n)
-                if not wait_for(path, j):
+                if not wait_for(path, j) or (m.group(2) == "ts" and not os.path.exists(os.path.join(CACHE, clip["id"], "init.mp4"))):
                     return self.send(503, "not rendered", "text/plain", {"Retry-After": "2"})
+                if m.group(2) == "ts":
+                    data = ts_segment(clip, n)
+                    if data is None:
+                        return self.send(500, "no TS", "text/plain")
+                    return self.send(200, data, "video/mp2t")
                 with open(path, "rb") as f:
                     return self.send(200, f.read(), "video/iso.segment")
             if name == "init.mp4":
@@ -661,7 +702,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(404, "not found", "text/plain")
 
     def log_message(self, fmt, *args):
-        pass
+        # Who asked for what (a player that stalls: did it come, which files, which answer); AFP_LOG_REQUESTS=0: none
+        if os.environ.get("AFP_LOG_REQUESTS", "1") != "0":
+            ua = (self.headers.get("User-Agent") or "-")[:60] if self.headers else "-"
+            log(self.client_address[0], fmt % args, ua)
 
 
 if __name__ == "__main__":
