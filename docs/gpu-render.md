@@ -203,8 +203,25 @@ frees the file's text mpv read (~5 MB a change: libplacebo keeps its own copy). 
 | 20 | 10240 MB, swapping: plays at 0.2× | 1010 MB, 0 dropped | 1793 MB, 42 dropped | 686 MB |
 | 40 | (stopped at 9 GB) | 1020 MB, 0 dropped | 2500 MB, 45 dropped | 774 MB (before the text was freed) |
 
-The distribution's mpv on Linux and Windows' mpv don't have the patch: the GPU path there (gpu=yes) piles up the
-same way until mpv takes the change upstream.
+The distribution's mpv on Linux and Windows' mpv (shinchiro's build) don't have the patch, so main.lua copes with an
+mpv that keeps them (`gpu_flush=auto`: any mpv without 0014's `--video-join`, which only the app's has):
+
+- **The same settings, the same file**: a shader is kept by the settings it was written with (the gyroflow-gpu-table
+  request, and the project's file as it is), 16 of them, and asked for again it's that file, not a new one: mpv gives
+  its parse back and holds nothing more (the denoise's ring started again by `gyroflow_dn_epoch`). Changing the edges
+  back and forth costs nothing after the first time, and no table is written (on the Mac too).
+- **The window made again**: what the shaders no longer used hold is counted (their text twice, the grid, the ring);
+  past 1.5 GB, mpv's `vo` is set to another list with the same output (its first entry twice, or once again) as the
+  next clip opens, and mpv makes a new window with no shader parsed but those in use; past 4 GB, at once.
+
+Measured as above with 0.10.0's mpv (no patch 0015; `gpu_flush=yes`, as it has `--video-join`), Ctrl+p on: 20 changes
+among 4 settings, then 20 that make new ones (the level, the view, the edges), then the next clip:
+
+| | 0 | 4 | 20 | 24 | 28 | 40 | next clip |
+|---|---|---|---|---|---|---|---|
+| Footprint, MB | 1005 | 2422 | 2905 (the same 4 files again) | 4763 | 1527 (made again at once) | 2893 | 1084 (made again as it opened) |
+
+No frame dropped in any sample. With the app's mpv the same run stays at 964-1018 MB, and nothing is made again.
 
 ### Save frame (crop mode and the photo) on the GPU path
 
