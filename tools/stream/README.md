@@ -115,6 +115,11 @@ its own address (`/Videos/<id>/stream`, User-Agent `Jellyfin-Server`), where a p
 nowhere. Jellyfin gets a master playlist pointing back here instead, so the device fetches the stream from afp-stream
 with its own User-Agent.
 
+Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
+Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
+web player takes HLG, and the iPhone plays the stream directly from afp-stream (checked 2026-11-08: fMP4 from here, no
+transcode, the colors as the player's).
+
 To remove it all: the library in Jellyfin's dashboard, `docker rm -f afp-jellyfin`, the folder `_Action Footage`.
 
 Measured on the N100, clip 0126 (Osmo Action 6, 4K60 D-Log M), 1080p HLG out, with the look:

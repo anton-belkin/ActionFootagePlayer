@@ -718,6 +718,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), "video/mp4")
         return self.send(404, "not found", "text/plain")
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            # A player that went away between requests (a TV stopping, a phone locking): not an error
+            self.close_connection = True
+
     def log_message(self, fmt, *args):
         # Who asked for what (a player that stalls: did it come, which files, which answer); AFP_LOG_REQUESTS=0: none
         if os.environ.get("AFP_LOG_REQUESTS", "1") != "0":
