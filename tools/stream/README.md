@@ -40,7 +40,7 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
 
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
-      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox afp-stream:f43 \
+      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
@@ -125,6 +125,9 @@ Measured on the N100, clip 0126 (Osmo Action 6, 4K60 D-Log M), 1080p HLG out, wi
 | planes, B-spline | 61 fps |
 | planes, Gyroflow's bicubic (9 fetches) | 59 fps |
 | RGB with the fringes taken out, bicubic | 48 fps |
+
+The bitrate costs no speed: 12, 30 and 50 Mbit/s rendered alike (2026-11-08, 20 s of a 4K60 clip, VDEnc). On the NAS
+it's 30M since then, Anton finding 12M too little on a TV; a Samsung TV's Ethernet port is 100 Mbit/s.
 
 Faster than the clip's rate is what a stream needs: below it the player catches up with the render and waits. 8K clips
 (the Action 6's 4:3 trip clips) render at ~42 fps against their 50, the N100's decoder being the limit; players buffer.

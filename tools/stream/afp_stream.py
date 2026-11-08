@@ -580,7 +580,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                # The player went (stopped, or skipped ahead): nothing to do
+                self.close_connection = True
 
     def base(self):
         return f"http://{self.headers.get('Host') or 'localhost:%d' % PORT}"
