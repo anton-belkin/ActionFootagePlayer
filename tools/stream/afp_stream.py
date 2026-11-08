@@ -667,6 +667,19 @@ class Handler(BaseHTTPRequestHandler):
                 first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if first is not None:
                     ensure(clip, first)
+                # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
+                # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
+                # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
+                # the stream from us, with its own User-Agent, and gets TS or fMP4 as it plays
+                if (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server"):
+                    i = info(clip)
+                    w, h = (shader_for(clip, clip_dir(clip), i).get("output") or [1920, 1080])
+                    height = min(HEIGHT, h)
+                    width = int(round(height * w / h / 2)) * 2
+                    master = ("#EXTM3U\n#EXT-X-VERSION:3\n"
+                              f"#EXT-X-STREAM-INF:BANDWIDTH={int(float(BITRATE.rstrip('MmKk')) * (1e6 if BITRATE[-1] in 'Mm' else 1e3) * 1.2)},"
+                              f"RESOLUTION={width}x{height},FRAME-RATE={i['fps']:.3f}\n{self.base()}/clip/{clip['id']}/index.m3u8\n")
+                    return self.send(200, master, "application/vnd.apple.mpegurl")
                 return self.send(200, playlist(clip, wants_ts(self.headers, u.query)), "application/vnd.apple.mpegurl")
             m = re.match(r"seg(\d+)\.(m4s|ts)$", name)
             if m:

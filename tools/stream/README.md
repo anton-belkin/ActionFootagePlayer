@@ -110,7 +110,10 @@ Older TVs play HLS only in MPEG-TS segments (Samsung's Tizen before 5, 2020: jel
 LG's webOS before 3.5), and Jellyfin can't tell TS from fMP4 inside its "hls" container, so it hands them the stream to
 play directly. A 2017 Samsung (Tizen 3.0) hung on the fMP4 one. afp-stream gives those players (by their User-Agent, or
 `?fmt=ts`) the same segments remuxed to TS (`seg<n>.ts`, made once from `seg<n>.m4s`, HEVC with its parameter sets in
-band, the timestamps kept). Every request is logged with the client and its User-Agent (`AFP_LOG_REQUESTS=0`: none).
+band, the timestamps kept). Every request is logged with the client and its User-Agent (`AFP_LOG_REQUESTS=0`: none). The TV doesn't even fetch the `.strm`'s URL itself: Jellyfin passes the stream on from
+its own address (`/Videos/<id>/stream`, User-Agent `Jellyfin-Server`), where a playlist's relative segment names lead
+nowhere. Jellyfin gets a master playlist pointing back here instead, so the device fetches the stream from afp-stream
+with its own User-Agent.
 
 To remove it all: the library in Jellyfin's dashboard, `docker rm -f afp-jellyfin`, the folder `_Action Footage`.
 
