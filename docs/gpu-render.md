@@ -185,6 +185,27 @@ What changed:
 Left: gyroflow-core's zoom search (0.2 s of a project's load) and the rows' transforms (0.3 s of a no-project table),
 done once per clip and settings now; mpv's own 0.4-0.8 s.
 
+**Each change is a new shader file, and mpv has to let the old one go** (tools/mpv-patches/0015, 2026-11-08).
+vo_gpu_next parses a user shader once and keeps it by its path until the window closes, with every texture and
+buffer its `//!TEXTURE` and `//!BUFFER` blocks make on the GPU. main.lua writes each version of the warp to a new
+path (`mpv-gyroflow-<pid>-<n>.glsl`: the same path would get the old parse back), so before the patch every setting
+changed, and every clip opened, left a whole warp resident: its table, its grid and, with Ctrl+p, the denoise's ring
+of 11 frames (`GDN_FRAMES`, 7680×12960 rgb10a2, ~400 MB, and `GDN_QUART`, ~50 MB). On a 16 GB Mac a session slowed
+down and dropped frames after a dozen or two changes, until the player was restarted. The patch destroys the shaders
+no longer in `glsl-shaders` when the options change (libplacebo frees them once the GPU is done with them), and
+frees the file's text mpv read (~5 MB a change: libplacebo keeps its own copy). Measured on the M1 Pro (16 GB), clip
+0068 (4K60), a 1280×720 window, the edges and the view changed over IPC every 2.5 s, the process's footprint:
+
+| Changes | Ctrl+p on, before | Ctrl+p on, patched | Ctrl+p off, before | Ctrl+p off, patched |
+|---|---|---|---|---|
+| 0 | 986 MB | 991 MB | 1078 MB, 22 dropped / 6 s | 587 MB, 6 dropped |
+| 10 | 5680 MB | 975 MB | 1386 MB | 583 MB |
+| 20 | 10240 MB, swapping: plays at 0.2× | 1010 MB, 0 dropped | 1793 MB, 42 dropped | 686 MB |
+| 40 | (stopped at 9 GB) | 1020 MB, 0 dropped | 2500 MB, 45 dropped | 774 MB (before the text was freed) |
+
+The distribution's mpv on Linux and Windows' mpv don't have the patch: the GPU path there (gpu=yes) piles up the
+same way until mpv takes the change upstream.
+
 ### Save frame (crop mode and the photo) on the GPU path
 
 **Crop mode's camera** is the warp's own: `gyroflow_cam_x..w` and `gyroflow_cam_zoom` (DYNAMIC parameters, set through
