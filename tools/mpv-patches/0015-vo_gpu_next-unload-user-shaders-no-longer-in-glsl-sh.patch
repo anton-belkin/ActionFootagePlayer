@@ -1,0 +1,68 @@
+From f85060669c8d1fb2422a8b51e6f191604147f7ac Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Sun, 8 Nov 2026 10:26:48 +0100
+Subject: [PATCH] vo_gpu_next: unload user shaders no longer in --glsl-shaders
+
+Each user shader is parsed once and kept by its path until the VO is
+destroyed, with the textures and buffers its //!TEXTURE and //!BUFFER
+blocks create on the GPU. A script that writes each new version of a
+shader to a new file (a shader holding per-clip data, rewritten on
+every settings change) leaves all the earlier ones parsed and resident:
+with storage textures of a few hundred MB each, a session slows down
+and drops frames after enough changes, until mpv is restarted.
+
+Shaders no longer listed in --glsl-shaders are now destroyed when the
+render options are updated. libplacebo defers the actual freeing until
+the GPU has finished with them. A shader listed again is parsed again.
+
+The file's text, read into the VO's context, was kept too: libplacebo
+copies what it needs, so it's freed once parsed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video/out/vo_gpu_next.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index de99181ed..c07bd6f4f 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -2956,6 +2956,8 @@ static const struct pl_hook *load_hook(struct priv *p, const char *path)
+     const struct pl_hook *hook = NULL;
+     if (shader.len)
+         hook = pl_mpv_user_shader_parse(p->gpu, shader.start, shader.len);
++    // libplacebo keeps its own copy of the text
++    talloc_free(shader.start);
+ 
+     MP_TARRAY_APPEND(p, p->user_hooks, p->num_user_hooks, (struct user_hook) {
+         .path = talloc_strdup(p, path),
+@@ -3268,6 +3270,26 @@ static void update_render_options(struct vo *vo)
+     pars->params.hooks = p->hooks;
+     p->view_base_stale = true;
+ 
++    // Forget the shaders no longer in the list. Each parsed shader keeps its
++    // textures and buffers on the GPU until it is destroyed, so a script that
++    // writes a new shader file for every change would otherwise pile them up
++    // for as long as the VO lives. libplacebo frees them once the GPU is done.
++    for (int i = p->num_user_hooks - 1; i >= 0; i--) {
++        bool listed = false;
++        for (int n = 0; opts->user_shaders && opts->user_shaders[n]; n++) {
++            if (strcmp(p->user_hooks[i].path, opts->user_shaders[n]) == 0) {
++                listed = true;
++                break;
++            }
++        }
++        if (listed)
++            continue;
++        MP_VERBOSE(p, "Unloading user shader %s\n", p->user_hooks[i].path);
++        pl_mpv_user_shader_destroy(&p->user_hooks[i].hook);
++        talloc_free(p->user_hooks[i].path);
++        MP_TARRAY_REMOVE_AT(p->user_hooks, p->num_user_hooks, i);
++    }
++
+     MP_DBG(p, "Render options updated, flushing renderer cache.\n");
+     p->flush_cache = p->paused || !p->next_opts->inter_preserve;
+ 
+-- 
+2.42.0
+
