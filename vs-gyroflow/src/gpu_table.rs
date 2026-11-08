@@ -383,7 +383,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
             sizes.push((s.0.div_ceil(2), s.1.div_ceil(2)));
         }
         let binds = |more: &[&str]| { let mut v = vec![format!("//!HOOK {hook}"), "//!BIND HOOKED".into(), "//!BIND GYROFLOW_TABLE".into()];
-            if grid { v.push("//!BIND GYROFLOW_GRID".into()); if rb { v.push("//!BIND GYROFLOW_GRID_RB".into()); } }
+            if grid { v.push("//!BIND GYROFLOW_GRID".into()); if rb { v.push("//!BIND GYROFLOW_GRID_RB".into()); } v.push("//!BIND GYROFLOW_GRID_DONE".into()); }
             v.extend(more.iter().map(|s| s.to_string())); v };
         let io = |name: &str, prefix: &str| format!("#define {prefix}_RAW {name}_raw\n#define {prefix}_MUL {name}_mul\n#define {prefix}_SIZE {name}_size");
         let defs = format!("{defs}\n#define FILL_PASS\n#define FILL_W {fw}\n#define FILL_H {fh}");

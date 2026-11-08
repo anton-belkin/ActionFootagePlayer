@@ -760,7 +760,13 @@ vec4 hook()
         for (int t = 0; t < 9; t++) {
             vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * target_size / vec2(FILL_W, FILL_H) - 0.5;
             vec2 uv;
+#ifdef GRID_STEP
+            // The warp's own grid where it has the place (the frame's parameters are set either way)
+            bool ok = grid_coord(j, uv);
+            if (!ok) ok = source_coord(j, uv);
+#else
             bool ok = source_coord(j, uv);
+#endif
             if (!ok) continue;
             sum += src(texel(clamp(uv, vec2(0.0), vec2(SRC_W, SRC_H) - 1.0)));
             cover += feather(uv);
