@@ -144,7 +144,8 @@ def ask_player(clip):
              f"--script-opts-append=gyroflow-render_args={tmp}", "--", clip["path"]]
     t = time.time()
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        # In ARGS: the workspace plugin's cache of moments (~~cache) lands there
+        r = subprocess.run(args, capture_output=True, text=True, timeout=180, cwd=ARGS)
         err = r.stderr
     except subprocess.TimeoutExpired:
         err = "timed out"
