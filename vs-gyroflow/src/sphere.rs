@@ -88,6 +88,10 @@ impl View {
         }
     }
 
+    /// The output camera's turn into the world: a direction of the output camera, `rot · d`, is the world's (the GPU
+    /// warp's sphere trail, gpu_table.rs)
+    pub fn rotation(&self) -> Matrix3<f32> { self.rot }
+
     /// The focal length at the middle, in output widths and heights
     pub fn focal(&self) -> (f32, f32) {
         (self.f.0 / self.size.0, self.f.1 / self.size.1)

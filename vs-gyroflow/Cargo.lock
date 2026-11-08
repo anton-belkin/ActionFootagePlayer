@@ -3371,6 +3371,7 @@ version = "0.2.0"
 dependencies = [
  "bytemuck",
  "dolby_vision",
+ "flate2",
  "gyroflow-core",
  "jpeg-encoder",
  "libc",

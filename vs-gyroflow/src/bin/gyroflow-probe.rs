@@ -79,6 +79,14 @@ fn main() {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => { println!("{}", serde_json::json!({ "mode": null, "reason": e.to_string(), "color": null })); return; }
     };
+    // Kept per file (and per build of this tool): opening a clip waits for this answer, and reading the file for it
+    // takes ~0.4 s cold (from a NAS more)
+    let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
+    let cache = vs_gyroflow::file_cache("probe", &path, &build);
+    if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
+        println!("{}", text.trim());
+        return;
+    }
     let mut out = match probe(&path) {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
@@ -108,4 +116,8 @@ fn main() {
         };
     }
     println!("{out}");
+    if let Some(c) = cache {
+        let tmp = c.with_extension("tmp");
+        if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &c); }
+    }
 }

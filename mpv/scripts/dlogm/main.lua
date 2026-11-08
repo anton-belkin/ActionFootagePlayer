@@ -672,6 +672,23 @@ local function keep_curve()
     mp.commandv("script-message-to", "workspace", "input-set", "curve", id)
 end
 
+-- The gyroflow plugin's GPU warp (its gpu=auto): the shader of the playing file, put in place of the one before it in the
+-- list this plugin builds its own from, so a look chosen later keeps it (an empty name: none)
+mp.register_script_message("gyroflow-shader", function(old, new)
+    if not base then return end
+    local list, done = {}, false
+    for _, s in ipairs(base.shaders) do
+        if old ~= "" and s == old then
+            if new ~= "" then table.insert(list, new) end
+            done = true
+        elseif s ~= new then
+            table.insert(list, s)
+        end
+    end
+    if new ~= "" and not done then table.insert(list, 1, new) end
+    base.shaders = list
+end)
+
 -- After the file is opened (its metadata is known), before the video output is set up for it
 mp.add_hook("on_preloaded", 50, function(hook)
     base, curve, current, announce, recorded, hdr, touched, shown_for = nil, nil, nil, false, nil, nil, false, nil

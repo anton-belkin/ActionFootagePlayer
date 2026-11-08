@@ -23,6 +23,9 @@
 -- asked for, so the frame that comes is the one it says (the filter reads the file as mpv sets it up, any time after
 -- the seek's asked for); the camera since then goes with the next one.
 --
+-- On the GPU path (main.lua's, the warp as an mpv shader) the camera is the warp's own parameters: turned at once,
+-- paused or playing, with nothing rendered again but the frame on screen; no control file, no seek, no preview.
+--
 -- Keys while it's on: a / Shift+a the frame's aspect, double click or Backspace back to the start, Enter saves it as a
 -- photo (export.lua's photo, with this camera and frame), c or Esc leaves
 -- (the camera as the plugin stabilizes it again). The frame's state is published as user-data/gyroflow/crop for the
@@ -89,8 +92,15 @@ local function stabilizing()
     return hooks ~= nil and hooks.stabilizing()
 end
 
+-- The GPU path (main.lua's): the camera is the warp's own parameters, the frame on screen has it the next refresh
+local function gpu_mode()
+    return hooks ~= nil and hooks.gpu ~= nil and hooks.gpu()
+end
+
 -- What the plugin wrote: the focal length in output widths and heights at zoom 1
 local function focal()
+    local g = gpu_mode() and hooks.focal()
+    if g and tonumber(g[1]) and tonumber(g[2]) then return tonumber(g[1]), tonumber(g[2]) end
     local f = hooks and io.open(hooks.control_path() .. ".camera", "r")
     if not f then return DEFAULT_FX, DEFAULT_FX * 16 / 9 end
     local info = utils.parse_json(f:read("*a") or "")
@@ -295,6 +305,7 @@ local anchor = nil
 -- The paused frame moved by mpv to about where the camera asked for puts it, from the one it was rendered with
 local function preview()
     if not cam then return end
+    if gpu_mode() then return end
     local paused = mp.get_property_native("pause")
     if hooks.shader then
         mp.set_property_number("video-zoom", 0)
@@ -333,6 +344,12 @@ end
 -- reads it. Not while such a seek is under way: the frame it brings would be rendered with this camera or that one
 local function write_now()
     if write_timer then write_timer:kill(); write_timer = nil end
+    -- The GPU path: the warp turns the camera itself, paused or playing, nothing to render again
+    if gpu_mode() then
+        hooks.camera(cam)
+        written, shown = copy(cam), copy(cam)
+        return
+    end
     local paused = mp.get_property_native("pause")
     if paused and refreshing then dirty = true; return end
     last_write = mp.get_time()
@@ -352,7 +369,9 @@ end
 
 -- The camera changed: the preview at once, the control file at most every WRITE_EVERY
 local function changed()
-    if cam then
+    if cam and gpu_mode() then
+        write_now()
+    elseif cam then
         preview()
         local wait = WRITE_EVERY - (mp.get_time() - last_write)
         if wait <= 0 then write_now()
@@ -467,6 +486,7 @@ function M.set(on)
         if write_timer then write_timer:kill(); write_timer = nil end
         cam, flat, shown = nil, nil, nil
         if hooks.shader then set_shader(nil) end
+        if gpu_mode() then hooks.camera(nil); had_camera = false end
         mp.set_property_number("video-zoom", 0)
         mp.set_property_number("video-pan-x", 0)
         mp.set_property_number("video-pan-y", 0)
@@ -519,7 +539,8 @@ end
 mp.register_event("end-file", function() M.set(false) end)
 
 -- hooks: { stabilizing(): the plugin stabilizes the clip, write(): the control file written anew (with
--- control_words), control_path(): where it is }
+-- control_words), control_path(): where it is; gpu(): on the GPU path, camera(c): the warp's camera set (nil: none),
+-- focal(): its focal length }
 function M.init(h)
     hooks = h
     publish()

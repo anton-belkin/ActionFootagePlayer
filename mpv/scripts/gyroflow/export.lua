@@ -573,10 +573,49 @@ end)
 -- shares of the view the camera renders; where mpv's own zoom and pan move the picture (not stabilized), the frame in
 -- shares of the video
 local photos = 0
+
+-- The frame as the GPU path renders it (the gyroflow plugin's warp as a shader: crop mode's camera in it, the look
+-- in HLG), at the video's size, for gyroflow-export --image: mpv's screenshot as a 16-bit PNG in the video's own
+-- colors (BT.2020 HLG; a raw screenshot would be converted to sRGB), uncompressed (quick to write and read). Only where
+-- the frame on screen is the HLG (the hdr, tonemap and dv looks; maker and nbcu end in SDR) and the clean frame
+-- (Ctrl+p) is off: cleaning up takes the frames around it at full size, gyroflow-export's own. Returns the arguments
+-- for it and the file, or nil
+local HLG_LOOKS = { hdr = true, tonemap = true, dv = true, dvsdr = true }
+local function gpu_frame()
+    local gpu = mp.get_property_native("user-data/gyroflow/gpu")
+    if type(gpu) ~= "table" or mp.get_property_native("user-data/gyroflow/still") == true then return nil end
+    local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
+    local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
+    if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end
+    local file = utils.join_path(platform.temp_dir(), string.format("afp-photo-%d-%d.png", utils.getpid(), photos))
+    local saved = {}
+    for k, v in pairs({ ["screenshot-format"] = "png", ["screenshot-tag-colorspace"] = "yes", ["screenshot-high-bit-depth"] = "yes",
+                        ["screenshot-png-compression"] = "0" }) do
+        saved[k] = mp.get_property(k)
+        mp.set_property(k, v)
+    end
+    local t0 = mp.get_time()
+    mp.command_native({ "screenshot-to-file", file, "video" })
+    for k, v in pairs(saved) do mp.set_property(k, v) end
+    if not utils.file_info(file) then return nil end
+    mp.msg.info(string.format("photo: the frame as rendered, in %d ms", math.floor((mp.get_time() - t0) * 1000)))
+    return { "--image", file }, file
+end
+
+-- The time of the frame on screen: on the GPU path with the denoise, up to its delay before time-pos, not before where
+-- it last started (main.lua's dn_sync, user-data/gyroflow/gpu_delay)
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    local restart = (d.restart and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
+
 local function photo()
     local path = local_path()
     if not path or not installed("Photo") then return end
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if not t then return end
     -- A moment plays as a video of its own: its time plus where it starts in the clip
     local ws = mp.get_property_native("user-data/workspace")
@@ -614,6 +653,9 @@ local function photo()
             table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", x0, y0, x1 - x0, y1 - y0))
         end
     end
+    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
+    local frame_args, frame_file = gpu_frame()
+    for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
@@ -622,6 +664,7 @@ local function photo()
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         photos = photos - 1
+        if frame_file then os.remove(frame_file) end
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if r and r.status == 0 and out then

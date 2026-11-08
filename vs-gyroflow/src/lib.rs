@@ -42,6 +42,7 @@ pub mod heading;
 pub mod sphere360;
 pub mod view360;
 pub mod export360;
+pub mod gpu_table;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -483,27 +484,31 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     Ok((stab, project_json, motion))
 }
 
-impl Engine {
-    /// `subsampling`: log2 of the chroma subsampling, (w, h)
-    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
-    /// then `preset`
-    /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
-    /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
-    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
-    /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
-    /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
-    /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
-    /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
-    /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
-    /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
-    /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
-    /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
-    /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
+/// What Engine::load sets up before its GPU workers: the project or the video's motion loaded as the plugin plays it,
+/// the views and levels, the output frame and size. Also the GPU warp's table (gpu_table.rs), so it renders exactly
+/// what the filter does. The arguments are Engine::load's
+pub struct Prepared {
+    pub stab: StabilizationManager,
+    pub views: Arc<Views>,
+    pub view: u8,
+    pub view_index: usize,
+    pub level_geometry: Option<motion::Geometry>,
+    pub motion: Option<Arc<motion::Motion>>,
+    pub render_size: (usize, usize),
+    pub project_size: Option<(usize, usize)>,
+    pub output_size: (usize, usize),
+    pub frame: Frame,
+    pub frame_offset_us: i64,
+    pub uncovered_frames: (usize, usize),
+    pub wide_fov: Option<f64>,
+}
+
+pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), output_override: Option<(usize, usize)>, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Prepared, String> {
         let t = std::time::Instant::now();
         let lens_only = lens == LensMode::Only;
         let horizon_lock = if lens_only { Some(0.0) } else { horizon_lock };
         let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead, lens_only)?;
+        log::debug!("prepare: loaded in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         match lens {
             LensMode::Only => {
                 // No smoothing (gyroflow-core's first algorithm, None), no rolling shutter correction, a zoom that holds
@@ -577,8 +582,14 @@ impl Engine {
         });
         if level_geometry.is_none() {
             stab.invalidate_smoothing();
-            stab.recompute_blocking();
+            let lap = |w: &str| log::debug!("prepare: {w} at {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+            lap("before");
+            stab.refresh_optical_correction(); lap("optical");
+            stab.recompute_smoothness(); lap("smoothness");
+            stab.recompute_adaptive_zoom(); lap("zoom");
+            stab.recompute_undistortion(); lap("undistortion");
         }
+        log::debug!("prepare: smoothed in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         let views = {
             // A FOV of its own (gyroflow-export --fov) in place of the levels'
             let set_fov = if let Fov::Set(f) = fov { Some(f) } else { None };
@@ -602,6 +613,7 @@ impl Engine {
                 }
             }
         };
+        log::debug!("prepare: views in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         let view = if fov == Fov::Wide { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
         let view_index = views.index(view, level);
         let uncovered_frames = views.uncovered[view_index];
@@ -621,6 +633,29 @@ impl Engine {
                              frame.projection.map(|p| format!(", {}", gyroflow_core::stabilization::projection::setting_name(p))).unwrap_or_default());
         log::info!("Loaded {project} in {:.0} ms: {}x{} -> {}x{} (frame {}x{}{turned}), frame offset {} us; {}edges uncovered in {} of {} frames", t.elapsed().as_secs_f64() * 1000.0, size.0, size.1, render_size.0, render_size.1, output_size.0, output_size.1, frame_offset_us, wide_fov.map(|f| format!("wider view at FOV {f:.3}; ")).unwrap_or_default(), uncovered_frames.0, uncovered_frames.1);
 
+        Ok(Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov })
+}
+
+impl Engine {
+    /// `subsampling`: log2 of the chroma subsampling, (w, h)
+    /// `project`: a .gyroflow project, or the video itself: its own motion data with Gyroflow's default preset and
+    /// then `preset`
+    /// `fov`: the project's, a FOV of its own, or the wider view's (see `Fov`)
+    /// `horizon_lock`: the horizon lock's amount (%, 0 off) instead of the project's
+    /// `underwater`: the lens under water, not, or as the camera says (water.rs)
+    /// `level`: for a clip without a project, the level it starts in (levels.rs; the control file switches it);
+    /// `lookahead`: how much of its motion data past what's played is enough (motion.rs; 0: all of it before it plays)
+    /// `trim`: for a video without a project, a part of it (seconds) stabilized on its own: its smoothing from its own
+    /// motion alone (a moment's; a project keeps its own trim range and "only within it"). `alone`: for a project,
+    /// its "only within the trim range" as it's viewed, whatever it says (a moment's switch, not saved)
+    /// `frame`: the output frame turned and cut to an aspect (Frame), in place of the project's output size and rotation;
+    /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
+    /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
+    /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
+    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
+        let t = std::time::Instant::now();
+        let Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov } =
+            prepare(project, preset, fov, horizon_lock, underwater, level, lookahead, input_size, output_override, trim, alone, frame, lens)?;
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
         let plane_size = |(w, h): (usize, usize), p: usize| if p == 0 { (w, h) } else { (w >> subsampling.0, h >> subsampling.1) };
@@ -862,13 +897,62 @@ fn add_motion_data(json: &mut serde_json::Value, project: &str) {
     }
     let t = std::time::Instant::now();
     let url = filesystem::path_to_url(&video);
+    // Read once per file: from a NAS it's many small reads through the file (a second or two), kept on this computer.
+    // A file without motion data too (an optical project's: DJI records none with EIS on): its metadata as a full
+    // project has it, so gyroflow-core doesn't read the file for it either
+    let cached = motion_cache(&video);
+    if let Some(data) = cached.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|d| !d.is_empty()) {
+        set_file_metadata(json, data, url);
+        log::info!("{project}: the video's motion data from the cache in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        return;
+    }
+    let keep = |data: &str| if let Some(c) = cached.as_ref() {
+        let tmp = c.with_extension("tmp");
+        if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, data).is_ok() { let _ = std::fs::rename(&tmp, c); }
+    };
     let Ok((m, size)) = motion::Motion::open(&video, &url, 0.0) else { return };
     let stab = StabilizationManager::default();
-    if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() || !stab.gyro.read().has_motion() { return; }
+    if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() { return; }
     let Some(data) = gyroflow_core::util::compress_to_base91_cbor(&*stab.gyro.read().file_metadata.read()) else { return };
+    keep(&data);
+    set_file_metadata(json, data, url);
+    log::info!("{project}: the video's motion data read ahead for it in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+}
+
+/// The video's metadata into its project, as a full project has it. Without motion data in it, gyroflow-core reads
+/// the video's motion data again anyway when the motion file is the video (its import): there, the motion file is
+/// named apart from the video, a file that isn't, and the metadata given is what it takes
+fn set_file_metadata(json: &mut serde_json::Value, data: String, url: String) {
+    let motion = gyroflow_core::util::decompress_from_base91_cbor::<gyroflow_core::gyro_source::FileMetadata>(&data).map(|m| m.has_motion()).unwrap_or(true);
+    if !motion {
+        json["gyro_source"]["filepath"] = format!("{url}.afp-no-motion-data").into();
+        if let Some(g) = json["gyro_source"].as_object_mut() { g.remove("filepath_bookmark"); }
+    }
     json["gyro_source"]["file_metadata"] = data.into();
     json["videofile"] = url.into();
-    log::info!("{project}: the video's motion data read ahead for it in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+}
+
+/// Where a video's motion data read for its project is kept (add_motion_data)
+fn motion_cache(video: &str) -> Option<std::path::PathBuf> {
+    file_cache("motion", video, "")
+}
+
+/// A file's answer kept in the app's cache folder (`kind`'s folder), by the file's path, size and time and `extra`
+/// (a version); None where there's no home to keep it in, or no such file
+pub fn file_cache(kind: &str, file: &str, extra: &str) -> Option<std::path::PathBuf> {
+    use sha2::{ Digest, Sha256 };
+    let meta = std::fs::metadata(file).ok()?;
+    let base = if cfg!(target_os = "macos") {
+        std::path::PathBuf::from(std::env::var_os("HOME")?).join("Library/Caches/ActionFootagePlayer")
+    } else if cfg!(windows) {
+        std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("ActionFootagePlayer/cache")
+    } else {
+        std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?.join("ActionFootagePlayer")
+    };
+    let key = format!("{file}|{}|{:?}|{extra}", meta.len(), meta.modified().ok());
+    let hash: String = Sha256::digest(key.as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
+    Some(base.join(kind).join(hash))
 }
 
 fn is_project_file(path: &str) -> bool {

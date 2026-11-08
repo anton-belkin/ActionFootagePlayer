@@ -160,6 +160,10 @@ rendition as the image, the HDR one (HLG) above it
                    a video export takes it too)
   --crop <x,y,w,h> the part of the frame to keep, in shares of its width and height (0-1; a video export's too),
                    of the frame as --rotation and --aspect have it
+  --image <file.png>  the photo's frame as the player rendered it on the GPU (its warp, crop mode's camera, the look
+                   in HLG): mpv's 16-bit PNG screenshot in the video's own colors. In place of decoding, stabilizing,
+                   cleaning up and the HDR look here; --crop cuts it, the SDR image is made from it (--sdr-image nbcu or
+                   macos)
   --format <heic|jpeg>  HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere)
   --live           with the motion around it, 1.5 s on each side, as the export plays it (--sdr, --nbcu, --dv-rpu
                    say how; at most 1920 wide or high): a HEIC becomes a Live Photo (a .mov next to it, paired by
@@ -215,6 +219,8 @@ struct Options {
     photo_grain: f32,
     camera: Option<vs_gyroflow::Camera>,
     crop: Option<[f64; 4]>,
+    /// --image: the player's own render of the frame (HLG, a 16-bit PNG)
+    image: Option<PathBuf>,
     jpeg: bool,
     quality: u8,
     sdr_image: Option<String>,
@@ -262,7 +268,7 @@ fn main() {
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
-                             photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None,
+                             photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false, sphere360: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -344,6 +350,7 @@ fn main() {
                 .and_then(|v| <[f64; 4]>::try_from(v).ok())
                 .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
                 .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
+            "--image" => opts.image = Some(PathBuf::from(value("--image"))),
             "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
                 v @ ("maker" | "nbcu" | "macos") => v.to_string(),
                 v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
@@ -1708,6 +1715,58 @@ fn content_id() -> Result<String, String> {
     Ok(format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]))
 }
 
+/// A 16-bit RGBA PNG (mpv's screenshot with screenshot-high-bit-depth): its width, height and pixels, 8 bytes each
+/// (big-endian, as PNG has them), unfiltered
+fn read_png16(path: &Path) -> Result<(usize, usize, Vec<u8>), String> {
+    use std::io::Read;
+    let bad = |why: &str| format!("{}: {why}", path.display());
+    let d = std::fs::read(path).map_err(|e| bad(&e.to_string()))?;
+    if d.len() < 8 || &d[..8] != b"\x89PNG\r\n\x1a\n" { return Err(bad("not a PNG")); }
+    let (mut i, mut w, mut h, mut idat) = (8, 0usize, 0usize, Vec::new());
+    while i + 8 <= d.len() {
+        let n = u32::from_be_bytes([d[i], d[i + 1], d[i + 2], d[i + 3]]) as usize;
+        let (kind, body) = (&d[i + 4..i + 8], d.get(i + 8..i + 8 + n).ok_or_else(|| bad("cut short"))?);
+        match kind {
+            b"IHDR" => {
+                w = u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize;
+                h = u32::from_be_bytes([body[4], body[5], body[6], body[7]]) as usize;
+                if body[8] != 16 || body[9] != 6 || body[12] != 0 { return Err(bad("not 16-bit RGBA without interlacing")); }
+            }
+            b"IDAT" => idat.extend_from_slice(body),
+            b"IEND" => break,
+            _ => {}
+        }
+        i += 12 + n;
+    }
+    let (bpp, stride) = (8, w * 8);
+    let mut raw = Vec::with_capacity((stride + 1) * h);
+    flate2::read::ZlibDecoder::new(&idat[..]).read_to_end(&mut raw).map_err(|e| bad(&e.to_string()))?;
+    if w == 0 || raw.len() < (stride + 1) * h { return Err(bad("short image data")); }
+    let mut out = vec![0u8; stride * h];
+    for y in 0..h {
+        let f = raw[y * (stride + 1)];
+        let line = &raw[y * (stride + 1) + 1..(y + 1) * (stride + 1)];
+        let (prev, cur) = out.split_at_mut(y * stride);
+        let up = if y > 0 { &prev[(y - 1) * stride..] } else { &[][..] };
+        let cur = &mut cur[..stride];
+        for x in 0..stride {
+            let a = if x >= bpp { cur[x - bpp] as i32 } else { 0 };
+            let b = if y > 0 { up[x] as i32 } else { 0 };
+            let c = if x >= bpp && y > 0 { up[x - bpp] as i32 } else { 0 };
+            let p = match f {
+                0 => 0,
+                1 => a,
+                2 => b,
+                3 => (a + b) / 2,
+                4 => { let (pa, pb, pc) = ((b - c).abs(), (a - c).abs(), (a + b - 2 * c).abs()); if pa <= pb && pa <= pc { a } else if pb <= pc { b } else { c } }
+                _ => return Err(bad("unknown filter")),
+            };
+            cur[x] = (line[x] as i32 + p) as u8;
+        }
+    }
+    Ok((w, h, out))
+}
+
 fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     use vs_gyroflow::photo::{ self as ph, Cube };
     use vs_gyroflow::still;
@@ -1760,6 +1819,34 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     // The image: the frame at `t`, cleaned up from its neighbours, in the HDR look and the SDR one the image is
     // (--sdr-image)
     let image = || -> Result<(ph::Image, Option<ph::Image>, String, usize), String> {
+        // The player's own render (--image): the HDR look as it is, cut to the frame; the SDR image from it
+        if let Some(img) = &opts.image {
+            let (iw, ih, raw) = read_png16(img)?;
+            let stride = iw * 8;
+            let [cx, cy, cw, ch] = opts.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+            let even = |v: f64| (v.round() as usize) & !1;
+            let (x0, y0) = (even(cx * iw as f64).min(iw - 2), even(cy * ih as f64).min(ih - 2));
+            let (w, h) = (even(cw * iw as f64).clamp(2, iw - x0), even(ch * ih as f64).clamp(2, ih - y0));
+            let mut pixels = Vec::with_capacity(w * h);
+            for y in y0..y0 + h {
+                let row = &raw[y * stride..];
+                for x in x0..x0 + w {
+                    let p = &row[x * 8..x * 8 + 6];
+                    let c = |i: usize| u16::from_be_bytes([p[i], p[i + 1]]) as f32 / 65535.0;
+                    pixels.push([c(0), c(2), c(4)]);
+                }
+            }
+            let hdr = ph::Image { width: w, height: h, pixels };
+            eprintln!("{}: photo at {t:.2} s (frame {n}), {w}x{h} as the player rendered it", file_name(file));
+            lap("the player's frame read");
+            let (sdr, how) = if sdr_look == "macos" && cfg!(target_os = "macos") && helper.is_file() {
+                (macos_sdr(&helper, &hdr, &out_dir)?, "as macOS shows the HLG")
+            } else {
+                (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&hdr), "NBCU")
+            };
+            lap("colors");
+            return Ok((sdr, Some(hdr), format!("HLG as the player rendered it: SDR {how}, HDR HLG"), 0));
+        }
         let engine = match &source {
             Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
                                          (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
