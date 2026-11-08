@@ -1,0 +1,407 @@
+# Что отдать в апстрим после 0.10
+
+Вопрос Антона (2026-11-08): что после удачного опыта с GPU-путём можно передать Адриану Эдди (Gyroflow) и другим
+открытым проектам, которыми мы пользуемся (mpv, libplacebo и остальным), и в какой форме.
+
+Это отчёт, не действия: **ничего никуда не отправлено и не открыто**. Черновики в конце — только черновики; каждый
+пост, issue, PR или письмо — с отдельного «да» Антона, его словами. Для PR в апстрим действует правило Антона: без
+строк `Co-Authored-By` от ИИ (у mpv это ещё и требование самого проекта, см. ниже).
+
+Основано на: `docs/gpu-render.md`, `docs/gpu-render-spike.md`, `docs/360-*.md`, `tools/mpv-patches/0001–0014`,
+`tools/stream/`, `vs-gyroflow/` и его `Cargo.toml`, истории коммитов, памяти проекта, а также на текущем состоянии
+репозиториев gyroflow/gyroflow, AdrianEddy/telemetry-parser, mpv-player/mpv, libplacebo, MoltenVK, Mesa (проверено
+2026-11-08, ссылки в разделах).
+
+## Коротко: что отдать, по порядку (наибольшая польза за наименьший труд)
+
+| # | Что | Кому | Форма | Труд у нас | Почему стоит |
+|---|---|---|---|---|---|
+| 1 | GPU-путь: GLSL-порт ядра, таблица узлов, замеры (N100, Mac), живая стабилизация с карты/NAS | Адриан (Gyroflow) | Сообщение в Discord `#dev-live-stabilization` или комментарий в [#635](https://github.com/gyroflow/gyroflow/issues/635) + видео 30–60 с + ссылка на код (черновик D1) | ½ дня (видео записывает Антон) | #635 «Realtime stabilization» у него открыт с ответом «no timeline»; сторонних реализаций нет; он сам думал о плеере на libplacebo ([#381](https://github.com/gyroflow/gyroflow/issues/381)) |
+| 2 | Патч 0009: flush HDR-состояния Metal-слоя | mpv | PR «Fixes [#18445](https://github.com/mpv-player/mpv/issues/18445)» | 1–2 ч | Открытый баг ровно с нашим симптомом (EDR не включается до ресайза окна); 19 строк |
+| 3 | Значения `//!PARAM` не попадают в ключ кэша кадров (патч 0011) | libplacebo, затем mpv | Issue в libplacebo с минимальным шейдером; если фикс должен быть в mpv — PR (черновик D3) | 2–3 ч | Баг всех DYNAMIC-параметров на gpu-next; корень найден (`pl_var_hash(*hook)`) |
+| 4 | Поля Osmo Action 6: `ColorMode` (D-Log M), барометр «в воде»/глубина, уверенность «под водой» | telemetry-parser | PR по образцу [#61](https://github.com/AdrianEddy/telemetry-parser/pull/61), ссылка на [#58](https://github.com/AdrianEddy/telemetry-parser/issues/58) | ~1 день | Action 6 сейчас разбирается общей схемой; цвет и подводный режим для всех пользователей Gyroflow |
+| 5 | Чтение метаданных по сети: 14–34 с → < 1 с | telemetry-parser | Issue с числами (черновик D2), потом PR (~300 строк, под MIT/Apache) | 30 мин + 1–2 дня | Ускоряет и сам Gyroflow на NAS/SMB |
+| 6 | `_AbsoluteTime` в vf_vapoursynth | mpv | Маленький PR | 1–2 ч + проверка | Убирает хрупкую эвристику у всех VapourSynth-фильтров под mpv (у нас — `vs-gyroflow/src/lib.rs`) |
+| 7 | MoltenVK ставит EDR/colorspace слоя вне главного потока без CATransaction | MoltenVK | Issue с минимальным воспроизведением | ½ дня | Корень бага из п. 2; касается всех Vulkan-приложений с HDR на Mac |
+| 8 | Хроматика под водой: R/G/B со своими показателями внутри warp | Gyroflow | Абзац в п. 1 → issue с кадрами до/после → PR, если он захочет | issue 1 ч; PR несколько дней (4 бэкенда) | Issue про хроматическую аберрацию у него нет вообще; в 1.7 рефракция стала точной — основа есть |
+| 9 | Ветки форка: `view_rotation`; equirect + RigLens; Insta360 RadtanPro (X4/X5) | Gyroflow | Вопрос в п. 1 / в [#800](https://github.com/gyroflow/gyroflow/issues/800) → PR'ы с тестами, как #1264 | 1–3 дня (rebase на 1.7, 38 коммитов позади) | #800: «not planned, unless someone contributes it»; equirect ложится шестой выходной проекцией |
+| 10 | Жесты тачпада для скриптов (0008) | mpv | PR после доработки (общие input-события), ссылка на [#15787](https://github.com/mpv-player/mpv/issues/15787) | 1–2 дня | Давний запрос пользователей |
+| 11 | Вывод через AVSampleBufferDisplayLayer + Dolby Vision RPU (0001–0006) | mpv | Сначала issue/разговор с Akemi; потом серия PR | 1–2 недели (переписать на Swift, macOS 10.15, пул буферов, PQ темнее) + долгое ревью | Большая ценность для mpv на Mac, но и самый дорогой; ревью Антон должен вести сам |
+| 12 | `--video-join` (0014) | mpv | Issue «как вы хотите это видеть» | ½ дня на issue | Намеренное ограничение hwdec под lavfi-complex; нужен общий дизайн |
+
+**Отправлять не нужно**: ANV/P010 (известное ограничение Mesa, см. раздел 3), mpv 0.41 + VapourSynth R74 (исправлено в
+0.42), `dvvC` (Apple документирует сам), предупреждение telemetry-parser о клип-метаданных DJI в первом сэмпле (уже
+есть), патчи 0007/0010/0012 (специфичны для приложения).
+
+**Что решить Антону** (до любого сообщения):
+
+1. **CLA Gyroflow §2.3**: всё, что Антон отдаст в Gyroflow (даже в чате), Адриан может перелицензировать, включая
+   закрытый код. Отдавать ли наши собственные части (узлы, сетка, 9-выборочный bicubic, хроматика, заполнение краёв,
+   денойз) или только показать и сослаться на GPL-код в ActionFootagePlayer.
+2. **Канал для Адриана**: Discord (быстрее, его привычка) или публичный комментарий в #635.
+3. **Ревью в mpv/libplacebo — лично**: оба проекта требуют, чтобы автор сам отвечал на ревью и раскрывал модель и
+   инструмент в описании PR (без ИИ-соавторов в коммитах — это совпадает с правилом Антона). Поэтому начинать с
+   маленьких (2, 3, 6).
+4. **Видео-демо** для п. 1 — записывает Антон (или разрешает тест с захватом экрана).
+
+Попутно у нас самих (не апстрим): комментарий в `vs-gyroflow/Cargo.toml` о #1280 устарел (он в 1.7.0); форк стоит
+пересадить на 1.7.0; на N100 попробовать Vulkan Video decode с `ANV_DEBUG=video-decode`.
+
+## 1. Gyroflow (Adrian Eddy) и telemetry-parser
+
+### Контекст: отношения уже есть, и Адриан сейчас очень активен
+
+- Два PR Антона уже в Gyroflow: [gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264) (Static
+  zoom, смержен 2026-10-21 после подробного ревью Адриана: «that's a nice feature, thanks») и
+  [gyroflow/gyroflow#1280](https://github.com/gyroflow/gyroflow/pull/1280) (wgpu `MemoryHints::MemoryUsage` на
+  встроенных GPU, смержен 2026-11-03, коммит `1f4f555f` в master). CLA подписан. Открытый issue Антона:
+  [gyroflow/gyroflow#1166](https://github.com/gyroflow/gyroflow/issues/1166).
+- **Gyroflow v1.7.0 вышел 2026-11-07** (`eb695f05`), с обоими PR. В master за последние две недели: GPU KLT вместо
+  OpenCV для оптического анализа (в 10 раз быстрее), gmflow, новый сглаживатель «Optimal path», AV1, CubeCL/burn,
+  десяток обновлений telemetry-parser (Canon, ARRI, Insta360, RED, DJI). То есть Адриан сам сейчас переносит тяжёлое
+  на GPU — тема «весь рендер на GPU» ему близка по времени.
+- Release notes 1.7.0 ([v1.7.0](https://github.com/gyroflow/gyroflow/releases/tag/v1.7.0)) благодарят Антона по
+  имени за оба PR. Описание #1280 уже упоминает ActionFootagePlayer («gyroflow-core in a VapourSynth filter for
+  realtime playback in mpv») — Адриан о проекте как минимум слышал.
+- **Реального времени у Gyroflow нет, и он это знает**: [#635 Realtime stabilization](https://github.com/gyroflow/gyroflow/issues/635)
+  открыт, ответ Адриана — «planned but no timeline and not enough interest»; попытку студента
+  ([#807](https://github.com/gyroflow/gyroflow/issues/807)) он отправил в Discord-канал `#dev-live-stabilization`;
+  [страница документации о live feed](https://docs.gyroflow.xyz/app/advanced-usage/live-feed-stabilization) говорит,
+  что живой стабилизации нет. Сторонних проектов «Gyroflow в mpv/libplacebo в реальном времени» исследование не нашло:
+  наш — первый.
+- **Плеер на libplacebo Адриан сам рассматривал**: в [#381](https://github.com/gyroflow/gyroflow/issues/381) (2022) он
+  думал заменить mdk-sdk на libmpv или свой плеер на libplacebo; его сомнения были в поддержке Metal и рисовании в
+  `MTLTexture`. Замена mdk у него теперь — [AdrianEddy/gpu-video](https://github.com/AdrianEddy/gpu-video) (Apache-2.0,
+  «NOT READY YET», последний push 2026-10-09). Наш опыт ровно про это: libplacebo рисует в импортированные
+  IOSurface/Metal-текстуры (патч 0002), zero-copy VideoToolbox и VAAPI.
+- **360**: [#800](https://github.com/gyroflow/gyroflow/issues/800) открыт, Адриан (2024): «not planned, unless someone
+  contributes it… a lot of refactoring». В 1.7 появились выходные проекции (stereographic, equidistant, equisolid,
+  orthographic — «для очень широких линз вроде Insta360 X4/X5»), но **equirect нет**; наш equirect ложится шестым
+  `OutputProjection`.
+- **Как он хочет получать предложения** ([CONTRIBUTING.md](https://github.com/gyroflow/gyroflow/blob/master/CONTRIBUTING.md)):
+  вопросы — в Discord («the best place»), идеи функций — в issues с сильным доводом, что это нужно большинству
+  пользователей. **GitHub Discussions в репозитории выключены.**
+- **ИИ-код**: на баунти по профилям линз он назвал большинство присланного «slop… mindlessly pointed an agent at a few
+  bullet points» и попросил больше таких PR не слать ([#742](https://github.com/gyroflow/gyroflow/issues/742),
+  [#150](https://github.com/gyroflow/gyroflow/issues/150)); около 20 таких PR висят. Ревью #1264 при этом было
+  доброжелательным («Opus missed this one», «Good job») — подробное описание с числами и тестами сработало. Его CLA
+  §3(e) требует раскрывать сгенерированное ИИ. Вывод: первое сообщение — коротко, своими словами Антона, с честным
+  «сделано с Claude, проверено так-то», с числами и демо, без простыни.
+- Следствие для нас: `vs-gyroflow/Cargo.toml` всё ещё говорит «из форка, пока апстрим не примет #1280» — уже принят;
+  форк нужен только ради трёх веток ниже. Переезд на 1.7.0 + наши ветки — отдельная задача (не часть этого отчёта).
+
+### 1.1 GLSL-порт ядра + таблица узлов + замеры — главное, что ему новое
+
+**Что у нас есть** (`shaders/gyroflow/warp.glsl`, 1279 строк; `vs-gyroflow/src/gpu_table.rs`;
+`gyroflow-gpu-table`; отчёт `docs/gpu-render-spike.md`):
+
+- Полный порт `undistort_coord` / `rotate_and_distort` в GLSL как пользовательский шейдер mpv/libplacebo: все модели
+  линз Gyroflow, кроме Sony и generic polynomial (им нужны mesh-данные), цифровые линзы GoPro, rolling shutter,
+  рефракция под водой, интерполяции bilinear / B-spline / bicubic (Keys −0.75) / Lanczos4 / EWA Robidoux.
+- **Точность**: каждый из 2 073 600 пикселей 1080p-выхода в пределах **0.037 px** от `undistort_coord`
+  (среднее 0.0003–0.001 px) — проверено тестом через naga на GPU (`gpu_table::tests`), на opencv_fisheye (Osmo Action 6)
+  и gopro (HERO12, включая 5.3K 8:7 → 16:9).
+- **Rolling shutter узлами, не строками**: вместо 2160 матриц на кадр (138 кБ) — 33 кватерниона, nlerp между ними.
+  На HERO7 с вибрацией: 9 узлов 0.071 px, 17 — 0.044, **33 — 0.021 px** (уровень шума f32), 65 не лучше. ~600 байт на
+  кадр, 10 МБ на 5 минут 4K60.
+- **Главный вывод о производительности на слабых GPU**: на Intel N100 проход стоит своих *выборок из текстур*, а не
+  математики. Геометрия на грубой сетке (каждые 8 px, билинейно: ≤ 0.06 px; Catmull-Rom держит 0.04 px даже на 32 px)
+  снимает ~3 мс; итерационные модели (gopro, insta360 с Newton-циклами) считаются только в узлах сетки. Bicubic
+  Gyroflow из **9 билинейных выборок вместо 16** (63 дБ против 16-выборочного). Итог: 4K60 → 1080p с bicubic
+  Gyroflow на N100 за 7.9 мс кадра из 16.7.
+- **Кадр не покидает GPU**: VideoToolbox/VAAPI zero-copy, кадр находится по `//!PARAM PTS` (mpv ≥ 0.42). На M1 Pro:
+  34 % CPU против 86 % через VapourSynth, 0 пропусков; клип открывается за 0.8–0.96 с.
+- **Живая стабилизация файлов прямо с карты или NAS**: prefetch таблицы сэмплов метаданных (см. 1.4) + «motion
+  streaming» (клип стартует с первыми 4 с данных движения, остальное дочитывается во время игры) + таблица в шейдере.
+- **NAS-стрим**: N100, VAAPI → libplacebo с тем же warp.glsl → VDEnc HEVC Main10 → HLS: 67–69 fps на 4K60 → 1080p
+  (`tools/stream/`).
+
+**Что из этого новое для Адриана.** В Gyroflow есть wgpu-ядро (`wgpu_undistort.wgsl`, выборки через `textureLoad`
+и ручная интерполяция), OpenCL-ядро, CPU-эталон и Qt-превью `src/qt_gpu/undistort.frag` — упрощённое: только
+билинейная выборка железом, параметры строк в текстуре. Нового для него:
+
+1. Доказательство, что **полное** ядро (с RS, всеми линзами и его bicubic/Lanczos/EWA) работает как шейдер плеера в
+   реальном времени, с точностью до сотых пикселя — то есть «плеер проектов .gyroflow без рендера» возможен на любом
+   mpv ≥ 0.42 без VapourSynth.
+2. Числа про слабые GPU (сетка геометрии, «выборки дороже математики», 33 узла достаточно) — применимы к его
+   превью и к wgpu-ядру экспорта на встроенных GPU. Оговорка: трюк «bicubic за 9 выборок» требует фильтруемой
+   текстуры с аппаратным билинейным фильтром; его wgpu-ядро читает `textureLoad` из-за множества пиксельных форматов,
+   так что туда переносится сетка, а не 9 выборок.
+3. Компактная таблица на кадр (параметры + узлы) как формат «проект → шейдер» — может стать его собственным
+   экспортом «для плееров» (по аналогии с его STMap-экспортом).
+
+**Размер изменения у него**: от нуля (просто прочитать/посмотреть демо) до среднего (взять сетку геометрии в
+Qt-превью; добавить «export for real-time players»). Ничего не требует от него сразу.
+
+**Лучшая форма**: Discussions выключены, поэтому — **комментарий в #635** (это прямой ответ на «no timeline»:
+вот реальное время, вот числа) **или короткое сообщение в Discord** (`#dev-live-stabilization`, куда он сам отправляет
+такие темы), с коротким видео (N100 / Mac, стабилизированный 4K60 в реальном времени, нагрузка на ЦП), таблицей
+точности и ссылкой на код. Комментарий в #635 публичен и остаётся; Discord — быстрее и ближе к его привычке. Моя
+рекомендация: Discord первым (разговор), ссылка оттуда на одну страницу с числами (например, `docs/gpu-render-spike.md`
+или отдельная заметка). Вопрос в конце: хочет ли он что-то из этого у себя (Qt-превью, экспорт таблицы, отдельный
+crate) и в какой форме. Черновик — в конце (D1).
+
+**Лицензия**: шейдер — производная от GPL-3.0-or-later кода Gyroflow и помечен так (`warp.glsl`, шапка; модели линз в
+`shaders/gyroflow/lens/` скопированы с его копирайтом). Для Gyroflow совместимо. Если что-то из нашего пойдёт PR'ом в
+gyroflow, действует его CLA (у Антона подписан) — см. «Лицензии и CLA» ниже.
+
+**Учесть 1.7**: в 1.7 переделана математика линз (коррекция ниже 100 % теперь точная, рефракция точная по всему кадру,
+линзы шире 180°; коммит `f3faf5f`, 2026-09-27; наш форк его уже содержит). В `gpu_table::unsupported` у нас «коррекция
+ниже 100 %» — возможно, с новой математикой это переносится проще; до письма стоит знать, что шейдер соответствует
+1.7, а не только форку.
+
+### Лицензии и CLA
+
+- Gyroflow и gyroflow-core — GPLv3 с исключением для App Store и (с мая 2026) исключением для линковки с mdk-sdk
+  ([LICENSE](https://github.com/gyroflow/gyroflow/blob/master/LICENSE)); плагины для NLE
+  ([gyroflow-plugins](https://github.com/gyroflow/gyroflow-plugins)) — тоже GPL-3.0 с исключением App Store, не
+  коммерческие. telemetry-parser — MIT OR Apache-2.0. gpu-video — Apache-2.0.
+- [CLA Адриана](https://gist.github.com/AdrianEddy/3825bd508e8a44cea815e991c11f593b) (у Антона подписан): автор
+  сохраняет копирайт, но даёт бессрочную сублицензируемую лицензию и патентную лицензию; **§2.3: Адриан может
+  лицензировать вклад «under any license, including … commercial, or proprietary»** (обязуясь держать его и под
+  лицензией на день вклада). «Submit» в CLA — это и issues, и обсуждения, и чат, не только PR.
+- Что это значит практически: всё, что Антон *отдаст в Gyroflow* (код, а формально и сниппеты в чате), Адриан сможет
+  использовать где угодно, включая закрытый код — например, в Apache-лицензированном gpu-video. Наш `warp.glsl` в
+  ActionFootagePlayer остаётся GPL независимо от этого. **Решение Антона**: давать ли наши собственные части (узлы,
+  сетка, 9-выборочный bicubic, хроматика, заполнение краёв, денойз) на условиях CLA, или только показывать и давать
+  ссылку на GPL-код. Для части, производной от его ядра, разницы почти нет — это и так его код.
+
+### 1.2 Хроматическая коррекция под водой внутри warp
+
+**Что у нас**: `vs-gyroflow/src/dispersion.rs` + сетка/выборка в `warp.glsl`. Вода преломляет синий сильнее
+красного; с плоским портом бокса это даёт поперечную хроматическую аберрацию 1–2 px на 4K на полпути к краю.
+Gyroflow знает один коэффициент рефракции (зелёный). Мы считаем показатели воды для R/G/B из физики (Quan & Fry,
+усреднено по каналам D-Gamut, `tools/water_dispersion.py`) — ничего не подогнано под футаж — и в warp выбираем каждый
+канал по своему лучу, **одна** пересэмплировка из исходных пикселей. Вне воды стоит 0 (ветка на кадр, не на пиксель).
+
+**Ценность для Gyroflow**: прямое продолжение его функции «Lens is underwater»; дайверы — заметная аудитория.
+**Изменение у него**: среднее — три координаты в каждом ядре (wgpu, OpenCL, CPU, Qt) при refraction ≠ 1, плюс
+таблица индексов. **Форма**: issue/discussion с парой кадров до/после и числами, потом PR, если он скажет «да».
+Хорошо идёт вторым сообщением после 1.1 или внутри него одним абзацем. Issue про хроматическую аберрацию у Gyroflow
+нет ни одного — тема для него новая; в 1.7 рефракция стала точной по всему кадру, так что основа под поканальную
+версию у него уже есть.
+
+### 1.3 Ветки форка: view_rotation, equirect + RigLens, Insta360 X4/X5
+
+Три ветки `anton-belkin/gyroflow` поверх master (`d130105`, ahead 6):
+
+| Ветка / коммит | Что | Размер | Пересечение с апстримом |
+|---|---|---|---|
+| `view-rotation` (9405503, 8f41ad8, f42a7dd) | Выходная камера, повёрнутая **после** сглаживания, как камера на штативе (yaw → pitch → roll) | ~45 строк | В master есть `additional_rotation` (с keyframes), но он применяется **до** horizon lock и сглаживания (`gyro_source/mod.rs::smooth_piece`) и требует пересглаживания. Наш — после, без пересчёта: интерактивный рефрейм (кроп-режим плеера) |
+| `360-raw-clips` (fb35b07) | Equirect-проекция выхода (вся сфера) и RigLens (поворот линзы рига, смещение на дистанции сшивки, предел валидности); тесты 432 строки | ~712 строк | В master нет equirect-выхода. В наших доках записано: у апстрима свой приватный 360-рендерер, говорить с ним в [issue #800](https://github.com/gyroflow/gyroflow/issues/800) до таких PR |
+| d130105 | Модель Insta360: члены RadtanPro из `offset_v6` (X4, X5) поверх v3, во всех 4 бэкендах | ~186 строк | В master нет; telemetry-parser недавно обновлял разбор Insta360 (5416396, a4a2fbd) — сверить перед PR |
+
+Плюс находка без кода: у Insta360 X4/X5 (`imu_orientation` `yzX`) ориентация IMU в telemetry-parser верна только для
+плоского клипа с окном кропа; для сырого 360-файла гироскоп надо развернуть на пол-оборота вокруг вертикали, а
+акселерометр — ещё на четверть (`vs-gyroflow/src/sphere360.rs::imu_turn`, выведено на одном клипе X5: 5.4° rms
+против 8.1° у следующего кандидата). В 1.7 есть «Fixed IMU orientation and lens center of Insta360 X4» (Ivan1248) —
+сначала проверить, не покрывает ли это наш случай (сырой 360-файл, а не плоский). **Форма**: если не покрывает —
+issue в telemetry-parser с этими числами и оговоркой «один клип».
+
+**Форма для веток**: view_rotation — маленький PR, но сначала один вопрос Адриану, нужен ли ему «поворот после
+сглаживания» рядом с `additional_rotation` (иначе это два похожих параметра). Equirect + RigLens и Insta360 — после
+ответа в #800 (там Адриан ждёт именно вклада: «not planned, unless someone contributes it»). Ветки на 38 коммитов
+позади master и трогают все ядра, которые менял `eae2669` (2026-10-29): перед PR — rebase на 1.7.0 с конфликтами.
+Объём equirect + RigLens — больше всего прочего; это PR «с тестами и числами», как #1264, не раньше чем Адриан
+скажет, что хочет.
+
+### 1.4 telemetry-parser: чтение по сети и Osmo Action 6
+
+telemetry-parser (MIT OR Apache-2.0, [AdrianEddy/telemetry-parser](https://github.com/AdrianEddy/telemetry-parser))
+— тоже Адриана, и обновляется почти ежедневно.
+
+- **Чтение с NAS/SMB.** telemetry-parser читает трек метаданных по одному сэмплу (seek + ~550 байт на кадр по всему
+  файлу), а `parse_mp4` читает первые и последние 15 МБ несколько раз. С локального диска это ~0.1 с на минуту 4K60,
+  с NAS — **14–34 с** (каждое чтение ждёт сервер). Наш `vs-gyroflow/src/prefetch.rs` читает все сэмплы параллельно
+  по таблице сэмплов и отдаёт парсеру из памяти: клип с NAS открывается **меньше чем за секунду** (#71). Это же
+  ускорило бы сам Gyroflow на сетевых дисках. **Форма**: issue с числами → PR (адаптер `Read + Seek` с упреждающим
+  чтением по таблице сэмплов, ~300 строк). Наш файл под GPL-3.0-or-later, а telemetry-parser — MIT/Apache:
+  Антон автор и может отдать код под их лицензией, но это надо явно сказать в PR.
+- **Osmo Action 6 (`dvtm_ac206`)** в апстриме разбирается общей схемой `Wm169` (своей .proto нет — `src/dji/rig.rs`,
+  `Schema::detect`). Поэтому не декодируются: `ColorMode` (D-Log M или Normal — DJI тегирует D-Log M как BT.709, и
+  иначе это не узнать), барометр с флагом «в воде» и глубиной (FrameMeta 3.2.13), уверенность «под водой» (3.2.8.1).
+  Мы читаем это сами (`probe.rs::color_profile`, `water.rs`, `dji-telemetry/telemetry.lua`; карта полей — в памяти
+  проекта, 85 клипов, прошивка 10.00.23.14). Открыт [telemetry-parser#58](https://github.com/AdrianEddy/telemetry-parser/issues/58)
+  «Video from DJI Action 6 unrecognized» — Адриан там: GPS «could be there, it's not wired in telemetry-parser»; а
+  [#61](https://github.com/AdrianEddy/telemetry-parser/pull/61) (2026-11-02) уже вывел экспозицию DJI в теги. Значит,
+  PR с полями Action 6 ложится в его текущую работу. **Форма**: PR в telemetry-parser — схема ac206 или хотя бы эти
+  поля как теги (по образцу #61), со ссылкой на #58. GPS у Action 6 мы не видели (только `gps_status=1` INVALID). Малое изменение у него, ценность — правильный цвет и подводная рефракция для всех пользователей Action 6.
+- **Авто-рефракция в Gyroflow по флагу «в воде».** Когда поля выше будут в telemetry-parser, Gyroflow мог бы сам
+  ставить keyframes «Lens is underwater» по участкам клипа (у нас это `Underwater::Auto` в `water.rs`). **Форма**:
+  предложение в том же discussion/issue; изменение у него малое–среднее.
+- Уже есть в апстриме, отправлять не нужно: предупреждение о том, что клип-метаданные DJI есть только в первом
+  сэмпле (`e8e0d7d`, 2026-10-26) — ровно то, на что мы наткнулись при lossless-cut.
+
+### 1.5 Что ещё можно показать, но не предлагать как PR
+
+- **Заполнение краёв «следом на сфере»** (что камера видела в этом направлении, с затуханием 2.5 с) и плавное
+  заполнение pull-push — альтернатива его режимам фона (solid/repeat/mirror/margin). Показать в демо.
+- **Временной шумодав 5+5 кадров с прогнозом движения по гироскопу** (поиск блоков вокруг предсказания,
+  `warp.glsl` `dn_`-проходы, 8 мс/кадр 1080p на M1 Pro). Гироскоп как приор для оптического потока — для него
+  интересно, раз он только что сделал GPU KLT.
+- **Сам vs-gyroflow / ActionFootagePlayer** как «где смотреть проекты Gyroflow в реальном времени» — попросить
+  ссылку в README/доках Gyroflow, если ему понравится.
+- **«Потоковая» загрузка движения**: gyroflow-core не умеет разбирать данные движения инкрементально; мы эмулируем
+  это нулями в prefetch (нечитанные сэмплы telemetry-parser пропускает) и повторным разбором. Это API-пробел, но
+  без явной пользы для его экспортного сценария — упомянуть, не настаивать.
+
+## 2. mpv и libplacebo
+
+Патчи лежат в `tools/mpv-patches/`, накладываются `tools/build_mpv.sh` на mpv master `fba63421a`
+(`tools/mpv.lock`), libplacebo v7.387.0. **Во всех 14 патчах есть строка `Co-Authored-By: Claude …`** — для
+апстрима её надо убрать (правило Антона; mpv сам запрещает соавторов-LLM в коммитах и просит раскрыть модель и
+инструмент в описании PR — см. 2.3).
+
+### 2.1 Классификация патчей
+
+«+строк» — добавленные строки кода в патче (грубая мера объёма).
+
+| Патч | Что | +строк | Класс | Почему |
+|---|---|---|---|---|
+| 0011 render-again-on-param-change | Хэш значений `//!PARAM` в подписи кадра: после смены DYNAMIC-параметра кадр рендерится заново, а не берётся из кэша миксов | 43 | **Почти как есть** | Настоящий баг gpu-next: libplacebo хэширует хуки, но не текущие значения параметров; при паузе/`display-resample` вид не обновляется. Маленький, общий, на всех платформах. Убрать зависимость от 0010 (`fresh=1/0` в логе); подумать про `PTS` в хэше (с интерполяцией) и не место ли фиксу в libplacebo (см. D3) |
+| 0009 metal-layer HDR state flush | `CATransaction.flush()`, когда MoltenVK меняет colorspace/EDR слоя вне главного потока | 19 | **Как есть** | Реальная регрессия на macOS 27: HLG/PQ-swapchain часто не включал EDR. Крошечный, только macOS. **В апстриме открыт ровно этот симптом**: [mpv#18445](https://github.com/mpv-player/mpv/issues/18445) (2026-09, «EDR wasn't activated until I adjusted the window size», mpv 0.41, macOS 26/27); рядом [mpv#16874](https://github.com/mpv-player/mpv/issues/16874). Апстрим пока только логирует состояние слоя ([#17024](https://github.com/mpv-player/mpv/pull/17024), [#18589](https://github.com/mpv-player/mpv/pull/18589)), flush'а нет. PR «Fixes #18445». Плюс отчёт в MoltenVK (раздел 3) |
+| 0001 present-through-platform | Три необязательные функции swapchain (`ext_active/start_frame/submit_frame`): контекст сам показывает кадр | 87 | **После доработки**, как часть серии AVSBDL | Сам по себе не нужен; это фундамент 0002 |
+| 0002, 0004, 0005, 0006 sample-buffer layer + DV RPU | Вывод через `AVSampleBufferDisplayLayer`: системный HDR→SDR и EDR, Dolby Vision RPU на каждый кадр (свой из файла или из `--macos-dovi-rpu-file`), фикс macOS 26 `preferredDynamicRange` | 492+89+65+28 | **После доработки** | Ценно для mpv на Mac (DV так, как его показывает QuickTime). Доработка из памяти проекта: mpv хочет новый Cocoa-код на Swift (у нас `sample_buffer.m` на Objective-C); API macOS 14 (`sampleBufferRenderer`) против минимальной 10.15 у mpv; `CVPixelBufferPool` вместо фиксированного кольца; `OPT_BOOL`; ширина строк; 0005 влить в 0002. Нерешённое: PQ через слой на 6–10 L* темнее, чем AVPlayerLayer на SDR-мониторе — до PR надо понять. **Пересечений нет**: в mpv такого PR нет, есть только старый запрос для iOS [mpv#8910](https://github.com/mpv-player/mpv/issues/8910); у Akemi (der richter) — EDR/цветовое пространство слоя ([#14017](https://github.com/mpv-player/mpv/pull/14017), смержен 2024; [#8485](https://github.com/mpv-player/mpv/pull/8485), закрытый WIP); в MoltenVK открыт запрос на AVSampleBufferDisplayLayer рядом с CAMetalLayer ([MoltenVK#1647](https://github.com/KhronosGroup/MoltenVK/issues/1647)). Перед большим PR — issue/обсуждение с Akemi, ведь это его область |
+| 0003 DV RPU to platform | RPU кадра уходит в `ext_submit_frame`, когда libplacebo его не применяет | 16 | **После доработки**, внутри серии | Имеет смысл только с 0001/0002 |
+| 0007 live DV L1 | Metal-ядро меряет min/avg/max каждого кадра и пишет L1 в RPU | 367 | **Специфично для приложения** (пока) | Нужен, когда RPU синтетический (наш look с подгонкой под DJI). Для файлов с настоящим DV не нужен. Может стать вторым PR, если первый примут |
+| 0008 trackpad gestures → scripts | pinch/rotate/scroll как script-messages с фазой жеста | 42 | **После доработки** | Есть открытые запросы: [mpv#15787](https://github.com/mpv-player/mpv/issues/15787) (зум и пан жестами тачпада), [mpv#3214](https://github.com/mpv-player/mpv/issues/3214). Сейчас `magnify(with:)` в `view.swift` только масштабирует окно ([#13807](https://github.com/mpv-player/mpv/pull/13807)); мультитач `touch-pos` есть только на Win32/Wayland ([#14003](https://github.com/mpv-player/mpv/pull/14003)). Вероятнее примут как общие input-события/свойства, а не macOS-only script-message |
+| 0013 display-sync | `--macos-display-sync=no/fullscreen`: показ без ожидания vsync в окне | 64 | **После доработки** | Полезно (кадр на 1–2 раньше без разрывов в окне), но в mpv уже есть `--vulkan-swap-mode=immediate` и `--macos-render-timer` (macvk); `--video-sync=display-vrr` ([#18781](https://github.com/mpv-player/mpv/pull/18781)) закрыт без слияния 2026-11-08. Нужна аргументация (измерения из 0010) и, вероятно, другое имя/место опции |
+| 0014 `--video-join` | Две видеодорожки одного размера/кодека как пара `f_enhancement_pair`, обе hwdec, склейка на GPU | 167 | **После доработки** | Решает известное ограничение: под `lavfi-complex` декодеры без vo_chain не получают hwdec. Сейчас это наш частный случай (360-камеры, две линзы); апстриму нужна общая форма (N дорожек? раскладка?) или исправление hwdec в lavfi-complex. `f_enhancement_pair` пришёл с DV Profile 7 FEL ([#17932](https://github.com/mpv-player/mpv/pull/17932), 2026-07); запрет hwdec для декодеров вне vo_chain — намеренный комментарий в `player/video.c`, не баг; issue про hwdec под lavfi-complex нет, старый запрос «несколько видеопотоков сразу» закрыт ([#7556](https://github.com/mpv-player/mpv/issues/7556)). Начинать с issue «как бы вы хотели это видеть» |
+| 0010 latency log | Время от ввода до экрана, синтетический скролл для замеров | 249 | **Специфично** (инструмент) | Отладочный; в апстриме разве что как идея для `--log-file`-статистики |
+| 0012 360 view by gestures in VO | VO сам доворачивает `view360_*` по жестам до прихода значений скрипта | 278 | **Специфично** | Завязан на наш шейдер и имена параметров |
+
+### 2.2 Не патч, но маленький PR: `_AbsoluteTime` в vf_vapoursynth
+
+`video/filter/vf_vapoursynth.c` в mpv master ставит `_SARNum`, `_ColorRange`, `_DurationNum`… и бинарный
+`_MP_IMAGE`, но **не `_AbsoluteTime`** (стандартное свойство кадра VapourSynth), а источник после каждой перемотки
+начинается с кадра 0. Поэтому фильтр не знает, какой это кадр видео. Мы обходим это эвристикой: ищем в бинарном
+`struct mp_image` первое double, растущее ровно на длительность кадра (`vs-gyroflow/src/lib.rs`, «Frame
+timestamps»). Это хрупко для всех, кто пишет VapourSynth-фильтры под mpv (интерполяция, стабилизация, денойз).
+PR — несколько строк (`mapSetFloat(map, "_AbsoluteTime", pts)`), польза всем; для нас — путь VapourSynth остаётся
+запасным на Windows/Linux. **Форма**: PR в mpv; лучший кандидат «первого маленького PR» вместе с 0011.
+
+### 2.3 Правила mpv для таких PR
+
+Из `DOCS/contribute.md` mpv (master на 2026-11-04, локальная копия `~/src/mpv`):
+
+- **ИИ разрешён**, но: модель и инструмент называются в описании PR/issue (не «an AI»); **никаких упоминаний LLM в
+  коммитах, комментариях кода и в соавторах** — автор целиком ты; отвечать на ревью должен сам автор («We do not prompt
+  an LLM by proxy»), понимая и объясняя каждую строку; «clearly vibe-coded patches will not be considered». Для Антона
+  практически: PR стоит открывать только на то, что он готов сам защищать в ревью. Это сильный довод начинать с
+  маленьких (0011, 0009, `_AbsoluteTime`), а серию AVSBDL — только когда будет время на долгое ревью.
+- **Новый Cocoa/AVFoundation-код — на Swift**, не Objective-C (наш `sample_buffer.m` придётся переписать).
+- **Лицензия**: новый код — LGPLv2.1+ (или с согласием на перелицензирование в LGPL). Патчи наши, препятствий нет;
+  `dovi_l1.c` (0007) тоже наш.
+
+### 2.4 libplacebo
+
+- **Кэш миксов и значения параметров** (корень 0011): `render_params_info()` в `src/renderer.c` хэширует каждый хук как
+  `pl_var_hash(*hook)` — саму структуру, а значения параметров лежат за указателем и в ключ не попадают. Issue в
+  libplacebo с этим наблюдением и минимальным шейдером — естественный первый шаг (может оказаться, что правильный фикс
+  там, и тогда mpv-патч не нужен). Сначала проверить на текущем master libplacebo.
+- **`//!PARAM PTS`** — это mpv (коммит Niklas Haas `89e608e16`, PR [mpv#15239](https://github.com/mpv-player/mpv/pull/15239),
+  в релизах с v0.40.0), в libplacebo только DYNAMIC-параметры. Наш опыт — самое большое применение этого механизма, что
+  я знаю: можно рассказать Niklas'у (haasn) как «show and tell», не как запрос.
+- **Найденные особенности** (память проекта `libplacebo-shader-gotchas`): `//!` в комментарии читается как директива;
+  строка после `//!TEXTURE` — как hex; `frame` считает все проходы файла; `HOOKED_mul` при 10-bit limited — ×65472/65535,
+  не точно; сохранённые текстуры видны только своему файлу шейдера. Первые три — кандидаты в правку
+  `docs/custom-shaders.md` (маленький MR), последнее — вопрос/запрос «общие текстуры между файлами».
+- **P010**: рендер в p010le-текстуры чинили в v7.360 ([c72fc6b2](https://code.videolan.org/videolan/libplacebo/-/commit/c72fc6b2),
+  для nvidia); про ANV ничего. Наше «libplacebo не рендерит в Vulkan P010 на ANV» без минимального воспроизведения
+  слать не стоит — скорее это ограничение ANV (раздел 3).
+- **Правила**: [CONTRIBUTING.md](https://code.videolan.org/videolan/libplacebo/-/blob/master/CONTRIBUTING.md)
+  (2026-11-02) — то же, что у mpv: раскрыть модель и инструмент, без ИИ-соавторов, агент никогда не выдаёт себя за
+  человека; есть AGENTS.md.
+
+## 3. Остальные зависимости
+
+| Проект | Что у нас есть | Форма | Ценность / усилие |
+|---|---|---|---|
+| **MoltenVK** | Слой `CAMetalLayer`: colorspace, `wantsExtendedDynamicRangeContent`, `edrMetadata` выставляются из потока, создающего swapchain, без run loop → неявная CA-транзакция не коммитится, EDR не включается (macOS 27). Фикс у нас в mpv (0009), но корень — в MoltenVK: он мог бы сам делать `CATransaction.flush()` / выставлять на главном потоке. Плюс: `r16f` storage texture читается как 0 через MoltenVK (`rgba16f` работает) | Issue в MoltenVK с минимальным воспроизведением (vkcube-подобный swapchain с HDR colorspace из не-главного потока). Такого issue нет; по коду `MVKSwapchain.mm` ставит `colorspace`, `wantsExtendedDynamicRangeContent` и `EDRMetadata` на вызывающем потоке, без dispatch на главный и без CATransaction ([исходник](https://github.com/KhronosGroup/MoltenVK/blob/main/MoltenVK/MoltenVK/GPUObjects/MVKSwapchain.mm)). Родственное: [MoltenVK#2759](https://github.com/KhronosGroup/MoltenVK/issues/2759) (EDR не включается на iOS) | Средняя / малое (воспроизведение — полдня). Помогает всем Vulkan-приложениям на Mac с HDR, не только mpv |
+| **Mesa ANV** (Intel N100) | FFmpeg `hwmap` VAAPI → Vulkan не импортирует двухплоскостной P010 с DRM-модификаторами; рендер в Vulkan P010-кадры не работает; Vulkan Video decode нет. Мы обошли: импорт каждой плоскости отдельным dmabuf, как делает mpv, и рендер прямо в VAAPI-поверхности энкодера (`tools/stream/afp-render.c`) | **Скорее всего известно — не слать.** P010 в списке разрешённых модификаторов ANV с Mesa 24.3 ([!31516](https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/31516)), но модификаторы с aux/CCS (какие отдаёт iHD на Gen12) для многоплоскостных форматов по-прежнему отвергаются; предупреждение «FINISHME … multi-planar formats with DRM modifiers» есть в чужих логах ([#12463](https://gitlab.freedesktop.org/mesa/mesa/-/issues/12463)); выборка из P010 — открытый [!28212](https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/28212). Vulkan Video decode в ANV включается только `ANV_DEBUG=video-decode` ([#8700](https://gitlab.freedesktop.org/mesa/mesa/-/issues/8700), [#13225](https://gitlab.freedesktop.org/mesa/mesa/-/issues/13225)) — **нам стоит попробовать на N100**. В FFmpeg отчёта про hwmap VAAPI→Vulkan P010 нет (ближайший — [#20057](https://code.ffmpeg.org/FFmpeg/FFmpeg/issues/20057)); если слать, то туда, с точной версией Mesa и модификатором | Низкая (как баг) / малое |
+| **FFmpeg / libplacebo-фильтр** | Тот же обход как пример: VAAPI → libplacebo (dmabuf по плоскостям) → VAAPI P010 энкодер, 67–69 fps на N100 | Не баг-репорт, а пример/заметка (gist или статья); возможно, письмо в рассылку FFmpeg про `vf_libplacebo` на ANV | Средняя / малое |
+| **VapourSynth / дистрибутивы** | mpv 0.41.0 + VapourSynth R74+: meson ищет и `vapoursynth`, и `vapoursynth-script`, R74 убрал второй → фильтр тихо выпадает (исправлено в mpv git 75b2ccf / 44a9b03, в 0.42). В Arch mpv 0.41.0-7 зависит от vapoursynth, но libmpv без него; в Debian/Ubuntu VapourSynth нет вообще | Исправлено в mpv 0.42 ([#17731](https://github.com/mpv-player/mpv/pull/17731) и последующие); Arch получит со сборкой 0.42 сам (старый запрос «собрать с vapoursynth» [закрыт](https://gitlab.archlinux.org/archlinux/packaging/packages/mpv/-/issues/1)); в Debian VapourSynth нет вообще (ITP 2016 стал RFP). Слать нечего. Для нас после 0.10 важность упала: GPU-путь не требует VapourSynth | — |
+| **mpv (Homebrew)** | Краш mpv при смене аудиоустройства — уже исправлен (бэкпорт в Homebrew 0.41.0_10) | Ничего | — |
+| **Apple** | QuickTime/AVFoundation применяют Dolby Vision L8 только при наличии `dvvC`; ключ `DolbyVisionRPUData` не в публичных заголовках; действующие и игнорируемые поля трима (ms_weight, six-vector не действуют) | `dvvC` для 8.4 Apple и так требует ([TN3145](https://developer.apple.com/documentation/technotes/tn3145-hdr-video-metadata)); новое у нас — какие поля трима действуют. Feedback Assistant по желанию, или заметка для сообщества | Низкая / малое |
+| **dovi_tool / `dolby_vision` crate** (MIT) | Пишем RPU 8.4 с L1 на кадр (`dovi.rs`, `dv_mux.rs`), сверено с dovi_tool 2.3.4 | Ничего обязательного; благодарность/ссылка | — |
+| **Tauri** (компаньон) | Багов не задокументировано | Ничего | — |
+| **Jellyfin** | M3U-тюнер к нашему HLS-стриму работает; интеграция ещё впереди (сессия jellyfin-library) | Пока ничего | — |
+| **GPAC / MP4Box, ffmpeg (для cut)** | ffmpeg `-c copy` не пишет DJI `djmd`; MP4Box `-splitx` теряет заголовок, inband VPS/SPS/PPS, пишет encoder=GPAC, creation time = now | Можно issue в GPAC про потерю in-band параметров и времени создания; ffmpeg — известное ограничение на неизвестные дорожки | Низкая / малое |
+
+## Черновики (только черновики — ничего не отправлено)
+
+Все тексты — на английском, в голосе Антона, для правки им. Перед отправкой: видео-демо (записывает Антон), и раскрытие
+работы с Claude — короткое и честное (CLA Gyroflow §3(e) этого требует, mpv — тоже).
+
+### D1. Первое сообщение Адриану (Discord `#dev-live-stabilization` или комментарий в #635)
+
+> Hi Adrian — Anton here (static zoom / the iGPU memory PR; thanks for the credit in 1.7).
+>
+> Re #635: I've got Gyroflow's undistort kernel running in real time as an mpv/libplacebo user shader, and thought you
+> might want to see the numbers.
+>
+> - It's a GLSL port of `undistort_coord` (your lens models' GLSL except Sony and the generic polynomial, the GoPro
+>   digital lenses, rolling shutter, refraction, your bicubic/Lanczos4/EWA; full lens correction only so far). Checked
+>   against `undistort_coord` at every pixel of a 1080p output, opencv_fisheye (Osmo Action 6) and gopro (HERO12):
+>   max 0.037 px, mean ~0.001 px. The other models compile but I have no clips to check them.
+> - Per frame the shader gets a small table: the `KernelParams` fields plus the row rotations as quaternion knots.
+>   33 knots per frame are within 0.021 px of per-row matrices on a vibrating HERO7 clip (9 knots: 0.07). ~600 bytes a
+>   frame. mpv ≥ 0.42 gives the shader the frame's PTS, so it finds its own row in the table.
+> - The frame never leaves the GPU (VideoToolbox / VAAPI zero-copy). On an M1 Pro: 4K60 D-Log M stabilized at 34 % CPU
+>   vs 86 % through a VapourSynth filter with gyroflow-core, clips open in < 1 s.
+> - On an Intel N100 (6 W iGPU) it plays 4K60 → 1080p with your bicubic in 7.9 ms a frame. What made it fit: on that GPU
+>   a pass costs its texture fetches, not its math, so the geometry is computed on an 8 px grid (≤ 0.06 px from exact;
+>   the Newton loops of the GoPro/Insta360 models run only at grid points) and the bicubic is done from 9 bilinear
+>   fetches instead of 16. The same NAS streams it as 1080p HDR HLS (VAAPI → libplacebo → VDEnc) at 67-69 fps.
+> - Underwater, red and blue get their own refraction index inside the same warp, so the water's colour fringes go
+>   away without a second resample.
+>
+> Short video: <link>. Code (GPL-3.0, credited as a derivative of gyroflow-core): `shaders/gyroflow/warp.glsl`,
+> `vs-gyroflow/src/gpu_table.rs` in anton-belkin/ActionFootagePlayer; measurements in `docs/gpu-render-spike.md`.
+> Written with Claude's help; every number above is measured, and the per-pixel check is a test in the repo.
+>
+> Would any of this be useful on your side — the grid/knots for the Qt preview on weak GPUs, a "table for players"
+> export, or the per-channel refraction? Happy to turn whichever you want into a PR, or leave it as a reference.
+
+Если выбрать #635, первые строку и подпись про Discord убрать; текст тот же.
+
+### D2. Issue в telemetry-parser: медленное чтение с сетевых дисков
+
+> **Reading the metadata track from a network share takes 14-34 s per minute of 4K60**
+>
+> `get_track_samples` reads the metadata track one sample at a time: a seek and a ~550 B read per frame, spread over
+> the whole file, and `parse_mp4` reads the first and last 15 MB more than once. From a local SSD that's ~0.1 s for a
+> minute of 4K60; from a NAS over SMB each read waits for the server (6-10 ms), so 14-34 s.
+>
+> What worked for us: read the sample table first, fetch all the metadata samples in parallel, and give the parser a
+> `Read + Seek` that serves them (and the two 15 MB ends) from memory. A clip on the NAS now opens in under a second
+> (ActionFootagePlayer, `vs-gyroflow/src/prefetch.rs`, ~300 lines). I can make it a PR under telemetry-parser's
+> MIT/Apache license if you'd like it in the crate — as a reader wrapper, or inside `get_track_samples`.
+
+Отдельно (тот же репозиторий, после D2 или вместе): поля Osmo Action 6 (`ColorMode`, барометр с «в воде»,
+уверенность «под водой») — PR со схемой; данные по полям — в памяти проекта (`dji-ac206-telemetry-layout`).
+
+### D3. PR в mpv: перерисовка кадра при смене `//!PARAM` (патч 0011)
+
+До PR: убрать из патча кусок `mac_latency_frame_fresh` (он из 0010) и строку `Co-Authored-By`; решить, не исключить ли
+из хэша параметры, меняющиеся каждый кадр сами (встроенный `PTS`): иначе с `--interpolation` каждый vsync будет
+перерисовывать все кадры микса — ревьюер спросит. И спросить себя, не место ли этому в libplacebo (ключ кэша
+`pl_render_image_mix` мог бы сам учитывать значения параметров хуков) — если так, это issue в libplacebo, а в mpv
+ничего.
+
+> **vo_gpu_next: render a frame again when a shader parameter's value changed**
+>
+> libplacebo reuses a cached frame while the render parameters' hash is unchanged, and that hash covers the hooks but
+> not the current values of their `//!PARAM`s. So a frame drawn again after a DYNAMIC parameter changed — a redraw
+> while paused, or a frame held for several vsyncs with `--video-sync=display-resample` — still shows the old value.
+> Example: a shader whose view is turned through `--glsl-shader-opts` (or `change-list glsl-shader-opts`) only moves
+> when a new video frame arrives.
+>
+> This folds a hash of the parameters' current values into the frames' signatures, the way the OSD state already is.
+>
+> To reproduce: <a minimal shader with one DYNAMIC float that offsets the image; pause; `set glsl-shader-opts
+> name=value` → no change on screen without the patch, immediate with it>.
+>
+> Written with <model, tool>; tested on macOS (vulkan/MoltenVK) and <Linux>.
+
+(Последняя строка — по правилу mpv: модель и инструмент в описании PR, нигде больше.)
