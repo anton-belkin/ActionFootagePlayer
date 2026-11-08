@@ -40,7 +40,8 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
 
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
-      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M afp-stream:f43 \
+      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M \
+      -e AFP_TV_LOOK=pq afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
@@ -114,6 +115,12 @@ band, the timestamps kept). Every request is logged with the client and its User
 its own address (`/Videos/<id>/stream`, User-Agent `Jellyfin-Server`), where a playlist's relative segment names lead
 nowhere. Jellyfin gets a master playlist pointing back here instead, so the device fetches the stream from afp-stream
 with its own User-Agent.
+
+Looks: a stream id may end in `~pq` (the hdr look's HLG made HDR10 by libplacebo, `afp-render --pq`) or `~sdr` (the
+player's nbcu look, `nbcu_hlg2sdr.glsl` last, BT.709: `--sdr`); the TS players get `AFP_TV_LOOK` unless the URL names
+one. On the NAS it's `pq` since 2026-11-08: the Samsung TV (Tizen 3.0) showed our HLG gray through Jellyfin's app
+(its web engine doesn't take HLG as HDR), while HDR10 and SDR looked right and alike (Anton, on "Maks diving close
+up"); HDR10 keeps the HDR.
 
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
