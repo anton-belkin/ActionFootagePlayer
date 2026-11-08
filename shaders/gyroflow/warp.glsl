@@ -447,33 +447,49 @@ vec2 texel(vec2 uv)
     return uv;
 }
 
-// The edges the frame doesn't cover (EDGE_FILL 1, the plugin's "smooth"): the frame's own colors where its edge is
-// nearest, blurred over EDGE_BLUR of its height and muted with the distance (less color, a little darker), so the
-// stabilized frame's motion doesn't show there as a hard line. The sphere trail isn't on the GPU yet: the same fill
-vec4 edge_fill(vec2 uv)
-{
-    vec2 edge = clamp(uv, vec2(0.0), vec2(SRC_W, SRC_H) - 1.0);
-    // Wider further out, so the frame's edge doesn't streak across the fill
-    float r = max(EDGE_BLUR * float(SRC_H), 1.0) * (1.0 + 6.0 * clamp(length(uv - edge) / float(SRC_H) * 4.0, 0.0, 1.0));
-    vec4 sum = vec4(0.0);
-    for (int y = -2; y <= 2; y++)
-        for (int x = -2; x <= 2; x++)
-            sum += src(texel(clamp(edge + vec2(x, y) * (0.5 * r), vec2(0.0), vec2(SRC_W, SRC_H) - 1.0)));
-    sum /= 25.0;
-    float m = clamp(length(uv - edge) / float(SRC_H) * 4.0, 0.0, 1.0);
-#ifdef PLANE_CHROMA
-    return mix(sum, vec4(0.5), 0.6 * m);
-#elif defined(PLANE_LUMA)
-    return sum * (1.0 - 0.25 * m);
-#else
-    float l = dot(sum.rgb, vec3(0.2627, 0.678, 0.0593));
-    return vec4(mix(sum.rgb, vec3(l), 0.6 * m) * (1.0 - 0.25 * m), sum.a);
-#endif
-}
-
-// The output pixel being drawn (the sphere trail's direction)
+// The output pixel being drawn (the sphere trail's direction, the fill's place)
 vec2 cur_j;
 
+// The picture's share at source coordinate uv: 1 inside, easing to 0 over FILL_FEATHER of the height at the frame's
+// edge, from FILL_INSET in (edges.rs's mask: the interpolation's taps past the edge pull in the background), so the
+// picture fades into the fill instead of meeting it in a line
+#define FILL_FEATHER 0.03
+#define FILL_INSET 0.002
+float feather(vec2 uv)
+{
+    vec2 d = min(uv + 0.5, vec2(SRC_W, SRC_H) - 0.5 - uv);
+    return clamp((min(d.x, d.y) - FILL_INSET * float(SRC_H)) / max(FILL_FEATHER * float(SRC_H), 1.0), 0.0, 1.0);
+}
+
+#if !defined(DN_PASS) && !defined(FILL_PASS)
+// The edges the frame doesn't cover (EDGE_FILL 1, the plugin's "smooth"; edges.rs, smooth.rs): the fill passes' grid
+// (GYROFLOW_FILL: the frame's colors spread out from where it is, blurred over EDGE_BLUR of the height) at this output
+// pixel, muted with the distance from the frame (less color and a little darker, easing in over FILL_MUTE_RAMP of the
+// height), so it doesn't draw the eye from the picture
+#define FILL_MUTE_RAMP 0.12
+vec4 edge_fill(vec2 uv)
+{
+#if EDGE_FILL && !defined(UV_OUT)
+    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / target_size) * FILL_MUL;
+    vec2 edge = clamp(uv, vec2(-0.5), vec2(SRC_W, SRC_H) - 0.5);
+    float t = clamp(length(uv - edge) / (FILL_MUTE_RAMP * float(SRC_H)), 0.0, 1.0);
+    float m = t * t * (3.0 - 2.0 * t);
+    float sat = 1.0 - 0.35 * m, bright = 1.0 - 0.12 * m;
+#ifdef PLANE_CHROMA
+    return vec4(0.5 + (f.xy - 0.5) * sat, 0.0, 1.0);
+#elif defined(PLANE_LUMA)
+    return vec4(vec3(0.0625 + (f.x - 0.0625) * bright), 1.0);
+#else
+    float mean = (f.r + f.g + f.b) / 3.0;
+    return vec4((mean + (f.rgb - mean) * sat) * bright, 1.0);
+#endif
+#else
+    return BACKGROUND;
+#endif
+}
+#endif
+
+#if !defined(DN_PASS) && !defined(FILL_PASS)
 #if SPHERE_FILL
 ivec2 sphere_texel(vec3 w)
 {
@@ -509,33 +525,47 @@ vec4 sphere_fill(vec2 uv)
 }
 #endif
 
+// The fill where the frame doesn't cover the output: the sphere trail over the smooth fill, or the smooth fill
+vec4 fill_at(vec2 uv)
+{
+#if SPHERE_FILL
+    return sphere_fill(uv);
+#elif EDGE_FILL
+    return edge_fill(uv);
+#else
+    return BACKGROUND;
+#endif
+}
+
 vec4 finish(vec2 uv)
 {
     if (outside(uv)) {
 #ifdef UV_OUT
         return BACKGROUND;
-#elif SPHERE_FILL
-        return sphere_fill(uv);
-#elif EDGE_FILL
-        return edge_fill(uv);
 #else
-        return BACKGROUND;
+        return fill_at(uv);
 #endif
     }
 #ifdef UV_OUT
     // The tests' output (gpu_table.rs): the source coordinate, not the picture
     return vec4(uv, 0.0, 1.0);
 #else
-    uv = texel(uv);
+    vec2 t = texel(uv);
 #if INTERP == 4
-    vec2 ux = dFdx(uv), uy = dFdy(uv);
-    return sample_src(uv, vec4(ux.x, uy.x, ux.y, uy.y));
+    vec2 ux = dFdx(t), uy = dFdy(t);
+    vec4 c = sample_src(t, vec4(ux.x, uy.x, ux.y, uy.y));
 #elif INTERP == 2 || INTERP == 3
-    vec2 ux = dFdx(uv), uy = dFdy(uv);
-    return sample_src(uv, clamp(max(abs(ux), abs(uy)), 1.0, 4.0));
+    vec2 ux = dFdx(t), uy = dFdy(t);
+    vec4 c = sample_src(t, clamp(max(abs(ux), abs(uy)), 1.0, 4.0));
 #else
-    return sample_src(uv);
+    vec4 c = sample_src(t);
 #endif
+#if EDGE_FILL
+    // Near the frame's edge, fading into the fill
+    float m = feather(uv);
+    if (m < 1.0) c = mix(fill_at(uv), c, m);
+#endif
+    return c;
 #endif
 }
 
@@ -553,6 +583,14 @@ vec4 finish_rgb(vec2 uv, vec4 rb)
 #if CHROMATIC_FAST
     c.r = src(texel(rb.xy)).r;
     c.b = src(texel(rb.zw)).b;
+#if EDGE_FILL
+    float m = feather(uv);
+    if (m < 1.0) {
+        vec4 f = fill_at(uv);
+        c.r = mix(f.r, c.r, m);
+        c.b = mix(f.b, c.b, m);
+    }
+#endif
 #else
     c.r = finish(rb.xy).r;
     c.b = finish(rb.zw).b;
@@ -560,6 +598,7 @@ vec4 finish_rgb(vec2 uv, vec4 rb)
     return c;
 #endif
 }
+#endif
 #endif
 #endif
 
@@ -703,6 +742,85 @@ vec4 hook()
     if (grid_wet) return finish_rgb(uv, grid_rb);
 #endif
     return finish(uv);
+}
+
+// ==== pass fill_lo ====
+// The smooth fill (edges.rs, smooth.rs) on a coarse grid of the output (FILL_W x FILL_H, ~8 px a cell at 1080p), its
+// first step: each cell the frame's average there (3x3 places, the frame's edge repeated past it) and how much of it
+// the frame covers, its feather counted (w)
+vec4 hook()
+{
+    vec2 cell = gl_FragCoord.xy - 0.5;
+    vec4 sum = vec4(0.0);
+    float cover = 0.0;
+    int n = 0;
+    if (frame_setup()) {
+        for (int t = 0; t < 9; t++) {
+            vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * target_size / vec2(FILL_W, FILL_H) - 0.5;
+            vec2 uv;
+            bool ok = source_coord(j, uv);
+            if (!ok) continue;
+            sum += src(texel(clamp(uv, vec2(0.0), vec2(SRC_W, SRC_H) - 1.0)));
+            cover += feather(uv);
+            n++;
+        }
+    }
+    if (n == 0) return vec4(0.0);
+    vec4 c = sum / float(n);
+    c.w = cover / 9.0;
+    return c;
+}
+
+// ==== pass fill_pull ====
+// Pull-push (The Lumigraph, 1996; smooth.rs), down: each cell the average of the four below it, weighted by how much
+// of each is known, and known as much as they add up to, at most fully
+vec4 hook()
+{
+    ivec2 c = ivec2(gl_FragCoord.xy);
+    ivec2 fs = ivec2(IN_SIZE);
+    vec3 acc = vec3(0.0);
+    float total = 0.0;
+    for (int i = 0; i < 4; i++) {
+        ivec2 f = 2 * c + ivec2(i % 2, i / 2);
+        if (any(greaterThanEqual(f, fs))) continue;
+        vec4 v = texelFetch(IN_RAW, f, 0) * IN_MUL;
+        if (v.w <= 0.0) continue;
+        acc += v.xyz * v.w;
+        total += v.w;
+    }
+    if (total > 1e-6) acc /= total;
+    return vec4(acc, min(total, 1.0));
+}
+
+// ==== pass fill_push ====
+// And up: each cell keeps what it knows, the rest from the coarser one (as filled already), bilinear
+vec4 hook()
+{
+    ivec2 x = ivec2(gl_FragCoord.xy);
+    vec4 f = texelFetch(IN_RAW, x, 0) * IN_MUL;
+    if (f.w >= 1.0) return vec4(f.xyz, 1.0);
+    vec2 cs = COARSE_SIZE;
+    vec2 p = clamp((vec2(x) + 0.5) * 0.5, vec2(0.5), cs - 0.5);
+    vec4 c = texture(COARSE_RAW, p / cs) * COARSE_MUL;
+    return vec4(f.xyz * f.w + c.xyz * (1.0 - f.w), 1.0);
+}
+
+// ==== pass fill_blur ====
+// Then blurred, a Gaussian of EDGE_BLUR of the height, one way (FILL_DIR) at a time, its ends repeated
+vec4 hook()
+{
+    ivec2 x = ivec2(gl_FragCoord.xy);
+    ivec2 sz = ivec2(IN_SIZE);
+    float sigma = max(EDGE_BLUR * float(FILL_H), 0.3);
+    int r = min(int(ceil(3.0 * sigma)), 24);
+    vec4 acc = vec4(0.0);
+    float ws = 0.0;
+    for (int k = -r; k <= r; k++) {
+        float w = exp(-float(k * k) / (2.0 * sigma * sigma));
+        acc += w * texelFetch(IN_RAW, clamp(x + k * FILL_DIR, ivec2(0), sz - 1), 0);
+        ws += w;
+    }
+    return acc * IN_MUL / ws;
 }
 
 // ==== pass sphere ====

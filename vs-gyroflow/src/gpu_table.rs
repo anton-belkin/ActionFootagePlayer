@@ -359,6 +359,12 @@ fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, bod
 /// The denoise's ring of frames: 10 bits a channel (half of rgba16f's memory: 11 slots of 4K)
 const FRAME_FORMAT: &str = "rgb10a2";
 
+/// The smooth fill's grid: 135 cells down (edges.rs's, ~8 px a cell at 1080p), across as the output's shape has it
+fn fill_grid(clip: &Clip) -> (usize, usize) {
+    let h = 135;
+    (((h as f64 * clip.output_size.0 as f64 / clip.output_size.1.max(1) as f64).round() as usize).max(1), h)
+}
+
 /// The passes for `opts.mode`, without the file's head
 pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let defs = defines(clip, opts, table);
@@ -367,8 +373,48 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let rb_bind = if rb { "//!BIND GYROFLOW_GRID_RB" } else { "" };
     let sphere = opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid;
     let sphere_bind = if sphere { "//!BIND GYROFLOW_SPHERE" } else { "" };
-    let sample = |hook: &str, desc: &str, extra: &str| hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, sphere_bind,
-        "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, extra, pass_body("sample"));
+    // The smooth fill's passes at a hook, ahead of the pass that draws it, and what that pass binds and defines
+    let fill = |hook: &str, tag: &str, extra: &str, grid: bool| -> (String, String, String) {
+        if opts.edge_fill.is_none() { return (String::new(), String::new(), String::new()); }
+        let (fw, fh) = fill_grid(clip);
+        let mut sizes = vec![(fw, fh)];
+        while { let s = *sizes.last().unwrap(); s.0 > 1 || s.1 > 1 } {
+            let s = *sizes.last().unwrap();
+            sizes.push((s.0.div_ceil(2), s.1.div_ceil(2)));
+        }
+        let binds = |more: &[&str]| { let mut v = vec![format!("//!HOOK {hook}"), "//!BIND HOOKED".into(), "//!BIND GYROFLOW_TABLE".into()];
+            if grid { v.push("//!BIND GYROFLOW_GRID".into()); if rb { v.push("//!BIND GYROFLOW_GRID_RB".into()); } }
+            v.extend(more.iter().map(|s| s.to_string())); v };
+        let io = |name: &str, prefix: &str| format!("#define {prefix}_RAW {name}_raw\n#define {prefix}_MUL {name}_mul\n#define {prefix}_SIZE {name}_size");
+        let defs = format!("{defs}\n#define FILL_PASS\n#define FILL_W {fw}\n#define FILL_H {fh}");
+        let pass = |more: Vec<String>, size: (usize, usize), desc: &str, ex: &str, body: &str| {
+            let mut v = binds(&more.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            v.extend([format!("//!WIDTH {}", size.0), format!("//!HEIGHT {}", size.1), "//!WHEN gyroflow_gpu_on".into(), format!("//!DESC gyroflow fill {desc}")]);
+            hook_pass(clip, &v, &defs, &format!("{extra}\n{ex}"), pass_body(body))
+        };
+        let lo = |k: usize| format!("GF{tag}{k}");
+        let up = |k: usize| format!("GP{tag}{k}");
+        let mut out = vec![pass(vec![format!("//!SAVE {}", lo(0))], sizes[0], "frame", "", "fill_lo")];
+        for k in 1..sizes.len() {
+            out.push(pass(vec![format!("//!BIND {}", lo(k - 1)), format!("//!SAVE {}", lo(k))], sizes[k], "pull", &io(&lo(k - 1), "IN"), "fill_pull"));
+        }
+        let top = sizes.len() - 1;
+        for k in (0..top).rev() {
+            let coarse = if k + 1 == top { lo(top) } else { up(k + 1) };
+            out.push(pass(vec![format!("//!BIND {}", lo(k)), format!("//!BIND {coarse}"), format!("//!SAVE {}", up(k))], sizes[k], "push",
+                &format!("{}\n{}", io(&lo(k), "IN"), io(&coarse, "COARSE")), "fill_push"));
+        }
+        let first = if top == 0 { lo(0) } else { up(0) };
+        let done = format!("GYROFLOW_FILL{tag}");
+        out.push(pass(vec![format!("//!BIND {first}"), format!("//!SAVE GF{tag}H")], sizes[0], "blur", &format!("{}\n#define FILL_DIR ivec2(1, 0)", io(&first, "IN")), "fill_blur"));
+        out.push(pass(vec![format!("//!BIND GF{tag}H"), format!("//!SAVE {done}")], sizes[0], "blur", &format!("{}\n#define FILL_DIR ivec2(0, 1)", io(&format!("GF{tag}H"), "IN")), "fill_blur"));
+        (out.join("\n"), format!("//!BIND {done}"), format!("#define FILL_RAW {done}_raw\n#define FILL_MUL {done}_mul"))
+    };
+    let sample = |hook: &str, desc: &str, extra: &str, tag: &str| {
+        let (passes, bind, fdefs) = fill(hook, tag, extra, true);
+        format!("{passes}\n{}", hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, sphere_bind, &bind,
+            "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, &format!("{extra}\n{fdefs}"), pass_body("sample")))
+    };
     let grid = |hook: &str| {
         let s = opts.grid_step;
         let (gw, gh) = (GRID_MAX.0.div_ceil(s) + 4, GRID_MAX.1.div_ceil(s) + 4);
@@ -379,9 +425,12 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
                 &defs, "#define GRID_PASS", pass_body("grid")))
     };
     let warp = match opts.mode {
-        Mode::Exact => hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
-            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, "", pass_body("exact")),
-        Mode::Grid => format!("{}\n{}{}", grid("MAIN"), sample("MAIN", "gyroflow warp", ""), if sphere {
+        Mode::Exact => {
+            let (passes, bind, fdefs) = fill("MAIN", "M", "", false);
+            format!("{passes}\n{}", hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", &bind, "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+                "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, &fdefs, pass_body("exact")))
+        }
+        Mode::Grid => format!("{}\n{}{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "", "M"), if sphere {
             // What the frame covers, written to the sphere by direction after the warp (before the looks, in the same
             // colors the fill reads back)
             format!("\n//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}", SPHERE_W / 2,
@@ -389,9 +438,9 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
                     "//!WIDTH OUTPUT.w 2 /", "//!HEIGHT OUTPUT.h 2 /", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, "#define SPHERE_PASS", pass_body("sphere")))
         } else { String::new() }),
         Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
-            sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA"),
+            sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA", "L"),
             sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
-                if opts.chromatic_bilinear_planes() { "\n#undef INTERP\n#define INTERP 0" } else { "" }))),
+                if opts.chromatic_bilinear_planes() { "\n#undef INTERP\n#define INTERP 0" } else { "" }), "C")),
     };
     if !opts.denoise { return warp; }
     // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
@@ -600,6 +649,8 @@ mod tests {
         let mut defs = defines(clip, opts, table);
         if name == "grid" { defs += "\n#define GRID_PASS"; }
         if name == "sphere" { defs += "\n#define SPHERE_PASS"; }
+        // The smooth fill's textures (its passes' own, and the grid they leave), as one more texture
+        if name.starts_with("fill") { defs += "\n#define FILL_PASS\n#define FILL_W 240\n#define FILL_H 135\n#define FILL_DIR ivec2(1, 0)"; }
         if uv_out && std::env::var("AFP_GPU_STRICT").is_ok() { defs += "\n#define GRID_STRICT"; }
         if uv_out { defs += "\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)"; }
         let head = format!("#version 450
@@ -617,6 +668,16 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
 #define GYROFLOW_GRID_RB grid_rb_img
 #define GYROFLOW_TABLE sampler2D(table_t, table_s)
 #define target_size out_size
+layout(set = 0, binding = 8) uniform texture2D fill_t;
+layout(set = 0, binding = 9) uniform sampler fill_s;
+#define FILL_RAW sampler2D(fill_t, fill_s)
+#define FILL_MUL 1.0
+#define IN_RAW sampler2D(fill_t, fill_s)
+#define IN_MUL 1.0
+#define IN_SIZE vec2(240.0, 135.0)
+#define COARSE_RAW sampler2D(fill_t, fill_s)
+#define COARSE_MUL 1.0
+#define COARSE_SIZE vec2(120.0, 68.0)
 {}",
             if compute { "layout(local_size_x = 8, local_size_y = 8) in;" } else { "layout(location = 0) out vec4 o_color;" },
             if name == "grid" { "writeonly" } else { "readonly" },
@@ -841,7 +902,10 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
                 for (mode, name, chromatic, fill, plane) in [(Mode::Exact, "exact", false, None, ""), (Mode::Grid, "sample", false, None, ""), (Mode::Grid, "grid", false, None, ""),
                     (Mode::Exact, "exact", true, Some(0.02), ""), (Mode::Grid, "sample", true, Some(0.02), ""), (Mode::Grid, "grid", true, Some(0.02), ""),
                     (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_LUMA\n"),
-                    (Mode::Grid, "sample", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere", true, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n")] {
+                    (Mode::Grid, "sample", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere", true, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
+                    (Mode::Grid, "fill_lo", true, Some(0.02), ""), (Mode::Planes, "fill_lo", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
+                    (Mode::Exact, "fill_lo", false, Some(0.02), ""), (Mode::Grid, "fill_pull", false, Some(0.02), ""), (Mode::Grid, "fill_push", false, Some(0.02), ""),
+                    (Mode::Grid, "fill_blur", false, Some(0.02), "")] {
                     let opts = Options { mode, interp, shrink, chromatic, edge_fill: fill, sphere: plane == "SPHERE", grid_linear: interp % 2 == 0, ..base };
                     let plane = if plane == "SPHERE" { "" } else { plane };
                     let src = glsl(&clip, &opts, &table, name, false).replacen("#version 450\n", &format!("#version 450\n{plane}"), 1);
