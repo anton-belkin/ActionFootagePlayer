@@ -4,7 +4,7 @@
 # afp-stream: clips stabilized and in HDR, as HLS streams over the network (docs/gpu-render.md, "The streaming server").
 # Runs on the NAS (tools/stream/README.md): for each clip in the library folders, an HLS stream (HEVC Main10, HLG,
 # fMP4 segments) rendered on the GPU by afp-render as it's asked for, with the Gyroflow warp gyroflow-gpu-table writes
-# for it (the clip's project, else its own motion data with the underwater preset) and the D-Log M look for DJI log clips.
+# for it as the player plays it (below) and the D-Log M look for D-Log M clips.
 #
 #   GET /                      the clips, each with its stream (Safari plays HLS by itself)
 #   GET /playlist.m3u          every clip as a channel: Jellyfin's Live TV takes it as an M3U tuner
@@ -15,6 +15,15 @@
 #   GET /prerender?folder=<f>&what=opening|whole   a folder's clips queued to be rendered in the background (their first
 #                              AFP_OPENING seconds, or all), one at a time, while nobody watches
 #   GET /status                what renders and what's queued
+#   GET /catalog.json          the project's moments and clip previews (_Moments/, _Clips/), each as the player plays it:
+#                              its name, part, date and stream, for tools/stream/jellyfin.py
+#   GET /poster/<id>.jpg       a moment's or clip preview's cover (the frame its file shows)
+#
+# A moment's or clip preview's file (.afplink.mp4) is a stream of its own: the part of the original it links to, with
+# the settings it plays with in the player. The player itself says what those are: mpv with the player's own plugins
+# (AFP_PLAYER: workspace, gyroflow, dlogm and their config/script-opts), without a window, asked with the gyroflow
+# plugin's render_args. So a clip's saved view, a moment's own, its Gyroflow project and the defaults all count, as in
+# the player, and a change to any of them renders it again. Originals too (a clip with a saved view)
 #
 # Environment: AFP_LIBRARY (folders, ':'-separated; default /clips), AFP_CACHE (/stream/cache), AFP_BIN (/stream: afp-render,
 # gyroflow-gpu-table, the shaders), AFP_PORT (8099), AFP_HEIGHT (1080), AFP_BITRATE (12M), AFP_CHROMATIC (0; 1: the water's
@@ -41,29 +50,138 @@ CACHE_GB = float(os.environ.get("AFP_CACHE_GB", "40"))
 # Pre-rendered openings (a folder's, on demand): this many seconds of each clip
 OPENING = float(os.environ.get("AFP_OPENING", "8"))
 VIDEO = re.compile(r"\.(mp4|mov)$", re.I)
+LINK = re.compile(r"\.afplink\.mp4$", re.I)
+# The player's plugins and settings (render_args), and what they said for each file
+PLAYER = os.environ.get("AFP_PLAYER", "/stream/player")
+ARGS = os.environ.get("AFP_ARGS", "/stream/args")
 
 jobs = {}  # key -> {proc, dir, started}
 lock = threading.Lock()
 
 
+_clips = {"at": 0, "list": []}
+
+
 def clips():
+    """The library's videos: originals, and a project's moments (_Moments/) and clip previews (_Clips/), which link to
+    them. Other folders starting with _ (exports, stills) and hidden ones aren't. Listed again every 10 s at most"""
+    if time.time() - _clips["at"] < 10:
+        return _clips["list"]
     out = []
     for root in LIBRARY:
-        for d, _, files in os.walk(root):
-            if "/_" in d or "/." in d or "#recycle" in d:
-                continue
+        for d, dirs, files in os.walk(root):
+            dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x != "#recycle")
+            rel = os.path.relpath(d, root)
+            parts = [] if rel == "." else rel.split(os.sep)
+            under = [p for p in parts if p.startswith("_")]
+            kind = "clip"
+            if under:
+                if under[0] not in ("_Moments", "_Clips"):
+                    continue
+                kind = "moment" if under[0] == "_Moments" else "preview"
             for f in sorted(files):
-                if VIDEO.search(f) and not f.startswith("."):
-                    path = os.path.join(d, f)
-                    out.append({"id": hashlib.sha1(path.encode()).hexdigest()[:12], "path": path, "name": os.path.relpath(path, root)})
+                if f.startswith(".") or not VIDEO.search(f) or (kind == "clip") == bool(LINK.search(f)):
+                    continue
+                path = os.path.join(d, f)
+                c = {"id": hashlib.sha1(path.encode()).hexdigest()[:12], "path": path, "name": os.path.relpath(path, root), "kind": kind}
+                if kind != "clip":
+                    # The project (the folder above _Moments/ or _Clips/) and the file's folder in there
+                    i = parts.index(under[0])
+                    c["project"] = os.path.join(root, *parts[:i]) if i else root
+                    c["folder"] = "/".join(parts[i + 1:])
+                out.append(c)
+    _clips.update(at=time.time(), list=out)
     return out
+
+
+def stamp(p):
+    try:
+        st = os.stat(p)
+        return f"{st.st_size}:{int(st.st_mtime)}"
+    except (OSError, TypeError):
+        return "-"
+
+
+def sidecars(path):
+    """The files beside a clip, moment or clip preview that change how the player plays it: its saved view
+    (<clip>.afp.json), its Gyroflow project (<name>.gyroflow, <file>.gyroflow)"""
+    base = LINK.sub("", path) if LINK.search(path) else os.path.splitext(path)[0]
+    return [base + ".afp.json", base + ".gyroflow", path + ".gyroflow"]
+
+
+_args = {}
+args_lock = threading.RLock()
+
+
+def player_args(clip):
+    """How the player plays the file (render_args): clip (the original), offset and length (a moment's part), render
+    (user_data, gyroflow-gpu-table's request; none: not stabilized), dlogm (the log curve). Kept in ARGS with the stamps
+    of the files it depended on, and asked again when one changed. None: the player couldn't (an original not found)"""
+    if clip.get("base"):
+        # A look variant: the file's own answer
+        return player_args(clip["base"])
+    a = _args.get(clip["id"])
+    if a is None:
+        try:
+            with open(os.path.join(ARGS, clip["id"] + ".json")) as f:
+                a = json.load(f)
+        except (OSError, ValueError):
+            a = None
+    if a is not None and all(stamp(p) == s for p, s in a.get("deps", {}).items()):
+        _args[clip["id"]] = a
+        return a if a.get("clip") else None
+    with args_lock:
+        if _args.get(clip["id"]) is not a and _args.get(clip["id"]) is not None:
+            return player_args(clip)
+        return ask_player(clip)
+
+
+def ask_player(clip):
+    os.makedirs(ARGS, exist_ok=True)
+    tmp = os.path.join(ARGS, clip["id"] + ".tmp.json")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    args = ["mpv", "--no-config", f"--config-dir={PLAYER}/config", "--load-scripts=no"]
+    args += [f"--script={os.path.join(PLAYER, p)}" for p in ("workspace", "gyroflow", "dlogm")]
+    args += ["--vo=null", "--ao=null", "--hwdec=no", "--pause", "--autocreate-playlist=no", "--idle=no", "--msg-level=all=error",
+             f"--script-opts-append=gyroflow-render_args={tmp}", "--", clip["path"]]
+    t = time.time()
+    try:
+        # In ARGS: the workspace plugin's cache of moments (~~cache) lands there
+        r = subprocess.run(args, capture_output=True, text=True, timeout=180, cwd=ARGS)
+        err = r.stderr
+    except subprocess.TimeoutExpired:
+        err = "timed out"
+    try:
+        with open(tmp) as f:
+            a = json.load(f)
+        os.remove(tmp)
+    except (OSError, ValueError):
+        a = {"error": (err or "no reply")[-300:]}
+    if a.get("moment", {}) and a["moment"].get("missing"):
+        a = {"error": "the original isn't there"}
+    deps = [clip["path"], os.path.join(PLAYER, "config", "script-opts", "gyroflow.conf"), os.path.join(PLAYER, "config", "script-opts", "dlogm.conf")]
+    deps += sidecars(clip["path"])
+    if a.get("clip"):
+        deps += [a["clip"]] + sidecars(a["clip"])
+        ud = (a.get("render") or {}).get("user_data") or {}
+        if ud.get("project") and ud["project"] != a["clip"]:
+            deps.append(ud["project"])
+    a["deps"] = {p: stamp(p) for p in dict.fromkeys(deps)}
+    log("player args for", clip["name"], f"in {time.time() - t:.1f} s:", a.get("error") or (a.get("render") or {}).get("kind", "not stabilized"))
+    with open(os.path.join(ARGS, clip["id"] + ".json"), "w") as f:
+        json.dump(a, f)
+    _args[clip["id"]] = a
+    return a if a.get("clip") else None
 
 
 def probe(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                        "stream=width,height,pix_fmt,color_transfer,r_frame_rate:format=duration", "-of", "json", path], capture_output=True, text=True)
+                        "stream=width,height,pix_fmt,color_transfer,r_frame_rate:format=duration:format_tags=creation_time", "-of", "json", path],
+                       capture_output=True, text=True)
     j = json.loads(r.stdout or "{}")
     s = (j.get("streams") or [{}])[0]
+    s["creation_time"] = ((j.get("format") or {}).get("tags") or {}).get("creation_time")
     return s, float((j.get("format") or {}).get("duration") or 0)
 
 
@@ -98,27 +216,77 @@ infos = {}
 
 
 def info(clip):
-    """The clip's size, rate and length, and its segments: a GOP of 2 s worth of frames each (afp-render's), the last
-    shorter. The VOD playlist lists them all before any is rendered"""
-    if clip["id"] not in infos:
-        s, duration = probe(clip["path"])
+    """What plays: the original (a moment's or clip preview's), its part (offset, duration), size and rate, how the
+    player plays it (args), and its segments: a GOP of SEGMENT s worth of frames each (afp-render's), the last shorter.
+    The VOD playlist lists them all before any is rendered. None: the player can't play it"""
+    a = player_args(clip)
+    if a is None:
+        return None
+    key = json.dumps(a, sort_keys=True)
+    old = infos.get(clip["id"])
+    if old is None or old["key"] != key:
+        s, duration = probe(a["clip"])
+        offset = float(a.get("offset") or 0)
+        if a.get("length"):
+            duration = min(float(a["length"]), duration - offset)
         num, _, den = (s.get("r_frame_rate") or "30/1").partition("/")
         fps = float(num) / float(den or 1) if float(den or 1) else 30.0
         gop = int(fps * SEGMENT + 0.5)
         seg = gop / fps
-        infos[clip["id"]] = {"stream": s, "duration": duration, "fps": fps, "seg": seg, "count": max(1, math.ceil(duration / seg - 1e-6))}
+        infos[clip["id"]] = {"key": key, "args": a, "source": a["clip"], "offset": offset, "stream": s, "duration": duration, "fps": fps,
+                             "seg": seg, "count": max(1, math.ceil(duration / seg - 1e-6))}
     return infos[clip["id"]]
 
 
-def playlist(clip):
+# Players that take HLS only in MPEG-TS segments: TVs before fMP4 HLS (Samsung's Tizen before 5, 2020; LG's webOS
+# before 3.5). Jellyfin can't tell a TS stream from an fMP4 one (both are its "hls" container), so it hands them ours to
+# play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
+# Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
+# in ~pq or ~sdr; TS players get TV_LOOK unless the URL says
+LOOKS = ("hlg", "pq", "sdr")
+TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
+TS_PLAYERS = re.compile(r"Tizen [1-4]\.|SMART-TV.*Tizen [1-4]|Web0S|webOS", re.I)
+
+
+def wants_ts(headers, query):
+    if "ts" in (urllib.parse.parse_qs(query).get("fmt") or []):
+        return True
+    return bool(TS_PLAYERS.search(headers.get("User-Agent") or ""))
+
+
+def playlist(clip, ts=False):
     i = info(clip)
-    lines = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{math.ceil(i['seg'])}", "#EXT-X-MEDIA-SEQUENCE:0",
-             "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS", '#EXT-X-MAP:URI="init.mp4"']
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3" if ts else "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{math.ceil(i['seg'])}",
+             "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD"]
+    if not ts:
+        lines += ["#EXT-X-INDEPENDENT-SEGMENTS", '#EXT-X-MAP:URI="init.mp4"']
     for n in range(i["count"]):
         d = min(i["seg"], i["duration"] - n * i["seg"]) if n == i["count"] - 1 else i["seg"]
-        lines += [f"#EXTINF:{max(d, 0.001):.6f},", f"seg{n:05d}.m4s"]
+        lines += [f"#EXTINF:{max(d, 0.001):.6f},", f"seg{n:05d}.{'ts' if ts else 'm4s'}"]
     lines.append("#EXT-X-ENDLIST")
     return "\n".join(lines) + "\n"
+
+
+def ts_segment(clip, n):
+    """Segment n remuxed to MPEG-TS (init + segment through ffmpeg, timestamps kept), made once beside it"""
+    m4s = segment_path(clip, n)
+    out = m4s[:-4] + ".ts"
+    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(m4s):
+        with open(out, "rb") as f:
+            return f.read()
+    with open(os.path.join(CACHE, clip["id"], "init.mp4"), "rb") as f:
+        data = f.read()
+    with open(m4s, "rb") as f:
+        data += f.read()
+    r = subprocess.run(["ffmpeg", "-v", "error", "-f", "mp4", "-i", "pipe:0", "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0",
+                        "-muxpreload", "0", "-f", "mpegts", "pipe:1"], input=data, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        log("no TS for", clip["name"], n, r.stderr.decode(errors="replace")[-200:])
+        return None
+    with open(out + ".tmp", "wb") as f:
+        f.write(r.stdout)
+    os.replace(out + ".tmp", out)
+    return r.stdout
 
 
 def segment_path(clip, n):
@@ -133,32 +301,33 @@ def highest(clip, since):
     return n - 1
 
 
-def shader_for(clip, out, s):
-    """The warp for the clip, written once: its project, else its own motion data with the underwater preset"""
+def shader_for(clip, out, i):
+    """The warp for the clip, written once: what the player plays it with (render_args), with the stream's own speed
+    settings (interpolation, color fringes) and the smooth edge fill (the sphere trail isn't on the GPU path's stream);
+    else the planes just scaled"""
     shader = os.path.join(out, "warp.glsl")
     meta = os.path.join(out, "warp.json")
     if os.path.exists(meta):
         with open(meta) as f:
             return json.load(f)
+    s = i["stream"]
     w, h = int(s.get("width") or 3840), int(s.get("height") or 2160)
-    project = project_of(clip["path"])
-    ud = {"project": project or clip["path"], "input_width": w, "input_height": h, "interpolation": INTERP,
-          "gpu_chromatic": CHROMATIC, "edges": "smooth", "edges_blur": 2, "underwater": "project" if project else "auto",
-          "level": "medium", "lookahead": 0}
-    if not project:
-        ud["preset"] = os.path.join(BIN, "underwater.gyroflow")
-    def table(ud):
+    render = i["args"].get("render") or {}
+    reply = {}
+    if render.get("stabilize") and render.get("user_data"):
+        ud = dict(render["user_data"])
+        for k in ("plugin", "edges_control", "still_control", "workers", "fast", "width", "height", "gpu_denoise"):
+            ud.pop(k, None)
+        ud.update(input_width=ud.get("input_width") or w, input_height=ud.get("input_height") or h, interpolation=INTERP,
+                  gpu_chromatic=bool(CHROMATIC and ud.get("gpu_chromatic")), edges="smooth" if ud.get("edges") == "sphere" else ud.get("edges", "smooth"))
         r = subprocess.run([os.path.join(BIN, "gyroflow-gpu-table"), "--player", json.dumps(ud), shader], capture_output=True, text=True)
         try:
-            return json.loads(r.stdout.strip().splitlines()[-1])
+            reply = json.loads(r.stdout.strip().splitlines()[-1])
         except Exception:
-            return {"error": (r.stderr or r.stdout)[-300:]}
-    reply = table(ud)
-    if not reply.get("shader") and "no motion data" in str(reply.get("error", "")):
-        # No motion data (a camera's own stabilization on): the lens alone corrected, as the player does
-        reply = table(dict(ud, lens="only"))
+            reply = {"error": (r.stderr or r.stdout)[-300:]}
     if not reply.get("shader"):
-        log("no warp for", clip["name"], reply)
+        if render.get("stabilize"):
+            log("no warp for", clip["name"], reply)
         # The planes scaled to the output's size as they are: libplacebo then never converts the whole source (a 4K
         # source through its conversion renders at ~43 fps on the N100, too slow for 60)
         with open(shader, "w") as f:
@@ -171,15 +340,12 @@ def shader_for(clip, out, s):
 
 
 def fingerprint(clip):
-    """What a clip's renders depend on: when it changes (the project saved in Gyroflow, the service's settings), what was
-    rendered goes"""
-    def stamp(p):
-        try:
-            st = os.stat(p)
-            return f"{st.st_size}:{int(st.st_mtime)}"
-        except OSError:
-            return "-"
-    return f"v3|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{stamp(clip['path'])}|{stamp(project_of(clip['path']) or '')}"
+    """What a clip's renders depend on: when it changes (what the player plays it with, its project saved in Gyroflow,
+    the service's settings), what was rendered goes"""
+    i = info(clip)
+    a = i["args"]
+    what = json.dumps({k: a.get(k) for k in ("clip", "offset", "length", "render", "dlogm", "deps")}, sort_keys=True)
+    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}|{hashlib.sha1(what.encode()).hexdigest()}"
 
 
 def clip_dir(clip):
@@ -221,20 +387,35 @@ def start_render(clip, n, upto=None, background=False):
     out = clip_dir(clip)
     i = info(clip)
     s = i["stream"]
-    reply = shader_for(clip, out, s)
+    reply = shader_for(clip, out, i)
     shaders = [reply["shader"]] if reply.get("shader") else []
     ow, oh = reply["output"]
     height = min(HEIGHT, oh)
     width = int(round(height * ow / oh / 2)) * 2
     args = [os.path.join(BIN, "afp-render")]
-    # DJI's D-Log M (10-bit, not tagged HLG or PQ): its look to HLG, as the player's hdr look
-    if os.path.basename(clip["path"]).startswith("DJI_") and "10" in (s.get("pix_fmt") or "") and s.get("color_transfer") not in ("arib-std-b67", "smpte2084"):
+    # D-Log M, as the player's dlogm plugin takes it (its curve, by the camera's metadata or set by hand for the
+    # source): its look to HLG, as the player's hdr look. Other log curves have no look here yet: as recorded
+    curve = (i["args"].get("dlogm") or {}).get("curve") or ""
+    if curve == "dlogm":
         shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
         args.append("--hlg")
-    args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-seg", str(SEGMENT), "-ss", f"{n * i['seg']:.6f}", "-start_number", str(n)]
-    if upto is not None:
-        args += ["-t", f"{(upto - n) * i['seg'] - 0.5 / i['fps']:.6f}"]
-    args += [clip["path"], out] + shaders
+        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10
+        if clip.get("look") == "sdr":
+            shaders.append(os.path.join(PLAYER, "dlogm", "shaders", "nbcu_hlg2sdr.glsl"))
+            args.append("--sdr")
+        elif clip.get("look") == "pq":
+            args.append("--pq")
+    elif curve:
+        log("no look for the curve", curve, "of", clip["name"])
+    # A moment's part: the clip's time from its in; the stream's time from 0, as mpv plays a moment
+    off = i["offset"]
+    args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-seg", str(SEGMENT), "-ss", f"{off + n * i['seg']:.6f}", "-start_number", str(n)]
+    end = upto * i["seg"] if upto is not None else (i["duration"] if off or i["args"].get("length") else None)
+    if end is not None:
+        args += ["-t", f"{min(end, i['duration']) - n * i['seg'] - 0.5 / i['fps']:.6f}"]
+    if off:
+        args += ["-offset", f"{off:.6f}"]
+    args += [i["source"], out] + shaders
     logf = open(os.path.join(out, "render.log"), "a")
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),
                             preexec_fn=(lambda: os.nice(10)) if background else None)
@@ -294,6 +475,9 @@ def prerender_worker():
             item = queue[0]
             clip = item["clip"]
             i = info(clip)
+            if i is None:
+                queue.pop(0)
+                continue
             last = i["count"] if item["what"] == "whole" else min(i["count"], math.ceil(OPENING / i["seg"]))
             clip_dir(clip)
             first = next((k for k in range(last) if not os.path.exists(segment_path(clip, k))), None)
@@ -327,6 +511,66 @@ def wait_for(path, j, timeout=60):
     return False
 
 
+def local_start(i):
+    """When the part starts, by the camera's clock: a DJI clip's name is its local time; else the file's creation time
+    (UTC, as the file has it). None: unknown"""
+    import datetime
+    m = re.match(r"DJI_(\d{14})_", os.path.basename(i["source"]))
+    t = None
+    if m:
+        t = datetime.datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+    elif i["stream"].get("creation_time"):
+        try:
+            t = datetime.datetime.strptime(i["stream"]["creation_time"][:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            t = None
+    return (t + datetime.timedelta(seconds=i["offset"])).strftime("%Y-%m-%dT%H:%M:%S") if t else None
+
+
+def catalog_entry(c, i, base):
+    a = i["args"]
+    moment = a.get("moment") or {}
+    name = LINK.sub("", os.path.basename(c["path"]))
+    return {"id": c["id"], "kind": c["kind"], "project": c["project"], "folder": c["folder"], "name": name,
+            "title": moment.get("name") or name, "clip": os.path.relpath(i["source"], c["project"]),
+            "in": i["offset"], "duration": round(i["duration"], 3), "start": local_start(i),
+            "stabilized": bool((a.get("render") or {}).get("stabilize")), "kind_of_stabilization": (a.get("render") or {}).get("kind"),
+            "look": "hdr" if (a.get("dlogm") or {}).get("curve") == "dlogm" else "",
+            "stream": f"{base}/clip/{c['id']}/index.m3u8", "poster": f"{base}/poster/{c['id']}.jpg"}
+
+
+def poster(clip):
+    """The frame a moment's or clip preview's file shows: its cover art, else its first frame. Kept in ARGS"""
+    path = os.path.join(ARGS, clip["id"] + ".jpg")
+    mark = path + ".stamp"
+    if os.path.exists(path) and os.path.exists(mark) and open(mark).read() == stamp(clip["path"]):
+        with open(path, "rb") as f:
+            return f.read()
+    os.makedirs(ARGS, exist_ok=True)
+    for args in (["-map", "0:v:1", "-c", "copy"], ["-map", "0:v:0", "-frames:v", "1", "-q:v", "3"]):
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", clip["path"]] + args + ["-f", "image2", path], capture_output=True)
+        if r.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(mark, "w") as f:
+                f.write(stamp(clip["path"]))
+            with open(path, "rb") as f:
+                return f.read()
+    return None
+
+
+def warm_worker():
+    """The moments' and clip previews' player args, asked ahead (the catalog lists only those it has), again when a file
+    they depend on changed; then their posters"""
+    while True:
+        for c in clips():
+            if c["kind"] != "clip":
+                try:
+                    if player_args(c):
+                        poster(c)
+                except Exception as e:
+                    log("warm:", c["name"], e)
+        time.sleep(60)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -349,7 +593,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                # The player went (stopped, or skipped ahead): nothing to do
+                self.close_connection = True
 
     def base(self):
         return f"http://{self.headers.get('Host') or 'localhost:%d' % PORT}"
@@ -373,7 +621,7 @@ class Handler(BaseHTTPRequestHandler):
                          f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a></p><ul>")
                 for c in cs:
                     i = infos.get(c["id"])
-                    done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
+                    done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg") and f.endswith(".m4s")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
                     have = f" <small>({done} s rendered)</small>" if done else ""
                     body += f'<li><a href="/clip/{c["id"]}/index.m3u8">{html.escape(os.path.basename(c["name"]))}</a> <a href="/watch/{c["id"]}">watch</a>{have}</li>'
                 body += "</ul>"
@@ -403,21 +651,59 @@ class Handler(BaseHTTPRequestHandler):
                 lines.append(f'#EXTINF:-1 tvg-id="{c["id"]}" tvg-name="{c["name"]}" group-title="Action Footage",{c["name"]}')
                 lines.append(f"{self.base()}/clip/{c['id']}/index.m3u8")
             return self.send(200, "\n".join(lines) + "\n", "audio/x-mpegurl")
+        if parts == ["catalog.json"]:
+            items, pending = [], 0
+            for c in clips():
+                if c["kind"] == "clip":
+                    continue
+                a = _args.get(c["id"])
+                if a is None or any(stamp(p) != v for p, v in a.get("deps", {}).items()):
+                    pending += 1
+                    continue
+                i = info(c) if a.get("clip") else None
+                if i is None:
+                    continue
+                items.append(catalog_entry(c, i, self.base()))
+            return self.send(200, json.dumps({"items": items, "pending": pending}, ensure_ascii=False), "application/json; charset=utf-8")
+        if len(parts) == 2 and parts[0] == "poster" and parts[1].endswith(".jpg"):
+            clip = next((c for c in clips() if c["id"] == parts[1][:-4]), None)
+            data = poster(clip) if clip else None
+            if not data:
+                return self.send(404, "no poster", "text/plain")
+            return self.send(200, data, "image/jpeg")
         if len(parts) == 2 and parts[0] == "watch":
             return self.send(200, f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><body style='margin:0;background:#000'>"
                                   f"<video src='/clip/{parts[1]}/index.m3u8' controls autoplay playsinline muted style='width:100vw;height:100vh'></video>", "text/html")
         if len(parts) == 3 and parts[0] == "clip":
-            clip = next((c for c in clips() if c["id"] == parts[1]), None)
-            if not clip:
+            cid, _, look = parts[1].partition("~")
+            clip = next((c for c in clips() if c["id"] == cid), None)
+            if not clip or info(clip) is None or (look and look not in LOOKS):
                 return self.send(404, "no such clip", "text/plain")
+            if not look and wants_ts(self.headers, u.query):
+                look = TV_LOOK
+            if look and look != "hlg":
+                clip = dict(clip, id=f"{cid}~{look}", look=look, base=clip)
             name = os.path.basename(parts[2])
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
                 first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if first is not None:
                     ensure(clip, first)
-                return self.send(200, playlist(clip), "application/vnd.apple.mpegurl")
-            m = re.match(r"seg(\d+)\.m4s$", name)
+                # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
+                # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
+                # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
+                # the stream from us, with its own User-Agent, and gets TS or fMP4 as it plays
+                if (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server"):
+                    i = info(clip)
+                    w, h = (shader_for(clip, clip_dir(clip), i).get("output") or [1920, 1080])
+                    height = min(HEIGHT, h)
+                    width = int(round(height * w / h / 2)) * 2
+                    master = ("#EXTM3U\n#EXT-X-VERSION:3\n"
+                              f"#EXT-X-STREAM-INF:BANDWIDTH={int(float(BITRATE.rstrip('MmKk')) * (1e6 if BITRATE[-1] in 'Mm' else 1e3) * 1.2)},"
+                              f"RESOLUTION={width}x{height},FRAME-RATE={i['fps']:.3f}\n{self.base()}/clip/{clip['id']}/index.m3u8\n")
+                    return self.send(200, master, "application/vnd.apple.mpegurl")
+                return self.send(200, playlist(clip, wants_ts(self.headers, u.query)), "application/vnd.apple.mpegurl")
+            m = re.match(r"seg(\d+)\.(m4s|ts)$", name)
             if m:
                 n = int(m.group(1))
                 if n >= info(clip)["count"]:
@@ -429,8 +715,13 @@ class Handler(BaseHTTPRequestHandler):
                 if ahead is not None:
                     ensure(clip, ahead)
                 path = segment_path(clip, n)
-                if not wait_for(path, j):
+                if not wait_for(path, j) or (m.group(2) == "ts" and not os.path.exists(os.path.join(CACHE, clip["id"], "init.mp4"))):
                     return self.send(503, "not rendered", "text/plain", {"Retry-After": "2"})
+                if m.group(2) == "ts":
+                    data = ts_segment(clip, n)
+                    if data is None:
+                        return self.send(500, "no TS", "text/plain")
+                    return self.send(200, data, "video/mp2t")
                 with open(path, "rb") as f:
                     return self.send(200, f.read(), "video/iso.segment")
             if name == "init.mp4":
@@ -445,11 +736,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), "video/mp4")
         return self.send(404, "not found", "text/plain")
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            # A player that went away between requests (a TV stopping, a phone locking): not an error
+            self.close_connection = True
+
     def log_message(self, fmt, *args):
-        pass
+        # Who asked for what (a player that stalls: did it come, which files, which answer); AFP_LOG_REQUESTS=0: none
+        if os.environ.get("AFP_LOG_REQUESTS", "1") != "0":
+            ua = (self.headers.get("User-Agent") or "-")[:60] if self.headers else "-"
+            log(self.client_address[0], fmt % args, ua)
 
 
 if __name__ == "__main__":
     os.makedirs(CACHE, exist_ok=True)
     log(f"afp-stream on :{PORT}, library {LIBRARY}, {len(clips())} clips")
+    threading.Thread(target=warm_worker, daemon=True).start()
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
