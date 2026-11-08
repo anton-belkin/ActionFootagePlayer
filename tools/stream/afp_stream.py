@@ -117,6 +117,9 @@ def player_args(clip):
     """How the player plays the file (render_args): clip (the original), offset and length (a moment's part), render
     (user_data, gyroflow-gpu-table's request; none: not stabilized), dlogm (the log curve). Kept in ARGS with the stamps
     of the files it depended on, and asked again when one changed. None: the player couldn't (an original not found)"""
+    if clip.get("base"):
+        # A look variant: the file's own answer
+        return player_args(clip["base"])
     a = _args.get(clip["id"])
     if a is None:
         try:
@@ -238,6 +241,10 @@ def info(clip):
 # Players that take HLS only in MPEG-TS segments: TVs before fMP4 HLS (Samsung's Tizen before 5, 2020; LG's webOS
 # before 3.5). Jellyfin can't tell a TS stream from an fMP4 one (both are its "hls" container), so it hands them ours to
 # play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
+# Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
+# in ~pq or ~sdr; TS players get TV_LOOK unless the URL says
+LOOKS = ("hlg", "pq", "sdr")
+TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
 TS_PLAYERS = re.compile(r"Tizen [1-4]\.|SMART-TV.*Tizen [1-4]|Web0S|webOS", re.I)
 
 
@@ -338,7 +345,7 @@ def fingerprint(clip):
     i = info(clip)
     a = i["args"]
     what = json.dumps({k: a.get(k) for k in ("clip", "offset", "length", "render", "dlogm", "deps")}, sort_keys=True)
-    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{hashlib.sha1(what.encode()).hexdigest()}"
+    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}|{hashlib.sha1(what.encode()).hexdigest()}"
 
 
 def clip_dir(clip):
@@ -392,6 +399,12 @@ def start_render(clip, n, upto=None, background=False):
     if curve == "dlogm":
         shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
         args.append("--hlg")
+        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10
+        if clip.get("look") == "sdr":
+            shaders.append(os.path.join(PLAYER, "dlogm", "shaders", "nbcu_hlg2sdr.glsl"))
+            args.append("--sdr")
+        elif clip.get("look") == "pq":
+            args.append("--pq")
     elif curve:
         log("no look for the curve", curve, "of", clip["name"])
     # A moment's part: the clip's time from its in; the stream's time from 0, as mpv plays a moment
@@ -662,9 +675,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><body style='margin:0;background:#000'>"
                                   f"<video src='/clip/{parts[1]}/index.m3u8' controls autoplay playsinline muted style='width:100vw;height:100vh'></video>", "text/html")
         if len(parts) == 3 and parts[0] == "clip":
-            clip = next((c for c in clips() if c["id"] == parts[1]), None)
-            if not clip or info(clip) is None:
+            cid, _, look = parts[1].partition("~")
+            clip = next((c for c in clips() if c["id"] == cid), None)
+            if not clip or info(clip) is None or (look and look not in LOOKS):
                 return self.send(404, "no such clip", "text/plain")
+            if not look and wants_ts(self.headers, u.query):
+                look = TV_LOOK
+            if look and look != "hlg":
+                clip = dict(clip, id=f"{cid}~{look}", look=look, base=clip)
             name = os.path.basename(parts[2])
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few

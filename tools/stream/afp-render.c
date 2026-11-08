@@ -20,6 +20,9 @@
 //     -b <bitrate>             video bitrate, e.g. 12M (default 12M)
 //     --hlg                    the source is log made HLG by a look shader (the dlogm plugin's way): tagged
 //                              BT.2020/HLG in and out, no conversion between; else the file's own tags
+//     --sdr                    with --hlg: the shaders end in SDR (the player's nbcu look: nbcu_hlg2sdr.glsl last), tagged
+//                              BT.709 in and out, no conversion between
+//     --pq                     with --hlg: the HLG made HDR10 by libplacebo (BT.2020, PQ; HLG's nominal peak, 1000 nits)
 //     --realtime               no faster than the clip's own rate
 //
 // Build: cc -O2 afp-render.c -o afp-render $(pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm)
@@ -117,7 +120,7 @@ static char *read_file(const char *path, size_t *len)
 
 int main(int argc, char **argv)
 {
-    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false;
+    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false, sdr = false, pq = false;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
@@ -129,6 +132,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-seg") && i + 1 < argc) seg = atof(argv[++i]);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) bitrate = argv[++i];
         else if (!strcmp(argv[i], "--hlg")) hlg = true;
+        else if (!strcmp(argv[i], "--sdr")) sdr = true;
+        else if (!strcmp(argv[i], "--pq")) pq = true;
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
         else if (npos < 64) pos[npos++] = argv[i];
     }
@@ -194,7 +199,11 @@ int main(int argc, char **argv)
     av_opt_set(ec, "b", bitrate, AV_OPT_SEARCH_CHILDREN);
     ec->rc_max_rate = 0;
     ec->color_range = AVCOL_RANGE_MPEG;
-    if (hlg) {
+    if (hlg && sdr) {
+        ec->color_primaries = AVCOL_PRI_BT709; ec->color_trc = AVCOL_TRC_BT709; ec->colorspace = AVCOL_SPC_BT709;
+    } else if (hlg && pq) {
+        ec->color_primaries = AVCOL_PRI_BT2020; ec->color_trc = AVCOL_TRC_SMPTE2084; ec->colorspace = AVCOL_SPC_BT2020_NCL;
+    } else if (hlg) {
         ec->color_primaries = AVCOL_PRI_BT2020; ec->color_trc = AVCOL_TRC_ARIB_STD_B67; ec->colorspace = AVCOL_SPC_BT2020_NCL;
     } else {
         ec->color_primaries = vst->codecpar->color_primaries; ec->color_trc = vst->codecpar->color_trc; ec->colorspace = vst->codecpar->color_space;
@@ -243,8 +252,13 @@ int main(int argc, char **argv)
     // ---- The frames ----
     struct pl_color_space color = hlg ? (struct pl_color_space) { .primaries = PL_COLOR_PRIM_BT_2020, .transfer = PL_COLOR_TRC_HLG } : (struct pl_color_space) {
         .primaries = pl_primaries_from_av(vst->codecpar->color_primaries), .transfer = pl_transfer_from_av(vst->codecpar->color_trc) };
+    // What the frames are in and go out as: the same (no conversion), but SDR's (the shaders made it SDR) or HDR10's
+    // (libplacebo converts the HLG)
+    if (hlg && sdr) color = (struct pl_color_space) { .primaries = PL_COLOR_PRIM_BT_709, .transfer = PL_COLOR_TRC_BT_1886 };
+    struct pl_color_space color_out = color;
+    if (hlg && pq) color_out = (struct pl_color_space) { .primaries = PL_COLOR_PRIM_BT_2020, .transfer = PL_COLOR_TRC_PQ };
     struct pl_color_repr repr_out = {
-        .sys = hlg ? PL_COLOR_SYSTEM_BT_2020_NC : pl_system_from_av(vst->codecpar->color_space), .levels = PL_COLOR_LEVELS_LIMITED,
+        .sys = hlg && !sdr ? PL_COLOR_SYSTEM_BT_2020_NC : hlg ? PL_COLOR_SYSTEM_BT_709 : pl_system_from_av(vst->codecpar->color_space), .levels = PL_COLOR_LEVELS_LIMITED,
         .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 },
     };
     if (repr_out.sys == PL_COLOR_SYSTEM_UNKNOWN) repr_out.sys = PL_COLOR_SYSTEM_BT_709;
@@ -322,7 +336,7 @@ int main(int argc, char **argv)
                     { .texture = dst_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
                 },
                 .repr = repr_out,
-                .color = color,
+                .color = color_out,
             };
             pl_frame_set_chroma_location(&dst, PL_CHROMA_LEFT);
             if (!pl_render_image(rr, &src, &dst, &params)) DIE("rendering failed");
