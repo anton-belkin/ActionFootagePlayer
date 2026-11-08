@@ -89,6 +89,8 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
+--   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) on macOS, where it has been tried;
+--                yes: on Windows and Linux too (mpv 0.42, vo=gpu-next); no: always through VapourSynth
 --   max_fps=0    every frame plays: the sphere trail is written as the GPU has room (vs-gyroflow/src/edges.rs).
 --                Above 0, clips faster than this play every other frame (30: a 60 fps clip at 30) when the
 --                stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and
@@ -858,8 +860,11 @@ local function mpv_has_pts()
     return commits ~= nil and commits >= 499
 end
 
+-- gpu=auto: on macOS (where it has been tried), yes: anywhere mpv can, no: never
+local function gpu_wanted() return o.gpu == "yes" or (o.gpu == "auto" and platform.macos) end
+
 local function gpu_eligible(source)
-    if o.gpu == "no" or not file_exists(GPU_TABLE) or not mpv_has_pts() then return false end
+    if not gpu_wanted() or not file_exists(GPU_TABLE) or not mpv_has_pts() then return false end
     local vo = mp.get_property("vo") or ""
     if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end
     if not source or (source.kind ~= "project" and source.kind ~= "default" and source.kind ~= "lens") then return false end
@@ -899,7 +904,7 @@ end
 local GPU_SERVER = not platform.windows and utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d.sock", utils.getpid())) or nil
 local gpu_server_running = false
 local function gpu_server()
-    if not GPU_SERVER or gpu_server_running or o.gpu == "no" or not file_exists(GPU_TABLE) or not mpv_has_pts() then return end
+    if not GPU_SERVER or gpu_server_running or not gpu_wanted() or not file_exists(GPU_TABLE) or not mpv_has_pts() then return end
     gpu_server_running = true
     mp.command_native_async({ name = "subprocess", args = { GPU_TABLE, "--serve", GPU_SERVER }, playback_only = false }, function()
         gpu_server_running = false
@@ -1181,7 +1186,7 @@ local function add_sphere(source)
     rig360 = rig
     local tracks = math.max(1, math.floor(tonumber(rig.tracks) or 1))
     local vo = mp.get_property("vo") or ""
-    local gpu_ok = o.gpu ~= "no" and file_exists(GPU_TABLE) and mpv_has_pts() and (vo == "" or vo:find("gpu-next", 1, true)) and not gpu_blocked[mp.get_property("path") or ""]
+    local gpu_ok = gpu_wanted() and file_exists(GPU_TABLE) and mpv_has_pts() and (vo == "" or vo:find("gpu-next", 1, true)) and not gpu_blocked[mp.get_property("path") or ""]
     -- The app's mpv joins two lens tracks itself (tools/mpv-patches/0014, --video-join): each decoded on the GPU
     -- (VideoToolbox's zero-copy) and drawn side by side there, for the GPU path's sphere shader. Elsewhere lavfi-complex's
     -- hstack joins them in memory
