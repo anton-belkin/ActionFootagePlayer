@@ -268,6 +268,18 @@ The current fill, step by step, and its GPU form:
 4. **The composite**: in the warp pass, the fill where the ray left the frame, blended by the mask.
 
 This is a redesign, not a port: the GPU version should look the same, but will not be bit-identical to the CPU one.
+
+**Built (2026-11-08)**, the smooth fill as the VapourSynth path makes it (gpu_table's `fill` chain, warp.glsl's
+`fill_*` passes): fragment passes at the warp's hook (MAIN; LUMA and CHROMA each in the planes layout), ahead of the
+pass that draws. `fill_lo` puts the warped frame on a grid 135 cells high (3x3 rays a cell, the frame's edge repeated
+past it) with how much of each cell the frame covers, its feather counted; `fill_pull` and `fill_push` are smooth.rs's
+pull-push, one pass a level (saved textures halving down to 1x1, then back up, each level keeping what it knows); two
+`fill_blur` passes are the Gaussian of `edges_blur`. The warp's pass reads the grid through the sampler's filter, mutes
+it with the distance from the frame (the source's, not smooth.rs's chamfer distance on the grid), and blends the
+picture into it over edges.rs's feather (3 % of the height, 0.2 % in), past the lens's field too. Against the
+VapourSynth path with crop mode's camera zoomed out (clip 0126): the same soft edge and blur; the old GPU fill (the
+nearest edge's colors, 25 taps) streaked outward from the frame and met it in a line.
+
 Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
 N100.)**
 
