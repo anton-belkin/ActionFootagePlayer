@@ -242,9 +242,22 @@ def info(clip):
 # before 3.5). Jellyfin can't tell a TS stream from an fMP4 one (both are its "hls" container), so it hands them ours to
 # play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
 # Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
-# in ~pq or ~sdr; TS players get TV_LOOK unless the URL says
-LOOKS = ("hlg", "pq", "sdr")
+# in ~pq or ~sdr, and any of them in x<peak> (~pqx1000): its highlights expanded into the headroom up to that many nits
+# (hlg_highlights.glsl); TS players get TV_LOOK unless the URL says
+LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?$")
 TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
+
+
+def highlights_shader(peak):
+    """hlg_highlights.glsl with its peak as the default (afp-render can't set a shader's parameters)"""
+    out = os.path.join(BIN, f"hlg_highlights_{peak}.glsl")
+    src = os.path.join(BIN, "hlg_highlights.glsl")
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+        text = open(src).read().replace("//!MAXIMUM 1000.0\n1000.0\n", f"//!MAXIMUM 1000.0\n{float(peak):.1f}\n", 1)
+        with open(out + ".tmp", "w") as f:
+            f.write(text)
+        os.replace(out + ".tmp", out)
+    return out
 TS_PLAYERS = re.compile(r"Tizen [1-4]\.|SMART-TV.*Tizen [1-4]|Web0S|webOS", re.I)
 
 
@@ -399,11 +412,15 @@ def start_render(clip, n, upto=None, background=False):
     if curve == "dlogm":
         shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
         args.append("--hlg")
-        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10
-        if clip.get("look") == "sdr":
+        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10; highlights expanded
+        m = LOOK.match(clip.get("look") or "hlg")
+        if m and m.group(2):
+            shaders.append(highlights_shader(int(m.group(2))))
+        base = m.group(1) if m else "hlg"
+        if base == "sdr":
             shaders.append(os.path.join(PLAYER, "dlogm", "shaders", "nbcu_hlg2sdr.glsl"))
             args.append("--sdr")
-        elif clip.get("look") == "pq":
+        elif base == "pq":
             args.append("--pq")
     elif curve:
         log("no look for the curve", curve, "of", clip["name"])
@@ -677,7 +694,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "clip":
             cid, _, look = parts[1].partition("~")
             clip = next((c for c in clips() if c["id"] == cid), None)
-            if not clip or info(clip) is None or (look and look not in LOOKS):
+            if not clip or info(clip) is None or (look and not LOOK.match(look)):
                 return self.send(404, "no such clip", "text/plain")
             if not look and wants_ts(self.headers, u.query):
                 look = TV_LOOK
