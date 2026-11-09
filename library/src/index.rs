@@ -241,7 +241,9 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
     };
     let mut items: Vec<Value> = Vec::new();
     let mut by_tree: HashMap<String, usize> = HashMap::new();
-    for l in &locs {
+    // Each location's own folders, as it is on its disk (the Library's Sources)
+    let mut loc_dirs: Vec<Vec<String>> = vec![Vec::new(); locs.len()];
+    for (li, l) in locs.iter().enumerate() {
         let Some(dir) = &l.dir else { continue };
         if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
         // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
@@ -249,24 +251,27 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
         for (rel, is_dir, size, mtime) in walk(dir, &skip) {
             let tree = if l.at.is_empty() { rel.clone() } else { format!("{}/{rel}", l.at) };
-            if is_dir { add_dir(&tree, &mut dirs); continue; }
+            if is_dir { add_dir(&tree, &mut dirs); loc_dirs[li].push(rel.clone()); continue; }
             let lower = rel.to_lowercase();
             if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
             let path = dir.join(&rel);
             let own_here = { let f = path.with_extension("afp.json"); if f.is_file() { Some(f) } else { let o = path.with_extension("marks.json"); o.is_file().then_some(o) } };
             if let Some(&i) = by_tree.get(&tree) {
                 let it = &mut items[i];
-                it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "path": path.display().to_string() }));
+                it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }));
                 if has_gyroflow(&path) { it["gyroflow"] = json!(true); }
                 if let Some(o) = own_here { it["own_files"].as_array_mut().unwrap().push(json!(o.display().to_string())); }
                 continue;
             }
             let mut it = json!({ "id": tree, "dir": parent_of(&tree), "name": name_of(&tree), "path": path.display().to_string(), "size": size,
-                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "path": path.display().to_string() }],
+                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }],
                                  "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
             it["gyroflow"] = json!(has_gyroflow(&path));
             let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
                 .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
+            // Where it is as arranged in _Clips (the folder its preview was put in): the Library shows footage that way
+            it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, &root.join("_Clips")).or_else(|| (d == root.join("_Clips")).then(String::new)))
+                .map(Value::from).unwrap_or(Value::Null);
             it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
             by_tree.insert(tree, items.len());
             items.push(it);
@@ -284,9 +289,10 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             }
         }
     }
-    let locs_json: Vec<Value> = locs.iter().map(|l| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
-                                                             "copies": l.copies, "local": l.local })).collect();
-    json!({ "dirs": dirs, "items": items, "locations": locs_json })
+    let locs_json: Vec<Value> = locs.iter().enumerate().map(|(i, l)| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
+                                                             "copies": l.copies, "local": l.local, "dirs": loc_dirs[i] })).collect();
+    let clips_dirs: Vec<String> = walk(&root.join("_Clips"), &|_, _| false).into_iter().filter(|e| e.1).map(|e| e.0).collect();
+    json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
 }
 
 pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
@@ -442,6 +448,20 @@ fn stamp(path: &str) -> Option<(u64, i64)> {
 }
 
 impl Probes {
+    /// What's known, kept between runs (in the Library's cache folder): read at start, written as it grows
+    pub fn load(&mut self, file: &Path) {
+        let Some(v) = read_json(file) else { return };
+        for (k, e) in v.as_object().into_iter().flatten() {
+            let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
+            self.known.insert(k.clone(), (s, m, e["v"].clone()));
+        }
+    }
+    pub fn save(&self, file: &Path) {
+        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, v))| (k.clone(), json!({ "s": s, "m": m, "v": v }))).collect();
+        if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+        let tmp = file.with_extension("tmp");
+        if std::fs::write(&tmp, serde_json::to_vec(&Value::Object(m)).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, file); }
+    }
     /// Asked for these clips: the ones not known (or changed since) are queued
     pub fn want(&mut self, paths: &[String]) {
         for p in paths {
@@ -466,7 +486,8 @@ impl Probes {
 }
 
 /// The worker: one clip at a time, the tool run as a process (it's the player's own; its answers kept per file)
-pub fn probe_worker(probes: SharedProbes) {
+pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
+    let mut unsaved = 0;
     loop {
         let next = {
             let mut p = probes.lock().unwrap();
@@ -476,6 +497,7 @@ pub fn probe_worker(probes: SharedProbes) {
             n.zip(p.tool.clone())
         };
         let Some((path, tool)) = next else {
+            if unsaved > 0 { if let Some(f) = &keep { probes.lock().unwrap().save(f); } unsaved = 0; }
             std::thread::sleep(std::time::Duration::from_millis(250));
             continue;
         };
@@ -495,6 +517,8 @@ pub fn probe_worker(probes: SharedProbes) {
             p.log.push((v, path));
         }
         p.busy = false;
+        unsaved += 1;
+        if unsaved >= 50 { if let Some(f) = &keep { p.save(f); } unsaved = 0; }
     }
 }
 
