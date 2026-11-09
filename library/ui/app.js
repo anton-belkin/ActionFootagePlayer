@@ -23,8 +23,9 @@ const VIEWS = [["sources", "Sources"], ["footage", "Footage"], ["moments", "Mome
 // Footage is the clips as arranged in _Clips (their previews' folders); the ones without a preview are in this one
 const NOPREV = "Without a clip preview";
 // Where each view is in the project, for the paths a batch is kept to
-const BASE = { footage: "", sources: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/" };
-const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"] };
+const BASE = { footage: "", sources: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/", clip: "" };
+const KIND_BASE = { moment: "_Moments/", still: "_Stills/", export: "_Exports/" };
+const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"], clip: ["moment or photo", "moments and photos"] };
 // Where each view's folders are, for renaming them: Footage's are _Clips'
 const FOLDER_BASE = { footage: "_Clips", moments: "_Moments", stills: "_Stills", exports: "_Exports" };
 
@@ -335,7 +336,7 @@ function plural(n) { const w = NOUN[S.view]; return n + " " + (n === 1 ? w[0] : 
 
 function keyOf(it) { return it.kind === "folder" ? "f:" + it.path : "i:" + (it.key || it.id); }
 function ctx() {
-  const viewName = VIEWS.find((v) => v[0] === S.view)[1];
+  const viewName = S.view === "clip" ? clipName() : VIEWS.find((v) => v[0] === S.view)[1];
   const folderName = S.path.length ? S.path[S.path.length - 1] : viewName;
   const selFolders = Object.keys(S.sel).filter((k) => k.startsWith("f:")).map((k) => k.slice(2));
   const direct = items().filter((it) => S.sel["i:" + (it.key || it.id)]);
@@ -354,7 +355,7 @@ function ctx() {
   const filt = filtering() || S.q.trim() !== "";
   // Footage's and Sources' folders aren't the project's tree: their clips, by their paths in it
   const clipsView = S.view === "footage" || S.view === "sources";
-  const only = clipsView ? Array.from(new Set(selItems.map((it) => it.id))) : filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
+  const only = clipsView ? Array.from(new Set(selItems.map((it) => it.id))) : S.view === "clip" ? selItems.map((it) => KIND_BASE[it.kind] + it.id) : filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
   return { viewName, folderName, selFolders, direct, selItems, any, selName, only, label: plural(selItems.length) };
 }
 
@@ -411,6 +412,13 @@ function renderMain() {
     h += '<div class="scope"><span class="sub" style="display:inline">Search in</span>' +
       (S.path.length ? '<div class="seg"><button type="button" class="' + (S.scope === "here" ? "on" : "") + '" data-a="scope" data-v="here">' + esc(c.folderName) + '</button><button type="button" class="' + (S.scope === "all" ? "on" : "") + '" data-a="scope" data-v="all">All of ' + c.viewName + '</button></div>' : '<b>All of ' + c.viewName + '</b>') +
       '<span class="sub" style="display:inline">' + list.length + ' found' + (S.q.trim() ? "" : " by the filters") + '</span><button type="button" class="btn sm" data-a="endsearch" style="margin-left:auto">Back to the folder</button></div>';
+  } else if (S.view === "clip") {
+    const cl = DATA.clip && DATA.clip.clip;
+    const dirs = cl && cl.dir ? cl.dir.split("/") : [];
+    h += '<div class="crumbs">' + navButtons() + '<button type="button" data-a="fcrumb" data-v="">Footage</button>';
+    dirs.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" data-a="fcrumb" data-v="' + esc(dirs.slice(0, i + 1).join("/")) + '">' + esc(p) + '</button>'; });
+    h += '<span aria-hidden="true">›</span><button type="button" class="here" data-a="gofootage" data-v="' + esc(S.clip) + '" title="Go to the clip in Footage">' + esc(clipName()) + '</button>' +
+      '<span class="where">Its moments and photos, in the order they are in the clip</span></div>';
   } else {
     h += '<div class="crumbs">' + navButtons() + '<button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
@@ -433,6 +441,7 @@ function renderMain() {
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
   const subOf = (it) => it.kind === "folder" ? (S.view === "sources" && !it.dir ? sourceOf(it.name) + " · " + folderSub(it) : folderSub(it)) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   if (!list.length) {
+    if (S.view === "clip" && !srch && !filt) h += '<div class="empty">No moments or photos of this clip yet. Mark it in the player, then make Moments or Photos of the marks.</div>'; else
     h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
   } else if (S.layout === "list") {
     const clipsV = S.view === "footage" || S.view === "sources";
@@ -631,17 +640,26 @@ function sec(key, title, hint, body) {
   const open = !!S.open[key];
   return '<div class="sec"><button type="button" class="sech" data-a="sec" data-v="' + key + '" aria-expanded="' + open + '">' + ICON.chev + esc(title) + '<span class="hint">' + esc(hint) + '</span></button>' + (open ? '<div class="secb">' + body + '</div>' : "") + '</div>';
 }
+// One clip: its moments and photos; one moment, photo or export: its clip in Footage
+function clipButton(c) {
+  if (c.direct.length !== 1 || c.selFolders.length) return "";
+  const it = c.direct[0];
+  if (it.kind === "clip") return '<button type="button" class="btn sm" data-a="showclip" data-v="' + esc(it.id) + '">Moments and photos</button>';
+  const id = clipOf(it);
+  return id ? '<button type="button" class="btn sm" data-a="gofootage" data-v="' + esc(id) + '">Go to the footage</button>' : "";
+}
 function renderSide() {
   const side = $("side");
   side.hidden = !S.root;
   if (!S.root) return;
   const c = ctx();
-  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Queue<span class="count">' + activeCount() + '</span></button></div>';
+  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Queue<span class="count">' + activeCount() + '</span></button><button type="button" role="tab" class="' + (S.tab === "info" ? "on" : "") + '" data-a="tab" data-v="info">Info</button></div>';
   if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
+  if (S.tab === "info") { side.innerHTML = h + '<div class="itab">' + infoHtml(c) + '</div>'; fillThumbs(); return; }
   h += '<div class="summary">' + (c.any
     ? '<b>' + esc(c.selName) + '</b><span class="sub wrap" style="margin-top:2px">' + esc("Commands below act on " + plural(c.selItems.length) + (c.selFolders.length ? ", everything inside the selected folders included." : ".")) + '</span>' +
-      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (S.view === "stills" ? "Open" : "Open in the player") + '</button>' +
-      (c.selItems.length === 1 && c.selItems[0].gyroflow ? '<button type="button" class="btn sm" data-a="opengf">Open in Gyroflow</button>' : "") + '<button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
+      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (c.selItems.length && c.selItems.every((x) => x.kind === "still") ? "Open" : "Open in the player") + '</button>' +
+      (c.selItems.length === 1 && c.selItems[0].gyroflow ? '<button type="button" class="btn sm" data-a="opengf">Open in Gyroflow</button>' : "") + clipButton(c) + '<button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
     : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
@@ -677,6 +695,8 @@ function renderSide() {
       '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
       '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
       '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="export">Export ' + esc(c.any ? c.label : "") + '</button></div>');
+  } else if (S.view === "clip") {
+    h += '<div class="summary"><span class="sub wrap">Rendering and exporting are in Moments; making more moments and photos, on the clip in Footage.</span></div>';
   } else {
     h += '<div class="summary"><span class="sub wrap">Syncing folders of ' + NOUN[S.view][1] + ' with Apple Photos comes in a later version of the Library.</span></div>';
   }
@@ -908,7 +928,7 @@ const NAV = {
   newdir: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/><path d="M12 12v5M9.5 14.5h5"/></svg>',
 };
 // Where one has been: each place (a tab and a folder) once as it's left, as a file manager's Back and Forward have it
-function place() { return S.view + "\u0000" + S.path.join("/"); }
+function place() { return S.view + "\u0000" + (S.view === "clip" ? S.clip : S.path.join("/")); }
 function noteHistory() {
   const here = place();
   if (S.hist[S.histAt] === here) return;
@@ -923,20 +943,22 @@ function goHistory(step) {
   const [view, path] = S.hist[i].split("\u0000");
   const left = S.path.slice();
   const fromView = S.view;
-  S.view = view; S.path = path ? path.split("/") : [];
+  if (view === "clip") { S.clip = path; S.path = []; } else { S.view = view; S.path = path ? path.split("/") : []; }
+  if (view === "clip") { S.view = view; if (DATA.moments && DATA.stills) buildClip(); else showClip(path); }
   S.sel = {}; S.anchor = null; S.q = ""; S.flat = false; S.renaming = null;
   if (view !== fromView) S.filters = {};
   // Back to a folder above: the one left, selected
   if (view === fromView && left.length > S.path.length && S.path.every((p, k) => p === left[k])) { const k = "f:" + left.slice(0, S.path.length + 1).join("/"); S.sel[k] = true; S.anchor = k; }
-  if (!DATA[view]) loadView(view).then(renderAll, () => {});
+  if (!DATA[view] && view !== "clip") loadView(view).then(renderAll, () => {});
   renderAll();
 }
 function navButtons() {
   const canDir = !!FOLDER_BASE[S.view];
+  const upOn = S.path.length || S.view === "clip";
   return '<span class="navs">' +
     '<button type="button" class="icon" data-a="back" aria-label="Back"' + (S.histAt > 0 ? "" : " disabled") + '>' + NAV.back + '</button>' +
     '<button type="button" class="icon" data-a="fwd" aria-label="Forward"' + (S.histAt < S.hist.length - 1 ? "" : " disabled") + '>' + NAV.fwd + '</button>' +
-    '<button type="button" class="icon" data-a="up" aria-label="Enclosing folder"' + (S.path.length ? "" : " disabled") + '>' + NAV.up + '</button>' +
+    '<button type="button" class="icon" data-a="up" aria-label="Enclosing folder"' + (upOn ? "" : " disabled") + '>' + NAV.up + '</button>' +
     (canDir ? '<button type="button" class="icon" data-a="newdir" aria-label="New folder" title="New folder">' + NAV.newdir + '</button>' : "") + '</span>';
 }
 async function newFolder() {
@@ -949,6 +971,277 @@ async function newFolder() {
     S.sel = {}; S.sel[k] = true; S.anchor = k; S.renaming = k;
     renderAll();
   } catch (e) { showError(String(e)); }
+}
+
+// ---------- a clip's moments and photos, and back to the footage ----------
+
+// A photo's clip and time, from its name: <clip's name>_<seconds>s.<ext>
+function stillFrom(name) {
+  const m = /_(\d+(?:\.\d+)?)s\.(?:MP\.)?[^.]+$/i.exec(name || "");
+  return m ? { stem: name.slice(0, m.index), t: +m[1] } : null;
+}
+function stemOf(name) { return String(name || "").replace(/\.[^.]+$/, ""); }
+// The footage clip a moment, photo or export was taken from: its id (its path in the project's tree), or null
+function clipOf(it) {
+  if (!it) return null;
+  if (it.kind === "clip") return it.id;
+  if (it.link && it.link.clip) return it.link.clip;
+  const f = it.kind === "still" ? stillFrom(it.name) : null;
+  if (!f || !RAW_FOOTAGE) return null;
+  const c = RAW_FOOTAGE.items.find((x) => stemOf(x.name) === f.stem);
+  return c ? c.id : null;
+}
+async function needViews(list) {
+  for (const v of list) if (!(v === "footage" ? RAW_FOOTAGE : DATA[v])) await loadView(v).catch(() => {});
+}
+// Footage, at the folder the clip is in, the clip selected
+async function goFootage(id) {
+  if (!id) { toast("Its clip isn’t known: it was taken from a clip outside this project, or its name changed"); return; }
+  await needViews(["footage"]);
+  const it = DATA.footage && DATA.footage.items.find((x) => x.id === id);
+  if (!it) { toast("Its clip, " + id + ", isn’t in the project’s footage: Check on the moment shows where it was"); return; }
+  S.view = "footage"; S.path = it.dir ? it.dir.split("/") : []; S.q = ""; S.flat = false; S.filters = {}; S.renaming = null;
+  const k = "i:" + it.key;
+  S.sel = {}; S.sel[k] = true; S.anchor = k; S.cursor = k;
+  renderAll();
+  const el = document.querySelector('#main [data-v="' + CSS.escape(k) + '"]');
+  if (el) el.scrollIntoView({ block: "center" });
+}
+// The clip's own folder: its moments and photos, in the order they are in the clip
+function buildClip() {
+  const id = S.clip;
+  const out = [];
+  for (const m of (DATA.moments && DATA.moments.items) || []) {
+    if (m.link && m.link.clip === id) out.push(Object.assign({}, m, { key: "m:" + m.id, dir: "", at: m.link.in || 0 }));
+  }
+  const clip = DATA.footage && DATA.footage.items.find((x) => x.id === id);
+  const stem = clip ? stemOf(clip.name) : stemOf(id.split("/").pop());
+  for (const p of (DATA.stills && DATA.stills.items) || []) {
+    const f = stillFrom(p.name);
+    if (!f || f.stem !== stem) continue;
+    // Its time in the clip's recording, as the moments have it
+    const when = clip && clip.when ? new Date(clip.when.getTime() + f.t * 1000) : p.when;
+    out.push(Object.assign({}, p, { key: "p:" + p.id, dir: "", at: f.t, sub: p.form + " · at " + clock(f.t), when, date: when ? dateText(when) : p.date }));
+  }
+  out.sort((a, b) => a.at - b.at || (a.kind === "moment" ? -1 : 1));
+  DATA.clip = { dirs: [], items: out, clip: clip || null };
+}
+async function showClip(id) {
+  if (!id) return;
+  await needViews(["footage", "moments", "stills"]);
+  S.view = "clip"; S.clip = id; S.path = []; S.q = ""; S.flat = false; S.filters = {}; S.renaming = null;
+  S.sel = {}; S.anchor = null;
+  buildClip();
+  renderAll();
+  $("main").scrollTop = 0;
+}
+function clipName() { return S.clip ? S.clip.split("/").pop() : ""; }
+
+// ---------- the context menu, deleting, Info ----------
+
+// What Delete takes of the selection: the project's own files and folders only. Footage's clips give their previews
+// (the clip stays); Sources' clips are footage, deleted in Finder
+function deletable(c) {
+  if (S.view === "sources" || (!FOLDER_BASE[S.view] && S.view !== "clip")) return [];
+  const list = c.selFolders.filter((f) => f !== NOPREV && !f.startsWith(NOPREV + "/")).map((f) => ({ kind: "folder", path: S.root + "/" + FOLDER_BASE[S.view] + "/" + f }));
+  for (const it of c.direct) {
+    if (it.kind === "clip") { if (it.preview) list.push({ kind: "preview", path: it.preview }); }
+    else list.push({ kind: it.kind, path: it.path });
+  }
+  return list;
+}
+function deleteLabel(c, list) {
+  const trash = S.macos ? "Move to Trash" : "Delete";
+  if (S.view === "footage" && list.length && list.every((x) => x.kind === "preview")) return list.length === 1 ? "Delete the clip preview" : "Delete " + list.length + " clip previews";
+  return trash;
+}
+async function deleteSelection() {
+  const c = ctx();
+  const list = deletable(c);
+  if (!list.length) {
+    if (c.any) toast(S.view === "sources" ? "Footage is deleted in Finder: Check then shows what pointed at it" : S.view === "footage" ? "These clips have no preview to delete: the clips themselves are deleted in Finder" : "Nothing here to delete");
+    return;
+  }
+  try {
+    const r = await invoke("delete_items", { items: list });
+    const where = r.to.length ? " to " + r.to.join(" and ") : "";
+    toast((r.done === 1 ? "1 moved" : r.done + " moved") + where + (r.problems.length ? ". But: " + r.problems.join(" · ") : ""));
+    S.sel = {}; S.anchor = null;
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+function canRename(c) {
+  if (c.selFolders.length + c.direct.length !== 1 || S.view === "sources") return false;
+  if (S.view === "footage") return c.selFolders.length === 1 && c.selFolders[0] !== NOPREV;
+  if (S.view === "clip") return c.direct.length === 1;
+  return true;
+}
+
+// The menu under the right button: the summary's commands, and Finder's own around them
+let CMENU = null;
+function closeMenu() { if (CMENU) { CMENU.remove(); CMENU = null; } }
+function openMenu(x, y) {
+  closeMenu();
+  const c = ctx();
+  const mac = S.macos;
+  const k = (m, w) => '<span class="kb">' + (mac ? m : w) + '</span>';
+  const b = (a, label, keys, off, v) => '<button type="button" role="menuitem" data-a="' + a + '"' + (v ? ' data-v="' + esc(v) + '"' : "") + (off ? " disabled" : "") + '><span>' + esc(label) + '</span>' + (keys || "") + '</button>';
+  const parts = [];
+  if (c.any) {
+    const oneFolder = c.selFolders.length === 1 && !c.direct.length;
+    const g = [];
+    g.push(oneFolder ? b("enter", "Open", k("⌘↓", "Enter")) : b("openit", c.selItems.length && c.selItems.every((x) => x.kind === "still") ? "Open" : "Open in the player", k("⌘↓", "Enter"), !c.selItems.length));
+    if (c.selItems.length === 1 && c.selItems[0].gyroflow && !oneFolder) g.push(b("opengf", "Open in Gyroflow"));
+    if (c.direct.length === 1 && !c.selFolders.length) {
+      const it = c.direct[0];
+      if (it.kind === "clip") g.push(b("showclip", "Show moments and photos", "", false, it.id));
+      else { const id = clipOf(it); g.push(b("gofootage", "Go to the footage", "", !id, id || "")); }
+    }
+    if (mac && c.direct.length) g.push(b("ql", "Quick Look", k("Space", "")));
+    g.push(b("revealit", mac ? "Show in Finder" : "Show in Explorer"));
+    parts.push(g.join(""));
+    const e = [];
+    if (canRename(c)) e.push(b("renameit", "Rename", k("Return", "F2")));
+    if (FOLDER_BASE[S.view]) e.push(b("newdir", "New folder", k("⇧⌘N", "Ctrl+Shift+N")));
+    const del = deletable(c);
+    if (S.view !== "sources") e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
+    if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) e.push(b("removesource", "Remove from the project"));
+    if (e.length) parts.push(e.join(""));
+    parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
+  } else {
+    const g = [];
+    if (FOLDER_BASE[S.view]) g.push(b("newdir", "New folder", k("⇧⌘N", "Ctrl+Shift+N")));
+    if (S.view === "sources" && !S.path.length) g.push(b("addsource", "Add a source…"));
+    g.push(b("revealhere", mac ? "Show in Finder" : "Show in Explorer"));
+    parts.push(g.join(""));
+    parts.push(b("selall", "Select all", k("⌘A", "Ctrl+A"), !VISIBLE.length));
+  }
+  const m = document.createElement("div");
+  m.className = "menu cmenu";
+  m.setAttribute("role", "menu");
+  m.innerHTML = parts.join("<hr>");
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 4)) + "px";
+  m.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + "px";
+  CMENU = m;
+}
+// The folder shown, on disk: its own folder, or a source's
+function hereOnDisk() {
+  if (S.view === "clip") { const cl = DATA.clip && DATA.clip.clip; return cl ? cl.path : null; }
+  if (S.view === "sources") {
+    const labels = (DATA.sources && DATA.sources.labels) || {};
+    const i = Object.keys(labels).find((x) => labels[x] === S.path[0]);
+    const l = i != null ? S.locations[+i] : null;
+    return l && l.dir ? l.dir + (S.path.length > 1 ? "/" + S.path.slice(1).join("/") : "") : null;
+  }
+  const base = FOLDER_BASE[S.view];
+  const p = S.path.filter((x) => x !== NOPREV).join("/");
+  return S.root + "/" + base + (p ? "/" + p : "");
+}
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest("input, textarea, select") || !S.root) { closeMenu(); return; }
+  if (!e.target.closest("#main")) { e.preventDefault(); closeMenu(); return; }
+  e.preventDefault();
+  const el = e.target.closest('[data-a="pick"]');
+  if (el) {
+    const v = el.dataset.v;
+    // As in Finder: a right-click outside the selection selects what's under it
+    if (!S.sel[v]) { S.sel = {}; S.sel[v] = true; S.anchor = v; S.cursor = v; S.checked = null; S.found = null; renderMain(); renderSide(); }
+  } else if (!e.target.closest(".crumbs,.scope,.selbar") && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); }
+  openMenu(e.clientX, e.clientY);
+});
+window.addEventListener("blur", closeMenu);
+window.addEventListener("resize", closeMenu);
+document.addEventListener("scroll", closeMenu, true);
+
+// Info: what there is to know of the selection, one item in full, several or folders summed up
+function kv(rows) {
+  rows = rows.filter((r) => r && r[1] !== "" && r[1] != null && r[1] !== false);
+  return rows.length ? '<dl class="kv">' + rows.map((r) => '<dt>' + esc(r[0]) + '</dt><dd' + (r[2] ? ' class="mono"' : "") + '>' + (r[3] ? r[1] : esc(r[1])) + '</dd>').join("") + '</dl>' : "";
+}
+function infoSec(title, body) { return body ? '<div class="isec"><div class="lab">' + esc(title) + '</div>' + body + '</div>' : ""; }
+function stabText(st) {
+  if (!st || typeof st !== "object") return null;
+  const d = {};
+  deriveTransform(d, st);
+  return [["Stabilization", d.stab], ["Horizon", d.horizon], ["Frame", d.frame], ["Projection", d.proj],
+    ["Level", st.level], ["Lens", st.lens === "corrected" ? "Corrected" : st.lens], ["Color fringes", st.chromatic === true ? "Taken out" : st.chromatic === false ? "As recorded" : null]];
+}
+function resText(p) {
+  if (!p) return "";
+  const w = p.width || (p.movie && p.movie.width), h = p.height || (p.movie && p.movie.height);
+  if (!w || !h) return "";
+  const fps = p.fps ? " · " + (Math.round(p.fps * 100) / 100) + " fps" : "";
+  return w + " × " + h + fps;
+}
+function marksList(it, probe) {
+  const own = it.own && Array.isArray(it.own.marks) ? it.own.marks.map((m) => m.t) : null;
+  const t = own || (probe && probe.marks && probe.marks.times) || [];
+  return t.length ? t.slice(0, 30).map((s) => clock(s)).join(", ") + (t.length > 30 ? " …" : "") : "";
+}
+function pathsHtml(list) { return list.map((p) => '<span class="mono blk">' + esc(p) + '</span>').join(""); }
+function itemInfo(it) {
+  let h = '<div class="ihead">' + (it.thumbPath ? '<span class="ith">' + img(it.thumbPath) + '</span>' : "") + '<b class="wrap">' + esc(it.name) + '</b><span class="sub">' + esc(it.sub || "") + '</span></div>';
+  const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
+  if (it.kind === "clip") {
+    const probe = PROBES[it.path];
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")],
+      ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
+      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? "None" : ""],
+      ["Tags", tags, false, true]]));
+    h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
+    const tf = stabText(it.own && it.own.view);
+    h += infoSec("Transform", tf ? kv(tf.concat([["Turned", it.turned ? "Yes" : ""]])) : '<p class="sub wrap">' + (it.gyroflow ? "Its Gyroflow project" : TF_DEFAULT) + (it.turned ? ", turned" : "") + '</p>');
+    const conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
+    h += infoSec("Files", kv([["In the project", it.id, true], ["Copies", pathsHtml((it.copies || []).map((c) => c.path + "  (" + c.loc + ")")), false, true],
+      ["Own file", conflict ? '<span class="chip warn">' + it.own_conflict.length + ' own files</span>' + pathsHtml(it.own_conflict) : pathsHtml(it.own_files || []) || (it.own ? "" : "None yet"), false, true],
+      ["Gyroflow", it.gyroflow ? "A project beside the clip" : ""], ["Clip preview", it.preview ? pathsHtml([it.preview]) : "None", false, !!it.preview]]));
+  } else if (it.kind === "moment" || it.kind === "export") {
+    const l = it.link || {};
+    h += infoSec(it.kind === "moment" ? "Moment" : "Export", kv([["From", l.clip ? l.clip + " · " + clock(l.in) + "–" + clock(l.out) : "", true], ["Length", it.dur], ["Taken", it.date],
+      ["Look", it.kind === "export" ? it.look : ""], ["Stabilized", it.kind === "export" ? (l.stabilized ? "Yes" : "No") : ""],
+      ["Stabilized as", it.kind === "moment" ? (l.alone ? "On its own" : "Part of the clip") : ""], ["Size", sizeText(it.size)], ["Tags", tags, false, true]]));
+    if (it.kind === "moment") {
+      const tf = stabText(l.stab);
+      if (tf) h += infoSec("Transform", kv(tf));
+      const rs = it.renders || {};
+      h += infoSec("Renders", kv(["HDR", "SDR"].map((p) => [p, rs[p] === "current" ? "Current" : rs[p] === "stale" ? "Stale: the moment changed" : "None"])));
+    }
+    h += infoSec("Files", kv([["File", pathsHtml([it.path]), false, true], ["Original", it.original ? pathsHtml([it.original]) : l.clip ? "Not found in the locations" : "", false, !!it.original],
+      ["Gyroflow", it.gyroflow ? "Its own project beside it" : ""]]));
+  } else {
+    const m = /_(\d+(?:\.\d+)?)s\.(?:MP\.)?[^.]+$/i.exec(it.name);
+    const clip = m ? it.name.slice(0, m.index) : "";
+    h += infoSec("Photo", kv([["Kind", it.form], ["From", clip ? clip + " at " + clock(+m[1]) : "", true], ["Changed", it.date], ["Size", sizeText(it.size)], ["Tags", tags, false, true]]));
+    h += infoSec("Files", kv([["File", pathsHtml([it.path]), false, true]]));
+  }
+  return h;
+}
+function manyInfo(c) {
+  const its = c.selItems;
+  const size = its.reduce((n, it) => n + (it.size || 0), 0);
+  const dur = its.reduce((n, it) => n + (it.durS > 0 ? it.durS : 0), 0);
+  const whens = its.map((it) => it.when).filter((d) => d && !isNaN(d)).sort((a, b) => a - b);
+  const count = (f) => { const m = {}; its.forEach((it) => { const v = f(it); if (v) m[v] = (m[v] || 0) + 1; }); return Object.keys(m).sort((a, b) => m[b] - m[a]).map((k) => k + " " + m[k]).join(", "); };
+  const one = c.selFolders.length === 1 && !c.direct.length;
+  let h = '<div class="ihead"><b class="wrap">' + esc(c.selName) + '</b><span class="sub">' + esc(plural(its.length) + (c.selFolders.length ? ", everything inside included" : "")) + '</span></div>';
+  h += infoSec("All of it", kv([["Length", dur ? clock(dur) : ""], ["Size", sizeText(size)], ["Recorded", whens.length ? dateText(whens[0]) + (whens.length > 1 ? " – " + dateText(whens[whens.length - 1]) : "") : ""],
+    ["Cameras", count((it) => it.cam)], ["Color", count((it) => it.color)], ["Marks", its.reduce((n, it) => n + (it.marks || 0), 0) || ""], ["Moments", its.reduce((n, it) => n + (it.moments || 0), 0) || ""],
+    ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")]]));
+  if (one && FOLDER_BASE[S.view] && c.selFolders[0] !== NOPREV) h += infoSec("Files", kv([["Folder", pathsHtml([S.root + "/" + FOLDER_BASE[S.view] + "/" + c.selFolders[0]]), false, true]]));
+  return h;
+}
+function infoHtml(c) {
+  if (!c.any) {
+    const all = items();
+    const here = hereOnDisk();
+    return '<div class="ihead"><b>' + esc(c.folderName) + '</b><span class="sub">' + esc(plural(scopeItems().length) + " here, " + plural(all.length) + " in " + c.viewName) + '</span></div>' +
+      infoSec("Files", kv([["Folder", here ? pathsHtml([here]) : "", false, true], ["Project", pathsHtml([S.root]), false, true]])) +
+      '<p class="sub wrap" style="padding:0 16px">Select a clip, moment, photo or folder to see what it is.</p>';
+  }
+  if (c.direct.length === 1 && !c.selFolders.length) { const b = clipButton(c); return itemInfo(c.direct[0]) + (b ? '<div class="isec"><div class="btns">' + b + '</div></div>' : ""); }
+  return manyInfo(c);
 }
 
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
@@ -1018,7 +1311,7 @@ async function commitRename(name) {
   if (!it || !name.trim() || name.trim() === renameStem(it)) { renderMain(); return; }
   const path = it.kind === "folder" ? S.root + "/" + FOLDER_BASE[S.view] + "/" + it.path : it.path;
   try {
-    await invoke("rename_item", { view: S.view, kind: it.kind, path, name: name.trim() });
+    await invoke("rename_item", { view: S.view === "clip" ? (it.kind === "still" ? "stills" : "moments") : S.view, kind: it.kind, path, name: name.trim() });
     S.sel = {}; S.anchor = null;
     await refresh();
   } catch (e) { showError(String(e)); renderMain(); }
@@ -1048,6 +1341,7 @@ function openSelection() {
   if (p.length) call("open_items", { paths: p }).catch(() => {});
 }
 function goUp() {
+  if (S.view === "clip" && !searching()) { goFootage(S.clip); return; }
   if (!S.path.length || searching()) return;
   const left = S.path[S.path.length - 1];
   S.path = S.path.slice(0, -1);
@@ -1101,6 +1395,7 @@ function listKeys(e) {
   if (e.key === "End") { moveTo(VISIBLE.length - 1, e.shiftKey); return true; }
   if (e.key === "Enter") { if (mac) startRename(); else openSelection(); return true; }
   if (e.key === "F2" && !mac) { startRename(); return true; }
+  if ((mac && e.key === "Backspace" && e.metaKey) || (!mac && e.key === "Delete")) { deleteSelection(); return true; }
   if ((e.key === "o" || e.key === "O") && cmd) { openSelection(); return true; }
   if (e.key === " " ) { if (mac) quickLook(); else openSelection(); return true; }
   return false;
@@ -1164,7 +1459,8 @@ async function refresh() {
   if (!S.root) return;
   S.info = await invoke("project").catch(() => S.info);
   await loadView("moments").catch(() => {});
-  await loadView(S.view === "moments" || S.view === "sources" ? "footage" : S.view).catch(() => {});
+  if (S.view === "clip") { await loadView("stills").catch(() => {}); await loadView("footage").catch(() => {}); buildClip(); }
+  else await loadView(S.view === "moments" || S.view === "sources" ? "footage" : S.view).catch(() => {});
   renderAll();
 }
 
@@ -1221,6 +1517,7 @@ function selectedPaths() {
 document.addEventListener("mousedown", (e) => { if (e.shiftKey && e.target.closest('[data-a="pick"]')) e.preventDefault(); });
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-a]");
+  if (CMENU) { const inMenu = el && el.closest(".cmenu"); closeMenu(); if (!inMenu) return; if (el.disabled) return; }
   if (el && el.tagName === "INPUT" && el.dataset.a === "loccopies") return;
   if (S.menu && !(el && el.closest(".menu")) && !(el && el.dataset.a === "menu")) { S.menu = false; if (!el) { renderTop(); renderSugg(); return; } }
   if (S.suggOpen && !e.target.closest(".searchwrap")) { S.suggOpen = false; renderSugg(); }
@@ -1287,6 +1584,15 @@ document.addEventListener("click", async (e) => {
     case "fwd": return goHistory(1);
     case "up": return goUp();
     case "newdir": return newFolder();
+    case "enter": return openSelection();
+    case "showclip": return showClip(v);
+    case "gofootage": return goFootage(v);
+    case "fcrumb": S.view = "footage"; S.path = v ? v.split("/") : []; S.sel = {}; S.anchor = null; S.filters = {}; if (!DATA.footage) await needViews(["footage"]); break;
+    case "ql": return quickLook();
+    case "renameit": { const c = ctx(); if (canRename(c)) startRename(); else toast(S.view === "sources" ? "Sources’ folders and clips are renamed in Finder" : "A clip is renamed in Finder: Find moved files then follows"); return; }
+    case "trash": return deleteSelection();
+    case "info": S.tab = "info"; break;
+    case "revealhere": { const p = hereOnDisk(); if (p) call("reveal_path", { path: p }).catch(() => {}); return; }
     case "opengf": { const it = ctx().selItems[0]; if (it) call("open_in_gyroflow", { paths: it.kind === "clip" ? (it.copies || []).map((x) => x.path) : [it.path] }).catch(() => {}); return; }
     case "removesource": return removeSources(ctx().selFolders);
     case "delrenders": {
@@ -1363,6 +1669,8 @@ document.addEventListener("keydown", (e) => {
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing && S.root) { e.preventDefault(); S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; renderMain(); renderSide(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && S.root) { e.preventDefault(); const q = $("q"); if (q) q.focus(); return; }
+  if (CMENU && e.key === "Escape") { closeMenu(); return; }
+  if (CMENU) closeMenu();
   if (e.key === "Escape" && S.sheet) { S.sheet = null; renderSheet(); return; }
   if (e.key === "Escape" && S.menu) { S.menu = false; renderTop(); return; }
   if (e.target.id === "rename") {

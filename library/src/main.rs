@@ -901,6 +901,86 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     }
 }
 
+// Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
+// UGREEN or Synology share keeps what's deleted there; Finder can't put a network file in the Trash). Ok: where it went
+fn to_trash(file: &Path) -> Result<String, String> {
+    if cfg!(target_os = "macos") {
+        // The volume it's on and its kind, from mount: "//u@host/share on /Volumes/share (smbfs, ...)"
+        let out = std::process::Command::new("/sbin/mount").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        let mut best: Option<(PathBuf, String)> = None;
+        for line in out.lines() {
+            let Some((_, rest)) = line.split_once(" on ") else { continue };
+            let Some((at, kind)) = rest.rsplit_once(" (") else { continue };
+            let at = PathBuf::from(at);
+            if file.starts_with(&at) && best.as_ref().is_none_or(|(b, _)| at.as_os_str().len() > b.as_os_str().len()) {
+                best = Some((at, kind.split([',', ')']).next().unwrap_or("").trim().to_string()));
+            }
+        }
+        let (at, kind) = best.unwrap_or((PathBuf::from("/"), "apfs".into()));
+        if ["smbfs", "nfs", "afpfs", "webdav", "cifs"].contains(&kind.as_str()) {
+            if !at.join("#recycle").is_dir() {
+                return Err(format!("{}: this share has no recycle bin to put it in: delete it in Finder", file.display()));
+            }
+            let r = if file.is_dir() { std::fs::remove_dir_all(file) } else { std::fs::remove_file(file) };
+            return r.map(|_| "the share's #recycle".to_string()).map_err(|e| format!("{}: {e}", file.display()));
+        }
+        let script = format!("tell application \"Finder\" to delete (POSIX file \"{}\" as alias)", file.display().to_string().replace('\\', "\\\\").replace('"', "\\\""));
+        let ok = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).output().map(|o| o.status.success()).unwrap_or(false);
+        return if ok && !file.exists() { Ok("the Trash".into()) } else { Err(format!("{}: Finder couldn't move it to the Trash", file.display())) };
+    }
+    if cfg!(target_os = "windows") {
+        let what = if file.is_dir() { "DeleteDirectory" } else { "DeleteFile" };
+        let cmd = format!("Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::{what}('{}','OnlyErrorDialogs','SendToRecycleBin')", file.display().to_string().replace('\'', "''"));
+        let ok = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &cmd]).output().map(|o| o.status.success()).unwrap_or(false);
+        return if ok && !file.exists() { Ok("the Recycle Bin".into()) } else { Err(format!("{}: couldn't move it to the Recycle Bin", file.display())) };
+    }
+    Err("Delete it in the file manager".into())
+}
+
+// Deletes `items` ({kind, path}) of the project's own folders, to the Trash: a folder whole, a moment with its
+// Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
+// footage is deleted in Finder), an export. What went where, and what couldn't
+#[tauri::command]
+fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
+    let own = ["_Moments", "_Clips", "_Stills", "_Exports"];
+    let (mut done, mut problems) = (0usize, Vec::<String>::new());
+    let mut went = std::collections::BTreeSet::new();
+    for it in &items {
+        let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
+        let kind = it["kind"].as_str().unwrap_or("");
+        if !path.starts_with(&root) || !own.iter().any(|d| path.starts_with(root.join(d)) && path != root.join(d)) {
+            problems.push(format!("{}: not in the project's own folders. Footage is deleted in Finder", path.display()));
+            continue;
+        }
+        if !path.exists() { continue; }
+        let mut also: Vec<PathBuf> = Vec::new();
+        let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        if let Ok(rel) = path.strip_prefix(root.join("_Moments")) {
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if kind == "folder" { also.push(root.join("_Renders").join(&rel)); } else if kind == "moment" {
+                let stem = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname);
+                also.push(dir.join(format!("{stem}.gyroflow")));
+                for p in index::RENDER_PROFILES { also.push(index::render_path(&root, &rel, p)); }
+            }
+        }
+        if kind == "still" {
+            if let Some(i) = fname.rfind('.') { for e in [".mov", ".MOV"] { also.push(dir.join(format!("{}{e}", &fname[..i]))); } }
+        }
+        match to_trash(&path) {
+            Ok(w) => {
+                done += 1;
+                went.insert(w);
+                for a in also.into_iter().filter(|a| a.exists()) { if let Err(e) = to_trash(&a) { problems.push(e); } }
+            }
+            Err(e) => problems.push(e),
+        }
+    }
+    Ok(serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems }))
+}
+
 // A clip's or moment's Gyroflow project opened in Gyroflow (the system's app for .gyroflow): `paths`, the clip's
 // copies or the moment's file; its project beside one of them (<name>.gyroflow or <name.ext>.gyroflow)
 #[tauri::command]
@@ -1153,7 +1233,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1282,5 +1362,21 @@ mod tests {
         let j = &inner.jobs[0];
         assert_eq!(j.state, JobState::Done, "{:?}", j.message);
         assert!(inner.running.is_none());
+    }
+}
+
+#[cfg(test)]
+mod trash_tests {
+    // Moves a file and a folder of the scratch space to the Trash (Finder): run by hand
+    #[test]
+    #[ignore]
+    fn to_the_trash() {
+        let d = std::env::temp_dir().join(format!("afl-trash-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("folder/inner")).unwrap();
+        std::fs::write(d.join("a file.txt"), b"x").unwrap();
+        assert_eq!(super::to_trash(&d.join("a file.txt")).unwrap(), "the Trash");
+        assert_eq!(super::to_trash(&d.join("folder")).unwrap(), "the Trash");
+        assert!(super::to_trash(&d.join("gone")).is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
