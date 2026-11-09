@@ -457,7 +457,7 @@ async fn scan(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>,
             match it["kind"].as_str() {
                 Some("clip") => if let Some(p) = it["path"].as_str() { want.push(p.to_string()); },
                 // A moment's original: what it is (its camera, its color) is the clip's
-                Some("moment") => if let Some(c) = it["link"]["clip"].as_str() { want.push(root.join(c).display().to_string()); },
+                Some("moment") => if let Some(o) = it["original"].as_str() { want.push(o.to_string()); },
                 _ => {}
             }
         }
@@ -711,6 +711,16 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
     }).await.map_err(|e| e.to_string())
 }
 
+// ---------- renders ----------
+
+#[tauri::command]
+fn delete_renders(shared: State<Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: delete renders when they're done".into()); }
+    let (n, problems) = index::delete_renders(&root, &moments, stale_only);
+    Ok(json!({ "deleted": n, "problems": problems }))
+}
+
 // ---------- tags ----------
 
 #[tauri::command]
@@ -803,7 +813,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 5] = ["clips", "clips-again", "moments", "photos", "export"];
+const KINDS: [&str; 6] = ["clips", "clips-again", "moments", "photos", "export", "render"];
 
 #[tauri::command]
 fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
@@ -818,6 +828,7 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
+        "render" => format!("Render ({})", options.get("profiles").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_else(|| "HDR".into())),
         _ => format!("Export all moments ({})", if sdr { "SDR" } else { "HDR" }),
     };
     // Kept to what's selected: "Clip previews · 3 clips"
@@ -834,6 +845,12 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
     if let Some(o) = &only { request["only"] = json!(o); }
     if kind == "photos" { request["photo"] = json!(photo); }
     if kind == "export" { request["sdr"] = json!(sdr); }
+    if kind == "render" {
+        let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
+            .filter(|p| index::RENDER_PROFILES.contains(p)).map(str::to_string).collect();
+        if profiles.is_empty() { return Err("Tick a profile".into()); }
+        request["profiles"] = json!(profiles);
+    }
     inner.next_id += 1;
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -952,7 +969,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

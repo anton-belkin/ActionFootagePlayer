@@ -33,6 +33,7 @@ const S = {
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
+  profiles: { HDR: true, SDR: false },
 };
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -151,7 +152,7 @@ function derive(view) {
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
     } else if (it.kind === "moment") {
       const l = it.link || {};
-      const original = l.clip ? root + "/" + l.clip : null;
+      const original = it.original || (l.clip ? root + "/" + l.clip : null);
       deriveSource(it, original && PROBES[original]);
       deriveTransform(it, l.stab);
       it.turned = false;
@@ -241,6 +242,11 @@ function buildFacets() {
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
   if (tagList.length) sections.push({ id: "tg", title: "Tags", facets: [{ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) }] });
+  if (S.view === "moments") {
+    const rf = (p, st) => (it) => (it.renders || {})[p] === st;
+    sections.push({ id: "rn", title: "Renders", facets: ["HDR", "SDR"].map((p) => ({ id: "rn" + p, title: p, opts: [
+      L("rn:" + p + ":c", "Current", rf(p, "current")), L("rn:" + p + ":s", "Stale", rf(p, "stale")), L("rn:" + p + ":n", "None", (it) => !(it.renders || {})[p])] })) });
+  }
   if (S.view === "stills") {
     sections.push({ id: "frm2", title: "Kind", facets: [{ id: "form", title: "Kind", opts: distinct(items, (i) => i.form).map((f) => L("form:" + f, f, (it) => it.form === f)) }] });
   }
@@ -418,6 +424,7 @@ function chips(it) {
     if (it.motion === false) c.push(["chip", "No motion data"]);
     if (it.is360) c.push(["chip fast", "360°"]);
   } else if (it.kind === "moment") {
+    for (const p of ["HDR", "SDR"]) { const st = (it.renders || {})[p]; if (st) c.push(["chip " + (st === "current" ? "ok" : "stale"), p + (st === "current" ? "" : " stale")]); }
     if (it.gyroflow) c.push(["chip ok", "Own Gyroflow project"]);
     if (!it.link) c.push(["chip warn", "No link"]);
   } else if (it.kind === "still") {
@@ -592,6 +599,16 @@ function renderSide() {
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
       '<span class="sub wrap">One of each mark, made once: a deleted one isn’t made again.</span>');
   } else if (S.view === "moments") {
+    const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
+    const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
+    const toMake = stats.reduce((n, x) => n + x[2] + x[3], 0);
+    h += sec("render", "Render", on.join(", ") || "no profile",
+      '<div class="lab">Profiles</div><div class="checks">' +
+      [["HDR", "HLG, as Shift+E exports HDR"], ["SDR", "as Shift+E exports SDR"]].map((p) => '<label title="' + esc(p[1]) + '"><input type="checkbox" id="prof-' + p[0] + '" data-a="prof" data-v="' + p[0] + '"' + (S.profiles[p[0]] ? " checked" : "") + '>' + p[0] + '</label>').join("") + '</div>' +
+      (c.any && stats.length ? '<div class="result">' + stats.map((x) => '<div class="it"><b style="width:36px">' + x[0] + '</b><span>' + x[1] + ' current · ' + x[2] + ' stale · ' + x[3] + ' missing</span></div>').join("") + '</div>' : "") +
+      '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="render"' + (c.any && on.length && !toMake ? " disabled" : "") + '>' + (c.any ? (toMake ? "Render " + toMake + " (missing and stale)" : "All current") : "Render") + '</button>' +
+      '<button type="button" class="btn sm" data-a="delrenders" data-v="stale">Delete stale</button><button type="button" class="btn sm" data-a="delrenders" data-v="all">Delete renders</button></div>' +
+      '<span class="sub wrap">Kept in _Renders/ of the project. An export with the same look copies a current render instead of rendering again. Deleting renders breaks nothing.</span>');
     h += sec("export", "Export", "to _Exports",
       '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
       '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
@@ -894,7 +911,7 @@ async function poll() {
 async function addJob(kind) {
   const c = ctx();
   if (!c.any) return;
-  const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : {};
+  const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : kind === "render" ? { profiles: ["HDR", "SDR"].filter((p) => S.profiles[p]) } : {};
   try {
     await invoke("add_job", { kind, options, only: c.only, label: c.label });
     toast("In the queue: " + c.label);
@@ -970,6 +987,11 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "delrenders": {
+      const c = ctx(); if (!c.any) return;
+      try { const r = await invoke("delete_renders", { moments: c.selItems.map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
+      return;
+    }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
     case "untag": return setTags([], [v]);
     case "findmoved": return findMoved();
@@ -1016,6 +1038,7 @@ document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
+  if (a === "prof") { S.profiles[v] = el.checked; renderSide(); return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
   else if (a === "look") S.exportSdr = el.value === "sdr";
