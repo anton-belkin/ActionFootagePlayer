@@ -460,8 +460,8 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let nb = (SLOT.0.div_ceil(32) + 1, SLOT.1.div_ceil(32) + 1);
     let ring = ["//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN"];
     let pass = |head: &[&str], tail: &[&str]| with(head.iter().chain(ring.iter()).chain(tail.iter()).copied().collect());
-    // After the frames' average: the dark specks, then the guided filter's quarter-size statistics, its a and b, their
-    // means, and the filter itself (warp.glsl's dn_clean)
+    // After the frames' average: the guided filter's quarter-size statistics, its a and b, their means, and the filter
+    // itself with the dark specks taken out first (warp.glsl's dn_clean)
     let q = |save: &str, desc: &str, binds: &[&str]| {
         let mut head = vec!["//!HOOK MAIN", "//!BIND HOOKED"];
         head.extend_from_slice(binds);
@@ -470,14 +470,12 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
         pass(&head, &[save.as_str(), "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /", "//!COMPONENTS 4", "//!WHEN gyroflow_gpu_on", desc.as_str()])
     };
     let clean = [
-        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise specks"]),
-            &dn_defs, "", &dn("#define DN_SPECKS", "dn_clean")),
         hook_pass(clip, &q("GDN_GF_LO", "filter quarter", &[]), &dn_defs, "", &dn("#define DN_GF_LO", "dn_clean")),
         hook_pass(clip, &q("GDN_GF_AY", "filter luma", &["//!BIND GDN_GF_LO"]), &dn_defs, "", &dn("#define DN_GF_AY", "dn_clean")),
         hook_pass(clip, &q("GDN_GF_AC", "filter color", &["//!BIND GDN_GF_LO"]), &dn_defs, "", &dn("#define DN_GF_AC", "dn_clean")),
         hook_pass(clip, &q("GDN_GF_MY", "filter luma means", &["//!BIND GDN_GF_AY"]), &dn_defs, "", &dn("#define DN_GF_MY", "dn_clean")),
         hook_pass(clip, &q("GDN_GF_MC", "filter color means", &["//!BIND GDN_GF_AC"]), &dn_defs, "", &dn("#define DN_GF_MC", "dn_clean")),
-        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_GF_MY", "//!BIND GDN_GF_MC"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise filter"]),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_GF_MY", "//!BIND GDN_GF_MC"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise filter and specks"]),
             &dn_defs, "", &dn("#define DN_GF_APPLY", "dn_clean")),
     ].join("\n");
     format!("{warp}\n{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{clean}",

@@ -1249,45 +1249,11 @@ vec4 hook()
 // - Dark specks: HEVC under water leaves spikes of the noise, mostly in red (dark cyan dots on blue water, 1-7 px), new
 //   each frame; the frame's own pixel keeps part of them. Where a pixel is darker than the ring of 16 pixels two away by
 //   more than the noise, and that ring has no dark pixels opposite each other (a dark line or edge through it would),
-//   it takes the ring's color. Bright dots stay: particles in the water are white.
+//   it takes the ring's color. Bright dots stay: particles in the water are white. In the filter's last pass.
 // - The color: a guided filter (He et al., "fast": its statistics at a quarter of the size) of B-Y and R-Y, each its own
 //   guide over ~20 px, so the color's blotches go and an edge of color well above its noise stays (a pink fin over water
 //   of its brightness: guided by the luma, its color would spread); with Stronger the luma too (its own guide, ~12 px).
 //   Their eps is the noise's (dn_state's measure).
-#ifdef DN_SPECKS
-// The ring two pixels away, offset i of 16 (i and 15 - i opposite each other)
-vec2 ring_off(int i)
-{
-    int r = i < 5 ? i : (i < 11 ? (i % 2 == 1 ? 5 + (i - 5) / 2 * 5 : 9 + (i - 6) / 2 * 5) : 20 + (i - 11));
-    return vec2(r % 5 - 2, r / 5 - 2);
-}
-vec4 hook()
-{
-    vec3 c = HOOKED_texOff(vec2(0.0)).rgb;
-    float yc = lum(c);
-    float t = (dn_strong() ? 1.0 : 1.3) * max(sigma_at(yc), 1e-4);
-    // Most pixels aren't darker than the four pixels two away: done at four reads
-    float m4 = 0.25 * (lum(HOOKED_texOff(vec2(2.0, 0.0)).rgb) + lum(HOOKED_texOff(vec2(-2.0, 0.0)).rgb)
-                     + lum(HOOKED_texOff(vec2(0.0, 2.0)).rgb) + lum(HOOKED_texOff(vec2(0.0, -2.0)).rgb));
-    if (yc >= m4 - 0.5 * t) return vec4(c, 1.0);
-    float m0 = 0.0;
-    for (int i = 0; i < 16; i++) m0 += lum(HOOKED_texOff(ring_off(i)).rgb);
-    m0 /= 16.0;
-    // The ring's level without its own dark ones
-    float m1 = 0.0, n1 = 0.0;
-    vec3 c1 = vec3(0.0);
-    for (int i = 0; i < 16; i++) {
-        vec3 v = HOOKED_texOff(ring_off(i)).rgb;
-        if (lum(v) > m0 - t) { m1 += lum(v); c1 += v; n1 += 1.0; }
-    }
-    if (n1 < 8.0 || yc >= m1 / n1 - t) return vec4(c, 1.0);
-    m1 /= n1;
-    // Dark on both sides: a line or an edge through it, kept
-    for (int i = 0; i < 8; i++)
-        if (lum(HOOKED_texOff(ring_off(i)).rgb) < m1 - t && lum(HOOKED_texOff(ring_off(15 - i)).rgb) < m1 - t) return vec4(c, 1.0);
-    return vec4(c1 / n1, 1.0);
-}
-#endif
 #ifdef DN_GF_LO
 // The quarter-size luma and color: each texel the mean of its 4x4 pixels (four bilinear reads)
 vec4 hook()
@@ -1358,10 +1324,44 @@ vec4 hook()
 }
 #endif
 #ifdef DN_GF_APPLY
+// The ring two pixels away, offset i of 16 (i and 15 - i opposite each other)
+vec2 ring_off(int i)
+{
+    int r = i < 5 ? i : (i < 11 ? (i % 2 == 1 ? 5 + (i - 5) / 2 * 5 : 9 + (i - 6) / 2 * 5) : 20 + (i - 11));
+    return vec2(r % 5 - 2, r / 5 - 2);
+}
+// The pixel without a dark speck: c, or its ring's color where c is one
+vec3 despeck(vec3 c)
+{
+    float yc = lum(c);
+    float t = (dn_strong() ? 1.0 : 1.3) * max(sigma_at(yc), 1e-4);
+    // Most pixels aren't darker than the four pixels two away: done at four reads
+    float m4 = 0.25 * (lum(HOOKED_texOff(vec2(2.0, 0.0)).rgb) + lum(HOOKED_texOff(vec2(-2.0, 0.0)).rgb)
+                     + lum(HOOKED_texOff(vec2(0.0, 2.0)).rgb) + lum(HOOKED_texOff(vec2(0.0, -2.0)).rgb));
+    if (yc >= m4 - 0.5 * t) return c;
+    float m0 = 0.0;
+    for (int i = 0; i < 16; i++) m0 += lum(HOOKED_texOff(ring_off(i)).rgb);
+    m0 /= 16.0;
+    // The ring's level without its own dark ones
+    float m1 = 0.0, n1 = 0.0;
+    vec3 c1 = vec3(0.0);
+    for (int i = 0; i < 16; i++) {
+        vec3 v = HOOKED_texOff(ring_off(i)).rgb;
+        if (lum(v) > m0 - t) { m1 += lum(v); c1 += v; n1 += 1.0; }
+    }
+    if (n1 < 8.0 || yc >= m1 / n1 - t) return c;
+    m1 /= n1;
+    // Dark on both sides: a line or an edge through it, kept
+    for (int i = 0; i < 8; i++)
+        if (lum(HOOKED_texOff(ring_off(i)).rgb) < m1 - t && lum(HOOKED_texOff(ring_off(15 - i)).rgb) < m1 - t) return c;
+    return c1 / n1;
+}
 // q = a I + b at full size, a and b between the quarter texels (the sampler's filter), I the pixel's own
 vec4 hook()
 {
-    vec3 c = HOOKED_texOff(vec2(0.0)).rgb;
+    // The dark specks first (in this pass, not one of their own: a full-size pass costs ~0.4 ms; the filter's statistics,
+    // from before, see them, few as they are)
+    vec3 c = despeck(HOOKED_texOff(vec2(0.0)).rgb);
     float y = lum(c);
     vec4 ac = GDN_GF_MC_tex(HOOKED_pos);
     vec2 ay = GDN_GF_MY_tex(HOOKED_pos).xy;
