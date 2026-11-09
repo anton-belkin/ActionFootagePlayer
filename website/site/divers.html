@@ -183,9 +183,10 @@
             <h3>Jump straight to the turtle</h3>
             <p>Press the camera's highlight button during the dive, and the marks show on the seek bar. <kbd>Ctrl</kbd>+<kbd>]</kbd> jumps to the next one.</p>
           </li>
-          <li>
-            <h3>A clean still of the moment</h3>
-            <p>Pause: a moment later the frame is rebuilt from the frames around it, so the sensor's noise from the dim light under water mostly goes. <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again.</p>
+          <li id="noise">
+            <h3><span class="os-mac">Old noisy dives, clean</span><span class="os-win">A clean still of the moment</span></h3>
+            <p class="os-mac">A dive the player steadies also plays without the noise of the dim light under water: each frame is averaged with the frames around it, each moved onto it by the motion between them, and the reef keeps its detail. Old noisy dives look good now. Nothing is done to the files: you only watch them clean, and the originals stay as they were. Pause, and the still is clean too. <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again.</p>
+            <p class="os-win">Pause: a moment later the frame is rebuilt from the frames around it, so the sensor's noise from the dim light under water mostly goes. <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again.</p>
           </li>
           <li>
             <h3>Keep the moments that matter</h3>
@@ -332,7 +333,7 @@
         </details>
         <details>
           <summary>Will my old dive videos look better?</summary>
-          <div class="a"><p>Clips shot with EIS off and the Wide field of view play steady straight from the folder: nothing is rendered or copied. Clips shot in log play in HDR. Clips shot in the normal mode with stabilization on look as they always did: Action Footage Player can't add what wasn't recorded.</p></div>
+          <div class="a"><p>Clips shot with EIS off and the Wide field of view play steady straight from the folder: nothing is rendered or copied. Clips shot in log play in HDR.<span class="os-mac"> On a Mac, the ones it steadies also play without the noise of the dim water, and nothing in the files changes.</span> Clips shot in the normal mode with stabilization on look as they always did: Action Footage Player can't add what wasn't recorded.</p></div>
         </details>
         <details>
           <summary>Does it change my original files?</summary>

@@ -186,9 +186,10 @@
             <h3>Droit à la tortue</h3>
             <p>Appuyez sur le bouton de temps fort de la caméra pendant la plongée, et les repères s’affichent sur la barre de lecture. <kbd>Ctrl</kbd>+<kbd>]</kbd> saute au suivant.</p>
           </li>
-          <li>
-            <h3>Une image propre du moment</h3>
-            <p>Mettez en pause : un instant plus tard, l’image est reconstruite à partir des images qui l’entourent, si bien que le bruit du capteur, dû à la faible lumière sous l’eau, disparaît en grande partie. <kbd>Ctrl</kbd>+<kbd>p</kbd> désactive cette fonction, et la réactive.</p>
+          <li id="noise">
+            <h3><span class="os-mac">Les vieilles plongées bruitées, nettoyées</span><span class="os-win">Une image propre du moment</span></h3>
+            <p class="os-mac">Une plongée que le lecteur stabilise est aussi lue sans le bruit de la faible lumière sous l’eau : chaque image est moyennée avec celles qui l’entourent, chacune ramenée sur elle selon le mouvement entre elles, et le récif garde ses détails. Les vieilles plongées pleines de bruit sont belles maintenant. Rien n’est fait aux fichiers : vous les regardez simplement nettoyées, et les originaux restent tels qu’ils étaient. Mettez en pause, et l’image fixe est propre aussi. <kbd>Ctrl</kbd>+<kbd>p</kbd> désactive cette fonction, et la réactive.</p>
+            <p class="os-win">Mettez en pause : un instant plus tard, l’image est reconstruite à partir des images qui l’entourent, si bien que le bruit du capteur, dû à la faible lumière sous l’eau, disparaît en grande partie. <kbd>Ctrl</kbd>+<kbd>p</kbd> désactive cette fonction, et la réactive.</p>
           </li>
           <li>
             <h3>Gardez les moments qui comptent</h3>
@@ -335,7 +336,7 @@
         </details>
         <details>
           <summary>Mes anciennes vidéos de plongée seront-elles plus belles ?</summary>
-          <div class="a"><p>Les clips tournés avec l’EIS désactivée et le champ de vision Wide sont lus stables directement depuis le dossier : rien n’est calculé ni copié. Les clips tournés en log sont lus en HDR. Les clips tournés dans le mode normal avec la stabilisation activée restent tels qu’ils ont toujours été : Action Footage Player ne peut pas ajouter ce qui n’a pas été enregistré.</p></div>
+          <div class="a"><p>Les clips tournés avec l’EIS désactivée et le champ de vision Wide sont lus stables directement depuis le dossier : rien n’est calculé ni copié. Les clips tournés en log sont lus en HDR.<span class="os-mac"> Sur un Mac, ceux qu’il stabilise sont aussi lus sans le bruit de la faible lumière sous l’eau, et rien ne change dans les fichiers.</span> Les clips tournés dans le mode normal avec la stabilisation activée restent tels qu’ils ont toujours été : Action Footage Player ne peut pas ajouter ce qui n’a pas été enregistré.</p></div>
         </details>
         <details>
           <summary>Est-ce qu’il modifie mes fichiers originaux ?</summary>
