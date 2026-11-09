@@ -294,6 +294,9 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     let Some(sub) = view_dir(view) else { return json!({ "dirs": [], "items": [] }) };
     let base = if sub.is_empty() { root.to_path_buf() } else { root.join(sub) };
     // Photos' tags are kept in the project's file (a HEIC's own metadata isn't written here)
+    // A moment's original, through the project's locations (the first that has it)
+    let locs = if view == "moments" { crate::locations::locations(root, &crate::locations::mounts()) } else { Vec::new() };
+    let original_of = |tree: &str| -> Option<PathBuf> { locs.iter().filter_map(|l| crate::locations::in_location(tree, l)).find(|f| f.is_file()) };
     let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
     let skip = |_: &str, _: &str| false;
     let entries = walk(&base, &skip);
@@ -314,6 +317,8 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 it["link"] = link(&path).unwrap_or(Value::Null);
                 it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 it["gyroflow"] = json!(has_gyroflow(&path));
+                it["renders"] = renders_of(root, rel, &path, &it["link"]);
+                it["original"] = it["link"]["clip"].as_str().and_then(&original_of).map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
             }
             "stills" => {
                 let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
@@ -336,6 +341,84 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         items.push(it);
     }
     json!({ "dirs": dirs, "items": items })
+}
+
+// ---------- renders (the player's render batch; docs/library-management.md, "Renders") ----------
+
+pub const RENDER_PROFILES: [&str; 2] = ["HDR", "SDR"];
+const RENDER_VERSION: u64 = 1;
+
+/// A value as the player's JSON keeps it: nulls and empty objects or arrays left out, for comparing recipes
+pub fn trimmed(v: &Value) -> Option<Value> {
+    match v {
+        Value::Null => None,
+        Value::Object(o) => {
+            let m: serde_json::Map<String, Value> = o.iter().filter_map(|(k, x)| trimmed(x).map(|t| (k.clone(), t))).collect();
+            (!m.is_empty()).then_some(Value::Object(m))
+        }
+        Value::Array(a) => {
+            let l: Vec<Value> = a.iter().filter_map(trimmed).collect();
+            (!l.is_empty()).then_some(Value::Array(l))
+        }
+        x => Some(x.clone()),
+    }
+}
+
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-9,
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same(v, w)),
+        _ => a == b,
+    }
+}
+
+/// The recipe of a moment's render in `profile` now, as the player's render_recipe makes it
+pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) -> Value {
+    let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
+    let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
+    let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
+    trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
+                     "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
+}
+
+/// Where a moment's render in a profile is: _Renders/<its path in _Moments without .afplink.mp4>.<profile>.mov
+pub fn render_path(root: &Path, rel: &str, profile: &str) -> PathBuf {
+    let mut p = root.join("_Renders");
+    let base = rel.strip_suffix(LINK_EXT).unwrap_or(rel);
+    let parts: Vec<&str> = base.split('/').collect();
+    for (i, part) in parts.iter().enumerate() { p.push(if i + 1 == parts.len() { format!("{part}.{profile}.mov") } else { part.to_string() }); }
+    p
+}
+
+/// Each profile's render of a moment: { HDR: "current" | "stale" }, absent: none
+fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for p in RENDER_PROFILES {
+        let file = render_path(root, rel, p);
+        if !file.is_file() { continue; }
+        let ok = crate::index::link(&file).filter(|l| l["kind"] == "render")
+            .and_then(|l| trimmed(&l["recipe"])).is_some_and(|r| same(&r, &render_recipe(root, moment, link, p)));
+        out.insert(p.to_string(), json!(if ok { "current" } else { "stale" }));
+    }
+    Value::Object(out)
+}
+
+/// Renders of these moments (paths in _Moments) removed: the stale ones only, or all of them
+pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usize, Vec<String>) {
+    let (mut n, mut problems) = (0, Vec::new());
+    for rel in moments {
+        let moment = root.join("_Moments").join(rel);
+        let link = link(&moment).unwrap_or(Value::Null);
+        let status = renders_of(root, rel, &moment, &link);
+        for p in RENDER_PROFILES {
+            let Some(st) = status.get(p).and_then(Value::as_str) else { continue };
+            if stale_only && st != "stale" { continue; }
+            match std::fs::remove_file(render_path(root, rel, p)) { Ok(_) => n += 1, Err(e) => problems.push(format!("{rel} {p}: {e}")) }
+        }
+    }
+    (n, problems)
 }
 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
@@ -556,7 +639,7 @@ mod dump {
             for it in v["items"].as_array().into_iter().flatten() {
                 let p = match it["kind"].as_str() {
                     Some("clip") => it["path"].as_str().map(str::to_string),
-                    Some("moment") => it["link"]["clip"].as_str().map(|c| root.join(c).display().to_string()),
+                    Some("moment") => it["original"].as_str().map(str::to_string),
                     _ => None,
                 };
                 if let (Some(p), Some(t)) = (p, tool.as_ref()) {

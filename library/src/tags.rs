@@ -23,7 +23,7 @@ fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
 
 /// A clip's own file over the project's locations (workspace.rs's own_file): the one there is, else beside the clip
 /// in the first location that has it and isn't copies only. Err: two of them
-fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
+pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
     let locs = locations::locations(root, &locations::mounts());
     let copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies))).collect();
     let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| f.with_extension("afp.json").is_file()).collect();

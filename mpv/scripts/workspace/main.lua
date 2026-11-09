@@ -2267,6 +2267,65 @@ end)
 -- same part of the same clip) and the export_<name> moments exports leave are skipped
 local export_job = nil
 
+-- Renders (docs/library-management.md, "Renders"): a moment rendered once, _Renders/<its path in _Moments>.<profile>.mov
+-- (HDR: as Shift+E exports HDR; SDR: as it exports SDR), its link (kind render) carrying its recipe: everything that
+-- decides its pixels. Current while the recipe is the moment's now; an export copies a current one instead of
+-- rendering again. Deleting renders breaks nothing
+local RENDERS = "_Renders"
+local RENDER_VERSION = 1
+local RENDER_PROFILES = { HDR = false, SDR = true }
+
+-- A value as JSON keeps it: nils and empty tables left out, for comparing recipes
+local function trimmed(v)
+    if type(v) ~= "table" then return v end
+    local out, n = {}, 0
+    for k, x in pairs(v) do
+        local t = trimmed(x)
+        if t ~= nil then out[k] = t; n = n + 1 end
+    end
+    if n == 0 then return nil end
+    return out
+end
+local function same_value(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) == "number" then return math.abs(a - b) < 1e-9 end
+    if type(a) ~= "table" then return a == b end
+    for k, x in pairs(a) do if not same_value(x, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+-- What a moment's render in `profile` is made from: its part of its original, its own transform and Gyroflow project,
+-- the source's input, the profile, the renderer's version
+local function render_recipe(m, original, profile)
+    local l = m.link
+    local doc = original and sidecar.read(original)
+    local own = own_project(m.file)
+    return trimmed({ v = RENDER_VERSION, clip = { hash = l.hash, size = l.size }, ["in"] = l["in"], out = l.out,
+                     stab = l.stab, alone = l.alone, input = type(doc) == "table" and doc.source or nil,
+                     gyroflow = fs.is_file(own) and fingerprint(own) or nil, profile = profile })
+end
+local function render_file(root, m, profile)
+    local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+    local base = rel:gsub("%.afplink%.mp4$", "")
+    if windows then base = base:gsub("/", "\\") end
+    return ws.join(ws.join(root, RENDERS), base .. "." .. profile .. ".mov")
+end
+local function render_current(file, recipe)
+    if not fs.is_file(file) then return false end
+    local raw = fs.read_link(file)
+    local l = raw and utils.parse_json(raw)
+    return type(l) == "table" and l.kind == "render" and same_value(trimmed(l.recipe), recipe)
+end
+-- A file copied (a clone on APFS, so a render copied as an export takes no room until one changes)
+local function copy_file(from, to)
+    local args = macos and { "/bin/cp", "-c", from, to } or windows and { "cmd", "/d", "/c", "copy", "/y", from, to } or { "cp", "--reflink=auto", from, to }
+    local r = mp.command_native({ name = "subprocess", args = args, playback_only = false, capture_stderr = true })
+    if not (r and r.status == 0) and macos then
+        r = mp.command_native({ name = "subprocess", args = { "/bin/cp", from, to }, playback_only = false, capture_stderr = true })
+    end
+    return r and r.status == 0
+end
+
 local function exported_parts(root)
     local set = {}
     local dir = ws.join(root, moments_lib.EXPORTS)
@@ -2295,15 +2354,42 @@ local function export_next()
     local m = j.queue[j.done + 1]
     j.id = j.id + 1
     j.fraction = 0
-    local label = j.sdr and " (SDR)" or ""
-    local output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
-    local l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
-                ["in"] = m.link["in"], out = m.link.out, name = final, look = j.sdr and "nbcu" or "hdr",
-                stabilized = m.rendered.view ~= "off", roots = { j.root } }
+    local sdr = j.sdr
+    if m.sdr ~= nil then sdr = m.sdr end
+    local output, l
+    if m.render_out then
+        -- A render: its fixed file, made again over the stale one
+        output, l = m.render_out, m.render_link
+        mkdir(ws.parent(output))
+        os.remove(output)
+    else
+        local label = sdr and " (SDR)" or ""
+        local final
+        output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
+        l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
+              ["in"] = m.link["in"], out = m.link.out, name = final, look = sdr and "nbcu" or "hdr",
+              stabilized = m.rendered.view ~= "off", roots = { j.root }, hash = m.link.hash }
+        -- A current render of it in this look: copied, its link made the export's
+        if m.copy_from then
+            local tool = plugin_tool("afp-cut")
+            local ok = copy_file(m.copy_from, output)
+            if ok and tool then
+                local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                              args = { tool, "--set-key", output, link.KEY, utils.format_json(l) } })
+                ok = r and r.status == 0
+            end
+            if ok then j.made = j.made + 1 else
+                j.failed = j.failed + 1
+                j.failures[#j.failures + 1] = { m.name, "couldn't copy its render" }
+            end
+            j.done = j.done + 1
+            return mp.add_timeout(0, export_next)
+        end
+    end
     m.output = output
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
-        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = j.sdr,
+        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr,
         progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
     }))
 end
@@ -2340,6 +2426,10 @@ local function export_moments(root, sdr)
                 m.project = fs.is_file(own) and own or nil
                 -- A moment kept as made (snap): stabilized on its own or as part of its clip, as Shift+E has it
                 if l.snap then m.alone = l.alone == true else m.alone = nil end
+                -- Rendered already in this look, and current: copied instead
+                local profile = sdr and "SDR" or "HDR"
+                local rf = render_file(root, m, profile)
+                if render_current(rf, render_recipe(m, original, profile)) then m.copy_from = rf end
                 queue[#queue + 1] = m
             else
                 failures[#failures + 1] = { m.name, "its original isn't found" }
@@ -2363,10 +2453,60 @@ local function export_moments(root, sdr)
     export_next()
 end
 
+-- Renders of the moments (Action Footage Library's Render, kept to its selection): each moment in each profile asked
+-- for whose render isn't current, made (again) in _Renders/. The ones current are left as they are
+local function render_moments(root, profiles)
+    if export_job then return end
+    if batch then batch.looking() end
+    local queue, failures = {}, {}
+    for _, m in ipairs(moments.scan(root, nil).list) do
+        local l = m.link
+        if type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"] and in_only(ws.relative(m.file, root) or "") then
+            local original = moments.original(l, root)
+            if not original then
+                failures[#failures + 1] = { m.name, "its original isn't found" }
+            else
+                local movie = markers and markers.movie and markers.movie(original) or nil
+                local _, rendered = made_view_of(original, movie, l.stab)
+                local own = own_project(m.file)
+                for _, p in ipairs(profiles) do
+                    if RENDER_PROFILES[p] ~= nil then
+                        local recipe = render_recipe(m, original, p)
+                        local out = render_file(root, m, p)
+                        if not render_current(out, recipe) then
+                            local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+                            queue[#queue + 1] = {
+                                name = m.name .. " (" .. p .. ")", link = l, original = original, rendered = rendered,
+                                project = fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
+                                sdr = RENDER_PROFILES[p], render_out = out,
+                                render_link = { v = 1, kind = "render", clip = l.clip, size = l.size, created = l.created, hash = l.hash,
+                                                ["in"] = l["in"], out = l.out, name = m.name, moment = rel, profile = p, recipe = recipe,
+                                                look = RENDER_PROFILES[p] and "nbcu" or "hdr", roots = { root } },
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #queue == 0 then
+        if batch then
+            return batch.finished({ made = 0, failed = #failures, failures = failures,
+                                    nothing = #failures == 0 and "Every render asked for is current" or nil })
+        end
+        return
+    end
+    mkdir(ws.join(root, RENDERS))
+    local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
+    export_job = { root = root, sdr = false, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
+                   progress = utils.join_path(tmp, "afp-batch-render-" .. tostring(utils.getpid()) .. ".json") }
+    export_next()
+end
+
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
 -- { kind, project, status, stop, photo, sdr, only }: kind clips (previews of the clips without one), clips-again (the ones
 -- removed), moments (moments of all marks), photos (photos of all marks; photo: no, live or motion), export (all
--- moments; sdr: in SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
+-- moments; sdr: in SDR), render (renders of the moments in _Renders/; profiles: HDR, SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
 -- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
 -- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
 -- is cancelled) and quits when it's done. `only`: the paths in the project it's kept to (clips, folders, moment files):
@@ -2470,6 +2610,9 @@ do
                     start_marks_job("photos", root)
                 elseif kind == "export" then
                     export_moments(root, req.sdr == true)
+                elseif kind == "render" then
+                    local profiles = type(req.profiles) == "table" and req.profiles or { "HDR" }
+                    render_moments(root, profiles)
                 else
                     batch.finished({ error = "no such batch: " .. tostring(kind) })
                 end
