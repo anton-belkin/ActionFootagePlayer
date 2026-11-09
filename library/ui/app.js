@@ -67,6 +67,30 @@ async function call(cmd, args) {
 let toastTimer = null;
 function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4200); }
 
+// What's selected, opened (open_items): until the player plays the first video (seconds for a clip on a NAS, with
+// nothing to see meanwhile on Windows before), a spinner says so; a quick one shows none
+let opening = 0;
+async function openItems(paths) {
+  if (!paths.length) return;
+  const id = ++opening;
+  const name = (paths[0].split(/[\\/]/).pop() || "").replace(/\.afplink\.mp4$/i, "");
+  const busy = setTimeout(() => {
+    if (opening !== id) return;
+    clearTimeout(toastTimer);
+    $("toastMsg").innerHTML = '<span class="spin" aria-hidden="true"></span>';
+    $("toastMsg").append("Opening " + (paths.length > 1 ? paths.length + " items" : name) + " in the player…");
+    $("toast").hidden = false;
+    document.body.classList.add("waiting");
+  }, 300);
+  let ok = true;
+  try { ok = await call("open_items", { paths }); } catch (e) { ok = null; }
+  clearTimeout(busy);
+  if (opening !== id) return;
+  document.body.classList.remove("waiting");
+  if (ok === false) toast("The player hasn’t opened " + name + " yet: is it still working on another clip?");
+  else $("toast").hidden = true;
+}
+
 // ---------- what an item is ----------
 
 function clock(s) {
@@ -1371,7 +1395,7 @@ function openSelection() {
   const keys = Object.keys(S.sel);
   if (keys.length === 1 && keys[0].startsWith("f:")) { S.path = keys[0].slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
   const p = selectedPaths();
-  if (p.length) call("open_items", { paths: p }).catch(() => {});
+  openItems(p);
 }
 function goUp() {
   if (S.view === "clip" && !searching()) { goFootage(S.clip); return; }
@@ -1601,7 +1625,7 @@ document.addEventListener("click", async (e) => {
     case "tab": S.tab = v; break;
     case "sec": S.open[v] = !S.open[v]; break;
     case "job": return addJob(v);
-    case "openit": { const p = selectedPaths(); if (p.length) call("open_items", { paths: p }).catch(() => {}); return; }
+    case "openit": { const p = selectedPaths(); openItems(p); return; }
     case "revealit": { const c = ctx(); const first = c.selFolders.length ? S.root + "/" + BASE[S.view] + c.selFolders[0] : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();
     case "clearjobs": await call("clear_finished").catch(() => {}); return poll();
@@ -1671,7 +1695,7 @@ document.addEventListener("dblclick", (e) => {
   if (v.startsWith("f:")) { S.q = ""; S.flat = false; S.path = v.slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
   if (S.renaming) return;
   const it = items().find((x) => keyOf(x) === v);
-  if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); call("open_items", { paths: [it.path] }).catch(() => {}); }
+  if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); openItems([it.path]); }
 });
 document.addEventListener("input", (e) => {
   const t = e.target;

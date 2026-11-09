@@ -1100,28 +1100,80 @@ fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<Str
     Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
 }
 
-// What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
+// What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them.
+// Done once the player plays the first video (Windows: it says so on its pipe; a clip on a NAS takes seconds), for the
+// window to show it's waiting: false when it didn't within a while
 #[tauri::command]
-fn open_items(paths: Vec<String>) -> Result<(), String> {
-    if paths.is_empty() { return Ok(()); }
-    let (photos, videos): (Vec<&String>, Vec<&String>) = paths.iter().partition(|p| {
+async fn open_items(paths: Vec<String>) -> Result<bool, String> {
+    if paths.is_empty() { return Ok(true); }
+    let (photos, videos): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
         let l = p.to_lowercase();
         [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| l.ends_with(e))
     });
     let player = player()?;
-    if !videos.is_empty() {
-        if cfg!(target_os = "macos") {
-            Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
-        } else {
-            Command::new(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
-        }
-    }
-    for p in photos {
+    // The player's window may come to the front over this one (Windows gives the foreground only to what the app
+    // the user clicked in starts, and the player is started by what this starts)
+    #[cfg(windows)]
+    foreground::allow_any();
+    for p in &photos {
         let _ = if cfg!(target_os = "macos") { Command::new("open").arg(p).spawn() }
             else if cfg!(windows) { Command::new("explorer").arg(p).spawn() }
             else { Command::new("xdg-open").arg(p).spawn() };
     }
-    Ok(())
+    let Some(first) = videos.first().cloned() else { return Ok(true) };
+    if cfg!(target_os = "macos") {
+        Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
+    Command::new(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    return tauri::async_runtime::spawn_blocking(move || player_pipe::wait_playing(&first, std::time::Duration::from_secs(60)))
+        .await.map_err(|e| e.to_string());
+    #[cfg(not(windows))]
+    { let _ = first; Ok(true) }
+}
+
+#[cfg(windows)]
+mod foreground {
+    const ASFW_ANY: u32 = u32::MAX;
+    #[link(name = "user32")]
+    unsafe extern "system" { fn AllowSetForegroundWindow(process: u32) -> i32; }
+    pub fn allow_any() { unsafe { AllowSetForegroundWindow(ASFW_ANY); } }
+}
+
+// The Windows player's JSON IPC pipe (windows/launcher: \\.\pipe\ActionFootagePlayer), asked what it plays
+#[cfg(windows)]
+mod player_pipe {
+    use std::io::{ BufRead, Write };
+    use std::time::{ Duration, Instant };
+
+    fn same(a: &str, b: &str) -> bool {
+        let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+        norm(a) == norm(b)
+    }
+
+    // The path mpv plays, or None (no player yet, or it didn't answer)
+    fn playing() -> Option<String> {
+        let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(r"\\.\pipe\ActionFootagePlayer").ok()?;
+        pipe.write_all(b"{\"command\":[\"get_property\",\"path\"],\"request_id\":1}\n").ok()?;
+        for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
+            let v: serde_json::Value = serde_json::from_str(&line).ok()?;
+            if v.get("request_id").and_then(|i| i.as_u64()) == Some(1) {
+                return v.get("data").and_then(|d| d.as_str()).map(String::from);
+            }
+        }
+        None
+    }
+
+    // Until the player plays `video` (its first frame may still be on its way: the player says that itself)
+    pub fn wait_playing(video: &str, wait: Duration) -> bool {
+        let until = Instant::now() + wait;
+        while Instant::now() < until {
+            if playing().is_some_and(|p| same(&p, video)) { return true; }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+        false
+    }
 }
 
 #[tauri::command]

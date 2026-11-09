@@ -154,7 +154,9 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
     let mpv = app.join(r"mpv\mpv.exe");
     let mut cmd = Command::new(&mpv);
     environment(&mut cmd, app);
-    cmd.arg("--player-operation-mode=pseudo-gui").arg(format!("--input-ipc-server={PIPE}"))
+    // The window at once, not once the first frame is there: a clip on a NAS takes seconds to be read and set up for
+    // the stabilization, and meanwhile there'd be no window and nothing in the taskbar (the plugins say what it does)
+    cmd.arg("--player-operation-mode=pseudo-gui").arg("--force-window=immediate").arg(format!("--input-ipc-server={PIPE}"))
         .arg(format!("--config-dir={}", mpv_config().display())).arg("--load-scripts=no")
         .arg(format!("--include={}", app.join("app.conf").display()));
     // The menu says which version this is
@@ -166,6 +168,9 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
     }
     cmd.args(&args);
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", mpv.display()))?;
+    // Its window in front: Windows gives the foreground to what the app the user clicked in (Explorer, Action Footage
+    // Library) starts, this launcher, and not to what this starts in turn
+    win::allow_foreground(child.id());
     let _ = std::fs::create_dir_all(data_dir());
     let _ = std::fs::write(started_file(), b"");
 
@@ -184,6 +189,8 @@ fn play(app: &Path, args: Vec<OsString>) -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    // Its window (made at once, force-window=immediate) to the front, while this still may
+    win::focus_window_of(child.id(), std::time::Duration::from_secs(5));
     // Videos opened from now on go to its pipe; this launcher stays (windowless) with PLAYER until mpv has exited
     drop(starting);
     let _ = child.wait();
@@ -311,7 +318,7 @@ mod ipc {
     }
 
     // The videos to the playing mpv: in place of what plays, or into its playlist when it has just started (videos
-    // opened together). False when no mpv of the app's is running
+    // opened together). False when no mpv of the app's is running, or it was quitting and didn't play them
     pub fn send_videos(videos: &[&OsString]) -> bool {
         let Some(mut pipe) = connect() else { return false };
         let together = std::fs::metadata(started_file()).and_then(|m| m.modified()).ok()
@@ -323,27 +330,62 @@ mod ipc {
             commands.push_str(&format!("{{\"command\":[\"loadfile\",{},\"{mode}\"],\"request_id\":{}}}\n",
                                        json_string(&path.to_string_lossy()), i + 1));
         }
-        pipe.write_all(commands.as_bytes()).is_ok() && answered(pipe, videos.len())
+        let Ok(reader) = pipe.try_clone() else { return false };
+        let heard = listen(reader);
+        pipe.write_all(commands.as_bytes()).is_ok() && answered(&heard, videos.len(), !together)
     }
 
-    // Whether mpv answered the last command. A player quitting keeps its pipe a while (its plugins finishing what
-    // they do): it may take the commands, then close the pipe without playing them
-    fn answered(pipe: std::fs::File, last: usize) -> bool {
+    // What the pipe says: a command's reply, an event, or that it closed
+    enum Heard { Reply(usize), Event(String), Closed }
+
+    fn listen(pipe: std::fs::File) -> std::sync::mpsc::Receiver<Heard> {
         use std::io::BufRead;
         let (tx, rx) = std::sync::mpsc::channel();
-        let id = format!("\"request_id\":{last}");
         std::thread::spawn(move || {
             for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
-                // Events come on the pipe too; a reply is {"data":…,"request_id":<n>,"error":…}
-                if let Some(at) = line.find(&id) {
-                    if !line[at + id.len()..].starts_with(|c: char| c.is_ascii_digit()) {
-                        let _ = tx.send(());
-                        return;
-                    }
+                // A reply is {"data":…,"request_id":<n>,"error":…}, an event {"event":"<name>",…}
+                let heard = if let Some(at) = line.find("\"request_id\":") {
+                    let digits: String = line[at + 13..].chars().take_while(|c| c.is_ascii_digit()).collect();
+                    digits.parse().ok().map(Heard::Reply)
+                } else if let Some(at) = line.find("\"event\":\"") {
+                    line[at + 9..].split('"').next().map(|e| Heard::Event(e.to_string()))
+                } else {
+                    None
+                };
+                if let Some(h) = heard {
+                    if tx.send(h).is_err() { return; }
                 }
             }
+            let _ = tx.send(Heard::Closed);
         });
-        rx.recv_timeout(ANSWER_WAIT).is_ok()
+        rx
+    }
+
+    // Whether mpv took the commands and plays them. A player quitting keeps its pipe a while (its plugins finishing
+    // what they do) and answers a loadfile, then exits without playing it: when one takes the place of what plays,
+    // its start (the start-file event) is waited for, and the pipe closing first means it's gone
+    fn answered(heard: &std::sync::mpsc::Receiver<Heard>, last: usize, replaces: bool) -> bool {
+        let until = std::time::Instant::now() + ANSWER_WAIT;
+        let (mut replied, mut started) = (false, false);
+        loop {
+            let Some(left) = until.checked_duration_since(std::time::Instant::now()) else {
+                // A player busy loading (a deferred hook on a NAS) may start the file later: it's alive
+                return replied;
+            };
+            match heard.recv_timeout(left) {
+                Ok(Heard::Reply(id)) if id == last => {
+                    replied = true;
+                    if !replaces || started { return true; }
+                }
+                Ok(Heard::Event(e)) if e == "start-file" => {
+                    started = true;
+                    if replied { return true; }
+                }
+                Ok(Heard::Closed) => return false,
+                Ok(_) => {}
+                Err(_) => return replied,
+            }
+        }
     }
 }
 
@@ -374,6 +416,10 @@ mod win {
         fn IsIconic(window: Handle) -> i32;
         fn ShowWindow(window: Handle, command: i32) -> i32;
         fn SetForegroundWindow(window: Handle) -> i32;
+        fn AllowSetForegroundWindow(process: u32) -> i32;
+        fn FindWindowExW(parent: Handle, after: Handle, class: *const u16, title: *const u16) -> Handle;
+        fn GetWindowThreadProcessId(window: Handle, process: *mut u32) -> u32;
+        fn IsWindowVisible(window: Handle) -> i32;
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -406,6 +452,38 @@ mod win {
                 ShowWindow(window, SW_RESTORE);
             }
             SetForegroundWindow(window);
+        }
+    }
+
+    // The process may bring its windows to the front (this one can: the app the user clicked in started it)
+    pub fn allow_foreground(process: u32) {
+        unsafe { AllowSetForegroundWindow(process) };
+    }
+
+    // The process's mpv window to the front, once it's shown (waited for, a while at most)
+    pub fn focus_window_of(process: u32, wait: std::time::Duration) {
+        let class = wide("mpv");
+        let until = std::time::Instant::now() + wait;
+        while std::time::Instant::now() < until {
+            unsafe {
+                let mut window = std::ptr::null_mut();
+                loop {
+                    window = FindWindowExW(std::ptr::null_mut(), window, class.as_ptr(), std::ptr::null());
+                    if window.is_null() {
+                        break;
+                    }
+                    let mut owner = 0u32;
+                    GetWindowThreadProcessId(window, &mut owner);
+                    if owner == process && IsWindowVisible(window) != 0 {
+                        if IsIconic(window) != 0 {
+                            ShowWindow(window, SW_RESTORE);
+                        }
+                        SetForegroundWindow(window);
+                        return;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
