@@ -380,7 +380,6 @@ function M.new(ws, fs)
     function self.footage(project)
         local out = {}
         local seen = {}
-        local top = project
         local function walk(dir, rel, depth)
             local files, subdirs = entries(dir)
             for _, e in ipairs(files) do
@@ -397,7 +396,8 @@ function M.new(ws, fs)
             end
             if depth >= 8 then return end
             for _, name in ipairs(subdirs) do
-                if not (depth == 0 and dir == top and OWN_FOLDERS[name:lower()]) then
+                -- A project's own folders at the top of a location aren't footage (this project's, or the one there before)
+                if not (depth == 0 and OWN_FOLDERS[name:lower()]) then
                     walk(ws.join(dir, name), rel and (rel .. "/" .. name) or name, depth + 1)
                 end
             end
