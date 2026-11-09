@@ -272,7 +272,7 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
--- The red dot and the time recorded so far, in the corner of the video
+-- The red dot and the time recorded so far, in the video's top right corner (mpv's messages are top left)
 local function draw_rec()
     if not rec_overlay then return end
     local a = area()
@@ -287,8 +287,8 @@ local function draw_rec()
     rec_shown = key
     local s = mp.get_property_number("display-hidpi-scale") or 1
     rec_overlay.res_x, rec_overlay.res_y = d.w or 0, d.h or 0
-    rec_overlay.data = string.format("{\\an7\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
-                                     math.floor(a.x + 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
+    rec_overlay.data = string.format("{\\an9\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
+                                     math.floor(a.x + a.w - 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
                                      math.floor(18 * s), text)
     rec_overlay:update()
 end

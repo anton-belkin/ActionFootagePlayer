@@ -2171,6 +2171,12 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
     let kind = if mode.keys.is_some() { "reframe" } else { "360" };
+    // A reframe's frame in its name when it isn't 16:9 (_9x16, _1x1), so the shapes of one part don't replace each other
+    let shape = {
+        let (w, h) = mode.size;
+        let g = (1..=w.min(h)).rev().find(|g| w % g == 0 && h % g == 0).unwrap_or(1);
+        if kind == "reframe" && w * 9 != h * 16 { format!("_{}x{}", w / g, h / g) } else { String::new() }
+    };
     // The recording: what it follows, unless --heading says otherwise, and the span recorded unless --from/--to do
     let recording = match &mode.keys {
         Some(Head360::Recording) => Some(vs_gyroflow::reframe::Recording::read(&path)?),
@@ -2180,7 +2186,7 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
         (Some(r), None, None) => { let (a, b) = r.span(); format!("_{a:.1}-{b:.1}s") }
         _ => range,
     };
-    let out_path = opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}_{kind}{range}.mp4")));
+    let out_path = opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}_{kind}{shape}{range}.mp4")));
     if out_path.exists() && !opts.force { return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display()))); }
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
 

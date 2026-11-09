@@ -1,6 +1,6 @@
 # 360°: a flat video by looking around
 
-Design, not built. Written 2026-11-09. Follows [the 360 architecture](360-cameras.md) and its plan's step 7, which
+Design written 2026-11-09; step 1 (recording, playback, Export flat) built the same day, see [Steps](#steps). Follows [the 360 architecture](360-cameras.md) and its plan's step 7, which
 already exports a flat view along keyframes of the head (`gyroflow-export --reframe`).
 
 ## In short
@@ -331,6 +331,53 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 
 1. **Recording and playback, no tidying:** Record, Stop, punch-in, undo and the sidecar; Play the recording with the
    raw samples; Export flat through `--reframe recording`. That's already a usable feature.
+
+   **Built** (branch `claude/360-reframe-step1-3fbcd7`, 2026-11-09):
+   - `mpv/scripts/view360/recording.lua`: takes, punch-in, undo (20 takes, in memory: not in the file), RDP thinning
+     (0.05°, the FOV as 100·ln), the head at any time. A sample's yaw is unwrapped within a take, so playback never
+     turns the long way round. In a part the head is a straight line between samples (the FOV in its log) and a
+     projection change is a cut at the later sample. Held before the first part (its start), **between parts (the
+     end of the one before)** and after the last (its end). Where a take cuts into a part, the remains end 1 ms before
+     it and start 1 ms after it, with the head interpolated there, so parts never share a time.
+   - `view360/main.lua`: Alt+r (`view360/record`), Alt+Shift+r (`view360/play-recording`), script messages
+     `view360-record`, `-play-recording`, `-undo`, `-clear`, `-frame`, `-size`. A sample per `time-pos` change during a
+     take. Pausing, a seek (the event, or a jump of more than 1 s), the clip's end and leaving the view end a take.
+     The red dot and the time are in the video's top **right** corner: mpv's messages take the top left. Follows is
+     locked during a take and while the recording plays (Alt+h and the panel refuse, saying why); a take under another
+     Follows is refused ("The recording follows the camera: switch to it, or clear the recording"). Playing the
+     recording sets Follows to the recording's. Recording is for a 360 camera's own file only, not a moment playing.
+   - Kept in `<clip>.afp.json` as `view360.recording` (`sidecar.lua` now keeps a file that holds only that).
+   - The 360° tab: *Flat video* under *Follows*, with Record / Stop · time, "Recorded … · N parts" (parts that touch
+     count as one), Play the recording, Frame (16:9, 9:16, 1:1) and Size (1080p, 4K), Export flat and **Export 360°**
+     (from step 3), Show the last export, Undo the last take and Clear the recording (a second click within 4 s
+     clears). Shown for stamped clips only.
+   - `export.lua`: `export flat` and `export 360` run `gyroflow-export` in the same job (progress, Cancel, Show the last
+     export), with the look's `--curve` and `--sdr`/`--nbcu`, the A–B part when it's set. Not through the workspace
+     plugin's naming (Shift+E's `_Exports`): the file goes where `gyroflow-export` puts it (`stabilized/` by the clip).
+   - `vs-gyroflow/src/reframe.rs`: the recording read from the sidecar and the head at a time, the same rules as the
+     Lua; `export360::HeadPath` (keys or the recording). `gyroflow-export --reframe recording`: what it follows (over
+     `--heading`), the span from the first sample to the last unless `--from`/`--to`, a projection per sample. The 360
+     exports now take the look: a log curve's LUT to HLG, or to Rec.709 (`--sdr`, `--nbcu`); colors as recorded
+     otherwise. A reframe that isn't 16:9 has its shape in the name (`_reframe_9x16_…`), so two shapes of one part
+     don't replace each other.
+   - **The FOV of 9:16 and 1:1** is as in the player: across a 16:9 picture at the frame's height. A 9:16 export is
+     the middle strip of what was on screen at the same scale (what the outline of step 5 will draw), not the recorded
+     FOV across its own width as [Export flat](#export-flat-the-360-tab) says. That reading would show far more above
+     and below than was seen, stretched in a rectilinear view.
+
+   **Checked:** `tests/view360_test.lua` (synthetic streams: thinning within the tolerance, the wrap, punch-in, undo,
+   holds, projection cuts, the file round trip; the script over a fake mpv: a take ended by a pause, a punch-in ended
+   by a seek, Follows locked, a take under another refused, a gesture taking the view back, undo, clear, leaving the
+   view), `tests/sidecar_test.lua`, the Rust tests in `reframe.rs`. On screen, the X5 sample, in a copy of the app
+   with this branch's scripts and binaries, driven over IPC (the head turned by script messages and an IPC mouse drag,
+   not by hand): two takes, the second punched into the first, a third undone; the file beside the clip; played back
+   with the recorded head per frame; a drag pausing it; Export flat at 16:9 and 9:16 from the panel's job, the frames
+   matching what was looked at; the recording read back after reopening; Alt+r and Alt+Shift+r. Headless: `--360` and
+   the look path (`--curve ilog`, with and without `--nbcu`) on a 1 s part.
+
+   **Open:** recording with real trackpad gestures by hand (only IPC-driven so far); a stitched clip (recording works
+   but its export needs the 360 camera's file, so the part isn't shown); the named export into `_Exports` with a link;
+   I-Log clips' look checked by eye (only the pipeline was run); the recording dot's size on a non-Retina screen.
 2. **Smooth the turns and Level**, in `reframe.rs`, with the preview through `gyroflow-probe --reframe`.
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
