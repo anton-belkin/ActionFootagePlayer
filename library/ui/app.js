@@ -678,8 +678,9 @@ function renderSide() {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
-      '<span class="sub wrap">The ones without a preview, removed ones too. Into _Clips' + (info.clips_flat ? " itself." : ", in the clips’ folders.") + '</span>' +
-      '<label class="switch"><input type="checkbox" id="clips_flat" data-a="setting" data-v="clips_flat"' + (info.clips_flat ? " checked" : "") + '>All clip previews in _Clips itself</label>' +
+      '<span class="sub wrap">The ones without a preview, removed ones too. A clip identical to another (the same file twice) gets its preview in _Clips/Duplicates, by where it is.</span>' +
+      '<div class="field"><label class="sub" for="clips_layout">Into _Clips</label><select id="clips_layout" data-a="layout_set">' +
+      [["tree", "As the footage’s folders"], ["trips", "By trips: clips at most 2 days apart"], ["flat", "All in _Clips itself"]].map((o) => '<option value="' + o[0] + '"' + ((info.clips_layout || (info.clips_flat ? "flat" : "tree")) === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select></div>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="moments">Moments of the marks</button></div>' +
       '<label class="switch"><input type="checkbox" id="moments_alone" data-a="setting" data-v="moments_alone"' + (info.moments_alone ? " checked" : "") + '>Stabilized on their own, not as part of the clip</label>' +
       '<div class="field"><label class="sub" for="pkind">Photos as</label><select id="pkind" data-a="pkind"><option value="no"' + (S.photoKind === "no" ? " selected" : "") + '>Stills</option>' +
@@ -1688,6 +1689,7 @@ document.addEventListener("change", (e) => {
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
   else if (a === "look") S.exportSdr = el.value === "sdr";
+  else if (a === "layout_set") { call("set_setting", { key: "clips_layout", value: el.value }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
   else if (a === "setting") { call("set_setting", { key: v, value: el.checked }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
   else return;
   renderAll();

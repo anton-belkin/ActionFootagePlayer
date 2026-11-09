@@ -586,6 +586,17 @@ Anton, 2026-11-09:
   marks, transform, its copies and own file; a moment's clip and times, renders, files; folders and several items
   summed up. A moment, photo or export has **Go to the footage** (its clip in Footage, selected); a clip has **Show
   moments and photos**, a folder of its own with them in the order they are in the clip (up goes back to the clip).
+- **Third round** (2026-11-09). A photo keeps its clip in itself: `afp:link` in its XMP (the player's namespace,
+  `https://actionfootageplayer.ch/ns/1.0/`, the same JSON a moment keeps as its MP4 key, kind `photo`, `t` the frame's
+  time), written by gyroflow-export in a JPEG and by afp-photo in a HEIC (its image data copied as it is: the gain map
+  and the Live Photo's identifier stay). Renamed or moved, a photo is still its clip's; older ones go by their name. A
+  clip's folder shows its marks too, each before what was made of it. **Export the library as JSON…** (the project's
+  menu) writes everything the library keeps, in the open: the project's file and this computer's additions, the
+  locations and their pointer files, each clip's own file and what the clip says of itself, every MP4 key of the
+  moments, previews, renders and exports, every photo's link. Clip previews: a clip identical to another (the same
+  size and fingerprint) gets its preview in `_Clips/Duplicates/<its location>/<its folders>`, the first location's
+  copy keeping its place; and a third layout, **by trips** (clips at most 2 days apart: `2026-10 October 20-26`), new
+  previews going into the folder their trip's are in already.
 
 ## Open questions
 

@@ -265,6 +265,7 @@ end
 local extras = nil
 -- The project's settings (further down)
 local settings
+local clips_layout, fingerprint
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
 -- Input and transform (transform.lua, docs/moments-and-workspaces.md "Source and transform"): the source's input is
@@ -1254,7 +1255,7 @@ end
 -- Where a new preview goes: at the clip's path in _Clips/ (flat: in _Clips/ itself). A name another clip's preview has
 -- gets the clip's folder in parentheses ("GX010123 (100GOPRO)"), then a number
 local function new_preview_path(root, c, flat)
-    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(c.relative, flat)))
+    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(c.preview_rel or moments_lib.clip_preview_relative(c.relative, flat)))
     if not fs.is_file(file) then return file end
     local raw = fs.read_link(file)
     local l = raw and utils.parse_json(raw)
@@ -1340,12 +1341,70 @@ local function start_clips(root, queue, what)
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
     clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
-                  flat = pf.read(root).settings.clips_flat == true }
+                  flat = clips_layout(root) == "flat" }
     state.clips = { done = 0, total = #queue }
     publish()
     draw_progress()
     mp.osd_message(what, 3)
     next_clip()
+end
+
+-- How the clip previews are laid out in _Clips (the project file's settings): "tree" (as the footage is), "flat"
+-- (all in _Clips itself), "trips" (in a folder per trip: clips at most 2 days apart)
+clips_layout = function(root)
+    local s = pf.read(root).settings or {}
+    if s.clips_layout == "flat" or s.clips_layout == "trips" or s.clips_layout == "tree" then return s.clips_layout end
+    return s.clips_flat == true and "flat" or "tree"
+end
+
+-- Where each of `queue`'s previews goes, out of all the project's clips (`all`): an identical clip's (the same size
+-- and fingerprint as one before it, or as one that has its preview) into _Clips/Duplicates/, under its location's name
+-- and its folders there, as Sources show them; else by trips when that's the layout, into the folder its trip's
+-- previews are in already (renamed, it's kept), else the trip's own. Sets c.preview_rel, c.duplicate_of
+local function place_previews(root, all, queue)
+    local by_size = {}
+    for _, c in ipairs(all) do
+        if c.size then local k = tostring(c.size); by_size[k] = by_size[k] or {}; table.insert(by_size[k], c) end
+    end
+    -- The one kept in place: the first location's (the project's order), then the first in the tree
+    for _, list in pairs(by_size) do
+        table.sort(list, function(x, y) if (x.li or 0) ~= (y.li or 0) then return (x.li or 0) < (y.li or 0) end return x.relative < y.relative end)
+    end
+    local hashes = {}
+    local function hash(c)
+        if hashes[c.file] == nil then hashes[c.file] = fingerprint(c.file) or false end
+        return hashes[c.file]
+    end
+    for _, c in ipairs(queue) do
+        local mates = c.size and by_size[tostring(c.size)]
+        if mates and #mates > 1 and hash(c) then
+            local first
+            for _, m in ipairs(mates) do
+                if m.relative ~= c.relative and preview_for(m.relative, m.size) and hash(m) == hash(c) then first = m break end
+            end
+            if not first then for _, m in ipairs(mates) do if hash(m) == hash(c) then first = m break end end end
+            if first and first.relative ~= c.relative then c.duplicate_of = first.relative end
+        end
+    end
+    local trips = clips_layout(root) == "trips"
+    local folder_of = {}
+    if trips then
+        moments_lib.trips(all)
+        local clips_dir = ws.join(root, moments_lib.CLIPS)
+        for _, c in ipairs(all) do
+            local p = c.trip and not folder_of[c.trip] and preview_for(c.relative, c.size)
+            local rel = p and p:sub(1, #clips_dir + 1) == clips_dir .. (windows and "\\" or "/") and p:sub(#clips_dir + 2)
+            local top = rel and rel:match("^([^/\\]+)[/\\]")
+            if top and top ~= "Duplicates" then folder_of[c.trip] = top end
+        end
+    end
+    for _, c in ipairs(queue) do
+        if c.duplicate_of then
+            c.preview_rel = "Duplicates/" .. moments_lib.safe_name(c.loc or "Location") .. "/" .. moments_lib.clip_preview_relative(c.loc_rel or c.relative, false)
+        elseif trips and c.trip then
+            c.preview_rel = (folder_of[c.trip] or c.trip) .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
+        end
+    end
 end
 
 -- The project's clips without a preview made (again: the ones made and since deleted)
@@ -1359,7 +1418,8 @@ local function make_clips(again, root)
     end
     local made = read_made(root)
     local queue = {}
-    for _, c in ipairs(moments.footage(root)) do
+    local all = moments.footage(root)
+    for _, c in ipairs(all) do
         local listed = made[moments_lib.made_line(c.relative, c.size)]
         if batch_only then
             -- Chosen ones: each that has no preview now, removed ones too
@@ -1373,7 +1433,10 @@ local function make_clips(again, root)
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
         return mp.osd_message(why, 4)
     end
-    start_clips(root, queue, "Clip previews: " .. #queue .. (#queue == 1 and " clip" or " clips") .. ", in the background")
+    place_previews(root, all, queue)
+    local dups = 0
+    for _, c in ipairs(queue) do if c.duplicate_of then dups = dups + 1 end end
+    start_clips(root, queue, "Clip previews: " .. #queue .. (dups > 0 and (", " .. dups .. " of them identical to another clip: into _Clips/Duplicates") or "") .. (#queue == 1 and " clip" or " clips") .. ", in the background")
 end
 
 mp.register_script_message("clips-stop", function()
@@ -1523,7 +1586,7 @@ local function fingerprint_of(r)
     local h = r and r.status == 0 and type(r.stdout) == "string" and r.stdout:match("^(%x+)")
     return h and #h == 64 and h or nil
 end
-local function fingerprint(file)
+fingerprint = function(file)
     local cmd = fingerprint_args(file)
     return cmd and fingerprint_of(mp.command_native(cmd)) or nil
 end

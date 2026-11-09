@@ -195,5 +195,25 @@ do
     expect("loose: none", #lp({ 10 }, { { 0, 60 } }, 60, 2), 0)
 end
 
+-- Trips: clips at most 2 days apart are one, named by their year, month and days
+do
+    local function at(y, mo, d) return os.time({ year = y, month = mo, day = d, hour = 12 }) end
+    local tn = moments_lib.trip_name
+    expect("trip: one day", tn(at(2026, 10, 20), at(2026, 10, 20)), "2026-10 October 20")
+    expect("trip: days", tn(at(2026, 10, 20), at(2026, 10, 26)), "2026-10 October 20-26")
+    expect("trip: months", tn(at(2026, 9, 28), at(2026, 10, 3)), "2026-09 September 28 - October 3")
+    expect("trip: years", tn(at(2026, 12, 28), at(2027, 1, 2)), "2026-12 December 28 - January 2, 2027")
+    local clips = {
+        { relative = "A/DJI_20261020101010_0001_D.MP4" }, { relative = "A/DJI_20261022090000_0002_D.MP4" },
+        { relative = "B/DJI_20261023150000_0003_D.MP4" }, { relative = "B/DJI_20261101100000_0004_D.MP4" },
+        { relative = "GoPro/GX010123.MP4", mtime = at(2026, 11, 2) }, { relative = "x/no time.MP4" },
+    }
+    moments_lib.trips(clips)
+    expect("trips: first", clips[1].trip, "2026-10 October 20-23")
+    expect("trips: 2 days on", clips[3].trip, "2026-10 October 20-23")
+    expect("trips: by the file's time too", clips[5].trip, "2026-11 November 1-2")
+    expect("trips: no time", clips[6].trip, nil)
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
