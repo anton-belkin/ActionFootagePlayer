@@ -679,14 +679,36 @@ cleared, the decoded pixels the same.
 Built (2026-11-10): the Library writes a photo's tags with afp-meta and reads them from the photo; tags an older
 version kept in `photo_tags` are shown with the photo's own and go into it at its next change of tags.
 
-### What changes in the code
+### What was built (2026-11-10, PR #182)
 
-- Finding a clip by identity, with the cache and the repair's criteria: the three twins (`workspace.lua`,
-  vs-gyroflow's `workspace.rs`, the Library's `locations.rs`) and their shared cases (`tests/workspace_cases.txt`).
-- The player's moments of a clip by identity; the Library's index scanning the whole project folder.
-- Batches writing into `Generated/` with the layout from the dialog; `clips_made`, `stills_made` and the settings
-  dropped from `projectfile.lua` and the Library; `clips_failed` to the log.
-- Photo tags into XMP (afp-photo, the Library).
+- **Finding by identity**: the player (`moments.lua`'s original, `link.lua`'s created from `moov/mvhd`) and the Library
+  (`checks.rs`'s find_clip, `index.rs`) look for a link's clip at its hint, then where this computer last found it
+  (the player's cache), then among the footage of its size: the fingerprint deciding, its name first; without one,
+  Anton's steps. Found elsewhere, the hint is written into the link (the player as it opens a moment, clip preview or
+  export; the Library as it reads Moments). Find moved files goes down to size alone and offers several to choose.
+- **A clip's moments** by fingerprint, else size and creation time, else (older links) path and size.
+- **The main own file** of a clip in several places: the rule above, in `workspace.lua`, `workspace.rs` and the
+  Library's `tags.rs`; the shared cases test it (`tests/workspace_cases.txt`). The player says once that another one
+  exists and saves to the main one.
+- **"I never rename my footage"**: Project settings → On this Mac (this computer's file for the project).
+- **Own files anywhere**: the player's scans (moments, clip previews, exports, photos of marks) and the Library's views
+  read the whole project folder: in its own folders (`_…`, `Generated`) and outside its footage every video and photo,
+  among its footage only `.afplink.mp4`. The Library's Moments, Photos and Exports show the project folder's own
+  folders (paths from the project's folder: `_Moments/Reef`, `Generated/2026-11-10 14-32 Moments`), empty folders too;
+  Footage shows clips as their previews are arranged, wherever. Rename, delete and New folder work there.
+- **Generated/**: every run (clip previews, moments and photos of marks, exports) writes into
+  `Generated/<date> <time> <what>/`; a moment, photo or export made by hand in the player into
+  `Generated/<date> Moments|Photos|Exports/`. Clip previews' layout and "stabilized on their own" are chosen in the
+  Library for each run (remembered on this computer); in the player, "on their own" is this computer's.
+- **Nothing more in Project.afproject**: no `clips_made`, `stills_made`, `clips_failed`, `moment_names` or settings
+  written (empty lists of before aren't written back either). Photos of marks made already are found by their links;
+  name suggestions are the moments' names; failures are in the player's log and the batch's status. Renders stay in
+  `_Renders/`, at the moment's path in `_Moments` or, elsewhere, in the project's folder.
+- **Photo tags** in the photo's XMP (afp-meta), **afp-meta** itself, and the Library **watching** the project.
+
+Checked with unit tests (luajit: 12 suites; Rust: the Library's 16, vs-gyroflow's workspace cases and XMP) and the
+Library's page against a mock in jsdom. Not checked yet: the player and the Library live on a real project (the
+player's batch writing into `Generated/`, a moment opened whose clip moved).
 
 ## Steps
 

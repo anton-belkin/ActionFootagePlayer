@@ -511,8 +511,8 @@ local function project_part(u, x, w, y)
     if not ws.project then
         u:text(ix, y + 8 * s, "No project yet", { size = 14, bold = true })
         y = y + 22 * s
-        y = u:caption(ix, iw, y, "A project is a trip's folder. In it the player makes the folders _Moments, _Clips and _Exports, "
-            .. "and the file Project.afproject, which opens the trip in Action Footage Library. A clip's own files, its marks and Gyroflow project, "
+        y = u:caption(ix, iw, y, "A project is a trip's folder. What the player makes goes into its Generated folder, from where you move it "
+            .. "anywhere in the project; and the file Project.afproject, which opens the trip in Action Footage Library. A clip's own files, its marks and Gyroflow project, "
             .. "stay beside the clip. Every folder inside the project is part of it. Marks need no project: they're "
             .. "kept beside the clip anyway.")
         local choices = ws.project_choices or {}
@@ -1329,9 +1329,10 @@ local function crop_part(u, x, w, y)
     local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
               or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
               or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-    -- Where gyroflow-export puts it: the project's _Stills, else stabilized/ next to the clip
+    -- Where gyroflow-export puts it: the project's Generated/<date> Photos (the gyroflow plugin says), else
+    -- stabilized/ next to the clip
     local ws = state("workspace")
-    local where = type(ws) == "table" and ws.project and "the project's _Stills folder" or "the stabilized folder by the clip"
+    local where = type(ws) == "table" and ws.project and "the project's Generated folder" or "the stabilized folder by the clip"
     y = u:caption(x, w, y, what .. " in " .. where .. ": the SDR look, brighter where the screen has HDR")
     y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
     return whole_video(y)

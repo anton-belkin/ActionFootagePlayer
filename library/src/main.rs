@@ -8,8 +8,8 @@
 //
 // It plays and renders nothing itself: each batch is ActionFootagePlayer run with no window (the workspace plugin's
 // batch mode, AFP_BATCH), which makes them as the player does, with its plugins and settings, and writes how far it
-// is to a status file this reads. The project's settings for the batches (clip previews in _Clips/ itself, new
-// moments stabilized on their own) are in Project.afproject, which the player reads too.
+// is to a status file this reads. What a batch makes goes into Generated/<date> <time> <what>/, laid out as chosen for
+// that run (docs/library-management.md §8); nothing of it is kept in Project.afproject.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -264,9 +264,9 @@ fn project_info(root: &Path) -> ProjectInfo {
         moments_alone: flag("moments_alone"),
         clips_made: doc.get("clips_made").and_then(Value::as_array).map_or(0, |a| a.len() as u64),
         clips_failed: failed,
-        clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8),
+        clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
-        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 2),
+        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 2) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
     }
 }
@@ -751,7 +751,7 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     project_id(root)?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();
-    for name in [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache"] {
+    for name in [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED] {
         let from = root.join(name);
         if !from.exists() { continue; }
         let to = dest.join(name);
@@ -941,7 +941,11 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
     let name = good_name(&name)?;
     let from = PathBuf::from(&path);
-    if !from.starts_with(&root) || !["_Moments", "_Clips", "_Stills", "_Exports"].iter().any(|d| from.starts_with(root.join(d))) {
+    // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
+    // footage (a project next to it), only a link file (a moment or clip preview beside its clip)
+    let footage = index::footage_dirs(&root);
+    let linked = kind != "folder" && index::link(&from).is_some();
+    if from == root || !from.starts_with(&root) || !(index::own_area(&root, &from, &footage) || linked) {
         return Err("Footage is renamed in Finder (Find moved files then updates what points at it). Here: moments, clip previews, photos, exports and their folders".into());
     }
     let dir = from.parent().ok_or("no folder")?.to_path_buf();
@@ -953,8 +957,8 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     if kind == "folder" {
         let to = dir.join(&name);
         mv(&from, &to)?;
-        // The moments' renders follow their folder
-        if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+        // The moments' renders follow their folder (_Renders/<its path>, a folder of _Moments by its path there)
+        if let Ok(rel) = from.strip_prefix(root.join("_Moments")).or_else(|_| from.strip_prefix(&root)) {
             let r = root.join("_Renders").join(rel);
             if r.is_dir() { let _ = std::fs::rename(&r, r.with_file_name(&name)); }
         }
@@ -962,12 +966,14 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     }
     match kind.as_str() {
         "moment" => {
-            let old = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname).to_string();
-            let to = dir.join(format!("{name}{}", index::LINK_EXT));
+            let ext = if fname.to_lowercase().ends_with(index::LINK_EXT) { fname[fname.len() - index::LINK_EXT.len()..].to_string() }
+                else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
+            let old = fname[..fname.len() - ext.len()].to_string();
+            let to = dir.join(format!("{name}{ext}"));
             mv(&from, &to)?;
             let g = dir.join(format!("{old}.gyroflow"));
             if g.is_file() { let _ = std::fs::rename(&g, dir.join(format!("{name}.gyroflow"))); }
-            if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+            if let Ok(rel) = from.strip_prefix(&root) {
                 let rel = rel.to_string_lossy().replace('\\', "/");
                 for p in index::RENDER_PROFILES {
                     let r = index::render_path(&root, &rel, p);
@@ -1037,24 +1043,27 @@ fn to_trash(file: &Path) -> Result<String, String> {
 fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
-    let own = ["_Moments", "_Clips", "_Stills", "_Exports"];
+    let footage = index::footage_dirs(&root);
     let (mut done, mut problems) = (0usize, Vec::<String>::new());
     let mut went = std::collections::BTreeSet::new();
     for it in &items {
         let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
         let kind = it["kind"].as_str().unwrap_or("");
-        if !path.starts_with(&root) || !own.iter().any(|d| path.starts_with(root.join(d)) && path != root.join(d)) {
-            problems.push(format!("{}: not in the project's own folders. Footage is deleted in Finder", path.display()));
+        // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among
+        // its footage, only a link file
+        let linked = kind != "folder" && index::link(&path).is_some();
+        if path == root || !path.starts_with(&root) || !(index::own_area(&root, &path, &footage) || linked) || (kind == "folder" && footage.iter().any(|d| d.starts_with(&path))) {
+            problems.push(format!("{}: not the project's own. Footage is deleted in Finder", path.display()));
             continue;
         }
         if !path.exists() { continue; }
         let mut also: Vec<PathBuf> = Vec::new();
         let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        if let Ok(rel) = path.strip_prefix(root.join("_Moments")) {
+        if let Ok(rel) = path.strip_prefix(root.join("_Moments")).or_else(|_| path.strip_prefix(&root)) {
             let rel = rel.to_string_lossy().replace('\\', "/");
             if kind == "folder" { also.push(root.join("_Renders").join(&rel)); } else if kind == "moment" {
-                let stem = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname);
+                let stem = fname.strip_suffix(index::LINK_EXT).or_else(|| fname.rsplit_once('.').map(|(s, _)| s)).unwrap_or(&fname);
                 also.push(dir.join(format!("{stem}.gyroflow")));
                 for p in index::RENDER_PROFILES { also.push(index::render_path(&root, &rel, p)); }
             }
@@ -1178,9 +1187,9 @@ fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let base = match view.as_str() { "footage" => "_Clips", "moments" => "_Moments", "stills" => "_Stills", "exports" => "_Exports",
-                                     _ => return Err("Folders of the sources are made in Finder".into()) };
-    let mut dir = root.join(base);
+    // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
+    if !matches!(view.as_str(), "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
+    let mut dir = root.clone();
     for p in parent.split('/').filter(|p| !p.is_empty() && *p != "..") { dir.push(p); }
     let mut name = "untitled folder".to_string();
     let mut n = 1;
@@ -1316,6 +1325,13 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
     if let Some(o) = &only { request["only"] = json!(o); }
     if kind == "photos" { request["photo"] = json!(photo); }
     if kind == "export" { request["sdr"] = json!(sdr); }
+    // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
+    // whether new moments are stabilized on their own
+    if kind == "clips" || kind == "clips-again" {
+        let layout = options.get("layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).unwrap_or("tree");
+        request["layout"] = json!(layout);
+    }
+    if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
             .filter(|p| index::RENDER_PROFILES.contains(p)).map(str::to_string).collect();
@@ -1369,7 +1385,7 @@ fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), S
 fn reveal(shared: State<Shared>, what: Option<String>) {
     let Some(root) = shared.lock().unwrap().project.clone() else { return };
     let path = match what.as_deref() {
-        Some(sub @ ("_Clips" | "_Moments" | "_Stills" | "_Exports")) if root.join(sub).is_dir() => root.join(sub),
+        Some(sub @ ("_Clips" | "_Moments" | "_Stills" | "_Exports" | "Generated")) if root.join(sub).is_dir() => root.join(sub),
         _ => root,
     };
     let _ = if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }

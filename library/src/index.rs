@@ -5,13 +5,16 @@
 // color, motion data, the camera's marks: gyroflow-probe --library, kept by that tool per file and here per run).
 //
 // The views:
-//   footage  the project's videos, but its own folders (_Moments, _Clips, _Exports, _Stills, the old ones), hidden
-//            ones and link files: each with its own file (<clip>.afp.json: marks, input, its view), whether it has a
-//            Gyroflow project beside it, and its clip preview (_Clips/)
-//   moments  _Moments/**.afplink.mp4, each with its link (the part of which clip, its own transform)
-//   stills   _Stills/: photos (a Live Photo's .mov beside its still is the same photo)
-//   exports  _Exports/: videos, with their link when they have one
-// Paths in a view are its tree's: "Day 1/A.MP4" for footage, "Reef/Turtle.afplink.mp4" in moments.
+//   footage  the project's videos, but its own folders (_Moments, _Clips, Generated…, the old ones), hidden ones and
+//            link files: each with its own file (<clip>.afp.json: marks, input, its view), whether it has a Gyroflow
+//            project beside it, and its clip preview (wherever it is in the project's folder)
+//   moments  the moments, each with its link (the part of which clip, its own transform)
+//   stills   the photos (a Live Photo's .mov beside its still is the same photo)
+//   exports  the exports, with their link
+// Since 0.11 (docs/library-management.md §8) the project's own files are wherever they were put in its folder, found
+// by the link inside: Generated/<date> <time> <what>/ where a run made them, _Moments/ and the like from before, any
+// folder of one's own. Paths in footage are its tree's ("Day 1/A.MP4"); in the others the project folder's
+// ("Generated/2026-11-10 14-32 Moments/Turtle.afplink.mp4", "_Moments/Reef/Turtle.afplink.mp4").
 
 use serde_json::{ json, Value };
 use std::collections::{ HashMap, HashSet, VecDeque };
@@ -22,12 +25,57 @@ use std::process::{ Command, Stdio };
 use std::sync::{ Arc, Mutex };
 
 pub const LINK_EXT: &str = ".afplink.mp4";
-const OWN_FOLDERS: [&str; 9] = ["_moments", "_clips", "_exports", "_stills", "moments", "clips", "exports", "stabilized", "_actionfootageplayer"];
-const MAX_DEPTH: usize = 8;
+pub const OWN_FOLDERS: [&str; 13] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
+                                     "_actionfootageplayer", "generated", "#recycle"];
+/// Where what's made goes since 0.11 (docs/library-management.md §8): Generated/<date> <time> <what>/
+pub const GENERATED: &str = "Generated";
 
-pub fn view_dir(view: &str) -> Option<&'static str> {
-    match view { "footage" => Some(""), "moments" => Some("_Moments"), "stills" => Some("_Stills"), "exports" => Some("_Exports"), _ => None }
+/// The footage's folders inside the project's own folder (a project next to its footage): its locations there
+pub fn footage_dirs(root: &Path) -> Vec<PathBuf> {
+    crate::locations::locations(root, &crate::locations::mounts()).into_iter().filter_map(|l| l.dir).filter(|d| d.starts_with(root)).collect()
 }
+
+/// Whether a path in the project's folder is the project's own (its files can be anything there): in one of its own
+/// folders at its top (_Moments, Generated…), or anywhere that isn't among its footage
+pub fn own_area(root: &Path, path: &Path, footage: &[PathBuf]) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else { return false };
+    let top = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).unwrap_or_default();
+    if top.starts_with('_') || OWN_FOLDERS.contains(&top.as_str()) { return true; }
+    !footage.iter().any(|d| path.starts_with(d))
+}
+
+/// The project's own files of a view's kind, wherever they are in its folder (docs/library-management.md §8): every
+/// file of the project's folder that `keep` takes (its path in the project, its full path, whether it's in the own
+/// area), and the folders they're in, with the empty folders (a folder just made, to move things into). Among the footage only `.afplink.mp4` files are offered (not every clip read)
+fn own_files(root: &Path, keep: &mut dyn FnMut(&str, &Path, bool) -> bool) -> (Vec<(String, u64, i64)>, Vec<String>) {
+    let footage = footage_dirs(root);
+    let mut files = Vec::new();
+    let mut dirs: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let entries = walk(root, &|_, lower| lower == "#recycle");
+    // Folders with anything in them (a file, or a folder: the walk lists a folder before what's in it)
+    let full: HashSet<String> = entries.iter().map(|e| parent_of(&e.0)).collect();
+    for (rel, is_dir, _, _) in &entries {
+        // An empty folder holds no footage: shown wherever it is (made here to move things into)
+        if *is_dir && !full.contains(rel) {
+            let mut d = rel.clone();
+            while !d.is_empty() && seen.insert(d.clone()) { dirs.push(d.clone()); d = parent_of(&d); }
+        }
+    }
+    for (rel, is_dir, size, mtime) in entries {
+        if is_dir { continue; }
+        let path = root.join(&rel);
+        let own = own_area(root, &path, &footage);
+        if !own && !rel.to_lowercase().ends_with(LINK_EXT) { continue; }
+        if !keep(&rel, &path, own) { continue; }
+        let mut d = parent_of(&rel);
+        while !d.is_empty() && seen.insert(d.clone()) { dirs.push(d.clone()); d = parent_of(&d); }
+        files.push((rel, size, mtime));
+    }
+    dirs.sort();
+    (files, dirs)
+}
+const MAX_DEPTH: usize = 8;
 
 fn unix(t: std::io::Result<std::time::SystemTime>) -> i64 {
     t.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -270,17 +318,19 @@ pub fn link(path: &Path) -> Option<Value> {
     v
 }
 
-/// The clip previews in _Clips/, wherever they were moved in it: the clip each links to (its path in the project) ->
-/// the preview
-fn previews(root: &Path) -> HashMap<String, PathBuf> {
-    let base = root.join("_Clips");
+/// The clip previews, wherever they are in the project's folder (found by the link inside, kind clip): the clip each
+/// links to (its path in the project) -> the preview; and the folders they're in (paths in the project)
+fn previews(root: &Path) -> (HashMap<String, PathBuf>, Vec<String>) {
     let mut out = HashMap::new();
-    for (rel, is_dir, _, _) in walk(&base, &|_, _| false) {
-        if is_dir || !rel.to_lowercase().ends_with(LINK_EXT) { continue; }
-        let p = base.join(&rel);
-        if let Some(c) = link(&p).and_then(|l| l.get("clip").and_then(Value::as_str).map(str::to_string)) { out.entry(c).or_insert(p); }
-    }
-    out
+    let (_, dirs) = own_files(root, &mut |rel, path, _| {
+        let l = rel.to_lowercase();
+        if !(l.ends_with(".mp4") || l.ends_with(".mov")) { return false; }
+        match link(path).filter(|k| k["kind"] == "clip") {
+            Some(k) => { if let Some(c) = k.get("clip").and_then(Value::as_str) { out.entry(c.to_string()).or_insert(path.to_path_buf()); } true }
+            None => false,
+        }
+    });
+    (out, dirs)
 }
 
 // ---------- a clip's own files ----------
@@ -319,7 +369,7 @@ fn has_gyroflow(file: &Path) -> bool {
 fn footage(root: &Path, flat_previews: bool) -> Value {
     let mounts = crate::locations::mounts();
     let locs = crate::locations::locations(root, &mounts);
-    let linked = previews(root);
+    let (linked, clips_dirs) = previews(root);
     let mut dirs: Vec<String> = Vec::new();
     let mut seen_dirs: HashSet<String> = HashSet::new();
     let mut add_dir = |d: &str, dirs: &mut Vec<String>| {
@@ -360,8 +410,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             it["gyroflow"] = json!(has_gyroflow(&path));
             let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
                 .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
-            // Where it is as arranged in _Clips (the folder its preview was put in): the Library shows footage that way
-            it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, &root.join("_Clips")).or_else(|| (d == root.join("_Clips")).then(String::new)))
+            // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
+            it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, root).or_else(|| (d == root).then(String::new)))
                 .map(Value::from).unwrap_or(Value::Null);
             it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
             by_tree.insert(tree, items.len());
@@ -382,15 +432,12 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
     }
     let locs_json: Vec<Value> = locs.iter().enumerate().map(|(i, l)| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
                                                              "copies": l.copies, "local": l.local, "dirs": loc_dirs[i] })).collect();
-    let clips_dirs: Vec<String> = walk(&root.join("_Clips"), &|_, _| false).into_iter().filter(|e| e.1).map(|e| e.0).collect();
     json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
 }
 
 pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     if view == "footage" { return footage(root, flat_previews); }
-    let Some(sub) = view_dir(view) else { return json!({ "dirs": [], "items": [] }) };
-    let base = if sub.is_empty() { root.to_path_buf() } else { root.join(sub) };
-    // Photos' tags are kept in the project's file (a HEIC's own metadata isn't written here)
+    if !matches!(view, "moments" | "stills" | "exports") { return json!({ "dirs": [], "items": [] }) }
     // A moment's original, through the project's locations (the first that has it)
     let locs = if view == "moments" { crate::locations::locations(root, &crate::locations::mounts()) } else { Vec::new() };
     let at_hint = |link: &Value| -> Option<PathBuf> {
@@ -407,39 +454,53 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         let (hit, _, _) = crate::checks::find_clip(link, list, false, never_rename, &mut |p| crate::checks::fingerprint_kept(p), &mut |p| created(p));
         match hit { Some(c) => (Some(c.path.clone()), (!c.local).then(|| c.tree.clone())), None => (None, None) }
     };
+    // Tags an older version kept for photos in the project's file, by their path in _Stills
     let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
-    let skip = |_: &str, _: &str| false;
-    let entries = walk(&base, &skip);
-    let mut dirs = Vec::new();
+    // The files of this view's kind, wherever they are (docs/library-management.md §8): moments and exports by the link
+    // inside (an export of before 0.11 in _Exports without one too), photos with a link or in _Stills
+    let mut links: HashMap<String, Value> = HashMap::new();
+    let (entries, dirs) = own_files(root, &mut |rel, path, _| {
+        let lower = rel.to_lowercase();
+        let video = lower.ends_with(".mp4") || lower.ends_with(".mov");
+        let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
+        let l = if video || photo { link(path) } else { None };
+        let keep = match view {
+            "moments" => video && (l.as_ref().is_some_and(|k| k["kind"] == "moment") || (lower.starts_with("_moments/") && lower.ends_with(LINK_EXT) && l.is_none())),
+            "exports" => video && (l.as_ref().is_some_and(|k| k["kind"] == "export") || (lower.starts_with("_exports/") && l.is_none())),
+            _ => photo && (l.is_some() || lower.starts_with("_stills/")),
+        };
+        if keep { if let Some(k) = l { links.insert(rel.to_string(), k); } }
+        keep
+    });
     let mut items = Vec::new();
-    let files: HashSet<String> = entries.iter().filter(|e| !e.1).map(|e| e.0.to_lowercase()).collect();
-    for (rel, is_dir, size, mtime) in &entries {
-        if *is_dir { dirs.push(json!(rel)); continue; }
+    let files: HashSet<String> = walk_names(root, &entries);
+    for (rel, size, mtime) in &entries {
+        let rel = rel.as_str();
         let name = name_of(rel);
         let lower = name.to_lowercase();
-        let path = base.join(rel);
+        let path = root.join(rel);
         let mut it = json!({ "id": rel, "dir": parent_of(rel), "name": name, "path": path.display().to_string(), "size": size, "mtime": mtime });
+        let l = links.get(rel).cloned().unwrap_or(Value::Null);
         match view {
             "moments" => {
-                if !lower.ends_with(LINK_EXT) { continue; }
                 it["kind"] = json!("moment");
-                it["name"] = json!(&name[..name.len() - LINK_EXT.len()]);
-                it["link"] = link(&path).unwrap_or(Value::Null);
-                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                let stem = if lower.ends_with(LINK_EXT) { &name[..name.len() - LINK_EXT.len()] } else { name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name) };
+                it["name"] = json!(stem);
+                it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 it["gyroflow"] = json!(has_gyroflow(&path));
-                it["renders"] = renders_of(root, rel, &path, &it["link"]);
-                let (original, moved_to) = original_of(&it["link"]);
+                it["renders"] = renders_of(root, rel, &path, &l);
+                let (original, moved_to) = original_of(&l);
                 it["original"] = original.map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
                 // Found away from the path its link names: the new path, written into the link (main.rs's scan)
                 if let Some(t) = moved_to { it["relink"] = json!(t); }
+                it["link"] = l;
             }
             "stills" => {
-                let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
-                if !photo { continue; }
                 it["kind"] = json!("still");
                 // Its own (XMP), and what older versions kept for it in Project.afproject, until written into it
                 let mut tags = self::photo_tags(&path);
-                for t in photo_tags.get(rel.as_str()).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                let old_id = rel.strip_prefix("_Stills/").unwrap_or(rel);
+                for t in photo_tags.get(old_id).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                     if !tags.iter().any(|x| x.eq_ignore_ascii_case(t)) { tags.push(t.to_string()); }
                 }
                 it["tags"] = json!(tags);
@@ -448,19 +509,30 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
                     else if lower.ends_with(".heic") { "HEIC with gain map" } else { "Ultra HDR JPEG" });
                 // Its clip and time, from the photo itself (older ones have none: their name tells)
-                it["link"] = link(&path).unwrap_or(Value::Null);
+                it["link"] = l;
             }
-            "exports" => {
-                if !(lower.ends_with(".mov") || lower.ends_with(".mp4")) { continue; }
+            _ => {
                 it["kind"] = json!("export");
-                it["link"] = link(&path).unwrap_or(Value::Null);
-                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                it["link"] = l;
             }
-            _ => {}
         }
         items.push(it);
     }
     json!({ "dirs": dirs, "items": items })
+}
+
+/// The lower-case paths of the files beside these (a Live Photo's .mov beside its still)
+fn walk_names(root: &Path, entries: &[(String, u64, i64)]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let dirs: HashSet<String> = entries.iter().map(|(r, _, _)| parent_of(r)).collect();
+    for d in dirs {
+        let dir = if d.is_empty() { root.to_path_buf() } else { root.join(&d) };
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            out.insert(rel_join(&d, &e.file_name().to_string_lossy()).to_lowercase());
+        }
+    }
+    out
 }
 
 // ---------- renders (the player's render batch; docs/library-management.md, "Renders") ----------
@@ -503,10 +575,13 @@ pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) ->
                      "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
 }
 
-/// Where a moment's render in a profile is: _Renders/<its path in _Moments without .afplink.mp4>.<profile>.mov
+/// Where a moment's render in a profile is: _Renders/<its path without .afplink.mp4>.<profile>.mov, its path being the
+/// one in _Moments for a moment there (as before 0.11), else in the project's folder (`rel`: its path in the project's
+/// folder, or in _Moments as before; the player's render_rel does the same)
 pub fn render_path(root: &Path, rel: &str, profile: &str) -> PathBuf {
     let mut p = root.join("_Renders");
-    let base = rel.strip_suffix(LINK_EXT).unwrap_or(rel);
+    let rel = rel.strip_prefix("_Moments/").unwrap_or(rel);
+    let base = rel.strip_suffix(LINK_EXT).or_else(|| rel.rsplit_once('.').map(|(s, _)| s)).unwrap_or(rel);
     let parts: Vec<&str> = base.split('/').collect();
     for (i, part) in parts.iter().enumerate() { p.push(if i + 1 == parts.len() { format!("{part}.{profile}.mov") } else { part.to_string() }); }
     p
@@ -720,6 +795,31 @@ mod tests {
         assert_eq!(clip_preview_relative("Day 1/A.MP4", true), "A.afplink.mp4");
     }
 
+    /// An MP4 of the smallest kind with the player's link key in it (moov/meta: hdlr mdta, keys, ilst), as
+    /// gyroflow-export writes it
+    pub fn tests_mp4_with_link(link: &str) -> Vec<u8> {
+        let bx = |t: &[u8], body: &[u8]| { let mut v = ((8 + body.len()) as u32).to_be_bytes().to_vec(); v.extend_from_slice(t); v.extend_from_slice(body); v };
+        let key = b"ch.actionfootageplayer.link";
+        let mut hdlr = vec![0u8; 8];
+        hdlr.extend_from_slice(b"mdta");
+        hdlr.extend_from_slice(&[0u8; 13]);
+        let mut keys = vec![0u8; 4];
+        keys.extend_from_slice(&1u32.to_be_bytes());
+        keys.extend_from_slice(&((8 + key.len()) as u32).to_be_bytes());
+        keys.extend_from_slice(b"mdta");
+        keys.extend_from_slice(key);
+        let mut data = 1u32.to_be_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 4]);
+        data.extend_from_slice(link.as_bytes());
+        let item = bx(&1u32.to_be_bytes(), &bx(b"data", &data));
+        let mut meta = bx(b"hdlr", &hdlr);
+        meta.extend(bx(b"keys", &keys));
+        meta.extend(bx(b"ilst", &item));
+        let mut out = bx(b"ftyp", b"isom\0\0\0\0isom");
+        out.extend(bx(b"moov", &bx(b"meta", &meta)));
+        out
+    }
+
     #[test]
     fn creation_time_from_mvhd() {
         let bx = |t: &[u8], body: &[u8]| { let mut v = ((8 + body.len()) as u32).to_be_bytes().to_vec(); v.extend_from_slice(t); v.extend_from_slice(body); v };
@@ -767,7 +867,30 @@ mod tests {
         assert!(a["preview"].as_str().unwrap().ends_with("_Clips/Day 1/A.afplink.mp4"));
         let m = scan(&root, "moments", false);
         assert_eq!(m["items"][0]["name"], json!("Turtle"));
-        assert_eq!(m["items"][0]["dir"], json!("Reef"));
+        assert_eq!(m["items"][0]["dir"], json!("_Moments/Reef"));
+        // Anywhere in the project's folder, by the link inside (docs/library-management.md §8): a moment and a clip
+        // preview a run left in Generated/, a moment moved into a folder of one's own and renamed; a folder just made
+        let mk = |kind: &str| tests_mp4_with_link(&format!(r#"{{"v":1,"kind":"{kind}","clip":"Day 1/B.mov","in":1,"out":2}}"#));
+        for d in ["Generated/2026-11-10 14-32 Moments", "Generated/2026-11-10 14-40 Clip previews/Day 1", "Mine/Best", "Empty"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        std::fs::write(root.join("Generated/2026-11-10 14-32 Moments/Gen.afplink.mp4"), mk("moment")).unwrap();
+        std::fs::write(root.join("Mine/Best/renamed.mp4"), mk("moment")).unwrap();
+        std::fs::write(root.join("Mine/Best/One.afplink.mp4"), mk("moment")).unwrap();
+        std::fs::write(root.join("Generated/2026-11-10 14-40 Clip previews/Day 1/B.afplink.mp4"), mk("clip")).unwrap();
+        let m = scan(&root, "moments", false);
+        let ids: Vec<&str> = m["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
+        // This project is next to its footage: among it a plain .mp4 isn't read (not every clip), a .afplink.mp4 is
+        assert_eq!(ids, ["Generated/2026-11-10 14-32 Moments/Gen.afplink.mp4", "Mine/Best/One.afplink.mp4", "_Moments/Reef/Turtle.afplink.mp4"]);
+        assert_eq!(m["items"][1]["name"], json!("One"));
+        assert!(m["dirs"].as_array().unwrap().contains(&json!("Empty")) && !m["dirs"].as_array().unwrap().contains(&json!("Day 1")));
+        let f = scan(&root, "footage", false);
+        let b = f["items"].as_array().unwrap().iter().find(|i| i["id"] == "Day 1/B.mov").unwrap();
+        assert_eq!(b["pdir"], json!("Generated/2026-11-10 14-40 Clip previews/Day 1"));
+        assert_eq!(render_path(&root, "Mine/Best/renamed.mp4", "HDR"), root.join("_Renders/Mine/Best/renamed.HDR.mov"));
+        // A project apart from its footage: anything in its folder is its own, a plain .mp4 too
+        std::fs::write(root.join("Project.afproject"), r#"{"locations":[{"at":"","path":"../elsewhere"}]}"#).unwrap();
+        let m = scan(&root, "moments", false);
+        assert!(m["items"].as_array().unwrap().iter().any(|i| i["id"] == "Mine/Best/renamed.mp4"));
+        assert_eq!(render_path(&root, "_Moments/Reef/Turtle.afplink.mp4", "SDR"), root.join("_Renders/Reef/Turtle.SDR.mov"));
         let s = scan(&root, "stills", false);
         let forms: Vec<&str> = s["items"].as_array().unwrap().iter().map(|i| i["form"].as_str().unwrap()).collect();
         assert_eq!(forms, ["Live Photo", "Motion Photo"]);

@@ -143,7 +143,8 @@ fn is_video(name: &str) -> bool {
     let l = name.to_lowercase();
     (l.ends_with(".mp4") || l.ends_with(".mov")) && !l.ends_with(crate::index::LINK_EXT)
 }
-const OWN: [&str; 9] = ["_moments", "_clips", "_exports", "_stills", "moments", "clips", "exports", "stabilized", "_actionfootageplayer"];
+const OWN: [&str; 12] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
+                         "_actionfootageplayer", "generated"];
 
 /// Every clip of the project, at its tree path (all copies), and every own file found on the way
 pub fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
@@ -177,18 +178,22 @@ fn under(tree: &str, sel: &[String]) -> bool {
     sel.is_empty() || sel.iter().any(|s| tree == s || tree.starts_with(&format!("{s}/")))
 }
 
+/// The project's link files (moments, clip previews, exports, renders, photos), wherever they are in its folder
 fn links(root: &Path) -> Vec<(PathBuf, Value)> {
+    let footage = crate::index::footage_dirs(root);
     let mut out = Vec::new();
-    for sub in ["_Moments", "_Clips", "_Exports"] {
-        let mut todo = vec![root.join(sub)];
-        while let Some(d) = todo.pop() {
-            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                let p = e.path();
-                if p.is_dir() { todo.push(p); continue; }
-                let n = p.to_string_lossy().to_lowercase();
-                if !(n.ends_with(".mp4") || n.ends_with(".mov")) { continue; }
-                if let Some(l) = crate::index::link(&p) { if l.get("clip").and_then(Value::as_str).is_some() { out.push((p, l)); } }
-            }
+    let mut todo = vec![(root.to_path_buf(), 0)];
+    while let Some((d, depth)) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if name.starts_with('.') || name.starts_with('#') { continue; }
+            let p = e.path();
+            if p.is_dir() { if depth < 8 { todo.push((p, depth + 1)); } continue; }
+            let video = name.ends_with(".mp4") || name.ends_with(".mov");
+            let photo = [".heic", ".jpg", ".jpeg"].iter().any(|x| name.ends_with(x));
+            // Among the footage only link files by name (not every clip read)
+            if !(video || photo) || (!crate::index::own_area(root, &p, &footage) && !name.ends_with(crate::index::LINK_EXT)) { continue; }
+            if let Some(l) = crate::index::link(&p) { if l.get("clip").and_then(Value::as_str).is_some() { out.push((p, l)); } }
         }
     }
     out

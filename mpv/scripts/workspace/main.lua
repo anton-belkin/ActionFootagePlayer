@@ -2438,7 +2438,7 @@ local function render_rel(root, file)
 end
 local function render_file(root, m, profile)
     local rel = render_rel(root, m.file)
-    local base = rel:gsub("%.afplink%.mp4$", "")
+    local base = rel:lower():match("%.afplink%.mp4$") and rel:sub(1, -13) or (rel:gsub("%.[^./\\]*$", ""))
     if windows then base = base:gsub("/", "\\") end
     return ws.join(ws.join(root, RENDERS), base .. "." .. profile .. ".mov")
 end
