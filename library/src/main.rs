@@ -18,6 +18,7 @@ mod index;
 mod locations;
 mod tags;
 mod takein;
+mod swallow;
 
 use serde::Serialize;
 use serde_json::{ json, Value };
@@ -810,6 +811,25 @@ async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) ->
     }).await.map_err(|e| e.to_string())?
 }
 
+// ---------- One location swallowing another inside it ----------
+
+#[tauri::command]
+async fn swallow_plan(shared: State<'_, Shared>, outer: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || swallow::plan(&root, &outer)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn swallow_run(shared: State<'_, Shared>, outer: String, inner: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: swallow it when they're done".into()); }
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
+        swallow::run(&root, &outer, &inner, &relink, &takein::to_trash)
+    }).await.map_err(|e| e.to_string())?
+}
+
 // ---------- Quick Look, renaming ----------
 
 // The system's Quick Look of these files (macOS): what Finder's space bar shows. A second call closes it
@@ -1374,7 +1394,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library])
+                                                 choose_other, take_in_plan, take_in_run, swallow_plan, swallow_run, set_tags, delete_renders, delete_items, export_library])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

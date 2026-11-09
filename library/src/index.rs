@@ -611,6 +611,23 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     bytes.map(|b| data_url(&b))
 }
 
+/// A small MP4 with only a link key, as afp-cut --set-key leaves one: for tests
+#[cfg(test)]
+pub fn tests_mp4_with_link(link: &str) -> Vec<u8> {
+    fn bx(t: &[u8; 4], body: &[u8]) -> Vec<u8> { let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec(); v.extend_from_slice(t); v.extend_from_slice(body); v }
+    let mut hdlr = vec![0u8; 8]; hdlr.extend_from_slice(b"mdta"); hdlr.extend_from_slice(&[0u8; 13]);
+    let name = b"ch.actionfootageplayer.link";
+    let mut keys = vec![0u8, 0, 0, 0, 0, 0, 0, 1];
+    keys.extend_from_slice(&((name.len() + 8) as u32).to_be_bytes()); keys.extend_from_slice(b"mdta"); keys.extend_from_slice(name);
+    let mut data = vec![0u8, 0, 0, 1, 0, 0, 0, 0]; data.extend_from_slice(link.as_bytes());
+    let ilst = bx(&1u32.to_be_bytes(), &bx(b"data", &data));
+    let mut meta = vec![0u8; 4];
+    meta.extend(bx(b"hdlr", &hdlr)); meta.extend(bx(b"keys", &keys)); meta.extend(bx(b"ilst", &ilst));
+    let mut out = bx(b"ftyp", b"isom\0\0\0\0isom");
+    out.extend(bx(b"moov", &bx(b"meta", &meta)));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

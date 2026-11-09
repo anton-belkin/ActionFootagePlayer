@@ -89,7 +89,7 @@ fn map_tree(t: &str, landings: &[Landing]) -> String {
     [l.at_here.as_str(), rest].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("/")
 }
 
-fn unique(dest: PathBuf) -> PathBuf {
+pub fn unique(dest: PathBuf) -> PathBuf {
     if !dest.exists() { return dest; }
     let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let (stem, ext) = match name.find(".afplink.mp4").or_else(|| name.rfind('.')) { Some(i) => (name[..i].to_string(), name[i..].to_string()), None => (name.clone(), String::new()) };

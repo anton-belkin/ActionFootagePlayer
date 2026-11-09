@@ -271,6 +271,18 @@ clip to the inbox that was also copied into the archive from a laptop, say). Mom
 *Check the project* and *Take in* list such clips, by fingerprint, with where each is; you delete the one you don't
 want, and *Find moved files* moves what pointed at it to the other.
 
+### One location swallowing another inside it
+
+Two locations, one's folder inside the other's (the inbox placed at `Inbox/`, while it's also a folder of the archive
+placed at the top), show the same clips twice, at two places in the tree. *Swallow a location inside it…* (Sources, on
+the outer location) takes the inner one out of the project: whatever reached clips through it reaches the same files
+through the outer one, at `<outer's place>/<inner's folder in the outer's>/…`. The links of moments, clip previews,
+exports and renders that named the old paths are written again, the lines of Project.afproject that name clips too; a
+clip preview where the "as the footage's folders" layout put it moves to where that layout puts the new path, and a
+preview that was in `_Clips/Duplicates` only because the clip was seen through both goes to the Trash. No footage
+moves. Photos keep their link in their XMP, which isn't written again: they keep the old path. Only for a location
+inside another (the same folder counts); the outer one always stays.
+
 ## 3. Taking one project into another
 
 **Take in…** (Library, in the project that takes): choose the other project's `Project.afproject`. Each of its

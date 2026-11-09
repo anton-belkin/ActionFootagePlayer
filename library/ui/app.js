@@ -694,7 +694,7 @@ function renderSide() {
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
   if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) {
-    h += '<div class="summary"><div class="btns"><button type="button" class="btn sm" data-a="removesource">Remove from the project</button></div><span class="sub wrap" style="margin-top:6px">Its clips stay where they are: the project stops looking there, and its pointer file goes.</span></div>';
+    h += '<div class="summary"><div class="btns"><button type="button" class="btn sm" data-a="removesource">Remove from the project</button>' + (c.selFolders.length === 1 ? '<button type="button" class="btn sm" data-a="swallow">Swallow a location inside it…</button>' : "") + '</div><span class="sub wrap" style="margin-top:6px">Its clips stay where they are: the project stops looking there, and its pointer file goes.' + (c.selFolders.length === 1 ? ' Swallowing takes out a location whose folder is inside this one’s: what reached clips through it reaches them through this one.' : "") + '</span></div>';
   }
   if (S.view === "footage" || S.view === "sources" || S.view === "moments") h += checksSection(c);
   h += tagsSection(c);
@@ -896,6 +896,7 @@ async function runTakeIn() {
 function renderSheet() {
   const el = $("sheet");
   if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
+  if (S.sheet === "swallow" && S.swallow) { el.innerHTML = renderSwallow(); return; }
   if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
   const st = S.settings;
   const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
@@ -1157,7 +1158,7 @@ function openMenu(x, y) {
     const del = deletable(c);
     const marksOnly = c.direct.length && !c.selFolders.length && c.direct.every((x) => x.kind === "mark");
     if (S.view !== "sources" && !marksOnly) e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
-    if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) e.push(b("removesource", "Remove from the project"));
+    if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) { e.push(b("removesource", "Remove from the project")); if (c.selFolders.length === 1) e.push(b("swallow", "Swallow a location inside it…")); }
     if (e.length) parts.push(e.join(""));
     parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
   } else {
@@ -1325,6 +1326,45 @@ async function addSource() {
     toast("Added " + r.name + (problems.length ? ". But: " + problems.join(" · ") : ". Its place in the tree and order are in Sources settings"));
     await refresh();
   } catch (e) { showError(String(e)); }
+}
+// One location swallowing another inside it: the plan for the selected one (the outer), then the run
+async function planSwallow(label) {
+  const all = DATA.sources && DATA.sources.labels || {};
+  const i = Object.keys(all).find((k) => all[k] === label);
+  const l = i != null ? S.locations[+i] : null;
+  if (!l) return;
+  if (l.local) { showError("That source is this computer’s own copies: it can’t swallow the library’s locations"); return; }
+  try { S.swallow = await invoke("swallow_plan", { outer: l.path }); S.sheet = "swallow"; renderSheet(); } catch (e) { showError(String(e)); }
+}
+function renderSwallow() {
+  const w = S.swallow;
+  const n = (k, one, many) => k + " " + (k === 1 ? one : many);
+  let h = '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="swTitle">' +
+    '<header><h2 id="swTitle">' + esc(w.name) + ' swallows a location</h2><span class="sub">A location whose folder is inside ' + esc(w.name) + '’s goes from the project; whatever reached clips through it reaches the same files through ' + esc(w.name) + '. No footage moves.</span></header><div class="sb">' +
+    '<div class="field"><span class="sub">' + esc(w.name) + '</span><span class="mono">' + esc(w.dir) + '</span></div><div class="result">';
+  if (!w.candidates.length) {
+    h += '<div class="it"><span class="wrap">No other location of the project is inside this one’s folder.' + (w.inside_of.length ? ' This one is inside ' + w.inside_of.map((x) => "“" + esc(x.name) + "”").join(", ") + ': select that one to swallow this one.' : "") + '</span></div>';
+  }
+  w.candidates.forEach((c, i) => {
+    const what = [n(c.links, "link", "links") + " written again", c.moved ? n(c.moved, "preview moves", "previews move") + " in _Clips" : "", c.trashed ? n(c.trashed, "duplicate preview goes", "duplicate previews go") + " to the Trash" : "", c.lines ? n(c.lines, "line", "lines") + " of Project.afproject" : ""].filter(Boolean).join(", ");
+    h += '<div class="it"><span class="wrap"><b>' + esc(c.name) + '</b> <span class="sub">' + esc(c.dir) + '</span><br>Its clips, now at ' + esc(c.at || "the top") + '/ in the tree, will be at ' + esc(c.place || "the top") + '/. ' + esc(what) + '.' +
+      (c.photos ? ' <span class="chip warn">' + n(c.photos, "photo", "photos") + '</span> keep the old path in their own file (XMP), which isn’t written again: “Go to the footage” from them won’t find their clip.' : "") +
+      '</span><button type="button" class="btn sm pri" data-a="swallowrun" data-v="' + i + '"' + (S.swallowing ? " disabled" : "") + '>' + (S.swallowing ? "Swallowing…" : "Swallow") + '</button></div>';
+  });
+  h += '</div></div><footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">' + (w.candidates.length ? "Cancel" : "Close") + '</button></footer>';
+  return h + '</div></div>';
+}
+async function runSwallow(i) {
+  const w = S.swallow, c = w && w.candidates[i];
+  if (!c || S.swallowing) return;
+  S.swallowing = true; renderSheet();
+  try {
+    const r = await invoke("swallow_run", { outer: w.path, inner: c.path });
+    S.sheet = null; S.swallow = null;
+    toast((r.removed ? r.outer + " swallowed " + r.inner : r.inner + " stays: not every link could be written again") + ": " + r.relinked + " links written again" + (r.moved ? ", " + r.moved + " previews moved" : "") + (r.trashed ? ", " + r.trashed + " duplicate previews in the Trash" : "") + (r.lines ? ", " + r.lines + " lines of Project.afproject" : "") + (r.problems.length ? ". But: " + r.problems.join(" · ") : ""));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+  S.swallowing = false; renderSheet();
 }
 async function removeSources(labels) {
   const st = await call("project_settings").catch(() => null);
@@ -1652,6 +1692,8 @@ document.addEventListener("click", async (e) => {
     case "revealhere": { const p = hereOnDisk(); if (p) call("reveal_path", { path: p }).catch(() => {}); return; }
     case "opengf": { const it = ctx().selItems[0]; if (it) call("open_in_gyroflow", { paths: it.kind === "clip" ? (it.copies || []).map((x) => x.path) : [it.path] }).catch(() => {}); return; }
     case "removesource": return removeSources(ctx().selFolders);
+    case "swallow": return planSwallow(ctx().selFolders[0]);
+    case "swallowrun": return runSwallow(+v);
     case "delrenders": {
       const c = ctx(); if (!c.any) return;
       try { const r = await invoke("delete_renders", { moments: c.selItems.map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
