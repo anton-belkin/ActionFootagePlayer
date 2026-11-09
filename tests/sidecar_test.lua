@@ -84,6 +84,13 @@ expect("input alone: the turn", s.read(clip).source.rotation, 90)
 s.update(clip, function(d) d.source = nil end)
 expect("nothing left: removed", exists(s.path(clip)), false)
 
+-- A 360° clip's recording alone (the view360 plugin's): written, and removed with it
+s.update(clip, function(d) d.view360 = { recording = { follows = "travel", parts = {} } } end)
+expect("recording alone written", exists(s.path(clip)), true)
+expect("recording alone: follows", s.read(clip).view360.recording.follows, "travel")
+s.update(clip, function(d) d.view360 = nil end)
+expect("recording gone: removed", exists(s.path(clip)), false)
+
 -- Someone else's file of that name: left alone
 write(s.path(clip), serialize({ format = "something-else" }))
 local d2, f2, problem = s.read(clip)

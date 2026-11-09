@@ -30,6 +30,8 @@
 --                       little planet
 --   Alt+h   heading     what straight ahead follows, on a 360 camera's own file: along the way -> along the camera ->
 --                       north -> in the world, the ones the clip has
+--   Alt+r   record      record where you look while the clip plays (a take), or stop (docs/360-reframe.md)
+--   Alt+R   play-recording  the view follows the recording, or your gestures again (Alt+Shift+r)
 --
 -- Script messages (`script-message-to view360 <message>`, what the side panel runs):
 --   view360 yes|no|toggle                   the view on or off
@@ -38,11 +40,22 @@
 --   view360-heading <mode>                  what the view follows: world, camera, travel, north (from the stamp; a
 --                                           stitched clip has none, and holds still whatever it is)
 --   view360-reset                           ahead again, at the projection's own FOV
+--   view360-record [toggle|start|stop]      a take of the recording
+--   view360-play-recording [toggle|yes|no]  the view following the recording
+--   view360-undo                            the last take taken back (up to 20, for as long as the clip is open)
+--   view360-clear                           nothing recorded (the panel asks first)
+--   view360-frame 16:9|9:16|1:1, view360-size 1080p|4K   the flat export's, kept with the recording
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
 -- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
 -- camera's own file), stereo, note (why a 360° clip isn't shown), modes (per heading mode: available, why not,
 -- confidence, and what it's from: false until the clip's been read), heading_confidence (the chosen mode's, now: 0-1,
--- or false).
+-- or false), recording (the flat video recorded as you look around: taking, seconds, spans, parts, follows, playing,
+-- frame, size, undo; can, and why not when it can't).
+--
+-- The recording (recording.lua) is kept in the clip's own file, <clip>.afp.json, under view360.recording (the
+-- workspace plugin's sidecar.lua). Each frame shown during a take records the head relative to what the view follows,
+-- and the projection; pausing, seeking, the clip's end or leaving the view end a take. What the view follows is the
+-- recording's: locked during a take and while the recording plays, and a take under another is refused.
 
 local mp = require 'mp'
 
@@ -51,9 +64,24 @@ do
     local here = mp.get_script_directory() or "."
     local sep = package.config:sub(1, 1)
     local parent = here:match("^(.*)[/\\][^/\\]+$") or "."
-    package.path = here .. sep .. "?.lua;" .. parent .. sep .. "gyroflow" .. sep .. "?.lua;" .. package.path
+    package.path = here .. sep .. "?.lua;" .. parent .. sep .. "gyroflow" .. sep .. "?.lua;" .. parent .. sep .. "workspace"
+                   .. sep .. "?.lua;" .. package.path
 end
 local view = require 'view'
+local recording = require 'recording'
+-- The clip's own file: the workspace plugin's sidecar.lua, in the folder beside this one
+local sidecar = nil
+do
+    local ok_utils, utils = pcall(require, 'mp.utils')
+    local ok_sidecar, sidecar_lib = pcall(require, 'sidecar')
+    if ok_utils and ok_sidecar then
+        local windows = (mp.get_property("platform") or "") == "windows" or package.config:sub(1, 1) == "\\"
+        sidecar = sidecar_lib.new({ parse_json = function(text) return (utils.parse_json(text)) end, format_json = utils.format_json,
+                                    windows = windows })
+    else
+        mp.msg.warn("no sidecar.lua in the workspace plugin's folder beside this one: the 360 recording isn't kept")
+    end
+end
 local ok_gestures, gestures = pcall(require, 'gestures')
 if not ok_gestures then
     mp.msg.warn("no gestures.lua in the gyroflow plugin's folder beside this one: the view can't be turned with the mouse")
@@ -94,6 +122,14 @@ local confidence_now = false
 local note = nil
 local crop_on = false
 local input = nil
+-- The recording: the clip's file it's kept for (nil: none can be, and why), whether the view follows it now
+local rec = recording.new()
+local rec_clip, rec_why = nil, nil
+local rec_playing = false
+local rec_overlay = mp.create_osd_overlay and mp.create_osd_overlay("ass-events") or nil
+local rec_shown = nil
+local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
+local FOLLOWS_NAMES = { camera = "the camera", world = "the world", travel = "the way", north = "north" }
 
 -- The video's area in the window, less the margins (the side panel's), in OSD pixels: while the view is on, the
 -- video's aspect is this area's, so the video fills it
@@ -107,12 +143,23 @@ local function area()
     return { x = x0, y = y0, w = x1 - x0, h = y1 - y0 }
 end
 
+local function rec_state()
+    local spans = {}
+    for _, sp in ipairs(rec:spans()) do table.insert(spans, { sp.from, sp.to }) end
+    return {
+        can = rec_clip ~= nil and sphere ~= nil, why = rec_why or false, taking = rec:taking(), seconds = rec:take_seconds(),
+        spans = spans, parts = #rec.parts, follows = rec.follows or false, playing = rec_playing, frame = rec.frame,
+        size = rec.size, undo = rec:undoable(),
+    }
+end
+
 local function publish()
     local r = view.FOV[cur.projection]
     mp.set_property_native("user-data/view360", {
         available = sphere ~= nil, active = active, yaw = cur.yaw, pitch = cur.pitch, roll = cur.roll, fov = cur.fov,
         fov_min = r.min, fov_max = r.max, projection = cur.projection, heading = heading, stamped = sphere ~= nil and sphere.stamped == true,
         stereo = sphere and sphere.stereo or "mono", note = note or false, modes = modes, heading_confidence = confidence_now,
+        recording = rec_state(),
     })
 end
 
@@ -155,10 +202,19 @@ local function apply_soon()
     end)
 end
 
+-- A gesture while the recording plays: the head is yours again, from where the recording had it
+local function yours()
+    if not rec_playing then return end
+    rec_playing = false
+    mp.osd_message("Your view: the recording is paused", 2)
+    publish()
+end
+
 -- The head turned so that what's at x - dx, y - dy (OSD pixels; the area's middle when nil) comes to x, y
 local function pan(dx, dy, x, y)
     local a = area()
     if not active or not a then return end
+    yours()
     local cx, cy, half = a.x + a.w / 2, a.y + a.h / 2, a.h / 2
     x, y = x or cx, y or cy
     local yaw, pitch = view.pan(cur, (x - dx - cx) / half, (y - dy - cy) / half, (x - cx) / half, (y - cy) / half)
@@ -168,12 +224,14 @@ end
 
 local function zoom(factor)
     if not active or not factor or factor <= 0 then return end
+    yours()
     cur.fov = view.clamp_fov(cur.projection, cur.fov / factor)
     apply_soon()
 end
 
 local function roll(degrees)
     if not active then return end
+    yours()
     cur.roll = view.wrap(cur.roll + degrees)
     apply_soon()
 end
@@ -181,6 +239,7 @@ end
 -- Ahead again (where the clip's metadata says to look first), at the projection's own FOV
 local function reset()
     if not sphere then return end
+    yours()
     local projection = cur.projection
     cur = view.copy(start)
     cur.projection = projection
@@ -191,6 +250,7 @@ end
 
 local function set_projection(name)
     if not view.FOV[name] then return end
+    yours()
     local was = cur.projection
     cur.projection = name
     -- The little planet looks down from where the head is: its own pitch and FOV, and back
@@ -203,6 +263,120 @@ local function set_projection(name)
     apply()
     if active then mp.osd_message("360°: " .. ({ auto = "auto projection", rectilinear = "rectilinear", stereographic = "stereographic",
                                                   planet = "little planet" })[name], 1.5) end
+end
+
+-- The recording ----------------------------------------------------------------------------------------------------
+
+local function clock(s)
+    s = math.max(0, math.floor(s + 0.5))
+    return string.format("%d:%02d", math.floor(s / 60), s % 60)
+end
+
+-- The red dot and the time recorded so far, in the corner of the video
+local function draw_rec()
+    if not rec_overlay then return end
+    local a = area()
+    if not rec:taking() or not a then
+        if rec_shown then rec_overlay:remove(); rec_shown = nil end
+        return
+    end
+    local text = clock(rec:take_seconds())
+    local d = mp.get_property_native("osd-dimensions") or {}
+    local key = text .. ":" .. a.x .. ":" .. a.y .. ":" .. tostring(d.w)
+    if key == rec_shown then return end
+    rec_shown = key
+    local s = mp.get_property_number("display-hidpi-scale") or 1
+    rec_overlay.res_x, rec_overlay.res_y = d.w or 0, d.h or 0
+    rec_overlay.data = string.format("{\\an7\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
+                                     math.floor(a.x + 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
+                                     math.floor(18 * s), text)
+    rec_overlay:update()
+end
+
+local function save_recording()
+    if not sidecar or not rec_clip then return end
+    local t = rec:to_table()
+    local ok, err = sidecar.update(rec_clip, function(d)
+        local v = type(d.view360) == "table" and d.view360 or {}
+        if t == nil and v.recording == nil then return false end
+        v.recording = t
+        d.view360 = next(v) ~= nil and v or nil
+    end)
+    if not ok then
+        mp.msg.warn("couldn't keep the 360 recording in " .. sidecar.path(rec_clip) .. ": " .. tostring(err))
+        mp.osd_message("The recording couldn't be saved: " .. tostring(err), 4)
+    end
+end
+
+-- The view at t from the recording, while it plays
+local function follow_recording(t)
+    if not rec_playing or not active then return end
+    t = t or mp.get_property_number("time-pos")
+    local h = t and rec:head(t)
+    if not h then return end
+    cur.yaw, cur.pitch, cur.roll = view.wrap(h.yaw), math.max(-view.PITCH_MAX, math.min(view.PITCH_MAX, h.pitch)), view.wrap(h.roll)
+    cur.projection = view.FOV[h.projection] and h.projection or "auto"
+    cur.fov = view.clamp_fov(cur.projection, h.fov)
+    apply()
+end
+
+local function set_playing(on, quiet)
+    on = on and active and not rec:empty() and not rec:taking()
+    if on == rec_playing then return publish() end
+    rec_playing = on
+    if on then
+        -- The recording's own heading: the head was recorded relative to it
+        if rec.follows and heading ~= rec.follows then heading = rec.follows end
+        follow_recording()
+        if not quiet then mp.osd_message("Playing the recording", 1.5) end
+    elseif not quiet then
+        mp.osd_message("Your view: the recording is paused", 2)
+    end
+    publish()
+end
+
+local function stop_take(why)
+    if not rec:taking() then return end
+    local part = rec:stop()
+    draw_rec()
+    if part then
+        save_recording()
+        mp.osd_message(string.format("Recorded %s–%s%s", clock(part.from), clock(part.to), why and (" (" .. why .. ")") or ""), 2.5)
+        -- What was recorded, shown
+        set_playing(true, true)
+    else
+        mp.osd_message("Recording stopped: too short to keep", 2)
+    end
+    publish()
+end
+
+local function add_frame(t)
+    if not rec:taking() or not t then return end
+    local s = rec.take.samples
+    local last = s[#s]
+    -- A jump forward of more than a second is a seek the event didn't tell
+    if last and t > last.t + 1 then return stop_take("a seek") end
+    local before = last and math.floor(rec:take_seconds()) or -1
+    if not rec:add(t, cur.yaw, cur.pitch, cur.roll, cur.fov, cur.projection) then return stop_take("a seek") end
+    draw_rec()
+    if math.floor(rec:take_seconds()) ~= before then publish() end
+end
+
+local function start_take()
+    if rec:taking() then return end
+    if not active then return mp.osd_message("Recording: turn the 360 view on first (Alt+v)", 2) end
+    if not rec_clip then return mp.osd_message("Recording: " .. (rec_why or "this clip can't keep one"), 3) end
+    local ok, other = rec:start(heading)
+    if not ok then
+        return mp.osd_message(string.format("The recording follows %s: switch to it, or clear the recording",
+                                            FOLLOWS_NAMES[other] or tostring(other)), 4)
+    end
+    rec_playing = false
+    if mp.get_property_native("pause") then mp.set_property_native("pause", false) end
+    add_frame(mp.get_property_number("time-pos"))
+    mp.osd_message("Recording: look around. Alt+r stops", 2)
+    draw_rec()
+    publish()
 end
 
 if gestures then
@@ -254,6 +428,8 @@ local function set_active(on, ending)
             input:pause(crop_on)
         end
     else
+        stop_take("left the 360 view")
+        rec_playing = false
         if input then input:set(false) end
         if not ending and saved then
             mp.set_property("file-local-options/video-aspect-override", saved.aspect or "-1")
@@ -306,6 +482,23 @@ mp.add_hook("on_load", 60, function()
         if projection == "planet" then start.pitch = 0 end
     end
     cur = view.copy(start)
+    -- The clip's recording: a local file of its own (not a moment playing, which has a time of its own)
+    rec:load(nil)
+    rec_playing, rec_clip, rec_why = false, nil, nil
+    if sphere then
+        local path = mp.get_property("path")
+        local ws = mp.get_property_native("user-data/workspace")
+        if not sidecar then rec_why = "the workspace plugin's sidecar.lua isn't installed"
+        elseif not path or path:find("://", 1, true) then rec_why = "not a local file"
+        elseif type(ws) == "table" and ws.path == path and ws.redirected then rec_why = "a moment: open the clip itself to record"
+        else
+            rec_clip = path
+            local doc, _, problem = sidecar.read(path)
+            if problem then mp.msg.warn(problem) end
+            local v = type(doc) == "table" and type(doc.view360) == "table" and doc.view360 or {}
+            rec:load(v.recording)
+        end
+    end
     -- Set up before the first frame shows
     set_active(sphere ~= nil)
     if not sphere then apply() end
@@ -318,8 +511,11 @@ end)
 mp.register_event("end-file", function()
     -- The hint isn't the next clip's
     if active then mp.osd_message("", 0) end
+    stop_take("the end of the clip")
     set_active(false, true)
     sphere, note = nil, nil
+    rec:load(nil)
+    rec_clip, rec_playing = nil, false
     publish()
 end)
 
@@ -356,7 +552,6 @@ end)
 -- The heading modes in the order Alt+h goes through them: along the way first (for a 360 camera what matters most:
 -- on a stick or a helmet the camera's own direction means little), then the camera's, north, the world
 local HEADINGS = { "travel", "camera", "north", "world" }
-local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
 
 -- How sure the chosen mode is now (the probe's confidence per second), for the panel
 local function update_confidence()
@@ -380,6 +575,13 @@ end
 
 local function set_heading(mode, by_viewer)
     if not HEADING_INDEX[mode] then return false end
+    -- The recording's own while a take records or the recording plays (re-expressing it in another is step 2 of
+    -- docs/360-reframe.md)
+    if mode ~= heading and (rec:taking() or rec_playing) then
+        mp.osd_message(string.format("%s: following %s. %s", rec:taking() and "Recording" or "Playing the recording",
+                                     FOLLOWS_NAMES[heading] or heading, rec:taking() and "Alt+r stops" or "A drag gives you the view"), 2.5)
+        return false
+    end
     if sphere and sphere.stamped and not available(mode) then
         local why = type(modes) == "table" and type(modes[mode]) == "table" and modes[mode].why
         mp.osd_message("360°: " .. HEADING_LABELS[mode] .. ": " .. (why or (modes and "not in this clip" or "reading the clip…")), 3)
@@ -413,13 +615,79 @@ mp.observe_property("user-data/gyroflow/headings360", "native", function(_, h)
         world = { available = true, held_by = world.held_by or false, drift = tonumber(world.drift_deg_min) or false },
     }
     seconds = type(h.seconds) == "table" and h.seconds or nil
-    if not heading_chosen and modes.travel.available then heading = "travel" end
+    if not heading_chosen and modes.travel.available and not rec:taking() and not rec_playing then heading = "travel" end
     update_confidence()
     apply()
 end)
 
-mp.observe_property("time-pos", "number", function()
+mp.observe_property("time-pos", "number", function(_, t)
     if active and (heading == "travel" or heading == "north") then update_confidence() end
+    -- Each frame shown: recorded during a take, or the view from the recording while it plays
+    if rec:taking() then add_frame(t) elseif rec_playing then follow_recording(t) end
+end)
+
+-- What ends a take: pausing, seeking, the clip's end
+mp.observe_property("pause", "bool", function(_, paused) if paused then stop_take() end end)
+mp.observe_property("eof-reached", "bool", function(_, eof) if eof then stop_take("the end of the clip") end end)
+mp.register_event("seek", function() stop_take("a seek") end)
+mp.observe_property("osd-dimensions", "native", function() draw_rec() end)
+
+local function toggle_take()
+    if rec:taking() then stop_take() else start_take() end
+end
+
+local function toggle_playing()
+    if not active then return end
+    if rec:empty() then return mp.osd_message("Nothing recorded yet: Alt+r records where you look", 2) end
+    set_playing(not rec_playing)
+end
+
+mp.add_key_binding("Alt+r", "record", toggle_take)
+mp.add_key_binding("Alt+R", "play-recording", toggle_playing)
+
+mp.register_script_message("view360-record", function(how)
+    if how == "start" then start_take() elseif how == "stop" then stop_take() else toggle_take() end
+end)
+
+mp.register_script_message("view360-play-recording", function(how)
+    if how == "yes" or how == "no" then
+        if how == "yes" and rec:empty() then return toggle_playing() end
+        set_playing(how == "yes")
+    else
+        toggle_playing()
+    end
+end)
+
+mp.register_script_message("view360-undo", function()
+    if rec:taking() then return end
+    if not rec:undo() then return mp.osd_message("Nothing to undo", 1.5) end
+    save_recording()
+    if rec:empty() then rec_playing = false else follow_recording() end
+    mp.osd_message(rec:empty() and "The last take undone: nothing recorded now" or "The last take undone", 2)
+    publish()
+end)
+
+mp.register_script_message("view360-clear", function()
+    if rec:taking() then stop_take() end
+    rec:clear()
+    rec_playing = false
+    save_recording()
+    mp.osd_message("The recording cleared", 2)
+    publish()
+end)
+
+mp.register_script_message("view360-frame", function(f)
+    if not recording.FRAMES[f] then return end
+    rec.frame = f
+    if not rec:empty() then save_recording() end
+    publish()
+end)
+
+mp.register_script_message("view360-size", function(v)
+    if not recording.SIZES[v] then return end
+    rec.size = v
+    if not rec:empty() then save_recording() end
+    publish()
 end)
 
 mp.add_key_binding("Alt+h", "heading", function()
@@ -443,6 +711,7 @@ end)
 mp.register_script_message("view360-set", function(key, value)
     value = tonumber(value)
     if not active or not value then return end
+    yours()
     if key == "yaw" then cur.yaw = view.wrap(value)
     elseif key == "pitch" then cur.pitch = math.max(-view.PITCH_MAX, math.min(view.PITCH_MAX, value))
     elseif key == "roll" then cur.roll = view.wrap(value)

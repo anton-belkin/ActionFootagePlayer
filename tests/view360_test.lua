@@ -658,5 +658,126 @@ do
     f.props["user-data/gyroflow/rig360"] = nil
 end
 
+do
+    -- Recording in the view360 script: a take (Alt+r, paused: it plays), ended by pausing and kept in the clip's file,
+    -- played back; a gesture takes the view back; Follows locked; a take under another refused; a punch-in ended by a
+    -- seek; undo; clear
+    local function serialize(v)
+        if type(v) == "table" then
+            local parts = {}
+            for k, x in pairs(v) do
+                parts[#parts + 1] = "[" .. (type(k) == "string" and string.format("%q", k) or tostring(k)) .. "]=" .. serialize(x)
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        end
+        return type(v) == "string" and string.format("%q", v) or tostring(v)
+    end
+    local function parse(text)
+        local fn = (loadstring or load)("return " .. text)
+        local ok, v = pcall(fn or function() end)
+        return ok and v or nil
+    end
+    package.loaded['mp.utils'] = { parse_json = parse, format_json = serialize }
+    package.loaded['sidecar'] = nil
+    package.loaded['recording'] = nil
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p '" .. dir .. "'")
+    local clip = dir .. "/VID_20250416_143628_00_005.insv"
+    local file = dir .. "/VID_20250416_143628_00_005.afp.json"
+    local function on_disk()
+        local fh = io.open(file, "r")
+        if not fh then return nil end
+        local text = fh:read("*a")
+        fh:close()
+        return parse(text)
+    end
+
+    local f = load_view360()
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.props["path"] = clip
+    f.props["pause"] = true
+    f.props["time-pos"] = 10
+    f.load(false)
+    local function st() return f.props["user-data/view360"].recording end
+    local function yaw() return tonumber(f.props["glsl-shader-opts"].view360_yaw) end
+    expect("rec: can", st().can, true)
+    expect("rec: nothing yet", st().parts, 0)
+    f.bindings["record"].fn()
+    expect("rec: paused, so it plays", f.props["pause"], false)
+    expect("rec: taking", st().taking, true)
+    -- Follows locked during a take
+    f.message("view360-heading", "world")
+    expect("rec: follows locked", f.props["glsl-shader-opts"].view360_heading, "1")
+    for i = 1, 100 do
+        f.message("view360-set", "yaw", tostring(i * 0.5))
+        f.set("time-pos", 10 + i / 25)
+    end
+    expect("rec: seconds", st().seconds, 4)
+    f.set("pause", true)
+    expect("rec: a pause ends the take", st().taking, false)
+    expect("rec: one part", st().parts, 1)
+    expect("rec: plays by itself", st().playing, true)
+    local doc = on_disk()
+    expect("rec: in the clip's file", doc and doc.view360.recording.follows, "camera")
+    expect("rec: thinned in the file", doc and #doc.view360.recording.parts[1].samples, 2)
+    -- Played back: the head from the recording at each frame shown
+    f.set("time-pos", 12)
+    near("rec: played back", yaw(), 25, 1e-3)
+    f.set("time-pos", 3)
+    near("rec: held before", yaw(), 0, 1e-3)
+    f.set("time-pos", 11)
+    near("rec: between", yaw(), 12.5, 1e-3)
+    -- Follows locked while it plays
+    f.message("view360-heading", "world")
+    expect("rec: follows locked while playing", f.props["glsl-shader-opts"].view360_heading, "1")
+    -- A gesture: the view is yours, from there
+    f.bindings["view360-key-wheel-up"].fn({ event = "down", scale = 1 })
+    expect("rec: a gesture pauses it", st().playing, false)
+    expect("rec: says so", f.osd, "Your view: the recording is paused")
+    f.set("time-pos", 12)
+    near("rec: no longer followed", yaw(), 12.5, 1e-3)
+    -- A take under another Follows: refused, saying which
+    f.message("view360-heading", "world")
+    f.bindings["record"].fn()
+    expect("rec: other follows refused", st().taking, false)
+    expect("rec: says which", (f.osd or ""):find("follows the camera", 1, true) ~= nil, true)
+    f.message("view360-heading", "camera")
+    -- A punch-in, ended by a seek
+    f.set("time-pos", 11)
+    f.bindings["record"].fn()
+    f.message("view360-set", "yaw", "-90")
+    for i = 1, 25 do f.set("time-pos", 11 + i / 25) end
+    f.event("seek")
+    expect("rec: a seek ends it", st().taking, false)
+    expect("rec: punched in", st().parts, 3)
+    expect("rec: one span", #st().spans, 1)
+    f.set("time-pos", 11.5)
+    near("rec: the punch-in plays", yaw(), -90, 1e-3)
+    f.message("view360-undo")
+    expect("rec: undone", st().parts, 1)
+    f.set("time-pos", 11.48)
+    near("rec: as before", yaw(), 37 * 0.5, 1e-3)
+    expect("rec: undone in the file", #on_disk().view360.recording.parts, 1)
+    f.message("view360-frame", "9:16")
+    expect("rec: frame", on_disk().view360.recording.frame, "9:16")
+    f.bindings["play-recording"].fn()
+    expect("rec: Alt+R toggles", st().playing, false)
+    f.message("view360-clear")
+    expect("rec: cleared", st().parts, 0)
+    expect("rec: file gone with it", on_disk(), nil)
+    -- Leaving the view ends a take
+    f.bindings["record"].fn()
+    f.set("time-pos", 11.52)
+    f.set("time-pos", 11.56)
+    f.bindings["toggle"].fn()
+    expect("rec: leaving the view ends it", st().taking, false)
+    expect("rec: and keeps it", st().parts, 1)
+    f.event("end-file")
+    os.remove(file)
+    os.execute("rmdir '" .. dir .. "'")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
