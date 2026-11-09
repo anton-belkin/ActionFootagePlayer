@@ -20,8 +20,9 @@ sampling (59 fps with the bicubic), so a TV or phone plays any clip of the libra
 **On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU, the warp taking 0.6 ms of GPU time a frame; a clip opens
 stabilized in about a second, also when it's read straight from the NAS.
 
-**Live, without reading the whole file first.** A clip without a project starts playing once its first ~4 s of
-motion data are read, and the rest comes in as it plays:
+**Live, without reading the whole file first.** You open a video straight off the camera's card — no `.gyroflow`
+project made beforehand, the camera's own gyro data and a default preset — and it plays stabilized once the first
+~4 s of that gyro data are parsed; the rest is parsed while it plays, the way a live feed would arrive:
 - telemetry-parser gets a `Read + Seek` over the file in which the metadata samples not read yet are zeros, which it
   skips, so gyroflow-core's normal loader sees only the seconds read so far. The samples are fetched in parallel from
   the sample table instead of one seek per frame (over SMB that alone took a minute of 4K60 from 14-34 s to under a
