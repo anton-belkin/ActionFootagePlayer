@@ -19,6 +19,28 @@ Not yet: the edge fill (uncovered edges are black), the color fringes under wate
 view (`.afp.json`: level, horizon, lens), marks and moments, crop mode. A clip with its own Gyroflow project
 beside it (`<clip>.gyroflow`) plays with it.
 
+## Spike 1: our mpv on iOS (the default player now)
+
+The same mpv as the Mac app's (tools/mpv.lock, tools/mpv-patches) plus one patch of its own
+(`mpv-patches-ios/0001`: a Vulkan context for iOS, MoltenVK into the app's CAMetalLayer given as `--wid`), as a
+static libmpv with every library it needs built from source (`build_mpv_ios.sh`: ffmpeg 8.0 with VideoToolbox,
+libass and its fonts' libraries, LuaJIT without its JIT, glslang, libplacebo 7.387, MoltenVK 1.4.1). The player
+gives it the Mac player's own shaders: the warp as `gyroflow-gpu-table --player` writes it (`afp_mpv_shader`, in
+the app's process: iOS starts no programs) and the hdr look (`dlogm_hlg.glsl`, the video tagged HLG, as the dlogm
+plugin sets it). On screen: mpv's frame rate, drops and the GPU time of its passes (the warp's apart).
+
+Checked in the simulator: a 4K60 D-Log M clip plays through gpu-next on MoltenVK, VideoToolbox decoding (p010), the
+warp in its planes layout (motion in 1.2 s), stabilized on and off. The frame rate and the GPU time mean nothing
+there (it drops frames; no GPU timers): that's for a phone. Settings → Player switches back to the first prototype.
+
+    ios/build/deps-src/MoltenVK: git clone -b v1.4.1 https://github.com/KhronosGroup/MoltenVK; raise its deployment
+        targets (Xcode 27: iOS 15+, macOS 12+); ./fetchDependencies --ios --iossim; then xcodebuild build -project
+        MoltenVKPackaging.xcodeproj -scheme "MoltenVK Package (iOS only)" -destination "generic/platform=iOS" (and
+        "generic/platform=iOS Simulator")
+    ~/afp-ios-build/src/mpv: mpv at tools/mpv.lock's commit with tools/mpv-patches and mpv-patches-ios applied
+        (git am), libplacebo cloned into subprojects/ as tools/build_mpv.sh does
+    ios/build_mpv_ios.sh all                    # -> ios/build/MPV.xcframework (~100 MB, static)
+
 ## Building
 
     ios/build_motion.sh            # Rust: afp-motion for the iPhone and the simulator -> ios/build/AFPMotion.xcframework

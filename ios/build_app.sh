@@ -7,6 +7,10 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
 [ -d build/AFPMotion.xcframework ] || ./build_motion.sh
+# The looks' shaders, baked from the LUTs as the Mac app's (tools/make_app.sh)
+mkdir -p build/shaders
+[ -f build/shaders/dlogm_hlg.glsl ] || python3 -I ../tools/cube_to_glsl.py ../shaders/dlogm_hlg.glsl.in ../luts/dlogm_hlg.cube build/shaders/dlogm_hlg.glsl >/dev/null
+[ -f build/shaders/gplog_hlg.glsl ] || python3 -I ../tools/cube_to_glsl.py ../shaders/log_hlg.glsl.in ../luts/gplog_hlg.cube build/shaders/gplog_hlg.glsl >/dev/null
 xcodegen generate --quiet
 case "${1:-sim}" in
   sim)

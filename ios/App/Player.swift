@@ -423,6 +423,15 @@ struct MetalVideo: UIViewRepresentable {
     static func dismantleUIView(_ v: VideoHost, coordinator: ()) { v.video.stop() }
 }
 
+/// The player the settings choose
+struct AnyPlayer: View {
+    @EnvironmentObject var library: Library
+    let item: PlayItem
+    var body: some View {
+        if library.engine == "mpv" { MpvPlayerScreen(item: item) } else { PlayerScreen(item: item) }
+    }
+}
+
 struct PlayerScreen: View {
     @EnvironmentObject var library: Library
     let item: PlayItem

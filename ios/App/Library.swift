@@ -15,6 +15,8 @@ final class Library: ObservableObject {
     @Published var sources: [Source] = []
     @Published var server: String { didSet { UserDefaults.standard.set(server, forKey: "server") } }
     @Published var interpolation: String { didSet { UserDefaults.standard.set(interpolation, forKey: "interpolation") } }
+    /// Which player plays a clip here: "mpv" (our mpv with the Mac player's shaders) or "metal" (the first prototype's)
+    @Published var engine: String { didSet { UserDefaults.standard.set(engine, forKey: "engine") } }
     /// Folders being read now (security-scoped access started once, kept while the app runs)
     private var open: [UUID: URL] = [:]
 
@@ -23,6 +25,7 @@ final class Library: ObservableObject {
     init() {
         server = UserDefaults.standard.string(forKey: "server") ?? "http://192.168.50.186:8099"
         interpolation = UserDefaults.standard.string(forKey: "interpolation") ?? "bicubic9"
+        engine = UserDefaults.standard.string(forKey: "engine") ?? "mpv"
         if let data = UserDefaults.standard.data(forKey: "sources"),
            let list = try? JSONDecoder().decode([Source].self, from: data) { sources = list }
     }

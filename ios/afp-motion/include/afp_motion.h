@@ -17,3 +17,5 @@ AfpWarp *afp_warp_build(const char *json);
 void afp_warp_free(AfpWarp *w);
 char *afp_plain_msl(void);
 void afp_string_free(char *s);
+// The mpv user shader for the player's JSON written to out (gyroflow-gpu-table --player); the reply as JSON
+char *afp_mpv_shader(const char *json, const char *out);

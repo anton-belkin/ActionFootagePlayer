@@ -182,6 +182,41 @@ pub fn build(json: &str) -> Result<Warp, String> {
               fps: clip.fps, frames: clip.frame_count, note: String::new() })
 }
 
+/// The mpv user shader for the clip, as `gyroflow-gpu-table --player <json> <out>` writes it for the Mac player (the
+/// same JSON keys, the same reply), here in the app's process: iOS starts no programs. The table at most MAX_W wide
+pub fn mpv_shader(json: &str, out: &str) -> serde_json::Value {
+    let j: serde_json::Value = match serde_json::from_str(json) { Ok(j) => j, Err(e) => return serde_json::json!({ "error": format!("bad JSON: {e}") }) };
+    let loaded = match PlayerClip::load(&j) { Ok(l) => l, Err(e) => return serde_json::json!({ "error": e }) };
+    let clip = loaded.clip(&j);
+    if let Some(why) = gpu_table::unsupported(&clip) { return serde_json::json!({ "unsupported": why }); }
+    let s = |k: &str| j.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let interp = match s("interpolation") { "bilinear" => 0, "lanczos" | "lanczos4" => 3, "ewa" => 4, "bspline" => 1, _ => 5 };
+    let chromatic = j.get("gpu_chromatic").and_then(|v| v.as_bool()).unwrap_or(false);
+    let view = loaded.view(&j);
+    let wet = chromatic && loaded.wet(view, &clip);
+    let edge_fill = match s("edges") { "smooth" | "sphere" => Some(j.get("edges_blur").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32 / 100.0), _ => None };
+    let sphere = s("edges") == "sphere" && j.get("gpu_sphere").and_then(|v| v.as_bool()).unwrap_or(true);
+    let rgb = wet || sphere;
+    let opts = Options { mode: if rgb { Mode::Grid } else { Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
+                         chromatic: wet, chromatic_fast: true, edge_fill, sphere,
+                         time_offset: j.get("time_offset").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                         denoise: j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), knots: 33, interp, shrink: false, range: None };
+    let built = match loaded.table(view, &clip, &opts) { Ok(t) => t, Err(e) => return serde_json::json!({ "error": e }) };
+    let table = repack(&built, MAX_W);
+    if let Err(e) = std::fs::write(out, gpu_table::shader(&clip, &opts, &table)) { return serde_json::json!({ "error": format!("{out}: {e}") }); }
+    serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
+                        "chromatic": wet, "sphere": sphere })
+}
+
+/// mpv_shader for C: the reply as JSON; free with afp_string_free
+#[unsafe(no_mangle)]
+pub extern "C" fn afp_mpv_shader(json: *const c_char, out: *const c_char) -> *mut c_char {
+    let get = |p: *const c_char| if p.is_null() { String::new() } else { unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned() };
+    let (json, out) = (get(json), get(out));
+    let reply = std::panic::catch_unwind(|| mpv_shader(&json, &out)).unwrap_or_else(|_| serde_json::json!({ "error": "the motion library panicked" }));
+    cstr(&reply.to_string())
+}
+
 // ---- C interface (ios/afp-motion/include/afp_motion.h) ----
 
 #[repr(C)]

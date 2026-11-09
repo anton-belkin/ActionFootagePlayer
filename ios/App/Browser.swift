@@ -78,7 +78,7 @@ struct FolderView: View {
                         Label(item.url.lastPathComponent, systemImage: "folder")
                     }
                 } else {
-                    NavigationLink { PlayerScreen(item: PlayItem(url: item.url, title: item.url.lastPathComponent)) } label: {
+                    NavigationLink { AnyPlayer(item: PlayItem(url: item.url, title: item.url.lastPathComponent)) } label: {
                         ClipRow(item: item)
                     }
                     .contextMenu {

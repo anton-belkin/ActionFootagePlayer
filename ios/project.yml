@@ -20,9 +20,22 @@ targets:
         buildPhase: resources
       - path: ../luts/gplog_hlg.cube
         buildPhase: resources
+      - path: build/shaders
+        type: folder
+        buildPhase: resources
     dependencies:
       - framework: build/AFPMotion.xcframework
         embed: false
+      - framework: build/MPV.xcframework
+        embed: false
+      - sdk: AudioToolbox.framework
+      - sdk: VideoToolbox.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreText.framework
+      - sdk: IOSurface.framework
+      - sdk: libz.tbd
+      - sdk: libbz2.tbd
+      - sdk: libiconv.tbd
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework

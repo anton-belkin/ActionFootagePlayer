@@ -121,7 +121,7 @@ struct CatalogDetail: View {
                 }
                 if let original {
                     NavigationLink {
-                        PlayerScreen(item: PlayItem(url: original, title: item.title ?? item.name,
+                        AnyPlayer(item: PlayItem(url: original, title: item.title ?? item.name,
                                                     start: item.start_in ?? 0, duration: item.kind == "moment" ? item.duration : nil))
                     } label: {
                         Label("On this iPhone: stabilized here", systemImage: "iphone.gen3")
@@ -176,6 +176,10 @@ struct SettingsView: View {
                         Text("Bicubic (16 reads)").tag("bicubic")
                         Text("Lanczos").tag("lanczos")
                         Text("Bilinear (fastest)").tag("bilinear")
+                    }
+                    Picker("Player", selection: $library.engine) {
+                        Text("mpv (the Mac player's shaders)").tag("mpv")
+                        Text("Metal (first prototype)").tag("metal")
                     }
                 } header: { Text("Stabilized on this iPhone") }
                 Section {
