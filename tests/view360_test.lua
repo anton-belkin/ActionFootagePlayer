@@ -216,6 +216,145 @@ do
     expect("opts heading", o.view360_heading, "2")
 end
 
+-- The recording (mpv/scripts/view360/recording.lua): takes from synthetic streams of frames at 25 fps
+local recording = require 'recording'
+local FPS = 25
+-- A take from a to b seconds, the head given by fn(t) -> yaw, pitch, roll, fov, projection
+local function take(r, follows, a, b, fn)
+    local ok, why = r:start(follows)
+    if not ok then return nil, why end
+    local n = math.floor((b - a) * FPS + 0.5)
+    for i = 0, n do
+        local t = a + i / FPS
+        r:add(t, fn(t))
+    end
+    return r:stop()
+end
+local function still(yaw, fov) return function() return yaw, 0, 0, fov or 100, "auto" end end
+do
+    -- A still head is two samples; a steady turn too; a wobble keeps what it needs to stay within the tolerance
+    local r = recording.new()
+    local p = take(r, "travel", 10, 20, still(30))
+    expect("still: two samples", #p.samples, 2)
+    expect("still: from", p.from, 10)
+    near("still: to", p.to, 20, 1e-9)
+    r:clear()
+    p = take(r, "travel", 0, 10, function(t) return 5 * t, -t, 0, 100, "auto" end)
+    expect("steady turn: two samples", #p.samples, 2)
+    near("steady turn: between", r:head(3.3).yaw, 16.5, 1e-9)
+    r:clear()
+    local function wobble(t) return 20 * math.sin(t), 5 * math.cos(2 * t), 0, 100 * math.exp(0.2 * math.sin(t / 3)), "auto" end
+    p = take(r, "travel", 0, 20, wobble)
+    expect("wobble: thinned", #p.samples < 20 * FPS / 2, true)
+    expect("wobble: not to nothing", #p.samples > 10, true)
+    local worst = 0
+    for i = 0, 20 * FPS do
+        local t = i / FPS
+        local h = r:head(t)
+        local y, pi, _, f = wobble(t)
+        worst = math.max(worst, math.abs(h.yaw - y), math.abs(h.pitch - pi), math.abs(100 * math.log(h.fov) - 100 * math.log(f)))
+    end
+    expect("wobble: every frame within the tolerance", worst <= recording.TOLERANCE + 1e-9, true)
+    -- The yaw across ±180°: unwrapped, played back the short way
+    r:clear()
+    p = take(r, "camera", 0, 2, function(t) return ((170 + 10 * t) + 180) % 360 - 180, 0, 0, 100, "auto" end)
+    near("wrap: unwrapped", p.samples[#p.samples].yaw, 190, 1e-6)
+    near("wrap: the short way", r:head(1).yaw, 180, 1e-6)
+end
+do
+    -- Punch-in: 20-30 over 12-47 keeps 12-20 and 30-47 as they were
+    local r = recording.new()
+    take(r, "travel", 12, 47, function(t) return t, 0, 0, 100, "auto" end)
+    take(r, "travel", 20, 30, still(-90, 60))
+    expect("punch-in: three parts", #r.parts, 3)
+    near("punch-in: before kept", r:head(15).yaw, 15, 1e-6)
+    near("punch-in: up to the cut", r:head(19.96).yaw, 19.96, 1e-6)
+    near("punch-in: the take", r:head(25).yaw, -90, 1e-9)
+    near("punch-in: the take's fov", r:head(25).fov, 60, 1e-9)
+    near("punch-in: its first frame", r:head(20).yaw, -90, 1e-9)
+    near("punch-in: its last frame", r:head(30).yaw, -90, 1e-9)
+    near("punch-in: after kept", r:head(30.04).yaw, 30.04, 1e-6)
+    near("punch-in: after kept, later", r:head(40).yaw, 40, 1e-6)
+    expect("punch-in: one span", #r:spans(), 1)
+    near("punch-in: the span", r:spans()[1].to, 47, 1e-9)
+    -- Holding: before the first part, between parts (the end of the one before), after the last
+    take(r, "travel", 60, 70, still(45))
+    near("hold before", r:head(3).yaw, 12, 1e-9)
+    near("hold between", r:head(55).yaw, 47, 1e-6)
+    near("hold after", r:head(90).yaw, 45, 1e-9)
+    expect("two spans", #r:spans(), 2)
+    -- Undo, one take at a time: what each replaced comes back
+    expect("undo: the last take", r:undo(), true)
+    near("undo: after the last part again", r:head(90).yaw, 47, 1e-6)
+    expect("undo: the punch-in", r:undo(), true)
+    expect("undo: one part again", #r.parts, 1)
+    near("undo: as it was", r:head(25).yaw, 25, 1e-6)
+    expect("undo: the first", r:undo(), true)
+    expect("undo: nothing", r:empty(), true)
+    expect("undo: follows nothing", r.follows, nil)
+    expect("undo: no more", r:undo(), false)
+    -- A take that covers a whole part replaces it; one inside a part's start only cuts the start
+    take(r, "travel", 10, 20, still(1))
+    take(r, "travel", 5, 25, still(2))
+    expect("covered: one part", #r.parts, 1)
+    near("covered: the new", r:head(15).yaw, 2, 1e-9)
+    take(r, "travel", 0, 10, still(3))
+    expect("start cut: two parts", #r.parts, 2)
+    near("start cut: the rest", r:head(20).yaw, 2, 1e-9)
+    -- At most 20 takes back
+    r:clear()
+    for i = 1, 25 do take(r, "travel", i, i + 0.5, still(i)) end
+    expect("undo limited", r:undoable(), recording.UNDO)
+end
+do
+    -- Follows: the first take's; another's refused, saying which the recording has
+    local r = recording.new()
+    take(r, "travel", 0, 1, still(0))
+    local p, why = take(r, "camera", 2, 3, still(0))
+    expect("other follows refused", p, nil)
+    expect("says the recording's", why, "travel")
+    expect("same follows taken", take(r, "travel", 2, 3, still(0)) ~= nil, true)
+    r:clear()
+    expect("cleared: any follows", take(r, "camera", 2, 3, still(0)) ~= nil, true)
+    expect("now camera", r.follows, "camera")
+    -- A seek back during a take: add says so
+    r:start("camera")
+    r:add(5, 0, 0, 0, 100, "auto")
+    expect("back in time", r:add(4, 0, 0, 0, 100, "auto"), false)
+    -- Too short to keep
+    r:stop()
+    r:start("camera")
+    r:add(5, 0, 0, 0, 100, "auto")
+    expect("one frame: nothing", r:stop(), nil)
+end
+do
+    -- The projection: a change is a cut at the later sample, kept through thinning; in the file only where it changes
+    local r = recording.new()
+    take(r, "world", 0, 4, function(t) if t < 2 then return 0, 0, 0, 100, "auto" else return 0, 0, 0, 270, "planet" end end)
+    expect("projection: four samples", #r.parts[1].samples, 4)
+    expect("projection: before", r:head(1.99).projection, "auto")
+    near("projection: held to the change", r:head(1.99).fov, 100, 1e-9)
+    expect("projection: on it", r:head(2).projection, "planet")
+    local t = r:to_table()
+    expect("file: follows", t.follows, "world")
+    expect("file: first sample has it", t.parts[1].samples[1][6], "auto")
+    expect("file: no repeat", t.parts[1].samples[2][6], nil)
+    expect("file: the change", t.parts[1].samples[3][6], "planet")
+    expect("file: frame", t.frame, "16:9")
+    -- Read back: the same; keys it doesn't know kept; bad samples left out
+    t.tidy = { turns = "medium" }
+    table.insert(t.parts[1].samples, { 1, 0, 0, 0, 100 })
+    table.insert(t.parts, { samples = { { 9, 0, 0, 0, 100 } } })
+    local r2 = recording.new():load(t)
+    expect("read: one part", #r2.parts, 1)
+    expect("read: samples", #r2.parts[1].samples, 4)
+    expect("read: projection filled in", r2.parts[1].samples[2].projection, "auto")
+    expect("read: planet after", r2:head(3).projection, "planet")
+    expect("read: tidy kept", r2:to_table().tidy.turns, "medium")
+    expect("read: nonsense", recording.new():load({ follows = "sideways", parts = {} }):empty(), true)
+    expect("empty: no table", recording.new():to_table(), nil)
+end
+
 -- The gestures (crop mode's and the view's), over a fake mpv
 do
     local f = fake_mp()
