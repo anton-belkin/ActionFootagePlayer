@@ -84,6 +84,8 @@ pub fn from_player_json(j: &serde_json::Value) -> Result<(Clip, f64), String> {
 /// without a project), so the view is picked without loading it again (gyroflow-gpu-table --serve keeps these)
 pub struct PlayerClip {
     pub views: std::sync::Arc<crate::Views>,
+    /// The video, whose translation compensation may be kept (translation.rs)
+    video: String,
     /// Built tables, by view, the fringes taken out or not and the knots; whether the view's lens is under water
     tables: std::sync::Mutex<Vec<((usize, bool, usize), std::sync::Arc<Table>)>>,
     wet: std::sync::Mutex<Vec<(usize, bool)>>,
@@ -117,7 +119,8 @@ impl PlayerClip {
         // All of a clip's own motion data before it plays (lookahead 0): the table is written once
         let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
         let sp = p.stab.params.read();
-        Ok(PlayerClip { views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us })
+        let video = if crate::is_project_file(project) { gyroflow_core::filesystem::url_to_path(&p.stab.input_file.read().url) } else { project.to_string() };
+        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us })
     }
 
     /// The index of the view the JSON asks for (wide, level) in `views`
@@ -146,6 +149,12 @@ impl PlayerClip {
         tables.push((key, t.clone()));
         if tables.len() > 4 { tables.remove(0); }
         Ok(t)
+    }
+
+    /// The translation compensation computed for this clip (gyroflow-export --translation), if it was: each frame's
+    /// shift over the output's focal length
+    pub fn translation(&self) -> Option<Vec<[f32; 2]>> {
+        crate::translation::cached(&self.video).filter(|v| v.len() == self.frame_count)
     }
 
     /// The clip in the view the JSON asks for (wide, level)
@@ -353,6 +362,9 @@ fn pass_body(name: &str) -> &'static str {
 /// One hook pass: its directives, the defines, the common code and its body
 fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, body: &str) -> String {
     let (_, common, _) = sections();
+    // The translation compensation's shifts, which frame_setup reads, in every pass with the common code
+    let mut directives = directives.to_vec();
+    if defines.contains("#define TRANS_BIND") { directives.push("//!BIND GYROFLOW_TRANS".to_string()); }
     format!("{}\n\n{defines}\n{extra}\n{}\n{body}\n", directives.join("\n"), common.replace("@LENS@", &lens_code(clip)))
 }
 
@@ -366,8 +378,19 @@ fn fill_grid(clip: &Clip) -> (usize, usize) {
 }
 
 /// The passes for `opts.mode`, without the file's head
-pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
-    let defs = defines(clip, opts, table);
+pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 2]]>) -> String {
+    // The translation compensation kept for the clip (translation.rs): each frame's shift, one texel a frame
+    const TRANS_PER_ROW: usize = MAX_TEX;
+    let defs = defines(clip, opts, table) + &if trans.is_some() { format!("\n#define TRANS_BIND\n#define TRANS_PER_ROW {TRANS_PER_ROW}") } else { String::new() };
+    let trans_head = trans.map(|b| {
+        let frames = b.len().max(1);
+        let (w, h) = (frames.min(TRANS_PER_ROW), frames.div_ceil(TRANS_PER_ROW));
+        let mut data = vec![0f32; w * h * 4];
+        for (f, v) in b.iter().enumerate() { data[f * 4..f * 4 + 2].copy_from_slice(v); }
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+        let hex: String = data.iter().flat_map(|v| v.to_le_bytes()).flat_map(|b| [DIGITS[(b >> 4) as usize] as char, DIGITS[(b & 15) as usize] as char]).collect();
+        format!("//!TEXTURE GYROFLOW_TRANS\n//!SIZE {w} {h}\n//!FORMAT rgba32f\n//!FILTER NEAREST\n{hex}\n\n")
+    }).unwrap_or_default();
     let rb = opts.chromatic && opts.mode == Mode::Grid;
     let d = |v: &[&str]| v.iter().map(|s| s.to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
     let rb_bind = if rb { "//!BIND GYROFLOW_GRID_RB" } else { "" };
@@ -442,6 +465,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
             sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
                 if opts.chromatic_bilinear_planes() { "\n#undef INTERP\n#define INTERP 0" } else { "" }), "C")),
     };
+    let warp = format!("{trans_head}{warp}");
     if !opts.denoise { return warp; }
     // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
     let common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }, rb_bind, sphere_bind];
@@ -503,10 +527,13 @@ impl Options {
 }
 
 /// The shader file mpv loads
-pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String {
+pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String { shader_with(clip, opts, table, None) }
+
+/// The same with the translation compensation kept for the clip (translation.rs)
+pub fn shader_with(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 2]]>) -> String {
     let (head, _, _) = sections();
     head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table))
+        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table, trans))
 }
 
 /// The GPU path's 360 mode: a 360 camera's sphere shader (warp.glsl's sphere360 and stamp360 passes) for its lens

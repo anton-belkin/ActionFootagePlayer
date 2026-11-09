@@ -90,6 +90,12 @@
 //!MAXIMUM 1.0
 0.25
 
+//!PARAM gyroflow_trans
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+1.0
+
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
 //!FORMAT rgba32f
@@ -398,6 +404,20 @@ vec4 sample_src(vec2 uv) { return src(uv); }
 
 #endif
 
+#ifdef TRANS_BIND
+// The translation compensation (vs-gyroflow's translation.rs, computed for the clip ahead and kept: gyroflow-export
+// --translation): each frame's shift in GYROFLOW_TRANS, over the output camera's focal length (so it holds in any
+// view and zoom), TRANS_PER_ROW frames a row. gyroflow_trans is how much of it (main.lua's Ctrl+j: 0 or 1; no comment
+// can go between the parameters at the top, libplacebo reads it as the value). At most 6 % of the output's width
+vec2 trans_shift(int f, vec2 out_f)
+{
+    if (gyroflow_trans <= 0.0) return vec2(0.0);
+    vec2 s = texelFetch(GYROFLOW_TRANS, ivec2(f % TRANS_PER_ROW, f / TRANS_PER_ROW), 0).xy * out_f * gyroflow_trans;
+    float lim = 0.06 * float(OUT_W), l = length(s);
+    return l > lim ? s * (lim / l) : s;
+}
+#endif
+
 // The frame's parameters, from the table by PTS. False where the table has none
 bool frame_setup()
 {
@@ -413,6 +433,13 @@ bool frame_setup()
     t3 = table(9).xyz;
     for (int i = 0; i < 4; i++) params.digital_lens_params[i] = table(10 + i);
     stretch = table(14);
+#ifdef TRANS_BIND
+    // The translation compensation's shift: where the output looks in Gyroflow's frame (output_ray's focal length).
+    // A shift, not a turn: the hand's translation moves a subject's plane evenly across the frame, which a shift undoes;
+    // a turn that puts the middle in the same place moves the edges further (1 / cos^2 of their angle). Side by side
+    // on the clips they were measured on, Anton saw no difference, and the shift is the cheaper
+    t2.xy += trans_shift(table_frame, fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom));
+#endif
     params.width = float(SRC_W); params.height = float(SRC_H);
     params.output_width = float(OUT_W); params.output_height = float(OUT_H);
     params.flags = HAS_DIGITAL * 2;
