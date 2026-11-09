@@ -321,7 +321,7 @@ nearest edge's colors, 25 taps) streaked outward from the frame and met it in a 
 Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
 N100.)**
 
-### Temporal denoise (Ctrl+p) on the GPU path: 5 frames on each side
+### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
 
 A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:
 −62 % noise on water at 4K60 on an M1 Pro), but Anton froze it for playback (the eye averages at 60 fps), and a plain
@@ -345,12 +345,16 @@ recursive filter is no good under water: it has to follow what moves. The GPU pa
   the frame on screen exactly, so the picture stays. Save frame takes the time of the frame on screen
   (`user-data/gyroflow/gpu_delay`).
 
-**Its settings** (the panel's Transform, kept with a clip's transform as `denoise_frames`, `denoise_grain` and
-`denoise_tolerance`; the app's defaults gyroflow.conf's `still_radius`, `still_grain`, `still_tolerance`): the frames
-on each side (1-5; fewer also shortens the delay), the grain kept (`gyroflow_dn_keep`) and the motion tolerance
-(`gyroflow_dn_tolerance`, still.rs's weight's scale: how much a patch may differ and still be averaged in). DYNAMIC
-parameters of the shader: a change takes nothing written again, only the frames on each side start the ring again (the
-delay changes). The VapourSynth path's paused frame takes the frames and the grain (still.rs has no tolerance).
+**Its settings:** on or off is Ctrl+p (the panel's Transform, gyroflow.conf's `still`); how much of it this computer
+does is Performance & Quality's **Temporal denoise** (gyroflow.conf's `temporal_denoise`): **Full**, 5 frames on each
+side (the picture 5 frames behind), **Light**, 3 (3 behind; about a quarter cheaper), **Off**, none whatever Ctrl+p
+says: the shader is written without the `dn_` passes (no ring, no delay), the paused frame isn't cleaned either, Ctrl+p
+says it's off on this computer, and its switch is kept for when it's on again. The frames on each side are a DYNAMIC
+parameter (`gyroflow_dn_radius`): Full to Light writes nothing again, only the ring starts again (the delay changes).
+The grain kept is gyroflow.conf's `still_grain` (0.25; `gyroflow_dn_keep`). The VapourSynth path's paused frame takes
+the same frames and grain. From 2026-11-08 to 11-09 (#148) the frames, the grain and a motion tolerance were sliders in
+Transform, kept with a clip's transform; they did little to the picture (the noise measure below was the matter), and
+a clip's `denoise_` keys from then are left out.
 
 Measured 2026-11-07 on the M1 Pro, clip 0126 (4K60 D-Log M, under water), a 1080p window:
 
@@ -369,6 +373,42 @@ not at all for the frame just before (its own step as searched). On the XDR full
 2 frames dropped in 8 s. On clip 0126 it takes out 3.7 codes of grain in open water against 3.9 at a calm moment, 5.8
 against 7.0 in a fast turn (Transform's Loose motion takes out more), and changes the picture's structure a little
 less (1.19 against 1.27).
+
+**The noise measured right, 2026-11-09** (Anton: "on the Thistlegorm clips it only now and then catches the noise",
+a dark noisy dive). Measured offline on copies with the player's own shader (libplacebo on MoltenVK, no window: each
+frame with and without the denoise, the noise as the high-pass spread in the flattest quarter of 32 px blocks, 1080p,
+none of the grain kept). The motion was right: all 10 neighbours were found for every frame, and averaging all of them
+took out 73 % of the noise on 0087 (ghosting what moves). The noise measure was wrong: `dn_state` took it as the lower
+quartile of the differences against the frame before, over 0.4506, as still.rs does. Under water HEVC copies many
+blocks from the frame before, whose difference is about none, and codes the rest with fresh noise; the lower quartile
+of that mix read 3.3 codes in open water where the spread is 7-8, and swung 2-10 codes from frame to frame (its
+correlation with the real noise 0.38). With the measure that low, plain noise was taken for motion: at 2 codes 4-7 % of
+it went. Now:
+
+- **The upper quartile** of the differences, over 1.6268, against the frame before's nearest pixel (between pixels the
+  bilinear mix halved the noise), **smoothed over the frames** (a tenth of each new one).
+- **The pixel's reference kept within the noise of its four neighbours' mean**: with the measure right, a spike of the
+  noise turned every other frame away and stayed, dark specks on clean water.
+- **A color check**: the color (B-Y, R-Y) of the pixel and its neighbours against the other frame's, by the color's
+  own noise (measured the same way, `gdn_sigma[16-31]`): a pink fin over water of its brightness ghosted without it.
+- The tolerance is fixed (1.5, as the default was).
+
+Noise taken out, luma (color in brackets), 30 s of each clip; the noise without, in 10-bit codes:
+
+| clip | noise | until now (#151) | before #151 | Full (5+5) | Light (3+3) |
+|---|---|---|---|---|---|
+| 0087, Thistlegorm | 8.5 | 31 % (48) | 34 % (38) | 61 % (70) | 55 % (62) |
+| 0090, Thistlegorm, strong stabilization | 11.1 | 36 % (55) | 44 % (51) | 60 % (69) | 53 % (61) |
+| 0093, Thistlegorm | 13.2 | 37 % (56) | 42 % (50) | 62 % (70) | 55 % (62) |
+| 0004, Thistlegorm | 4.1 | 29 % (45) | 32 % (39) | 50 % (59) | 44 % (51) |
+| 0126, reef (the reference) | 5.0 | 25 % (44) | 23 % (34) | 58 % (65) | 50 % (56) |
+
+The stabilization: on 0090 (strong) the one before took out 39 % where the correction turns slowly and 27 % in its
+fastest third (the frames' different blur passing the too-low threshold as motion); now 61 % and 57 %. On the other
+clips it made no difference either way. The pre-#151 passes (5x5 search, 32-pixel chain check) with the same fix took
+out no more, at about 1.6 times the cost, so they stay out. Cost (offline, the whole denoise, so above what the player
+measures): as #151 at 1080p (3.7 ms), +5 % at the XDR's size and 4K; Light about 25 % less. No ghosts on 0126's
+bubbles and diver or 0087's fish; paused-frame crops and the rig in the review's notes.
 
 The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
 18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once

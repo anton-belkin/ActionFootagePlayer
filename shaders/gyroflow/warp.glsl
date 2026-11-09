@@ -78,12 +78,6 @@
 //!MAXIMUM 1.0
 0.25
 
-//!PARAM gyroflow_dn_tolerance
-//!TYPE DYNAMIC float
-//!MINIMUM 0.25
-//!MAXIMUM 8.0
-1.5
-
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
 //!FORMAT rgba32f
@@ -887,8 +881,8 @@ void hook()
 // The motion is searched once per frame, between it and the one before (per 32 px block: the gyro's prediction, a
 // search around it on the quarter-size luma, then at full size; GDN_VEC, a field per slot, kept). The motion from the
 // shown frame to each other one is those steps chained (backwards; forwards, each step inverted), then checked within
-// a pixel at full size (GDN_NV, a texture the blend reads through the sampler's filter). The noise: by brightness, from how the shown frame differs from the one before
-// it where they match. This pass: the frame's luma at a quarter of its size, for the search
+// a pixel at full size (GDN_NV, a texture the blend reads through the sampler's filter). The noise: by brightness, from
+// how the shown frame differs from the one before it where they match (dn_blend, dn_state). This pass: the frame's luma at a quarter of its size, for the search
 vec4 hook()
 {
     vec2 p = HOOKED_pos;
@@ -909,7 +903,8 @@ ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
 bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, target_size)); }
 // This render's frame is the newest one again (paused, a redraw)
 bool dn_same() { return dn_ok() && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
-// The frames on each side it takes (the panel's Transform: 1-5), and of them the ones after the shown frame
+// The frames on each side it takes (Performance & Quality's temporal denoise: Full 5, Light 3), and of them the ones
+// after the shown frame
 int dn_radius() { return clamp(gyroflow_dn_radius, 1, DN_RADIUS); }
 int dn_after() { return clamp(gyroflow_dn_after, 0, dn_radius()); }
 // This render writes its frame: a new one, or the same one again where none is shown after it (crop mode's camera
@@ -1138,12 +1133,23 @@ vec4 hook()
 
 // ==== pass dn_blend ====
 #ifdef DN_BLEND
+// How much a patch may differ beyond the noise and still be averaged in: still.rs's weight's scale
+#define DN_TOLERANCE 1.5
+// The noise at a brightness, between its bins: the luma's (gdn_sigma[0-15]) and the color's (B-Y, gdn_sigma[16-31]);
+// a bin not measured yet holds the start value negated (dn_state)
 float sigma_at(float l)
 {
     float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
     int i = int(b);
-    return mix(gdn_sigma[i], gdn_sigma[min(i + 1, 15)], b - float(i));
+    return mix(abs(gdn_sigma[i]), abs(gdn_sigma[min(i + 1, 15)]), b - float(i));
 }
+float sigc_at(float l)
+{
+    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
+    int i = int(b);
+    return mix(abs(gdn_sigma[16 + i]), abs(gdn_sigma[16 + min(i + 1, 15)]), b - float(i));
+}
+vec2 chroma(vec3 c) { float y = lum(c); return vec2(c.b - y, c.r - y); }
 vec3 frame_bilinear(int slot, vec2 p)
 {
     vec2 f = fract(p);
@@ -1168,9 +1174,17 @@ vec4 hook()
     float l = lum(cur);
     float own_q = dn_quart(sc, j / 4);
     float s = max(sigma_at(l), 1e-4);
+    // The reference the other frames are matched against: the pixel kept within the noise of its four neighbours'
+    // mean, so a spike of the noise doesn't turn every other frame away (and stay, a speck on a clean background)
+    vec3 n4 = dn_frame(sc, j + ivec2(1, 0)) + dn_frame(sc, j - ivec2(1, 0)) + dn_frame(sc, j + ivec2(0, 1)) + dn_frame(sc, j - ivec2(0, 1));
+    float m4 = 0.25 * lum(n4);
+    float lr = m4 + clamp(l - m4, -s, s);
+    // The color's: the pixel's and its four neighbours' (the color's noise is coarser than the luma's)
+    vec2 cref = chroma((cur + n4) * 0.2);
+    float sc2 = max(sigc_at(l), 1e-4);
     vec3 sum = cur;
     float wsum = 1.0;
-    float noise_diff = -1.0;
+    float noise_diff = -1.0, noise_c = -1.0;
     for (int n = 0; n < 2 * DN_RADIUS; n++) {
         if (!dn_has(n)) continue;
         int slot = dn_slot_at(dn_offset(n));
@@ -1184,15 +1198,22 @@ vec4 hook()
         vec3 a00 = dn_frame(slot, i), a10 = dn_frame(slot, i + ivec2(1, 0)), a01 = dn_frame(slot, i + ivec2(0, 1)), a11 = dn_frame(slot, i + ivec2(1, 1));
         vec3 h = mix(mix(a00, a10, f.x), mix(a01, a11, f.x), f.y);
         vec3 near = f.y < 0.5 ? (f.x < 0.5 ? a00 : a10) : (f.x < 0.5 ? a01 : a11);
-        float e = l - lum(near);
+        float e = lr - lum(near);
         float eq = 1.8 * (own_q - dn_quart(slot, ivec2(floor((p + 0.5) / 4.0))));
         float d = 0.5 * (e * e + eq * eq);
-        // still.rs's weight: full where the patches differ by the noise alone, none past three times it (times the
-        // motion tolerance: higher averages more of what moved, lower keeps more of the frame's own)
-        float w = 1.0 - smoothstep(1.0 * gyroflow_dn_tolerance, 3.0 * gyroflow_dn_tolerance, d / (2.0 * s * s));
+        // still.rs's weight: full where the patches differ by the noise alone, none past three times it
+        float w = 1.0 - smoothstep(1.0 * DN_TOLERANCE, 3.0 * DN_TOLERANCE, d / (2.0 * s * s));
+        // And the color: a fin of another color but the same brightness isn't the water behind it
+        vec2 dc = cref - chroma(near);
+        w *= 1.0 - smoothstep(3.0, 8.0, dot(dc, dc) / (2.4 * sc2 * sc2));
         sum += w * h;
         wsum += w;
-        if (n == 0) noise_diff = abs(l - lum(h));
+        // The noise's sample: against the frame before, its nearest pixel (between pixels, the bilinear mix would
+        // halve it)
+        if (n == 0) {
+            noise_diff = abs(l - lum(near));
+            noise_c = abs(chroma(cur).x - chroma(near).x);
+        }
     }
     vec3 den = sum / wsum;
     // The noise, from the shown frame against the one before where they match
@@ -1200,8 +1221,9 @@ vec4 hook()
         uint bin = uint(clamp(l * 16.0, 0.0, 15.0));
         uint st = uint(clamp(noise_diff * 4096.0, 0.0, 255.0));
         atomicAdd(gdn_hist[bin * 256u + st], 1u);
+        atomicAdd(gdn_hist[4096u + bin * 256u + uint(clamp(noise_c * 4096.0, 0.0, 255.0))], 1u);
     }
-    // Some of the grain kept, so it doesn't look smeared (the panel's strength)
+    // Some of the grain kept, so it doesn't look smeared (gyroflow.conf's still_grain)
     return vec4(den + gyroflow_dn_keep * (cur - den), 1.0);
 }
 #endif
@@ -1210,31 +1232,36 @@ vec4 hook()
 #ifdef DN_STATE
 void hook()
 {
-    // One workgroup of 16: brightness bin i each
+    // One workgroup of 16: brightness bin i each, the luma's and the color's
     uint i = gl_LocalInvocationID.x;
     bool same = dn_same(), ok = dn_ok(), fresh = dn_fresh();
     int nw = dn_newest();
     bool first = gdn_magic != DN_MAGIC;
     memoryBarrierBuffer();
     barrier();
-    if (!same) {
-        // The noise of bin i: the lower quartile of the differences over 0.4506 (two noisy samples' |a - b| is under it
-        // for a quarter of them), as still.rs measures it; a bin with too few keeps what it had
+    for (uint k = i; k < 32u && !same; k += 16u) {
+        // The noise of bin k: the upper quartile of the differences over 1.6268 (two noisy samples' |a - b| is under
+        // it for three quarters of them). Not the lower quartile (still.rs's): HEVC copies many blocks from the frame
+        // before, whose difference is about none, and the rest is fresh noise, so the lower quartile read the noise
+        // two or three times too low, swinging with each frame (clip 0087: 2-10 codes for about 8), and the noise was
+        // taken for motion. Smoothed over the frames (a tenth of each); a bin with too few keeps what it had, and
+        // starts from 4 codes, negated until it's measured
         uint total = 0u;
-        for (uint st = 0u; st < 256u; st++) total += gdn_hist[i * 256u + st];
+        for (uint st = 0u; st < 256u; st++) total += gdn_hist[k * 256u + st];
         if (total >= 200u) {
             uint seen = 0u;
             float q = 0.0;
             for (uint st = 0u; st < 256u; st++) {
-                uint h = gdn_hist[i * 256u + st];
-                if ((seen + h) * 4u >= total) { q = (float(st) + 0.5) / 4096.0; break; }
+                uint h = gdn_hist[k * 256u + st];
+                if (float(seen + h) >= 0.75 * float(total)) { q = (float(st) + 0.5) / 4096.0; break; }
                 seen += h;
             }
-            gdn_sigma[i] = max(q / 0.4506, 0.0005);
+            float v = max(q / 1.6268, 0.0005);
+            gdn_sigma[k] = first || gdn_sigma[k] < 0.0 ? v : mix(gdn_sigma[k], v, 0.1);
         } else if (first) {
-            gdn_sigma[i] = 0.004;
+            gdn_sigma[k] = -0.004;
         }
-        for (uint st = 0u; st < 256u; st++) gdn_hist[i * 256u + st] = 0u;
+        for (uint st = 0u; st < 256u; st++) gdn_hist[k * 256u + st] = 0u;
     }
     memoryBarrierBuffer();
     barrier();
