@@ -765,22 +765,23 @@ class Handler(BaseHTTPRequestHandler):
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
                 # (Jellyfin's probe: only those it reads)
                 count = info(clip)["count"]
+                relay = (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server")
                 first = next((k for k in range(min(6, count)) if not os.path.exists(segment_path(clip, k))), None)
-                if first is not None:
+                if first is not None and not relay:
                     ensure(clip, first, 2 if is_probe(self.headers) else None)
                 # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
                 # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
                 # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
                 # the stream from us, with its own User-Agent, and gets TS or fMP4 as it plays
-                if (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server"):
+                if relay:
                     # A TV is about to play: its look's render starts now from the first segment it doesn't have (past a
-                    # pre-rendered opening), seconds before the TV asks
-                    if not look:
-                        tv = with_look(clip, TV_LOOK)
-                        asked[tv["id"]] = time.time()
-                        k = next((k for k in range(count) if not os.path.exists(segment_path(tv, k))), None)
-                        if k is not None:
-                            ensure(tv, k)
+                    # pre-rendered opening), seconds before the TV asks. Nothing in the look Jellyfin itself asked for: it
+                    # only passes the playlist on, and a render nobody watches would halve the TV's
+                    tv = with_look(clip, look or TV_LOOK)
+                    asked[tv["id"]] = time.time()
+                    k = next((k for k in range(count) if not os.path.exists(segment_path(tv, k))), None)
+                    if k is not None:
+                        ensure(tv, k)
                     i = info(clip)
                     w, h = (shader_for(clip, clip_dir(clip), i).get("output") or [1920, 1080])
                     height = min(HEIGHT, h)

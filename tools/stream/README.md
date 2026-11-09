@@ -155,12 +155,14 @@ What renders while the TV plays (found from the cache files' times, 2026-11-09):
 (ffprobe, User-Agent `Lavf`, ~5 s before the TV starts) set off a render of the whole clip in HLG, which nobody watched
 and which halved the GPU for the TV's (27-29 fps where alone it does 40+). A probe now gets at most the 2 segments it
 reads rendered. When Jellyfin passes a stream on (`Jellyfin-Server`), the TV look's render starts at once from the
-first segment not in the cache, instead of when the TV gets near it; and a render nobody has asked for in 15 s (the
-player went to another clip) stops. What was rendered stays in the cache (`AFP_CACHE_GB`): played again or sought
-back, it's served from there with nothing rendered.
+first segment not in the cache, instead of when the TV gets near it, and nothing in the look Jellyfin's request names
+(that started a second HLG render too); and a render nobody has asked for in 15 s (the player went to another clip)
+stops. Measured after (clip 0127, opening pre-rendered): only the TV's render runs, 1.7x real time at 30 fps. What
+was rendered stays in the cache (`AFP_CACHE_GB`): played again or sought back, it's served from there with nothing
+rendered.
 
 It renders one clip at a time at low priority, only while nobody watches; `/status` shows it. Per folder, the index page
-has "openings for the TV". Not run yet (Anton runs it himself).
+has "openings for the TV". Run 2026-11-09: 337 openings in 43 min, 9 GB.
 
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
