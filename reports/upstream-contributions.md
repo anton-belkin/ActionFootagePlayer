@@ -35,10 +35,11 @@
 
 **Что решить Антону** (до любого сообщения):
 
-1. **CLA Gyroflow §2.3**: всё, что Антон отдаст в Gyroflow (даже в чате), Адриан может перелицензировать, включая
-   закрытый код; права Антона на свой код при этом остаются. Отдавать ли наши собственные части (узлы, сетка,
-   9-выборочный bicubic, хроматика, заполнение краёв, денойз) или только показать с пометкой «Not a Contribution» и
-   сослаться на GPL-код в ActionFootagePlayer.
+1. ~~CLA Gyroflow §2.3~~ **Решено 2026-11-09**: GPU-путь и фильтры (узлы, сетка, 9-выборочный bicubic, хроматика,
+   заполнение краёв, денойз) остаются в ActionFootagePlayer — Адриану рассказать с пометкой «Not a Contribution»;
+   правки gyroflow-core (equirect + RigLens, view_rotation, Insta360 RadtanPro) — PR'ами по CLA. Учесть: всё, что
+   производно от GPL-кода Адриана или линкует gyroflow-core (порт ядра, vs-gyroflow), Антон закрыть не может — только
+   полностью свои части, отдельно от них (см. «Лицензии и CLA»).
 2. **Канал для Адриана**: Discord (быстрее, его привычка) или публичный комментарий в #635.
 3. **Ревью в mpv/libplacebo — лично**: оба проекта требуют, чтобы автор сам отвечал на ревью и раскрывал модель и
    инструмент в описании PR (без ИИ-соавторов в коммитах — это совпадает с правилом Антона). Поэтому начинать с
@@ -174,6 +175,14 @@ gyroflow, действует его CLA (у Антона подписан) — �
 - Для самого ActionFootagePlayer: всё, что уже вышло под GPL (Gyroflow до 1.7.0 включительно, наш форк, закреплённые в
   `Cargo.lock` ревизии), остаётся под GPL навсегда — GPLv3 §2 делает выданную лицензию безотзывной. Если Адриан когда-то
   закроет будущие версии, мы потеряем только будущие обновления, а не то, что уже есть.
+- В обратную сторону: закрыть будущие версии **своего** кода Антон может только для частей, целиком написанных им и не
+  производных от чужого GPL-кода. Порт ядра (`warp.glsl`, модели линз) — производная от кода Адриана, vs-gyroflow
+  линкует gyroflow-core (GPL-3.0), mpv приложения собран по умолчанию, то есть под GPL: всё это остаётся GPL при любом
+  распространении, сколько бы раз ядро ни переносилось заново. Закрытая версия потребовала бы коммерческой лицензии
+  от Адриана (CLA позволяет ему её дать на своё и чужое внесённое) или собственной замены ядра. Совместимые с GPL
+  способы зарабатывать: платные сборки и магазины приложений (у Gyroflow для этого есть исключение App Store в лицензии — проверить, покрывает ли оно производные вроде нашей), поддержка,
+  сервис (стриминг с NAS — GPLv3 не требует раскрывать код серверного использования), двойная лицензия только на
+  полностью свои части.
 
 ### 1.2 Хроматическая коррекция под водой внутри warp
 
@@ -365,14 +374,19 @@ PR — несколько строк (`mapSetFloat(map, "_AbsoluteTime", pts)`),
 > - Underwater, red and blue get their own refraction index inside the same warp, so the water's colour fringes go
 >   away without a second resample.
 >
-> Short video: <link>. Code (GPL-3.0, credited as a derivative of gyroflow-core): `shaders/gyroflow/warp.glsl`,
-> `vs-gyroflow/src/gpu_table.rs` in anton-belkin/ActionFootagePlayer; measurements in `docs/gpu-render-spike.md`.
-> Written with Claude's help; every number above is measured, and the per-pixel check is a test in the repo.
+> Short video: <link>. The code is GPL-3.0 in anton-belkin/ActionFootagePlayer (`shaders/gyroflow/warp.glsl`,
+> `vs-gyroflow/src/gpu_table.rs`, credited as a derivative of gyroflow-core); measurements in
+> `docs/gpu-render-spike.md`. Written with Claude's help; every number above is measured, and the per-pixel check is a
+> test in the repo. This message and the links are shared for information — Not a Contribution under the CLA.
 >
-> Would any of this be useful on your side — the grid/knots for the Qt preview on weak GPUs, a "table for players"
-> export, or the per-channel refraction? Happy to turn whichever you want into a PR, or leave it as a reference.
+> Separately, I have a few changes to gyroflow-core itself that I'd be glad to send as PRs, if you want them: an
+> equirect output projection (with a rig lens's pose and offset, for 360 cameras; re #800), a view rotation applied
+> after the smoothing (a tripod-style pan that doesn't need re-smoothing), and the RadtanPro terms of Insta360's
+> offset_v6 (X4, X5). Each with tests, rebased on 1.7.
 
-Если выбрать #635, первые строку и подпись про Discord убрать; текст тот же.
+Решено (Антон, 2026-11-09): **рассказать, но не отдавать** GPU-путь и фильтры — они остаются в ActionFootagePlayer;
+правки самого gyroflow-core предложить PR'ами по CLA. Если выбрать #635, первую строку убрать; текст тот же. Пометка
+«Not a Contribution» нужна и в комментарии, и в Discord: CLA считает вкладом и сообщения в чате.
 
 ### D2. Issue в telemetry-parser: медленное чтение с сетевых дисков
 
