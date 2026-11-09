@@ -263,6 +263,7 @@ switches and buttons, scrolled with the wheel:
   NBCU's and the maker's SDR); and **Export**, a file of what plays (the part marked, in SDR, the last export).
 - Source and Output have **In the folder** at the bottom: the previous and next clip, **Autoplay next**, **Loop the
   clip**.
+- **Playlist**: the videos in the clip's folder, the one playing marked (▶); a click plays one. `F8` opens it.
 - **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame at full size, the temporal
   denoise (Full, Light, Off), what fills the edges and how often the trail is written, skipping the color aberration correction on
   this screen, whether it asks when the GPU can't keep up. They make playback lighter on this computer; what's
@@ -277,8 +278,16 @@ switches and buttons, scrolled with the wheel:
 
 The keys are beside what they do. Look, Stabilization, Quality and Telemetry have **Make these the defaults** at the
 bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
-chosen icon, or the arrow at the top of the panel, leaves only the rail. While the panel shows, mpv's own controls
-(play, the seek bar) are a small box at the bottom of the video. It's the side-panel plugin (`side_panel.conf`:
+chosen icon, or the arrow at the top of the panel, leaves only the rail.
+
+**The navigation bar** at the bottom of the video (in place of mpv's own controls, [docs/navigation-bar.md](docs/navigation-bar.md)):
+the track, with the camera's highlights (amber) and your marks (white) over it, the part marked with `l` behind it and
+the project's moments under it. Over the track, the time under the mouse in hundredths; near a mark it lands on the
+mark, and says its name. A click goes to that exact frame; dragging is quick (keyframes), the frame where it's let
+go exact. The wheel or a sideways swipe over the bar steps frame by frame. Its buttons: previous clip, play, next
+clip; a frame back, the time (a click: the time left), a frame on; previous mark, mark here (`M`), next mark; the
+part (`l`); the speed, looping the clip, the sound, fullscreen. With the panel closed it's over the video and shows
+as the mouse moves; with the panel open it's below the video, always there. It's the side-panel plugin (`side_panel.conf`:
 `shown=`, `open=`, `tab=`); its Clip and Support buttons run footage-menu's commands.
 
 ### Keys
@@ -312,6 +321,8 @@ chosen icon, or the arrow at the top of the panel, leaves only the rail. While t
 | `Alt+p` | A 360° clip: the projection, auto (straight lines straight up to 100°, the whole sphere from 160°) → rectilinear → stereographic → little planet | `view360/projection` |
 | right click | The plugins' menu, when there's no side panel (mpv's own menu with it) | `footage_menu/menu` |
 | `Tab` | The panel beside the video, hidden or shown | `side_panel/toggle` |
+| `F8` | The panel's Playlist: the videos in the clip's folder | `side_panel/playlist` |
+| wheel over the bar | A frame on (up, or a swipe right) or back (down, left) | |
 
 To use other keys, bind the names in `input.conf`, e.g. `Ctrl+d script-binding dlogm/sdr`. What the menu sets
 without a key, a key can too, with the plugins' script messages (listed at the top of each plugin's `main.lua`),
@@ -1305,6 +1316,7 @@ tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field
 vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut (Rust)
 docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
 docs/360-cameras.md           360° cameras (design): the plugin's sphere in the camera's axes, the angles in the frame, the view in a shader
+docs/360-reframe.md           360° to flat (design): the view recorded as you look around, tidied (angles, horizon, the picture), exported
 macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
                               Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
                               the Quick Actions' export script

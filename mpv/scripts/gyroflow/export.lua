@@ -15,8 +15,9 @@
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
 -- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
 -- in color only by itself. Script messages, for the right-click menu:
---   export [sdr]         the same as Shift+E, or in SDR whatever plays: the SDR look it plays in, else the one
---                        the dlogm plugin would choose (its sdr_look)
+--   export [hdr|sdr|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look it
+--                        plays in, else the one the dlogm plugin would choose (its sdr_look); for a 360 camera's file
+--                        the whole sphere (360) or the view recorded as you looked around (flat: docs/360-reframe.md)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
@@ -439,6 +440,58 @@ mp.add_key_binding("E", "export", function()
     end
 end)
 
+-- A 360° clip (a 360 camera's own file, the view360 plugin's view): `360`, the whole sphere stabilized and turned
+-- along what the view follows (gyroflow-export --360); `flat`, the view recorded as you looked around
+-- (--reframe recording: the recording in the clip's .afp.json, its frame and size). The part marked (A-B), else for
+-- flat the recorded parts' span and for 360 the whole clip. In the look it plays in: the log curve's HLG, or its SDR
+-- (--sdr, --nbcu) when the look is SDR; colors as recorded when it isn't log
+local FLAT_SIZES = {
+    ["16:9"] = { ["1080p"] = "1920x1080", ["4K"] = "3840x2160" },
+    ["9:16"] = { ["1080p"] = "1080x1920", ["4K"] = "2160x3840" },
+    ["1:1"] = { ["1080p"] = "1080x1080", ["4K"] = "2160x2160" },
+}
+local function start_360(path, how)
+    if not installed("Export") then return end
+    local v = mp.get_property_native("user-data/view360")
+    if type(v) ~= "table" or not v.available or not v.stamped then
+        return mp.osd_message("Export " .. (how == "flat" and "flat" or "360°") .. ": for a 360 camera's own file", 2.5)
+    end
+    local r = type(v.recording) == "table" and v.recording or {}
+    if how == "flat" and (r.parts or 0) == 0 then return mp.osd_message("Export flat: record a view first (Alt+r)", 2.5) end
+    if r.taking then return mp.osd_message("Export: stop recording first (Alt+r)", 2) end
+    local progress = temp_name("progress")
+    local control = platform.windows and temp_name("control") or nil
+    local args = { EXPORT, "--force", "--progress", progress }
+    if control then table.insert(args, "--control"); table.insert(args, control) end
+    if playing then table.insert(args, "--background") end
+    -- The look: the curve and the SDR choice of as_it_plays (the rest is the 360 view's own)
+    local look = {}
+    as_it_plays(look, false, false, false)
+    for i, a in ipairs(look) do
+        if a == "--curve" then table.insert(args, a); table.insert(args, look[i + 1])
+        elseif a == "--sdr" or a == "--nbcu" then table.insert(args, a) end
+    end
+    if how == "flat" then
+        local size = (FLAT_SIZES[r.frame] or FLAT_SIZES["16:9"])[r.size] or "1920x1080"
+        table.insert(args, "--reframe"); table.insert(args, "recording")
+        table.insert(args, "--size"); table.insert(args, size)
+    else
+        table.insert(args, "--360")
+        if v.heading then table.insert(args, "--heading"); table.insert(args, v.heading) end
+    end
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local range = how == "flat" and " flat" or " 360°"
+    if a and b and b > a then
+        table.insert(args, "--from"); table.insert(args, string.format("%.3f", a))
+        table.insert(args, "--to");   table.insert(args, string.format("%.3f", b))
+        range = range .. " " .. clock(a) .. "-" .. clock(b)
+    elseif how == "flat" and type(r.spans) == "table" and #r.spans > 0 then
+        range = range .. " " .. clock(r.spans[1][1]) .. "-" .. clock(r.spans[#r.spans][2])
+    end
+    table.insert(args, path)
+    return run_export(path, args, range, progress, control)
+end
+
 mp.register_script_message("export", function(how)
     local path = local_path()
     if not path then return end
@@ -446,6 +499,7 @@ mp.register_script_message("export", function(how)
         mp.osd_message("Exporting " .. running[path].name .. running[path].range .. " already", 2)
         return
     end
+    if how == "360" or how == "flat" then return start_360(path, how) end
     begin(path, how == "sdr")
 end)
 

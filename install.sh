@@ -265,6 +265,8 @@ put mpv/scripts/footage-menu/main.lua "$MENU/main.lua" 644
 # The settings beside the video
 put mpv/scripts/side-panel/main.lua "$PANEL/main.lua" 644
 put mpv/scripts/side-panel/ui.lua   "$PANEL/ui.lua" 644
+put mpv/scripts/side-panel/bar.lua  "$PANEL/bar.lua" 644
+put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
@@ -286,6 +288,7 @@ put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
 # 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
 put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644
 put mpv/scripts/view360/view.lua     "$VIEW360/view.lua" 644
+put mpv/scripts/view360/recording.lua "$VIEW360/recording.lua" 644
 put mpv/scripts/view360/view360.glsl "$VIEW360/view360.glsl" 644
 
 # 0.2 had Steady Router's script and the Quick Action's in the gyroflow plugin; ActionFootagePlayer carries them now

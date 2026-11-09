@@ -257,11 +257,13 @@ local function bind()
     -- These keys alone, and no OSC: shown by the mouse, it would take Shift+click
     mp.input_enable_section("input_forced_" .. mp.get_script_name(), "exclusive")
     if report.osc then mp.commandv("script-message-to", "osc", "osc-visibility", "never", "no_osd") end
+    if report.bar then mp.commandv("script-message-to", "side_panel", "bar", "never") end
 end
 
 unbind = function()
     mp.unobserve_property(mouse_moved)
     if report.osc then mp.commandv("script-message-to", "osc", "osc-visibility", report.osc, "no_osd") end
+    if report.bar then mp.commandv("script-message-to", "side_panel", "bar", "auto") end
     for i in ipairs(BUTTONS) do mp.remove_key_binding("report-drag-" .. i) end
     for _, name in ipairs({ "report-double", "report-comment", "report-comment-kp", "report-leave" }) do
         mp.remove_key_binding(name)
@@ -365,6 +367,8 @@ local function start()
         time = mp.get_property_number("time-pos"), frame_number = mp.get_property_number("estimated-frame-number"),
         paused = paused, dragging = mp.get_property_native("window-dragging"),
         osc = mp.get_property_native("user-data/osc/visibility"),
+        -- The side panel's navigation bar, in the OSC's place
+        bar = mp.get_property_native("user-data/side_panel/loaded") == true,
     }
     report.state.player.pause = paused
     mp.set_property_native("window-dragging", false)
