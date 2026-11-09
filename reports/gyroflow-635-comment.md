@@ -1,4 +1,4 @@
-# Черновик комментария в gyroflow/gyroflow#635 (не отправлен)
+# Комментарий в gyroflow/gyroflow#635 — опубликован 2026-11-09: https://github.com/gyroflow/gyroflow/issues/635#issuecomment-6740037218
 
 Куда: https://github.com/gyroflow/gyroflow/issues/635 — комментарий. Без видео (решение Антона, 2026-11-09).
 
@@ -58,5 +58,5 @@ and #1290 (equirect output + a rig lens's pose, re #800).
 ## Discord, #dev-live-stabilization (одна строка, после комментария)
 
 Hi Adrian — posted real-time numbers for #635 (Gyroflow's warp as an mpv/libplacebo shader, 4K60 → 1080p HDR at
-60 fps on an N100 NAS, starting from the first seconds of motion data): <link to the comment>. Not a Contribution,
+60 fps on an N100 NAS, starting from the first seconds of motion data): https://github.com/gyroflow/gyroflow/issues/635#issuecomment-6740037218. Not a Contribution,
 just for info.
