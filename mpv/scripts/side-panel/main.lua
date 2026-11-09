@@ -1051,6 +1051,22 @@ local function transform_part(u, x, w, y)
     y = u:switch(x, w, y, "strong", "Stronger, for a very noisy clip", g.denoise_strong == true, "script-message-to gyroflow denoise-strong toggle",
                  nil, none or not g.still or not gpu, saved_strong)
     y = u:caption(x, w, y - 2 * s, "No grain kept, more frames taken in, dark specks out and the flat areas smoothed: open water clean, fine texture softer")
+
+    -- The hand's sideways jerks (the translation compensation, Ctrl+j): measured once for a clip shot up close, then
+    -- on or off
+    local tr = g.translation
+    y = u:heading(x, w, y + 8 * s, "Sideways jerks", keys["script-binding gyroflow/translation"])
+    if tr == "on" or tr == "off" then
+        y = u:switch(x, w, y, "translation", "Take out the hand's sideways jerks", tr == "on", "script-binding gyroflow/translation")
+        y = u:caption(x, w, y - 2 * s, "Measured for this clip: the picture moved against the hand's jitter, as far as the camera's accelerometer and the picture say")
+    elseif tr == "measuring" then
+        y = u:caption(x, w, y, string.format("Measuring them for this clip… %d %%", tonumber(g.translation_progress) or 0))
+    elseif tr == "none" then
+        y = u:button(x, w, y + 2 * s, "translation", "Measure for this clip", "script-binding gyroflow/translation")
+        y = u:caption(x, w, y, "Up close, the hand's own jitter shakes the picture however well its turns are taken out. Measured once a clip (Osmo Action 6; about half the clip's length), kept")
+    else
+        y = u:caption(x, w, y, "On the GPU path, for a clip shot up close")
+    end
     return y
 end
 

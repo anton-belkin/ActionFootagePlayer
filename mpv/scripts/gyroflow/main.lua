@@ -142,6 +142,11 @@
 --   still=yes    the temporal denoise (Ctrl+p, the panel's Transform): the paused frame cleaned of its noise from it
 --                and the frames on each side, still_delay=0.4 s after it pauses; on the GPU path also while it plays
 --                (warp.glsl's dn_ passes). still_grain=0.25 of the grain stays, so it doesn't look smeared (0: none)
+--   translation=yes  on the GPU path, the hand's sideways jerks taken out too where they've been computed for the clip
+--                (up close they shake the picture however well its turns are taken out): Ctrl+j computes them for the
+--                clip playing (gyroflow-export --translation, ~half the clip's length; Osmo Action 6, which records its
+--                accelerometer), then switches them off and on. Kept in the cache (vs-gyroflow's translation.rs).
+--                The side panel's Transform has it too
 --   temporal_denoise=full  how much of it this computer does (Performance & Quality): full, 5 frames on each side
 --                (on the GPU path the picture 5 frames behind, the sound delayed as much); light, 3 (about a quarter
 --                cheaper, a little less clean); off, none, whatever Ctrl+p says (Ctrl+p's switch kept for when it's
@@ -197,7 +202,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -482,6 +487,8 @@ local current_source = nil
 -- The GPU path's state (further down, at add_filter): { shader, output, mode, chromatic } while the clip plays through it,
 -- and what writes its shader again after a change
 local gpu = nil
+-- The translation compensation (Ctrl+j, the panel's Transform): taken out or not, its computing and how far it is
+local trans = { on = true, job = nil, progress = 0 }
 local gpu_refresh
 -- A table on its way: true, or "again" when a change came meanwhile (written again once it's there)
 local gpu_pending = false
@@ -821,6 +828,11 @@ local function publish()
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
         temporal_denoise = o.temporal_denoise, denoise_strong = denoise_strong,
+        -- The hand's sideways jerks: unavailable (off in gyroflow.conf, or not on the GPU path), measuring, none
+        -- (not computed for the clip yet), on, off
+        translation = (not o.translation or not (gpu and gpu.shader)) and "unavailable" or trans.job and "measuring"
+            or gpu.translation and (trans.on and "on" or "off") or "none",
+        translation_progress = trans.progress,
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
@@ -1068,11 +1080,17 @@ local function gpu_user_data(source)
     return ud
 end
 
+-- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
+local trans_rev = 0
+
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
     -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
     -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
+    -- The translation compensation, where it's been computed for the clip (Ctrl+j); a new shader once it is
+    ud.gpu_translation = o.translation and true or false
+    ud.translation_rev = trans_rev > 0 and trans_rev or nil
     -- Written before with these settings (and the project as it is now): that file again
     local project = source.project and utils.file_info(source.project)
     local key = settings_key(ud) .. (project and string.format("|%s/%s", tostring(project.mtime), tostring(project.size)) or "")
@@ -1098,6 +1116,7 @@ local function gpu_table(source, done)
         if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
         reply.ms = math.floor((mp.get_time() - t) * 1000)
         reply.denoise = ud.gpu_denoise
+        reply.translation = reply.translation == true
         if reply.shader then gpu_remember(key, reply) end
         done(reply)
     end)
@@ -1158,10 +1177,12 @@ local function gpu_apply(reply)
     -- anyway (the app's Lanczos took 10 ms of a 5.3K frame on an M1 Pro)
     mp.set_property("file-local-options/cscale", reply.mode == "grid" and "bilinear" or (mp.get_property("options/cscale") or "bilinear"))
     gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic,
-            focal = type(reply.focal) == "table" and reply.focal or nil, denoise = reply.denoise or false }
+            focal = type(reply.focal) == "table" and reply.focal or nil, denoise = reply.denoise or false, translation = reply.translation or false }
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
     gpu_render_scale()
     dn_sync(shown)
+    -- The panel's sideways jerks: computed for this clip or not
+    publish()
 end
 
 -- Crop mode's camera on the GPU path (crop.lua): the warp's gyroflow_cam_ parameters, set as it turns (no table
@@ -2003,6 +2024,75 @@ mp.register_script_message("chromatic", function(value)
     elseif value == "yes" or value == "no" then
         set_chromatic(value == "yes")
     end
+end)
+
+-- Ctrl+j: the hand's sideways jerks taken out (the translation compensation, warp.glsl's trans_shift). Computed for
+-- the clip the first time (gyroflow-export --translation, as the clip plays: its project, level, view, horizon and
+-- lens under water), kept in the cache; then off and on (gyroflow_trans). The panel's Transform has it too
+local EXPORTER = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-export"))
+local function trans_apply()
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    local want = trans.on and "1" or "0"
+    if opts.gyroflow_trans ~= want then
+        opts.gyroflow_trans = want
+        mp.set_property_native("glsl-shader-opts", opts)
+    end
+end
+local function trans_compute()
+    local source = current_source
+    if not source or not source.project then return end
+    local ud = gpu_user_data(source)
+    local video, args = source.project, { EXPORTER, "--translation" }
+    if video:lower():match("%.gyroflow$") then
+        args[#args + 1], args[#args + 2] = "--project", video
+        video = mp.get_property("path")
+    end
+    if ud.level then args[#args + 1], args[#args + 2] = "--level", tostring(ud.level) end
+    if ud.underwater then args[#args + 1], args[#args + 2] = "--underwater", tostring(ud.underwater) end
+    if tonumber(ud.horizon_lock) then args[#args + 1], args[#args + 2] = "--horizon-lock", string.format("%g", ud.horizon_lock) end
+    if ud.wide == true or ud.wide == 1 then args[#args + 1] = "--wide" end
+    local progress = utils.join_path(platform.temp_dir(), string.format("mpv-translation-%d.json", utils.getpid()))
+    args[#args + 1], args[#args + 2], args[#args + 3] = "--progress", progress, video
+    trans.progress = 0
+    local poll = mp.add_periodic_timer(0.5, function()
+        local f = io.open(progress, "r")
+        local p = f and utils.parse_json(f:read("*a") or "") or nil
+        if f then f:close() end
+        trans.progress = tonumber(p and p.translation) or trans.progress
+        mp.osd_message(string.format("Gyroflow: measuring the sideways jerks… %d %%", trans.progress), 1)
+        publish()
+    end)
+    mp.osd_message("Gyroflow: measuring the sideways jerks…", 2)
+    trans.job = mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
+        poll:kill()
+        trans.job = nil
+        os.remove(progress)
+        publish()
+        local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
+        if not (reply and reply.translation) then
+            local why = r and (r.stderr or ""):match("failed, ([^\n]*)") or r and (r.stderr or ""):match("skipped, ([^\n]*)")
+            return mp.osd_message("Gyroflow: the sideways jerks couldn't be measured" .. (why and (": " .. why) or ""), 4)
+        end
+        trans_rev, trans.on = trans_rev + 1, true
+        trans_apply()
+        if current_source == source then gpu_refresh() end
+        local share = tonumber(reply.share) or 0
+        mp.osd_message(share < 0.25 and "Gyroflow: little to take out of this clip's sideways jerks (no close subject to measure them on)"
+            or string.format("Gyroflow: sideways jerks taken out, %.1f → %.1f px (Ctrl+j off and on)", tonumber(reply.before) or 0, tonumber(reply.after) or 0), 4)
+    end)
+    publish()
+end
+mp.add_key_binding("Ctrl+j", "translation", function()
+    if not (gpu and gpu.shader) then
+        return mp.osd_message("Gyroflow: the sideways jerks are taken out on the GPU path only", 3)
+    end
+    if not o.translation then return mp.osd_message("Gyroflow: translation compensation is off (gyroflow.conf translation=no)", 3) end
+    if trans.job then return mp.osd_message("Gyroflow: still measuring the sideways jerks…", 2) end
+    if not gpu.translation then return trans_compute() end
+    trans.on = not trans.on
+    trans_apply()
+    publish()
+    mp.osd_message("Gyroflow: sideways jerks " .. (trans.on and "taken out" or "left as recorded"), 2)
 end)
 
 mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)

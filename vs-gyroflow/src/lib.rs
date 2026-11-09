@@ -45,6 +45,7 @@ pub mod view360;
 pub mod export360;
 pub mod reframe;
 pub mod gpu_table;
+pub mod translation;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -957,7 +958,7 @@ pub fn file_cache(kind: &str, file: &str, extra: &str) -> Option<std::path::Path
     Some(base.join(kind).join(hash))
 }
 
-fn is_project_file(path: &str) -> bool {
+pub(crate) fn is_project_file(path: &str) -> bool {
     path.to_ascii_lowercase().ends_with(".gyroflow")
 }
 
