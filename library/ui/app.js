@@ -32,6 +32,7 @@ const S = {
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
+  take: null, takePlace: "", taking: false,
 };
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -306,6 +307,7 @@ function renderTop() {
       recent.map((r) => '<button type="button" role="menuitem" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="ck"></span><span style="min-width:0"><span style="display:block">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></span></button>').join("") +
       '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
       (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
+        '<button type="button" role="menuitem" data-a="takein"><span class="ck"></span>Take in another project…</button>' +
         '<button type="button" role="menuitem" data-a="moveproject"><span class="ck"></span>Move the project to…</button>' +
         '<button type="button" role="menuitem" data-a="revealroot"><span class="ck"></span>' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button>' : '') +
       '</div>' : '') + '</div>' +
@@ -691,8 +693,51 @@ async function openSettings() {
   S.sheet = "settings";
   renderSheet();
 }
+function renderTake() {
+  const t = S.take;
+  const counts = t.counts || {};
+  const what = Object.keys(counts).filter((k) => counts[k]).map((k) => counts[k] + " in " + k).join(", ") || "nothing in its own folders";
+  let h = '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="takeTitle">' +
+    '<header><h2 id="takeTitle">Take in “' + esc(t.name) + '”</h2><span class="sub">Into ' + esc(S.name) + ', once. Nothing stays in sync afterwards.</span></header><div class="sb">' +
+    '<div class="field"><span class="sub">Project</span><span class="mono">' + esc(t.other) + '/Project.afproject</span></div><div class="result">';
+  for (const l of t.landings) {
+    h += '<div class="it">' + (l.inside ? '<span class="chip ok">inside</span><span class="wrap">' + esc(l.name || "Its folder") + ' is already in this project, at ' + esc(l.at_here || "the top") + '/. No location added, no footage moved.</span>'
+      : l.dir ? '<span class="chip fast">added</span><span class="wrap">' + esc(l.name) + ' becomes a location of this project at ' + esc(l.at_here || "?") + '/ (' + esc(l.path_here) + ').</span>'
+      : '<span class="chip warn">not here</span><span class="wrap">' + esc(l.name) + ' (' + esc(l.path_here) + ') isn’t reachable from this computer: it’s added as it is.</span>') + '</div>';
+  }
+  h += '<div class="it"><span class="wrap">' + esc(what) + ' move into this project’s, under ' + esc(t.place || "?") + '/; their links get “' + esc(t.place) + '/” in front. The clips’ own files stay beside the clips.</span></div>';
+  for (const i of t.issues || []) { const k = KIND_TEXT[i.kind] || ["", i.kind]; h += '<div class="it"><span class="chip ' + k[0] + '">' + esc(k[1]) + '</span><span class="wrap">' + esc(issueText(i)) + '</span></div>'; }
+  h += '<div class="it"><span class="sub wrap">Its Project.afproject then goes to the Trash.</span></div></div>';
+  if (t.landings.some((l) => !l.inside && l.dir)) {
+    h += '<div class="field"><label class="sub" for="takeplace">Its other locations go at</label><span class="tagin"><input id="takeplace" type="text" value="' + esc(S.takePlace) + '" placeholder="2025/Red Sea"><button type="button" class="btn sm" data-a="takeplan">Show</button></span></div>';
+  }
+  h += '</div><footer><button type="button" class="btn" data-a="takein">Choose another…</button><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="takerun"' + (t.needs_place || S.taking ? " disabled" : "") + '>' + (S.taking ? "Taking in…" : "Take in") + '</button></footer>';
+  return h + '</div></div>';
+}
+async function chooseTakeIn() {
+  S.menu = false; renderTop();
+  const other = await call("choose_other").catch(() => null);
+  if (!other) return;
+  S.takePlace = "";
+  await planTakeIn(other);
+}
+async function planTakeIn(other) {
+  try { S.take = await invoke("take_in_plan", { other, place: S.takePlace }); S.sheet = "take"; renderSheet(); } catch (e) { showError(String(e)); }
+}
+async function runTakeIn() {
+  if (!S.take) return;
+  S.taking = true; renderSheet();
+  try {
+    const r = await invoke("take_in_run", { other: S.take.other, place: S.takePlace });
+    S.sheet = null; S.take = null;
+    toast("Taken in: " + r.moved + " files under " + r.place + "/" + (r.added ? ", " + r.added + " location" + (r.added > 1 ? "s" : "") + " added" : "") + "; its project file " + r.project_file + (r.problems.length ? ". But: " + r.problems.join(" · ") : ""));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+  S.taking = false; renderSheet();
+}
 function renderSheet() {
   const el = $("sheet");
+  if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
   if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
   const st = S.settings;
   const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
@@ -895,6 +940,9 @@ document.addEventListener("click", async (e) => {
     case "quit": return call("answer_close", { quit: true }).catch(() => {});
     case "toastok": $("toast").hidden = true; return;
     case "sheet": return openSettings();
+    case "takein": S.sheet = null; renderSheet(); return chooseTakeIn();
+    case "takeplan": return planTakeIn(S.take.other);
+    case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
     case "findmoved": return findMoved();
     case "applymoved": return applyMoved();
@@ -933,6 +981,7 @@ document.addEventListener("input", (e) => {
   if (t.id === "q") { S.q = t.value; S.suggOpen = true; S.sugg = -1; S.sel = {}; S.anchor = null; renderMain(); renderSide(); renderFilters(); renderSugg(); }
   else if (t.dataset.l) { S.locEdit[+t.dataset.i][t.dataset.l] = t.value; }
   else if (t.id === "hosts") { S.hostsText = t.value; }
+  else if (t.id === "takeplace") { S.takePlace = t.value; }
 });
 document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
