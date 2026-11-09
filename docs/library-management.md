@@ -577,6 +577,15 @@ Anton, 2026-11-09:
   F2 renames, Alt+↑ goes up). A clip or moment with a Gyroflow project has Open in Gyroflow. What the Library last saw of
   a project shows at once while it looks again. The player opens without its side panel (Tab shows it), and a video
   opened in a paused player plays.
+- **The list's own menu and Info** (Anton's second round, 2026-11-09). A right-click holds the summary's commands and
+  Finder's around them: Open, Open in Gyroflow, Quick Look, Show in Finder, Rename, New folder, Delete, Select all and
+  none. Delete moves to the Trash, and only the project's own files: folders, moments (with their Gyroflow project and
+  renders), photos (with a Live Photo's video), exports, and in Footage a clip's preview (the clip stays; footage is
+  deleted in Finder). On a network share, where Finder has no Trash, it goes to the share's own `#recycle`, or isn't
+  deleted. **Info**, a tab beside Commands and Queue, tells all there is of the selection: a clip's recording, picture,
+  marks, transform, its copies and own file; a moment's clip and times, renders, files; folders and several items
+  summed up. A moment, photo or export has **Go to the footage** (its clip in Footage, selected); a clip has **Show
+  moments and photos**, a folder of its own with them in the order they are in the clip (up goes back to the clip).
 
 ## Open questions
 
