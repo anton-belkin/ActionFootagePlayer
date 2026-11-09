@@ -244,8 +244,9 @@ def info(clip):
 # Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
 # in ~pq or ~sdr, and any of them in x<peak> (~pqx1000): its highlights expanded into the headroom up to that many nits
 # (hlg_highlights.glsl), and in g<gain> (~pqg2): the whole picture's light times that, a shoulder below 1000 nits
-# (hlg_gain.glsl); TS players get TV_LOOK unless the URL says
-LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?(?:g(\d(?:\.\d)?))?$")
+# (hlg_gain.glsl), and in r<fps> (~pqg2.5r30): at most that many frames a second (afp-render -every: the rest decoded,
+# not rendered; the TV interpolates); TS players get TV_LOOK unless the URL says
+LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?(?:g(\d(?:\.\d)?))?(?:r(\d{2}))?$")
 TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
 
 
@@ -454,6 +455,11 @@ def start_render(clip, n, upto=None, background=False):
         args += ["-t", f"{min(end, i['duration']) - n * i['seg'] - 0.5 / i['fps']:.6f}"]
     if off:
         args += ["-offset", f"{off:.6f}"]
+    m = LOOK.match(clip.get("look") or "")
+    if m and m.group(4):
+        every = max(1, round(i["fps"] / int(m.group(4))))
+        if every > 1:
+            args += ["-every", str(every)]
     args += [i["source"], out] + shaders
     logf = open(os.path.join(out, "render.log"), "a")
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),

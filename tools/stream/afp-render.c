@@ -12,6 +12,9 @@
 //     -w <width> -h <height>   output size (default 1920x1080)
 //     -ss <seconds>            start there
 //     -t <seconds>             only this long
+//     -every <n>               only every n-th frame rendered and encoded (all are decoded): 60 fps out as 30 with 2, for
+//                              a renderer that can't keep up with the clip's rate (the TV interpolates); keyframes and
+//                              segments stay where they were
 //     -offset <seconds>        the stream's time starts there in the clip (a moment: its part, from 0): the shaders and
 //                              the segments get the clip's time minus this, as mpv plays a moment's EDL
 //     -seg <seconds>           segment length (default 1): a keyframe every round(fps * seg) frames, a segment each
@@ -123,7 +126,7 @@ static char *read_file(const char *path, size_t *len)
 
 int main(int argc, char **argv)
 {
-    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; const char *bitrate = "12M"; bool hlg = false, realtime = false, sdr = false, pq = false;
+    int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; int every = 1; const char *bitrate = "12M"; bool hlg = false, realtime = false, sdr = false, pq = false;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
@@ -131,6 +134,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-ss") && i + 1 < argc) start = atof(argv[++i]);
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) duration = atof(argv[++i]);
         else if (!strcmp(argv[i], "-offset") && i + 1 < argc) offset = atof(argv[++i]);
+        else if (!strcmp(argv[i], "-every") && i + 1 < argc) { every = atoi(argv[++i]); if (every < 1) every = 1; }
         else if (!strcmp(argv[i], "-start_number") && i + 1 < argc) start_number = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-seg") && i + 1 < argc) seg = atof(argv[++i]);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) bitrate = argv[++i];
@@ -140,7 +144,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
         else if (npos < 64) pos[npos++] = argv[i];
     }
-    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -b RATE --hlg --realtime] <in> <out dir> [shader.glsl ...]");
+    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -every N -b RATE --hlg --realtime] <in> <out dir> [shader.glsl ...]");
     W &= ~1; H &= ~1;
     const char *in = pos[0], *outdir = pos[1];
     mkdir(outdir, 0755);
@@ -192,11 +196,12 @@ int main(int argc, char **argv)
     if (!enc) DIE("no hevc_vaapi");
     AVCodecContext *ec = avcodec_alloc_context3(enc);
     ec->width = W; ec->height = H;
-    ec->time_base = av_inv_q(fr.num > 0 ? fr : (AVRational) { 30, 1 });
-    ec->framerate = fr;
+    AVRational fr_out = av_div_q(fr.num > 0 ? fr : (AVRational) { 30, 1 }, (AVRational) { every, 1 });
+    ec->time_base = av_inv_q(fr_out);
+    ec->framerate = fr_out;
     ec->pix_fmt = AV_PIX_FMT_VAAPI;
     ec->profile = AV_PROFILE_HEVC_MAIN_10;
-    ec->gop_size = (int) (fps * seg + 0.5);
+    ec->gop_size = (int) (fps / every * seg + 0.5);
     ec->max_b_frames = 0;
     ec->bit_rate = 0;
     av_opt_set(ec, "b", bitrate, AV_OPT_SEARCH_CHILDREN);
@@ -314,6 +319,8 @@ int main(int argc, char **argv)
             double pts = f->best_effort_timestamp * av_q2d(vst->time_base) - t0;
             if (pts < start - 0.5 / fps) { av_frame_unref(f); continue; }
             if (duration > 0 && pts >= start + duration) { av_frame_unref(f); eof = true; break; }
+            // Every n-th frame from the render's start (a segment's first frame, so segments keep their keyframe)
+            if (every > 1 && llround((pts - start) * fps) % every != 0) { av_frame_unref(f); continue; }
             if (first_pts < 0) first_pts = pts;
             // The shaders find the frame by mpv's PTS: the file's time from its start
             for (int i = 0; i < npts; i++) pts_vars[i]->f = (float) (pts - offset);
