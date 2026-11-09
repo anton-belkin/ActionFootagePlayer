@@ -555,8 +555,16 @@ Every link (moment, clip preview, export, render, photo) already carries what id
 the tree), `size`, `created` (the MP4's own `creation_time`, written by the camera inside the file) and `hash` (SHA-256
 of its first and last MiB; links older than it have none). From now on:
 
-- **`clip` is where it was last seen**, a hint to look first. Nothing depends on it being right, and nothing rewrites
-  it when the clip turns up elsewhere.
+- **`clip` is where it was last seen**, a hint to look first. Nothing depends on it being right, but it's **kept up to
+  date** (Anton): when the clip is found elsewhere (opening a moment, the Library's look, a repair), the new path in
+  the tree is written into the link, so the next time it's found at once, from any computer.
+  - Written in place: a moment's, preview's, export's or render's MP4 key (as tags are now, the `moov` keeping its
+    size), a photo's XMP (with the same writer as its tags). The file's modification time is put back, so Finder's
+    order by date and the caches don't see a change of content.
+  - Only a path in the library: a clip found in this computer's own location (a local copy) leaves the hint as it
+    is, since other computers can't see it there.
+  - A file that can't be written (a read-only share, a card) keeps its old hint; the cache on this computer remembers
+    where it was found.
 - **The clip is the file that matches the criteria.** By default **size and `created`**, the `hash` deciding between
   candidates and confirming a find away from the hint. With **"I never rename my footage"** ticked (Project settings,
   this computer's choices), the **name** counts too (the hint's last part), and the hash is read only on a tie.
@@ -746,7 +754,7 @@ Anton, 2026-11-09:
 
 - **Fourth round** (2026-11-10): [the project is its files](#8-the-project-is-its-files). `Project.afproject` keeps
   only the locations (and the id and the NAS's names); the rest is in the files or a cache on this computer. A link's
-  path is where its clip was last seen; the clip is found by size, `created` and hash, plus the name for someone who
+  path is where its clip was last seen, written again when it's found elsewhere; the clip is found by size, `created` and hash, plus the name for someone who
   never renames footage (a tick). Repair drops criteria one at a time, name, then `created`, then both, size always
   kept, the hash comparing what's found. No list of what was made: you make what you ask for. New files land in
   `Generated/<date> <time> <what>/`, laid out as chosen in that run's dialog, and are found wherever you move them.
