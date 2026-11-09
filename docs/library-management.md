@@ -15,7 +15,11 @@ Second version, the same day, after Anton's first comments: locations as network
 (no lists per computer); what a computer adds kept on it, outside the library; the app moves no footage (*Archive* and
 *Work on* gone), *Find moved files* instead; *Take in* without moving footage when it's already inside. Third, after his
 second round: a clip may be in several projects; what belongs to a clip lives beside it, one file per clip, and two
-stop saving; `.afplocation` files lead from a clip to its projects; from a laptop to the NAS.
+stop saving; `.afplocation` files lead from a clip to its projects; from a laptop to the NAS. Fourth, 2026-11-10,
+after the *Swallow a location* command (PR #181) showed what changing the locations costs: [the project is its
+files](#8-the-project-is-its-files): `Project.afproject` keeps only where the footage is, a link finds its clip by what
+the clip is rather than where it was, and everything else is read from the files or is a cache. Where §1–§2 say
+otherwise, §8 wins.
 
 ## The workflow it's for
 
@@ -509,6 +513,126 @@ Anton, 2026-11-09: time to have them; the first use is Photos'.
 - **The app's**: *Deleted in Photos* (sync sets it), later others; shown apart, removable like any.
 - Search and filters take tags; *Marks to the editor* passes them on as keywords.
 
+## 8. The project is its files
+
+Anton, 2026-11-10, back to where this started. *Swallow a location* (PR #181) had to rewrite the links of moments,
+previews, exports and renders, move previews, rewrite lines of `Project.afproject`, and still left photos pointing at
+the old paths, all because one location was taken out while not a single file moved. The cause: a link names its clip
+by its **path in the project's tree**, and the tree exists only in `Project.afproject`'s `locations`. Change the
+tree, and every path written anywhere is stale.
+
+So: the project file keeps **only where the footage is**. Everything else is either in the files themselves (the
+clip's own file, a moment's MP4 key, a photo's XMP) or a **cache** of where things were last seen, on this computer,
+read again and forgotten when it doesn't match.
+
+### What `Project.afproject` keeps
+
+```json
+{
+  "format": "actionfootage-project", "version": 3,
+  "id": "6f1c2e4a-…",
+  "locations": [ { "name": "Archive", "at": "", "path": "//DISKSTATIONDXP/video/Footage" }, … ],
+  "hosts": { "DISKSTATIONDXP": ["web.nas", "192.168.50.186"] }
+}
+```
+
+Nothing else. What was there goes:
+
+| Was | Becomes |
+|---|---|
+| `clips_made`, `stills_made` (so a deleted preview or photo isn't made again) | nothing. You make what you ask for: a right-click on a folder, *Make clip previews*. A deleted one is made again only if you ask again |
+| `settings.clips_layout` / `clips_flat`, `settings.moments_alone` | a choice in each run's dialog, remembered on this computer as the dialog's last choice |
+| `clips_failed` (the last previews that failed, and why) | a log in the app's own folder on this computer (`<data>/ActionFootage/logs/<project id>/`), shown in the Queue |
+| `moment_names` (the name dialog's suggestions) | the names of the moments found in the project |
+| `photo_tags` | the photo's own XMP, `dc:subject` ([below](#photos-carry-what-they-need)) |
+
+A project file with the old keys is read as before; the first time the Library opens it, the photo tags are written
+into the photos, the old file is kept beside it once as `Project.afproject.before-v3`, and the keys are dropped.
+
+### A link finds its clip by what the clip is
+
+Every link (moment, clip preview, export, render, photo) already carries what identifies its clip: `clip` (its path in
+the tree), `size`, `created` (the MP4's own `creation_time`, written by the camera inside the file) and `hash` (SHA-256
+of its first and last MiB; links older than it have none). From now on:
+
+- **`clip` is where it was last seen**, a hint to look first. Nothing depends on it being right, and nothing rewrites
+  it when the clip turns up elsewhere.
+- **The clip is the file that matches the criteria.** By default **size and `created`**, the `hash` deciding between
+  candidates and confirming a find away from the hint. With **"I never rename my footage"** ticked (Project settings,
+  this computer's choices), the **name** counts too (the hint's last part), and the hash is read only on a tie.
+- **Finding:**
+  1. The hint: the file at that path in the tree, through the locations in order, if it matches. Most links stop here.
+  2. Otherwise the cache: where this computer last found a file with these criteria, if it still matches.
+  3. Otherwise a search of the project's locations: their folder listings give every file's name and size for free;
+     only the files of the right size are opened, for `created` (a few KB of the file's header) and, when needed,
+     the hash (2 MiB). Camera files' sizes are almost unique, so that's a handful of reads, on a local disk or the
+     NAS. The listing of a big archive on the NAS is the main cost, seconds; what was read is cached by path, size
+     and modification time.
+- **Repair** (*Check the project*, *Find moved files*), Anton's order: what isn't found drops criteria by itself, one
+  step at a time, until something matches. **Size is always kept.**
+  1. name + size + `created`;
+  2. size + `created` (renamed);
+  3. name + size (something rewrote `created`: an editor's remux, a tool that sets it to the copy's time);
+  4. size alone.
+
+  At each step the candidates are few (camera files of one exact size), and where the link has a hash, each is
+  compared by it: a find is never a guess, however many criteria were dropped. A link without a hash shows what each
+  step found, to choose from.
+- **The same clip in two places** (the same size, `created` and hash) is one clip: the first location in order is the
+  one played. There's nothing to fix: the inbox inside the archive is simply seen twice. Taking a location out of the
+  project is just taking it out: what reached clips through it finds them through the other. *Swallow a location*
+  isn't needed (PR #181 closed), and neither is `_Clips/Duplicates`.
+- **The clip's own file** (`<clip>.afp.json`, `<clip>.gyroflow`) is still beside the clip, wherever it is: it moves with
+  the clip, and carries `clip.hash` to be matched back if it's left behind.
+
+What the cache knows is this computer's (`<data>/ActionFootage/cache/<project id>/`: each file's path, size,
+modification time, `created`, hash, link), never the library's, so two computers on one NAS never write over each
+other. Deleting it costs one slower look.
+
+### The project's own files are wherever you put them
+
+Moments, clip previews, photos, exports and renders are recognized by **their link inside** (the MP4 key, the photo's
+XMP), in **any folder of the project folder**: not only `_Moments/`, `_Clips/`, `_Stills/`, `_Exports/`, `_Renders/`,
+which stay as ordinary folders. Organize them as you like, rename them, make folders: they're still found, and
+still find their clips.
+
+- The Library reads them when it opens the project, from the cache for files unchanged since, and looks again as
+  folders change.
+- The player finds a clip's moments the same way: by the clip's identity (size, `created`, hash), not its path. It
+  keeps watching the folders where it found moments (as it watches `_Moments/` now), and the project folder's top.
+- A project next to its footage reads its clips' keys once too (a clip has no link, so it's footage); cached like the
+  rest.
+
+### New files land in `Generated/`
+
+Each run writes into a folder of its own, `Generated/<date> <time> <what>/` (`Generated/2026-11-10 14-32 Clip
+previews/`), laid out as chosen in that run's dialog: as the footage's folders, flat, or by trips. From there you move
+them where you want; they stay found. Moments saved one by one in the player go to `Generated/<date> Moments/`, one
+folder a day. `_Cache/` (the NAS's opening data, [§6](#6-the-nas-prepares-clips-to-open-fast)) stays what it is, a
+cache.
+
+### Photos carry what they need
+
+A photo already keeps its clip in itself, `afp:link` in its XMP, as a moment keeps it in its MP4 key; with the link
+found by the clip's identity, it never needs writing again when locations change. What's left is the tags: they go
+into the photo's XMP too (`dc:subject`, which Photos and Lightroom read as keywords), written **in place, without
+re-encoding**:
+
+- HEIC: on a Mac, ImageIO copies the image data as it is with new metadata (`CGImageDestinationCopyImageSource`): the
+  gain map and the Live Photo's identifier stay (**to try**).
+- JPEG: the XMP segment rewritten; in a Motion Photo the video after the image keeps its length, which its XMP says,
+  so that stays right (**to try**).
+- Windows and Linux: a writer of our own for the XMP box/segment, or exiv2 (**to try**).
+
+### What changes in the code
+
+- Finding a clip by identity, with the cache and the repair's criteria: the three twins (`workspace.lua`,
+  vs-gyroflow's `workspace.rs`, the Library's `locations.rs`) and their shared cases (`tests/workspace_cases.txt`).
+- The player's moments of a clip by identity; the Library's index scanning the whole project folder.
+- Batches writing into `Generated/` with the layout from the dialog; `clips_made`, `stills_made` and the settings
+  dropped from `projectfile.lua` and the Library; `clips_failed` to the log.
+- Photo tags into XMP (afp-photo, the Library).
+
 ## Steps
 
 Each a PR, each usable on its own:
@@ -528,6 +652,16 @@ Each a PR, each usable on its own:
    1–6 (a folder of the inbox to start with).
 
 The order (Q9, the order of building): locations first, they're under everything else. 4 needs nothing from 1–3. 5 needs 4.
+
+[§8, the project is its files](#8-the-project-is-its-files), before anything else that writes paths, each a PR:
+
+1. **Finding by identity**: the hint, the cache, the search by size, `created`, name and hash, *"I never rename my
+   footage"*, the repair's steps; in the three twins with shared cases. Taking a location out then needs nothing more.
+2. **Own files anywhere**: the Library's index and the player's moments of a clip found by the link inside, in any
+   folder of the project.
+3. **`Generated/`**: batches write there with the layout chosen per run; `clips_made`, `stills_made` and the settings
+   dropped; failures to the log in the app's folder.
+4. **Photo tags in XMP**, `photo_tags` dropped; the old project files cleaned (`Project.afproject.before-v3` kept).
 
 ## Decided
 
@@ -597,6 +731,14 @@ Anton, 2026-11-09:
   size and fingerprint) gets its preview in `_Clips/Duplicates/<its location>/<its folders>`, the first location's
   copy keeping its place; and a third layout, **by trips** (clips at most 2 days apart: `2026-10 October 20-26`), new
   previews going into the folder their trip's are in already.
+
+- **Fourth round** (2026-11-10): [the project is its files](#8-the-project-is-its-files). `Project.afproject` keeps
+  only the locations (and the id and the NAS's names); the rest is in the files or a cache on this computer. A link's
+  path is where its clip was last seen; the clip is found by size, `created` and hash, plus the name for someone who
+  never renames footage (a tick). Repair drops criteria one at a time, name, then `created`, then both, size always
+  kept, the hash comparing what's found. No list of what was made: you make what you ask for. New files land in
+  `Generated/<date> <time> <what>/`, laid out as chosen in that run's dialog, and are found wherever you move them.
+  Photos keep their tags in their own XMP.
 
 ## Open questions
 
