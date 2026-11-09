@@ -1515,14 +1515,21 @@ local function view360_part(u, x, w, y)
     return flat_video_part(u, x, w, y, v, r)
 end
 
--- The playlist: the files mpv plays one after the other (the videos in the clip's folder: autocreate-playlist), the
--- one playing marked; a click opens one. Shown with the one playing in view, when it opens and as the next one starts
+-- The playlist: the files mpv plays one after the other (the videos in the clip's folder: autocreate-playlist, then
+-- those of its subfolders, stabilized/, as it goes on into them), what has played kept, the one playing marked; a
+-- click opens one. Shown with the one playing in view, when it opens and as the next one starts
 local reveal, redraw = true, false
 function reveal_playlist() reveal = true end
+-- What has played: listed, though not a video by its extension (a 360° clip, .insv), once the playlist goes on from it
+local played = {}
+mp.register_event("start-file", function()
+    local file = mp.get_property("playlist/" .. (mp.get_property_number("playlist-playing-pos") or -1) .. "/filename")
+    if file then played[file] = true end
+end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")))
+    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played)
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
     local dir = tl.common_folder(list)
     if dir and local_file(dir) then
