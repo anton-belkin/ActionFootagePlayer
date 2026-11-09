@@ -793,6 +793,11 @@ local function save(name, update, typed, quiet, opts)
         v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
+    -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
+    if update then
+        local old = utils.parse_json(fs.read_link(update.file) or "")
+        if type(old) == "table" then l.tags = old.tags end
+    end
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
     -- own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
     -- clip's project changed later doesn't change it. An update keeps them; a moment without settings of its own

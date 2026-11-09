@@ -192,7 +192,6 @@ pub fn relative(file: &Path, dir: &Path) -> Option<String> {
 }
 
 /// A tree path's file in a location, when it's in that location's part of the tree
-#[allow(dead_code)]
 pub fn in_location(tree: &str, l: &Location) -> Option<PathBuf> {
     let dir = l.dir.as_ref()?;
     let rel = if l.at.is_empty() { Some(tree) } else { tree.strip_prefix(&format!("{}/", l.at)) }?;

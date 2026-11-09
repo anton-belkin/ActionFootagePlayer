@@ -16,6 +16,7 @@
 mod checks;
 mod index;
 mod locations;
+mod tags;
 mod takein;
 
 use serde::Serialize;
@@ -670,12 +671,19 @@ fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<S
 
 // ---------- Check, Find moved files ----------
 
-// The player's gyroflow-export, which writes a link again in a file (--relink)
-fn export_tool() -> Option<PathBuf> {
+// The player's afp-cut, which writes a key of an MP4 again in place, the file's other keys kept (--set-key)
+fn link_tool() -> Option<PathBuf> {
     let player = player().ok()?;
     let probe = index::probe_tool(Some(&player))?;
-    let name = if cfg!(windows) { "gyroflow-export.exe" } else { "gyroflow-export" };
+    let name = if cfg!(windows) { "afp-cut.exe" } else { "afp-cut" };
     Some(probe.with_file_name(name)).filter(|p| p.is_file())
+}
+
+// A moment's, clip preview's or export's link written again (its original moved, tags changed)
+fn write_link(tool: Option<&PathBuf>, file: &Path, link: &str) -> Result<(), String> {
+    let tool = tool.ok_or("ActionFootagePlayer's afp-cut isn't there to write the links")?;
+    let o = Command::new(tool).arg("--set-key").arg(file).arg("ch.actionfootageplayer.link").arg(link).output().map_err(|e| e.to_string())?;
+    if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
 }
 
 // Check, on the selection: `sel` paths of the footage tree, `links` link files (moments, exports) by their path in the
@@ -696,15 +704,21 @@ async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Val
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
-    let tool = export_tool();
+    let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
-        let relink = |file: &Path, link: &str| -> Result<(), String> {
-            let tool = tool.as_ref().ok_or("ActionFootagePlayer's gyroflow-export isn't there to write the links")?;
-            let o = Command::new(tool).arg("--relink").arg(file).arg(link).output().map_err(|e| e.to_string())?;
-            if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
-        };
+        let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
         checks::apply(&root, &found, &relink)
     }).await.map_err(|e| e.to_string())
+}
+
+// ---------- tags ----------
+
+#[tauri::command]
+async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l)))
+        .await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------
@@ -739,13 +753,9 @@ async fn take_in_plan(shared: State<'_, Shared>, other: String, place: String) -
 async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: take it in when they're done".into()); }
-    let tool = export_tool();
+    let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
-        let relink = |file: &Path, link: &str| -> Result<(), String> {
-            let tool = tool.as_ref().ok_or("ActionFootagePlayer's gyroflow-export isn't there to write the links")?;
-            let o = Command::new(tool).arg("--relink").arg(file).arg(link).output().map_err(|e| e.to_string())?;
-            if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
-        };
+        let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
         takein::take_in(&root, Path::new(&other), &place, &relink, true)
     }).await.map_err(|e| e.to_string())?
 }
@@ -942,7 +952,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run])
+                                                 choose_other, take_in_plan, take_in_run, set_tags])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

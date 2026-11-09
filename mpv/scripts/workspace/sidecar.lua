@@ -106,7 +106,7 @@ function M.new(env)
         if fn(doc) == false then return true end
         doc.format = M.FORMAT
         local file = p
-        if doc.marks == nil and doc.view == nil and doc.source == nil then
+        if doc.marks == nil and doc.view == nil and doc.source == nil and (type(doc.tags) ~= "table" or next(doc.tags) == nil) then
             if from then os.remove(from) end
             return true
         end
