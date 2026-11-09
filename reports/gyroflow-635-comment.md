@@ -1,14 +1,15 @@
 # Черновик комментария в gyroflow/gyroflow#635 (не отправлен)
 
-Куда: https://github.com/gyroflow/gyroflow/issues/635 — комментарий. Перед отправкой вставить ссылку на видео вместо `<video>`.
+Куда: https://github.com/gyroflow/gyroflow/issues/635 — комментарий. Без видео (решение Антона, 2026-11-09).
 
 ---
 
 Real-time Gyroflow stabilization, entirely on the GPU — it runs even on a small NAS.
 
 I've ported gyroflow-core's undistort kernel to an mpv/libplacebo user shader (GLSL) and use it in
-ActionFootagePlayer, an mpv-based player for action-camera footage. Gyroflow does the motion, smoothing and lens
-work on the CPU as usual; the per-pixel warp runs as a shader and the frame never leaves the GPU.
+[ActionFootagePlayer](https://actionfootageplayer.ch), an mpv-based player for action-camera footage. Gyroflow does
+the motion, smoothing and lens work on the CPU as usual; the per-pixel warp runs as a shader and the frame never leaves
+the GPU.
 
 **On a UGREEN DXP2800 NAS (Intel N100, 6 W iGPU):** 4K60 10-bit HEVC (Osmo Action 6, D-Log M) → stabilized 1080p
 HDR at 60 fps with Gyroflow's bicubic, 7.9 ms of the 16.7 ms frame budget, in mpv. The same box serves it as a
@@ -18,7 +19,20 @@ sampling (59 fps with the bicubic), so a TV or phone plays any clip of the libra
 **On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU (86 % through a VapourSynth filter with gyroflow-core); a clip
 opens stabilized in about a second, also when it's read straight from the NAS.
 
-How it fits on a 6 W GPU:
+**Live, without reading the whole file first.** A clip without a project starts playing once its first ~4 s of
+motion data are read, and the rest comes in as it plays:
+- telemetry-parser gets a `Read + Seek` over the file in which the metadata samples not read yet are zeros, which it
+  skips, so gyroflow-core's normal loader sees only the seconds read so far. The samples are fetched in parallel from
+  the sample table instead of one seek per frame (over SMB that alone took a minute of 4K60 from 14-34 s to under a
+  second), and while it plays they're copied from the OS file cache, the pages mpv already read for the video, every
+  2 s, then parsed and smoothed again.
+- The smoothing is your Default made local in time (a `SmoothingAlgorithm` of its own): the second pass measures the
+  distance against the crop margin instead of the clip-wide maximum, so each moment depends only on the few seconds
+  around it. With 4 s of look-ahead it stays within 1 px (p99) of the same smoothing run on the whole clip.
+- All of it is on gyroflow-core's public API, no patches. From the NAS a clip opens stabilized in ~1.2 s instead of
+  3-7 s.
+
+How the warp fits on a 6 W GPU:
 - Accuracy: every pixel of a 1080p output is within 0.037 px of `undistort_coord` (opencv_fisheye and gopro
   checked; your lens models' GLSL, the GoPro digital lenses, rolling shutter and refraction are in).
 - Per frame the shader reads a small table: the `KernelParams` fields and the row rotations as 33 quaternion knots
@@ -28,10 +42,11 @@ How it fits on a 6 W GPU:
   from exact; the GoPro/Insta360 Newton loops run only at grid points) and the bicubic uses 9 bilinear fetches
   instead of 16.
 
-Video: <video>. Code (GPL-3.0, a derivative of gyroflow-core): `shaders/gyroflow/warp.glsl` and
-`vs-gyroflow/src/gpu_table.rs` in https://github.com/anton-belkin/ActionFootagePlayer; measurements in
-`docs/gpu-render-spike.md`. Built with Claude Code; every number here is measured, and the per-pixel check is a
-test in the repo. Shared for information — Not a Contribution under the CLA.
+Code (GPL-3.0, a derivative of gyroflow-core) in https://github.com/anton-belkin/ActionFootagePlayer:
+`shaders/gyroflow/warp.glsl` and `vs-gyroflow/src/gpu_table.rs` for the warp, `vs-gyroflow/src/motion.rs`,
+`prefetch.rs` and `smoothing.rs` for the live loading; measurements in `docs/gpu-render-spike.md`. Built with Claude
+Code; every number here is measured, and the per-pixel check is a test in the repo. Shared for information — Not a
+Contribution under the CLA.
 
 Separately, two changes to gyroflow-core itself are up as PRs: #1289 (view_rotation, a pan after the smoothing)
 and #1290 (equirect output + a rig lens's pose, re #800).
@@ -41,4 +56,5 @@ and #1290 (equirect output + a rig lens's pose, re #800).
 ## Discord, #dev-live-stabilization (одна строка, после комментария)
 
 Hi Adrian — posted real-time numbers for #635 (Gyroflow's warp as an mpv/libplacebo shader, 4K60 → 1080p HDR at
-60 fps on an N100 NAS): <link to the comment>. Not a Contribution, just for info.
+60 fps on an N100 NAS, starting from the first seconds of motion data): <link to the comment>. Not a Contribution,
+just for info.
