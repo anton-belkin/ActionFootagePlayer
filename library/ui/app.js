@@ -774,7 +774,7 @@ function tagsSection(c) {
   const body = c.any
     ? '<div class="chips">' + (on.length ? on.map((t) => '<button type="button" class="chip ' + (t === "Deleted in Photos" ? "sys" : "tag") + '" data-a="untag" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + ' from the selection">' + esc(t) + ' ×</button>').join("") : '<span class="sub">No tags yet</span>') + '</div>' +
       '<div class="tagin"><input id="tagdraft" type="text" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
-      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in the project’s file.</span>'
+      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in its own metadata (XMP keywords).</span>'
     : '<p>Select items or folders to tag them.</p>';
   return sec("tags", "Tags", c.any ? on.length + " on the selection" : "select to tag", body);
 }

@@ -206,17 +206,52 @@ pub fn keys_and_cover(path: &Path) -> (HashMap<String, String>, Option<Vec<u8>>)
     (keys, cover)
 }
 
-/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/,
-/// as vs-gyroflow's photo.rs and afp-photo write it), within the file's first 64 KiB
-fn photo_link(path: &Path) -> Option<Value> {
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#34;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+}
+
+/// A photo's XMP packet, within the file's first 64 KiB (where vs-gyroflow's photo.rs and ImageIO put it)
+fn photo_xmp(path: &Path) -> Option<String> {
     use std::io::Read;
     let mut head = Vec::with_capacity(65536);
     std::fs::File::open(path).ok()?.take(65536).read_to_end(&mut head).ok()?;
     let s = String::from_utf8_lossy(&head);
-    let from = s.find("<afp:link>")? + "<afp:link>".len();
-    let to = from + s[from..].find("</afp:link>")?;
-    let text = s[from..to].replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
-    serde_json::from_str(&text).ok()
+    let a = s.find("<x:xmpmeta")?;
+    let b = a + s[a..].find("</x:xmpmeta>")?;
+    Some(s[a..b].to_string())
+}
+
+/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/),
+/// an element as photo.rs writes it, or an attribute as ImageIO may
+fn photo_link(path: &Path) -> Option<Value> {
+    let s = photo_xmp(path)?;
+    let text = if let Some(a) = s.find("<afp:link>") {
+        let from = a + "<afp:link>".len();
+        s[from..from + s[from..].find("</afp:link>")?].to_string()
+    } else {
+        let from = s.find("afp:link=\"")? + "afp:link=\"".len();
+        s[from..from + s[from..].find('"')?].to_string()
+    };
+    serde_json::from_str(&unescape(&text)).ok()
+}
+
+/// A photo's tags: `dc:subject` in its XMP (vs-gyroflow's afp-meta writes them), which Photos and Lightroom read as
+/// keywords
+pub fn photo_tags(path: &Path) -> Vec<String> {
+    let Some(s) = photo_xmp(path) else { return Vec::new() };
+    let Some(a) = s.find("<dc:subject") else { return Vec::new() };
+    let Some(len) = s[a..].find("</dc:subject>") else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut rest = &s[a..a + len];
+    while let Some(i) = rest.find("<rdf:li") {
+        let Some(gt) = rest[i..].find('>') else { break };
+        let from = i + gt + 1;
+        let Some(to) = rest[from..].find("</rdf:li>") else { break };
+        let t = unescape(rest[from..from + to].trim());
+        if !t.is_empty() { out.push(t); }
+        rest = &rest[from + to..];
+    }
+    out
 }
 
 pub fn link(path: &Path) -> Option<Value> {
@@ -402,7 +437,12 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
                 if !photo { continue; }
                 it["kind"] = json!("still");
-                it["tags"] = photo_tags.get(rel.as_str()).cloned().filter(Value::is_array).unwrap_or(json!([]));
+                // Its own (XMP), and what older versions kept for it in Project.afproject, until written into it
+                let mut tags = self::photo_tags(&path);
+                for t in photo_tags.get(rel.as_str()).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                    if !tags.iter().any(|x| x.eq_ignore_ascii_case(t)) { tags.push(t.to_string()); }
+                }
+                it["tags"] = json!(tags);
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
                 it["form"] = json!(if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }

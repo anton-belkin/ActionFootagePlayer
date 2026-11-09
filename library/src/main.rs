@@ -741,6 +741,18 @@ fn write_link(tool: Option<&PathBuf>, file: &Path, link: &str) -> Result<(), Str
     if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
 }
 
+// The player's afp-meta, which writes a photo's own metadata (its tags in its XMP; a HEIC's through afp-photo)
+fn meta_tool() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "afp-meta.exe" } else { "afp-meta" };
+    link_tool().map(|t| t.with_file_name(name)).filter(|p| p.is_file())
+}
+
+fn write_photo_tags(tool: Option<&PathBuf>, file: &Path, tags: &[String]) -> Result<(), String> {
+    let tool = tool.ok_or("ActionFootagePlayer's afp-meta isn't there to write a photo's tags")?;
+    let o = Command::new(tool).arg(file).arg("--tags").arg(serde_json::to_string(tags).unwrap()).output().map_err(|e| e.to_string())?;
+    if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
+}
+
 // Check, on the selection: `sel` paths of the footage tree, `links` link files (moments, exports) by their path in the
 // project
 #[tauri::command]
@@ -782,7 +794,9 @@ fn delete_renders(shared: State<Shared>, moments: Vec<String>, stale_only: bool)
 async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l)))
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
+                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
         .await.map_err(|e| e.to_string())
 }
 
@@ -1050,7 +1064,7 @@ fn library_json(root: &Path, probes: &index::SharedProbes) -> Value {
     }).collect();
     let photo_tags = doc.get("photo_tags").cloned().unwrap_or(json!({}));
     let photos: Vec<Value> = view("stills").iter().map(|it| json!({
-        "file": it["path"], "form": it["form"], "link_in_its_xmp": it["link"], "tags_in_the_project_file": photo_tags.get(it["id"].as_str().unwrap_or("")).cloned(),
+        "file": it["path"], "form": it["form"], "link_in_its_xmp": it["link"], "tags_in_its_xmp": it["path"].as_str().map(|p| index::photo_tags(Path::new(p))), "tags_in_the_project_file": photo_tags.get(it["id"].as_str().unwrap_or("")).cloned(),
     })).collect();
     let exports: Vec<Value> = view("exports").iter().map(|it| { let p = it["path"].as_str().unwrap_or(""); json!({ "file": p, "keys": keys(p) }) }).collect();
     json!({

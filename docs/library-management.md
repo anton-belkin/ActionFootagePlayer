@@ -667,6 +667,9 @@ Videos (moments, clip previews, exports, renders) and JPEG photos are written by
 afp-photo on a Mac (ImageIO, the image data copied as it is). Checked on a HEIC: tags and link written, replaced and
 cleared, the decoded pixels the same.
 
+Built (2026-11-10): the Library writes a photo's tags with afp-meta and reads them from the photo; tags an older
+version kept in `photo_tags` are shown with the photo's own and go into it at its next change of tags.
+
 ### What changes in the code
 
 - Finding a clip by identity, with the cache and the repair's criteria: the three twins (`workspace.lua`,
