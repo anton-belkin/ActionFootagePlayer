@@ -41,7 +41,7 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
       -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M \
-      -e AFP_TV_LOOK=pq afp-stream:f43 \
+      -e AFP_TV_LOOK=pqg2.5 afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
@@ -127,6 +127,14 @@ contrasty, colors not saturated, shadows crushed, sky to white"). Measured on a 
 442 against 440 nits; the frames carry HDR10's static metadata (mastering display BT.2020/D65 0.005-1000 nits, MaxCLL
 1000) as SEI, in the TS segments too. HDR10+ (per-frame metadata) isn't written: hevc_vaapi can't, and whether a 2017
 Tizen honours it in Jellyfin's web player is unknown.
+
+Brighter for a room: a look may add `x<peak>` (`hlg_highlights.glsl`: the highlights expanded into the headroom, the
+LUT's top, 422 nits, to `peak`, mid grey kept) and `g<gain>` (`hlg_gain.glsl`: every pixel's display light times the
+gain, up to 500 nits, then a shoulder below 1000). The HDR10 at BT.2100's levels (mid-tones 35-55 nits, the brightest
+at ~203, peaks 300-450) looked dark on the TV in a lit room, its HDR mode keeping to absolute nits where a Mac's EDR
+follows the brightness slider; expanding the highlights alone didn't help (Anton: the mid-tones and shadows are what's
+dark). Of x1, 1.5, 2 and 2.5 on clip 0065 (median 45 -> 67, 90, 112 nits; peaks up to 760) Anton chose 2.5 for that TV,
+2026-11-09: `AFP_TV_LOOK=pqg2.5`.
 
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
