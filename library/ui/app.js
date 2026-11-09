@@ -30,6 +30,7 @@ const S = {
   filters: {}, filtersOpen: true, fsec: { src: true, tf: true }, fexp: {}, suggOpen: false, sugg: -1,
   tab: "commands", open: { moments: true, export: true }, menu: false, recent: [],
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
+  locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
 };
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -143,6 +144,8 @@ function derive(view) {
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
       it.thumbPath = it.preview || null;
+      it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
+      it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
     } else if (it.kind === "moment") {
       const l = it.link || {};
@@ -225,6 +228,14 @@ function buildFacets() {
       { id: "prv", title: "Clip preview", opts: [L("prv:y", "Made", (it) => !!it.preview), L("prv:n", "Not made", (it) => !it.preview)] },
     ] });
   }
+  if (S.view === "footage") {
+    const names = distinct(items, (i) => i.loc);
+    const wh = [];
+    if (names.length > 1) wh.push({ id: "loc", title: "Plays from", opts: names.map((n) => L("loc:" + n, n, (it) => it.loc === n)) });
+    wh.push({ id: "where2", title: "Copies", opts: [L("cp:2", "In two locations or more", (it) => (it.locs || []).length > 1)] });
+    wh.push({ id: "iss", title: "Issues", opts: [L("iss:own", "Two own files", (it) => it.conflict)] });
+    sections.push({ id: "wh", title: "Where", facets: wh });
+  }
   if (S.view === "stills") {
     sections.push({ id: "frm2", title: "Kind", facets: [{ id: "form", title: "Kind", opts: distinct(items, (i) => i.form).map((f) => L("form:" + f, f, (it) => it.form === f)) }] });
   }
@@ -293,7 +304,9 @@ function renderTop() {
       (S.root ? '<button type="button" role="menuitem" class="cur" data-a="closemenu"><span class="ck">' + ICON.check + '</span><span style="min-width:0"><span style="display:block">' + esc(S.name) + '</span><span class="sub">' + esc(S.root) + '</span></span></button>' : '') +
       recent.map((r) => '<button type="button" role="menuitem" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="ck"></span><span style="min-width:0"><span style="display:block">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></span></button>').join("") +
       '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
-      (S.root ? '<button type="button" role="menuitem" data-a="revealroot"><span class="ck"></span>' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button>' : '') +
+      (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
+        '<button type="button" role="menuitem" data-a="moveproject"><span class="ck"></span>Move the project to…</button>' +
+        '<button type="button" role="menuitem" data-a="revealroot"><span class="ck"></span>' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button>' : '') +
       '</div>' : '') + '</div>' +
     (S.root ? '<div class="seg" role="tablist" aria-label="What to browse">' + VIEWS.map((v) => '<button type="button" role="tab" aria-selected="' + (S.view === v[0]) + '" class="' + (S.view === v[0] ? "on" : "") + '" data-a="view" data-v="' + v[0] + '">' + v[1] + '</button>').join("") + '</div>' +
       '<div class="searchwrap"><div class="search">' + ICON.search + activeTokens().map((t) => '<span class="tok"><span>' + esc(t.f.title + ": " + t.labels.join(", ")) + '</span><button type="button" data-a="tokrm" data-v="' + esc(t.f.id) + '" aria-label="Remove filter ' + esc(t.f.title) + '">' + ICON.x + '</button></span>').join("") +
@@ -335,7 +348,7 @@ function renderMain() {
   } else {
     h += '<div class="crumbs"><button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
-    h += '<span class="where">' + esc(S.view === "footage" ? S.root : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    h += '<span class="where">' + esc(S.view === "footage" ? (S.locations.length > 1 ? "From " + S.locations.filter((l) => l.dir).map((l) => l.name + (l.at ? " (" + l.at + "/)" : "")).join(", ") : S.root) : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
     if (filt) {
       const all = under(dir).filter((x) => matches(x)).length;
       h += '<div class="scope"><span class="chip fast">Filtered</span><span class="sub" style="display:inline">' + list.length + ' of ' + here.length + ' here' + (hiddenFolders ? " · " + hiddenFolders + " folder" + (hiddenFolders > 1 ? "s" : "") + " with no match hidden" : "") + '</span>' +
@@ -354,14 +367,14 @@ function renderMain() {
     h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
   } else if (S.layout === "list") {
     const cnt = S.view === "footage" ? "Marks · mom." : "";
-    h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (S.view === "footage" ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>Size</span></div><div class="list">';
+    h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (S.view === "footage" ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div><div class="list">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
       h += '<button type="button" class="row' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         '<span style="min-width:0"><span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
-        '<span class="chips hide-s">' + chips(it) + '</span><span class="cell">' + (f ? "" : sizeText(it.size)) + '</span></button>';
+        '<span class="chips hide-s">' + chips(it) + '</span><span class="cell">' + (f ? "" : (S.locations.length > 1 && it.kind === "clip" ? esc(it.loc) : sizeText(it.size))) + '</span></button>';
     }
     h += '</div>';
   } else {
@@ -391,6 +404,8 @@ function chips(it) {
     const prev = inner.filter((x) => x.preview).length;
     if (S.view === "footage" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
   } else if (it.kind === "clip") {
+    if (it.conflict) c.push(["chip warn", it.own_conflict.length + " own files"]);
+    if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
     if (!it.preview) c.push(["chip", "No preview"]);
     if (it.gyroflow) c.push(["chip ok", "Gyroflow project"]);
     if (it.motion === false) c.push(["chip", "No motion data"]);
@@ -595,12 +610,96 @@ function renderQueueOnly() {
   document.querySelectorAll(".count").forEach((e) => { e.textContent = activeCount(); });
 }
 
+// ---------- the project's settings ----------
+
+const ICON_UP = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+const ICON_DN = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+function hostsToText(h) { return Object.keys(h || {}).map((k) => k + " = " + (h[k] || []).join(", ")).join("\n"); }
+function textToHosts(t) {
+  const out = {};
+  for (const line of String(t || "").split("\n")) {
+    const m = /^\s*([^=\s]+)\s*=\s*(.*)$/.exec(line);
+    if (m) out[m[1]] = m[2].split(",").map((x) => x.trim()).filter(Boolean);
+  }
+  return out;
+}
+async function openSettings() {
+  S.menu = false;
+  renderTop();
+  const st = await call("project_settings").catch(() => null);
+  if (!st) return;
+  S.settings = st;
+  const ptr = st.name + ".afplocation";
+  S.locEdit = st.locations.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies,
+    st: (l.reachable ? "Reachable" : "Not reachable here") + (l.pointer ? " · " + ptr + " in it" : l.reachable ? " · its " + ptr + " is written on Save" : "") }));
+  S.localEdit = st.local.map((l) => ({ name: l.name, at: l.at, path: l.path, bytes: l.bytes, files: l.files, reachable: l.reachable }));
+  S.hostsText = hostsToText(st.hosts);
+  S.sheet = "settings";
+  renderSheet();
+}
+function renderSheet() {
+  const el = $("sheet");
+  if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
+  const st = S.settings;
+  const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
+  let h = '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">' +
+    '<header><h2 id="sheetTitle">' + esc(st.name) + ': project settings</h2><span class="mono">' + esc(st.path) + '/Project.afproject</span></header>' +
+    '<div class="tabs" role="tablist" style="margin-top:8px">' + tabs.map((t) => '<button type="button" role="tab" class="' + (S.stab === t[0] ? "on" : "") + '" data-a="stab" data-v="' + t[0] + '">' + t[1] + '</button>').join("") + '</div><div class="sb">';
+  if (S.stab === "loc") {
+    h += '<p class="sub wrap">Where the footage is. The first that has a clip wins. Each is a network path (//nas/share/folder) or a path relative to the project folder: the same on every computer. “In the tree” is where its folders show in the project.' +
+      (S.locEdit.length ? "" : " With none, the project is next to its footage: its own folder.") + '</p>';
+    if (S.locEdit.length) h += '<div class="lhead" aria-hidden="true"><span></span><span>Name</span><span>In the tree</span><span>Where</span><span>Copies only</span><span></span></div>';
+    S.locEdit.forEach((l, i) => {
+      h += '<div class="lrow"><span class="mv"><button type="button" data-a="locup" data-v="' + i + '" aria-label="Move ' + esc(l.name || "location") + ' up"' + (i === 0 ? " disabled" : "") + '>' + ICON_UP + '</button><button type="button" data-a="locdn" data-v="' + i + '" aria-label="Move ' + esc(l.name || "location") + ' down"' + (i === S.locEdit.length - 1 ? " disabled" : "") + '>' + ICON_DN + '</button></span>' +
+        '<input type="text" id="locname-' + i + '" data-l="name" data-i="' + i + '" value="' + esc(l.name) + '" aria-label="Name" placeholder="Name">' +
+        '<input type="text" id="locat-' + i + '" data-l="at" data-i="' + i + '" value="' + esc(l.at) + '" aria-label="In the tree" placeholder="/ (the top)">' +
+        '<input type="text" id="locpath-' + i + '" data-l="path" data-i="' + i + '" value="' + esc(l.path) + '" aria-label="Where" placeholder="//nas/share/folder" class="mono">' +
+        '<label class="switch" style="min-height:30px"><input type="checkbox" id="loccp-' + i + '" data-a="loccopies" data-v="' + i + '"' + (l.copies ? " checked" : "") + '><span class="sub" style="display:inline">copies</span></label>' +
+        '<button type="button" class="rm" data-a="locrm" data-v="' + i + '" aria-label="Remove ' + esc(l.name || "location") + '">' + ICON.x + '</button>' +
+        '<span class="st">' + esc(l.st || "") + '</span></div>';
+    });
+    h += '<div class="btns"><button type="button" class="btn sm" data-a="locadd">Add a location…</button>' + (st.next_to_footage ? '<button type="button" class="btn sm" data-a="locself">Add the project folder</button>' : "") + '</div>' +
+      '<p class="sub wrap">Saving writes them into Project.afproject, and a ' + esc(st.name) + '.afplocation file at the top of each, so a clip opened from Finder finds this project. A location taken out loses its file; nothing else in it changes.</p></div>' +
+      '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
+  } else if (S.stab === "mac") {
+    h += '<p class="sub wrap">Kept only on this computer, never part of the library: delete any of it and this computer simply reads the library again.</p>' +
+      '<div class="lab">Local copies of clips</div>';
+    if (!S.localEdit.length) h += '<p class="sub wrap">None. A folder here with copies of some clips, at their places in the tree, plays before the library’s.</p>';
+    S.localEdit.forEach((l, i) => {
+      h += '<div class="kv"><span style="min-width:0"><span class="nm">' + esc(l.path) + '</span><span class="sub">In the tree at ' + esc(l.at ? l.at + "/" : "the top") + (l.reachable === false ? " · not there now" : "") + '</span></span><span class="num">' + (l.files != null ? l.files + " files · " + sizeText(l.bytes) : "") + '</span><button type="button" class="btn sm" data-a="localrm" data-v="' + i + '">Remove</button></div>';
+    });
+    h += '<div class="btns"><button type="button" class="btn sm" data-a="localadd">Add a local copy…</button></div>' +
+      '<div class="lab">Caches on this computer, for all projects</div><div class="kv">';
+    for (const c of st.caches) h += '<span style="min-width:0"><span class="nm">' + esc(c.key) + '</span><span class="sub">' + esc(c.what) + '</span></span><span class="num">' + c.files + " files · " + sizeText(c.bytes) + '</span><button type="button" class="btn sm" data-a="clearcache" data-v="' + esc(c.key) + '"' + (c.files ? "" : " disabled") + '>Clear</button>';
+    h += '</div></div><footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Close</button><button type="button" class="btn pri" data-a="savelocal">Save</button></footer>';
+  } else {
+    h += '<div class="field"><span class="sub">Project folder</span><span class="mono">' + esc(st.path) + '</span></div>' +
+      '<div class="field"><span class="sub">Its id</span><span class="mono">' + esc(st.id || "made when it’s first needed") + '</span></div>' +
+      '<div class="field" style="align-items:start"><label class="sub" for="hosts">The NAS’s other names</label><textarea id="hosts" rows="3" class="mono" style="border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:var(--surface);color:var(--fg)" placeholder="DISKSTATIONDXP = web.nas, 192.168.50.186">' + esc(S.hostsText) + '</textarea></div>' +
+      '<p class="sub wrap">One line per NAS: the name its locations use, then the other names it answers to. Any of them matches a share mounted under that name.</p>' +
+      '<div class="btns"><button type="button" class="btn sm" data-a="moveproject">Move the project to…</button></div>' +
+      '<p class="sub wrap">Moves Project.afproject and the project’s _ folders to another folder (the SSD, say). The clips and their own files stay where they are; this folder becomes a location.</p></div>' +
+      '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
+  }
+  el.innerHTML = h + '</div></div>';
+}
+async function saveLocations() {
+  const hosts = textToHosts(S.hostsText);
+  try {
+    const problems = await invoke("save_locations", { list: S.locEdit.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: !!l.copies })), hosts });
+    S.sheet = null; renderSheet();
+    toast(problems && problems.length ? "Saved. " + problems.join(" · ") : "Saved in Project.afproject; each location has its pointer file");
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+
 // ---------- loading ----------
 
 async function loadView(view) {
   const r = await call("scan", { view });
   if (r.root !== S.root) return;
   DATA[view] = { dirs: r.dirs || [], items: r.items || [] };
+  if (view === "footage") S.locations = r.locations || [];
   mergeProbes(r.probes);
   if (view === "moments") countMoments();
   derive(view);
@@ -686,6 +785,7 @@ function selectedPaths() {
 document.addEventListener("mousedown", (e) => { if (e.shiftKey && e.target.closest('[data-a="pick"]')) e.preventDefault(); });
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-a]");
+  if (el && el.tagName === "INPUT" && el.dataset.a === "loccopies") return;
   if (S.menu && !(el && el.closest(".menu")) && !(el && el.dataset.a === "menu")) { S.menu = false; if (!el) { renderTop(); renderSugg(); return; } }
   if (S.suggOpen && !e.target.closest(".searchwrap")) { S.suggOpen = false; renderSugg(); }
   if (!el) {
@@ -739,6 +839,25 @@ document.addEventListener("click", async (e) => {
     case "keep": await call("answer_close", { quit: false }).catch(() => {}); return poll();
     case "quit": return call("answer_close", { quit: true }).catch(() => {});
     case "toastok": $("toast").hidden = true; return;
+    case "sheet": return openSettings();
+    case "scrim": if (e.target !== el) return; S.sheet = null; renderSheet(); return;
+    case "closesheet": S.sheet = null; renderSheet(); return;
+    case "stab": S.stab = v; renderSheet(); return;
+    case "locup": { const i = +v, l = S.locEdit; [l[i - 1], l[i]] = [l[i], l[i - 1]]; renderSheet(); return; }
+    case "locdn": { const i = +v, l = S.locEdit; [l[i + 1], l[i]] = [l[i], l[i + 1]]; renderSheet(); return; }
+    case "locrm": S.locEdit.splice(+v, 1); renderSheet(); return;
+    case "locadd": { const r = await call("choose_location").catch(() => null); if (r) { S.locEdit.push({ name: r.name, at: "", path: r.path, copies: false, st: "Chosen: " + r.dir }); renderSheet(); } return; }
+    case "locself": S.locEdit.unshift({ name: S.name, at: "", path: ".", copies: false, st: "The project folder itself" }); renderSheet(); return;
+    case "savelocs": return saveLocations();
+    case "localadd": { const d = await call("choose_local").catch(() => null); if (d) { S.localEdit.push({ name: "On this computer", at: "", path: d }); renderSheet(); } return; }
+    case "localrm": S.localEdit.splice(+v, 1); renderSheet(); return;
+    case "savelocal": try { await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })) }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
+    case "clearcache": try { await invoke("clear_cache", { key: v }); toast("Cleared"); await openSettings(); } catch (er) { showError(String(er)); } return;
+    case "moveproject": {
+      S.menu = false; S.sheet = null; renderSheet(); renderTop();
+      try { const r = await invoke("move_project"); if (r) { toast("The project is now in " + r); return poll(); } } catch (er) { showError(String(er)); }
+      return;
+    }
     default: return;
   }
   renderAll();
@@ -754,10 +873,13 @@ document.addEventListener("dblclick", (e) => {
 document.addEventListener("input", (e) => {
   const t = e.target;
   if (t.id === "q") { S.q = t.value; S.suggOpen = true; S.sugg = -1; S.sel = {}; S.anchor = null; renderMain(); renderSide(); renderFilters(); renderSugg(); }
+  else if (t.dataset.l) { S.locEdit[+t.dataset.i][t.dataset.l] = t.value; }
+  else if (t.id === "hosts") { S.hostsText = t.value; }
 });
 document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
   if (!a) return;
+  if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
   else if (a === "look") S.exportSdr = el.value === "sdr";
@@ -778,6 +900,7 @@ document.addEventListener("keydown", (e) => {
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing && S.root) { e.preventDefault(); S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; renderMain(); renderSide(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && S.root) { e.preventDefault(); const q = $("q"); if (q) q.focus(); return; }
+  if (e.key === "Escape" && S.sheet) { S.sheet = null; renderSheet(); return; }
   if (e.key === "Escape" && S.menu) { S.menu = false; renderTop(); return; }
   if (e.key === "Escape" && !typing && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); return; }
   if (e.key === "Enter" && !typing && Object.keys(S.sel).length) {
