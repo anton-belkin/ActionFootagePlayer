@@ -1,130 +1,794 @@
 "use strict";
-// The window's page: what the app (src/main.rs) says, asked twice a second, and its commands on the buttons
+// The Library's window (docs/library-management.md, the mockup it was settled on): a project's footage, moments,
+// photos and exports browsed as folders; filters that narrow the folder you're in, or a search that lists every match;
+// the commands on what's selected, in one side panel; the queue as its tab. What it shows comes from the app
+// (src/main.rs, src/index.rs): the project's files, and what each clip is (gyroflow-probe --library).
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let current = null;        // the project's path
-let info = null;           // its project() answer
-let macos = false;
-let lastFinished = 0;      // finished jobs seen: a new one reads the project again (its counts)
+const ICON = {
+  folder: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>',
+  fsm: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>',
+  chev: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  down: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  x: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  check: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg>',
+  search: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  filter: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16l-6 8v6l-4-2v-4z"/></svg>',
+  list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+};
+const VIEWS = [["footage", "Footage"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+// Where each view is in the project, for the paths a batch is kept to
+const BASE = { footage: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/" };
+const NOUN = { footage: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"] };
 
+const S = {
+  root: null, name: "", info: null, macos: true,
+  view: "footage", path: [], sel: {}, anchor: null, layout: "list", q: "", flat: false, scope: "here",
+  filters: {}, filtersOpen: true, fsec: { src: true, tf: true }, fexp: {}, suggOpen: false, sugg: -1,
+  tab: "commands", open: { moments: true, export: true }, menu: false, recent: [],
+  photoKind: "live", exportSdr: false, jobs: [], finished: 0,
+};
+const DATA = {};          // view -> { dirs: [path], items: [item] }
+const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
+let probesVersion = 0, probesPending = 0;
+let MOMENTS_OF = {};      // a clip's path in the project -> how many moments it has
+const THUMBS = new Map(); // a file -> data: URL, or null for none
+let VISIBLE = [];
+
+// ---------- talking to the app ----------
+
+let errTimer = null;
 function showError(text) {
   const el = $("error");
   el.textContent = text || "";
   el.hidden = !text;
-  if (text) setTimeout(() => { if (el.textContent === text) el.hidden = true; }, 8000);
+  clearTimeout(errTimer);
+  if (text) errTimer = setTimeout(() => { el.hidden = true; }, 9000);
+}
+async function call(cmd, args) {
+  try { return await invoke(cmd, args); } catch (e) { showError(String(e)); throw e; }
+}
+let toastTimer = null;
+function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4200); }
+
+// ---------- what an item is ----------
+
+function clock(s) {
+  if (!(s >= 0)) return "";
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0");
+}
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dateText(d) {
+  if (!d || isNaN(d)) return "";
+  return d.getDate() + " " + MONTHS[d.getMonth()] + " " + d.getFullYear() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+// When a clip was recorded: a DJI file's name is its local time; else the file's creation time (UTC)
+function recorded(name, created) {
+  const m = /DJI_(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(name || "");
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  return created ? new Date(created * 1000) : null;
+}
+function prettyCamera(c) {
+  if (!c) return null;
+  const s = String(c).trim();
+  const i = s.indexOf(" ");
+  const brand = i > 0 ? s.slice(0, i) : s;
+  let model = i > 0 ? s.slice(i + 1) : "";
+  model = model.replace(/([a-z])([A-Z0-9])/g, "$1 $2").replace(/([A-Za-z])(\d)/g, "$1 $2").trim();
+  return { brand, model: model || brand };
+}
+const COLORS = { dlogm: ["Log", "D-Log M"], dlog: ["Log", "D-Log"], dlog2: ["Log", "D-Log 2"], hlg: ["HDR", "HLG"], pq: ["HDR", "PQ"],
+  normal: [null, "Normal"], "d-cinelike": [null, "D-Cinelike"], other: [null, "Other"] };
+const TF_DEFAULT = "As the defaults";
+
+function deriveSource(it, probe) {
+  it.probed = !!probe;
+  const cam = prettyCamera(probe && probe.camera);
+  it.brand = cam ? cam.brand : null;
+  it.model = cam ? cam.model : null;
+  it.cam = cam ? (cam.brand + " " + cam.model) : "";
+  const col = probe && probe.color ? (COLORS[probe.color] || [null, probe.color]) : null;
+  it.colorGroup = col ? col[0] : null;
+  it.color = col ? col[1] : null;
+  it.motion = probe ? probe.mode != null : null;
+  it.is360 = !!(probe && (probe.spherical || probe.rig360));
+}
+function deriveTransform(it, view) {
+  if (!view || typeof view !== "object" || Array.isArray(view)) {
+    it.stab = null; it.horizon = null; it.frame = null; it.proj = null;
+    return;
+  }
+  it.stab = view.view === "off" ? "Off" : view.view === "wide" ? "Wider" : "Stabilized";
+  it.horizon = view.horizon_lock === "no" ? "Free" : view.horizon_lock === "yes" ? "Level" : null;
+  const aspect = view.aspect && view.aspect !== "original" ? view.aspect : null;
+  const portrait = view.orientation === "portrait";
+  it.frame = aspect || portrait ? (aspect || "Own ratio") + (portrait ? ", portrait" : "") : "As recorded";
+  const p = view.projection || "linear";
+  it.proj = p === "linear" ? "Linear" : p.charAt(0).toUpperCase() + p.slice(1);
+}
+function tfText(it) {
+  const p = [];
+  if (it.motion === false && !it.gyroflow) p.push("no motion data");
+  else if (it.gyroflow) p.push("Gyroflow project");
+  else if (it.stab) p.push(it.stab === "Stabilized" ? "stabilized" : it.stab === "Wider" ? "wider" : "not stabilized");
+  if (it.horizon && it.stab !== "Off") p.push(it.horizon === "Level" ? "level" : "horizon free");
+  if (it.frame && it.frame !== "As recorded") p.push(it.frame);
+  if (it.proj && it.proj !== "Linear") p.push(it.proj.toLowerCase());
+  if (it.turned) p.push("turned");
+  if (it.is360) p.push("360°");
+  return p.join(", ");
 }
 
-async function call(cmd, args) {
-  try {
-    return await invoke(cmd, args);
-  } catch (e) {
-    showError(String(e));
-    throw e;
+function derive(view) {
+  const d = DATA[view];
+  if (!d) return;
+  const root = S.root;
+  for (const it of d.items) {
+    if (it.kind === "clip") {
+      const probe = PROBES[it.path];
+      deriveSource(it, probe);
+      const own = it.own || {};
+      deriveTransform(it, own.view);
+      const src = own.source && typeof own.source === "object" ? own.source : {};
+      it.turned = !!(src.rotation && src.rotation !== 0);
+      const ownMarks = Array.isArray(own.marks) ? own.marks : null;
+      it.marks = ownMarks ? ownMarks.length : (probe && probe.marks && probe.marks.times ? probe.marks.times.length : 0);
+      it.moments = MOMENTS_OF[it.id] || 0;
+      const mv = probe && probe.movie;
+      it.durS = mv ? mv.duration : null;
+      it.when = recorded(it.name, mv && mv.created);
+      it.thumbPath = it.preview || null;
+      it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
+    } else if (it.kind === "moment") {
+      const l = it.link || {};
+      const original = l.clip ? root + "/" + l.clip : null;
+      deriveSource(it, original && PROBES[original]);
+      deriveTransform(it, l.stab);
+      it.turned = false;
+      it.durS = l.in != null && l.out != null ? l.out - l.in : null;
+      const start = l.created ? new Date(l.created) : null;
+      it.when = start && !isNaN(start) && l.in != null ? new Date(start.getTime() + l.in * 1000) : new Date(it.mtime * 1000);
+      it.thumbPath = it.path;
+      const clipName = l.clip ? l.clip.split("/").pop().replace(/\.[^.]+$/, "") : "?";
+      it.sub = [clipName + " " + clock(l.in) + "–" + clock(l.out), tfText(it)].filter(Boolean).join(" · ");
+    } else if (it.kind === "still") {
+      it.when = new Date(it.mtime * 1000);
+      it.thumbPath = it.path;
+      it.sub = it.form;
+    } else if (it.kind === "export") {
+      const l = it.link || {};
+      it.when = new Date(it.mtime * 1000);
+      it.durS = l.in != null && l.out != null ? l.out - l.in : null;
+      it.look = l.look === "nbcu" || l.look === "maker" ? "SDR" : l.look ? "HDR" : "Unknown";
+      it.thumbPath = it.path;
+      it.sub = (l.clip ? l.clip.split("/").pop() + " · " : "") + it.look;
+    }
+    it.date = it.when ? dateText(it.when) : "";
+    it.dur = it.kind === "still" ? (it.form === "Live Photo" ? "Live" : "") : clock(it.durS);
+  }
+}
+function countMoments() {
+  MOMENTS_OF = {};
+  for (const m of (DATA.moments && DATA.moments.items) || []) {
+    const c = m.link && m.link.clip;
+    if (c) MOMENTS_OF[c] = (MOMENTS_OF[c] || 0) + 1;
   }
 }
 
-function plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
+// ---------- filters ----------
 
-async function readProject() {
-  info = await invoke("project");
-  if (!info) return;
-  $("name").textContent = info.name;
-  $("path").textContent = info.path;
-  $("legacy").hidden = !info.legacy;
-  $("clips_flat").checked = info.clips_flat;
-  $("moments_alone").checked = info.moments_alone;
-  $("counts").innerHTML = [
-    ["_Clips", plural(info.clip_previews, "clip preview", "clip previews")],
-    ["_Moments", plural(info.moments, "moment", "moments")],
-    ["_Stills", plural(info.stills, "photo", "photos")],
-    ["_Exports", plural(info.exports, "export", "exports")],
-  ].map(([dir, label]) => `<button type="button" data-reveal="${dir}" title="Show ${dir}">${esc(label)}</button>`).join("");
-  const failed = info.clips_failed || [];
-  $("failed").hidden = failed.length === 0;
-  $("failed-sum").textContent = `${plural(failed.length, "clip preview", "clip previews")} couldn't be made last time`;
-  $("failed-list").innerHTML = failed.map(([clip, why]) => `<li><code>${esc(clip)}</code>: ${esc(why)}</li>`).join("");
+const L = (id, label, fn) => ({ id, label, fn });
+const P = (id, label, kids) => ({ id, label, kids });
+function distinct(items, f) { const out = []; for (const it of items) { const v = f(it); if (v != null && out.indexOf(v) < 0) out.push(v); } return out.sort(); }
+
+let FACETS = [];
+function buildFacets() {
+  const items = (DATA[S.view] && DATA[S.view].items) || [];
+  const sections = [];
+  if (S.view === "footage" || S.view === "moments") {
+    const brands = distinct(items, (i) => i.brand);
+    const camOpts = brands.map((b) => P("cam:" + b, b, distinct(items.filter((i) => i.brand === b), (i) => i.model).map((m) => L("cam:" + b + "|" + m, m, (it) => it.brand === b && it.model === m))));
+    if (items.some((i) => i.probed && !i.brand)) camOpts.push(L("cam:?", "Unknown", (it) => it.probed && !it.brand));
+    const colOpts = [];
+    for (const g of ["Log", "HDR"]) {
+      const kids = distinct(items.filter((i) => i.colorGroup === g), (i) => i.color).map((c) => L("col:" + c, c, (it) => it.color === c));
+      if (kids.length) colOpts.push(P("col:" + g, g, kids));
+    }
+    for (const c of distinct(items.filter((i) => i.color && !i.colorGroup), (i) => i.color)) colOpts.push(L("col:" + c, c, (it) => it.color === c && !it.colorGroup));
+    colOpts.push(L("col:?", "Unknown", (it) => it.probed && !it.color));
+    sections.push({ id: "src", title: "Source", facets: [
+      { id: "cam", title: "Camera", opts: camOpts },
+      { id: "col", title: "Color", opts: colOpts },
+      { id: "mot", title: "Motion data", opts: [L("mot:y", "Gyro in the file", (it) => it.motion === true), L("mot:n", "None", (it) => it.motion === false)] },
+      { id: "shp", title: "Shape", opts: [L("shp:flat", "Flat", (it) => it.probed && !it.is360), L("shp:360", "360°", (it) => it.is360)] },
+    ] });
+    const frames = distinct(items.filter((i) => i.frame && i.frame !== "As recorded"), (i) => i.frame);
+    const projs = distinct(items.filter((i) => i.proj && i.proj !== "Linear"), (i) => i.proj);
+    sections.push({ id: "tf", title: "Transform", facets: [
+      { id: "stab", title: "Stabilization", opts: [L("stab:gf", "By a Gyroflow project", (it) => !!it.gyroflow),
+        L("stab:on", "Stabilized", (it) => !it.gyroflow && it.stab === "Stabilized"), L("stab:w", "Wider", (it) => !it.gyroflow && it.stab === "Wider"),
+        L("stab:off", "Off", (it) => !it.gyroflow && it.stab === "Off"), L("stab:def", TF_DEFAULT, (it) => !it.gyroflow && !it.stab)] },
+      { id: "hor", title: "Horizon", opts: [L("hor:l", "Level", (it) => it.horizon === "Level"), L("hor:f", "Free", (it) => it.horizon === "Free")] },
+      { id: "frm", title: "Frame", opts: [L("frm:own", "As recorded", (it) => it.frame === "As recorded")].concat(frames.length ? [P("frm:ch", "Changed", frames.map((f) => L("frm:" + f, f, (it) => it.frame === f)))] : []) },
+      { id: "prj", title: "Projection", opts: [L("prj:lin", "Linear", (it) => it.proj === "Linear")].concat(projs.map((p) => L("prj:" + p, p, (it) => it.proj === p))) },
+    ].concat(S.view === "footage" ? [{ id: "trn", title: "Recorded turned", opts: [L("trn:y", "Turned", (it) => it.turned), L("trn:n", "As is", (it) => !it.turned)] }] : []) });
+  }
+  if (S.view === "footage") {
+    sections.push({ id: "mk", title: "Marks & previews", facets: [
+      { id: "mrk", title: "Marks", opts: [L("mrk:y", "Has marks", (it) => it.marks > 0), L("mrk:n", "No marks", (it) => !(it.marks > 0))] },
+      { id: "mom", title: "Moments", opts: [L("mom:y", "Has moments", (it) => it.moments > 0), L("mom:todo", "Marks without moments", (it) => it.marks > 0 && !it.moments)] },
+      { id: "prv", title: "Clip preview", opts: [L("prv:y", "Made", (it) => !!it.preview), L("prv:n", "Not made", (it) => !it.preview)] },
+    ] });
+  }
+  if (S.view === "stills") {
+    sections.push({ id: "frm2", title: "Kind", facets: [{ id: "form", title: "Kind", opts: distinct(items, (i) => i.form).map((f) => L("form:" + f, f, (it) => it.form === f)) }] });
+  }
+  if (S.view === "exports") {
+    sections.push({ id: "lk", title: "Look", facets: [{ id: "look", title: "Look", opts: distinct(items, (i) => i.look).map((f) => L("look:" + f, f, (it) => it.look === f)) }] });
+  }
+  FACETS = sections;
+}
+function allFacets() { const a = []; FACETS.forEach((x) => x.facets.forEach((f) => a.push(f))); return a; }
+function facetLeaves(f) { const out = []; f.opts.forEach((o) => (o.kids || [o]).forEach((l) => out.push(l))); return out; }
+function findOpt(id) { for (const f of allFacets()) for (const o of f.opts) { if (o.id === id) return o; if (o.kids) for (const k of o.kids) if (k.id === id) return k; } return null; }
+function facetMatch(f, it) { const on = facetLeaves(f).filter((l) => S.filters[l.id]); return !on.length || on.some((l) => l.fn(it)); }
+function textMatch(it) {
+  const q = S.q.trim().toLowerCase();
+  if (!q) return true;
+  return [it.name, it.cam, it.color, it.sub, it.dir, it.date].join(" ").toLowerCase().indexOf(q) >= 0;
+}
+function matches(it, except) { return textMatch(it) && allFacets().every((f) => f === except || facetMatch(f, it)); }
+function activeTokens() { const t = []; allFacets().forEach((f) => { const on = facetLeaves(f).filter((l) => S.filters[l.id]); if (on.length) t.push({ f, labels: on.map((l) => l.label) }); }); return t; }
+function nActive() { return Object.keys(S.filters).filter((k) => S.filters[k] && findOpt(k)).length; }
+function searching() { return S.q.trim() !== "" || S.flat; }
+function filtering() { return nActive() > 0; }
+function setOpt(id, on) { const o = findOpt(id); if (!o) return; (o.kids || [o]).forEach((k) => { if (on) S.filters[k.id] = true; else delete S.filters[k.id]; }); }
+
+// ---------- the tree ----------
+
+function dirKey() { return S.path.join("/"); }
+function items() { return (DATA[S.view] && DATA[S.view].items) || []; }
+function under(path) { return path ? items().filter((it) => it.dir === path || it.dir.startsWith(path + "/")) : items(); }
+function childDirs(dir) {
+  const ds = (DATA[S.view] && DATA[S.view].dirs) || [];
+  return ds.filter((d) => (d.lastIndexOf("/") < 0 ? "" : d.slice(0, d.lastIndexOf("/"))) === dir);
+}
+function scopeItems() { return S.scope === "all" || !S.path.length ? items() : under(dirKey()); }
+function plural(n) { const w = NOUN[S.view]; return n + " " + (n === 1 ? w[0] : w[1]); }
+
+function ctx() {
+  const viewName = VIEWS.find((v) => v[0] === S.view)[1];
+  const folderName = S.path.length ? S.path[S.path.length - 1] : viewName;
+  const selFolders = Object.keys(S.sel).filter((k) => k.startsWith("f:")).map((k) => k.slice(2));
+  const direct = items().filter((it) => S.sel["i:" + it.id]);
+  const seen = {}, selItems = [];
+  direct.concat(...selFolders.map((p) => under(p).filter((it) => matches(it)))).forEach((it) => { if (!seen[it.id]) { seen[it.id] = 1; selItems.push(it); } });
+  const any = selFolders.length + direct.length > 0;
+  const fnames = selFolders.map((p) => p.split("/").pop());
+  let selName = "";
+  if (any) {
+    const parts = [];
+    if (selFolders.length) parts.push(selFolders.length === 1 ? fnames[0] : selFolders.length + " folders");
+    if (direct.length) parts.push(plural(direct.length));
+    selName = parts.join(" and ");
+  }
+  // What a batch is kept to: the items, and the folders whole (the player takes what's under a folder) unless filtered
+  const filt = filtering() || S.q.trim() !== "";
+  const only = filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
+  return { viewName, folderName, selFolders, direct, selItems, any, selName, only, label: plural(selItems.length) };
 }
 
-function jobLine(j) {
-  const parts = [];
-  const fin = ["done", "stopped", "failed"].includes(j.state);
-  if (j.state === "waiting") parts.push("waiting");
-  else if (j.state === "starting") parts.push("starting the player");
-  else if (j.state === "looking") parts.push("looking through the project");
-  else if (fin) {
-    if (j.made != null) parts.push(`${j.made} made`);
-  } else if (j.total > 0) parts.push(`${j.done} of ${j.total}`);
-  if (j.failed > 0) parts.push(`<span class="err">${j.failed} failed</span>`);
-  if (j.current && !fin) parts.push(esc(j.current));
-  if (j.message) parts.push(j.state === "failed" ? `<span class="err">${esc(j.message)}</span>` : esc(j.message));
-  return parts.join(" · ");
+// ---------- drawing ----------
+
+function renderTop() {
+  const recent = S.recent.filter((r) => r.path !== S.root);
+  $("top").innerHTML =
+    '<div class="menuwrap"><button class="proj" type="button" data-a="menu" aria-haspopup="menu" aria-expanded="' + S.menu + '">' + ICON.folder + '<span class="ttl"><span>' + esc(S.root ? S.name : "Action Footage Library") + '</span></span>' + ICON.down + '</button>' +
+    (S.menu ? '<div class="menu" role="menu">' +
+      (S.root ? '<button type="button" role="menuitem" class="cur" data-a="closemenu"><span class="ck">' + ICON.check + '</span><span style="min-width:0"><span style="display:block">' + esc(S.name) + '</span><span class="sub">' + esc(S.root) + '</span></span></button>' : '') +
+      recent.map((r) => '<button type="button" role="menuitem" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="ck"></span><span style="min-width:0"><span style="display:block">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></span></button>').join("") +
+      '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
+      (S.root ? '<button type="button" role="menuitem" data-a="revealroot"><span class="ck"></span>' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button>' : '') +
+      '</div>' : '') + '</div>' +
+    (S.root ? '<div class="seg" role="tablist" aria-label="What to browse">' + VIEWS.map((v) => '<button type="button" role="tab" aria-selected="' + (S.view === v[0]) + '" class="' + (S.view === v[0] ? "on" : "") + '" data-a="view" data-v="' + v[0] + '">' + v[1] + '</button>').join("") + '</div>' +
+      '<div class="searchwrap"><div class="search">' + ICON.search + activeTokens().map((t) => '<span class="tok"><span>' + esc(t.f.title + ": " + t.labels.join(", ")) + '</span><button type="button" data-a="tokrm" data-v="' + esc(t.f.id) + '" aria-label="Remove filter ' + esc(t.f.title) + '">' + ICON.x + '</button></span>').join("") +
+      '<input id="q" type="search" value="' + esc(S.q) + '" placeholder="' + (nActive() ? "Add words or another filter" : "Search names, cameras, dates, or type a filter: dji, log, wider…") + '" aria-label="Search" autocomplete="off" spellcheck="false"></div><div id="sugg"></div></div>' +
+      '<button type="button" class="btn' + (S.filtersOpen ? " on" : "") + '" data-a="filters" aria-pressed="' + S.filtersOpen + '">' + ICON.filter + 'Filters' + (nActive() ? " · " + nActive() : "") + '</button>' +
+      '<div class="seg" aria-label="Layout"><button type="button" class="' + (S.layout === "list" ? "on" : "") + '" data-a="layout" data-v="list" aria-label="List">' + ICON.list + '</button><button type="button" class="' + (S.layout === "grid" ? "on" : "") + '" data-a="layout" data-v="grid" aria-label="Grid">' + ICON.grid + '</button></div>' : "");
 }
 
-function renderJobs(jobs) {
-  $("qempty").hidden = jobs.length > 0;
-  $("clear").hidden = !jobs.some((j) => ["done", "stopped", "failed"].includes(j.state));
-  $("jobs").innerHTML = jobs.map((j) => {
-    const fin = ["done", "stopped", "failed"].includes(j.state);
-    let pct = 0;
-    if (j.total > 0) pct = Math.min(100, ((j.done + (j.fraction || 0)) / j.total) * 100);
-    if (j.state === "done") pct = 100;
-    const where = j.project !== current ? ` <span class="dim">· ${esc(j.project_name)}</span>` : "";
-    const btn = fin ? "" : `<button type="button" data-cancel="${j.id}">${j.state === "waiting" ? "Remove" : "Stop"}</button>`;
-    const fails = (j.failures || []).length
-      ? `<details><summary>${plural(j.failures.length, "failure", "failures")}</summary><ul>${j.failures.map(([what, why]) => `<li><code>${esc(what)}</code>: ${esc(why)}</li>`).join("")}</ul></details>`
-      : "";
-    const bar = !fin && j.state !== "waiting" ? `<div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>` : "";
-    return `<li class="job${fin ? " finished" : ""}"><div class="r1"><b>${esc(j.title)}${where}</b><span class="pill ${j.state}">${j.state}</span>${btn}</div>
-      <div class="r2">${jobLine(j)}</div>${bar}${fails}</li>`;
-  }).join("");
+function mosaic(path, filt) {
+  const its = under(path).filter((x) => x.thumbPath && (!filt || matches(x))).slice(0, 4);
+  let h = '<span class="mosaic">';
+  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
+  return h + '<span class="fb">' + ICON.fsm + '</span></span>';
+}
+function img(path) {
+  const t = THUMBS.get(path);
+  return '<img data-thumb="' + esc(path) + '" alt=""' + (t ? ' src="' + t + '"' : (t === null ? ' hidden' : '')) + '>';
+}
+
+function renderMain() {
+  const main = $("main");
+  if (!S.root) { main.innerHTML = ""; return; }
+  const c = ctx(), srch = searching(), filt = filtering();
+  const dir = dirKey();
+  let hiddenFolders = 0;
+  const folderRows = childDirs(dir).map((d) => ({ kind: "folder", path: d, name: d.split("/").pop(), dir }));
+  const here = folderRows.concat(items().filter((it) => it.dir === dir));
+  const list = srch ? scopeItems().filter((it) => matches(it)) : !filt ? here : here.filter((it) => {
+    if (it.kind !== "folder") return matches(it);
+    const ok = under(it.path).some((x) => matches(x));
+    if (!ok) hiddenFolders++;
+    return ok;
+  });
+  let h = "";
+  if (srch) {
+    h += '<div class="scope"><span class="sub" style="display:inline">Search in</span>' +
+      (S.path.length ? '<div class="seg"><button type="button" class="' + (S.scope === "here" ? "on" : "") + '" data-a="scope" data-v="here">' + esc(c.folderName) + '</button><button type="button" class="' + (S.scope === "all" ? "on" : "") + '" data-a="scope" data-v="all">All of ' + c.viewName + '</button></div>' : '<b>All of ' + c.viewName + '</b>') +
+      '<span class="sub" style="display:inline">' + list.length + ' found' + (S.q.trim() ? "" : " by the filters") + '</span><button type="button" class="btn sm" data-a="endsearch" style="margin-left:auto">Back to the folder</button></div>';
+  } else {
+    h += '<div class="crumbs"><button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
+    S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
+    h += '<span class="where">' + esc(S.view === "footage" ? S.root : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    if (filt) {
+      const all = under(dir).filter((x) => matches(x)).length;
+      h += '<div class="scope"><span class="chip fast">Filtered</span><span class="sub" style="display:inline">' + list.length + ' of ' + here.length + ' here' + (hiddenFolders ? " · " + hiddenFolders + " folder" + (hiddenFolders > 1 ? "s" : "") + " with no match hidden" : "") + '</span>' +
+        '<button type="button" class="btn sm" data-a="flat" style="margin-left:auto">List every match below here (' + all + ')</button></div>';
+    }
+  }
+  if (probesPending && (S.view === "footage" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
+  const keyOf = (it) => it.kind === "folder" ? "f:" + it.path : "i:" + it.id;
+  VISIBLE = list.map(keyOf);
+  const nSel = VISIBLE.filter((k) => S.sel[k]).length;
+  if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button></div>';
+  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
+  const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
+  const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
+  if (!list.length) {
+    h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
+  } else if (S.layout === "list") {
+    const cnt = S.view === "footage" ? "Marks · mom." : "";
+    h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (S.view === "footage" ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>Size</span></div><div class="list">';
+    for (const it of list) {
+      const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
+      h += '<button type="button" class="row' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+        '<span style="min-width:0"><span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(subOf(it)) + '</span></span>' +
+        '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
+        '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
+        '<span class="chips hide-s">' + chips(it) + '</span><span class="cell">' + (f ? "" : sizeText(it.size)) + '</span></button>';
+    }
+    h += '</div>';
+  } else {
+    h += '<div class="grid">';
+    for (const it of list) {
+      const key = keyOf(it), sel = !!S.sel[key];
+      h += '<button type="button" class="card' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+        '<span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
+    }
+    h += '</div>';
+  }
+  const scrollTop = main.scrollTop;
+  main.innerHTML = h;
+  main.scrollTop = scrollTop;
+  fillThumbs();
+}
+function sizeText(n) {
+  if (!(n > 0)) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return (n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)) + " " + u[i];
+}
+function chips(it) {
+  const c = [];
+  if (it.kind === "folder") {
+    const inner = under(it.path);
+    const prev = inner.filter((x) => x.preview).length;
+    if (S.view === "footage" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
+  } else if (it.kind === "clip") {
+    if (!it.preview) c.push(["chip", "No preview"]);
+    if (it.gyroflow) c.push(["chip ok", "Gyroflow project"]);
+    if (it.motion === false) c.push(["chip", "No motion data"]);
+    if (it.is360) c.push(["chip fast", "360°"]);
+  } else if (it.kind === "moment") {
+    if (it.gyroflow) c.push(["chip ok", "Own Gyroflow project"]);
+    if (!it.link) c.push(["chip warn", "No link"]);
+  } else if (it.kind === "still") {
+    c.push(["chip tag", it.form]);
+  } else if (it.kind === "export") {
+    c.push(["chip tag", it.look]);
+  }
+  return c.map((x) => '<span class="' + x[0] + '">' + esc(x[1]) + '</span>').join("");
+}
+
+// The pictures: from the app, a few at a time, each set where it shows once it's there
+let thumbsBusy = 0;
+const thumbsWanted = [];
+function fillThumbs() {
+  for (const el of document.querySelectorAll("img[data-thumb]")) {
+    const p = el.getAttribute("data-thumb");
+    if (THUMBS.has(p)) continue;
+    if (thumbsWanted.indexOf(p) < 0) thumbsWanted.push(p);
+  }
+  pumpThumbs();
+}
+function pumpThumbs() {
+  while (thumbsBusy < 6 && thumbsWanted.length) {
+    const p = thumbsWanted.shift();
+    if (THUMBS.has(p)) continue;
+    thumbsBusy++;
+    invoke("thumb", { path: p }).then((u) => u || null, () => null).then((u) => {
+      THUMBS.set(p, u);
+      for (const el of document.querySelectorAll('img[data-thumb="' + CSS.escape(p) + '"]')) { if (u) { el.src = u; el.hidden = false; } else el.hidden = true; }
+    }).finally(() => { thumbsBusy--; pumpThumbs(); });
+  }
+}
+
+function optRow(id, label, count, checked, ind, isParent, exp, isKid) {
+  const cid = "fo-" + id.replace(/[^a-z0-9]/gi, "_");
+  return '<div class="opt' + (isKid ? " kid" : "") + (count ? "" : " zero") + '">' +
+    (isParent ? '<button type="button" class="tw" data-a="fexp" data-v="' + esc(id) + '" aria-expanded="' + exp + '" aria-label="' + (exp ? "Collapse " : "Expand ") + esc(label) + '">' + ICON.chev + '</button>' : "<span></span>") +
+    '<input type="checkbox" id="' + cid + '" data-a="fopt" data-v="' + esc(id) + '"' + (checked ? " checked" : "") + (ind ? ' data-ind="1"' : "") + '>' +
+    '<label for="' + cid + '"><span class="lb">' + esc(label) + '</span></label><span class="ct">' + count + '</span></div>';
+}
+function renderFilters() {
+  const el = $("fpanel");
+  el.hidden = !S.root || !S.filtersOpen;
+  if (el.hidden) { el.innerHTML = ""; return; }
+  const srch = searching();
+  const base = srch ? scopeItems().filter(textMatch) : under(dirKey());
+  const where = srch ? (S.scope === "all" || !S.path.length ? "all of " + ctx().viewName : S.path[S.path.length - 1] + " and below") : (S.path.length ? S.path[S.path.length - 1] + " and its folders" : "all of " + ctx().viewName);
+  let h = '<div class="fh"><b>Filters</b><button type="button" data-a="fclear"' + (nActive() ? "" : " disabled") + '>Clear all</button></div>' +
+    '<div class="rule">Ticks in one list: any of them. Different lists: all of them. ' + (srch ? "Applied to the search." : "Applied to the folder you’re in.") + ' Numbers: how many match in ' + esc(where) + '.</div>';
+  let hidden = 0;
+  for (const sx of FACETS) {
+    const open = !!S.fsec[sx.id];
+    const n = sx.facets.reduce((a, f) => a + facetLeaves(f).filter((l) => S.filters[l.id]).length, 0);
+    let body = "";
+    for (const f of sx.facets) {
+      const others = base.filter((it) => matches(it, f));
+      const cnt = (fns) => others.filter((it) => fns.some((fn) => fn(it))).length;
+      let rows = "";
+      for (const o of f.opts) {
+        if (o.kids) {
+          const onN = o.kids.filter((k) => S.filters[k.id]).length;
+          const kids = o.kids.map((k) => ({ k, c: cnt([k.fn]) })).filter((x) => x.c > 0 || S.filters[x.k.id]);
+          hidden += o.kids.length - kids.length;
+          if (!kids.length) { hidden++; continue; }
+          const exp = S.fexp[o.id] !== undefined ? S.fexp[o.id] : (kids.length > 1 || onN > 0);
+          rows += optRow(o.id, o.label, cnt(o.kids.map((k) => k.fn)), onN === o.kids.length, onN > 0 && onN < o.kids.length, true, exp, false);
+          if (exp) kids.forEach((x) => { rows += optRow(x.k.id, x.k.label, x.c, !!S.filters[x.k.id], false, false, false, true); });
+        } else {
+          const c1 = cnt([o.fn]);
+          if (!c1 && !S.filters[o.id]) { hidden++; continue; }
+          rows += optRow(o.id, o.label, c1, !!S.filters[o.id], false, false, false, false);
+        }
+      }
+      if (rows) body += (sx.facets.length > 1 ? '<div class="ftitle">' + esc(f.title) + '</div>' : "") + rows;
+    }
+    if (!body && !n) continue;
+    h += '<div class="fsec"><button type="button" class="fsech" data-a="fsec" data-v="' + sx.id + '" aria-expanded="' + open + '">' + ICON.chev + esc(sx.title) + (n ? '<span class="n">' + n + ' on</span>' : "") + '</button>';
+    if (open) h += '<div class="fbody">' + body + '</div>';
+    h += '</div>';
+  }
+  if (hidden) h += '<div class="rule" style="padding-top:10px">' + hidden + " filter" + (hidden > 1 ? "s" : "") + " with nothing to show here hidden.</div>";
+  const st = el.scrollTop;
+  el.innerHTML = h;
+  el.scrollTop = st;
+  el.querySelectorAll('input[data-ind="1"]').forEach((i) => { i.indeterminate = true; });
+}
+function suggestions() {
+  const q = S.q.trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  for (const f of allFacets()) for (const o of f.opts) {
+    const list = o.kids ? [o].concat(o.kids.map((k) => Object.assign({ parent: o }, k))) : [o];
+    for (const x of list) {
+      const path = f.title + (x.parent ? " › " + x.parent.label : "");
+      const on = x.kids ? x.kids.every((k) => S.filters[k.id]) : S.filters[x.id];
+      if ((x.label + " " + path).toLowerCase().indexOf(q) >= 0 && !on) out.push({ id: x.id, label: x.label, path });
+    }
+  }
+  return out.slice(0, 7);
+}
+function renderSugg() {
+  const el = $("sugg");
+  if (!el) return;
+  const q = S.q.trim();
+  if (!S.suggOpen || !q) { el.innerHTML = ""; return; }
+  const list = suggestions();
+  let h = '<div class="sugg" role="listbox" aria-label="Suggestions">';
+  if (list.length) { h += '<div class="sh">Filters</div>'; list.forEach((x, i) => { h += '<button type="button" role="option" class="' + (S.sugg === i ? "hi" : "") + '" data-a="suggpick" data-v="' + esc(x.id) + '"><span>' + esc(x.label) + '</span><span class="path">' + esc(x.path) + '</span></button>'; }); }
+  h += '<div class="sh">Words</div><button type="button" role="option" class="' + (S.sugg === list.length ? "hi" : "") + '" data-a="suggtext"><span>Names, cameras and dates with “' + esc(q) + '”</span></button></div>';
+  el.innerHTML = h;
+}
+
+function queueHtml() {
+  const fin = (j) => ["done", "stopped", "failed"].includes(j.state);
+  const live = S.jobs.filter((j) => !fin(j)), done = S.jobs.filter(fin).slice().reverse();
+  let h = '<div class="q">';
+  if (!live.length) h += '<p class="sub wrap">Nothing running. Commands on what you select land here.</p>';
+  for (const j of live) {
+    let pct = j.total > 0 ? Math.min(100, ((j.done + (j.fraction || 0)) / j.total) * 100) : 0;
+    const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? "looking through the project" : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
+    const other = j.project !== S.root ? " · " + j.project_name : "";
+    h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div>' +
+      (j.state === "waiting" ? "" : '<div class="bar2"><i style="width:' + pct.toFixed(1) + '%"></i></div>') +
+      '<div class="t"><span class="sub" style="flex:1">' + esc([what, j.current].filter(Boolean).join(" · ")) + '</span><button type="button" class="btn sm" data-a="cancel" data-v="' + j.id + '">' + (j.state === "waiting" ? "Remove" : "Stop") + '</button></div></div>';
+  }
+  if (done.length) {
+    h += '<div class="qh" style="display:flex;align-items:center">Done<button type="button" class="btn sm" data-a="clearjobs" style="margin-left:auto">Clear</button></div>';
+    for (const j of done) {
+      const parts = [];
+      if (j.made != null) parts.push(j.made + " made");
+      if (j.failed > 0) parts.push(j.failed + " failed");
+      if (j.message) parts.push(j.message);
+      const other = j.project !== S.root ? " · " + j.project_name : "";
+      h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div><span class="sub wrap' + (j.state === "failed" ? " err" : "") + '">' + esc(parts.join(" · ")) + '</span>' +
+        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
+    }
+  }
+  h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
+  return h;
+}
+function activeCount() { return S.jobs.filter((j) => !["done", "stopped", "failed"].includes(j.state)).length; }
+
+function sec(key, title, hint, body) {
+  const open = !!S.open[key];
+  return '<div class="sec"><button type="button" class="sech" data-a="sec" data-v="' + key + '" aria-expanded="' + open + '">' + ICON.chev + esc(title) + '<span class="hint">' + esc(hint) + '</span></button>' + (open ? '<div class="secb">' + body + '</div>' : "") + '</div>';
+}
+function renderSide() {
+  const side = $("side");
+  side.hidden = !S.root;
+  if (!S.root) return;
+  const c = ctx();
+  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Queue<span class="count">' + activeCount() + '</span></button></div>';
+  if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
+  h += '<div class="summary">' + (c.any
+    ? '<b>' + esc(c.selName) + '</b><span class="sub wrap" style="margin-top:2px">' + esc("Commands below act on " + plural(c.selItems.length) + (c.selFolders.length ? ", everything inside the selected folders included." : ".")) + '</span>' +
+      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (S.view === "stills" ? "Open" : "Open in the player") + '</button><button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
+    : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
+      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
+  const info = S.info || {};
+  if (S.view === "footage") {
+    h += sec("moments", "Moments & previews", "from the clips",
+      '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
+      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
+      '<span class="sub wrap">The ones without a preview, removed ones too. Into _Clips' + (info.clips_flat ? " itself." : ", in the clips’ folders.") + '</span>' +
+      '<label class="switch"><input type="checkbox" id="clips_flat" data-a="setting" data-v="clips_flat"' + (info.clips_flat ? " checked" : "") + '>All clip previews in _Clips itself</label>' +
+      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="moments">Moments of the marks</button></div>' +
+      '<label class="switch"><input type="checkbox" id="moments_alone" data-a="setting" data-v="moments_alone"' + (info.moments_alone ? " checked" : "") + '>Stabilized on their own, not as part of the clip</label>' +
+      '<div class="field"><label class="sub" for="pkind">Photos as</label><select id="pkind" data-a="pkind"><option value="no"' + (S.photoKind === "no" ? " selected" : "") + '>Stills</option>' +
+      (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
+      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
+      '<span class="sub wrap">One of each mark, made once: a deleted one isn’t made again.</span>');
+  } else if (S.view === "moments") {
+    h += sec("export", "Export", "to _Exports",
+      '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
+      '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
+      '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="export">Export ' + esc(c.any ? c.label : "") + '</button></div>');
+  } else {
+    h += '<div class="summary"><span class="sub wrap">Syncing folders of ' + NOUN[S.view][1] + ' with Apple Photos comes in a later version of the Library.</span></div>';
+  }
+  side.innerHTML = h;
+  if (!c.any) side.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+
+function renderEmpty() {
+  $("empty").hidden = !!S.root;
+  $("bodyrow").hidden = !S.root;
+  if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => '<button type="button" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="nm">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></button>').join("") + '</div>' : "";
+}
+function renderAll() {
+  const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
+  buildFacets();
+  renderEmpty(); renderTop(); renderMain(); renderSide(); renderFilters(); renderSugg();
+  if (id) { const e = $(id); if (e) { e.focus(); try { if (pos != null) e.setSelectionRange(pos, pos); } catch (_) { /* */ } } }
+}
+function renderQueueOnly() {
+  if (S.tab === "queue") { const b = $("qtab"); if (b) b.innerHTML = queueHtml(); }
+  document.querySelectorAll(".count").forEach((e) => { e.textContent = activeCount(); });
+}
+
+// ---------- loading ----------
+
+async function loadView(view) {
+  const r = await call("scan", { view });
+  if (r.root !== S.root) return;
+  DATA[view] = { dirs: r.dirs || [], items: r.items || [] };
+  mergeProbes(r.probes);
+  if (view === "moments") countMoments();
+  derive(view);
+  if (view === "moments") derive("footage");
+}
+function mergeProbes(p) {
+  if (!p) return false;
+  let n = 0;
+  for (const k of Object.keys(p.items || {})) { PROBES[k] = p.items[k]; n++; }
+  if (p.version > probesVersion) probesVersion = p.version;
+  probesPending = p.pending || 0;
+  return n > 0;
+}
+async function loadProject() {
+  S.info = await invoke("project").catch(() => null);
+  S.name = S.info ? S.info.name : "";
+  for (const k of Object.keys(DATA)) delete DATA[k];
+  S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
+  renderAll();
+  await loadView("moments").catch(() => {});
+  await loadView("footage").catch(() => {});
+  if (S.view !== "footage" && S.view !== "moments") await loadView(S.view).catch(() => {});
+  renderAll();
+}
+async function refresh() {
+  if (!S.root) return;
+  S.info = await invoke("project").catch(() => S.info);
+  await loadView("moments").catch(() => {});
+  await loadView(S.view === "moments" ? "footage" : S.view).catch(() => {});
+  renderAll();
+}
+
+let probeTimer = null;
+async function pollProbes() {
+  if (!S.root) return;
+  const r = await invoke("probes_since", { since: probesVersion }).catch(() => null);
+  const before = probesPending;
+  if (r && (mergeProbes(r) || before !== probesPending)) {
+    derive("footage"); derive("moments");
+    clearTimeout(probeTimer);
+    probeTimer = setTimeout(() => { buildFacets(); renderMain(); renderFilters(); }, 150);
+  }
 }
 
 async function poll() {
   let s;
   try { s = await invoke("snapshot"); } catch (e) { return; }
-  macos = s.macos;
-  if (s.project !== current) {
-    current = s.project;
-    $("empty").hidden = !!current;
-    $("project").hidden = !current;
-    $("show").hidden = !current;
-    if (current) await readProject();
-    else { $("name").textContent = "Action Footage Library"; $("path").textContent = ""; }
+  S.macos = s.macos;
+  if (s.project !== S.root) {
+    S.root = s.project;
+    S.recent = await invoke("recent").catch(() => []);
+    if (S.root) await loadProject(); else renderAll();
   }
-  renderJobs(s.jobs);
+  S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
-  if (finished !== lastFinished) {
-    lastFinished = finished;
-    if (current) readProject();
+  if (finished !== S.finished) {
+    const more = finished > S.finished;
+    S.finished = finished;
+    if (more) refresh();
   }
+  renderQueueOnly();
   $("ask").hidden = !s.close_asked;
 }
 
-document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("button");
-  if (!t) return;
-  if (t.id === "open") { await call("choose_project").catch(() => {}); return poll(); }
-  if (t.id === "show") return call("reveal", {}).catch(() => {});
-  if (t.dataset.reveal) return call("reveal", { what: t.dataset.reveal }).catch(() => {});
-  if (t.id === "clear") { await call("clear_finished"); return poll(); }
-  if (t.id === "keep") { await call("answer_close", { quit: false }); return poll(); }
-  if (t.id === "quit") return call("answer_close", { quit: true });
-  if (t.dataset.cancel) { await call("cancel_job", { id: Number(t.dataset.cancel) }); return poll(); }
-  if (t.dataset.job) {
-    const kind = t.dataset.job;
-    const options = kind === "photos" ? { photo: $("photo").value } : kind === "export" ? { sdr: $("look").value === "sdr" } : {};
-    await call("add_job", { kind, options }).catch(() => {});
-    return poll();
+// ---------- doing ----------
+
+async function addJob(kind) {
+  const c = ctx();
+  if (!c.any) return;
+  const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : {};
+  try {
+    await invoke("add_job", { kind, options, only: c.only, label: c.label });
+    toast("In the queue: " + c.label);
+    S.tab = "queue";
+    renderSide();
+  } catch (e) { showError(String(e)); }
+}
+function selectedPaths() {
+  const c = ctx();
+  return c.selItems.map((it) => it.path);
+}
+
+document.addEventListener("mousedown", (e) => { if (e.shiftKey && e.target.closest('[data-a="pick"]')) e.preventDefault(); });
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-a]");
+  if (S.menu && !(el && el.closest(".menu")) && !(el && el.dataset.a === "menu")) { S.menu = false; if (!el) { renderTop(); renderSugg(); return; } }
+  if (S.suggOpen && !e.target.closest(".searchwrap")) { S.suggOpen = false; renderSugg(); }
+  if (!el) {
+    if (e.target.closest("#main") && !e.target.closest(".row,.card,.crumbs,.scope,.selbar") && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); }
+    return;
+  }
+  const a = el.dataset.a, v = el.dataset.v;
+  if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
+  switch (a) {
+    case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
+    case "closemenu": S.menu = false; break;
+    case "choose": S.menu = false; await call("choose_project").catch(() => {}); return poll();
+    case "openrecent": S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+    case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
+    case "view":
+      S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
+      if (!DATA[v]) { renderAll(); await loadView(v).catch(() => {}); }
+      break;
+    case "filters": S.filtersOpen = !S.filtersOpen; break;
+    case "fclear": S.filters = {}; break;
+    case "fsec": S.fsec[v] = !S.fsec[v]; break;
+    case "fexp": { const o = findOpt(v); const cur = S.fexp[v] !== undefined ? S.fexp[v] : (o && o.kids && (o.kids.length > 1 || o.kids.some((k) => S.filters[k.id]))); S.fexp[v] = !cur; break; }
+    case "tokrm": { const f = allFacets().find((x) => x.id === v); if (f) facetLeaves(f).forEach((l) => { delete S.filters[l.id]; }); break; }
+    case "suggpick": setOpt(v, true); S.q = ""; S.suggOpen = false; S.sugg = -1; renderAll(); $("q").focus(); return;
+    case "suggtext": S.suggOpen = false; renderSugg(); $("q").focus(); return;
+    case "scope": S.scope = v; S.sel = {}; S.anchor = null; break;
+    case "flat": S.flat = true; S.scope = "here"; S.sel = {}; S.anchor = null; break;
+    case "endsearch": S.q = ""; S.flat = false; S.sel = {}; S.anchor = null; break;
+    case "layout": S.layout = v; break;
+    case "crumb": S.path = S.path.slice(0, +v); S.sel = {}; S.anchor = null; S.flat = false; break;
+    case "pick": {
+      if (e.detail > 1) return;
+      const multi = e.metaKey || e.ctrlKey;
+      if (e.shiftKey && S.anchor && VISIBLE.indexOf(S.anchor) >= 0) {
+        const i = VISIBLE.indexOf(S.anchor), j = VISIBLE.indexOf(v), lo = Math.min(i, j), hi = Math.max(i, j);
+        if (!multi) S.sel = {};
+        VISIBLE.slice(lo, hi + 1).forEach((k) => { S.sel[k] = true; });
+      } else if (multi) { if (S.sel[v]) delete S.sel[v]; else S.sel[v] = true; S.anchor = v; }
+      else { S.sel = {}; S.sel[v] = true; S.anchor = v; }
+      renderMain(); renderSide(); return;
+    }
+    case "selall": S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; break;
+    case "desel": S.sel = {}; S.anchor = null; break;
+    case "tab": S.tab = v; break;
+    case "sec": S.open[v] = !S.open[v]; break;
+    case "job": return addJob(v);
+    case "openit": { const p = selectedPaths(); if (p.length) call("open_items", { paths: p }).catch(() => {}); return; }
+    case "revealit": { const c = ctx(); const first = c.selFolders.length ? S.root + "/" + BASE[S.view] + c.selFolders[0] : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
+    case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();
+    case "clearjobs": await call("clear_finished").catch(() => {}); return poll();
+    case "keep": await call("answer_close", { quit: false }).catch(() => {}); return poll();
+    case "quit": return call("answer_close", { quit: true }).catch(() => {});
+    case "toastok": $("toast").hidden = true; return;
+    default: return;
+  }
+  renderAll();
+});
+document.addEventListener("dblclick", (e) => {
+  const el = e.target.closest('[data-a="pick"]');
+  if (!el) return;
+  const v = el.dataset.v;
+  if (v.startsWith("f:")) { S.q = ""; S.flat = false; S.path = v.slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
+  const it = items().find((x) => "i:" + x.id === v);
+  if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); call("open_items", { paths: [it.path] }).catch(() => {}); }
+});
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.id === "q") { S.q = t.value; S.suggOpen = true; S.sugg = -1; S.sel = {}; S.anchor = null; renderMain(); renderSide(); renderFilters(); renderSugg(); }
+});
+document.addEventListener("change", (e) => {
+  const el = e.target, a = el.dataset.a, v = el.dataset.v;
+  if (!a) return;
+  if (a === "fopt") setOpt(v, el.checked);
+  else if (a === "pkind") S.photoKind = el.value;
+  else if (a === "look") S.exportSdr = el.value === "sdr";
+  else if (a === "setting") { call("set_setting", { key: v, value: el.checked }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
+  else return;
+  renderAll();
+});
+document.addEventListener("keydown", (e) => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if (e.target.id === "q") {
+    const list = suggestions(), max = list.length;
+    if (e.key === "ArrowDown" && S.suggOpen) { e.preventDefault(); S.sugg = Math.min(max, S.sugg + 1); renderSugg(); }
+    else if (e.key === "ArrowUp" && S.suggOpen) { e.preventDefault(); S.sugg = Math.max(-1, S.sugg - 1); renderSugg(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (S.suggOpen && S.sugg >= 0 && S.sugg < max) { setOpt(list[S.sugg].id, true); S.q = ""; } S.suggOpen = false; S.sugg = -1; renderAll(); $("q").focus(); }
+    else if (e.key === "Backspace" && e.target.value === "") { const t = activeTokens(); if (t.length) { facetLeaves(t[t.length - 1].f).forEach((l) => { delete S.filters[l.id]; }); renderAll(); $("q").focus(); } }
+    else if (e.key === "Escape" && S.suggOpen) { S.suggOpen = false; renderSugg(); }
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing && S.root) { e.preventDefault(); S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; renderMain(); renderSide(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && S.root) { e.preventDefault(); const q = $("q"); if (q) q.focus(); return; }
+  if (e.key === "Escape" && S.menu) { S.menu = false; renderTop(); return; }
+  if (e.key === "Escape" && !typing && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); return; }
+  if (e.key === "Enter" && !typing && Object.keys(S.sel).length) {
+    // Enter: a folder opens, as a double click does; items open in the player
+    const keys = Object.keys(S.sel);
+    if (keys.length === 1 && keys[0].startsWith("f:")) { S.path = keys[0].slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); return; }
+    const p = selectedPaths(); if (p.length) call("open_items", { paths: p }).catch(() => {});
   }
 });
 
-for (const key of ["clips_flat", "moments_alone"]) {
-  $(key).addEventListener("change", (ev) => call("set_setting", { key, value: ev.target.checked }).catch(() => readProject()));
-}
-
-// A Project.afproject (or a folder of the trip) dropped on the window
+// A Project.afproject (or a folder of the project) dropped on the window
 try {
   window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (ev) => {
     if (ev.payload.type === "drop" && ev.payload.paths.length) {
@@ -135,16 +799,10 @@ try {
 } catch (e) { /* no drops then */ }
 
 (async () => {
-  try {
-    await invoke("engine");
-  } catch (e) {
-    $("engine").textContent = String(e);
-    $("engine").hidden = false;
-  }
+  try { await invoke("engine"); } catch (e) { $("engine").textContent = String(e); $("engine").hidden = false; }
+  S.recent = await invoke("recent").catch(() => []);
   await poll();
-  if (!macos) {
-    for (const o of document.querySelectorAll("option.mac")) o.remove();
-    $("show").textContent = "Show in Explorer";
-  }
-  setInterval(poll, 500);
+  if (!S.root) renderAll();
+  setInterval(poll, 600);
+  setInterval(pollProbes, 900);
 })();
