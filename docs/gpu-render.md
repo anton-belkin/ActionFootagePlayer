@@ -410,6 +410,36 @@ out no more, at about 1.6 times the cost, so they stay out. Cost (offline, the w
 measures): as #151 at 1080p (3.7 ms), +5 % at the XDR's size and 4K; Light about 25 % less. No ghosts on 0126's
 bubbles and diver or 0087's fish; paused-frame crops and the rig in the review's notes.
 
+**What the frames can't take out, and Stronger, 2026-11-09** (Anton, on 0087 at 37 s, open water with the wreck faint
+through it: "fairly strong noise" left; the dark dots are noise, particles in the water are white). Measured on the
+player's shader, 1080p, a 480x360 crop of that water, noise in 10-bit codes by scale (fine: the picture minus a
+Gaussian of 1 px; mid: 1 to 3 px; coarse: 3 to 10 px):
+
+| | luma fine / mid / coarse | color (B-Y) | dark specks a crop |
+|---|---|---|---|
+| without | 10.6 / 9.9 / 5.2 | 11.4 | 323 |
+| Full until now (#153) | 5.9 / 6.1 / 4.0 | 5.2 | 850 |
+| Full now | 5.4 / 4.9 / 3.7 | 0.4 | 213 |
+| Stronger | 1.7 / 1.8 / 2.3 | 0.2 | (none to see) |
+
+What was left after the frames: the coarse blotches (~10 px) go least, 25-30 %, and part of them stays from frame to
+frame (HEVC carries it over), so more frames wouldn't take them; the color's noise was the part that showed; and dark
+cyan specks, 1-7 px, mostly red (-36 codes), new each frame: the shown frame's own spike stayed in its average. So
+`dn_clean` after the average (both modes): the **dark specks** (a pixel darker than its ring of 16 pixels two away by
+more than the noise, the ring with no dark pixels opposite each other, takes the ring's color; bright dots stay) and
+the **color's guided filter** (B-Y, R-Y, each its own guide over ~20 px, eps 0.8 of the color's noise: a pink fin over
+water of its brightness keeps its edge, which a luma-guided filter would spread). **Stronger** (the transform's
+`denoise_strong`, the panel's Transform, for a very noisy clip: `gyroflow_dn_strong`) also keeps no grain, takes in
+frames that differ up to twice as much (tolerance 3), gives the shown pixel a tenth of the weight where it differs from
+what the other frames agree on by 2-4 times the noise, and runs the guided filter on the luma too (~12 px, eps 0.4 of
+the noise). Fine texture softens with it (0090's wreck); the moving fins (0087, 0090) and 0126's bubbles and diver show
+no ghosts or bleeding, and 0126 in Full looks as before. The guided filter is He's "fast" one: its statistics at a
+quarter of the size (5 small passes), the filter at full size.
+
+Cost (offline wall-clock, about 1.8 times the player's): at 1080p the specks 0.6 ms, the guided filter 0.7 ms; at the
+XDR's 3024x1701, 3.1 ms the two. The first version of the specks (16 colors in arrays, Metal spilling them) cost 3.0 ms
+at 1080p; now most pixels are done at 4 reads.
+
 The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
 18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once
 it plays on (its ring starts again from it; stepping 5 frames on would fill half of it); frame-back-step while paused

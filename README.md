@@ -256,7 +256,7 @@ switches and buttons, scrolled with the wheel:
   to saved**, **Use as default**, **Auto save**, a moment's or clip preview's **Settings of its own**; the
   stabilization (on, wider, off), the level, the horizon (level or free), the **Lens** (corrected, with its
   projection, linear or a fisheye; or as recorded), the **Frame** (its ratio, drawn, and as is, landscape or
-  portrait) and the water's color aberration. The dot in a
+  portrait), the water's color aberration and the temporal denoise (on, and **Stronger** for a very noisy clip). The dot in a
   corner marks what's saved, beside what's chosen. With a Gyroflow project, what the project has is shown as its
   values, with **Edit in Gyroflow…**.
 - **Output**: **Display**, the video output on this screen (HDR, HLG; HDR, HLG+DV; SDR, HLG+DV; mpv's tone mapping;
@@ -349,7 +349,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=display` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that |
-| `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off, how much of it this computer does (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off, how much of it this computer does (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
 | `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |

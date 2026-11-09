@@ -62,6 +62,7 @@
 --                           recorded, apart from the stabilization: off with the lens corrected is the lens alone, nothing
 --                           smoothed; a clip with a lens profile and no motion data (kind "lens") plays that way
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
+--   denoise-strong yes|no|toggle  the temporal denoise's Stronger, for a very noisy clip (part of the transform)
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
 --                           edge_fill_rate auto|50|25, edges <mode>, chromatic yes|no, temporal_denoise full|light|off
@@ -141,6 +142,9 @@
 --                (on the GPU path the picture 5 frames behind, the sound delayed as much); light, 3 (about a quarter
 --                cheaper, a little less clean); off, none, whatever Ctrl+p says (Ctrl+p's switch kept for when it's
 --                on again). still_radius and still_tolerance, from before it, are read and ignored
+--   denoise_strong=no  the transform's Stronger by default (the panel's Transform, for a very noisy clip, kept with
+--                its transform): no grain kept, more frames taken in, the frame's own pixel judged too, and the luma
+--                smoothed where it's flat (the GPU path's; warp.glsl's dn_ passes)
 --   paused_full_size=off  paused, the frame stays as it played; Ctrl+f renders it at full size. auto: still_delay after
 --                it pauses, it's rendered at full size (no input scaling, the output at the project's or the video's own
 --                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
@@ -189,7 +193,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -532,6 +536,7 @@ local function defaults_bundle()
         orientation = select(2, split_aspect(o.aspect, o.orientation)),
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
         lens = o.lens == "as-recorded" and "as-recorded" or "corrected",
+        denoise_strong = o.denoise_strong == true,
         preset_horizon = preset_horizon(),
     }
 end
@@ -567,6 +572,8 @@ local HORIZON = { yes = true, no = false }
 -- stabilized or not, and one with a lens profile and no motion data (kind "lens"), has it corrected or not
 local lens_mode = "corrected"
 local horizon = session.horizon_lock == "yes"
+-- The temporal denoise's Stronger (the transform's denoise_strong): for a very noisy clip, on the GPU path
+local denoise_strong = session.denoise_strong == true
 -- The lens under water with a flat port (yes), above water or behind a dome port (no), as the camera's telemetry says
 -- (auto), or as the project says (project, a clip with one). Input: the source's own correction (the workspace
 -- plugin's input), written there as it's changed; the app's default (underwater=) for sources without one. A clip's
@@ -610,6 +617,8 @@ local function take(b)
     if b.lens == "corrected" or b.lens == "as-recorded" then lens_mode = b.lens
     elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
     else lens_mode = session.lens end
+    if type(b.denoise_strong) == "boolean" then denoise_strong = b.denoise_strong else denoise_strong = session.denoise_strong end
+    if dn_sync then dn_sync() end
     return b.view == "off"
 end
 
@@ -806,7 +815,7 @@ local function publish()
         rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
-        temporal_denoise = o.temporal_denoise,
+        temporal_denoise = o.temporal_denoise, denoise_strong = denoise_strong,
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
@@ -1171,7 +1180,8 @@ dn_sync = setmetatable({ shown = dn_shown, new_ring = dn_new_ring }, { __call = 
     local frames = DENOISE_FRAMES[o.temporal_denoise] or DN_AFTER
     local after = crop_on and 0 or math.min(DN_AFTER, frames)
     -- The frames on each side (Full or Light) and the grain kept: the shader's own parameters, nothing rebuilt
-    local want = { gyroflow_dn_radius = string.format("%d", frames), gyroflow_dn_keep = string.format("%.3f", o.still_grain) }
+    local want = { gyroflow_dn_radius = string.format("%d", frames), gyroflow_dn_keep = string.format("%.3f", o.still_grain),
+                   gyroflow_dn_strong = denoise_strong and "1" or "0" }
     local opts = mp.get_property_native("glsl-shader-opts") or {}
     local differ = false
     for k, v in pairs(want) do if opts[k] ~= v then opts[k], differ = v, true end end
@@ -1955,6 +1965,21 @@ end)
 
 mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)
 
+-- The temporal denoise's Stronger (the panel's Transform): kept with the clip's transform; the shader takes it at once
+-- (gyroflow_dn_strong, nothing written again)
+mp.register_script_message("denoise-strong", function(value)
+    local v
+    if value == "toggle" then v = not denoise_strong elseif value == "yes" or value == "no" then v = value == "yes" else return end
+    denoise_strong = v
+    sticks("denoise_strong", v)
+    dn_sync()
+    publish()
+    local note = ""
+    if v and not (gpu and gpu.denoise) then note = still.enabled() and " (while it plays on the GPU path)" or " (with Ctrl+p on)" end
+    mp.msg.info("temporal denoise: " .. (v and "stronger" or "as usual"))
+    mp.osd_message("Temporal denoise: " .. (v and "stronger, for this clip" or "as usual") .. note, 2)
+end)
+
 mp.register_script_message("edges", function(mode)
     if EDGE_LABELS[mode] then set_edges(mode) end
 end)
@@ -2043,6 +2068,7 @@ local function as_plays()
         orientation = project and session.orientation or frame.orientation,
         projection = project and session.projection or frame.projection,
         lens = project and session.lens or lens_mode,
+        denoise_strong = denoise_strong,
     }
 end
 
@@ -2052,9 +2078,10 @@ mp.register_script_message("remember", function()
         { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
         { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "orientation", b.orientation }, { "projection", b.projection },
         { "lens", b.lens }, { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
-        { "still", still.switched() and "yes" or "no" },
+        { "still", still.switched() and "yes" or "no" }, { "denoise_strong", b.denoise_strong and "yes" or "no" },
     })
     if saved then
+        o.denoise_strong = b.denoise_strong
         o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection, o.lens = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection, b.lens
         DEFAULTS = defaults_bundle()
         for k, v in pairs(b) do session[k] = v end

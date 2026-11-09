@@ -27,7 +27,7 @@ expect("empty: aspect neutral", b.aspect, "original")
 expect("empty: projection neutral", b.projection, "linear")
 
 -- A whole bundle stays as it is
-local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "16:9", orientation = "portrait", projection = "linear", lens = "corrected" }
+local whole = { view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "16:9", orientation = "portrait", projection = "linear", lens = "corrected", denoise_strong = false }
 b, added = t.complete(whole, session)
 expect("whole: nothing added", added, false)
 expect("whole: aspect", b.aspect, "16:9")
@@ -59,7 +59,7 @@ b = t.complete({ aspect = "16:9" }, session)
 expect("old landscape: stays landscape", b.orientation, "landscape")
 b = t.complete({ aspect = "original" }, session)
 expect("old original: as is", b.orientation, "as-is")
-b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "4:3", orientation = "as-is", projection = "linear", lens = "corrected" }, session)
+b, added = t.complete({ view = "normal", level = "weak", horizon_lock = "yes", chromatic = true, aspect = "4:3", orientation = "as-is", projection = "linear", lens = "corrected", denoise_strong = false }, session)
 expect("new: nothing added", added, false)
 expect("new: as is kept", b.orientation, "as-is")
 expect("a portrait ratio as an aspect isn't one", t.valid("aspect", "3:4"), false)
@@ -142,6 +142,15 @@ expect("denoise: old grain left out", b.denoise_grain, nil)
 expect("denoise: the rest kept", b.view, "wide")
 expect("denoise: not picked", (t.pick({ denoise_frames = 3 })), nil)
 expect("denoise: no change", t.status({ view = "wide", denoise_grain = 0.25 }, { view = "wide", denoise_grain = 0.1 }, false), "saved")
+
+-- Stronger (denoise_strong): a clip's own kept; a bundle from before it plays without; not a boolean, without
+b = t.complete({ view = "wide", denoise_strong = true }, { view = "normal", denoise_strong = false })
+expect("strong: its own kept", b.denoise_strong, true)
+b = t.complete({ view = "wide" }, { view = "normal", denoise_strong = true })
+expect("strong: an old bundle plays without", b.denoise_strong, false)
+expect("strong: not a boolean", t.complete({ denoise_strong = "yes" }, {}).denoise_strong, false)
+expect("strong: a change is a change", t.status({ denoise_strong = false }, { denoise_strong = true }, false), "changed")
+expect("strong: not a project's", t.status({ denoise_strong = false }, { denoise_strong = true }, true), "changed")
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -1033,6 +1033,12 @@ local function transform_part(u, x, w, y)
     y = u:caption(x, w, y - 2 * s, none and "Off on this computer (Performance & Quality)"
         or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows"
         or "The paused frame from the frames around it, moved onto it")
+    -- Stronger: the clip's (its transform), on the GPU path
+    local saved_strong = nil
+    if saved then saved_strong = saved.denoise_strong == true end
+    y = u:switch(x, w, y, "strong", "Stronger, for a very noisy clip", g.denoise_strong == true, "script-message-to gyroflow denoise-strong toggle",
+                 nil, none or not g.still or not gpu, saved_strong)
+    y = u:caption(x, w, y - 2 * s, "No grain kept, more frames taken in, dark specks out and the flat areas smoothed: open water clean, fine texture softer")
     return y
 end
 
