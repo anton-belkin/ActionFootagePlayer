@@ -244,8 +244,9 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
     for l in &locs {
         let Some(dir) = &l.dir else { continue };
         if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
-        let top = dir == root;
-        let skip = |rel: &str, lower: &str| top && !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+        // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
+        // aren't footage
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
         for (rel, is_dir, size, mtime) in walk(dir, &skip) {
             let tree = if l.at.is_empty() { rel.clone() } else { format!("{}/{rel}", l.at) };
             if is_dir { add_dir(&tree, &mut dirs); continue; }
