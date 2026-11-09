@@ -258,3 +258,4 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .kv dd.mono{font-family:var(--mono);font-size:11px}
 .mono.blk{display:block}
 .mono.blk+.mono.blk{margin-top:3px}
+.th.mk{display:flex;align-items:center;justify-content:center;color:var(--accent);background:var(--accent-soft)}

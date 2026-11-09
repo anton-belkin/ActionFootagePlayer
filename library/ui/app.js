@@ -25,8 +25,9 @@ const NOPREV = "Without a clip preview";
 // Where each view is in the project, for the paths a batch is kept to
 const BASE = { footage: "", sources: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/", clip: "" };
 const KIND_BASE = { moment: "_Moments/", still: "_Stills/", export: "_Exports/" };
-const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"], clip: ["moment or photo", "moments and photos"] };
+const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"], clip: ["item", "items"] };
 // Where each view's folders are, for renaming them: Footage's are _Clips'
+const ICON_MARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>';
 const FOLDER_BASE = { footage: "_Clips", moments: "_Moments", stills: "_Stills", exports: "_Exports" };
 
 const S = {
@@ -372,6 +373,7 @@ function renderTop() {
       (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
         '<button type="button" role="menuitem" data-a="takein"><span class="ck"></span>Take in another project…</button>' +
         '<button type="button" role="menuitem" data-a="moveproject"><span class="ck"></span>Move the project to…</button>' +
+        '<button type="button" role="menuitem" data-a="exportjson"><span class="ck"></span>Export the library as JSON…</button>' +
         '<button type="button" role="menuitem" data-a="revealroot"><span class="ck"></span>' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button>' : '') +
       '</div>' : '') + '</div>' +
     (S.root ? '<div class="seg" role="tablist" aria-label="What to browse">' + VIEWS.map((v) => '<button type="button" role="tab" aria-selected="' + (S.view === v[0]) + '" class="' + (S.view === v[0] ? "on" : "") + '" data-a="view" data-v="' + v[0] + '">' + v[1] + '</button>').join("") + '</div>' +
@@ -418,7 +420,7 @@ function renderMain() {
     h += '<div class="crumbs">' + navButtons() + '<button type="button" data-a="fcrumb" data-v="">Footage</button>';
     dirs.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" data-a="fcrumb" data-v="' + esc(dirs.slice(0, i + 1).join("/")) + '">' + esc(p) + '</button>'; });
     h += '<span aria-hidden="true">›</span><button type="button" class="here" data-a="gofootage" data-v="' + esc(S.clip) + '" title="Go to the clip in Footage">' + esc(clipName()) + '</button>' +
-      '<span class="where">Its moments and photos, in the order they are in the clip</span></div>';
+      '<span class="where">Its marks, moments and photos, in the order they are in the clip</span></div>';
   } else {
     h += '<div class="crumbs">' + navButtons() + '<button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
@@ -437,11 +439,11 @@ function renderMain() {
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button></div>';
-  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
+  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
   const subOf = (it) => it.kind === "folder" ? (S.view === "sources" && !it.dir ? sourceOf(it.name) + " · " + folderSub(it) : folderSub(it)) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   if (!list.length) {
-    if (S.view === "clip" && !srch && !filt) h += '<div class="empty">No moments or photos of this clip yet. Mark it in the player, then make Moments or Photos of the marks.</div>'; else
+    if (S.view === "clip" && !srch && !filt) h += '<div class="empty">No marks, moments or photos of this clip yet. Mark it in the player (M), then make Moments or Photos of the marks.</div>'; else
     h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
   } else if (S.layout === "list") {
     const clipsV = S.view === "footage" || S.view === "sources";
@@ -496,6 +498,9 @@ function chips(it) {
     for (const p of ["HDR", "SDR"]) { const st = (it.renders || {})[p]; if (st) c.push(["chip " + (st === "current" ? "ok" : "stale"), p + (st === "current" ? "" : " stale")]); }
     if (it.gyroflow) c.push(["chip ok", "Own Gyroflow project"]);
     if (!it.link) c.push(["chip warn", "No link"]);
+  } else if (it.kind === "mark") {
+    if (!it.hasMoment) c.push(["chip", "No moment"]);
+    if (!it.hasPhoto) c.push(["chip", "No photo"]);
   } else if (it.kind === "still") {
     c.push(["chip tag", it.form]);
   } else if (it.kind === "export") {
@@ -644,7 +649,8 @@ function sec(key, title, hint, body) {
 function clipButton(c) {
   if (c.direct.length !== 1 || c.selFolders.length) return "";
   const it = c.direct[0];
-  if (it.kind === "clip") return '<button type="button" class="btn sm" data-a="showclip" data-v="' + esc(it.id) + '">Moments and photos</button>';
+  if (it.kind === "clip") return '<button type="button" class="btn sm" data-a="showclip" data-v="' + esc(it.id) + '">Marks, moments and photos</button>';
+  if (it.kind === "mark") return '<button type="button" class="btn sm" data-a="gofootage" data-v="' + esc(S.clip) + '">Go to the footage</button>';
   const id = clipOf(it);
   return id ? '<button type="button" class="btn sm" data-a="gofootage" data-v="' + esc(id) + '">Go to the footage</button>' : "";
 }
@@ -1017,13 +1023,31 @@ function buildClip() {
   const clip = DATA.footage && DATA.footage.items.find((x) => x.id === id);
   const stem = clip ? stemOf(clip.name) : stemOf(id.split("/").pop());
   for (const p of (DATA.stills && DATA.stills.items) || []) {
-    const f = stillFrom(p.name);
-    if (!f || f.stem !== stem) continue;
+    // By the link in the photo; one made before photos had it, by its name
+    const l = p.link && p.link.clip ? p.link : null;
+    const nf = stillFrom(p.name);
+    const f = l ? (l.clip === id ? { t: +l.t || 0 } : null) : nf && nf.stem === stem ? nf : null;
+    if (!f) continue;
     // Its time in the clip's recording, as the moments have it
     const when = clip && clip.when ? new Date(clip.when.getTime() + f.t * 1000) : p.when;
     out.push(Object.assign({}, p, { key: "p:" + p.id, dir: "", at: f.t, sub: p.form + " · at " + clock(f.t), when, date: when ? dateText(when) : p.date }));
   }
-  out.sort((a, b) => a.at - b.at || (a.kind === "moment" ? -1 : 1));
+  // Its marks among them: the player's (its own file's), else the camera's; each with what was made of it
+  const own = clip && clip.own && Array.isArray(clip.own.marks) ? clip.own.marks.map((m) => m.t) : null;
+  const probe = clip && PROBES[clip.path];
+  const times = own || (probe && probe.marks && probe.marks.times) || [];
+  times.slice().sort((a, b) => a - b).forEach((t, i) => {
+    const moment = out.find((x) => x.kind === "moment" && x.link && t >= x.link.in - 0.05 && t <= x.link.out + 0.05);
+    const photo = out.find((x) => x.kind === "still" && Math.abs(x.at - t) < 0.6);
+    const when = clip && clip.when ? new Date(clip.when.getTime() + t * 1000) : null;
+    out.push({ kind: "mark", key: "k:" + i, id: "mark " + i, dir: "", at: t, t, n: i + 1, name: "Mark " + (i + 1) + " at " + clock(t),
+      sub: [own ? "the player’s mark" : "the camera’s mark", moment ? "in moment " + moment.name : "no moment", photo ? "has a photo" : "no photo"].join(" · "),
+      path: clip ? clip.path : "", when, date: when ? dateText(when) : "", dur: "", hasMoment: !!moment, hasPhoto: !!photo });
+  });
+  // In the clip's order; at one time, the mark first, then what was made of it
+  const rank = { mark: 0, moment: 1, still: 2 };
+  const tenth = (x) => Math.round(x.at * 10);
+  out.sort((a, b) => tenth(a) - tenth(b) || rank[a.kind] - rank[b.kind]);
   DATA.clip = { dirs: [], items: out, clip: clip || null };
 }
 async function showClip(id) {
@@ -1045,6 +1069,7 @@ function deletable(c) {
   if (S.view === "sources" || (!FOLDER_BASE[S.view] && S.view !== "clip")) return [];
   const list = c.selFolders.filter((f) => f !== NOPREV && !f.startsWith(NOPREV + "/")).map((f) => ({ kind: "folder", path: S.root + "/" + FOLDER_BASE[S.view] + "/" + f }));
   for (const it of c.direct) {
+    if (it.kind === "mark") continue;
     if (it.kind === "clip") { if (it.preview) list.push({ kind: "preview", path: it.preview }); }
     else list.push({ kind: it.kind, path: it.path });
   }
@@ -1073,7 +1098,7 @@ async function deleteSelection() {
 function canRename(c) {
   if (c.selFolders.length + c.direct.length !== 1 || S.view === "sources") return false;
   if (S.view === "footage") return c.selFolders.length === 1 && c.selFolders[0] !== NOPREV;
-  if (S.view === "clip") return c.direct.length === 1;
+  if (S.view === "clip") return c.direct.length === 1 && c.direct[0].kind !== "mark";
   return true;
 }
 
@@ -1094,7 +1119,8 @@ function openMenu(x, y) {
     if (c.selItems.length === 1 && c.selItems[0].gyroflow && !oneFolder) g.push(b("opengf", "Open in Gyroflow"));
     if (c.direct.length === 1 && !c.selFolders.length) {
       const it = c.direct[0];
-      if (it.kind === "clip") g.push(b("showclip", "Show moments and photos", "", false, it.id));
+      if (it.kind === "clip") g.push(b("showclip", "Show marks, moments and photos", "", false, it.id));
+      else if (it.kind === "mark") g.push(b("gofootage", "Go to the footage", "", false, S.clip));
       else { const id = clipOf(it); g.push(b("gofootage", "Go to the footage", "", !id, id || "")); }
     }
     if (mac && c.direct.length) g.push(b("ql", "Quick Look", k("Space", "")));
@@ -1104,7 +1130,8 @@ function openMenu(x, y) {
     if (canRename(c)) e.push(b("renameit", "Rename", k("Return", "F2")));
     if (FOLDER_BASE[S.view]) e.push(b("newdir", "New folder", k("⇧⌘N", "Ctrl+Shift+N")));
     const del = deletable(c);
-    if (S.view !== "sources") e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
+    const marksOnly = c.direct.length && !c.selFolders.length && c.direct.every((x) => x.kind === "mark");
+    if (S.view !== "sources" && !marksOnly) e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
     if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) e.push(b("removesource", "Remove from the project"));
     if (e.length) parts.push(e.join(""));
     parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
@@ -1210,10 +1237,15 @@ function itemInfo(it) {
     }
     h += infoSec("Files", kv([["File", pathsHtml([it.path]), false, true], ["Original", it.original ? pathsHtml([it.original]) : l.clip ? "Not found in the locations" : "", false, !!it.original],
       ["Gyroflow", it.gyroflow ? "Its own project beside it" : ""]]));
+  } else if (it.kind === "mark") {
+    h += infoSec("Mark", kv([["At", clock(it.t) + " in the clip"], ["Recorded", it.date], ["Set by", it.sub.split(" · ")[0].replace("the ", "").replace("’s mark", "")],
+      ["Moment", it.hasMoment ? "Made" : "Not yet"], ["Photo", it.hasPhoto ? "Made" : "Not yet"]]));
+    h += infoSec("Files", kv([["Clip", pathsHtml([it.path]), false, true]]));
   } else {
-    const m = /_(\d+(?:\.\d+)?)s\.(?:MP\.)?[^.]+$/i.exec(it.name);
-    const clip = m ? it.name.slice(0, m.index) : "";
-    h += infoSec("Photo", kv([["Kind", it.form], ["From", clip ? clip + " at " + clock(+m[1]) : "", true], ["Changed", it.date], ["Size", sizeText(it.size)], ["Tags", tags, false, true]]));
+    const l = it.link || {};
+    const nf = stillFrom(it.name);
+    const from = l.clip ? l.clip + " at " + clock(+l.t || 0) : nf ? nf.stem + " at " + clock(nf.t) + " (by its name)" : "";
+    h += infoSec("Photo", kv([["Kind", it.form], ["From", from, true], ["Changed", it.date], ["Size", sizeText(it.size)], ["Tags", tags, false, true]]));
     h += infoSec("Files", kv([["File", pathsHtml([it.path]), false, true]]));
   }
   return h;
@@ -1617,6 +1649,11 @@ document.addEventListener("click", async (e) => {
     case "localrm": S.localEdit.splice(+v, 1); renderSheet(); return;
     case "savelocal": try { await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })) }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
     case "clearcache": try { await invoke("clear_cache", { key: v }); toast("Cleared"); await openSettings(); } catch (er) { showError(String(er)); } return;
+    case "exportjson": {
+      S.menu = false; renderTop();
+      try { const f = await invoke("export_library"); if (f) { toast("Exported: " + f); call("reveal_path", { path: f }).catch(() => {}); } else $("toast").hidden = true; } catch (er) { showError(String(er)); }
+      return;
+    }
     case "moveproject": {
       S.menu = false; S.sheet = null; renderSheet(); renderTop();
       try { const r = await invoke("move_project"); if (r) { toast("The project is now in " + r); return poll(); } } catch (er) { showError(String(er)); }

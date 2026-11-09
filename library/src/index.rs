@@ -165,6 +165,19 @@ pub fn keys_and_cover(path: &Path) -> (HashMap<String, String>, Option<Vec<u8>>)
     (keys, cover)
 }
 
+/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/,
+/// as vs-gyroflow's photo.rs and afp-photo write it), within the file's first 64 KiB
+fn photo_link(path: &Path) -> Option<Value> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(65536);
+    std::fs::File::open(path).ok()?.take(65536).read_to_end(&mut head).ok()?;
+    let s = String::from_utf8_lossy(&head);
+    let from = s.find("<afp:link>")? + "<afp:link>".len();
+    let to = from + s[from..].find("</afp:link>")?;
+    let text = s[from..to].replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
+    serde_json::from_str(&text).ok()
+}
+
 pub fn link(path: &Path) -> Option<Value> {
     // Kept by the file's size and time: a folder of them is read again on each look
     static LINKS: Mutex<Option<HashMap<PathBuf, (u64, i64, Option<Value>)>>> = Mutex::new(None);
@@ -174,7 +187,9 @@ pub fn link(path: &Path) -> Option<Value> {
             if (*s, *m) == st { return v.clone(); }
         }
     }
-    let v = keys_and_cover(path).0.get("ch.actionfootageplayer.link").and_then(|t| serde_json::from_str::<Value>(t).ok());
+    let lower = path.to_string_lossy().to_lowercase();
+    let v = if [".heic", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e)) { photo_link(path) }
+        else { keys_and_cover(path).0.get("ch.actionfootageplayer.link").and_then(|t| serde_json::from_str::<Value>(t).ok()) };
     if let Some((s, m)) = st { LINKS.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (s, m, v.clone())); }
     v
 }
@@ -335,6 +350,8 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 it["form"] = json!(if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
                     else if lower.ends_with(".heic") { "HEIC with gain map" } else { "Ultra HDR JPEG" });
+                // Its clip and time, from the photo itself (older ones have none: their name tells)
+                it["link"] = link(&path).unwrap_or(Value::Null);
             }
             "exports" => {
                 if !(lower.ends_with(".mov") || lower.ends_with(".mp4")) { continue; }
@@ -641,6 +658,11 @@ mod tests {
         let s = scan(&root, "stills", false);
         let forms: Vec<&str> = s["items"].as_array().unwrap().iter().map(|i| i["form"].as_str().unwrap()).collect();
         assert_eq!(forms, ["Live Photo", "Motion Photo"]);
+        // A photo's link, read from its XMP
+        std::fs::write(root.join("_Stills/B.MP.jpg"), "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1,&quot;kind&quot;:&quot;photo&quot;,&quot;clip&quot;:&quot;Day 1/A &amp; B.MP4&quot;,&quot;t&quot;:2.5}</afp:link></x:xmpmeta>").unwrap();
+        let s = scan(&root, "stills", false);
+        assert_eq!(s["items"][1]["link"]["clip"], json!("Day 1/A & B.MP4"));
+        assert_eq!(s["items"][0]["link"], Value::Null);
         assert_eq!(scan(&root, "exports", false)["items"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
