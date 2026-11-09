@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod checks;
 mod index;
 mod locations;
 
@@ -666,6 +667,45 @@ fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<S
     Ok(Some(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) }))
 }
 
+// ---------- Check, Find moved files ----------
+
+// The player's gyroflow-export, which writes a link again in a file (--relink)
+fn export_tool() -> Option<PathBuf> {
+    let player = player().ok()?;
+    let probe = index::probe_tool(Some(&player))?;
+    let name = if cfg!(windows) { "gyroflow-export.exe" } else { "gyroflow-export" };
+    Some(probe.with_file_name(name)).filter(|p| p.is_file())
+}
+
+// Check, on the selection: `sel` paths of the footage tree, `links` link files (moments, exports) by their path in the
+// project
+#[tauri::command]
+async fn run_check(shared: State<'_, Shared>, sel: Vec<String>, links: Vec<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || checks::check(&root, &sel, &links)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || checks::find_moved(&root, &issues)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
+    let tool = export_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let relink = |file: &Path, link: &str| -> Result<(), String> {
+            let tool = tool.as_ref().ok_or("ActionFootagePlayer's gyroflow-export isn't there to write the links")?;
+            let o = Command::new(tool).arg("--relink").arg(file).arg(link).output().map_err(|e| e.to_string())?;
+            if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
+        };
+        checks::apply(&root, &found, &relink)
+    }).await.map_err(|e| e.to_string())
+}
+
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
 #[tauri::command]
 fn open_items(paths: Vec<String>) -> Result<(), String> {
@@ -857,7 +897,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, project_settings, save_locations, choose_location,
-                                                 choose_local, save_local, clear_cache, move_project])
+                                                 choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

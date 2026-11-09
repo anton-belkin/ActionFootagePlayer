@@ -31,6 +31,7 @@ const S = {
   tab: "commands", open: { moments: true, export: true }, menu: false, recent: [],
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
+  checking: false, checked: null, finding: false, found: null,
 };
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -570,6 +571,7 @@ function renderSide() {
     : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
+  if (S.view === "footage" || S.view === "moments") h += checksSection(c);
   if (S.view === "footage") {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
@@ -592,6 +594,58 @@ function renderSide() {
   }
   side.innerHTML = h;
   if (!c.any) side.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+
+// Check and Find moved files, on the selection (library/src/checks.rs)
+const KIND_TEXT = { own2: ["warn", "2 own files"], orphan: ["stale", "no clip"], twice: ["stale", "twice"], missing: ["warn", "original missing"] };
+function issueText(i) {
+  const short = (p) => String(p || "").split("/").slice(-2).join("/");
+  if (i.kind === "own2") return i.tree + " has its own file in " + i.files.length + " places: " + i.files.map(short).join(", ") + ". Nothing is saved for it until one goes.";
+  if (i.kind === "orphan") return short(i.file) + " has no clip beside it. Find moved files puts it back by the clip’s fingerprint.";
+  if (i.kind === "twice") return "The same clip at " + i.trees.join(" and ") + ". Delete one.";
+  if (i.kind === "missing") return short(i.file) + ": its original isn’t at " + i.tree + ".";
+  return JSON.stringify(i);
+}
+function checksSection(c) {
+  let body = '<p>Over ' + esc(c.any ? c.label : "what you select") + '. Kept to the selection: a whole big project takes long.</p>' +
+    '<div class="btns"><button type="button" class="btn sm' + (S.checked ? " on" : "") + '" data-a="runcheck">' + (S.checking ? "Checking…" : "Check") + '</button>' +
+    '<button type="button" class="btn sm" data-a="findmoved"' + (S.checked && S.checked.issues.some((i) => i.kind === "missing" || i.kind === "orphan") ? "" : " disabled") + '>' + (S.finding ? "Looking…" : "Find moved files") + '</button></div>';
+  if (S.checked) {
+    const list = S.checked.issues;
+    body += '<div class="result"><b>' + (list.length ? list.length + " issue" + (list.length > 1 ? "s" : "") : "Nothing wrong") + '</b>' +
+      list.slice(0, 40).map((i) => { const k = KIND_TEXT[i.kind] || ["", i.kind]; return '<div class="it"><span class="chip ' + k[0] + '">' + esc(k[1]) + '</span><span class="wrap">' + esc(issueText(i)) + '</span></div>'; }).join("") +
+      (list.length > 40 ? '<span class="sub">…and ' + (list.length - 40) + ' more</span>' : "") + '</div>';
+  }
+  if (S.found) {
+    const ok = S.found.filter((f) => f.found);
+    body += '<div class="result"><b>Found ' + ok.length + ' of ' + S.found.length + '</b>' +
+      S.found.map((f) => '<div class="it"><span class="mono">' + esc(f.issue.tree) + (f.found ? '<br>→ ' + esc(f.found.tree) + ' <span class="sub" style="display:inline">(' + esc(f.by) + ')</span>' : '<br>not found') + '</span></div>').join("") +
+      (ok.length ? '<div class="btns"><button type="button" class="btn sm pri" data-a="applymoved">Update ' + ok.length + '</button></div>' : "") + '</div>';
+  }
+  return sec("checks", "Checks", "issues, moved files", body);
+}
+async function runCheck() {
+  const c = ctx();
+  if (!c.any) return;
+  S.checking = true; S.found = null; renderSide();
+  try {
+    S.checked = await invoke("run_check", S.view === "moments" ? { sel: [], links: c.only } : { sel: c.only, links: [] });
+  } catch (e) { showError(String(e)); }
+  S.checking = false; renderSide();
+}
+async function findMoved() {
+  if (!S.checked) return;
+  S.finding = true; renderSide();
+  try { S.found = await invoke("find_moved", { issues: S.checked.issues.filter((i) => i.kind === "missing" || i.kind === "orphan") }); } catch (e) { showError(String(e)); }
+  S.finding = false; renderSide();
+}
+async function applyMoved() {
+  try {
+    const problems = await invoke("apply_moved", { found: (S.found || []).filter((f) => f.found) });
+    toast(problems.length ? "Updated, but: " + problems.join(" · ") : "Updated: links and own files follow the clips");
+    S.found = null; S.checked = null;
+    await refresh();
+  } catch (e) { showError(String(e)); }
 }
 
 function renderEmpty() {
@@ -825,6 +879,7 @@ document.addEventListener("click", async (e) => {
         VISIBLE.slice(lo, hi + 1).forEach((k) => { S.sel[k] = true; });
       } else if (multi) { if (S.sel[v]) delete S.sel[v]; else S.sel[v] = true; S.anchor = v; }
       else { S.sel = {}; S.sel[v] = true; S.anchor = v; }
+      S.checked = null; S.found = null;
       renderMain(); renderSide(); return;
     }
     case "selall": S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; break;
@@ -840,6 +895,9 @@ document.addEventListener("click", async (e) => {
     case "quit": return call("answer_close", { quit: true }).catch(() => {});
     case "toastok": $("toast").hidden = true; return;
     case "sheet": return openSettings();
+    case "runcheck": return runCheck();
+    case "findmoved": return findMoved();
+    case "applymoved": return applyMoved();
     case "scrim": if (e.target !== el) return; S.sheet = null; renderSheet(); return;
     case "closesheet": S.sheet = null; renderSheet(); return;
     case "stab": S.stab = v; renderSheet(); return;
