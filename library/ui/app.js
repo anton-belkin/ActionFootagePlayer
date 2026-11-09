@@ -31,7 +31,7 @@ const FOLDER_BASE = { footage: "_Clips", moments: "_Moments", stills: "_Stills",
 const S = {
   root: null, name: "", info: null, macos: true,
   view: "footage", path: [], sel: {}, anchor: null, layout: "list", q: "", flat: false, scope: "here",
-  filters: {}, filtersOpen: true, fsec: { src: true, tf: true }, fexp: {}, suggOpen: false, sugg: -1,
+  filters: {}, filtersOpen: false, fsec: { src: true, tf: true }, fexp: {}, suggOpen: false, sugg: -1,
   tab: "commands", open: { moments: true, export: true }, menu: false, recent: [],
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
@@ -39,6 +39,7 @@ const S = {
   take: null, takePlace: "", taking: false, tagDraft: "",
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
+  hist: [], histAt: -1,
 };
 let RAW_FOOTAGE = null; // the footage view as scanned: one item per clip, at its path in the tree
 const DATA = {};          // view -> { dirs: [path], items: [item] }
@@ -393,6 +394,7 @@ function img(path) {
 function renderMain() {
   const main = $("main");
   if (!S.root) { main.innerHTML = ""; return; }
+  noteHistory();
   const c = ctx(), srch = searching(), filt = filtering();
   const dir = dirKey();
   let hiddenFolders = 0;
@@ -410,7 +412,7 @@ function renderMain() {
       (S.path.length ? '<div class="seg"><button type="button" class="' + (S.scope === "here" ? "on" : "") + '" data-a="scope" data-v="here">' + esc(c.folderName) + '</button><button type="button" class="' + (S.scope === "all" ? "on" : "") + '" data-a="scope" data-v="all">All of ' + c.viewName + '</button></div>' : '<b>All of ' + c.viewName + '</b>') +
       '<span class="sub" style="display:inline">' + list.length + ' found' + (S.q.trim() ? "" : " by the filters") + '</span><button type="button" class="btn sm" data-a="endsearch" style="margin-left:auto">Back to the folder</button></div>';
   } else {
-    h += '<div class="crumbs"><button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
+    h += '<div class="crumbs">' + navButtons() + '<button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
     h += '<span class="where">' + esc(S.view === "footage" ? "As arranged in _Clips" : S.view === "sources" ? (S.path.length ? sourceOf(S.path[0]) : "Where the footage is, first wins") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
     if (S.view === "sources" && !S.path.length) h += '<div class="selbar"><button type="button" class="btn sm" data-a="addsource">Add a source…</button><button type="button" class="btn sm" data-a="sheet" data-v="settings">Sources settings…</button></div>';
@@ -897,6 +899,58 @@ async function saveLocations() {
   } catch (e) { showError(String(e)); }
 }
 
+// ---------- back, forward, up, new folder ----------
+
+const NAV = {
+  back: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+  fwd: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 19V6M6 11l6-6 6 6"/></svg>',
+  newdir: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/><path d="M12 12v5M9.5 14.5h5"/></svg>',
+};
+// Where one has been: each place (a tab and a folder) once as it's left, as a file manager's Back and Forward have it
+function place() { return S.view + "\u0000" + S.path.join("/"); }
+function noteHistory() {
+  const here = place();
+  if (S.hist[S.histAt] === here) return;
+  S.hist = S.hist.slice(0, S.histAt + 1);
+  S.hist.push(here);
+  S.histAt = S.hist.length - 1;
+}
+function goHistory(step) {
+  const i = S.histAt + step;
+  if (i < 0 || i >= S.hist.length) return;
+  S.histAt = i;
+  const [view, path] = S.hist[i].split("\u0000");
+  const left = S.path.slice();
+  const fromView = S.view;
+  S.view = view; S.path = path ? path.split("/") : [];
+  S.sel = {}; S.anchor = null; S.q = ""; S.flat = false; S.renaming = null;
+  if (view !== fromView) S.filters = {};
+  // Back to a folder above: the one left, selected
+  if (view === fromView && left.length > S.path.length && S.path.every((p, k) => p === left[k])) { const k = "f:" + left.slice(0, S.path.length + 1).join("/"); S.sel[k] = true; S.anchor = k; }
+  if (!DATA[view]) loadView(view).then(renderAll, () => {});
+  renderAll();
+}
+function navButtons() {
+  const canDir = !!FOLDER_BASE[S.view];
+  return '<span class="navs">' +
+    '<button type="button" class="icon" data-a="back" aria-label="Back"' + (S.histAt > 0 ? "" : " disabled") + '>' + NAV.back + '</button>' +
+    '<button type="button" class="icon" data-a="fwd" aria-label="Forward"' + (S.histAt < S.hist.length - 1 ? "" : " disabled") + '>' + NAV.fwd + '</button>' +
+    '<button type="button" class="icon" data-a="up" aria-label="Enclosing folder"' + (S.path.length ? "" : " disabled") + '>' + NAV.up + '</button>' +
+    (canDir ? '<button type="button" class="icon" data-a="newdir" aria-label="New folder" title="New folder">' + NAV.newdir + '</button>' : "") + '</span>';
+}
+async function newFolder() {
+  if (!FOLDER_BASE[S.view]) return;
+  const parent = S.path.join("/");
+  try {
+    const made = await invoke("new_folder", { view: S.view, parent: S.view === "footage" && parent === NOPREV ? "" : parent });
+    await refresh();
+    const k = "f:" + made;
+    S.sel = {}; S.sel[k] = true; S.anchor = k; S.renaming = k;
+    renderAll();
+  } catch (e) { showError(String(e)); }
+}
+
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
 
 // A source's line: where it is, its place in the tree, copies only, not here
@@ -1036,6 +1090,9 @@ function listKeys(e) {
   if (e.key === "ArrowDown" && cmd && mac) { openSelection(); return true; }
   if (e.key === "ArrowUp" && ((cmd && mac) || (e.altKey && !mac))) { goUp(); return true; }
   if (e.key === "Backspace" && !mac) { goUp(); return true; }
+  if ((mac && cmd && e.key === "[") || (!mac && e.altKey && e.key === "ArrowLeft")) { goHistory(-1); return true; }
+  if ((mac && cmd && e.key === "]") || (!mac && e.altKey && e.key === "ArrowRight")) { goHistory(1); return true; }
+  if (cmd && e.shiftKey && (e.key === "n" || e.key === "N")) { newFolder(); return true; }
   if (e.key === "ArrowDown") { moveTo(cur < 0 ? 0 : cur + cols, e.shiftKey); return true; }
   if (e.key === "ArrowUp") { moveTo(cur < 0 ? 0 : cur - cols, e.shiftKey); return true; }
   if (grid && e.key === "ArrowRight") { moveTo(cur < 0 ? 0 : cur + 1, e.shiftKey); return true; }
@@ -1226,6 +1283,10 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "back": return goHistory(-1);
+    case "fwd": return goHistory(1);
+    case "up": return goUp();
+    case "newdir": return newFolder();
     case "opengf": { const it = ctx().selItems[0]; if (it) call("open_in_gyroflow", { paths: it.kind === "clip" ? (it.copies || []).map((x) => x.path) : [it.path] }).catch(() => {}); return; }
     case "removesource": return removeSources(ctx().selFolders);
     case "delrenders": {

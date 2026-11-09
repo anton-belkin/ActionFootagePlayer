@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Action Footage Library's icon: the player's (macos/icon/AppIcon.svg) scene, grey log on one side and vivid color on
+       the other with its play button on the seam, as a grid of four clips: the Library's folders show their clips so -->
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-opacity=".3"/>
+    </filter>
+    <filter id="soft"><feDropShadow dx="0" dy="6" stdDeviation="10" flood-opacity=".35"/></filter>
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <clipPath id="log"><path d="M0 0h760L264 1024H0z"/></clipPath>
+    <clipPath id="vivid"><path d="M760 0h264v1024H264z"/></clipPath>
+    <clipPath id="tile"><rect width="400" height="400" rx="44"/></clipPath>
+    <linearGradient id="skyV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5e62"/><stop offset=".55" stop-color="#ff9a3c"/><stop offset="1" stop-color="#ffd66b"/>
+    </linearGradient>
+    <linearGradient id="seaV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#00a6c0"/><stop offset="1" stop-color="#003a6b"/>
+    </linearGradient>
+    <linearGradient id="skyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8f8d8c"/><stop offset="1" stop-color="#a8a6a2"/>
+    </linearGradient>
+    <linearGradient id="seaL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7d8282"/><stop offset="1" stop-color="#5f6466"/>
+    </linearGradient>
+    <!-- One clip's frame, 400 square: the sun on the horizon over the waves -->
+    <g id="sceneV">
+      <rect width="400" height="250" fill="url(#skyV)"/>
+      <circle cx="200" cy="250" r="72" fill="#fff3c4"/>
+      <rect y="250" width="400" height="150" fill="url(#seaV)"/>
+      <path d="M-10 300q40-15 80 0t80 0 80 0 80 0 80 0 80 0M-10 350q40-15 80 0t80 0 80 0 80 0 80 0 80 0" fill="none" stroke="#5fe3f0" stroke-width="11" stroke-linecap="round"/>
+    </g>
+    <g id="sceneL">
+      <rect width="400" height="250" fill="url(#skyL)"/>
+      <circle cx="200" cy="250" r="72" fill="#b9b6b0"/>
+      <rect y="250" width="400" height="150" fill="url(#seaL)"/>
+      <path d="M-10 300q40-15 80 0t80 0 80 0 80 0 80 0 80 0M-10 350q40-15 80 0t80 0 80 0 80 0 80 0 80 0" fill="none" stroke="#9a9e9e" stroke-width="11" stroke-linecap="round"/>
+    </g>
+  </defs>
+  <g filter="url(#shadow)"><rect x="100" y="100" width="824" height="824" rx="185" fill="#2a2d31"/></g>
+  <g clip-path="url(#body)">
+    <g clip-path="url(#log)">
+      <g transform="translate(100 100)" clip-path="url(#tile)"><use xlink:href="#sceneL"/></g>
+      <g transform="translate(524 100)" clip-path="url(#tile)"><use xlink:href="#sceneL"/></g>
+      <g transform="translate(100 524)" clip-path="url(#tile)"><use xlink:href="#sceneL"/></g>
+      <g transform="translate(524 524)" clip-path="url(#tile)"><use xlink:href="#sceneL"/></g>
+    </g>
+    <g clip-path="url(#vivid)">
+      <g transform="translate(100 100)" clip-path="url(#tile)"><use xlink:href="#sceneV"/></g>
+      <g transform="translate(524 100)" clip-path="url(#tile)"><use xlink:href="#sceneV"/></g>
+      <g transform="translate(100 524)" clip-path="url(#tile)"><use xlink:href="#sceneV"/></g>
+      <g transform="translate(524 524)" clip-path="url(#tile)"><use xlink:href="#sceneV"/></g>
+    </g>
+    <path d="M760 0L264 1024" stroke="#fff" stroke-width="9"/>
+    <!-- The grid's gaps over the seam -->
+    <rect x="500" y="0" width="24" height="1024" fill="#2a2d31"/>
+    <rect x="0" y="500" width="1024" height="24" fill="#2a2d31"/>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="512" cy="512" r="128" fill="#fff"/>
+    <path d="M474 444v136c0 9 10 14 17 10l110-68c8-5 8-15 0-20l-110-68c-7-4-17 1-17 10z" fill="#1c1d22"/>
+  </g>
+</svg>
