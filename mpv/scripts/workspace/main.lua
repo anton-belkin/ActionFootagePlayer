@@ -54,7 +54,9 @@
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
---   sidecar_file    the clip's own file beside it, its marks and saved view (sidecar.lua)
+--   sidecar_file    the clip's own file, its marks and saved view (sidecar.lua): beside the clip, in whichever of the
+--                   project's locations has it (a working copy's is the archive's clip's)
+--   own_conflict    when the clip has two or more own files (in two locations): their paths; nothing is saved for it
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
@@ -140,9 +142,85 @@ local fs = {
     home = os.getenv(windows and "USERPROFILE" or "HOME"),
     windows = windows,
 }
+-- For the project's locations (workspace.lua): a JSON file read, a folder's files, the shares mounted here
+fs.read_json = function(p)
+    turn()
+    local f = io.open(p, "r")
+    if not f then return nil end
+    local t = f:read("*a") or ""
+    f:close()
+    local v = utils.parse_json(t)
+    return type(v) == "table" and v or nil
+end
+fs.files = function(p) turn(); return utils.readdir(p, "files") end
+fs.mounts = function()
+    local out = {}
+    if windows then return out end
+    local text
+    if macos then
+        local r = mp.command_native({ name = "subprocess", args = { "/sbin/mount" }, playback_only = false, capture_stdout = true, capture_stderr = true })
+        text = r and r.stdout or ""
+        for src, dir in text:gmatch("(//[^\n]-) on (/[^\n]-) %(") do out[#out + 1] = { source = src, dir = dir } end
+    else
+        local f = io.open("/proc/mounts", "r")
+        text = f and f:read("*a") or ""
+        if f then f:close() end
+        for src, dir in text:gmatch("(//%S+) (%S+) cifs") do
+            out[#out + 1] = { source = src:gsub("\\040", " "), dir = dir:gsub("\\040", " ") }
+        end
+    end
+    return out
+end
 local ws = workspace.new(fs)
+-- A project's locations, read again when its file changes
+local locs_cache = {}
+local function locations_of(root)
+    if not root then return nil end
+    local info = utils.file_info(ws.join(root, workspace.PROJECT_FILE))
+    local stamp = info and (tostring(info.mtime) .. "/" .. tostring(info.size)) or "-"
+    local c = locs_cache[root]
+    if c and c.stamp == stamp then return c.list end
+    local doc = fs.read_json(ws.join(root, workspace.PROJECT_FILE)) or {}
+    local list = ws.locations(root, doc)
+    -- This computer's own copies of the project's clips (the Library's On this computer), looked at first
+    local id = type(doc.id) == "string" and doc.id:match("^[%w%-]+$")
+    if id then
+        local base = windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
+                     or os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") or "") .. "/.config"
+        local mine = fs.read_json(ws.join(ws.join(ws.join(base, "ActionFootage"), "projects"), id .. ".json"))
+        if mine and type(mine.locations) == "table" then
+            for i = #mine.locations, 1, -1 do
+                local l = mine.locations[i]
+                if type(l) == "table" and type(l.path) == "string" then
+                    table.insert(list, 1, { name = l.name, at = (type(l.at) == "string" and l.at or ""):gsub("^/+", ""):gsub("/+$", ""),
+                                            dir = ws.place(l.path, root), copies = true, path = l.path, here = true })
+                end
+            end
+        end
+    end
+    locs_cache[root] = { stamp = stamp, list = list }
+    return list
+end
+fs.locations_of = locations_of
+-- A file's path in its project's tree ("Action 6/A.MP4"): the location holding it, its place plus the path under it
+local function tree_of(file, root)
+    if not file or not root then return nil end
+    return ws.tree_path(file, locations_of(root))
+end
 local moments = moments_lib.new(ws, fs)
-local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows })
+-- The clip's own file is wherever it is over the project's locations (workspace.lua's own_file): beside the archive's
+-- clip while its working copy plays; two of them, none written
+local state
+local function own_path(clip)
+    if state and state.clip == clip and state.project then
+        if state.own_conflict then return nil, state.own_conflict end
+        if state.sidecar_file then return state.sidecar_file end
+    end
+    local root = ws.project_root(clip)
+    if not root then return nil end
+    return ws.own_file(clip, locations_of(root))
+end
+local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows, own_path = own_path })
 -- The project's own file, Project.afproject (projectfile.lua)
 local pf = projectfile.new({
     parse_json = fs.parse_json, format_json = utils.format_json, join = function(a, b) return ws.join(a, b) end,
@@ -156,7 +234,7 @@ local pf = projectfile.new({
     end,
 })
 
-local state = {}
+state = {}
 -- The project's _Moments/ as last read: every moment in it, and its folders' times
 local found = { list = {}, dirs = {} }
 local scanned_project = nil
@@ -257,14 +335,28 @@ local function describe(path)
     local clip = ws.absolute(path, mp.get_property("working-directory"))
     local root = ws.project_root(clip)
     migrate(root)
+    local locs = locations_of(root)
+    local tree = root and ws.tree_path(clip, locs) or nil
+    -- Its own file and its Gyroflow project are the clip's wherever it is: looked for beside it in every location
+    local own, conflict = ws.own_file(clip, root and locs or nil)
+    local gyroflow_projects = {}
+    if tree then
+        for _, c in ipairs(ws.files_at(tree, locs)) do
+            for _, g in ipairs(ws.gyroflow_projects(c.file)) do gyroflow_projects[#gyroflow_projects + 1] = g end
+        end
+    end
+    if #gyroflow_projects == 0 then gyroflow_projects = ws.gyroflow_projects(clip) end
+    -- A new one goes beside its own file's clip (the archive's, not a working copy)
+    local gyroflow_new = own and own:gsub("%.afp%.json$", ".gyroflow") or ws.gyroflow_new(clip)
     return {
         path = path,
         clip = clip,
         project = root,
-        relative = root and ws.relative(clip, root) or nil,
-        gyroflow_projects = ws.gyroflow_projects(clip),
-        gyroflow_new = ws.gyroflow_new(clip),
-        sidecar_file = sidecar.path(clip),
+        relative = tree,
+        gyroflow_projects = gyroflow_projects,
+        gyroflow_new = gyroflow_new,
+        sidecar_file = own,
+        own_conflict = conflict,
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
         project_choices = not root and ws.project_choices(clip) or nil,
         project_new = not root and ws.new_project_root(clip) or nil,
@@ -473,6 +565,13 @@ mp.add_hook("on_load", 10, function()
         elseif info and (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
             open_moment(path)
         end
+    end
+    -- Two own files of this clip (in two of the project's locations): it plays with the first's, nothing is saved
+    if state.own_conflict then
+        local names = {}
+        for i, f in ipairs(state.own_conflict) do names[i] = f end
+        mp.msg.warn("two own files of this clip, nothing saved until one goes: " .. table.concat(names, ", "))
+        mp.osd_message("This clip has " .. #names .. " files of its own:\n" .. table.concat(names, "\n") .. "\nKeep one: until then nothing is saved for it", 8)
     end
     -- The source's own file beside it: its input, always; its bundle, unless a link with settings of its own plays.
     -- An old file's input moves out of its view, and a link's input it didn't have yet goes into it
@@ -691,7 +790,7 @@ local function save(name, update, typed, quiet, opts)
     end
     local info = utils.file_info(state.clip)
     local l = {
-        v = 1, kind = "moment", clip = ws.relative(state.clip, root), size = info and info.size,
+        v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
@@ -1026,7 +1125,7 @@ mp.register_script_message("export-name", function(json)
         local output, final = moments.unique_file(ws.join(root, moments_lib.EXPORTS), safe, label .. ".mov")
         local info = utils.file_info(state.clip)
         local l = {
-            v = 1, kind = "export", clip = ws.relative(state.clip, root), size = info and info.size,
+            v = 1, kind = "export", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
             created = state.created, ["in"] = a and moments_lib.ms(a), out = b and moments_lib.ms(b), name = final,
             look = req.look, stabilized = req.stabilized == true, roots = { root },
         }
@@ -1299,7 +1398,7 @@ mp.add_key_binding("X", "not-interesting", function()
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
     local root = state.project
     local info = utils.file_info(state.clip)
-    local c = { file = state.clip, relative = ws.relative(state.clip, root), size = info and info.size }
+    local c = { file = state.clip, relative = state.relative or tree_of(state.clip, root), size = info and info.size }
     start_clips(root, { c }, "Making this clip's preview again")
 end)
 
@@ -1385,7 +1484,7 @@ mp.register_script_message("init-project", function(dir)
         return mp.osd_message("Can't write in " .. dir, 4)
     end
     state.project = dir
-    state.relative = ws.relative(state.clip, dir)
+    state.relative = tree_of(state.clip, dir)
     state.moments_folder = ws.join(dir, moments_lib.FOLDER)
     state.project_choices, state.project_new = nil, nil
     mp.osd_message("Project initialized: " .. ws.name(dir), 3)
@@ -1523,7 +1622,7 @@ local function cut_finish()
                 local info = utils.file_info(p.file)
                 p.size = info and info.size
                 p.created = cut_lib.later(c.created, p.from)
-                p.relative = c.project and ws.relative(p.file, c.project) or nil
+                p.relative = c.project and tree_of(p.file, c.project) or nil
                 p.hash = fingerprint(p.file)
             end
             -- Marks: each part's own, at its time

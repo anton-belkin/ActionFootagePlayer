@@ -340,6 +340,14 @@ function M.new(ws, fs)
     -- Its size must match where the link has it
     function self.original(link, project)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
+        -- In the project's locations first: the first that has it (a working copy before the archive's)
+        if project and ws.files_at then
+            local locs = fs.locations_of and fs.locations_of(project) or ws.locations(project)
+            for _, c in ipairs(ws.files_at(link.clip, locs)) do
+                local info = fs.info(c.file)
+                if info and (link.size == nil or info.size == link.size) then return c.file end
+            end
+        end
         local rel = windows and link.clip:gsub("/", "\\") or link.clip
         local places = {}
         if project then places[#places + 1] = project end
@@ -371,6 +379,8 @@ function M.new(ws, fs)
     -- size }
     function self.footage(project)
         local out = {}
+        local seen = {}
+        local top = project
         local function walk(dir, rel, depth)
             local files, subdirs = entries(dir)
             for _, e in ipairs(files) do
@@ -378,17 +388,25 @@ function M.new(ws, fs)
                 local lower = name:lower()
                 local ext = lower:match("%.([^.]+)$")
                 if ext and M.FOOTAGE[ext] and lower:sub(-#M.EXT) ~= M.EXT then
-                    out[#out + 1] = { file = ws.join(dir, name), relative = rel and (rel .. "/" .. name) or name, size = e.info.size }
+                    local r = rel and (rel .. "/" .. name) or name
+                    if not seen[r] then
+                        seen[r] = true
+                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size }
+                    end
                 end
             end
             if depth >= 8 then return end
             for _, name in ipairs(subdirs) do
-                if not (depth == 0 and OWN_FOLDERS[name:lower()]) then
+                if not (depth == 0 and dir == top and OWN_FOLDERS[name:lower()]) then
                     walk(ws.join(dir, name), rel and (rel .. "/" .. name) or name, depth + 1)
                 end
             end
         end
-        walk(project, nil, 0)
+        -- Every location of the project, in its order (a path the first one has wins), each at its place in the tree
+        local locs = ws.locations and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or { { dir = project, at = "" } }
+        for _, l in ipairs(locs) do
+            if l.dir then walk(l.dir, l.at ~= "" and l.at or nil, 0) end
+        end
         table.sort(out, function(a, b) return a.relative < b.relative end)
         return out
     end

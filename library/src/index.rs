@@ -213,13 +213,6 @@ fn read_json(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-/// A clip's own file: <clip>.afp.json, or the older <clip>.marks.json
-fn own_file(clip: &Path) -> Option<Value> {
-    let stem = clip.file_stem()?.to_string_lossy().into_owned();
-    let dir = clip.parent()?;
-    read_json(&dir.join(format!("{stem}.afp.json"))).or_else(|| read_json(&dir.join(format!("{stem}.marks.json"))))
-}
-
 fn has_gyroflow(file: &Path) -> bool {
     let Some(dir) = file.parent() else { return false };
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -229,15 +222,80 @@ fn has_gyroflow(file: &Path) -> bool {
 
 // ---------- the views ----------
 
+/// The footage view: every location of the project, each at its place in the tree, a path the first one has winning
+/// (a working copy before the archive's). Each clip with where it plays from (`loc`), every location that has it
+/// (`copies`), its own file wherever it is (two: `own_conflict`)
+fn footage(root: &Path, flat_previews: bool) -> Value {
+    let mounts = crate::locations::mounts();
+    let locs = crate::locations::locations(root, &mounts);
+    let linked = previews(root);
+    let mut dirs: Vec<String> = Vec::new();
+    let mut seen_dirs: HashSet<String> = HashSet::new();
+    let mut add_dir = |d: &str, dirs: &mut Vec<String>| {
+        let mut parts = Vec::new();
+        for p in d.split('/').filter(|p| !p.is_empty()) {
+            parts.push(p);
+            let x = parts.join("/");
+            if seen_dirs.insert(x.clone()) { dirs.push(x); }
+        }
+    };
+    let mut items: Vec<Value> = Vec::new();
+    let mut by_tree: HashMap<String, usize> = HashMap::new();
+    for l in &locs {
+        let Some(dir) = &l.dir else { continue };
+        if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
+        let top = dir == root;
+        let skip = |rel: &str, lower: &str| top && !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+        for (rel, is_dir, size, mtime) in walk(dir, &skip) {
+            let tree = if l.at.is_empty() { rel.clone() } else { format!("{}/{rel}", l.at) };
+            if is_dir { add_dir(&tree, &mut dirs); continue; }
+            let lower = rel.to_lowercase();
+            if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
+            let path = dir.join(&rel);
+            let own_here = { let f = path.with_extension("afp.json"); if f.is_file() { Some(f) } else { let o = path.with_extension("marks.json"); o.is_file().then_some(o) } };
+            if let Some(&i) = by_tree.get(&tree) {
+                let it = &mut items[i];
+                it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "path": path.display().to_string() }));
+                if has_gyroflow(&path) { it["gyroflow"] = json!(true); }
+                if let Some(o) = own_here { it["own_files"].as_array_mut().unwrap().push(json!(o.display().to_string())); }
+                continue;
+            }
+            let mut it = json!({ "id": tree, "dir": parent_of(&tree), "name": name_of(&tree), "path": path.display().to_string(), "size": size,
+                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "path": path.display().to_string() }],
+                                 "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
+            it["gyroflow"] = json!(has_gyroflow(&path));
+            let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
+                .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
+            it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
+            by_tree.insert(tree, items.len());
+            items.push(it);
+        }
+    }
+    // Each clip's own file: the one there is (two or more: none read, the clip shows the problem)
+    for it in items.iter_mut() {
+        let files: Vec<String> = it["own_files"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        if files.len() > 1 { it["own_conflict"] = json!(files); }
+        if let Some(f) = files.first() {
+            if let Some(own) = read_json(Path::new(f)) {
+                it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
+                                    "source": own.get("source").cloned().unwrap_or(Value::Null) });
+            }
+        }
+    }
+    let locs_json: Vec<Value> = locs.iter().map(|l| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
+                                                             "copies": l.copies, "local": l.local })).collect();
+    json!({ "dirs": dirs, "items": items, "locations": locs_json })
+}
+
 pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
+    if view == "footage" { return footage(root, flat_previews); }
     let Some(sub) = view_dir(view) else { return json!({ "dirs": [], "items": [] }) };
     let base = if sub.is_empty() { root.to_path_buf() } else { root.join(sub) };
-    let skip = |rel: &str, lower: &str| view == "footage" && !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+    let skip = |_: &str, _: &str| false;
     let entries = walk(&base, &skip);
     let mut dirs = Vec::new();
     let mut items = Vec::new();
     let files: HashSet<String> = entries.iter().filter(|e| !e.1).map(|e| e.0.to_lowercase()).collect();
-    let linked = if view == "footage" { previews(root) } else { HashMap::new() };
     for (rel, is_dir, size, mtime) in &entries {
         if *is_dir { dirs.push(json!(rel)); continue; }
         let name = name_of(rel);
@@ -245,18 +303,6 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         let path = base.join(rel);
         let mut it = json!({ "id": rel, "dir": parent_of(rel), "name": name, "path": path.display().to_string(), "size": size, "mtime": mtime });
         match view {
-            "footage" => {
-                if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
-                it["kind"] = json!("clip");
-                if let Some(own) = own_file(&path) {
-                    it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
-                                        "source": own.get("source").cloned().unwrap_or(Value::Null) });
-                }
-                it["gyroflow"] = json!(has_gyroflow(&path));
-                let preview = linked.get(rel.as_str()).cloned().or_else(|| [clip_preview_relative(rel, flat_previews), clip_preview_relative(rel, !flat_previews)]
-                    .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
-                it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
-            }
             "moments" => {
                 if !lower.ends_with(LINK_EXT) { continue; }
                 it["kind"] = json!("moment");

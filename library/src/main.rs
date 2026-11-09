@@ -14,6 +14,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod index;
+mod locations;
 
 use serde::Serialize;
 use serde_json::{ json, Value };
@@ -158,7 +159,9 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
     let mut doc = read_doc(root);
     let map = doc.as_object_mut().ok_or("not an object")?;
     map.insert("format".into(), json!(FORMAT));
-    map.insert("version".into(), json!(1));
+    // 2 once it has locations (docs/library-management.md); the player reads both
+    let v = map.get("version").and_then(Value::as_u64).unwrap_or(1).max(1);
+    map.insert("version".into(), json!(v));
     if !map.get("settings").is_some_and(Value::is_object) { map.insert("settings".into(), json!({})); }
     change(map);
     let tmp = file.with_extension("afproject.tmp");
@@ -471,6 +474,198 @@ async fn thumb(app: tauri::AppHandle, path: String) -> Result<Option<String>, St
     tauri::async_runtime::spawn_blocking(move || index::thumb(Path::new(&path), &cache)).await.map_err(|e| e.to_string())
 }
 
+// ---------- the project's settings: its locations, what this computer keeps for it ----------
+
+fn new_id() -> String {
+    // Random enough for a project's id: the time and this process, hashed
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in format!("{t}-{}-{:?}", std::process::id(), std::thread::current().id()).bytes() { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
+    let t2 = (t as u64).rotate_left(17) ^ h.rotate_right(9);
+    format!("{:08x}-{:04x}-4{:03x}-a{:03x}-{:012x}", h >> 32, (h >> 16) & 0xffff, h & 0xfff, (t2 >> 52) & 0xfff, t2 & 0xffff_ffff_ffff)
+}
+
+// The project's id, made (and written) when it has none
+fn project_id(root: &Path) -> Result<String, String> {
+    if let Some(id) = read_doc(root).get("id").and_then(Value::as_str).filter(|i| !i.is_empty()) { return Ok(id.to_string()); }
+    let id = new_id();
+    update_doc(root, |d| { d.insert("id".into(), json!(id)); })?;
+    Ok(id)
+}
+
+fn dir_size(dir: &Path) -> (u64, u64) {
+    let (mut bytes, mut files) = (0, 0);
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let Ok(m) = e.metadata() else { continue };
+            if m.is_dir() { todo.push(e.path()); } else { bytes += m.len(); files += 1; }
+        }
+    }
+    (bytes, files)
+}
+
+// This computer's caches: the player's (motion data, probes, GPU tables, the Library's probes) and the Library's
+// pictures. They're kept by each file's path, for every project at once
+fn caches(app: &tauri::AppHandle) -> Vec<(String, String, PathBuf)> {
+    let mut out = Vec::new();
+    let player = if cfg!(target_os = "macos") { std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Caches/ActionFootagePlayer")) }
+        else if cfg!(windows) { std::env::var_os("LOCALAPPDATA").map(|h| PathBuf::from(h).join("ActionFootagePlayer/cache")) }
+        else { std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/ActionFootagePlayer")) };
+    if let Some(p) = player {
+        out.push(("motion".into(), "Motion data: gyro samples read from clips, so they open fast here".into(), p.join("motion")));
+        out.push(("probe".into(), "What each clip is: read once per clip".into(), p.join("probe")));
+        out.push(("library".into(), "What each clip is, for the Library's filters".into(), p.join("library")));
+        out.push(("gpu".into(), "GPU tables: each clip's warp for its settings".into(), p.join("gpu")));
+    }
+    if let Ok(c) = app.path().app_cache_dir() { out.push(("thumbs".into(), "Pictures shown in the Library".into(), c.join("thumbs"))); }
+    out
+}
+
+#[tauri::command]
+async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mounts = locations::mounts();
+        let doc = read_doc(&root);
+        let name = locations::pointer_name(&root);
+        let all = locations::locations(&root, &mounts);
+        let own: Vec<Value> = all.iter().filter(|l| !l.local && !(l.path == "." && doc.get("locations").is_none())).map(|l| json!({
+            "name": l.name, "at": l.at, "path": l.path, "copies": l.copies, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
+            "reachable": l.dir.as_ref().is_some_and(|d| d.is_dir()),
+            "pointer": l.dir.as_ref().is_some_and(|d| d == &root || d.join(&name).is_file()),
+        })).collect();
+        let local: Vec<Value> = all.iter().filter(|l| l.local).map(|l| {
+            let (bytes, files) = l.dir.as_ref().map(|d| dir_size(d)).unwrap_or((0, 0));
+            json!({ "name": l.name, "at": l.at, "path": l.path, "reachable": l.dir.as_ref().is_some_and(|d| d.is_dir()), "bytes": bytes, "files": files })
+        }).collect();
+        let caches: Vec<Value> = caches(&app).into_iter().map(|(k, what, dir)| { let (b, f) = dir_size(&dir); json!({ "key": k, "what": what, "path": dir.display().to_string(), "bytes": b, "files": f }) }).collect();
+        Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
+                   "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
+                   "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// The project's locations written: into Project.afproject (none: the project is next to its footage again), and its
+// .afplocation file into each of them (taken out of the ones removed)
+#[tauri::command]
+async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Option<Value>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mounts = locations::mounts();
+        let before: Vec<locations::Location> = locations::locations(&root, &mounts).into_iter().filter(|l| !l.local).collect();
+        let clean: Vec<Value> = list.iter().filter(|l| l.get("path").and_then(Value::as_str).is_some_and(|p| !p.trim().is_empty())).map(|l| json!({
+            "name": l.get("name").and_then(Value::as_str).unwrap_or("").trim(),
+            "at": l.get("at").and_then(Value::as_str).unwrap_or("").trim().trim_matches('/'),
+            "path": l.get("path").and_then(Value::as_str).unwrap_or("").trim(),
+            "copies": l.get("copies").and_then(Value::as_bool).unwrap_or(false),
+        })).collect();
+        project_id(&root)?;
+        update_doc(&root, |d| {
+            if clean.is_empty() { d.remove("locations"); } else { d.insert("locations".into(), json!(clean)); d.insert("version".into(), json!(2)); }
+            if let Some(h) = &hosts { if h.as_object().is_some_and(|o| !o.is_empty()) { d.insert("hosts".into(), h.clone()); } else { d.remove("hosts"); } }
+        })?;
+        let after: Vec<locations::Location> = locations::locations(&root, &mounts).into_iter().filter(|l| !l.local).collect();
+        Ok(locations::write_pointers(&root, &after, &before, &mounts))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// A folder chosen for a location: where it is here and how the project keeps it (network path, or relative)
+#[tauri::command]
+fn choose_location(shared: State<Shared>) -> Result<Option<Value>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let Some(dir) = rfd::FileDialog::new().set_title("A folder of the project's footage").pick_folder() else { return Ok(None) };
+    let mounts = locations::mounts();
+    Ok(Some(json!({ "dir": dir.display().to_string(), "path": locations::path_for(&dir, &root, &mounts),
+                    "name": dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() })))
+}
+
+// This computer's own locations for the project (copies on its own disk), kept on it, by the project's id
+#[tauri::command]
+fn choose_local(shared: State<Shared>) -> Result<Option<String>, String> {
+    shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    Ok(rfd::FileDialog::new().set_title("A folder on this computer with copies of the project's clips").pick_folder().map(|d| d.display().to_string()))
+}
+
+#[tauri::command]
+fn save_local(shared: State<Shared>, list: Vec<Value>) -> Result<(), String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let id = project_id(&root)?;
+    let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
+    let clean: Vec<Value> = list.iter().filter_map(|l| {
+        let p = l.get("path").and_then(Value::as_str)?.trim();
+        (!p.is_empty()).then(|| json!({ "name": l.get("name").and_then(Value::as_str).unwrap_or("On this computer"), "at": l.get("at").and_then(Value::as_str).unwrap_or("").trim_matches('/'), "path": p }))
+    }).collect();
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
+    if clean.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
+    std::fs::write(&file, serde_json::to_vec_pretty(&json!({ "project": root.display().to_string(), "locations": clean })).unwrap()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let (_, _, dir) = caches(&app).into_iter().find(|(k, _, _)| *k == key).ok_or("no such cache")?;
+    if dir.is_dir() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+// The project's own files moved to another folder (the SSD, say): Project.afproject and its _ folders. The clips and
+// their own files stay where they are: the old folder becomes a location at the top, unless it is one already; the
+// locations given relative to the project are written again for its new place
+// The project's own files moved from `root` to `dest`: Project.afproject and its _ folders. The clips and their own
+// files stay: the old folder becomes a location at the top unless the project had locations, whose paths relative to
+// the project are written again for its new place. Problems writing the pointers are returned
+fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
+    if dest == root { return Ok(vec![]); }
+    if dest.join(PROJECT_FILE).exists() { return Err(format!("{} has a project already", dest.display())); }
+    if dest.starts_with(root) { return Err("Choose a folder outside the project's".into()); }
+    let mounts = locations::mounts();
+    let all: Vec<locations::Location> = locations::locations(root, &mounts).into_iter().filter(|l| !l.local).collect();
+    let had = read_doc(root).get("locations").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    let list: Vec<Value> = if had {
+        all.iter().map(|l| {
+            let path = match (&l.dir, locations::network(&l.path)) { (Some(d), None) => locations::path_for(d, dest, &mounts), _ => l.path.clone() };
+            json!({ "name": l.name, "at": l.at, "path": path, "copies": l.copies })
+        }).collect()
+    } else {
+        vec![json!({ "name": root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or("Footage".into()), "at": "",
+                     "path": locations::path_for(root, dest, &mounts), "copies": false })]
+    };
+    project_id(root)?;
+    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    let mut moved = Vec::new();
+    for name in [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache"] {
+        let from = root.join(name);
+        if !from.exists() { continue; }
+        let to = dest.join(name);
+        if std::fs::rename(&from, &to).is_err() {
+            // Another disk: copied, then the old one removed
+            let ok = Command::new(if cfg!(windows) { "xcopy" } else { "/bin/cp" }).args(if cfg!(windows) { vec!["/E", "/I", "/H", "/K"] } else { vec!["-Rp"] })
+                .arg(&from).arg(&to).status().map(|s| s.success()).unwrap_or(false);
+            if !ok { return Err(format!("couldn't move {} (moved so far: {})", from.display(), moved.join(", "))); }
+            let _ = if from.is_dir() { std::fs::remove_dir_all(&from) } else { std::fs::remove_file(&from) };
+        }
+        moved.push(name.to_string());
+    }
+    update_doc(dest, |d| { d.insert("locations".into(), json!(list)); d.insert("version".into(), json!(2)); })?;
+    let after: Vec<locations::Location> = locations::locations(dest, &mounts).into_iter().filter(|l| !l.local).collect();
+    // The pointers of before (the old folder's name) out, the new ones in
+    for l in &all {
+        if let Some(d) = &l.dir { if locations::pointer_name(root) != locations::pointer_name(dest) { let _ = std::fs::remove_file(d.join(locations::pointer_name(root))); } }
+    }
+    Ok(locations::write_pointers(dest, &after, &[], &mounts))
+}
+
+#[tauri::command]
+fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: move the project when they're done".into()); }
+    let Some(dest) = rfd::FileDialog::new().set_title("Move the project's own files to this folder").pick_folder() else { return Ok(None) };
+    let problems = move_to(&root, &dest)?;
+    shared.lock().unwrap().project = Some(dest.clone());
+    remember(&app, &dest);
+    Ok(Some(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) }))
+}
+
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
 #[tauri::command]
 fn open_items(paths: Vec<String>) -> Result<(), String> {
@@ -661,7 +856,8 @@ fn main() {
         .manage(probes)
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
-                                                 thumb, open_items, reveal_path])
+                                                 thumb, open_items, reveal_path, project_settings, save_locations, choose_location,
+                                                 choose_local, save_local, clear_cache, move_project])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -732,6 +928,37 @@ mod tests {
         // Someone else's file of that name is left alone
         std::fs::write(root.join(PROJECT_FILE), br#"{"format":"other"}"#).unwrap();
         assert!(update_doc(&root, |_| {}).is_err());
+    }
+
+    #[test]
+    fn moving_the_project_to_the_ssd() {
+        let top = temp("move");
+        let trip = top.join("HDD/Trip");
+        std::fs::create_dir_all(trip.join("Day 1")).unwrap();
+        std::fs::create_dir_all(trip.join("_Moments")).unwrap();
+        std::fs::write(trip.join("Day 1/A.MP4"), b"x").unwrap();
+        std::fs::write(trip.join("Day 1/A.afp.json"), b"{}").unwrap();
+        std::fs::write(trip.join("_Moments/M.afplink.mp4"), b"x").unwrap();
+        std::fs::write(trip.join(PROJECT_FILE), br#"{"format":"actionfootage-project","version":1,"settings":{"clips_flat":true}}"#).unwrap();
+        let dest = top.join("SSD/Projects/Trip");
+        assert!(move_to(&trip, &dest).unwrap().is_empty());
+        // The project's own files moved, the clip and its own file stayed
+        assert!(dest.join(PROJECT_FILE).is_file() && dest.join("_Moments/M.afplink.mp4").is_file());
+        assert!(!trip.join(PROJECT_FILE).exists() && trip.join("Day 1/A.afp.json").is_file());
+        let doc = read_doc(&dest);
+        assert_eq!(doc["settings"]["clips_flat"], json!(true));
+        assert_eq!(doc["locations"][0]["path"], json!("../../../HDD/Trip"));
+        assert!(doc["id"].as_str().is_some_and(|i| i.len() == 36));
+        // The old folder points at the project
+        let ptr = locations::read_json(&trip.join("Trip.afplocation")).unwrap();
+        assert_eq!(locations::place(ptr["project"].as_str().unwrap(), &trip, None, &[]), Some(dest.clone()));
+        let v = index::scan(&dest, "footage", false);
+        assert_eq!(v["items"][0]["id"], json!("Day 1/A.MP4"));
+        // Moved again: its locations follow
+        let dest2 = top.join("SSD/Other/Trip");
+        move_to(&dest, &dest2).unwrap();
+        assert_eq!(read_doc(&dest2)["locations"][0]["path"], json!("../../../HDD/Trip"));
+        assert!(move_to(&dest2, &dest2.join("x")).is_err());
     }
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a
