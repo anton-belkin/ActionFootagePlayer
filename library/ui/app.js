@@ -32,7 +32,7 @@ const S = {
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
-  take: null, takePlace: "", taking: false,
+  take: null, takePlace: "", taking: false, tagDraft: "",
 };
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -238,6 +238,9 @@ function buildFacets() {
     wh.push({ id: "iss", title: "Issues", opts: [L("iss:own", "Two own files", (it) => it.conflict)] });
     sections.push({ id: "wh", title: "Where", facets: wh });
   }
+  const tagList = [];
+  for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
+  if (tagList.length) sections.push({ id: "tg", title: "Tags", facets: [{ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) }] });
   if (S.view === "stills") {
     sections.push({ id: "frm2", title: "Kind", facets: [{ id: "form", title: "Kind", opts: distinct(items, (i) => i.form).map((f) => L("form:" + f, f, (it) => it.form === f)) }] });
   }
@@ -253,7 +256,7 @@ function facetMatch(f, it) { const on = facetLeaves(f).filter((l) => S.filters[l
 function textMatch(it) {
   const q = S.q.trim().toLowerCase();
   if (!q) return true;
-  return [it.name, it.cam, it.color, it.sub, it.dir, it.date].join(" ").toLowerCase().indexOf(q) >= 0;
+  return [it.name, it.cam, it.color, it.sub, it.dir, it.date].concat(it.tags || []).join(" ").toLowerCase().indexOf(q) >= 0;
 }
 function matches(it, except) { return textMatch(it) && allFacets().every((f) => f === except || facetMatch(f, it)); }
 function activeTokens() { const t = []; allFacets().forEach((f) => { const on = facetLeaves(f).filter((l) => S.filters[l.id]); if (on.length) t.push({ f, labels: on.map((l) => l.label) }); }); return t; }
@@ -402,6 +405,7 @@ function sizeText(n) {
 }
 function chips(it) {
   const c = [];
+  for (const t of it.tags || []) c.push([t === "Deleted in Photos" ? "chip sys" : "chip tag", t]);
   if (it.kind === "folder") {
     const inner = under(it.path);
     const prev = inner.filter((x) => x.preview).length;
@@ -574,6 +578,7 @@ function renderSide() {
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
   if (S.view === "footage" || S.view === "moments") h += checksSection(c);
+  h += tagsSection(c);
   if (S.view === "footage") {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
@@ -626,6 +631,27 @@ function checksSection(c) {
   }
   return sec("checks", "Checks", "issues, moved files", body);
 }
+// Tags on the selection (library/src/tags.rs): kept with each item, in the library
+function tagsSection(c) {
+  const on = [];
+  for (const it of c.selItems) for (const t of it.tags || []) if (on.indexOf(t) < 0) on.push(t);
+  const body = c.any
+    ? '<div class="chips">' + (on.length ? on.map((t) => '<button type="button" class="chip ' + (t === "Deleted in Photos" ? "sys" : "tag") + '" data-a="untag" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + ' from the selection">' + esc(t) + ' ×</button>').join("") : '<span class="sub">No tags yet</span>') + '</div>' +
+      '<div class="tagin"><input id="tagdraft" type="text" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
+      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in the project’s file.</span>'
+    : '<p>Select items or folders to tag them.</p>';
+  return sec("tags", "Tags", c.any ? on.length + " on the selection" : "select to tag", body);
+}
+async function setTags(add, remove) {
+  const c = ctx();
+  if (!c.any) return;
+  try {
+    const problems = await invoke("set_tags", { items: c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), add, remove });
+    if (problems.length) showError(problems.join(" · "));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+
 async function runCheck() {
   const c = ctx();
   if (!c.any) return;
@@ -944,6 +970,8 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
+    case "untag": return setTags([], [v]);
     case "findmoved": return findMoved();
     case "applymoved": return applyMoved();
     case "scrim": if (e.target !== el) return; S.sheet = null; renderSheet(); return;
@@ -982,6 +1010,7 @@ document.addEventListener("input", (e) => {
   else if (t.dataset.l) { S.locEdit[+t.dataset.i][t.dataset.l] = t.value; }
   else if (t.id === "hosts") { S.hostsText = t.value; }
   else if (t.id === "takeplace") { S.takePlace = t.value; }
+  else if (t.id === "tagdraft") { S.tagDraft = t.value; }
 });
 document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
@@ -996,6 +1025,7 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if (e.target.id === "tagdraft" && e.key === "Enter") { e.preventDefault(); const t = S.tagDraft.trim(); if (t) { S.tagDraft = ""; setTags([t], []); } return; }
   if (e.target.id === "q") {
     const list = suggestions(), max = list.length;
     if (e.key === "ArrowDown" && S.suggOpen) { e.preventDefault(); S.sugg = Math.min(max, S.sugg + 1); renderSugg(); }

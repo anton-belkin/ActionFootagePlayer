@@ -9,8 +9,8 @@
 //   twice     the same clip (size and fingerprint) at two places in the tree
 //   missing   a moment's, clip preview's or export's original not found where its link says
 // Find moved files looks for the missing originals and the orphans' clips in the project's own locations (files of
-// the same size first, then the fingerprint), and fixes what it found: links written again (gyroflow-export
-// --relink), own files moved beside their clip, the lines in Project.afproject that name the old path.
+// the same size first, then the fingerprint), and fixes what it found: links written again (afp-cut
+// --set-key: the file's other keys kept), own files moved beside their clip, the lines in Project.afproject that name the old path.
 
 use crate::locations::{ self, Location };
 use serde_json::{ json, Value };

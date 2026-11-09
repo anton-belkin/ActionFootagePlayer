@@ -57,9 +57,6 @@ use vs_gyroflow::{ Engine, Fov, Interpolation, Level, PlaneJob, SampleKind, Unde
 const USAGE: &str = "usage: gyroflow-export [options] <video>...
        gyroflow-export --fingerprint <file>...  (each file's fingerprint, as a link keeps its original's: SHA-256 of
                                                  its first and last MiB)
-       gyroflow-export --relink <file> <json>   (a moment's, clip preview's or export's link to its original written
-                                                 again, after the original moved: Action Footage Library's Find moved
-                                                 files)
 
 Renders each video stabilized (and, for log, color-converted) into the _Exports/ folder of its project (the trip
 folder with Project.afproject in it above the video, as the player initializes it), else into a stabilized/
@@ -264,16 +261,6 @@ fn main() {
             }
         }
         std::process::exit(if failed { 1 } else { 0 });
-    }
-    // --relink <file> <json>: the link inside a moment, clip preview or export written again (Action Footage Library's
-    // Find moved files: its original was moved). In place when the moov has room after it, else the file is rewritten
-    if first.as_deref() == Some("--relink") {
-        let (Some(file), Some(link)) = (std::env::args().nth(2), std::env::args().nth(3)) else { fail("--relink <file> <json>") };
-        if serde_json::from_str::<serde_json::Value>(&link).map(|v| !v.is_object()).unwrap_or(true) { fail("--relink: the link isn't a JSON object"); }
-        match vs_gyroflow::mp4meta::write_keys(Path::new(&file), &[("ch.actionfootageplayer.link", link.as_str())]) {
-            Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("{file}: {e}"); std::process::exit(1); }
-        }
     }
     vs_gyroflow::init_logging();
     catch_signals();

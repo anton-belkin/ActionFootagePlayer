@@ -280,6 +280,7 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             if let Some(own) = read_json(Path::new(f)) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
                                     "source": own.get("source").cloned().unwrap_or(Value::Null) });
+                it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
         }
     }
@@ -292,6 +293,8 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     if view == "footage" { return footage(root, flat_previews); }
     let Some(sub) = view_dir(view) else { return json!({ "dirs": [], "items": [] }) };
     let base = if sub.is_empty() { root.to_path_buf() } else { root.join(sub) };
+    // Photos' tags are kept in the project's file (a HEIC's own metadata isn't written here)
+    let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
     let skip = |_: &str, _: &str| false;
     let entries = walk(&base, &skip);
     let mut dirs = Vec::new();
@@ -309,12 +312,14 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 it["kind"] = json!("moment");
                 it["name"] = json!(&name[..name.len() - LINK_EXT.len()]);
                 it["link"] = link(&path).unwrap_or(Value::Null);
+                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 it["gyroflow"] = json!(has_gyroflow(&path));
             }
             "stills" => {
                 let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
                 if !photo { continue; }
                 it["kind"] = json!("still");
+                it["tags"] = photo_tags.get(rel.as_str()).cloned().filter(Value::is_array).unwrap_or(json!([]));
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
                 it["form"] = json!(if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
@@ -324,6 +329,7 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 if !(lower.ends_with(".mov") || lower.ends_with(".mp4")) { continue; }
                 it["kind"] = json!("export");
                 it["link"] = link(&path).unwrap_or(Value::Null);
+                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
             _ => {}
         }
