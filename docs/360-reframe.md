@@ -7,6 +7,10 @@ already exports a flat view along keyframes of the head (`gyroflow-export --refr
 
 - **Recording the view.** In the side panel's 360° tab, **Record** saves where you look while the clip plays: the
   head's turn, tilt, roll and field of view, frame by frame. Recording again over a part replaces just that part.
+- **Relative to what you follow.** The head is recorded, and tidied, relative to what the view follows, the choice
+  already made while watching (*Follows*): the way you move, the camera, north or the world. Smoothing relative to
+  the camera keeps the camera's turns and smooths only your head on top of them; smoothing relative to the world
+  smooths the camera's turns too.
 - **Tidying the recording.** Three checkboxes, all undoable: **smooth the turns** (on the angles), **level the
   horizon**, and **hold on what's in the middle**, which smooths by the picture: the motion between frames, measured in
   the view itself. **Play the recording** shows the result before anything is exported.
@@ -53,6 +57,7 @@ A new part at the bottom of the tab, **Flat video**, under *Follows*:
  └────────────────────────────────────────────────┘
  Recorded 0:12–0:47 and 1:05–1:31 · 2 parts
  [ Play the recording ]                    ( on )
+ Relative to what the view follows: Way
  ☑ Smooth the turns      [ Light | Medium | Strong ]
  ☑ Level the horizon
  ☐ Hold on what's in the middle (by the picture)
@@ -71,9 +76,13 @@ flat video".
 
 - **Record** (or Alt+r) starts recording at the current position and starts playback if it was paused. Each frame
   shown records the head as it was when that frame was on screen:
-  - turn (yaw), tilt (pitch), roll and FOV, in the player's degrees;
-  - the projection;
-  - the heading mode in use.
+  - turn (yaw), tilt (pitch), roll and FOV, in the player's degrees, relative to what the view follows;
+  - the projection.
+
+  What the view follows (*Follows*: the way you move, the camera, north, the world) is the recording's own: the
+  first take takes the one chosen when it starts, and the head is recorded relative to it. While a take records,
+  *Follows* is locked (greyed out, "Recording: following the way"). A later take made under another choice is turned
+  into the recording's (below), so a recording is always relative to one thing.
 - **Stop** (Alt+r again, or the end of the clip) ends the take. So do pausing, seeking and leaving the 360 view: a
   take is a single stretch of playback. Recording resumes with the next Record.
 - **Punch-in.** A take replaces only the time it covers. Recording 0:20–0:30 over a recording of 0:12–0:47 keeps
@@ -98,6 +107,10 @@ at the screen's rate, with the options applied. It turns on by itself after a ta
 A drag, a scroll or a pinch turns it off ("Your view: the recording is paused") and the head is yours again, from
 where the recording had it. Record starts from there too.
 
+While the recording plays, *Follows* is the recording's choice: switching it there changes what the recording is
+relative to (see [Relative to what](#relative-to-what)). Not playing the recording, *Follows* is the viewer's, as it
+is now, and leaves the recording alone.
+
 ### Where it's kept
 
 In the clip's own file, `<clip>.afp.json`, beside its marks and saved view:
@@ -105,9 +118,10 @@ In the clip's own file, `<clip>.afp.json`, beside its marks and saved view:
 ```json
 "view360": {
   "recording": {
+    "follows": "travel",
     "parts": [
       { "from": 12.32, "to": 47.10,
-        "samples": [[12.32, 0.0, -4.1, 0.0, 100.0, "auto", "travel"], [12.36, 0.4, -4.1, 0.0, 100.0], ...] }
+        "samples": [[12.32, 0.0, -4.1, 0.0, 100.0, "auto"], [12.36, 0.4, -4.1, 0.0, 100.0], ...] }
     ],
     "tidy": { "turns": "medium", "level": true, "picture": false },
     "frame": "16:9", "size": "1080p",
@@ -116,8 +130,9 @@ In the clip's own file, `<clip>.afp.json`, beside its marks and saved view:
 }
 ```
 
-- **What a sample holds:** `[t, yaw, pitch, roll, fov]`, where `t` is the clip's own time. A sample that also lists a
-  projection or a heading mode marks a change; later samples keep it until the next change.
+- **What a sample holds:** `[t, yaw, pitch, roll, fov]`, where `t` is the clip's own time, and the angles are the head
+  relative to `follows`. A sample that also lists a projection marks a change; later samples keep it until the next
+  change.
 - **Thinning:** samples are thinned as they're written. A sample is dropped where the head moved less than 0.05°
   from a straight line between its neighbours (Ramer-Douglas-Peucker on the angles and the FOV's log). A still head is
   two samples; a 10-minute take of constant looking around is a few hundred kilobytes at most.
@@ -131,26 +146,40 @@ link file). That's natural, but it touches the Library's batches; it's left for 
 All of it runs in Rust, in one module (`vs-gyroflow/src/reframe.rs`). The preview and the export use the same code, so
 Play the recording shows exactly what Export flat makes.
 
-### Where it works: the view in the world
+### Relative to what
 
-The head is recorded relative to the heading mode: straight ahead is the GPS course, the camera, north or the world.
-What the eye sees is the composition:
+Each frame carries, in its stamp, the yaw of every heading mode: the way you move, the camera, north, the world
+(`sphere360::Motion` computes the same from the motion data alone, without rendering, as `gyroflow-probe --headings`
+does already). What the eye sees is the head on top of the chosen one:
 
 ```
-q_view(t) = R_up(heading_yaw(t)) · R(head(t))       (world axes, gravity down: the view in the world)
+q_view(t) = R_up(heading_yaw_F(t)) · R(head_F(t))       F: what the view follows; world axes, gravity down
 ```
 
-`heading_yaw(t)` is each frame's yaw for that mode, the one stamped in the frame. It is also what
-`sphere360::Motion` computes from the motion data alone, without rendering, as `gyroflow-probe --headings` does already.
+- **Recorded relative to F**, the recording's `follows`, the choice made while watching.
+- **Tidied relative to F.** The smoothing below works on `head_F(t)`: the angles as recorded, relative to what the view
+  follows. That choice decides what the smoothing keeps and what it takes out:
 
-Tidying smooths `q_view(t)`, not the head. A wobble of the heading and a wobble of your hand are the same wobble on
-screen, and both are taken out together. A switch of heading mode mid-take becomes a smooth pan instead of a jump.
-The result goes back into a head relative to the same heading, for the player:
-`head'(t) = R_up(heading_yaw(t))⁻¹ · q_view'(t)`.
+| Follows | What a smoothed head does |
+|---|---|
+| The way you move | Keeps the turns of the road (the GPS course), smooths only the head on top of them |
+| The camera | Keeps the camera's turns (its heading, smoothed over a few seconds already), smooths only the head |
+| North | Keeps the view tied to the compass, smooths the head |
+| The world | Smooths everything that turns the view: the camera's turns, the road's and the head's together |
+
+- **Changing it afterwards.** While the recording plays, choosing another *Follows* re-expresses the recording in it:
+  `head_G(t) = R_up(heading_yaw_G(t))⁻¹ · R_up(heading_yaw_F(t)) · R(head_F(t))`, per frame, exactly, and `follows`
+  becomes G. Untidied, the view is the same frame for frame, so nothing you looked at moves. Tidied, the smoothing now
+  works relative to G. So the choice can be tried on the same take: following the camera, then the world, and see which
+  smooths the way you want. A take made under another *Follows* than the recording's is re-expressed the same way as
+  it's added.
+- **Where a mode is unsure** (the way you move while standing, north without a compass fix), its stamped yaw is the
+  camera's: the plugin already falls back that way, and so does the head re-expressed in it.
+- **Stitched clips** carry no stamp: every mode is the clip's own frame, and `head_F` is just the head.
 
 ### Smooth the turns (on the angles)
 
-- **Rotation:** a Gaussian over time on the rotation (on SO(3)). Its width σ is 0.25 s for Light, 0.6 s for Medium
+- **Rotation:** a Gaussian over time on the head's rotation relative to what the view follows (on SO(3)). Its width σ is 0.25 s for Light, 0.6 s for Medium
   and 1.5 s for Strong.
   - Each frame's smoothed rotation is the weighted mean of its neighbours' quaternions, made sign-consistent, then
     normalized. Within a window of a few σ the spread is small, so this matches a proper mean on the sphere to well
@@ -165,8 +194,8 @@ The result goes back into a head relative to the same heading, for the player:
 
 - The view's roll against gravity is set to 0, so the picture is level whatever the hand did. A roll you meant (a
   barrel roll) is lost while this is on, so it's a checkbox and on by default.
-- The heading frame is level already, with gravity from the stamp. Leveling sets the head's roll to 0 after the
-  composition, before the smoothing.
+- Every heading frame is level already (a turn about the vertical, gravity from the stamp), so leveling is the
+  head's roll set to 0, before the smoothing, whatever the view follows.
 
 ### Hold on what's in the middle (by the picture)
 
@@ -182,7 +211,8 @@ option makes the path follow the content near the middle, then smooths that.
   - The shift is turned into an angle at the view's middle: `dx / f`, `dy / f`, where `f` is the projection's focal
     length at the centre.
   - The confidence comes from the spread and from how many blocks matched.
-- **Follow:** the measured angles accumulate into where the content went, and the path is pulled towards it.
+- **Follow:** the measured angles accumulate into where the content went, and the path is pulled towards it. The
+  correction is applied to the head, relative to what the view follows, like the rest of the tidying.
   - Weight by confidence: a frame with a low confidence (a flash, water, the sky, a fast subject across the middle)
     keeps the angle-smoothed path.
   - Never more than 8° from the recorded path, so it can't wander off what you looked at.
@@ -198,8 +228,9 @@ option makes the path follow the content near the middle, then smooths that.
 ### When it runs
 
 - **Smooth the turns** and **Level** are instant even on a long recording: a few thousand quaternions. The player
-  runs them through `gyroflow-probe --reframe <clip>` after each take and each change of option, which reads the
-  recording and the motion and prints the tidied head per frame. The view360 script plays that back.
+  runs them through `gyroflow-probe --reframe <clip>` after each take and each change of option or of *Follows*,
+  which reads the recording and the motion and prints the tidied head per frame, relative to `follows`. The view360
+  script plays that back with `follows` as the heading, as the shader composes it now.
 - **Hold on what's in the middle** renders, so it runs in the background and the panel shows its progress. Play the
   recording uses the angle-smoothed path until the measurement is done.
 
@@ -291,7 +322,7 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 | Recording, punch-in, undo, sidecar writes | `mpv/scripts/view360/recording.lua` (plain Lua, tested in `tests/view360_test.lua` with recorded sample streams) |
 | The 360° tab's *Flat video* part | `side-panel/main.lua`, `view360_part` |
 | Split button and dropdown | `side-panel/ui.lua` |
-| Tidying: world composition, SO(3) Gaussian, level, picture hold | `vs-gyroflow/src/reframe.rs`, with Rust tests: a synthetic jittered path comes out smooth, a level path stays level, a held subject's drift is taken out in a rendered synthetic sphere |
+| Tidying: re-expressing between heading modes, SO(3) Gaussian, level, picture hold | `vs-gyroflow/src/reframe.rs`, with Rust tests: a synthetic jittered path comes out smooth, a level path stays level, a held subject's drift is taken out in a rendered synthetic sphere |
 | `gyroflow-probe --reframe <clip>` | the tidied head per frame, for the player's preview |
 | `gyroflow-export --reframe recording` | reads the sidecar, renders through `export360.rs` |
 | Export kinds, `how` = hdr/sdr/360/flat | `gyroflow/export.lua` |
