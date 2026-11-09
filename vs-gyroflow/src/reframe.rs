@@ -345,6 +345,217 @@ impl Recording {
     }
 }
 
+// The picture hold ---------------------------------------------------------------------------------------------------
+//
+// "Hold on what's in the middle" (docs/360-reframe.md): the view rendered small along the angle-tidied path, what's in
+// its middle matched frame to frame, and the head moved with it. The measuring renders (gyroflow-export
+// --measure-hold), so it's kept in the app's cache, keyed by the clip and the path it was measured along; the tidying
+// applies it when it's there.
+
+/// The view rendered for the measuring: small, a 16:9 picture as the FOV spans one
+pub const HOLD_SIZE: (usize, usize) = (480, 270);
+/// How far the hold may take the head from the angle-tidied path, degrees
+pub const HOLD_MAX: f64 = 8.0;
+/// The hold lets go of what it followed over this long (s): what's in the middle is held over seconds, and the head
+/// comes back to where you looked
+pub const HOLD_LETGO: f64 = 4.0;
+/// The matching's noise taken out of the hold, s (a Gaussian)
+pub const HOLD_SMOOTH: f64 = 0.1;
+/// How sure a frame's match has to be to count at all, and to count fully
+pub const HOLD_SURE: (f64, f64) = (0.4, 0.8);
+
+/// One frame of the measuring: at `t`, how far the head turns to follow what's in the middle since the frame before
+/// (degrees across the screen and up it: `yaw` right, `pitch` up), and how sure the match is (0-1)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoldFrame { pub t: f64, pub yaw: f64, pub pitch: f64, pub sure: f64 }
+
+impl HoldFrame {
+    /// From a shift measured in a picture `height` high (pixels, y down), less what the head's own turn from `a` to `b`
+    /// moved there (expected_shift): what moved right of that is followed by turning right, what moved down by looking
+    /// down
+    pub fn from_shift(t: f64, (dx, dy, sure): (f64, f64, f64), (ex, ey): (f64, f64), projection: Projection, fov: f64, height: f64) -> HoldFrame {
+        let f = focal_px(projection, fov, height);
+        HoldFrame { t, yaw: ((dx - ex) / f).to_degrees(), pitch: -((dy - ey) / f).to_degrees(), sure }
+    }
+}
+
+/// Where the head's own turn from `a` to `b` moves what's in the middle (pixels, y down, `f` pixels a radian): a turn
+/// to the right moves it left, looking up moves it down
+pub fn expected_shift(a: &HeadKey, b: &HeadKey, f: f64) -> (f64, f64) {
+    let pitch = ((a.pitch + b.pitch) / 2.0).to_radians();
+    (-(b.yaw - a.yaw).to_radians() * pitch.cos() * f, (b.pitch - a.pitch).to_radians() * f)
+}
+
+/// Pixels a radian at the middle of a picture `height` high, in a projection at a FOV, as the view draws it
+/// (view.lua: r = k sin θ / (cos θ + d), k = 16/9 (cos(fov/2) + d) / sin(fov/2) in half heights)
+pub fn focal_px(projection: Projection, fov: f64, height: f64) -> f64 {
+    let d = match projection {
+        Projection::Rectilinear => 0.0,
+        Projection::Stereographic | Projection::Planet => 1.0,
+        _ => { let x = ((fov - 100.0) / 60.0).clamp(0.0, 1.0); x * x * (3.0 - 2.0 * x) }
+    };
+    let half = fov.to_radians() / 2.0;
+    let k = 16.0 / 9.0 * (half.cos() + d) / half.sin();
+    k / (1.0 + d) * height / 2.0
+}
+
+/// How what's in the middle of `prev` moved into `cur` (luma, `w` × `h`, a byte a pixel): (dx, dy) pixels and how
+/// sure (0-1). 8×8 blocks over the middle 40 %, each searched for within ±10 pixels of `around` (where the head's own
+/// turn moved it; to a fraction of a pixel); the median of the blocks with something in them, sure by how many agree
+/// with it and how many have something in them
+pub fn measure_shift(prev: &[u8], cur: &[u8], w: usize, h: usize, around: (f64, f64)) -> (f64, f64, f64) {
+    const B: usize = 8;
+    const R: i32 = 10;
+    let (x0, x1) = ((w as f64 * 0.3) as usize, (w as f64 * 0.7) as usize);
+    let (y0, y1) = ((h as f64 * 0.3) as usize, (h as f64 * 0.7) as usize);
+    let at = |f: &[u8], x: i32, y: i32| f[y as usize * w + x as usize] as i32;
+    let mut shifts: Vec<(f64, f64)> = Vec::new();
+    let mut blocks = 0usize;
+    let mut by = y0;
+    while by + B <= y1 {
+        let mut bx = x0;
+        while bx + B <= x1 {
+            blocks += 1;
+            // Something to match: a block of the sky or of open water is left out
+            let (mut sum, mut sq) = (0i64, 0i64);
+            for y in by..by + B { for x in bx..bx + B { let v = prev[y * w + x] as i64; sum += v; sq += v * v; } }
+            let n = (B * B) as i64;
+            let var = (sq * n - sum * sum) as f64 / (n * n) as f64;
+            let (ax, ay) = (around.0.round() as i32, around.1.round() as i32);
+            if var >= 9.0 && bx as i32 + ax - R >= 1 && by as i32 + ay - R >= 1 && (bx + B) as i32 + ax + R < w as i32 - 1
+               && (by + B) as i32 + ay + R < h as i32 - 1 {
+                let cost = |dx: i32, dy: i32| -> i64 {
+                    let mut s = 0i64;
+                    for y in by as i32..(by + B) as i32 {
+                        for x in bx as i32..(bx + B) as i32 { s += (at(prev, x, y) - at(cur, x + dx, y + dy)).abs() as i64; }
+                    }
+                    s
+                };
+                let (mut best, mut bv) = ((ax, ay), i64::MAX);
+                for dy in ay - R..=ay + R { for dx in ax - R..=ax + R { let c = cost(dx, dy); if c < bv { bv = c; best = (dx, dy); } } }
+                // Between pixels: where the costs either side say the minimum is
+                let frac = |a: i64, c: i64, b: i64| { let den = (a - 2 * c + b) as f64; if den > 0.0 { ((a - b) as f64 / (2.0 * den)).clamp(-0.5, 0.5) } else { 0.0 } };
+                let (dx, dy) = best;
+                let fx = if (dx - ax).abs() < R { frac(cost(dx - 1, dy), bv, cost(dx + 1, dy)) } else { 0.0 };
+                let fy = if (dy - ay).abs() < R { frac(cost(dx, dy - 1), bv, cost(dx, dy + 1)) } else { 0.0 };
+                shifts.push((dx as f64 + fx, dy as f64 + fy));
+            }
+            bx += B;
+        }
+        by += B;
+    }
+    if shifts.len() < 6 { return (0.0, 0.0, 0.0); }
+    let median = |mut v: Vec<f64>| { v.sort_by(f64::total_cmp); v[v.len() / 2] };
+    let mx = median(shifts.iter().map(|s| s.0).collect());
+    let my = median(shifts.iter().map(|s| s.1).collect());
+    let agree = shifts.iter().filter(|s| (s.0 - mx).abs() <= 1.0 && (s.1 - my).abs() <= 1.0).count();
+    let sure = (agree as f64 / shifts.len() as f64) * (shifts.len() as f64 / (blocks as f64 * 0.3)).min(1.0);
+    (mx, my, sure.clamp(0.0, 1.0))
+}
+
+/// The hold's measuring as kept: {"key", "frames": [[t, yaw, pitch, sure], ...]}
+pub fn hold_to_json(key: &str, frames: &[HoldFrame]) -> serde_json::Value {
+    let r = |v: f64| (v * 10000.0).round() / 10000.0;
+    serde_json::json!({ "key": key, "frames": frames.iter().map(|f| serde_json::json!([r(f.t), r(f.yaw), r(f.pitch), r(f.sure)])).collect::<Vec<_>>() })
+}
+
+pub fn hold_from_json(v: &serde_json::Value, key: &str) -> Option<Vec<HoldFrame>> {
+    if v.get("key")?.as_str()? != key { return None; }
+    v.get("frames")?.as_array()?.iter().map(|f| {
+        let a = f.as_array()?;
+        Some(HoldFrame { t: a.first()?.as_f64()?, yaw: a.get(1)?.as_f64()?, pitch: a.get(2)?.as_f64()?, sure: a.get(3)?.as_f64()? })
+    }).collect()
+}
+
+impl Recording {
+    /// What the hold's measuring is kept under: the path it's measured along (the angle tidying's result)
+    pub fn hold_key(&self) -> String {
+        use sha2::{ Digest, Sha256 };
+        let mut path = self.tidied();
+        path.tidy.picture = false;
+        let text = format!("hold3|{:?}|{}", HOLD_SIZE, path.to_json());
+        Sha256::digest(text.as_bytes()).iter().take(12).map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Where the hold's measuring for this clip is kept (the app's cache)
+    pub fn hold_file(&self, clip: &str) -> Option<PathBuf> { crate::file_cache("reframe-hold", clip, &self.hold_key()) }
+
+    /// The hold's measuring for this clip, if it's been made along this path
+    pub fn read_hold(&self, clip: &str) -> Option<Vec<HoldFrame>> {
+        let text = std::fs::read_to_string(self.hold_file(clip)?).ok()?;
+        hold_from_json(&serde_json::from_str(&text).ok()?, &self.hold_key())
+    }
+
+    pub fn write_hold(&self, clip: &str, frames: &[HoldFrame]) -> Result<(), String> {
+        let file = self.hold_file(clip).ok_or("no cache folder")?;
+        if let Some(dir) = file.parent() { std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?; }
+        std::fs::write(&file, hold_to_json(&self.hold_key(), frames).to_string()).map_err(|e| format!("{}: {e}", file.display()))
+    }
+
+    /// Tidied for this clip: the angles, then the picture hold when it's asked for and measured. The bool: the hold is
+    /// asked for and still to be measured (the angle tidying meanwhile)
+    pub fn tidied_for(&self, clip: &str) -> (Recording, bool) {
+        let angles = self.tidied();
+        if !self.tidy.picture { return (angles, false); }
+        match self.read_hold(clip) {
+            Some(frames) => (hold(&angles, &frames), false),
+            None => (angles, true),
+        }
+    }
+}
+
+/// The angle-tidied path moved with what's in the middle, as measured along it: in each stretch (not the little planet,
+/// which looks down) the turns that follow it add up, weighted by how sure each is (HOLD_SURE) and letting go over HOLD_LETGO, kept
+/// within HOLD_MAX of the path, their noise smoothed out; samples a frame, thinned
+pub fn hold(path: &Recording, frames: &[HoldFrame]) -> Recording {
+    let mut parts = Vec::with_capacity(path.parts.len());
+    for p in &path.parts {
+        let inside: Vec<&HoldFrame> = frames.iter().filter(|f| f.t > p.from && f.t <= p.to).collect();
+        let projection = p.samples[0].projection;
+        if inside.len() < 2 || projection == Projection::Planet { parts.push(p.clone()); continue; }
+        // What follows it, frame by frame: the screen's turn across, in yaw at this pitch
+        let mut times = vec![p.from];
+        let mut acc = vec![(0.0f64, 0.0f64)];
+        let (mut cy, mut cp, mut last) = (0.0f64, 0.0f64, p.from);
+        for f in inside {
+            let (head, _) = within(&p.samples, f.t);
+            let keep = (-(f.t - last) / HOLD_LETGO).exp();
+            // A match most blocks don't agree on (grass flowing past, water, a subject across the middle) adds nothing
+            let s = ((f.sure - HOLD_SURE.0) / (HOLD_SURE.1 - HOLD_SURE.0)).clamp(0.0, 1.0);
+            cy = cy * keep + s * f.yaw / head.pitch.to_radians().cos().max(0.2);
+            cp = cp * keep + s * f.pitch;
+            let len = (cy * cy + cp * cp).sqrt();
+            if len > HOLD_MAX { cy *= HOLD_MAX / len; cp *= HOLD_MAX / len; }
+            times.push(f.t);
+            acc.push((cy, cp));
+            last = f.t;
+        }
+        if times[times.len() - 1] < p.to { times.push(p.to); acc.push(*acc.last().unwrap()); }
+        let mut samples = Vec::with_capacity(times.len());
+        for (i, &t) in times.iter().enumerate() {
+            // The noise smoothed out, less so near the start, which stays where the path is
+            let sigma = HOLD_SMOOTH.min((t - p.from) / 3.0);
+            let (mut sy, mut sp, mut ws) = (acc[i].0, acc[i].1, 1.0);
+            if sigma > 1e-3 {
+                (sy, sp, ws) = (0.0, 0.0, 0.0);
+                for (j, &u) in times.iter().enumerate() {
+                    let d = (u - t) / sigma;
+                    if d.abs() > 3.0 { continue; }
+                    let w = (-0.5 * d * d).exp();
+                    sy += w * acc[j].0;
+                    sp += w * acc[j].1;
+                    ws += w;
+                }
+            }
+            let (head, _) = within(&p.samples, t);
+            samples.push(Sample { t, yaw: head.yaw + sy / ws, pitch: (head.pitch + sp / ws).clamp(-89.9, 89.9), roll: head.roll, fov: head.fov, projection });
+        }
+        let samples = thin(&samples, TOLERANCE);
+        parts.push(Part { from: samples[0].t, to: samples[samples.len() - 1].t, samples });
+    }
+    Recording { parts, ..path.clone() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,5 +748,99 @@ mod tests {
             let (a, b) = (r.head_at(t).0, back.head_at(t).0);
             assert!((a.yaw - b.yaw).abs() < 0.01 && (a.fov - b.fov).abs() < 0.01);
         }
+    }
+
+    /// A textured picture (sums of sines and a hash, so blocks are told apart), moved by (sx, sy) pixels
+    fn picture(w: usize, h: usize, sx: f64, sy: f64) -> Vec<u8> {
+        let mut out = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (u, v) = (x as f64 - sx, y as f64 - sy);
+                let s = 128.0 + 40.0 * (u * 0.31).sin() * (v * 0.23).cos() + 30.0 * (u * 0.07 + v * 0.11).sin() + 25.0 * ((u * 0.53).sin() * (v * 0.47).sin());
+                out[y * w + x] = s.clamp(0.0, 255.0) as u8;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_middle_s_shift_is_measured() {
+        let (w, h) = HOLD_SIZE;
+        let a = picture(w, h, 0.0, 0.0);
+        let (dx, dy, sure) = measure_shift(&a, &picture(w, h, 3.0, -2.0), w, h, (0.0, 0.0));
+        assert!((dx - 3.0).abs() < 0.15 && (dy + 2.0).abs() < 0.15 && sure > 0.8, "{dx} {dy} {sure}");
+        let (dx, dy, _) = measure_shift(&a, &picture(w, h, 1.5, 0.5), w, h, (0.0, 0.0));
+        assert!((dx - 1.5).abs() < 0.3 && (dy - 0.5).abs() < 0.3, "{dx} {dy}");
+        // A turn moves it far: found around where the turn says
+        let (dx, dy, sure) = measure_shift(&a, &picture(w, h, -24.0, 3.0), w, h, (-22.0, 2.0));
+        assert!((dx + 24.0).abs() < 0.15 && (dy - 3.0).abs() < 0.15 && sure > 0.8, "{dx} {dy} {sure}");
+        // Nothing to match (the sky): not sure at all
+        let flat = vec![120u8; w * h];
+        assert_eq!(measure_shift(&flat, &flat, w, h, (0.0, 0.0)).2, 0.0);
+    }
+
+    #[test]
+    fn focal_length_at_the_middle() {
+        // Rectilinear at 90°: the 16:9 picture's half width (240 px at 270 high) is tan 45° away
+        assert!((focal_px(Projection::Rectilinear, 90.0, 270.0) - 240.0).abs() < 1e-9);
+        // A pixel to the right is followed by a turn to the right, one down by looking down
+        let f = HoldFrame::from_shift(1.0, (2.4, 2.4, 1.0), (0.0, 0.0), Projection::Rectilinear, 90.0, 270.0);
+        assert!((f.yaw - 0.573).abs() < 0.01 && (f.pitch + 0.573).abs() < 0.01, "{f:?}");
+        // The head's own turn: what it moves is no shift to follow
+        let (a, b) = (HeadKey { t: 0.0, yaw: 10.0, pitch: 0.0, roll: 0.0, fov: 90.0 }, HeadKey { t: 0.04, yaw: 12.0, pitch: 1.0, roll: 0.0, fov: 90.0 });
+        let e = expected_shift(&a, &b, 240.0);
+        assert!(e.0 < -8.0 && e.1 > 4.0, "{e:?}");
+        let f = HoldFrame::from_shift(1.0, (e.0, e.1, 1.0), e, Projection::Rectilinear, 90.0, 270.0);
+        assert!(f.yaw.abs() < 1e-9 && f.pitch.abs() < 1e-9);
+        // Stereographic: half as many pixels a radian at the middle as its scale says
+        assert!(focal_px(Projection::Stereographic, 140.0, 270.0) > 0.0);
+    }
+
+    #[test]
+    fn the_hold_follows_what_s_in_the_middle_within_limits() {
+        let path = recording(vec![path(0.0, 4.0, 30.0, |_| (10.0, 0.0, 0.0, 100.0))], serde_json::json!({ "turns": "off", "level": false }));
+        let frames = |yaw: f64, sure: f64| (1..=120).map(|i| HoldFrame { t: i as f64 / 30.0, yaw, pitch: -yaw / 2.0, sure }).collect::<Vec<_>>();
+        // 0.05° a frame for 2 s, sure: followed (less what it lets go of)
+        let held = hold(&path, &frames(0.05, 1.0));
+        let at2 = held.head_at(2.0).0;
+        assert!(at2.yaw > 10.0 + 2.0 && at2.yaw < 10.0 + 3.0, "{at2:?}");
+        assert!(at2.pitch < -1.0, "{at2:?}");
+        // The start where it was
+        assert!((held.head_at(0.0).0.yaw - 10.0).abs() < 1e-6);
+        // Never past HOLD_MAX
+        let far = hold(&path, &frames(1.0, 1.0));
+        let h = far.head_at(3.5).0;
+        assert!(((h.yaw - 10.0).powi(2) + h.pitch.powi(2)).sqrt() <= HOLD_MAX + 0.1, "{h:?}");
+        // Not sure: left alone
+        let unsure = hold(&path, &frames(0.5, 0.0));
+        assert!((unsure.head_at(2.0).0.yaw - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_hold_is_kept_by_the_path_it_was_measured_along() {
+        let dir = std::env::temp_dir().join(format!("afp-hold-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("clip.insv");
+        std::fs::write(&clip, b"x").unwrap();
+        let clip = clip.to_string_lossy().to_string();
+        let mut r = recording(vec![path(0.0, 2.0, 30.0, |t| (t, 0.0, 0.0, 100.0))], serde_json::json!({ "turns": "light", "picture": true }));
+        let (_, needed) = r.tidied_for(&clip);
+        assert!(needed);
+        let frames: Vec<HoldFrame> = (1..=60).map(|i| HoldFrame { t: i as f64 / 30.0, yaw: 0.02, pitch: 0.0, sure: 1.0 }).collect();
+        r.write_hold(&clip, &frames).unwrap();
+        let (held, needed) = r.tidied_for(&clip);
+        assert!(!needed);
+        assert!(held.head_at(1.5).0.yaw > r.tidied().head_at(1.5).0.yaw + 0.5);
+        // Another smoothing: another path, measured again
+        r.tidy.turns = Turns::Strong;
+        assert!(r.tidied_for(&clip).1);
+        // Not asked for: not needed
+        r.tidy.picture = false;
+        assert!(!r.tidied_for(&clip).1);
+        if let Some(f) = r.hold_file(&clip) { let _ = std::fs::remove_file(f); }
+        r.tidy.turns = Turns::Light;
+        r.tidy.picture = true;
+        if let Some(f) = r.hold_file(&clip) { let _ = std::fs::remove_file(f); }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

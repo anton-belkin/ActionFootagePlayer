@@ -1352,7 +1352,14 @@ local function flat_video_part(u, x, w, y, v, r)
             y = u:segmented(x, w, y, "view360-tidy-strength", options, sel, r.taking)
         end
         y = u:switch(x, w, y, "view360-tidy-level", "Level the horizon", tidy.level == true, msg("view360-tidy", "level", "toggle"), nil, r.taking)
-        if r.tidying then y = u:caption(x, w, y, "Tidying the recording…") end
+        y = u:switch(x, w, y, "view360-tidy-picture", "Hold on what's in the middle", tidy.picture == true, msg("view360-tidy", "picture", "toggle"), nil, r.taking)
+        if r.measuring then
+            y = u:caption(x, w, y, string.format("Measuring… %d %%. The smoothed turns play meanwhile", r.measuring))
+        elseif r.tidying then
+            y = u:caption(x, w, y, "Tidying the recording…")
+        elseif tidy.picture then
+            y = u:caption(x, w, y, "By the picture: the view follows what's in its middle, up to 8°")
+        end
     end
 
     -- The frame and the size of the flat video

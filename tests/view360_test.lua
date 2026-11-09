@@ -872,6 +872,33 @@ do
     f.message("view360-tidy", "level", "toggle")
     runs[#runs].fn(true, { status = 0, stdout = utils.format_json({ error = "nothing recorded" }) })
     near("tidy: an error plays as recorded", yaw(), 25, 1e-3)
+    -- The hold on what's in the middle: asked for, the probe says it's to be measured, so it is, in the background
+    f.message("view360-tidy", "picture", "yes")
+    expect("hold: asked for", st().tidy.picture, true)
+    local probe = runs[#runs]
+    expect("hold: the probe first", probe.args[2], "--reframe")
+    local aborted = {}
+    f.mp.abort_async_command = function(c) table.insert(aborted, c) end
+    f.mp.command_native_async = function(cmd, fn) table.insert(runs, { args = cmd.args, fn = fn }); return #runs end
+    probe.fn(true, { status = 0, stdout = utils.format_json({ follows = "camera", hold = "needed", parts = answer.parts }) })
+    local m = runs[#runs]
+    expect("hold: measured by gyroflow-export", m.args[1], "mpv/scripts/gyroflow/gyroflow-export")
+    expect("hold: --measure-hold", table.concat(m.args, " "):find("--reframe recording --measure-hold --progress", 1, true) ~= nil, true)
+    expect("hold: the clip last", m.args[#m.args], clip)
+    expect("hold: measuring shown", st().measuring, 0)
+    near("hold: the smoothed turns meanwhile", yaw(), 40, 1e-3)
+    -- Done: tidied again, with the hold
+    local before_done = #runs
+    m.fn(true, { status = 0, stdout = "", stderr = "" })
+    expect("hold: no longer measuring", st().measuring, false)
+    expect("hold: tidied again", #runs, before_done + 1)
+    expect("hold: by the probe", runs[#runs].args[2], "--reframe")
+    -- A change while it measures: stopped
+    runs[#runs].fn(true, { status = 0, stdout = utils.format_json({ follows = "camera", hold = "needed", parts = answer.parts }) })
+    expect("hold: measuring again", st().measuring, 0)
+    f.message("view360-tidy", "picture", "no")
+    expect("hold: a change stops it", #aborted, 1)
+    expect("hold: not measuring", st().measuring, false)
     f.event("end-file")
     os.remove(file)
     os.execute("rmdir '" .. dir .. "'")

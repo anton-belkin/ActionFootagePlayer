@@ -410,6 +410,42 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    **Open:** the preview on screen and by eye; whether Strong is too strong for a whip pan (the design's one-euro idea).
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
+
+   **Built** (branch `claude/360-reframe-steps2-5`), with these changes from the design above:
+   - **The measuring** (`gyroflow-export --reframe recording --measure-hold`, `measure_hold`): the view rendered at
+     480×270 along the angle tidying, from a 2048-wide sphere, over the recorded span; luma only. The match is on the
+     **CPU** (`reframe::measure_shift`), not `still.rs`'s GPU search: 8×8 blocks over the middle 40 %, those with
+     nothing in them (sky, open water) left out, each searched within ±10 px **around where the view's own turn moved
+     it** (the head's turn and the turn of what it follows, from the frame's stamp), to a fraction of a pixel; the
+     median, sure by how many blocks agree with it (within 1 px) and how many had something in them. What's followed
+     is **what's left after the view's own turn**: what moved in the world (parallax, what the stabilization left, a
+     subject).
+   - **The hold** (`reframe::hold`): per stretch, those turns add up, each weighted by how sure it is (nothing below
+     0.4 of the blocks agreeing, fully from 0.8), **letting go over 4 s** (so the head comes back to where you looked),
+     kept within 8° of the angle-tidied path, the matching's noise smoothed out over **0.1 s** (not the chosen
+     strength: that would take out the shake it's there to hold). A screen turn across becomes a yaw over cos(pitch),
+     so the horizon stays level. Not for the little planet.
+   - **Kept** in the app's cache (`file_cache("reframe-hold")`), keyed by the clip and the angle-tidied path, so a
+     change of smoothing or of the recording measures again, and turning the option off and on is instant.
+   - **The player:** *Hold on what's in the middle* in the 360° tab (`view360-tidy picture`). The probe says
+     `"hold": "needed"`; view360 runs the measuring at background priority, shows "Measuring… N %" from its progress
+     file, plays the angle tidying meanwhile, and tidies again when it's done; a change of the recording or of how stops
+     it. **An export** with the hold asked for and not measured measures first ("measuring the hold" in its progress).
+
+   **Checked:** Rust tests (a textured picture moved by whole and half pixels and by 24 px around a predicted turn is
+   found; nothing to match is not sure; the focal length at the middle; the head's own turn is no shift; the hold
+   follows a steady drift, stays within 8°, ignores unsure frames, keeps its start; the cache is keyed by the path).
+   `tests/view360_test.lua`: the switch, the probe saying it's needed, the measuring started with the clip, its
+   progress, tidied again when done, stopped by a change. Headless on the X5 sample (a ride past a field): 387 frames
+   measured in 35 s (**~11 fps**, far from the design's estimate: the sphere's stitching on the CPU dominates; a
+   10-minute clip would take ~25 min); an export along the held path; an export measuring first when the smoothing
+   changed.
+
+   **Seen on the X5 sample:** the middle is mostly grass close to the road flowing past, so most frames are unsure
+   (median 0.19) and add nothing; where enough blocks agree, the hold follows the field and moves the view up to ~6°
+   off the smoothed path. That's what it promises (hold what's in the middle), but on a ride it's rarely what you want:
+   **off by default**, worth trying on walking and diving clips. **Open:** by eye on screen; the speed (measuring on a
+   GPU sphere, or every other frame).
 5. **The frame outline while recording**, and 9:16 and 1:1.
 
    **Built** (branch `claude/360-reframe-steps2-5`): `view360/main.lua` draws the export's frame over the view while a

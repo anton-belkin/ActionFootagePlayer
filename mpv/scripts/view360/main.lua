@@ -45,8 +45,10 @@
 --   view360-undo                            the last take taken back (up to 20, for as long as the clip is open)
 --   view360-clear                           nothing recorded (the panel asks first)
 --   view360-frame 16:9|9:16|1:1, view360-size 1080p|4K   the flat export's, kept with the recording
---   view360-tidy turns off|light|medium|strong|toggle, view360-tidy level yes|no|toggle   how the recording is tidied
---                                           (smoothed, leveled), kept with it: the preview and the export both
+--   view360-tidy turns off|light|medium|strong|toggle, view360-tidy level|picture yes|no|toggle   how the recording
+--                                           is tidied (smoothed, leveled, held on what's in the middle), kept with it:
+--                                           the preview and the export both. The hold is measured in the background
+--                                           (gyroflow-export --measure-hold) the first time it's asked for a path
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
 -- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
 -- camera's own file), stereo, note (why a 360° clip isn't shown), modes (per heading mode: available, why not,
@@ -93,12 +95,15 @@ end
 local SHADER = mp.get_script_directory() and (mp.get_script_directory() .. "/view360.glsl")
 -- gyroflow-probe, in the gyroflow plugin's folder beside this one: the recording tidied (--reframe) for the preview
 local PROBE = nil
+-- gyroflow-export beside it: the hold on what's in the middle measured (--measure-hold), in the background
+local EXPORT = nil
 do
     local here = mp.get_script_directory()
     local sep = package.config:sub(1, 1)
     local parent = here and here:match("^(.*)[/\\][^/\\]+$")
     local windows = (mp.get_property("platform") or "") == "windows" or sep == "\\"
     if parent then PROBE = parent .. sep .. "gyroflow" .. sep .. "gyroflow-probe" .. (windows and ".exe" or "") end
+    if parent then EXPORT = parent .. sep .. "gyroflow" .. sep .. "gyroflow-export" .. (windows and ".exe" or "") end
 end
 local HEADING_INDEX = { world = 0, camera = 1, travel = 2, north = 3 }
 local STEREO_INDEX = { mono = 0, ["top-bottom"] = 1, ["left-right"] = 2 }
@@ -141,6 +146,8 @@ local rec_playing = false
 -- follows while the recording plays; nil while it's worked out (the samples as recorded meanwhile) or not needed
 local tidied = nil
 local tidy_run, tidying = 0, false
+-- The hold's measuring under way: its command (to stop it), its progress file and how far it is (0-100), or nil
+local measuring = nil
 -- The smoothing chosen before it was turned off, to turn it on again with
 local turns_before = "medium"
 local rec_overlay = mp.create_osd_overlay and mp.create_osd_overlay("ass-events") or nil
@@ -166,7 +173,8 @@ local function rec_state()
     return {
         can = rec_clip ~= nil and sphere ~= nil, why = rec_why or false, taking = rec:taking(), seconds = rec:take_seconds(),
         spans = spans, parts = #rec.parts, follows = rec.follows or false, playing = rec_playing, frame = rec.frame,
-        size = rec.size, undo = rec:undoable(), tidy = { turns = rec.tidy.turns, level = rec.tidy.level }, tidying = tidying,
+        size = rec.size, undo = rec:undoable(), tidy = { turns = rec.tidy.turns, level = rec.tidy.level, picture = rec.tidy.picture }, tidying = tidying,
+        measuring = measuring and measuring.percent or false,
     }
 end
 
@@ -374,10 +382,62 @@ end
 
 -- The recording tidied again (after a take, an undo, a change of how): gyroflow-probe reads the clip's file, so it's
 -- saved first. The samples as recorded play meanwhile; an answer for a recording since changed is dropped
-local function retidy()
+local function stop_measuring()
+    if not measuring then return end
+    if measuring.command and mp.abort_async_command then mp.abort_async_command(measuring.command) end
+    if measuring.timer then measuring.timer:kill() end
+    if measuring.progress then os.remove(measuring.progress) end
+    measuring = nil
+end
+
+local retidy
+
+-- The hold on what's in the middle measured along the angle tidying (gyroflow-export --measure-hold: it renders, a
+-- frame of the recording at a time), its progress read from its file; tidied again when it's done
+local function measure(run)
+    stop_measuring()
+    if not EXPORT or not rec_clip then return end
+    local ok_utils, utils = pcall(require, 'mp.utils')
+    local dir = os.getenv("TMPDIR") or os.getenv("TEMP") or "/tmp"
+    local progress = dir .. "/afp-hold-" .. tostring(ok_utils and utils.getpid and utils.getpid() or os.time()) .. ".json"
+    measuring = { percent = 0, progress = progress }
+    local m = measuring
+    m.command = mp.command_native_async({ name = "subprocess", args = { EXPORT, "--background", "--reframe", "recording", "--measure-hold", "--progress", progress, rec_clip },
+                                          capture_stdout = true, capture_stderr = true, playback_only = false },
+        function(_, r)
+            if measuring ~= m then return end
+            m.command = nil
+            stop_measuring()
+            if not r or r.status ~= 0 then
+                local why = r and r.stderr and r.stderr:match("failed, ([^\n]+)") or (r and r.error_string) or "it stopped"
+                mp.msg.warn("the hold on what's in the middle couldn't be measured: " .. tostring(why))
+                mp.osd_message("Hold on what's in the middle: couldn't measure it (" .. tostring(why) .. ")", 4)
+                return publish()
+            end
+            if run == tidy_run then retidy() end
+            publish()
+        end)
+    if mp.add_periodic_timer then
+        m.timer = mp.add_periodic_timer(0.5, function()
+            local fh = io.open(progress, "r")
+            if not fh then return end
+            local text = fh:read("*a")
+            fh:close()
+            local done, total = text:match('"done":(%d+)'), text:match('"total":(%d+)')
+            if done and total and tonumber(total) > 0 then
+                local p = math.floor(100 * tonumber(done) / tonumber(total))
+                if p ~= m.percent then m.percent = p; publish() end
+            end
+        end)
+    end
+    publish()
+end
+
+function retidy()
     tidy_run = tidy_run + 1
     tidied, tidying = nil, false
-    if rec:empty() or rec:untidied() or not rec_clip or not PROBE or not mp.command_native_async then return end
+    stop_measuring()
+    if rec:empty() or (rec:untidied() and not rec.tidy.picture) or not rec_clip or not PROBE or not mp.command_native_async then return end
     local run = tidy_run
     tidying = true
     mp.command_native_async({ name = "subprocess", args = { PROBE, "--reframe", rec_clip }, capture_stdout = true, playback_only = false },
@@ -391,6 +451,8 @@ local function retidy()
             else
                 local t = recording.new():load(doc)
                 if not t:empty() then tidied = t end
+                -- The hold asked for and not measured along this path yet: measured, the angle tidying meanwhile
+                if doc.hold == "needed" then measure(run) end
             end
             follow_recording()
             publish()
@@ -592,6 +654,8 @@ mp.register_event("end-file", function()
     -- The hint isn't the next clip's
     if active then mp.osd_message("", 0) end
     stop_take("the end of the clip")
+    stop_measuring()
+    tidy_run = tidy_run + 1
     set_active(false, true)
     sphere, note = nil, nil
     rec:load(nil)
@@ -774,10 +838,10 @@ mp.register_script_message("view360-tidy", function(what, how)
         if not recording.TURNS[how] or how == rec.tidy.turns then return end
         if rec.tidy.turns ~= "off" then turns_before = rec.tidy.turns end
         rec.tidy.turns = how
-    elseif what == "level" then
-        local on = how == "yes" or (how == "toggle" and not rec.tidy.level)
-        if how ~= "yes" and how ~= "no" and how ~= "toggle" or on == rec.tidy.level then return end
-        rec.tidy.level = on
+    elseif what == "level" or what == "picture" then
+        local on = how == "yes" or (how == "toggle" and not rec.tidy[what])
+        if how ~= "yes" and how ~= "no" and how ~= "toggle" or on == rec.tidy[what] then return end
+        rec.tidy[what] = on
     else
         return
     end

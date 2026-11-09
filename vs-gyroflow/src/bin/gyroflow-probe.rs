@@ -32,8 +32,9 @@
 // the camera marked (markers.rs, as the highlights plugin reads them), or null. Kept per file as the plain answer is.
 //
 // `gyroflow-probe --reframe <video>`: the view recorded in the player as you looked around (the clip's .afp.json,
-// view360.recording), tidied as its "tidy" says (reframe.rs): {"follows", "parts", "tidy"} as the player keeps a
-// recording, for the view360 plugin to play while it shows the recording; {"error": why} when there's none.
+// view360.recording), tidied as its "tidy" says (reframe.rs): {"follows", "parts", "tidy", "hold"} as the player keeps a
+// recording, for the view360 plugin to play while it shows the recording, "hold" false (not asked for), "applied" or
+// "needed" (to be measured: gyroflow-export --reframe recording --measure-hold); {"error": why} when there's none.
 
 use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
 
@@ -67,8 +68,15 @@ fn main() {
         std::process::exit(2);
     };
     if reframe {
+        // The hold's measuring is kept under the clip's full path, as gyroflow-export keeps it
+        let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
         let out = match vs_gyroflow::reframe::Recording::read(std::path::Path::new(&path)) {
-            Ok(r) => r.tidied().to_json(),
+            Ok(r) => {
+                let (t, needed) = r.tidied_for(&path);
+                let mut j = t.to_json();
+                j["hold"] = if !r.tidy.picture { false.into() } else if needed { "needed".into() } else { "applied".into() };
+                j
+            }
             Err(e) => serde_json::json!({ "error": e }),
         };
         println!("{out}");
