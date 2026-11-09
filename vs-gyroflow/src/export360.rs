@@ -6,7 +6,8 @@
 // reads it), and the view (view360.rs, the WGSL twin of the player's GLSL) draws:
 // - a stabilized 360 video: the whole sphere turned into the world and the chosen heading, equirect, for YouTube and
 //   editors (gyroflow-export adds the spherical metadata, mp4meta::write_spherical);
-// - a flat reframe: the view along keyframes of the head (yaw, pitch, roll, FOV), as crop mode's photos are made.
+// - a flat reframe: the view along keyframes of the head (yaw, pitch, roll, FOV), as crop mode's photos are made, or
+//   along the view recorded in the player as you looked around (reframe.rs: docs/360-reframe.md).
 // gyroflow-export runs ffmpeg around it (decoding, joining, encoding).
 //
 // The heading mode by default: along the way you move when the clip has it (GPS), else along the camera, as the player
@@ -62,13 +63,31 @@ pub fn head_at(keys: &[HeadKey], t: f64) -> HeadKey {
     HeadKey { t, ..*keys.last().unwrap() }
 }
 
+/// Where a flat view looks at each moment
+#[derive(Clone, Debug)]
+pub enum HeadPath {
+    /// Keyframes, eased between, in one projection
+    Keys { keys: Vec<HeadKey>, projection: Projection },
+    /// The view recorded in the player, its projection per sample
+    Recording(crate::reframe::Recording),
+}
+
+impl HeadPath {
+    pub fn at(&self, t: f64) -> (HeadKey, Projection) {
+        match self {
+            HeadPath::Keys { keys, projection } => (head_at(keys, t), *projection),
+            HeadPath::Recording(r) => r.head_at(t),
+        }
+    }
+}
+
 /// What comes out
 #[derive(Clone, Debug)]
 pub enum Output {
     /// The whole sphere, `width` by `width / 2`
     Sphere { width: usize },
-    /// The view along the head's keyframes
-    Flat { size: (usize, usize), projection: Projection, keys: Vec<HeadKey> },
+    /// The view along a path of the head
+    Flat { size: (usize, usize), head: HeadPath },
 }
 
 impl Output {
@@ -164,9 +183,9 @@ impl Render360 {
         let mut p = ViewParams { q_world_from_cam: st.q_world_from_cam, heading_yaw: st.headings[self.heading as usize].yaw, ..Default::default() };
         match &self.out {
             Output::Sphere { .. } => p.projection = Projection::Equirect,
-            Output::Flat { projection, keys, .. } => {
-                let h = head_at(keys, t);
-                (p.yaw, p.pitch, p.roll, p.fov, p.projection) = (h.yaw, h.pitch, h.roll, h.fov, *projection);
+            Output::Flat { head, .. } => {
+                let (h, projection) = head.at(t);
+                (p.yaw, p.pitch, p.roll, p.fov, p.projection) = (h.yaw, h.pitch, h.roll, h.fov, projection);
             }
         }
         // Each plane: the sphere's (its stamp rows, two in luma and one in chroma, left out of the view)

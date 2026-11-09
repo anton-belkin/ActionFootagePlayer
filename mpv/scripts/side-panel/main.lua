@@ -1283,6 +1283,92 @@ end
 local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" } }, { { "stereographic", "Stereographic" }, { "planet", "Little planet" } } }
 -- What the view follows: along the way you move (GPS), the camera, north (the compass, or GPS), the world
 local HEADING_OPTIONS = { { "travel", "Way" }, { "camera", "Camera" }, { "north", "North" }, { "world", "World" } }
+local FOLLOWS_NAMES = { travel = "the way", camera = "the camera", north = "north", world = "the world" }
+local FLAT_FRAMES = { { "16:9", 1, 9 / 16 }, { "9:16", 9 / 16, 1 }, { "1:1", 0.8, 0.8 } }
+local FLAT_SIZES = { "1080p", "4K" }
+-- Clear the recording asks first: a second click within this many seconds clears
+local CLEAR_SECONDS = 4
+local clear_asked = nil
+-- The panel drawn again (update, set once it's defined below)
+local redraw_flat = nil
+
+-- The 360° tab's Flat video (docs/360-reframe.md, step 1): Record / Stop, what's recorded, playing it, the frame and
+-- the size, the exports, undo and clear. v: user-data/view360; r: its recording
+local function flat_video_part(u, x, w, y, v, r)
+    local s = u.s
+    local function msg(...) return "script-message-to view360 " .. table.concat({ ... }, " ") end
+    local alt_shift = (keys["script-binding view360/play-recording"] or ""):gsub("%+(%u)$", function(c) return "+Shift+" .. c:lower() end)
+    y = u:heading(x, w, y + 10 * s, "Flat video", keys["script-binding view360/record"])
+    if r.taking then
+        y = u:button(x, w, y, "view360-record", "■  Stop · " .. clock(r.seconds or 0), msg("view360-record", "stop"), { primary = true })
+    else
+        y = u:button(x, w, y, "view360-record", "●  Record", msg("view360-record", "start"), { primary = true, disabled = not r.can })
+    end
+    if not r.can then return u:caption(x, w, y, "Can't record here: " .. tostring(r.why or "this clip can't keep a recording")) end
+    if (r.parts or 0) == 0 then
+        y = u:caption(x, w, y, "Look around as it plays: what you see becomes a flat video. Pausing, seeking or the clip's end "
+                               .. "stop a take")
+    else
+        local spans = {}
+        for _, sp in ipairs(r.spans or {}) do table.insert(spans, clock(sp[1]) .. "–" .. clock(sp[2])) end
+        local listed = #spans > 3 and (spans[1] .. ", " .. spans[2] .. " … " .. spans[#spans]) or table.concat(spans, " and ")
+        y = u:caption(x, w, y, string.format("Recorded %s · %d part%s", listed, #spans, #spans == 1 and "" or "s"), { color = C.label })
+        y = u:switch(x, w, y, "view360-play-recording", "Play the recording", r.playing == true, msg("view360-play-recording", "toggle"),
+                     alt_shift ~= "" and alt_shift or nil, r.taking)
+        y = u:caption(x, w, y, "Relative to what the view follows: " .. (FOLLOWS_NAMES[r.follows] or tostring(r.follows))
+                               .. (r.playing and "" or ". A drag, a scroll or a pinch gives you the view"))
+    end
+
+    -- The frame and the size of the flat video
+    local frames, fsel = {}, nil
+    for i, f in ipairs(FLAT_FRAMES) do
+        table.insert(frames, { f[1], msg("view360-frame", f[1]), f[2], f[3] })
+        if f[1] == r.frame then fsel = i end
+    end
+    y = u:heading(x, w, y + 6 * s, "Frame")
+    y = u:ratios(x, w, y, "view360-frame", frames, fsel)
+    local sizes, ssel = {}, nil
+    for i, z in ipairs(FLAT_SIZES) do
+        table.insert(sizes, { z, msg("view360-size", z) })
+        if z == r.size then ssel = i end
+    end
+    y = u:segmented(x, w, y, "view360-size", sizes, ssel)
+
+    -- The exports: the recorded view flat, or the whole sphere; a part marked (A-B) or the recorded parts' span
+    local g = state("gyroflow") or {}
+    local half = (w - 8 * s) / 2
+    local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local part = (a and b and b > a) and (" " .. clock(a) .. "–" .. clock(b)) or ""
+    if g.exporting then
+        y = u:button(x, w, y + 4 * s, "view360-export-cancel", "Cancel export", "script-message-to gyroflow cancel-export")
+    else
+        u:button(x, half, y + 4 * s, "view360-export-flat", "Export flat" .. part, "script-message-to gyroflow export flat",
+                 { primary = true, disabled = (r.parts or 0) == 0 or r.taking })
+        y = u:button(x + half + 8 * s, half, y + 4 * s, "view360-export-360", "Export 360°" .. part, "script-message-to gyroflow export 360",
+                     { disabled = r.taking })
+    end
+    y = u:caption(x, w, y, (part ~= "" and "The part marked" or "Flat: the recorded parts' span") .. ", in the look it plays in. "
+                           .. "360°: the whole sphere, level, along what the view follows")
+    y = u:button(x, w, y, "view360-last", "Show the last export", "script-message-to gyroflow reveal-last-export",
+                 { disabled = (g.last_export or "") == "" })
+
+    if (r.parts or 0) > 0 then
+        local asking = clear_asked and mp.get_time() < clear_asked + CLEAR_SECONDS
+        u:button(x, half, y + 4 * s, "view360-undo", "Undo the last take", msg("view360-undo"), { disabled = (r.undo or 0) == 0 or r.taking })
+        y = u:button(x + half + 8 * s, half, y + 4 * s, "view360-clear", asking and "Sure? Click again" or "Clear the recording",
+                     function()
+                         if clear_asked and mp.get_time() < clear_asked + CLEAR_SECONDS then
+                             clear_asked = nil
+                             mp.commandv("script-message-to", "view360", "view360-clear")
+                         else
+                             clear_asked = mp.get_time()
+                             mp.add_timeout(CLEAR_SECONDS + 0.05, function() if redraw_flat then redraw_flat() end end)
+                         end
+                     end)
+    end
+    return y
+end
+
 local function view360_part(u, x, w, y)
     local s = u.s
     local v = state("view360")
@@ -1344,7 +1430,14 @@ local function view360_part(u, x, w, y)
         table.insert(options, { h[2], msg("view360-heading", h[1]), v.stamped and not has(h[1]) })
         if h[1] == v.heading then selected = i end
     end
-    y = u:segmented(x, w, y, "view360-heading", options, selected, not v.stamped)
+    -- The recording's own while a take records or the recording plays
+    local r = type(v.recording) == "table" and v.recording or {}
+    local locked = r.taking == true or r.playing == true
+    y = u:segmented(x, w, y, "view360-heading", options, selected, not v.stamped or locked)
+    if locked then
+        y = u:caption(x, w, y, (r.taking and "Recording" or "Playing the recording") .. ": following "
+                               .. (FOLLOWS_NAMES[v.heading] or tostring(v.heading)), { color = C.label })
+    end
     if not v.stamped then
         return u:caption(x, w, y, "This clip has no motion data in its frames: the camera as it was stitched, level and still, "
                                   .. "and only your head turns")
@@ -1384,7 +1477,7 @@ local function view360_part(u, x, w, y)
             end
         end
     end
-    return y
+    return flat_video_part(u, x, w, y, v, r)
 end
 
 local PARTS = { project = project_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
@@ -1549,6 +1642,7 @@ function place_osc()
 end
 
 local update = render
+redraw_flat = update
 
 -- The mouse: clicks and the wheel are the panel's while it's over it, the player's elsewhere
 local captured = false

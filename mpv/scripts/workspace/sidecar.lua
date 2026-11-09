@@ -8,6 +8,7 @@
 --
 -- `marks` absent: the camera's marks are the clip's (nothing changed yet); present, even empty: they're these.
 -- `view` absent: the clip plays as the defaults say.
+-- `view360` (the view360 plugin's): a 360° clip's recorded view, `view360.recording` (docs/360-reframe.md).
 --
 -- Plain Lua, no mpv (tests/sidecar_test.lua):
 --   local sidecar = require('sidecar').new({ parse_json, format_json, windows })
@@ -78,8 +79,8 @@ function M.new(env)
     end
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
-    -- nothing written. A doc left with no marks, no view and no source (the input: curve, turn, lens under water):
-    -- the file removed
+    -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water) and no
+    -- 360 recording: the file removed
     function s.update(clip, fn)
         local doc, from, problem = s.read(clip)
         if problem then return false, problem end
@@ -87,7 +88,7 @@ function M.new(env)
         if fn(doc) == false then return true end
         doc.format = M.FORMAT
         local file = s.path(clip)
-        if doc.marks == nil and doc.view == nil and doc.source == nil then
+        if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil then
             if from then os.remove(from) end
             return true
         end

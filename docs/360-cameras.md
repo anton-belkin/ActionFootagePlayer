@@ -224,7 +224,8 @@ as level and fixed, and only the head turns. This is the first step to build: it
 The same sphere and stamp, the same view math in Rust (WGSL), so that an export looks as the player shows:
 
 - **stabilized 360**: the sphere turned into the world and the chosen heading, written with spherical metadata;
-- **flat reframe**: the view along keyframes of the head, through gyroflow-export as crop mode's photos are.
+- **flat reframe**: the view along keyframes of the head, through gyroflow-export as crop mode's photos are; the head
+  recorded as you look around, tidied and exported, is designed in [360-reframe.md](360-reframe.md).
 
 The view math exists twice, in GLSL and WGSL, so a test renders both from the same sphere and stamp and compares.
 
