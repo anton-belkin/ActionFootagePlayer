@@ -19,10 +19,10 @@
 --   _Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
--- Clip previews: _Clips/<the clip's path>.afplink.mp4, a flipbook of the clip in color (its marks, else a dozen
--- frames), made by Action Footage Library (the batch mode at the end of this file), one at a time in the background,
--- only for clips not in the project file's clips_made, so that one deleted (X, or in Finder: not interesting) stays
--- deleted.
+-- Clip previews: <the clip's path>.afplink.mp4 in a run's Generated/<date> <time> Clip previews/ (moved anywhere in
+-- the project's folder from there), a flipbook of the clip in color (its marks, else a dozen frames), made by Action
+-- Footage Library (the batch mode at the end of this file), one at a time in the background, for the clips without
+-- one. Nothing remembers a deleted one (docs/library-management.md §8): asked again, it's made again.
 --   X                   this clip isn't interesting: its preview to the Trash; again: made again
 -- A clip preview's file plays its original, all of it.
 --
@@ -48,7 +48,7 @@
 --   clips           while clip previews are made: { done, total }
 --   project_choices with no project: the folders one can be started in, from the top down; project_new: the one the
 --                   panel suggests (init-project <folder> initializes it)
---   moments_total   the project's moments; clips_stats: { total (clips), previews (made, there), new (never made) }
+--   moments_total   the project's moments; clips_stats: { total (clips), previews (there), new (without one) }
 --   clip_preview    this clip's preview: made, removed (made, then deleted: not interesting) or none
 --   project         the project's folder, absent for none
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
@@ -59,7 +59,7 @@
 --   own_others      the clip's own files beside its other copies (in other locations): read, never written; the main
 --                   one is sidecar_file (workspace.lua's own_file)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
---   moments_folder  the project's _Moments/ folder
+--   moments_folder  where the project's new moments go: its Generated/ folder (_Moments/ in a project of before)
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
@@ -187,6 +187,8 @@ fs.mounts = function()
     return out
 end
 local ws = workspace.new(fs)
+-- A path in a project ("Day 1/A.MP4") with this system's separators
+local function native(rel) return windows and (rel:gsub("/", "\\")) or rel end
 -- A project's locations, read again when its file changes
 local locs_cache = {}
 local function locations_of(root)
@@ -226,6 +228,7 @@ fs.never_rename = function(root)
     return locs_cache[root] ~= nil and locs_cache[root].never_rename
 end
 fs.created = link.created
+fs.read_photo_link = link.photo
 -- A file's path in its project's tree ("Action 6/A.MP4"): the location holding it, its place plus the path under it
 local function tree_of(file, root)
     if not file or not root then return nil end
@@ -289,7 +292,6 @@ end
 -- The project's counts and this clip's preview, for the side panel (set further down, with the clip previews)
 local extras = nil
 -- The project's settings (further down)
-local settings
 local clips_layout, fingerprint
 fs.fingerprint = function(file) return fingerprint and fingerprint(file) or nil end
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
@@ -383,6 +385,14 @@ end
 
 -- What's known about the file at `path`, as published
 local told_others = {}
+-- Where a project's made files are shown from (the menu's Moments folder): Generated/, or _Moments/ in a project of
+-- before that has no Generated/ yet
+local function moments_home(root)
+    local gen = ws.join(root, moments_lib.GENERATED)
+    if fs.is_dir(gen) then return gen end
+    local old = ws.join(root, moments_lib.FOLDER)
+    return fs.is_dir(old) and old or gen
+end
 local function describe(path)
     if not path or path == "" then return {} end
     if path:find("://", 1, true) then return { path = path } end
@@ -411,7 +421,7 @@ local function describe(path)
         gyroflow_new = gyroflow_new,
         sidecar_file = own,
         own_others = others and #others > 0 and others or nil,
-        moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
+        moments_folder = root and moments_home(root) or nil,
         project_choices = not root and ws.project_choices(clip) or nil,
         project_new = not root and ws.new_project_root(clip) or nil,
     }
@@ -483,14 +493,10 @@ local function refresh()
     publish()
 end
 
--- A folder of _Moments/ changed (a file added, removed or renamed in it), or _Moments/ was made
+-- A folder with moments in it changed (a file added, removed or renamed in it), or the project's top or one of its own
+-- folders did (a folder of moments moved in): moments.scan's dirs
 local function watch()
     if not scanned_project or scanned_project ~= state.project then return end
-    local root = ws.join(scanned_project, moments_lib.FOLDER)
-    if found.dirs[root] == nil then
-        if fs.is_dir(root) then refresh() end
-        return
-    end
     for dir, mtime in pairs(found.dirs) do
         local info = utils.file_info(dir)
         if not info or info.mtime ~= mtime then return refresh() end
@@ -504,7 +510,7 @@ local function open_moment(path)
     local l = utils.parse_json(raw)
     if type(l) == "table" and l.v == 1 and l.kind == "export" then
         -- It plays as it is (stabilized, in its look already); its original is a menu item
-        local original = original_of(l, moments.project_of(state.clip, moments_lib.EXPORTS), state.clip)
+        local original = original_of(l, moments.project_of(state.clip), state.clip)
         state.export = { name = moments_lib.display_name(state.clip), original = original,
                          ["in"] = l["in"], out = l.out }
         return
@@ -512,7 +518,7 @@ local function open_moment(path)
     if type(l) == "table" and l.v == 1 and l.kind == "clip" then
         -- A clip preview: its original, all of it
         if before_autocreate() then return end
-        local original = original_of(l, moments.project_of(state.clip, moments_lib.CLIPS), state.clip)
+        local original = original_of(l, moments.project_of(state.clip), state.clip)
         if not original then
             mp.osd_message(moments_lib.display_name(state.clip) .. ": the clip isn't at " .. tostring(l.clip), 6)
             return
@@ -584,10 +590,18 @@ local function open_moment(path)
     state.created = l.created
 end
 
--- _Moments/ or a folder in it: its moments, in the order they happened, as the playlist
+-- A folder of the project's own (not among its footage) with moments in it: its moments, in the order they
+-- happened, as the playlist
 local function open_folder(dir)
     local project = moments.project_of(ws.join(dir, "x"))
     if not project then return end
+    local rel = ws.relative(dir, project)
+    local top = rel and rel:match("^([^/]+)")
+    if not (top and moments_lib.OWN_FOLDERS[top:lower()]) then
+        for _, l in ipairs(locations_of(project) or {}) do
+            if l.dir and (l.dir == dir or ws.relative(dir, l.dir)) then return end
+        end
+    end
     local all = moments.scan(project, tracked_cache).list
     save_cache()
     local prefix = dir:sub(-1):match("[/\\]") and dir or (dir .. (windows and "\\" or "/"))
@@ -712,35 +726,44 @@ end
 local function project_doc() return state.project and pf.read(state.project) or nil end
 local function project_update(fn) return state.project ~= nil and pf.update(state.project, fn) end
 
--- The names typed for moments, the last one last: the project's moment_names, and a name typed is added to them
+-- The names of the project's moments, the newest last (by their files' times): what the name dialog suggests from
+-- and ↑ goes through. Read from the moments themselves (docs/library-management.md §8), not kept in the project's file
+local function moment_names()
+    local list = {}
+    for _, m in ipairs(found and found.list or {}) do
+        local c = cache[m.file]
+        list[#list + 1] = { name = type(m.link.name) == "string" and m.link.name or m.name, t = type(c) == "table" and c.mtime or 0 }
+    end
+    table.sort(list, function(x, y) return x.t < y.t end)
+    local out, seen = {}, {}
+    for i = #list, 1, -1 do
+        local n = list[i].name
+        if not seen[n] then seen[n] = true; table.insert(out, 1, n) end
+    end
+    return out
+end
+
 local function last_name()
     if last_typed then return last_typed end
-    local doc = project_doc()
-    local names = doc and doc.moment_names or {}
+    local names = moment_names()
     return names[#names]
 end
 
 local function remember_name(text)
-    if not text or not text:match("%S") then return end
-    project_update(function(d)
-        if d.moment_names[#d.moment_names] ~= text then d.moment_names[#d.moment_names + 1] = text end
-        -- The last few hundred are enough for ↑
-        while #d.moment_names > 500 do table.remove(d.moment_names, 1) end
-    end)
+    if text and text:match("%S") then last_typed = text end
 end
 
--- mp.input's ↑ reads earlier names from a file: the project's, written out for it before it asks
+-- mp.input's ↑ reads earlier names from a file: the moments' names, written out for it before it asks
 local history_path = nil
 local function history_file()
-    local doc = project_doc()
-    if not doc then return nil end
+    if not state.project then return nil end
     if not history_path then
         local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
         history_path = utils.join_path(tmp, "afp-moment-names-" .. tostring(utils.getpid()) .. ".txt")
     end
     local f = io.open(history_path, "w")
     if not f then return nil end
-    for _, n in ipairs(doc.moment_names) do f:write(n, "\n") end
+    for _, n in ipairs(moment_names()) do f:write(n, "\n") end
     f:close()
     return history_path
 end
@@ -840,7 +863,10 @@ local function save(name, update, typed, quiet, opts)
     if update then
         file, final = update.file, update.name
     else
-        file, final = moments.unique_file(ws.join(root, moments_lib.FOLDER), safe)
+        -- Into Generated/<date> Moments/, a folder a day (docs/library-management.md §8)
+        local dir = ws.join(root, native(moments_lib.generated_rel("Moments", os.time(), true)))
+        mkdir(dir)
+        file, final = moments.unique_file(dir, safe)
     end
     local info = utils.file_info(state.clip)
     local l = {
@@ -859,7 +885,7 @@ local function save(name, update, typed, quiet, opts)
     local preview_project = nil
     if not update or update.snap or opts.own then
         local alone = opts.alone
-        if alone == nil then alone = update and update.alone or (not update and settings().moments_alone == true) or false end
+        if alone == nil then alone = update and update.alone or (not update and cache.moments_alone == true) or false end
         local stab = opts.stab or (update and update.stab) or current_view()
         l.snap, l.alone, l.stab = 1, alone, stab
         local own = own_project(file)
@@ -1181,7 +1207,9 @@ mp.register_script_message("export-name", function(json)
         local first = false
         local root = need_project("Exporting")
         if not root then return end
-        local output, final = moments.unique_file(ws.join(root, moments_lib.EXPORTS), safe, label .. ".mov")
+        local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), true)))
+        mkdir(dir)
+        local output, final = moments.unique_file(dir, safe, label .. ".mov")
         local info = utils.file_info(state.clip)
         local l = {
             v = 1, kind = "export", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
@@ -1249,13 +1277,6 @@ do
     end
 end
 
--- The clips a preview was made for (the project file's clips_made), as a set of made_line()s
-local function read_made(root)
-    root = root or state.project
-    if not root then return {} end
-    return moments_lib.parse_made(table.concat(pf.read(root).clips_made, "\n"))
-end
-
 -- A clip's marks: its marks file's, else the camera's; nil for none
 local function marks_of(clip)
     local doc = sidecar.read(clip)
@@ -1274,23 +1295,16 @@ local function marks_of(clip)
     return nil
 end
 
-local function native(rel) return windows and rel:gsub("/", "\\") or rel end
 
--- The project's settings (the project file's): clips_flat (clip previews all in _Clips/ itself), moments_alone
-settings = function()
-    local doc = project_doc()
-    return doc and doc.settings or {}
-end
-
--- The clip previews there are, found by the link inside each: renamed, or moved into folders of one's own within
--- _Clips/, they're still the clip's. { [the clip's path in the project] = { file, size } }, read again a minute on
+-- The clip previews there are, found by the link inside each wherever they are in the project's folder: renamed, or
+-- moved into folders of one's own, they're still the clip's. { [the clip's path in the project] = { file, size } }, read again a minute on
 local previews_cache = { time = -1e9, index = {} }
 local function previews(force)
     local project = state.project
     if not project then return {} end
     if not force and previews_cache.project == project and mp.get_time() - previews_cache.time < 60 then return previews_cache.index end
     local index = {}
-    for _, p in ipairs(moments.scan(project, tracked_cache, moments_lib.CLIPS, "clip").list) do
+    for _, p in ipairs(moments.scan(project, tracked_cache, nil, "clip").list) do
         if type(p.link.clip) == "string" then index[p.link.clip] = { file = p.file, size = p.link.size } end
     end
     save_cache()
@@ -1305,10 +1319,11 @@ local function preview_for(relative, size)
     return nil
 end
 
--- Where a new preview goes: at the clip's path in _Clips/ (flat: in _Clips/ itself). A name another clip's preview has
--- gets the clip's folder in parentheses ("GX010123 (100GOPRO)"), then a number
-local function new_preview_path(root, c, flat)
-    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(c.preview_rel or moments_lib.clip_preview_relative(c.relative, flat)))
+-- Where a new preview goes: at the clip's path in the run's folder (Generated/<date> <time> Clip previews; flat: in
+-- that folder itself). A name another clip's preview has gets the clip's folder in parentheses ("GX010123 (100GOPRO)"),
+-- then a number
+local function new_preview_path(dir, c, flat)
+    local file = ws.join(dir, native(c.preview_rel or moments_lib.clip_preview_relative(c.relative, flat)))
     if not fs.is_file(file) then return file end
     local raw = fs.read_link(file)
     local l = raw and utils.parse_json(raw)
@@ -1341,9 +1356,9 @@ local function next_clip()
         state.clips = nil
         publish()
         draw_progress()
-        -- Why the ones that failed did, in the project file (Action Footage Library shows them)
-        if #job.failures > 0 or not job.stopping then
-            pf.update(job.project, function(d) d.clips_failed = job.failures end)
+        -- Why the ones that failed did: in the player's log (and the batch's status, which the Library shows)
+        if #job.failures > 0 then
+            for _, f in ipairs(job.failures) do mp.msg.warn("clip preview of " .. tostring(f[1]) .. " not made: " .. tostring(f[2])) end
         end
         recount()
         if batch then return batch.finished({ made = job.made, failed = job.failed, failures = job.failures, stopped = job.stopping }) end
@@ -1353,7 +1368,7 @@ local function next_clip()
         return
     end
     local exporter = mp.get_property_native("user-data/gyroflow/exporter")
-    local out = new_preview_path(job.project, c, job.flat)
+    local out = new_preview_path(job.dir, c, job.flat)
     local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
     -- At background priority while a video plays
     if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
@@ -1371,8 +1386,6 @@ local function next_clip()
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             job.made = job.made + 1
-            local line = moments_lib.made_line(c.relative, c.size)
-            pf.update(job.project, function(d) d.clips_made[#d.clips_made + 1] = line end)
         elseif not job.stopping then
             job.failed = job.failed + 1
             local err = r and r.stderr or ""
@@ -1393,7 +1406,10 @@ local function start_clips(root, queue, what)
     if not mp.get_property_native("user-data/gyroflow/exporter") then
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
-    clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
+    -- A folder of this run's own, from where they're moved anywhere (docs/library-management.md §8)
+    local dir = ws.join(root, native(moments_lib.generated_rel("Clip previews", os.time())))
+    mkdir(dir)
+    clips_job = { project = root, dir = dir, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
                   flat = clips_layout(root) == "flat" }
     state.clips = { done = 0, total = #queue }
     publish()
@@ -1402,18 +1418,19 @@ local function start_clips(root, queue, what)
     next_clip()
 end
 
--- How the clip previews are laid out in _Clips (the project file's settings): "tree" (as the footage is), "flat"
--- (all in _Clips itself), "trips" (in a folder per trip: clips at most 2 days apart)
-clips_layout = function(root)
-    local s = pf.read(root).settings or {}
-    if s.clips_layout == "flat" or s.clips_layout == "trips" or s.clips_layout == "tree" then return s.clips_layout end
-    return s.clips_flat == true and "flat" or "tree"
+-- How a run's clip previews are laid out in its folder: "tree" (as the footage is), "flat" (all in it), "trips" (in a
+-- folder per trip: clips at most 2 days apart). Chosen for each run: the Library's request says, else this computer's
+-- last choice (kept with the player's cache)
+local LAYOUTS = { tree = true, flat = true, trips = true }
+clips_layout = function()
+    if batch and LAYOUTS[batch.layout] then return batch.layout end
+    return LAYOUTS[cache.clips_layout] and cache.clips_layout or "tree"
 end
 
--- Where each of `queue`'s previews goes, out of all the project's clips (`all`): an identical clip's (the same size
--- and fingerprint as one before it, or as one that has its preview) into _Clips/Duplicates/, under its location's name
--- and its folders there, as Sources show them; else by trips when that's the layout, into the folder its trip's
--- previews are in already (renamed, it's kept), else the trip's own. Sets c.preview_rel, c.duplicate_of
+-- Where each of `queue`'s previews goes in the run's folder, out of all the project's clips (`all`): an identical
+-- clip's (the same size and fingerprint as one before it, or as one that has its preview) into Duplicates/, under its
+-- location's name and its folders there, as Sources show them; else by trips when that's the layout, into its trip's
+-- folder. Sets c.preview_rel, c.duplicate_of
 local function place_previews(root, all, queue)
     local by_size = {}
     for _, c in ipairs(all) do
@@ -1439,29 +1456,20 @@ local function place_previews(root, all, queue)
             if first and first.relative ~= c.relative then c.duplicate_of = first.relative end
         end
     end
-    local trips = clips_layout(root) == "trips"
-    local folder_of = {}
-    if trips then
-        moments_lib.trips(all)
-        local clips_dir = ws.join(root, moments_lib.CLIPS)
-        for _, c in ipairs(all) do
-            local p = c.trip and not folder_of[c.trip] and preview_for(c.relative, c.size)
-            local rel = p and p:sub(1, #clips_dir + 1) == clips_dir .. (windows and "\\" or "/") and p:sub(#clips_dir + 2)
-            local top = rel and rel:match("^([^/\\]+)[/\\]")
-            if top and top ~= "Duplicates" then folder_of[c.trip] = top end
-        end
-    end
+    local trips = clips_layout() == "trips"
+    if trips then moments_lib.trips(all) end
     for _, c in ipairs(queue) do
         if c.duplicate_of then
             c.preview_rel = "Duplicates/" .. moments_lib.safe_name(c.loc or "Location") .. "/" .. moments_lib.clip_preview_relative(c.loc_rel or c.relative, false)
         elseif trips and c.trip then
-            c.preview_rel = (folder_of[c.trip] or c.trip) .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
+            c.preview_rel = c.trip .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
         end
     end
 end
 
--- The project's clips without a preview made (again: the ones made and since deleted)
--- `root`: the project's folder, in batch mode (no clip plays)
+-- The project's clips without a preview (anywhere in the project's folder). Nothing remembers the ones made and
+-- deleted: made again when asked (docs/library-management.md §8). `root`: the project's folder, in batch mode
+-- (no clip plays)
 local function make_clips(again, root)
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
     if not root then
@@ -1469,27 +1477,21 @@ local function make_clips(again, root)
         root = need_project("Making clip previews")
         if not root then return end
     end
-    local made = read_made(root)
     local queue = {}
+    previews(true)
     local all = moments.footage(root)
     for _, c in ipairs(all) do
-        local listed = made[moments_lib.made_line(c.relative, c.size)]
-        if batch_only then
-            -- Chosen ones: each that has no preview now, removed ones too
-            if in_only(c.relative) and not preview_for(c.relative, c.size) then queue[#queue + 1] = c end
-        elseif (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
-            queue[#queue + 1] = c
-        end
+        if (not batch_only or in_only(c.relative)) and not preview_for(c.relative, c.size) then queue[#queue + 1] = c end
     end
     if #queue == 0 then
-        local why = again and "No clip preview was removed" or "Every clip has its preview (removed ones: Make again for removed clips)"
+        local why = "Every clip has its preview"
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
         return mp.osd_message(why, 4)
     end
     place_previews(root, all, queue)
     local dups = 0
     for _, c in ipairs(queue) do if c.duplicate_of then dups = dups + 1 end end
-    start_clips(root, queue, "Clip previews: " .. #queue .. (dups > 0 and (", " .. dups .. " of them identical to another clip: into _Clips/Duplicates") or "") .. (#queue == 1 and " clip" or " clips") .. ", in the background")
+    start_clips(root, queue, "Clip previews: " .. #queue .. (dups > 0 and (", " .. dups .. " of them identical to another clip: into Duplicates") or "") .. (#queue == 1 and " clip" or " clips") .. ", in the background")
 end
 
 mp.register_script_message("clips-stop", function()
@@ -1532,14 +1534,12 @@ end)
 -- for again replaces the one under way; a quit, or another clip, doesn't wait for it
 local stats_cache = {}
 local function count(project, force, s)
-    local made = read_made()
     local cached = stats_cache[project]
     if force or not cached or mp.get_time() - cached.time > 60 then
         local total, previews, new = 0, 0, 0
         for _, c in ipairs(moments.footage(project)) do
             total = total + 1
-            if preview_for(c.relative, c.size) then previews = previews + 1 end
-            if not made[moments_lib.made_line(c.relative, c.size)] then new = new + 1 end
+            if preview_for(c.relative, c.size) then previews = previews + 1 else new = new + 1 end
         end
         cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
         stats_cache[project] = cached
@@ -1549,7 +1549,6 @@ local function count(project, force, s)
     state.clips_stats = cached.stats
     local info = fs.info(state.clip)
     if state.relative and preview_for(state.relative, info and info.size) then state.clip_preview = "made"
-    elseif state.relative and made[moments_lib.made_line(state.relative, info and info.size)] then state.clip_preview = "removed"
     else state.clip_preview = "none" end
 end
 
@@ -1577,9 +1576,7 @@ extras = function(force)
     local s = state
     counting.co, counting.calls = coroutine.create(function() count(project, force, s) end), 0
     step(counting.co)
-    local doc = pf.read(project)
-    state.moments_alone = doc.settings.moments_alone == true
-    state.clips_failed = #doc.clips_failed > 0 and #doc.clips_failed or nil
+    state.moments_alone = cache.moments_alone == true
 end
 
 -- Counted again after clip previews are made or removed
@@ -1606,7 +1603,7 @@ mp.register_script_message("init-project", function(dir)
     end
     state.project = dir
     state.relative = tree_of(state.clip, dir)
-    state.moments_folder = ws.join(dir, moments_lib.FOLDER)
+    state.moments_folder = moments_home(dir)
     state.project_choices, state.project_new = nil, nil
     mp.osd_message("Project initialized: " .. ws.name(dir), 3)
     refresh()
@@ -2147,11 +2144,12 @@ mp.register_event("file-loaded", function()
     publish_view(true)
 end)
 
--- New moments stabilized on their own (a project's setting)
+-- New moments stabilized on their own: this computer's choice (kept with the player's cache), not the project's
 mp.register_script_message("moments-alone", function()
-    if not state.project then return end
-    local alone
-    project_update(function(d) d.settings.moments_alone = not (d.settings.moments_alone == true); alone = d.settings.moments_alone end)
+    local alone = not (cache.moments_alone == true)
+    cache.moments_alone = alone
+    cache_dirty = true
+    save_cache()
     local t = { moments_alone = alone }
     state.moments_alone = alone
     publish()
@@ -2174,17 +2172,26 @@ end
 
 -- The project's marks, all at once (the Project tab's): a moment for each mark in no moment yet, 2 s on each side,
 -- those that overlap joined into one (the clip's marks: its own file's, else the camera's); or a photo of each mark,
--- into _Stills, except those made before (the project file's stills_made: a line per clip and mark, so a photo
--- deleted stays deleted). One at a time in the background, each with its clip's saved view (else the defaults); a
+-- except those that have one somewhere in the project's folder (its link: the clip and the time). A run's go into a
+-- folder of its own, Generated/<date> <time> Moments or Photos (docs/library-management.md §8). One at a time in the background, each with its clip's saved view (else the defaults); a
 -- moment with settings of its own, as one saved with k: a copy of the clip's Gyroflow project when it has one. While it
 -- runs: user-data/workspace/marks_job { kind (moments, photos), done, total, failed }
 local MOMENT_AROUND = 2
 local marks_job = nil
 
 local function stills_line(relative, size, t) return relative .. "\t" .. tostring(size) .. "\t" .. string.format("%.3f", t) end
-local function read_stills_made(root)
+-- The photos there are of marks: a stills_line per photo (its clip's path, size and time), and the same with its
+-- clip's identity in place of the path, so a clip moved since still has its photos
+local function photos_made(root)
     local made = {}
-    for _, line in ipairs(pf.read(root).stills_made) do made[line] = true end
+    for _, p in ipairs(moments.photos(root, tracked_cache)) do
+        local l = p.link
+        if type(l.t) == "number" then
+            made[stills_line(l.clip, l.size, l.t)] = true
+            if type(l.hash) == "string" then made[l.hash .. "\t" .. string.format("%.3f", l.t)] = true end
+        end
+    end
+    save_cache()
     return made
 end
 
@@ -2228,12 +2235,7 @@ mp.register_script_message("job-done", function(id, json)
     if not j or tostring(j.id) ~= id then return end
     local r = utils.parse_json(json or "") or {}
     local item = j.queue[j.done + 1]
-    if r.ok then
-        if j.kind == "photos" and item then
-            local line = stills_line(item.relative, item.size, item.t)
-            pf.update(j.root, function(d) d.stills_made[#d.stills_made + 1] = line end)
-        end
-    else
+    if not r.ok then
         j.failed = j.failed + 1
         j.failures[#j.failures + 1] = { tostring(item and (item.relative or item.name) or ""), tostring(r.error or "failed") }
         mp.msg.warn((j.kind == "moments" and "moment " or "photo ") .. tostring(item and item.name or "") .. ": " .. tostring(r.error))
@@ -2256,12 +2258,13 @@ job_next = function()
     local id = tostring(j.id)
     if j.kind == "photos" then
         mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
-            id = id, clip = item.clip, t = item.t, view = item.rendered, reply = mp.get_script_name(), done = "job-done" }))
+            id = id, clip = item.clip, t = item.t, view = item.rendered, reply = mp.get_script_name(), done = "job-done", out_dir = j.dir }))
         return
     end
     -- A moment, as k saves one: its link, its own settings (and project), its preview
     local root = j.root
-    local file, final = moments.unique_file(ws.join(root, moments_lib.FOLDER), item.name)
+    mkdir(j.dir)
+    local file, final = moments.unique_file(j.dir, item.name)
     local l = { v = 1, kind = "moment", clip = item.relative, size = item.size, created = item.created_text,
                 ["in"] = moments_lib.ms(item.a), out = moments_lib.ms(item.b), name = final, roots = { root },
                 snap = 1, alone = j.alone, stab = item.view }
@@ -2291,7 +2294,7 @@ end
 -- What there is to make, over the project's clips (their headers read: a second or so per hundred clips)
 local function marks_queue(kind, root)
     local queue = {}
-    local made = kind == "photos" and read_stills_made(root) or nil
+    local made = kind == "photos" and photos_made(root) or nil
     local all = kind == "moments" and moments.scan(root, nil).list or nil
     local taken_names = {}
     for _, c in ipairs(moments.footage(root)) do
@@ -2304,7 +2307,12 @@ local function marks_queue(kind, root)
             if kind == "photos" then
                 for _, t in ipairs(times) do
                     if not made[stills_line(c.relative, size, t)] then
-                        queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, t = t, view = view, rendered = rendered, name = ws.name(c.file) .. " " .. clock(t) }
+                        -- A clip that moved: its photos by its fingerprint, read only where its marks are (few clips)
+                        local h = not c.hash_read and fingerprint(c.file) or c.hash
+                        c.hash_read, c.hash = true, h
+                        if not (h and made[h .. "\t" .. string.format("%.3f", t)]) then
+                            queue[#queue + 1] = { clip = c.file, relative = c.relative, size = size, t = t, view = view, rendered = rendered, name = ws.name(c.file) .. " " .. clock(t) }
+                        end
                     end
                 end
             else
@@ -2349,11 +2357,14 @@ local function start_marks_job(kind, root)
     if batch then batch.looking() end
     local queue = marks_queue(kind, root)
     if #queue == 0 then
-        local why = kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already (deleted ones aren't made again)"
+        local why = kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already"
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
         return mp.osd_message(why, 4)
     end
-    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, alone = pf.read(root).settings.moments_alone == true }
+    -- This run's folder (docs/library-management.md §8)
+    local dir = ws.join(root, native(moments_lib.generated_rel(kind == "moments" and "Moments" or "Photos", os.time())))
+    marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, dir = dir,
+                  alone = (batch and batch.alone ~= nil) and batch.alone or cache.moments_alone == true }
     mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
     job_progress()
     job_next()
@@ -2420,8 +2431,13 @@ local function render_recipe(m, original, profile)
                      stab = l.stab, alone = l.alone, input = type(doc) == "table" and doc.source or nil,
                      gyroflow = fs.is_file(own) and fingerprint(own) or nil, profile = profile })
 end
+-- A moment's path for its renders: in _Moments its path there (as before 0.11), else its path in the project's folder
+-- (Library's index.rs renders_of does the same)
+local function render_rel(root, file)
+    return ws.relative(file, ws.join(root, moments_lib.FOLDER)) or ws.relative(file, root) or ws.name(file)
+end
 local function render_file(root, m, profile)
-    local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+    local rel = render_rel(root, m.file)
     local base = rel:gsub("%.afplink%.mp4$", "")
     if windows then base = base:gsub("/", "\\") end
     return ws.join(ws.join(root, RENDERS), base .. "." .. profile .. ".mov")
@@ -2442,20 +2458,17 @@ local function copy_file(from, to)
     return r and r.status == 0
 end
 
+-- The exports there are, wherever they are in the project's folder (found by the link inside)
 local function exported_parts(root)
     local set = {}
-    local dir = ws.join(root, moments_lib.EXPORTS)
-    for _, name in ipairs(utils.readdir(dir, "files") or {}) do
-        local lower = name:lower()
-        if lower:match("%.mov$") or lower:match("%.mp4$") then
-            local raw = fs.read_link(ws.join(dir, name))
-            local l = raw and fs.parse_json(raw)
-            if type(l) == "table" and l.kind == "export" and type(l.clip) == "string" and l["in"] and l.out then
-                local sdr = l.look == "maker" or l.look == "nbcu"
-                set[l.clip .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] = true
-            end
+    for _, e in ipairs(moments.scan(root, tracked_cache, nil, "export").list) do
+        local l = e.link
+        if type(l.clip) == "string" and l["in"] and l.out then
+            local sdr = l.look == "maker" or l.look == "nbcu"
+            set[l.clip .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] = true
         end
     end
+    save_cache()
     return set
 end
 
@@ -2481,7 +2494,7 @@ local function export_next()
     else
         local label = sdr and " (SDR)" or ""
         local final
-        output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
+        output, final = moments.unique_file(j.dir, moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
         l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
               ["in"] = m.link["in"], out = m.link.out, name = final, look = sdr and "nbcu" or "hdr",
               stabilized = m.rendered.view ~= "off", roots = { j.root }, hash = m.link.hash }
@@ -2560,9 +2573,11 @@ local function export_moments(root, sdr)
         end
         return
     end
-    mkdir(ws.join(root, moments_lib.EXPORTS))
+    -- This run's folder (docs/library-management.md §8)
+    local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time())))
+    mkdir(dir)
     local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
-    export_job = { root = root, sdr = sdr, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
+    export_job = { root = root, dir = dir, sdr = sdr, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
                    progress = utils.join_path(tmp, "afp-batch-export-" .. tostring(utils.getpid()) .. ".json") }
     -- Those whose original is missing count as failed, after the rest
     export_job.total_extra = #failures
@@ -2590,7 +2605,7 @@ local function render_moments(root, profiles)
                         local recipe = render_recipe(m, original, p)
                         local out = render_file(root, m, p)
                         if not render_current(out, recipe) then
-                            local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+                            local rel = render_rel(root, m.file)
                             queue[#queue + 1] = {
                                 name = m.name .. " (" .. p .. ")", link = l, original = original, rendered = rendered,
                                 project = fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
@@ -2620,9 +2635,10 @@ local function render_moments(root, profiles)
 end
 
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
--- { kind, project, status, stop, photo, sdr, only }: kind clips (previews of the clips without one), clips-again (the ones
--- removed), moments (moments of all marks), photos (photos of all marks; photo: no, live or motion), export (all
--- moments; sdr: in SDR), render (renders of the moments in _Renders/; profiles: HDR, SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
+-- { kind, project, status, stop, photo, sdr, only, layout, alone }: kind clips or clips-again (previews of the clips
+-- without one; layout: tree, flat or trips), moments (moments of all marks; alone: stabilized on their own), photos
+-- (photos of all marks; photo: no, live or motion), export (all moments; sdr: in SDR), render (renders of the moments
+-- in _Renders/; profiles: HDR, SDR). What a run makes goes into Generated/<date> <time> <what>/. The player makes them for that project as the menu used to, writes how far it is to `status`
 -- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
 -- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
 -- is cancelled) and quits when it's done. `only`: the paths in the project it's kept to (clips, folders, moment files):
@@ -2651,7 +2667,9 @@ do
                 end
             end
             local started, stop_sent, ended = false, false, false
-            batch = {}
+            -- Chosen for this run in the Library's dialog: how clip previews are laid out (tree, flat, trips), and
+            -- whether new moments are stabilized on their own
+            batch = { layout = req.layout, alone = type(req.alone) == "boolean" and req.alone or nil }
             function batch.looking()
                 status.state = "looking"
                 write_status()

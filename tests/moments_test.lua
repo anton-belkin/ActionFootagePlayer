@@ -122,6 +122,23 @@ expect("of clip: by in", mine[1].name, "Moray")
 expect("of clip: second", mine[2].name, "Turtle")
 expect("of clip: other created", #m.of_clip(found.list, { relative = "Day 1/A.MP4", size = 100, created = "2025-01-01T00:00:00Z" }), 0)
 expect("of clip: unknown size", #m.of_clip(found.list, { relative = "Day 1/A.MP4" }), 3)
+-- Moments anywhere in the project's folder (§8): in Generated/, beside the footage when named .afplink.mp4; among
+-- the footage a plain .mp4 isn't read
+file("/T/Egypt/Generated/2026-11-10 14-32 Moments/Gen.mp4", 10, 1, link("Day 1/A.MP4", 40, 41))
+file("/T/Egypt/Day 1/Beside.afplink.mp4", 10, 1, link("Day 1/A.MP4", 50, 51))
+file("/T/Egypt/Day 2/renamed.mp4", 10, 1, link("Day 1/A.MP4", 60, 61))
+local anywhere = m.scan("/T/Egypt", {})
+local names = {}
+for _, x in ipairs(anywhere.list) do names[x.name] = true end
+expect("anywhere: in Generated", names["Gen"], true)
+expect("anywhere: beside the footage", names["Beside"], true)
+expect("anywhere: a plain video among the footage isn't read", names["renamed"], nil)
+expect("anywhere: Generated's folder watched", anywhere.dirs["/T/Egypt/Generated/2026-11-10 14-32 Moments"], 7)
+expect("anywhere: a folder with none not watched", anywhere.dirs["/T/Egypt/Day 2"], nil)
+expect("anywhere: kept to a folder", #m.scan("/T/Egypt", {}, "Generated").list, 1)
+expect("generated", moments_lib.generated_rel("Moments", os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 })), "Generated/2026-11-10 14-32 Moments")
+expect("generated a day", moments_lib.generated_rel("Moments", os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 }), true), "Generated/2026-11-10 Moments")
+for _, f in ipairs({ "/T/Egypt/Generated/2026-11-10 14-32 Moments/Gen.mp4", "/T/Egypt/Day 1/Beside.afplink.mp4", "/T/Egypt/Day 2/renamed.mp4" }) do files[f] = nil end
 local before = reads
 m.scan("/T/Egypt", cache)
 expect("cache: nothing read again", reads, before)
@@ -132,7 +149,7 @@ expect("by time", m.by_time(found.list)[1].name, "Other")
 
 -- Where a moment's original is
 expect("project of", m.project_of("/T/Egypt/_Moments/Reef/Moray.afplink.mp4"), "/T/Egypt")
-expect("project of: not in Moments", m.project_of("/T/Egypt/Day 1/A.MP4"), nil)
+expect("project of: anywhere in it", m.project_of("/T/Egypt/Day 1/A.MP4"), "/T/Egypt")
 expect("project of: copied out", m.project_of("/Users/me/Desktop/Turtle.afplink.mp4"), nil)
 local l = fs.parse_json(link("Day 1/A.MP4", 20, 30, ',"roots":["/Old/Egypt","/T/Egypt"]'))
 expect("original", m.original(l, "/T/Egypt"), "/T/Egypt/Day 1/A.MP4")
@@ -192,7 +209,6 @@ expect("free file", (m.unique_file("/T/Egypt/_Moments", "Dolphin")), "/T/Egypt/_
 file("/T/Egypt/_Exports/Turtle (SDR).mov", 10)
 expect("unique export", (m.unique_file("/T/Egypt/_Exports", "Turtle", " (SDR).mov")), "/T/Egypt/_Exports/Turtle 2 (SDR).mov")
 expect("export's project", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov", "_Exports"), "/T/Egypt")
-expect("not a moment's", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov"), nil)
 
 -- Clip previews
 expect("clip preview", moments_lib.clip_preview_relative("Day 1/DJI_0068_D.MP4"), "Day 1/DJI_0068_D.afplink.mp4")

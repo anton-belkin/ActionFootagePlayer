@@ -12,6 +12,10 @@
 --                 made again
 --   moment_names  the names typed for moments, the last one last (the name dialog suggests the next)
 --
+-- Since 0.11 (docs/library-management.md §8, "The project is its files") the player writes none of these lists: what
+-- was made is found by the link inside each file, settings are chosen per run or kept on this computer, names are the
+-- moments'. Older files are read as they are; empty lists aren't written.
+--
 -- Each change reads the file again, changes it and writes it whole through a temporary file renamed over it, keeping
 -- what this doesn't know: the player and Action Footage Library write it both.
 --
@@ -115,7 +119,20 @@ function M.new(env)
         return read_file(root) or p.read_legacy(root) or blank()
     end
 
+    -- What's written: since 0.11 (docs/library-management.md §8) the file keeps only where the footage is; the lists of
+    -- before are kept while they have something (the Library takes what it needs from them), empty ones left out
+    local OLD_LISTS = { "settings", "clips_made", "clips_failed", "stills_made", "moment_names" }
+    local function written(doc)
+        local out = {}
+        for k, v in pairs(doc) do out[k] = v end
+        for _, k in ipairs(OLD_LISTS) do
+            if type(out[k]) == "table" and next(out[k]) == nil then out[k] = nil end
+        end
+        return out
+    end
+
     local function write(root, doc)
+        doc = written(doc)
         local file = p.path(root)
         local tmp = file .. ".tmp"
         local f, err = io.open(tmp, "wb")

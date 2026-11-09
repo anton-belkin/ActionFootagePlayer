@@ -674,6 +674,16 @@ local function shown_time()
     return math.max(restart, t - d.delay)
 end
 
+-- Where a photo goes: the project's Generated/<date> Photos/, a folder a day (docs/library-management.md §8), as the
+-- workspace plugin says the project is; nil: gyroflow-export's own choice (stabilized/ beside a clip of no project)
+local function photo_dir()
+    local ws = mp.get_property_native("user-data/workspace")
+    local project = type(ws) == "table" and ws.project
+    if type(project) ~= "string" or project == "" then return nil end
+    local sep = platform.windows and "\\" or "/"
+    return project .. sep .. "Generated" .. sep .. os.date("%Y-%m-%d") .. " Photos"
+end
+
 local function photo()
     local path = local_path()
     if not path or not installed("Photo") then return end
@@ -715,6 +725,8 @@ local function photo()
             table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", x0, y0, x1 - x0, y1 - y0))
         end
     end
+    local dir = photo_dir()
+    if dir then table.insert(args, "--out"); table.insert(args, dir) end
     -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
     local frame_args, frame_file = gpu_frame()
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
@@ -749,7 +761,8 @@ mp.register_script_message("photo", photo)
 
 -- A photo of any clip at a time, with its saved view, for the workspace plugin (the Project tab's photos of marks):
 -- { id, clip, t, view, reply }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
--- frame on or off; into the project's _Stills. The answer: photo-done (or req.done) <id> { ok, error, out }
+-- frame on or off; into `out_dir` (the run's Generated/ folder), else the project's Generated/<date> Photos. The
+-- answer: photo-done (or req.done) <id> { ok, error, out }
 mp.register_script_message("photo-at", function(json)
     local req = utils.parse_json(json or "")
     if type(req) ~= "table" or not req.clip or not req.t or not req.reply then return end
@@ -764,6 +777,8 @@ mp.register_script_message("photo-at", function(json)
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     view_args(args, type(req.view) == "table" and req.view or {})
     if mp.get_property_native("user-data/gyroflow/still") == false then table.insert(args, "--radius"); table.insert(args, "0") end
+    local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
+    if dir then table.insert(args, "--out"); table.insert(args, dir) end
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
