@@ -72,6 +72,12 @@
 //!MAXIMUM 5
 5
 
+//!PARAM gyroflow_dn_strong
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 1
+0
+
 //!PARAM gyroflow_dn_keep
 //!TYPE DYNAMIC float
 //!MINIMUM 0.0
@@ -897,6 +903,23 @@ vec4 hook()
 #define DN_SLOT ivec2(DN_SLOT_W, DN_SLOT_H)
 #define DN_MAGIC 0x5E21u
 float lum(vec3 c) { return dot(c, vec3(0.2627, 0.678, 0.0593)); }
+// The noise at a brightness, between its bins: the luma's (gdn_sigma[0-15]) and the color's (B-Y, gdn_sigma[16-31]);
+// a bin not measured yet holds the start value negated (dn_state)
+float sigma_at(float l)
+{
+    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
+    int i = int(b);
+    return mix(abs(gdn_sigma[i]), abs(gdn_sigma[min(i + 1, 15)]), b - float(i));
+}
+float sigc_at(float l)
+{
+    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
+    int i = int(b);
+    return mix(abs(gdn_sigma[16 + i]), abs(gdn_sigma[16 + min(i + 1, 15)]), b - float(i));
+}
+vec2 chroma(vec3 c) { float y = lum(c); return vec2(c.b - y, c.r - y); }
+// The clip's Stronger (the panel's Transform, for very noisy clips)
+bool dn_strong() { return gyroflow_dn_strong > 0; }
 ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
 // The ring holds frames of this render's kind: not after a reset (main.lua's epoch: the camera's mode, a realign) or a
 // change of the output's size
@@ -1133,23 +1156,9 @@ vec4 hook()
 
 // ==== pass dn_blend ====
 #ifdef DN_BLEND
-// How much a patch may differ beyond the noise and still be averaged in: still.rs's weight's scale
-#define DN_TOLERANCE 1.5
-// The noise at a brightness, between its bins: the luma's (gdn_sigma[0-15]) and the color's (B-Y, gdn_sigma[16-31]);
-// a bin not measured yet holds the start value negated (dn_state)
-float sigma_at(float l)
-{
-    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
-    int i = int(b);
-    return mix(abs(gdn_sigma[i]), abs(gdn_sigma[min(i + 1, 15)]), b - float(i));
-}
-float sigc_at(float l)
-{
-    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
-    int i = int(b);
-    return mix(abs(gdn_sigma[16 + i]), abs(gdn_sigma[16 + min(i + 1, 15)]), b - float(i));
-}
-vec2 chroma(vec3 c) { float y = lum(c); return vec2(c.b - y, c.r - y); }
+// How much a patch may differ beyond the noise and still be averaged in: still.rs's weight's scale (twice it with
+// Stronger: more frames taken in where the noise is heavy and blotchy)
+#define DN_TOLERANCE (dn_strong() ? 3.0 : 1.5)
 vec3 frame_bilinear(int slot, vec2 p)
 {
     vec2 f = fract(p);
@@ -1216,6 +1225,13 @@ vec4 hook()
         }
     }
     vec3 den = sum / wsum;
+    // Stronger: the shown pixel judged too, against what the matched frames agree on. A spike of the noise in it (the
+    // dark specks HEVC leaves under water) gets a tenth of the weight instead of staying a part of every frame's own
+    if (dn_strong() && wsum >= 3.0) {
+        vec3 nbm = (sum - cur) / (wsum - 1.0);
+        float ws = mix(0.1, 1.0, 1.0 - smoothstep(2.0 * s, 4.0 * s, abs(l - lum(nbm))));
+        den = (sum - cur + ws * cur) / (wsum - 1.0 + ws);
+    }
     // The noise, from the shown frame against the one before where they match
     if (!dn_same() && noise_diff >= 0.0 && all(equal(j % 4, ivec2(0)))) {
         uint bin = uint(clamp(l * 16.0, 0.0, 15.0));
@@ -1223,8 +1239,138 @@ vec4 hook()
         atomicAdd(gdn_hist[bin * 256u + st], 1u);
         atomicAdd(gdn_hist[4096u + bin * 256u + uint(clamp(noise_c * 4096.0, 0.0, 255.0))], 1u);
     }
-    // Some of the grain kept, so it doesn't look smeared (gyroflow.conf's still_grain)
-    return vec4(den + gyroflow_dn_keep * (cur - den), 1.0);
+    // Some of the grain kept, so it doesn't look smeared (gyroflow.conf's still_grain); none with Stronger
+    return vec4(den + (dn_strong() ? 0.0 : gyroflow_dn_keep) * (cur - den), 1.0);
+}
+#endif
+
+// ==== pass dn_clean ====
+// After the frames are averaged, the frame itself (in both the denoise's modes): what averaging frames can't take out.
+// - Dark specks: HEVC under water leaves spikes of the noise, mostly in red (dark cyan dots on blue water, 1-7 px), new
+//   each frame; the frame's own pixel keeps part of them. Where a pixel is darker than the ring of 16 pixels two away by
+//   more than the noise, and that ring has no dark pixels opposite each other (a dark line or edge through it would),
+//   it takes the ring's color. Bright dots stay: particles in the water are white.
+// - The color: a guided filter (He et al., "fast": its statistics at a quarter of the size) of B-Y and R-Y, each its own
+//   guide over ~20 px, so the color's blotches go and an edge of color well above its noise stays (a pink fin over water
+//   of its brightness: guided by the luma, its color would spread); with Stronger the luma too (its own guide, ~12 px).
+//   Their eps is the noise's (dn_state's measure).
+#ifdef DN_SPECKS
+// The ring two pixels away, offset i of 16 (i and 15 - i opposite each other)
+vec2 ring_off(int i)
+{
+    int r = i < 5 ? i : (i < 11 ? (i % 2 == 1 ? 5 + (i - 5) / 2 * 5 : 9 + (i - 6) / 2 * 5) : 20 + (i - 11));
+    return vec2(r % 5 - 2, r / 5 - 2);
+}
+vec4 hook()
+{
+    vec3 c = HOOKED_texOff(vec2(0.0)).rgb;
+    float yc = lum(c);
+    float t = (dn_strong() ? 1.0 : 1.3) * max(sigma_at(yc), 1e-4);
+    // Most pixels aren't darker than the four pixels two away: done at four reads
+    float m4 = 0.25 * (lum(HOOKED_texOff(vec2(2.0, 0.0)).rgb) + lum(HOOKED_texOff(vec2(-2.0, 0.0)).rgb)
+                     + lum(HOOKED_texOff(vec2(0.0, 2.0)).rgb) + lum(HOOKED_texOff(vec2(0.0, -2.0)).rgb));
+    if (yc >= m4 - 0.5 * t) return vec4(c, 1.0);
+    float m0 = 0.0;
+    for (int i = 0; i < 16; i++) m0 += lum(HOOKED_texOff(ring_off(i)).rgb);
+    m0 /= 16.0;
+    // The ring's level without its own dark ones
+    float m1 = 0.0, n1 = 0.0;
+    vec3 c1 = vec3(0.0);
+    for (int i = 0; i < 16; i++) {
+        vec3 v = HOOKED_texOff(ring_off(i)).rgb;
+        if (lum(v) > m0 - t) { m1 += lum(v); c1 += v; n1 += 1.0; }
+    }
+    if (n1 < 8.0 || yc >= m1 / n1 - t) return vec4(c, 1.0);
+    m1 /= n1;
+    // Dark on both sides: a line or an edge through it, kept
+    for (int i = 0; i < 8; i++)
+        if (lum(HOOKED_texOff(ring_off(i)).rgb) < m1 - t && lum(HOOKED_texOff(ring_off(15 - i)).rgb) < m1 - t) return vec4(c, 1.0);
+    return vec4(c1 / n1, 1.0);
+}
+#endif
+#ifdef DN_GF_LO
+// The quarter-size luma and color: each texel the mean of its 4x4 pixels (four bilinear reads)
+vec4 hook()
+{
+    vec2 d = HOOKED_pt;
+    vec3 c = 0.25 * (HOOKED_tex(HOOKED_pos + vec2(-d.x, -d.y)).rgb + HOOKED_tex(HOOKED_pos + vec2(d.x, -d.y)).rgb
+                   + HOOKED_tex(HOOKED_pos + vec2(-d.x, d.y)).rgb + HOOKED_tex(HOOKED_pos + vec2(d.x, d.y)).rgb);
+    float y = lum(c);
+    return vec4(y, c.b - y, c.r - y, 1.0);
+}
+#endif
+#if defined(DN_GF_AY) || defined(DN_GF_AC)
+// The filter's a and b per quarter texel, from the means over a window around it: the luma's (1 texel around: ~12 px)
+// and the color's (2 around: ~20 px), each its own guide
+vec4 hook()
+{
+#ifdef DN_GF_AY
+    const int R = 1;
+#else
+    const int R = 2;
+#endif
+    vec2 d = GDN_GF_LO_pt;
+    vec2 p = GDN_GF_LO_pos;
+    float my = 0.0, myy = 0.0;
+    vec2 mc = vec2(0.0), mcc = vec2(0.0);
+    for (int dy = -R; dy <= R; dy++)
+        for (int dx = -R; dx <= R; dx++) {
+            vec3 v = GDN_GF_LO_tex(p + vec2(dx, dy) * d).xyz;
+            my += v.x; myy += v.x * v.x; mc += v.yz; mcc += v.yz * v.yz;
+        }
+    float n = float((2 * R + 1) * (2 * R + 1));
+    my /= n; myy /= n; mc /= n; mcc /= n;
+#ifdef DN_GF_AY
+    float var = max(myy - my * my, 0.0);
+    float e = 0.4 * sigma_at(my);
+    float a = var / (var + e * e);
+    return vec4(a, my - a * my, 0.0, 1.0);
+#else
+    vec2 var = max(mcc - mc * mc, vec2(0.0));
+    float e = 0.8 * sigc_at(my);
+    vec2 a = var / (var + e * e);
+    return vec4(a.x, mc.x - a.x * mc.x, a.y, mc.y - a.y * mc.y);
+#endif
+}
+#endif
+#if defined(DN_GF_MY) || defined(DN_GF_MC)
+// The means of a and b over the same windows
+vec4 hook()
+{
+#ifdef DN_GF_MY
+    const int R = 1;
+    vec2 d = GDN_GF_AY_pt;
+    vec2 p = GDN_GF_AY_pos;
+#else
+    const int R = 2;
+    vec2 d = GDN_GF_AC_pt;
+    vec2 p = GDN_GF_AC_pos;
+#endif
+    vec4 m = vec4(0.0);
+    for (int dy = -R; dy <= R; dy++)
+        for (int dx = -R; dx <= R; dx++)
+#ifdef DN_GF_MY
+            m += GDN_GF_AY_tex(p + vec2(dx, dy) * d);
+#else
+            m += GDN_GF_AC_tex(p + vec2(dx, dy) * d);
+#endif
+    return m / float((2 * R + 1) * (2 * R + 1));
+}
+#endif
+#ifdef DN_GF_APPLY
+// q = a I + b at full size, a and b between the quarter texels (the sampler's filter), I the pixel's own
+vec4 hook()
+{
+    vec3 c = HOOKED_texOff(vec2(0.0)).rgb;
+    float y = lum(c);
+    vec4 ac = GDN_GF_MC_tex(HOOKED_pos);
+    vec2 ay = GDN_GF_MY_tex(HOOKED_pos).xy;
+    float cb = ac.x * (c.b - y) + ac.y, cr = ac.z * (c.r - y) + ac.w;
+    if (dn_strong()) y = ay.x * y + ay.y;
+    // Back to RGB from the luma and B-Y, R-Y (lum's weights)
+    float r = cr + y, b = cb + y;
+    float g = (y - 0.2627 * r - 0.0593 * b) / 0.678;
+    return vec4(r, g, b, 1.0);
 }
 #endif
 

@@ -258,6 +258,8 @@ local function stabilization_menu(g, key)
         -- None with Performance & Quality's temporal denoise off on this computer
         item("Temporal denoise", "script-binding gyroflow/still", { checked = g.still, disabled = g.temporal_denoise == "off",
                                                                    shortcut = key["script-binding gyroflow/still"] }),
+        item("Stronger denoise for this clip", "script-message-to gyroflow denoise-strong toggle",
+             { checked = g.denoise_strong == true, disabled = not g.still or type(g.gpu) ~= "table" }),
         item("Save frame…", "script-binding gyroflow/crop", { checked = (g.crop or {}).active == true, shortcut = key["script-binding gyroflow/crop"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),

@@ -9,8 +9,9 @@
 -- Transform: how it's shown, a matter of taste, always kept whole, all its keys at once (a bundle): the
 -- stabilization (normal, wide, off), its level, the horizon lock, the water's color fringes, the frame's aspect and
 -- orientation, the lens's projection, and the lens corrected or as recorded (apart from the stabilization: corrected
--- with it off is the lens alone). The temporal denoise isn't part of it: how much of it there is is the computer's
--- (gyroflow.conf's temporal_denoise), and a bundle's denoise_ keys from before that are left out. A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
+-- with it off is the lens alone), and the temporal denoise's Stronger (for a very noisy clip). How much temporal
+-- denoise there is is the computer's (gyroflow.conf's temporal_denoise), and a bundle's denoise_frames, _grain and
+-- _tolerance from before that are left out. A bundle is the source's (.afp.json's `view`), or a moment's or clip preview's own (its link's
 -- `stab`, with "settings of its own"); with none, the session's plays (the gyroflow plugin's, from the app's defaults
 -- and changed only by hand). The topmost bundle there is plays, and bundles never mix.
 --
@@ -36,11 +37,11 @@
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens" }
+M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise_strong" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle; a wider view or none over it is for viewing only, so the view too
 M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
-M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear" }
+M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear", denoise_strong = false }
 
 local VALID = {
     view = { normal = true, wide = true, off = true },
@@ -51,6 +52,7 @@ local VALID = {
     orientation = { ["as-is"] = true, landscape = true, portrait = true },
     projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true },
     lens = { corrected = true, ["as-recorded"] = true },
+    denoise_strong = { [true] = true, [false] = true },
 }
 
 local function valid(k, v)
