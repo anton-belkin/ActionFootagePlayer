@@ -41,7 +41,7 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
       -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M \
-      -e AFP_TV_LOOK=pqg2.5 afp-stream:f43 \
+      -e AFP_TV_LOOK=pqg2.5r30 afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
@@ -135,6 +135,11 @@ at ~203, peaks 300-450) looked dark on the TV in a lit room, its HDR mode keepin
 follows the brightness slider; expanding the highlights alone didn't help (Anton: the mid-tones and shadows are what's
 dark). Of x1, 1.5, 2 and 2.5 on clip 0065 (median 45 -> 67, 90, 112 nits; peaks up to 760) Anton chose 2.5 for that TV,
 2026-11-09: `AFP_TV_LOOK=pqg2.5`.
+
+At 30 fps for the TV: with the PQ conversion and the gain the TV's renders ran at 33-54 fps against the clips' 59.94,
+and it stopped between segments. A look may end in `r<fps>` (`afp-render -every n`: all frames decoded, every n-th
+rendered and encoded, keyframes and segments where they were; the TV interpolates). Clip 0087 (57.8 s): 103.8 s to
+render at 60 fps (0.56x real time), 40.1 s at 30 (1.44x); clip 0082: 0.57x and 1.34x. `AFP_TV_LOOK=pqg2.5r30` since.
 
 Pre-rendering for the TV: the TV plays its own renders (its look), so what was pre-rendered for the player's HLG doesn't
 help it. `GET /prerender` takes `look=tv` (`AFP_TV_LOOK`, or a look as in a stream id), `recursive=1` (the folder and
