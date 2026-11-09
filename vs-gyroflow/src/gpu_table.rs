@@ -413,7 +413,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
     let sample = |hook: &str, desc: &str, extra: &str, tag: &str| {
         let (passes, bind, fdefs) = fill(hook, tag, extra, true);
         format!("{passes}\n{}", hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, sphere_bind, &bind,
-            "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, &format!("{extra}\n{fdefs}"), pass_body("sample")))
+            "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w gyroflow_render_scale *", "//!HEIGHT OUTPUT.h gyroflow_render_scale *", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, &format!("{extra}\n{fdefs}"), pass_body("sample")))
     };
     let grid = |hook: &str| {
         let s = opts.grid_step;
@@ -421,13 +421,13 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
         let texture = |name: &str| format!("//!TEXTURE {name}\n//!SIZE {gw} {gh}\n//!FORMAT rgba32f\n//!STORAGE\n\n");
         format!("{}{}{}", texture("GYROFLOW_GRID"), if rb { texture("GYROFLOW_GRID_RB") } else { String::new() },
             hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!SAVE GYROFLOW_GRID_DONE",
-                &format!("//!WIDTH OUTPUT.w {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
+                &format!("//!WIDTH OUTPUT.w gyroflow_render_scale * {s} / 4 +"), &format!("//!HEIGHT OUTPUT.h gyroflow_render_scale * {s} / 4 +"), "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow grid"]),
                 &defs, "#define GRID_PASS", pass_body("grid")))
     };
     let warp = match opts.mode {
         Mode::Exact => {
             let (passes, bind, fdefs) = fill("MAIN", "M", "", false);
-            format!("{passes}\n{}", hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", &bind, "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+            format!("{passes}\n{}", hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", &bind, "//!WIDTH OUTPUT.w gyroflow_render_scale *", "//!HEIGHT OUTPUT.h gyroflow_render_scale *",
                 "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, &fdefs, pass_body("exact")))
         }
         Mode::Grid => format!("{}\n{}{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "", "M"), if sphere {
@@ -435,7 +435,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
             // colors the fill reads back)
             format!("\n//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}", SPHERE_W / 2,
                 hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!BIND GYROFLOW_SPHERE", "//!SAVE GYROFLOW_SPHERE_DONE",
-                    "//!WIDTH OUTPUT.w 2 /", "//!HEIGHT OUTPUT.h 2 /", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, "#define SPHERE_PASS", pass_body("sphere")))
+                    "//!WIDTH HOOKED.w 2 /", "//!HEIGHT HOOKED.h 2 /", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, "#define SPHERE_PASS", pass_body("sphere")))
         } else { String::new() }),
         Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
             sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA", "L"),
@@ -483,13 +483,13 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table) -> String {
         texture("GDN_VEC", nb.0, nb.1 * RING, "rgba32f"),
         hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!SAVE GDN_CUR4", "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise luma"]), &dn_defs, "", pass_body("dn_luma")),
-        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4"], &["//!SAVE GDN_STORE_DONE", "//!WIDTH OUTPUT.w", "//!HEIGHT OUTPUT.h",
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4"], &["//!SAVE GDN_STORE_DONE", "//!WIDTH HOOKED.w", "//!HEIGHT HOOKED.h",
             "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise store"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STORE", "dn_store")),
-        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_VEC"], &["//!SAVE GDN_MOTION_DONE", "//!WIDTH OUTPUT.w 32 / 1 +",
-            "//!HEIGHT OUTPUT.h 32 / 1 +", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise motion"]),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_CUR4", "//!BIND GDN_VEC"], &["//!SAVE GDN_MOTION_DONE", "//!WIDTH HOOKED.w 32 / 1 +",
+            "//!HEIGHT HOOKED.h 32 / 1 +", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow denoise motion"]),
             &dn_defs, "#define DN_COMPUTE", &dn("#define DN_MOTION", "dn_motion")),
-        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_VEC"], &["//!SAVE GDN_NV", "//!WIDTH OUTPUT.w 32 / 1 +",
-            &format!("//!HEIGHT OUTPUT.h 32 / 2 + {} *", 2 * RADIUS), "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise motion chained"]),
+        hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_VEC"], &["//!SAVE GDN_NV", "//!WIDTH HOOKED.w 32 / 1 +",
+            &format!("//!HEIGHT HOOKED.h 32 / 2 + {} *", 2 * RADIUS), "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise motion chained"]),
             &dn_defs, "#define DN_COMPUTE", &dn("#define DN_COMPOSE", "dn_compose")),
         hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_NV"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise"]),
             &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
@@ -567,7 +567,7 @@ pub fn sphere_shader(prep: &crate::sphere360::Prepared360, time_offset: f64) -> 
     let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let passes = format!("//!TEXTURE GYROFLOW_WEIGHTS\n//!SIZE {ww} {wh}\n//!FORMAT rgba8\n//!FILTER LINEAR\n{hex}\n\n{}",
         hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_WEIGHTS", &format!("//!WIDTH {sw}"), &format!("//!HEIGHT {sh}"),
-                            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
+                            "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)\n#define RT target_size", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
     let (head, _, _) = sections();
     let text = head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
         .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes);
@@ -686,6 +686,7 @@ layout(set = 0, binding = 7, rgba32f) uniform image2D sphere_img;
 #define GYROFLOW_GRID_RB grid_rb_img
 #define GYROFLOW_TABLE sampler2D(table_t, table_s)
 #define target_size out_size
+#define RT out_size
 layout(set = 0, binding = 8) uniform texture2D fill_t;
 layout(set = 0, binding = 9) uniform sampler fill_s;
 #define FILL_RAW sampler2D(fill_t, fill_s)

@@ -45,7 +45,7 @@ for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }
 -- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
 local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
-local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
+local RESOLUTIONS = { { "auto", "Auto: fit the display, at most 1080p with temporal denoise" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" }, { "video", "The video's own size" } }
 local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
 local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 -- How much temporal denoise (Ctrl+p) this computer does: gyroflow.conf's temporal_denoise

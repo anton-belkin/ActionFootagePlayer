@@ -1060,14 +1060,15 @@ local function quality_part(u, x, w, y)
     }, rates[tostring(g.fps_limit or 0)])
     y = u:caption(x, w, y, "How often the stabilized frame is rendered")
     y = u:heading(x, w, y + 8 * s, "Size")
-    local sizes = { video = 1, display = 2, ["1080"] = 3, ["720"] = 4 }
+    local sizes = { auto = 1, display = 2, ["1080"] = 3, ["720"] = 4, video = 5 }
     y = u:segmented(x, w, y, "size", {
-        { "Video", "script-message-to gyroflow quality resolution video" },
-        { "Display", "script-message-to gyroflow quality resolution display" },
+        { "Auto", "script-message-to gyroflow quality resolution auto" },
+        { "Screen", "script-message-to gyroflow quality resolution display" },
         { "1080p", "script-message-to gyroflow quality resolution 1080" },
         { "720p", "script-message-to gyroflow quality resolution 720" },
+        { "Video", "script-message-to gyroflow quality resolution video" },
     }, sizes[tostring(g.resolution)])
-    y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
     y = u:heading(x, w, y + 8 * s, "Paused frame", keys["script-binding gyroflow/full"])
     local paused = { off = 1, auto = 2 }
     y = u:segmented(x, w, y, "paused", {
