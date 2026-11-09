@@ -649,6 +649,15 @@ re-encoding**:
   so that stays right (**to try**).
 - Windows and Linux: a writer of our own for the XMP box/segment, or exiv2 (**to try**).
 
+### The Library sees what changes
+
+Anton, 2026-11-10: the player writes marks, moments, photos and settings while the Library is open, and the Library
+didn't know. Now it watches the project's folder and its locations with the system's own notices (FSEvents on a Mac,
+ReadDirectoryChangesW on Windows, inotify on Linux: `notify`), counts what changes there (hidden and temporary files
+aside), and reads the project again once the changes have settled for 0.8 s, while no batch runs (a batch's end reads
+it again anyway). Whoever changed the files: the player, Finder, afp-meta. A share watched from a Mac reports what this
+Mac changes on it, not another computer's changes.
+
 ### Seeing and fixing it without the app: `afp-meta`
 
 The library is its files, so what the player keeps in them can be read and written from the command line (Anton,

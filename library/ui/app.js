@@ -1545,9 +1545,17 @@ async function poll() {
   try { s = await invoke("snapshot"); } catch (e) { return; }
   S.macos = s.macos;
   if (s.project !== S.root) {
+    S.changes = s.changes;
     S.root = s.project;
     S.recent = await invoke("recent").catch(() => []);
     if (S.root) await loadProject(); else renderAll();
+  }
+  // Files changed in the project's folder or its locations (the player saving marks, moments, photos; Finder): read
+  // again once they've settled, unless a batch is running (its end reads it again)
+  if (S.root && s.changes !== S.changes && s.quiet_ms > 800 && !S.refreshing && !s.jobs.some((j) => j.state === "running")) {
+    S.changes = s.changes;
+    S.refreshing = true;
+    refresh().finally(() => { S.refreshing = false; });
   }
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;

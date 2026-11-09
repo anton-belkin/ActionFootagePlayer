@@ -96,6 +96,46 @@ struct Inner {
     close_asked: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
+    // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
+    watch: Option<Watch>,
+}
+
+// The file system's own notices (FSEvents, ReadDirectoryChangesW, inotify) for the project's folder and its locations:
+// each change counted, and when it was, so that the page reads the project again once the changes settle. The
+// project's file's time is kept too: its locations changed, they're watched again
+struct Watch {
+    root: PathBuf,
+    stamp: Option<std::time::SystemTime>,
+    _watcher: Option<notify::RecommendedWatcher>,
+    changes: Arc<std::sync::atomic::AtomicU64>,
+    last: Arc<Mutex<Instant>>,
+}
+
+fn watch(root: &Path) -> Watch {
+    use notify::Watcher;
+    let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let last = Arc::new(Mutex::new(Instant::now()));
+    let (c, l) = (changes.clone(), last.clone());
+    let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(e) = res else { return };
+        if matches!(e.kind, notify::EventKind::Access(_)) { return; }
+        // Temporary and hidden files (a write through a temporary file shows as its final name too), the NAS's recycle bin
+        let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
+                                          && !p.to_string_lossy().ends_with(".tmp"));
+        if !ours { return; }
+        c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *l.lock().unwrap() = Instant::now();
+    }).ok().and_then(|mut w| {
+        let mut dirs = vec![root.to_path_buf()];
+        for l in locations::locations(root, &locations::mounts()) {
+            if let Some(d) = l.dir { if d.is_dir() && !dirs.iter().any(|x| d.starts_with(x)) { dirs.push(d); } }
+        }
+        let mut any = false;
+        for d in dirs { any |= w.watch(&d, notify::RecursiveMode::Recursive).is_ok(); }
+        any.then_some(w)
+    });
+    let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
+    Watch { root: root.to_path_buf(), stamp, _watcher: watcher, changes, last }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -394,6 +434,9 @@ struct Snapshot {
     jobs: Vec<Job>,
     close_asked: bool,
     macos: bool,
+    // Changes seen in the project's folder and locations, and how long since the last one (ms)
+    changes: u64,
+    quiet_ms: u64,
 }
 
 #[tauri::command]
@@ -402,11 +445,28 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
     if inner.project.is_none() {
         if let Some(p) = inner.pending_open.pop_front() { inner.project = Some(p); }
     }
+    // Watched: the project open, its locations as its file says now
+    match inner.project.clone() {
+        Some(root) => {
+            let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
+            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp) {
+                let before = inner.watch.as_ref().filter(|w| w.root == root).map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed) + 1);
+                let w = watch(&root);
+                // The same project watched again (its locations changed): counted on from where it was, and once more
+                if let Some(n) = before { w.changes.store(n, std::sync::atomic::Ordering::Relaxed); }
+                inner.watch = Some(w);
+            }
+        }
+        None => inner.watch = None,
+    }
+    let (changes, quiet_ms) = inner.watch.as_ref().map(|w| (w.changes.load(std::sync::atomic::Ordering::Relaxed), w.last.lock().unwrap().elapsed().as_millis() as u64)).unwrap_or((0, 0));
     Snapshot {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
         macos: cfg!(target_os = "macos"),
+        changes,
+        quiet_ms,
     }
 }
 
@@ -1434,6 +1494,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changes_seen() {
+        let root = std::env::temp_dir().join(format!("afl-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Generated")).unwrap();
+        std::fs::write(root.join(PROJECT_FILE), "{}").unwrap();
+        let w = watch(&root.canonicalize().unwrap());
+        std::thread::sleep(Duration::from_millis(300));
+        let n = |w: &Watch| w.changes.load(std::sync::atomic::Ordering::Relaxed);
+        let start = n(&w);
+        // A hidden temporary file isn't a change; the file it becomes is
+        std::fs::write(root.join("Generated/.a.tmp"), "x").unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(n(&w), start, "a hidden file counted");
+        std::fs::write(root.join("Generated/Turtle.afplink.mp4"), "x").unwrap();
+        let t = Instant::now();
+        while n(&w) == start && t.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(n(&w) > start, "the new file not seen");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("afl-test-{}-{name}", std::process::id()));
