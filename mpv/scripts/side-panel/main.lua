@@ -1303,6 +1303,8 @@ local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" }
 -- What the view follows: along the way you move (GPS), the camera, north (the compass, or GPS), the world
 local HEADING_OPTIONS = { { "travel", "Way" }, { "camera", "Camera" }, { "north", "North" }, { "world", "World" } }
 local FOLLOWS_NAMES = { travel = "the way", camera = "the camera", north = "north", world = "the world" }
+-- The smoothing's strengths (reframe.rs: a Gaussian of 0.25, 0.6, 1.5 s)
+local TIDY_TURNS = { { "light", "Light" }, { "medium", "Medium" }, { "strong", "Strong" } }
 local FLAT_FRAMES = { { "16:9", 1, 9 / 16 }, { "9:16", 9 / 16, 1 }, { "1:1", 0.8, 0.8 } }
 local FLAT_SIZES = { "1080p", "4K" }
 -- Clear the recording asks first: a second click within this many seconds clears
@@ -1336,6 +1338,21 @@ local function flat_video_part(u, x, w, y, v, r)
                      alt_shift ~= "" and alt_shift or nil, r.taking)
         y = u:caption(x, w, y, "Relative to what the view follows: " .. (FOLLOWS_NAMES[r.follows] or tostring(r.follows))
                                .. (r.playing and "" or ". A drag, a scroll or a pinch gives you the view"))
+
+        -- How it's tidied: for the preview and the export alike, relative to what the view follows
+        local tidy = type(r.tidy) == "table" and r.tidy or {}
+        local smooth = tidy.turns ~= nil and tidy.turns ~= "off"
+        y = u:switch(x, w, y, "view360-tidy-turns", "Smooth the turns", smooth, msg("view360-tidy", "turns", "toggle"), nil, r.taking)
+        if smooth then
+            local options, sel = {}, nil
+            for i, k in ipairs(TIDY_TURNS) do
+                table.insert(options, { k[2], msg("view360-tidy", "turns", k[1]) })
+                if k[1] == tidy.turns then sel = i end
+            end
+            y = u:segmented(x, w, y, "view360-tidy-strength", options, sel, r.taking)
+        end
+        y = u:switch(x, w, y, "view360-tidy-level", "Level the horizon", tidy.level == true, msg("view360-tidy", "level", "toggle"), nil, r.taking)
+        if r.tidying then y = u:caption(x, w, y, "Tidying the recording…") end
     end
 
     -- The frame and the size of the flat video

@@ -379,6 +379,35 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    but its export needs the 360 camera's file, so the part isn't shown); the named export into `_Exports` with a link;
    I-Log clips' look checked by eye (only the pipeline was run); the recording dot's size on a non-Retina screen.
 2. **Smooth the turns and Level**, in `reframe.rs`, with the preview through `gyroflow-probe --reframe`.
+
+   **Built** (branch `claude/360-reframe-steps2-5`):
+   - `reframe.rs`: `Tidy` (`turns` off/light/medium/strong, `level`, `picture`) read from the recording's `tidy`;
+     **not there: medium and level**, so a recording from step 1 exports smoothed. `Recording::tidied()`:
+     - parts that touch (within 0.1 s, a punch-in's remains) are one run, so where they meet is blended;
+     - each stretch of one projection is tidied on its own (a change stays a cut);
+     - on a grid of 100 a second: level sets the roll to 0, then the head as a quaternion (`rot_yaw · rot_pitch ·
+       rot_roll`, as the shader composes it) and the FOV's log are averaged with a Gaussian (σ 0.25/0.6/1.5 s, ±3σ),
+       its σ shrinking to a third of the distance to the stretch's end, so the ends stay where they were recorded;
+     - back to angles, the yaw unwrapped along the way, thinned as the player thins (RDP, 0.05°).
+     The result is a recording again, so the player plays it with `recording.lua`'s own `head()`.
+   - `gyroflow-probe --reframe <clip>` prints the tidied recording as the player keeps one (`{follows, parts, tidy}`), or
+     `{error}`. ~0.5 s on the X5 sample (four parts, two of them touching, became two).
+   - `gyroflow-export --reframe recording` renders along the tidied path.
+   - `view360/main.lua`: after each take, undo, clear, change of how and when a clip opens, it runs the probe (async);
+     the samples as recorded play until it answers, and an answer for a recording since changed is dropped. Script
+     message `view360-tidy turns off|light|medium|strong|toggle` and `view360-tidy level yes|no|toggle`, kept with the
+     recording in the clip's file (toggling the smoothing back on restores the strength chosen before).
+   - The 360° tab: *Smooth the turns* (a switch, then Light / Medium / Strong) and *Level the horizon*, under the
+     recording's line; "Tidying the recording…" while the probe works.
+
+   **Checked:** Rust tests (angles ↔ quaternions; a steady turn with a 1° 8 Hz shake comes out within 0.1° of the turn;
+   a 1 Hz sway kept in part by Light and gone with Medium; the ends kept; level takes out the roll and leaves the rest;
+   the yaw continuous past 180°; a punch-in blended, parts apart and a projection change kept apart; the JSON read back).
+   `tests/view360_test.lua`: the tidy options kept and read; the probe run after a take with the clip, the tidied path
+   played once it answers, a stale answer dropped, nothing run with nothing to tidy, an error playing as recorded.
+   Headless: the probe and a 3 s Export flat along the tidied recording of the X5 sample.
+
+   **Open:** the preview on screen and by eye; whether Strong is too strong for a whip pan (the design's one-euro idea).
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
 5. **The frame outline while recording**, and 9:16 and 1:1.

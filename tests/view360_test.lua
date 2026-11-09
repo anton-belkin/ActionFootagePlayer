@@ -779,5 +779,97 @@ do
     f.props["user-data/gyroflow/rig360"] = nil
 end
 
+do
+    -- How the recording is tidied: kept with it, defaults when it says nothing
+    local recording = require 'recording'
+    local r = recording.new():load({ follows = "camera", parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: medium by default", r.tidy.turns, "medium")
+    expect("tidy: level by default", r.tidy.level, true)
+    expect("tidy: something to do", r:untidied(), false)
+    r:load({ follows = "camera", tidy = { turns = "strong", level = false, picture = true },
+             parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: read", r.tidy.turns .. tostring(r.tidy.level) .. tostring(r.tidy.picture), "strongfalsetrue")
+    expect("tidy: written", r:to_table().tidy.turns, "strong")
+    expect("tidy: not kept as an unknown key", r.extra.tidy, nil)
+    r:load({ follows = "camera", tidy = { turns = "wobbly" }, parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: an unknown one is the default", r.tidy.turns, "medium")
+    r.tidy.turns, r.tidy.level = "off", false
+    expect("tidy: off and not level is nothing to do", r:untidied(), true)
+end
+
+do
+    -- The preview plays the recording tidied: gyroflow-probe --reframe <clip> after a take and each change of how,
+    -- the samples as recorded until it answers, an answer for a recording since changed dropped
+    local utils = package.loaded['mp.utils']
+    package.loaded['sidecar'] = nil
+    package.loaded['recording'] = nil
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p '" .. dir .. "'")
+    local clip = dir .. "/VID_20250416_143628_00_006.insv"
+    local file = dir .. "/VID_20250416_143628_00_006.afp.json"
+    local f = load_view360()
+    local runs = {}
+    f.mp.command_native_async = function(cmd, fn) table.insert(runs, { args = cmd.args, fn = fn }) end
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.props["path"] = clip
+    f.props["pause"] = true
+    f.props["time-pos"] = 10
+    f.load(false)
+    expect("tidy: nothing recorded, nothing run", #runs, 0)
+    local function st() return f.props["user-data/view360"].recording end
+    local function yaw() return tonumber(f.props["glsl-shader-opts"].view360_yaw) end
+    f.bindings["record"].fn()
+    for i = 1, 50 do
+        f.message("view360-set", "yaw", tostring(i))
+        f.set("time-pos", 10 + i / 25)
+    end
+    f.set("pause", true)
+    expect("tidy: run after the take", #runs, 1)
+    local args = runs[1].args
+    expect("tidy: gyroflow-probe beside", args[1], "mpv/scripts/gyroflow/gyroflow-probe")
+    expect("tidy: --reframe the clip", args[2] .. " " .. args[3], "--reframe " .. clip)
+    expect("tidy: working on it", st().tidying, true)
+    -- Meanwhile, as recorded
+    f.set("time-pos", 11)
+    near("tidy: as recorded meanwhile", yaw(), 25, 1e-3)
+    local answer = { follows = "camera", parts = { { from = 10, to = 12, samples = { { 10, 0, 0, 0, 100, "auto" }, { 12, 80, 0, 0, 100 } } } } }
+    runs[1].fn(true, { status = 0, stdout = utils.format_json(answer) })
+    expect("tidy: done", st().tidying, false)
+    near("tidy: the tidied path plays", yaw(), 40, 1e-3)
+    -- A change of how: run again; the old answer, coming late, is dropped
+    f.message("view360-tidy", "turns", "strong")
+    expect("tidy: kept in the file", st().tidy.turns, "strong")
+    local fh = io.open(file, "r")
+    local text = fh and fh:read("*a") or ""
+    if fh then fh:close() end
+    expect("tidy: in the clip's file", text:find('"strong"', 1, true) ~= nil, true)
+    expect("tidy: run again", #runs, 2)
+    near("tidy: as recorded until it answers", yaw(), 25, 1e-3)
+    runs[1].fn(true, { status = 0, stdout = utils.format_json(answer) })
+    near("tidy: a stale answer dropped", yaw(), 25, 1e-3)
+    -- Toggled off and on again: the strength comes back
+    f.message("view360-tidy", "turns", "toggle")
+    expect("tidy: turns off", st().tidy.turns, "off")
+    f.message("view360-tidy", "turns", "toggle")
+    expect("tidy: back to strong", st().tidy.turns, "strong")
+    -- Nothing to do: nothing run, as recorded
+    f.message("view360-tidy", "turns", "off")
+    local before = #runs
+    f.message("view360-tidy", "level", "no")
+    expect("tidy: level off", st().tidy.level, false)
+    expect("tidy: nothing to tidy, nothing run", #runs, before)
+    f.set("time-pos", 11)
+    near("tidy: off plays as recorded", yaw(), 25, 1e-3)
+    -- An error from the probe: as recorded, no crash
+    f.message("view360-tidy", "level", "toggle")
+    runs[#runs].fn(true, { status = 0, stdout = utils.format_json({ error = "nothing recorded" }) })
+    near("tidy: an error plays as recorded", yaw(), 25, 1e-3)
+    f.event("end-file")
+    os.remove(file)
+    os.execute("rmdir '" .. dir .. "'")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

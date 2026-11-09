@@ -2199,7 +2199,7 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
     };
     // The recording: what it follows, unless --heading says otherwise, and the span recorded unless --from/--to do
     let recording = match &mode.keys {
-        Some(Head360::Recording) => Some(vs_gyroflow::reframe::Recording::read(&path)?),
+        Some(Head360::Recording) => Some(vs_gyroflow::reframe::Recording::read(&path)?.tidied()),
         _ => None,
     };
     let range = match (&recording, opts.from, opts.to) {

@@ -45,6 +45,8 @@
 --   view360-undo                            the last take taken back (up to 20, for as long as the clip is open)
 --   view360-clear                           nothing recorded (the panel asks first)
 --   view360-frame 16:9|9:16|1:1, view360-size 1080p|4K   the flat export's, kept with the recording
+--   view360-tidy turns off|light|medium|strong|toggle, view360-tidy level yes|no|toggle   how the recording is tidied
+--                                           (smoothed, leveled), kept with it: the preview and the export both
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
 -- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
 -- camera's own file), stereo, note (why a 360° clip isn't shown), modes (per heading mode: available, why not,
@@ -89,6 +91,15 @@ if not ok_gestures then
 end
 
 local SHADER = mp.get_script_directory() and (mp.get_script_directory() .. "/view360.glsl")
+-- gyroflow-probe, in the gyroflow plugin's folder beside this one: the recording tidied (--reframe) for the preview
+local PROBE = nil
+do
+    local here = mp.get_script_directory()
+    local sep = package.config:sub(1, 1)
+    local parent = here and here:match("^(.*)[/\\][^/\\]+$")
+    local windows = (mp.get_property("platform") or "") == "windows" or sep == "\\"
+    if parent then PROBE = parent .. sep .. "gyroflow" .. sep .. "gyroflow-probe" .. (windows and ".exe" or "") end
+end
 local HEADING_INDEX = { world = 0, camera = 1, travel = 2, north = 3 }
 local STEREO_INDEX = { mono = 0, ["top-bottom"] = 1, ["left-right"] = 2 }
 
@@ -126,6 +137,12 @@ local input = nil
 local rec = recording.new()
 local rec_clip, rec_why = nil, nil
 local rec_playing = false
+-- The recording tidied as its tidy says (gyroflow-probe --reframe: reframe.rs, as the export does it), what the view
+-- follows while the recording plays; nil while it's worked out (the samples as recorded meanwhile) or not needed
+local tidied = nil
+local tidy_run, tidying = 0, false
+-- The smoothing chosen before it was turned off, to turn it on again with
+local turns_before = "medium"
 local rec_overlay = mp.create_osd_overlay and mp.create_osd_overlay("ass-events") or nil
 local rec_shown = nil
 local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
@@ -149,7 +166,7 @@ local function rec_state()
     return {
         can = rec_clip ~= nil and sphere ~= nil, why = rec_why or false, taking = rec:taking(), seconds = rec:take_seconds(),
         spans = spans, parts = #rec.parts, follows = rec.follows or false, playing = rec_playing, frame = rec.frame,
-        size = rec.size, undo = rec:undoable(),
+        size = rec.size, undo = rec:undoable(), tidy = { turns = rec.tidy.turns, level = rec.tidy.level }, tidying = tidying,
     }
 end
 
@@ -308,16 +325,41 @@ local function save_recording()
     end
 end
 
--- The view at t from the recording, while it plays
+-- The view at t from the recording, while it plays: tidied when that's worked out
 local function follow_recording(t)
     if not rec_playing or not active then return end
     t = t or mp.get_property_number("time-pos")
-    local h = t and rec:head(t)
+    local h = t and (tidied or rec):head(t)
     if not h then return end
     cur.yaw, cur.pitch, cur.roll = view.wrap(h.yaw), math.max(-view.PITCH_MAX, math.min(view.PITCH_MAX, h.pitch)), view.wrap(h.roll)
     cur.projection = view.FOV[h.projection] and h.projection or "auto"
     cur.fov = view.clamp_fov(cur.projection, h.fov)
     apply()
+end
+
+-- The recording tidied again (after a take, an undo, a change of how): gyroflow-probe reads the clip's file, so it's
+-- saved first. The samples as recorded play meanwhile; an answer for a recording since changed is dropped
+local function retidy()
+    tidy_run = tidy_run + 1
+    tidied, tidying = nil, false
+    if rec:empty() or rec:untidied() or not rec_clip or not PROBE or not mp.command_native_async then return end
+    local run = tidy_run
+    tidying = true
+    mp.command_native_async({ name = "subprocess", args = { PROBE, "--reframe", rec_clip }, capture_stdout = true, playback_only = false },
+        function(_, r)
+            if run ~= tidy_run then return end
+            tidying = false
+            local ok_utils, utils = pcall(require, 'mp.utils')
+            local doc = ok_utils and r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+            if type(doc) ~= "table" or doc.error then
+                mp.msg.warn("the 360 recording couldn't be tidied: " .. tostring(type(doc) == "table" and doc.error or (r and r.error_string) or "no answer"))
+            else
+                local t = recording.new():load(doc)
+                if not t:empty() then tidied = t end
+            end
+            follow_recording()
+            publish()
+        end)
 end
 
 local function set_playing(on, quiet)
@@ -341,6 +383,7 @@ local function stop_take(why)
     draw_rec()
     if part then
         save_recording()
+        retidy()
         mp.osd_message(string.format("Recorded %s–%s%s", clock(part.from), clock(part.to), why and (" (" .. why .. ")") or ""), 2.5)
         -- What was recorded, shown
         set_playing(true, true)
@@ -499,6 +542,7 @@ mp.add_hook("on_load", 60, function()
             rec:load(v.recording)
         end
     end
+    retidy()
     -- Set up before the first frame shows
     set_active(sphere ~= nil)
     if not sphere then apply() end
@@ -662,6 +706,7 @@ mp.register_script_message("view360-undo", function()
     if rec:taking() then return end
     if not rec:undo() then return mp.osd_message("Nothing to undo", 1.5) end
     save_recording()
+    retidy()
     if rec:empty() then rec_playing = false else follow_recording() end
     mp.osd_message(rec:empty() and "The last take undone: nothing recorded now" or "The last take undone", 2)
     publish()
@@ -672,6 +717,7 @@ mp.register_script_message("view360-clear", function()
     rec:clear()
     rec_playing = false
     save_recording()
+    retidy()
     mp.osd_message("The recording cleared", 2)
     publish()
 end)
@@ -680,6 +726,27 @@ mp.register_script_message("view360-frame", function(f)
     if not recording.FRAMES[f] then return end
     rec.frame = f
     if not rec:empty() then save_recording() end
+    publish()
+end)
+
+-- How the recording is tidied: view360-tidy turns off|light|medium|strong|toggle, view360-tidy level yes|no|toggle
+mp.register_script_message("view360-tidy", function(what, how)
+    if rec:taking() then return end
+    if what == "turns" then
+        if how == "toggle" then how = rec.tidy.turns == "off" and turns_before or "off" end
+        if not recording.TURNS[how] or how == rec.tidy.turns then return end
+        if rec.tidy.turns ~= "off" then turns_before = rec.tidy.turns end
+        rec.tidy.turns = how
+    elseif what == "level" then
+        local on = how == "yes" or (how == "toggle" and not rec.tidy.level)
+        if how ~= "yes" and how ~= "no" and how ~= "toggle" or on == rec.tidy.level then return end
+        rec.tidy.level = on
+    else
+        return
+    end
+    if not rec:empty() then save_recording() end
+    retidy()
+    follow_recording()
     publish()
 end)
 

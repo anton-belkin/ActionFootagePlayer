@@ -30,6 +30,10 @@
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights
 // the camera marked (markers.rs, as the highlights plugin reads them), or null. Kept per file as the plain answer is.
+//
+// `gyroflow-probe --reframe <video>`: the view recorded in the player as you looked around (the clip's .afp.json,
+// view360.recording), tidied as its "tidy" says (reframe.rs): {"follows", "parts", "tidy"} as the player keeps a
+// recording, for the view360 plugin to play while it shows the recording; {"error": why} when there's none.
 
 use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
 
@@ -55,10 +59,21 @@ fn main() {
     // --library: everything Action Footage Library's index keeps about a clip
     let library = args.first().is_some_and(|a| a == "--library");
     if library { args.remove(0); }
+    // --reframe: the recorded view, tidied, for the player's preview of the flat export
+    let reframe = args.first().is_some_and(|a| a == "--reframe");
+    if reframe { args.remove(0); }
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --library] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --library | --reframe] <video>");
         std::process::exit(2);
     };
+    if reframe {
+        let out = match vs_gyroflow::reframe::Recording::read(std::path::Path::new(&path)) {
+            Ok(r) => r.tidied().to_json(),
+            Err(e) => serde_json::json!({ "error": e }),
+        };
+        println!("{out}");
+        return;
+    }
     if lens {
         // Gyroflow's readers take paths as URLs: a relative one reads nothing
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);

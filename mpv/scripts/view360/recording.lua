@@ -6,7 +6,7 @@
 --   local r = recording.new()
 --   r:load(t)                     from the sidecar's view360.recording (anything else: an empty recording)
 --   r:to_table()                  for the sidecar: { follows, parts = { { from, to, samples } }, frame, size, ... },
---                                 nil when nothing's recorded; keys it doesn't know (tidy) kept
+--                                 nil when nothing's recorded; keys it doesn't know kept; tidy: how it's tidied
 --   r:start(follows)              a take starts: true, or false and why (the recording follows another mode)
 --   r:add(t, yaw, pitch, roll, fov, projection)   a frame shown during the take; false when t went back (a seek):
 --                                 the caller ends the take
@@ -40,6 +40,10 @@ M.EPSILON = 0.001
 M.FRAMES = { ["16:9"] = true, ["9:16"] = true, ["1:1"] = true }
 M.SIZES = { ["1080p"] = true, ["4K"] = true }
 M.FOLLOWS = { travel = true, camera = true, north = true, world = true }
+-- How the recording is tidied (reframe.rs does it: gyroflow-probe --reframe for the preview, the export the same):
+-- the turns smoothed (a Gaussian of 0.25, 0.6 or 1.5 s) and the horizon level. Not there: medium and level
+M.TURNS = { off = true, light = true, medium = true, strong = true }
+function M.default_tidy() return { turns = "medium", level = true, picture = false } end
 local PROJECTIONS = { auto = true, rectilinear = true, stereographic = true, planet = true }
 
 local function wrap(a)
@@ -133,7 +137,8 @@ local R = {}
 R.__index = R
 
 function M.new()
-    return setmetatable({ follows = nil, parts = {}, frame = "16:9", size = "1080p", extra = {}, history = {}, take = nil }, R)
+    return setmetatable({ follows = nil, parts = {}, frame = "16:9", size = "1080p", tidy = M.default_tidy(), extra = {}, history = {},
+                          take = nil }, R)
 end
 
 function R:empty() return #self.parts == 0 end
@@ -150,10 +155,15 @@ local function num(v) return type(v) == "number" and v == v and v ~= math.huge a
 -- From the sidecar's table: what's not right is left out (a part without two good samples, a follows it doesn't know)
 function R:load(t)
     self.follows, self.parts, self.extra, self.history, self.take = nil, {}, {}, {}, nil
-    self.frame, self.size = "16:9", "1080p"
+    self.frame, self.size, self.tidy = "16:9", "1080p", M.default_tidy()
     if type(t) ~= "table" then return self end
     for k, v in pairs(t) do
-        if k ~= "follows" and k ~= "parts" and k ~= "frame" and k ~= "size" then self.extra[k] = v end
+        if k ~= "follows" and k ~= "parts" and k ~= "frame" and k ~= "size" and k ~= "tidy" then self.extra[k] = v end
+    end
+    if type(t.tidy) == "table" then
+        if M.TURNS[t.tidy.turns] then self.tidy.turns = t.tidy.turns end
+        if type(t.tidy.level) == "boolean" then self.tidy.level = t.tidy.level end
+        if type(t.tidy.picture) == "boolean" then self.tidy.picture = t.tidy.picture end
     end
     if M.FRAMES[t.frame] then self.frame = t.frame end
     if M.SIZES[t.size] then self.size = t.size end
@@ -187,6 +197,7 @@ function R:to_table()
     local t = {}
     for k, v in pairs(self.extra) do t[k] = v end
     t.follows, t.frame, t.size = self.follows, self.frame, self.size
+    t.tidy = { turns = self.tidy.turns, level = self.tidy.level, picture = self.tidy.picture }
     t.parts = {}
     for _, p in ipairs(self.parts) do
         local samples, projection = {}, nil
@@ -287,6 +298,9 @@ function R:undo()
 end
 
 function R:undoable() return #self.history end
+
+-- Nothing to tidy: the samples play as recorded
+function R:untidied() return self.tidy.turns == "off" and not self.tidy.level end
 
 function R:clear()
     self.parts, self.history, self.follows, self.take = {}, {}, nil, nil
