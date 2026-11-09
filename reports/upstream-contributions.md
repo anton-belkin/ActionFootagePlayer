@@ -379,11 +379,11 @@ PR — несколько строк (`mapSetFloat(map, "_AbsoluteTime", pts)`),
 >
 > **On a UGREEN DXP2800 NAS (Intel N100, 6 W iGPU):** 4K60 10-bit HEVC (Osmo Action 6, D-Log M) → stabilized 1080p
 > HDR at 60 fps with Gyroflow's bicubic, 7.9 ms of the 16.7 ms frame budget, in mpv. The same box serves it as a
-> live HLS stream (VAAPI decode → the warp in libplacebo → VDEnc HEVC Main10, HLG) at 67-69 fps, so a TV or phone
-> plays any clip of the library stabilized while it's rendered.
+> live HLS stream (VAAPI decode → the warp in libplacebo → VDEnc HEVC Main10, HLG) at 67-69 fps with bilinear
+> sampling (59 fps with the bicubic), so a TV or phone plays any clip of the library stabilized while it's rendered.
 >
-> **On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU (86 % through a VapourSynth filter with gyroflow-core), clips
-> open in under a second, also straight from an SD card or the NAS.
+> **On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU (86 % through a VapourSynth filter with gyroflow-core); a clip
+> opens stabilized in about a second, also when it's read straight from the NAS.
 >
 > How it fits on a 6 W GPU:
 > - Accuracy: every pixel of a 1080p output is within 0.037 px of `undistort_coord` (opencv_fisheye and gopro
