@@ -4,6 +4,7 @@
 //             [--quality 0-1] [--taken "YYYY:MM:DD HH:MM:SS"] [--make <name>] [--model <name>] [--content-id <UUID>]
 //             [--link <json>]
 //   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds>
+//   afp-photo --set-meta <file.heic> [--link <json>] [--tags <json list>]
 //
 // The renditions are 16-bit RGB, little-endian, row by row (vs-gyroflow's photo::write_rgb16): --sdr the SDR look as
 // an sRGB screen shows it (the image every app shows), --hdr the HDR look in HLG (BT.2100). Core Image (macOS 15)
@@ -42,6 +43,36 @@ while let a = it.next() {
     guard a.hasPrefix("--"), let v = it.next() else { fail("bad arguments") }
     args[String(a.dropFirst(2))] = v
 }
+// --set-meta <file.heic> [--link <json>] [--tags <json list>]: a photo's link and tags (vs-gyroflow's afp-meta asks),
+// written into its XMP (afp:link, dc:subject), its image data copied as it is: the gain map and the Live Photo's
+// identifier kept. An empty list takes the tags out
+if let path = args["set-meta"] {
+    let url = URL(fileURLWithPath: path)
+    let tmp = url.deletingLastPathComponent().appendingPathComponent("." + url.lastPathComponent + ".meta")
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(src),
+          let dst = CGImageDestinationCreateWithURL(tmp as CFURL, type, 1, nil) else { fail("\(path): can't be read as a photo") }
+    let md = CGImageMetadataCreateMutable()
+    let afp = "https://actionfootageplayer.ch/ns/1.0/", dc = "http://purl.org/dc/elements/1.1/"
+    guard CGImageMetadataRegisterNamespaceForPrefix(md, afp as CFString, "afp" as CFString, nil),
+          CGImageMetadataRegisterNamespaceForPrefix(md, dc as CFString, "dc" as CFString, nil) else { fail("\(path): namespaces") }
+    if let link = args["link"] {
+        guard CGImageMetadataSetValueWithPath(md, nil, "afp:link" as CFString, link as CFString) else { fail("\(path): the link") }
+    }
+    if let t = args["tags"] {
+        guard let data = t.data(using: .utf8), let list = (try? JSONSerialization.jsonObject(with: data)) as? [String] else { fail("--tags takes a JSON list") }
+        // Merged, the list replaces the one there (empty: an empty list, no tags)
+        guard let tag = CGImageMetadataTagCreate(dc as CFString, "dc" as CFString, "subject" as CFString, .arrayUnordered, list as CFArray),
+              CGImageMetadataSetTagWithPath(md, nil, "dc:subject" as CFString, tag) else { fail("\(path): the tags") }
+    }
+    var err: Unmanaged<CFError>?
+    guard CGImageDestinationCopyImageSource(dst, src, [kCGImageDestinationMetadata: md, kCGImageDestinationMergeMetadata: true] as CFDictionary, &err) else {
+        try? FileManager.default.removeItem(at: tmp)
+        fail("\(path): not written (\(err.map { String(describing: $0.takeRetainedValue()) } ?? "?"))")
+    }
+    do { _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp) } catch { fail("\(path): \(error.localizedDescription)") }
+    exit(0)
+}
+
 // A Live Photo's video: the MOV copied with the content identifier and the still's time
 func liveVideo(from input: URL, to output: URL, id: String, still: Double) {
     let asset = AVURLAsset(url: input)

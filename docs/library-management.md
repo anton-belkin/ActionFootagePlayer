@@ -649,6 +649,24 @@ re-encoding**:
   so that stays right (**to try**).
 - Windows and Linux: a writer of our own for the XMP box/segment, or exiv2 (**to try**).
 
+### Seeing and fixing it without the app: `afp-meta`
+
+The library is its files, so what the player keeps in them can be read and written from the command line (Anton,
+2026-11-10). `afp-meta` is beside the player's other tools (`ActionFootagePlayer.app/Contents/Resources/gyroflow/`
+on a Mac):
+
+```
+afp-meta <file>...                    what of ours each file keeps, as JSON: a video's link and all its MP4 keys,
+                                      a photo's link and tags
+afp-meta <file> --link <json>         its link written (a video's ch.actionfootageplayer.link, a photo's afp:link)
+afp-meta <file> --tags <json list>    its tags written (a video's in its link, a photo's dc:subject)
+afp-meta <file> --key <name> <value>  an MP4's metadata key written, its other keys kept
+```
+
+Videos (moments, clip previews, exports, renders) and JPEG photos are written by it on every system; a HEIC by
+afp-photo on a Mac (ImageIO, the image data copied as it is). Checked on a HEIC: tags and link written, replaced and
+cleared, the decoded pixels the same.
+
 ### What changes in the code
 
 - Finding a clip by identity, with the cache and the repair's criteria: the three twins (`workspace.lua`,
