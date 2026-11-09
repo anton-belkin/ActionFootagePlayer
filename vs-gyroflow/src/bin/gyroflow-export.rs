@@ -145,6 +145,9 @@ lenses, the horizon level by gravity, pointed along a heading mode); --from, --t
   --reframe <keys> a flat video looking along the head's keyframes, \"t:yaw,pitch,roll,fov;...\" (seconds of the
                    clip, degrees: yaw right, pitch up, roll counterclockwise, the FOV across a 16:9 picture as in the
                    player; eased between keys, held before the first and after the last): <name>_reframe.mp4
+  --reframe recording  along the view recorded in the player as you looked around (its 360° tab), from the clip's
+                   <name>.afp.json: relative to what it follows, each sample's projection (a change is a cut), held
+                   outside the recorded parts; by default from the first recorded part to the end of the last
   --heading <mode> what straight ahead follows: travel (along the way you move: GPS), camera, north, world. By
                    default travel where the clip has it, else camera, as the player picks
   --sphere-width <px>  the sphere's width (default 5760; the 360 video's size, its height half of it)
@@ -229,9 +232,13 @@ struct Options {
     sphere360: Option<Mode360>,
 }
 
+// Where a reframe looks: keyframes, or the view recorded in the player (--reframe recording)
+#[derive(Clone)]
+enum Head360 { Keys(Vec<vs_gyroflow::export360::HeadKey>), Recording }
+
 struct Mode360 {
-    // None: the whole sphere (--360); else the head's keyframes (--reframe)
-    keys: Option<Vec<vs_gyroflow::export360::HeadKey>>,
+    // None: the whole sphere (--360); else the head's keyframes or the recording (--reframe)
+    keys: Option<Head360>,
     heading: Option<vs_gyroflow::stamp::Heading>,
     sphere_width: usize,
     size: (usize, usize),
@@ -360,8 +367,11 @@ fn main() {
             "--live" => opts.live = true,
             "--360" => { opts.sphere360.get_or_insert_with(Mode360::default); }
             "--reframe" => {
-                let keys = vs_gyroflow::export360::parse_keys(&value("--reframe")).unwrap_or_else(|e| fail(&format!("--reframe: {e}")));
-                opts.sphere360.get_or_insert_with(Mode360::default).keys = Some(keys);
+                let v = value("--reframe");
+                let head = if v == "recording" { Head360::Recording } else {
+                    Head360::Keys(vs_gyroflow::export360::parse_keys(&v).unwrap_or_else(|e| fail(&format!("--reframe: {e}"))))
+                };
+                opts.sphere360.get_or_insert_with(Mode360::default).keys = Some(head);
             }
             "--heading" => { let v = value("--heading"); opts.sphere360.get_or_insert_with(Mode360::default).heading = Some(vs_gyroflow::export360::parse_heading(&v)
                 .unwrap_or_else(|| fail(&format!("--heading {v}: travel, camera, north or world")))); }
@@ -2141,7 +2151,7 @@ mod tests {
 /// tracks joined side by side (as the player's lavfi-complex), the frames go through the plugin's 360 mode and the
 /// view, ffmpeg encodes them (HEVC 10-bit, the source's audio copied); a 360 video gets its spherical metadata after
 fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, String> {
-    use vs_gyroflow::export360::{ Output, Render360, heading_name };
+    use vs_gyroflow::export360::{ HeadPath, Output, Render360, heading_name };
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let video = path.to_string_lossy().to_string();
     let rig = match vs_gyroflow::rig::read(&video) {
@@ -2161,6 +2171,15 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
         (f, t) => format!("_{:.1}-{}s", f.unwrap_or(0.0), t.map(|t| format!("{t:.1}")).unwrap_or_else(|| "end".into())),
     };
     let kind = if mode.keys.is_some() { "reframe" } else { "360" };
+    // The recording: what it follows, unless --heading says otherwise, and the span recorded unless --from/--to do
+    let recording = match &mode.keys {
+        Some(Head360::Recording) => Some(vs_gyroflow::reframe::Recording::read(&path)?),
+        _ => None,
+    };
+    let range = match (&recording, opts.from, opts.to) {
+        (Some(r), None, None) => { let (a, b) = r.span(); format!("_{a:.1}-{b:.1}s") }
+        _ => range,
+    };
     let out_path = opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}_{kind}{range}.mp4")));
     if out_path.exists() && !opts.force { return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display()))); }
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
@@ -2170,18 +2189,27 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
     let src_fmt = String::from_utf8_lossy(&depth_probe.stdout).trim().to_string();
     let depth = if src_fmt.contains("10") || src_fmt.contains("12") || src_fmt.contains("16") { 10 } else { 8 };
     let raw_fmt = match (depth, info.full_range) { (8, true) => "yuvj420p", (8, false) => "yuv420p", _ => "yuv420p10le" };
-    let out = match &mode.keys {
-        None => Output::Sphere { width: if mode.sphere_width > 0 { mode.sphere_width } else { vs_gyroflow::sphere360::DEFAULT_WIDTH } },
-        Some(keys) => Output::Flat { size: mode.size, projection: mode.projection, keys: keys.clone() },
+    // The recording is relative to what it follows: that one, whatever --heading says
+    let heading = recording.as_ref().map(|r| r.follows).or(mode.heading);
+    if let (Some(r), Some(h)) = (&recording, mode.heading) {
+        if r.follows != h { eprintln!("{}: along {}, as the recording follows (not --heading {})", file_name(file), heading_name(r.follows), heading_name(h)); }
+    }
+    let out = match (&mode.keys, &recording) {
+        (None, _) => Output::Sphere { width: if mode.sphere_width > 0 { mode.sphere_width } else { vs_gyroflow::sphere360::DEFAULT_WIDTH } },
+        (Some(_), Some(r)) => Output::Flat { size: mode.size, head: HeadPath::Recording(r.clone()) },
+        (Some(Head360::Keys(keys)), None) => Output::Flat { size: mode.size, head: HeadPath::Keys { keys: keys.clone(), projection: mode.projection } },
+        (Some(Head360::Recording), None) => unreachable!(),
     };
     let t0 = Instant::now();
-    let render = Render360::new(&video, depth, !info.full_range, out, mode.heading, mode.sphere_width)?;
+    let render = Render360::new(&video, depth, !info.full_range, out, heading, mode.sphere_width)?;
     if let Some(note) = &render.heading_note { eprintln!("{}: {note}", file_name(file)); }
     eprintln!("{}: {} {}, {} lenses; {}, along {} ({:.1} s to load)", file_name(file), rig.brand, rig.model, rig.lenses.len(),
               if kind == "360" { "a 360 video" } else { "a reframe" }, heading_name(render.heading), t0.elapsed().as_secs_f64());
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
-    let from = opts.from.unwrap_or(0.0).max(0.0);
-    let to = opts.to.unwrap_or(info.duration).min(info.duration.max(from));
+    let span = recording.as_ref().map(|r| r.span());
+    let from = opts.from.or(span.map(|s| s.0)).unwrap_or(0.0).max(0.0);
+    // The recording's last sample's frame included
+    let to = opts.to.or(span.map(|s| s.1 + 0.5 / fps)).unwrap_or(info.duration).min(info.duration.max(from));
     let first = (from * fps - 1e-6).ceil() as u64;
     let total_frames = (((to * fps) - 1e-6).ceil() as u64).saturating_sub(first).max(1);
     let (in_bytes, out_bytes) = render.frame_bytes();
@@ -2196,7 +2224,32 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
         "-map", "[v]", "-frames:v", &total_frames.to_string(), "-f", "rawvideo", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit());
     let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
-    // Encoding: HEVC 10-bit at the source's bits per pixel, BT.709 limited range, the source's audio
+    // The look, as it plays: a log curve's LUT to HLG, or to Rec.709 (--sdr: the maker's LUT, D-Log M's; --nbcu:
+    // NBCU's from the HLG), in RGB from the source's matrix; else the colors as recorded, BT.709
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&video));
+    let in_range = if info.full_range { "pc" } else { "tv" };
+    let mut _temp_lut = None;
+    let (look_vf, tags, look_label) = match curve {
+        None => ("scale=out_range=tv:out_color_matrix=bt709".to_string(), ["bt709", "bt709", "bt709"], "colors as recorded".to_string()),
+        Some(curve) => {
+            let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
+            let (cube, tags, label) = if opts.nbcu {
+                let composed = out_dir.join(format!(".{}.nbcu.cube", out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default()));
+                gpu_lut::compose_nbcu(&lut(&format!("{curve}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+                _temp_lut = Some(TempFile(composed.clone()));
+                (composed, ["bt709", "bt709", "bt709"], format!("{name} -> Rec.709 (NBCU)"))
+            } else if opts.sdr && curve == "dlogm" {
+                (lut("dji-dlogm-rec709.cube")?, ["bt709", "bt709", "bt709"], format!("{name} -> Rec.709 (DJI's LUT)"))
+            } else {
+                (lut(&format!("{curve}_hlg.cube"))?, ["bt2020", "arib-std-b67", "bt2020nc"], format!("{name} -> HLG"))
+            };
+            let matrix = if tags[2] == "bt2020nc" { "bt2020" } else { "bt709" };
+            (format!("scale=in_color_matrix={}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,scale=out_color_matrix={matrix}:out_range=tv",
+                     yuv_matrix(info.matrix.as_deref()), filter_path(&cube)), tags, label)
+        }
+    };
+    eprintln!("{}: {look_label}", file_name(file));
+    // Encoding: HEVC 10-bit at the source's bits per pixel, in that look, limited range, the source's audio
     let enc = pick_encoder(opts, false)?;
     let src_px = (rig.picture.0 * rig.picture.1 * rig.pictures) as f64;
     let bit_rate = (info.bit_rate.unwrap_or(60_000_000) as f64 * rig.pictures as f64 * (ow * oh) as f64 / src_px).clamp(4e6, 200e6);
@@ -2208,10 +2261,10 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
     if first > 0 { enc_cmd.args(["-ss", &format!("{:.6}", first as f64 / fps)]); }
     enc_cmd.args(["-t", &format!("{:.6}", total_frames as f64 / fps)]).arg("-i").arg(&path)
         .args(["-map", "0:v", "-map", "1:a?", "-c:a", "copy",
-               "-vf", &format!("scale=out_range=tv:out_color_matrix=bt709,format={},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv{}", enc.pix_fmt, enc.upload),
+               "-vf", &format!("{look_vf},format={},setparams=color_primaries={}:color_trc={}:colorspace={}:range=tv{}", enc.pix_fmt, tags[0], tags[1], tags[2], enc.upload),
                "-c:v", &enc.name]).args(&enc.args)
         .args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64),
-               "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv", "-f", "mp4"]).arg(&tmp_path)
+               "-color_primaries", tags[0], "-color_trc", tags[1], "-colorspace", tags[2], "-color_range", "tv", "-f", "mp4"]).arg(&tmp_path)
         .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::inherit());
     let mut encoder = enc_cmd.spawn().map_err(|e| { let _ = decoder.kill(); format!("ffmpeg: {e}") })?;
     if BACKGROUND.load(Relaxed) { set_background(&[decoder.id(), encoder.id()], true); }

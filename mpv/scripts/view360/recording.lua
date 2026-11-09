@@ -75,7 +75,8 @@ local function within(samples, t)
     local x = (t - a.t) / (b.t - a.t)
     local function mix(p, q) return p + (q - p) * x end
     return { t = t, yaw = mix(a.yaw, b.yaw), pitch = mix(a.pitch, b.pitch), roll = mix(a.roll, b.roll),
-             fov = math.exp(mix(math.log(a.fov), math.log(b.fov))), projection = a.projection }
+             fov = a.fov == b.fov and a.fov or math.exp(mix(math.log(a.fov), math.log(b.fov))),
+             projection = a.projection }
 end
 M.within = within
 
