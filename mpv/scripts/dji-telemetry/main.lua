@@ -255,8 +255,11 @@ local function update()
     local scale = h / 720
     local margin = math.floor(24 * scale)
     local an = ALIGN[corner]
-    local x = (an == 7 or an == 1) and margin or w - margin
-    local y = (an == 7 or an == 9) and margin or h - margin
+    -- In the video's area: not under the side panel, nor the navigation bar docked below the video
+    local function ratio(name) return mp.get_property_number("video-margin-ratio-" .. name) or 0 end
+    local x0, x1, y0, y1 = w * ratio("left"), w * (1 - ratio("right")), h * ratio("top"), h * (1 - ratio("bottom"))
+    local x = (an == 7 or an == 1) and x0 + margin or x1 - margin
+    local y = (an == 7 or an == 9) and y0 + margin or y1 - margin
     overlay.res_x, overlay.res_y = w, h
     overlay.data = string.format("{\\an%d\\pos(%d,%d)\\fs%d\\bord%.1f\\shad0\\1c&HFFFFFF&\\3c&H000000&\\3a&H40&}",
         an, x, y, math.floor(o.font_size * scale + 0.5), 1.5 * scale) .. text
@@ -354,6 +357,9 @@ end)
 
 mp.observe_property("time-pos", "number", update)
 mp.observe_property("osd-dimensions", "native", update)
+for _, side in ipairs({ "left", "right", "top", "bottom" }) do
+    mp.observe_property("video-margin-ratio-" .. side, "number", function() shown = nil; update() end)
+end
 
 mp.add_key_binding("Ctrl+t", "toggle", function()
     if not track then
