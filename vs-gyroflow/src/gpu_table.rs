@@ -341,11 +341,22 @@ pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
         (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
+/// warp.glsl with \n line ends, whatever the checkout gave it: Git for Windows (core.autocrlf, also on GitHub's
+/// Windows runners) writes it with \r\n, and the section markers below are found by their \n
+fn template() -> &'static str {
+    static LF: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LF.get_or_init(|| TEMPLATE.replace("\r\n", "\n"))
+}
+
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
 fn sections() -> (&'static str, &'static str, Vec<(&'static str, &'static str)>) {
-    let common_at = TEMPLATE.find("// ==== common ====\n").expect("warp.glsl: no common section");
-    let head = &TEMPLATE[..common_at];
-    let rest = &TEMPLATE[common_at + "// ==== common ====\n".len()..];
+    split_sections(template())
+}
+
+fn split_sections(template: &str) -> (&str, &str, Vec<(&str, &str)>) {
+    let common_at = template.find("// ==== common ====\n").expect("warp.glsl: no common section");
+    let head = &template[..common_at];
+    let rest = &template[common_at + "// ==== common ====\n".len()..];
     let mut parts = rest.split("// ==== pass ");
     let common = parts.next().unwrap();
     let passes = parts.map(|p| {
@@ -842,6 +853,20 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         d.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let data = slice.get_mapped_range().unwrap();
         (0..out.1).flat_map(|y| bytemuck::cast_slice::<u8, [f32; 4]>(&data[y * row..y * row + out.0 * 16]).to_vec()).collect()
+    }
+
+    #[test]
+    fn the_template_parses_with_either_line_end() {
+        // A Windows checkout (core.autocrlf) has warp.glsl with \r\n: the same sections either way
+        let lf = TEMPLATE.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let (head, common, passes) = split_sections(&lf);
+        assert!(head.contains("@PASSES@") && !common.is_empty() && !passes.is_empty());
+        assert_eq!(template(), lf);
+        let normalized = crlf.replace("\r\n", "\n");
+        let (head2, common2, passes2) = split_sections(&normalized);
+        assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
+        assert!(!pass_body(passes[0].0).is_empty());
     }
 
     #[test]
