@@ -7,7 +7,8 @@
 Real-time Gyroflow stabilization, entirely on the GPU — it runs even on a small NAS.
 
 I've ported gyroflow-core's undistort kernel to an mpv/libplacebo user shader (GLSL) and use it in
-[ActionFootagePlayer](https://actionfootageplayer.ch), an mpv-based player for action-camera footage. Gyroflow does
+[ActionFootagePlayer](https://actionfootageplayer.ch), an open-source (GPL-3.0) mpv-based player for action-camera
+footage. Gyroflow does
 the motion, smoothing and lens work on the CPU as usual; the per-pixel warp runs as a shader and the frame never leaves
 the GPU.
 
@@ -16,8 +17,8 @@ HDR at 60 fps with Gyroflow's bicubic, 7.9 ms of the 16.7 ms frame budget, in mp
 live HLS stream (VAAPI decode → the warp in libplacebo → VDEnc HEVC Main10, HLG) at 67-69 fps with bilinear
 sampling (59 fps with the bicubic), so a TV or phone plays any clip of the library stabilized while it's rendered.
 
-**On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU (86 % through a VapourSynth filter with gyroflow-core); a clip
-opens stabilized in about a second, also when it's read straight from the NAS.
+**On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU, the warp taking 0.6 ms of GPU time a frame; a clip opens
+stabilized in about a second, also when it's read straight from the NAS.
 
 **Live, without reading the whole file first.** A clip without a project starts playing once its first ~4 s of
 motion data are read, and the rest comes in as it plays:
