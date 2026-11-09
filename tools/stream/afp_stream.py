@@ -243,9 +243,22 @@ def info(clip):
 # play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
 # Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
 # in ~pq or ~sdr, and any of them in x<peak> (~pqx1000): its highlights expanded into the headroom up to that many nits
-# (hlg_highlights.glsl); TS players get TV_LOOK unless the URL says
-LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?$")
+# (hlg_highlights.glsl), and in g<gain> (~pqg2): the whole picture's light times that, a shoulder below 1000 nits
+# (hlg_gain.glsl); TS players get TV_LOOK unless the URL says
+LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?(?:g(\d(?:\.\d)?))?$")
 TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
+
+
+def gain_shader(gain):
+    """hlg_gain.glsl with its gain as the default"""
+    out = os.path.join(BIN, f"hlg_gain_{gain}.glsl")
+    src = os.path.join(BIN, "hlg_gain.glsl")
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+        text = open(src).read().replace("//!MAXIMUM 4.0\n2.0\n", f"//!MAXIMUM 4.0\n{float(gain):.2f}\n", 1)
+        with open(out + ".tmp", "w") as f:
+            f.write(text)
+        os.replace(out + ".tmp", out)
+    return out
 
 
 def highlights_shader(peak):
@@ -416,6 +429,8 @@ def start_render(clip, n, upto=None, background=False):
         m = LOOK.match(clip.get("look") or "hlg")
         if m and m.group(2):
             shaders.append(highlights_shader(int(m.group(2))))
+        if m and m.group(3):
+            shaders.append(gain_shader(m.group(3)))
         base = m.group(1) if m else "hlg"
         if base == "sdr":
             shaders.append(os.path.join(PLAYER, "dlogm", "shaders", "nbcu_hlg2sdr.glsl"))
