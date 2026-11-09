@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Action Footage Library: a trip's batches, made in the background, in a window of their own. It opens a project, the
-// trip folder with Project.afproject in it (a double click on that file opens it here), and makes for it what the
-// player's menu used to: clip previews (and again for the removed ones), moments of all marks, photos of all marks,
-// exports of all moments. One at a time, in a queue that shows how far each is and can stop it.
+// Action Footage Library: a project's footage, moments, photos and exports, browsed as folders, searched and filtered
+// (index.rs reads them from the project's files), and the commands on what's selected, made in the background: clip
+// previews, moments of the marks, photos of the marks, exports of moments. One at a time, in a queue that shows how far
+// each is and can stop it. It opens a project, the folder with Project.afproject in it (a double click on that file
+// opens it here); what's opened plays in ActionFootagePlayer's own window.
 //
 // It plays and renders nothing itself: each batch is ActionFootagePlayer run with no window (the workspace plugin's
 // batch mode, AFP_BATCH), which makes them as the player does, with its plugins and settings, and writes how far it
@@ -11,6 +12,8 @@
 // moments stabilized on their own) are in Project.afproject, which the player reads too.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod index;
 
 use serde::Serialize;
 use serde_json::{ json, Value };
@@ -92,6 +95,27 @@ struct Inner {
 }
 
 type Shared = Arc<Mutex<Inner>>;
+
+// ---------- this computer's list of projects opened ----------
+
+fn recent_file(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("recent.json"))
+}
+
+fn recent_list(app: &tauri::AppHandle) -> Vec<String> {
+    recent_file(app).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()).unwrap_or_default()
+}
+
+fn remember(app: &tauri::AppHandle, root: &Path) {
+    let Some(file) = recent_file(app) else { return };
+    let p = root.display().to_string();
+    let mut list = recent_list(app);
+    list.retain(|x| x != &p);
+    list.insert(0, p);
+    list.truncate(10);
+    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(file, serde_json::to_vec(&list).unwrap_or_default());
+}
 
 // ---------- the project ----------
 
@@ -387,26 +411,105 @@ fn engine() -> Result<String, String> {
     player().map(|p| p.display().to_string())
 }
 
-fn open_path(shared: &Shared, path: &Path) -> Result<String, String> {
+fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<String, String> {
     let root = project_of(path).ok_or_else(|| format!(
         "{} isn't in a project. A project is a trip folder with {PROJECT_FILE} in it: open a clip of it in \
          ActionFootagePlayer and initialize the project there (the side panel's Project tab)", path.display()))?;
     shared.lock().unwrap().project = Some(root.clone());
+    remember(app, &root);
     Ok(root.display().to_string())
 }
 
 #[tauri::command]
-fn open_project(shared: State<Shared>, path: String) -> Result<String, String> {
-    open_path(&shared, Path::new(&path))
+fn open_project(app: tauri::AppHandle, shared: State<Shared>, path: String) -> Result<String, String> {
+    open_path(&app, &shared, Path::new(&path))
+}
+
+#[derive(Serialize)]
+struct Recent { path: String, name: String, here: bool }
+
+// The projects this computer has opened, the last first: the ones still there
+#[tauri::command]
+fn recent(app: tauri::AppHandle) -> Vec<Recent> {
+    recent_list(&app).into_iter().filter(|p| Path::new(p).join(PROJECT_FILE).is_file() || Path::new(p).join(LEGACY_DIR).is_dir())
+        .map(|p| Recent { name: Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()), here: true, path: p })
+        .collect()
+}
+
+// ---------- browsing ----------
+
+// A view of the open project (index.rs), its clips' probes asked for in the background
+#[tauri::command]
+async fn scan(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let flat = read_doc(&root).get("settings").and_then(|s| s.get("clips_flat")).and_then(Value::as_bool).unwrap_or(false);
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = index::scan(&root, &view, flat);
+        let mut want: Vec<String> = Vec::new();
+        for it in out["items"].as_array().into_iter().flatten() {
+            match it["kind"].as_str() {
+                Some("clip") => if let Some(p) = it["path"].as_str() { want.push(p.to_string()); },
+                // A moment's original: what it is (its camera, its color) is the clip's
+                Some("moment") => if let Some(c) = it["link"]["clip"].as_str() { want.push(root.join(c).display().to_string()); },
+                _ => {}
+            }
+        }
+        let known = { let mut p = probes.lock().unwrap(); p.want(&want); p.known(&want) };
+        json!({ "root": root.display().to_string(), "view": view, "dirs": out["dirs"], "items": out["items"], "probes": known })
+    }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn probes_since(probes: State<index::SharedProbes>, since: u64) -> Value {
+    probes.lock().unwrap().since(since)
+}
+
+#[tauri::command]
+async fn thumb(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
+    tauri::async_runtime::spawn_blocking(move || index::thumb(Path::new(&path), &cache)).await.map_err(|e| e.to_string())
+}
+
+// What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
+#[tauri::command]
+fn open_items(paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() { return Ok(()); }
+    let (photos, videos): (Vec<&String>, Vec<&String>) = paths.iter().partition(|p| {
+        let l = p.to_lowercase();
+        [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| l.ends_with(e))
+    });
+    let player = player()?;
+    if !videos.is_empty() {
+        if cfg!(target_os = "macos") {
+            Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+        } else {
+            Command::new(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+        }
+    }
+    for p in photos {
+        let _ = if cfg!(target_os = "macos") { Command::new("open").arg(p).spawn() }
+            else if cfg!(windows) { Command::new("explorer").arg(p).spawn() }
+            else { Command::new("xdg-open").arg(p).spawn() };
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn reveal_path(path: String) {
+    let p = PathBuf::from(&path);
+    let _ = if cfg!(target_os = "macos") { Command::new("open").arg("-R").arg(&p).spawn() }
+        else if cfg!(windows) { Command::new("explorer").arg(format!("/select,{}", p.display())).spawn() }
+        else { Command::new("xdg-open").arg(p.parent().unwrap_or(&p)).spawn() };
 }
 
 // A file dialog for Project.afproject (a synchronous command: it runs on the main thread, as the dialog must)
 #[tauri::command]
-fn choose_project(shared: State<Shared>) -> Result<Option<String>, String> {
+fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<String>, String> {
     let picked = rfd::FileDialog::new().set_title("Open a project: its Project.afproject")
         .add_filter("Action Footage project", &["afproject"]).pick_file();
     match picked {
-        Some(p) => open_path(&shared, &p).map(Some),
+        Some(p) => open_path(&app, &shared, &p).map(Some),
         None => Ok(None),
     }
 }
@@ -414,7 +517,7 @@ fn choose_project(shared: State<Shared>) -> Result<Option<String>, String> {
 const KINDS: [&str; 5] = ["clips", "clips-again", "moments", "photos", "export"];
 
 #[tauri::command]
-fn add_job(shared: State<Shared>, kind: String, options: Option<Value>) -> Result<(), String> {
+fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
     if !KINDS.contains(&kind.as_str()) { return Err(format!("no such batch: {kind}")); }
     let mut inner = shared.lock().unwrap();
     let root = inner.project.clone().ok_or("Open a project first")?;
@@ -428,11 +531,18 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>) -> Resul
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
         _ => format!("Export all moments ({})", if sdr { "SDR" } else { "HDR" }),
     };
+    // Kept to what's selected: "Clip previews · 3 clips"
+    let only = only.filter(|o| !o.is_empty());
+    let title = match (&only, label) {
+        (Some(_), Some(l)) => format!("{} · {l}", title.replace(" of all marks", " of the marks").replace("Export all moments", "Export")),
+        _ => title,
+    };
     let project = root.display().to_string();
     if inner.jobs.iter().any(|j| !j.state.finished() && j.project == project && j.title == title) {
         return Err(format!("{title} is in the queue already"));
     }
     let mut request = json!({ "kind": kind, "project": project });
+    if let Some(o) = &only { request["only"] = json!(o); }
     if kind == "photos" { request["photo"] = json!(photo); }
     if kind == "export" { request["sdr"] = json!(sdr); }
     inner.next_id += 1;
@@ -504,6 +614,7 @@ fn busy(shared: &Shared) -> bool {
 fn opened(shared: &Shared, app: &tauri::AppHandle, path: PathBuf) {
     match project_of(&path) {
         Some(root) => {
+            remember(app, &root);
             let mut inner = shared.lock().unwrap();
             inner.project = Some(root.clone());
             inner.pending_open.push_back(root);
@@ -526,6 +637,10 @@ fn main() {
             if let Some(root) = project_of(&p) { shared.lock().unwrap().project = Some(root); }
         }
     }
+    let probes: index::SharedProbes = Arc::new(Mutex::new(index::Probes::default()));
+    probes.lock().unwrap().tool = index::probe_tool(player().ok().as_deref());
+    let probe_worker = probes.clone();
+    std::thread::spawn(move || index::probe_worker(probe_worker));
     let worker = shared.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
@@ -543,8 +658,10 @@ fn main() {
             }
         }))
         .manage(shared)
+        .manage(probes)
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
-                                                 clear_finished, set_setting, reveal, answer_close])
+                                                 clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
+                                                 thumb, open_items, reveal_path])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -1066,6 +1066,16 @@ end)
 local clips_job = nil
 -- Batch mode (Action Footage Library runs the player without a window to make them): { finished(summary), ... }
 local batch = nil
+-- What a batch is kept to (Action Footage Library's selection): paths in the project ("Day 1/A.MP4", a folder
+-- "Day 1", a moment "_Moments/Reef/Turtle.afplink.mp4"), each taking what's under it too; nil: the whole project
+local batch_only = nil
+local function in_only(relative)
+    if not batch_only then return true end
+    for _, p in ipairs(batch_only) do
+        if relative == p or relative:sub(1, #p + 1) == p .. "/" then return true end
+    end
+    return false
+end
 local recount
 local overlay = mp.create_osd_overlay("ass-events")
 
@@ -1247,7 +1257,10 @@ local function make_clips(again, root)
     local queue = {}
     for _, c in ipairs(moments.footage(root)) do
         local listed = made[moments_lib.made_line(c.relative, c.size)]
-        if (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
+        if batch_only then
+            -- Chosen ones: each that has no preview now, removed ones too
+            if in_only(c.relative) and not preview_for(c.relative, c.size) then queue[#queue + 1] = c end
+        elseif (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
             queue[#queue + 1] = c
         end
     end
@@ -2062,7 +2075,7 @@ local function marks_queue(kind, root)
     local all = kind == "moments" and moments.scan(root, nil).list or nil
     local taken_names = {}
     for _, c in ipairs(moments.footage(root)) do
-        local times = marks_of(c.file)
+        local times = in_only(c.relative) and marks_of(c.file) or nil
         if times then
             local info = utils.file_info(c.file)
             local size = info and info.size
@@ -2212,6 +2225,7 @@ local function export_moments(root, sdr)
     for _, m in ipairs(moments.scan(root, nil).list) do
         local l = m.link
         if not m.name:match("^export_") and type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"]
+           and in_only(ws.relative(m.file, root) or "")
            and not done[tostring(l.clip) .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] then
             local original = moments.original(l, root)
             if original then
@@ -2246,12 +2260,13 @@ local function export_moments(root, sdr)
 end
 
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
--- { kind, project, status, stop, photo, sdr }: kind clips (previews of the clips without one), clips-again (the ones
+-- { kind, project, status, stop, photo, sdr, only }: kind clips (previews of the clips without one), clips-again (the ones
 -- removed), moments (moments of all marks), photos (photos of all marks; photo: no, live or motion), export (all
 -- moments; sdr: in SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
 -- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
 -- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
--- is cancelled) and quits when it's done
+-- is cancelled) and quits when it's done. `only`: the paths in the project it's kept to (clips, folders, moment files):
+-- clip previews then are made for each of those without one, removed ones too
 do
     local req_file = os.getenv("AFP_BATCH")
     if req_file and req_file ~= "" then
@@ -2263,6 +2278,7 @@ do
             mp.add_timeout(0.1, function() mp.commandv("quit", "2") end)
         else
             local root = ws.normalize(req.project)
+            if type(req.only) == "table" and #req.only > 0 then batch_only = req.only end
             local status = { kind = req.kind, project = root, state = "starting", done = 0, total = 0, failed = 0 }
             local function write_status()
                 local out = io.open(req.status .. ".tmp", "w")
