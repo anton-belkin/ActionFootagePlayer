@@ -249,6 +249,13 @@ LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?(?:g(\d(?:\.\d)?))?$")
 TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
 
 
+def with_look(clip, look):
+    """The clip as rendered in a look (its own id, ~<look>), or as it is for hlg / none"""
+    if look and look != "hlg":
+        return dict(clip, id=f"{clip['id']}~{look}", look=look, base=clip)
+    return clip
+
+
 def gain_shader(gain):
     """hlg_gain.glsl with its gain as the default"""
     out = os.path.join(BIN, f"hlg_gain_{gain}.glsl")
@@ -519,7 +526,7 @@ def prerender_worker():
             upto = first
             while upto < last and not os.path.exists(segment_path(clip, upto)):
                 upto += 1
-            current["name"] = clip["name"]
+            current["name"] = clip["name"] + (f" ({clip['look']})" if clip.get("look") else "")
             j = start_render(clip, first, upto if upto < i["count"] else None, background=True)
         j["proc"].wait()
         current["name"] = None
@@ -650,7 +657,8 @@ class Handler(BaseHTTPRequestHandler):
             for folder, cs in sorted(folders.items()):
                 q = urllib.parse.quote(folder)
                 body += (f"<h2>{html.escape(folder)}</h2><p><a href='/prerender?folder={q}&what=opening'>pre-render openings</a> · "
-                         f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a></p><ul>")
+                         f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a> · "
+                         f"<a href='/prerender?folder={q}&what=opening&look=tv'>openings for the TV ({html.escape(TV_LOOK)})</a></p><ul>")
                 for c in cs:
                     i = infos.get(c["id"])
                     done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg") and f.endswith(".m4s")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
@@ -661,20 +669,34 @@ class Handler(BaseHTTPRequestHandler):
                                   f"<body style='font-family:system-ui;background:#111;color:#ddd'><style>a{{color:#8cf}}</style><h1>Clips</h1><p>Stabilized, HDR (HLG). "
                                   f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV. {status}.</p>{body}", "text/html; charset=utf-8")
         if parts == ["prerender"]:
+            # folder: a folder's clips (folders below it too with recursive=1; "" and recursive=1: everything);
+            # what: opening | whole; look: the look to render (tv: AFP_TV_LOOK, what TVs are given; else as in a
+            # stream's id, ~pqg2.5 without the ~; none: the player's HLG); links=1: only moments and clip previews
+            # (what Jellyfin shows), not the originals
             q = urllib.parse.parse_qs(u.query)
             folder, what = (q.get("folder") or [""])[0], (q.get("what") or ["opening"])[0]
+            look = (q.get("look") or [""])[0]
+            look = TV_LOOK if look == "tv" else look
+            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0] == "1"
             if what not in ("opening", "whole"):
                 return self.send(400, "what: opening or whole", "text/plain")
+            if look and not LOOK.match(look):
+                return self.send(400, "look: tv, or hlg, pq, sdr with x<peak> and g<gain>", "text/plain")
             added = 0
             with lock:
                 for c in clips():
-                    if folder_of(c) == folder and not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
+                    f = folder_of(c)
+                    inside = f == folder or (recursive and (folder in ("", ".") or f.startswith(folder.rstrip("/") + "/")))
+                    if not inside or (links and c["kind"] == "clip"):
+                        continue
+                    c = with_look(c, look)
+                    if not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
                         queue.append({"clip": c, "what": what})
                         added += 1
-            log("pre-render", what, folder, added, "clips")
+            log("pre-render", what, folder or "(all)", "recursive" if recursive else "", look or "hlg", added, "clips")
             return self.send(303, "", "text/plain", {"Location": "/"})
         if parts == ["status"]:
-            return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue),
+            return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue), "tv_look": TV_LOOK,
                                               "rendering": [{"clip": v["clip"], "from": v["from"], "background": v["background"]} for v in jobs.values() if v["proc"].poll() is None]}),
                              "application/json")
         if parts == ["playlist.m3u"]:
@@ -713,8 +735,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(404, "no such clip", "text/plain")
             if not look and wants_ts(self.headers, u.query):
                 look = TV_LOOK
-            if look and look != "hlg":
-                clip = dict(clip, id=f"{cid}~{look}", look=look, base=clip)
+            clip = with_look(clip, look)
             name = os.path.basename(parts[2])
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few

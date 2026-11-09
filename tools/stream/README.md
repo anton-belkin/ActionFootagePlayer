@@ -136,6 +136,17 @@ follows the brightness slider; expanding the highlights alone didn't help (Anton
 dark). Of x1, 1.5, 2 and 2.5 on clip 0065 (median 45 -> 67, 90, 112 nits; peaks up to 760) Anton chose 2.5 for that TV,
 2026-11-09: `AFP_TV_LOOK=pqg2.5`.
 
+Pre-rendering for the TV: the TV plays its own renders (its look), so what was pre-rendered for the player's HLG doesn't
+help it. `GET /prerender` takes `look=tv` (`AFP_TV_LOOK`, or a look as in a stream id), `recursive=1` (the folder and
+all below it; `folder=` empty: everything) and `links=1` (only moments and clip previews, what Jellyfin shows). The
+openings (8 s each, `AFP_OPENING`) of everything in Jellyfin, for the TV, so that a folder played in a row starts each
+clip at once:
+
+    curl "http://192.168.50.186:8099/prerender?folder=&recursive=1&links=1&what=opening&look=tv"
+
+It renders one clip at a time at low priority, only while nobody watches; `/status` shows it. Per folder, the index page
+has "openings for the TV". Not run yet (Anton runs it himself).
+
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
 web player takes HLG, and the iPhone plays the stream directly from afp-stream (checked 2026-11-08: fMP4 from here, no
