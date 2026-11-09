@@ -981,6 +981,86 @@ fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<
     Ok(serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems }))
 }
 
+// Everything the library keeps, written out in the open as one JSON file: the project's file and this computer's
+// additions, the locations and their pointer files, and for each clip, moment, clip preview, render, photo and export
+// what's kept in it or beside it (an MP4's keys, a photo's XMP link, a clip's own file, what the clip itself says).
+// Nothing in the library is kept anywhere this doesn't show
+fn library_json(root: &Path, probes: &index::SharedProbes) -> Value {
+    let mounts = locations::mounts();
+    let doc = read_doc(root);
+    let name = locations::pointer_name(root);
+    let local = doc.get("id").and_then(Value::as_str).and_then(locations::local_file).and_then(|f| locations::read_json(&f).map(|d| json!({ "file": f.display().to_string(), "content": d })));
+    let locs: Vec<Value> = locations::locations(root, &mounts).iter().map(|l| json!({
+        "name": l.name, "at": l.at, "path": l.path, "copies": l.copies, "this_computer_only": l.local,
+        "here": l.dir.as_ref().map(|d| d.display().to_string()),
+        "pointer_file": l.dir.as_ref().map(|d| d.join(&name)).filter(|f| f.is_file()).map(|f| json!({ "file": f.display().to_string(), "content": locations::read_json(&f) })),
+    })).collect();
+    // An MP4's own keys (ch.actionfootageplayer.*), as JSON where they are
+    let keys = |p: &str| -> Value {
+        let k = index::keys_and_cover(Path::new(p)).0;
+        let mut o = serde_json::Map::new();
+        let mut names: Vec<&String> = k.keys().filter(|n| n.starts_with("ch.actionfootageplayer")).collect();
+        names.sort();
+        for n in names { o.insert(n.clone(), serde_json::from_str(&k[n]).unwrap_or_else(|_| json!(k[n]))); }
+        Value::Object(o)
+    };
+    let own_file = |p: &Path| json!({ "file": p.display().to_string(), "content": locations::read_json(p) });
+    let flat = doc.get("settings").and_then(|s| s.get("clips_flat")).and_then(Value::as_bool).unwrap_or(false);
+    let footage = index::scan(root, "footage", flat);
+    let paths: Vec<String> = footage["items"].as_array().into_iter().flatten().filter_map(|it| it["path"].as_str().map(str::to_string)).collect();
+    let known = probes.lock().unwrap().known(&paths);
+    let clips: Vec<Value> = footage["items"].as_array().into_iter().flatten().map(|it| {
+        let p = it["path"].as_str().unwrap_or("");
+        json!({
+            "tree": it["id"], "copies": it["copies"], "size": it["size"], "modified": it["mtime"],
+            "own_files": it["own_files"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|f| own_file(Path::new(f))).collect::<Vec<_>>(),
+            "gyroflow_project": it["gyroflow"],
+            "preview": it["preview"].as_str().map(|pv| json!({ "file": pv, "keys": keys(pv) })),
+            "what_the_clip_says": known["items"].get(p).cloned().unwrap_or(Value::Null),
+        })
+    }).collect();
+    let view = |v: &str| index::scan(root, v, flat)["items"].as_array().cloned().unwrap_or_default();
+    let moments: Vec<Value> = view("moments").iter().map(|it| {
+        let p = it["path"].as_str().unwrap_or("");
+        let rel = it["id"].as_str().unwrap_or("");
+        let renders: Vec<Value> = index::RENDER_PROFILES.iter().map(|pr| (pr, index::render_path(root, rel, pr))).filter(|(_, f)| f.is_file())
+            .map(|(pr, f)| json!({ "profile": pr, "file": f.display().to_string(), "state": it["renders"][*pr], "keys": keys(&f.to_string_lossy()) })).collect();
+        let g = Path::new(p).with_file_name(format!("{}.gyroflow", it["name"].as_str().unwrap_or("")));
+        json!({ "file": p, "name": it["name"], "original": it["original"], "keys": keys(p), "renders": renders,
+                "gyroflow_project": g.is_file().then(|| g.display().to_string()) })
+    }).collect();
+    let photo_tags = doc.get("photo_tags").cloned().unwrap_or(json!({}));
+    let photos: Vec<Value> = view("stills").iter().map(|it| json!({
+        "file": it["path"], "form": it["form"], "link_in_its_xmp": it["link"], "tags_in_the_project_file": photo_tags.get(it["id"].as_str().unwrap_or("")).cloned(),
+    })).collect();
+    let exports: Vec<Value> = view("exports").iter().map(|it| { let p = it["path"].as_str().unwrap_or(""); json!({ "file": p, "keys": keys(p) }) }).collect();
+    json!({
+        "format": "actionfootage-library-export", "version": 1,
+        "about": "Everything Action Footage Library and ActionFootagePlayer keep about this library, in the open: what's in the files beside the clips, inside the moments, previews, renders, photos and exports, and in the project's own files. The app keeps nothing else.",
+        "app": env!("CARGO_PKG_VERSION"),
+        "exported_unix_time": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        "project": { "folder": root.display().to_string(), "file": root.join(locations::PROJECT_FILE).display().to_string(), "content": doc },
+        "this_computer": local,
+        "locations": locs,
+        "clips": clips, "moments": moments, "photos": photos, "exports": exports,
+    })
+}
+
+#[tauri::command]
+async fn export_library(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>) -> Result<Option<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let base = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Library".into());
+    let Some(file) = rfd::AsyncFileDialog::new().set_title("Export the library as JSON").set_file_name(format!("{base} library.json"))
+        .add_filter("JSON", &["json"]).save_file().await else { return Ok(None) };
+    let file = file.path().to_path_buf();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = library_json(&root, &probes);
+        std::fs::write(&file, serde_json::to_vec_pretty(&v).unwrap()).map_err(|e| format!("{}: {e}", file.display()))?;
+        Ok(Some(file.display().to_string()))
+    }).await.map_err(|e| e.to_string())?
+}
+
 // A clip's or moment's Gyroflow project opened in Gyroflow (the system's app for .gyroflow): `paths`, the clip's
 // copies or the moment's file; its project beside one of them (<name>.gyroflow or <name.ext>.gyroflow)
 #[tauri::command]
@@ -1233,7 +1313,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1362,6 +1442,19 @@ mod tests {
         let j = &inner.jobs[0];
         assert_eq!(j.state, JobState::Done, "{:?}", j.message);
         assert!(inner.running.is_none());
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    // The test project's library as JSON, into AFL_EXPORT_OUT: run by hand
+    #[test]
+    #[ignore]
+    fn export_trip() {
+        let root = std::path::PathBuf::from(std::env::var("AFL_EXPORT_ROOT").unwrap());
+        let probes: crate::index::SharedProbes = Default::default();
+        let v = super::library_json(&root, &probes);
+        std::fs::write(std::env::var("AFL_EXPORT_OUT").unwrap(), serde_json::to_vec_pretty(&v).unwrap()).unwrap();
     }
 }
 

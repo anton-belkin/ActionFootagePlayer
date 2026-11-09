@@ -1767,6 +1767,24 @@ fn read_png16(path: &Path) -> Result<(usize, usize, Vec<u8>), String> {
     Ok((w, h, out))
 }
 
+/// A photo's link to its clip (photo.rs's AFP_NS): the clip's path in its project's tree (else its name), its size and
+/// fingerprint, the frame's time. --link's, when given, with these added
+fn photo_link(clip: &Path, opts: &Options, t: f64) -> String {
+    use vs_gyroflow::workspace as ws;
+    let mut o = opts.link.as_deref().and_then(|l| serde_json::from_str::<serde_json::Value>(l).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    o.insert("v".into(), 1.into());
+    o.insert("kind".into(), "photo".into());
+    o.insert("t".into(), serde_json::json!((t * 1000.0).round() / 1000.0));
+    if !o.contains_key("clip") {
+        let root = ws::project_root(clip);
+        let tree = root.as_ref().and_then(|r| ws::tree_path(clip, &ws::locations(r)));
+        o.insert("clip".into(), tree.unwrap_or_else(|| clip.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).into());
+        if let Some(r) = root { o.entry("roots").or_insert_with(|| serde_json::json!([r.display().to_string()])); }
+    }
+    if let Ok(m) = std::fs::metadata(clip) { o.entry("size").or_insert(m.len().into()); }
+    ws::with_fingerprint(&serde_json::Value::Object(o).to_string(), clip)
+}
+
 fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     use vs_gyroflow::photo::{ self as ph, Cube };
     use vs_gyroflow::still;
@@ -2049,13 +2067,14 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         };
 
         let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
+        let link = photo_link(&path, opts, n as f64 / fps);
         let maker = probe::camera(&path.to_string_lossy());
         let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
         if jpeg {
             let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref());
             let video = match &live { Some((f, _)) => Some(std::fs::read(&f.0).map_err(|e| format!("{}: {e}", f.0.display()))?), None => None };
             let motion = video.as_deref().zip(live.as_ref()).map(|(v, (_, at))| ph::Motion { video: v, presentation_us: (at * 1e6).round() as i64 });
-            let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref())?;
+            let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref(), Some(&link))?;
             std::fs::write(&out_path, bytes).map_err(|e| format!("{}: {e}", out_path.display()))?;
         } else {
             let name = out_path.file_name().unwrap().to_string_lossy().to_string();
@@ -2069,6 +2088,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             if let Some(t) = &taken { cmd.args(["--taken", t]); }
             if let Some(m) = &make { cmd.args(["--make", m]); }
             if let Some(m) = &model { cmd.args(["--model", m]); }
+            cmd.args(["--link", &link]);
             // A Live Photo: the video copied next to it, the two with one content identifier
             if let Some((video, at)) = &live {
                 cmd.arg("--live-video").arg(&video.0).arg("--live-out").arg(out_path.with_extension("mov"))
