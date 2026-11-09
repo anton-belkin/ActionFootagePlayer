@@ -149,6 +149,16 @@ clip at once:
 
     curl "http://192.168.50.186:8099/prerender?folder=&recursive=1&links=1&what=opening&look=tv"
 
+A whole run (337 openings) took 43 min on 2026-11-09, 9 GB.
+
+What renders while the TV plays (found from the cache files' times, 2026-11-09): Jellyfin's own probe of each stream
+(ffprobe, User-Agent `Lavf`, ~5 s before the TV starts) set off a render of the whole clip in HLG, which nobody watched
+and which halved the GPU for the TV's (27-29 fps where alone it does 40+). A probe now gets at most the 2 segments it
+reads rendered. When Jellyfin passes a stream on (`Jellyfin-Server`), the TV look's render starts at once from the
+first segment not in the cache, instead of when the TV gets near it; and a render nobody has asked for in 15 s (the
+player went to another clip) stops. What was rendered stays in the cache (`AFP_CACHE_GB`): played again or sought
+back, it's served from there with nothing rendered.
+
 It renders one clip at a time at low priority, only while nobody watches; `/status` shows it. Per folder, the index page
 has "openings for the TV". Not run yet (Anton runs it himself).
 

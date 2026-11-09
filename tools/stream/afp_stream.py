@@ -56,6 +56,10 @@ PLAYER = os.environ.get("AFP_PLAYER", "/stream/player")
 ARGS = os.environ.get("AFP_ARGS", "/stream/args")
 
 jobs = {}  # key -> {proc, dir, started}
+# When a player last asked for each clip's segments: a render nobody asks for any more (the player went to another
+# clip) stops, so that it doesn't halve the GPU for the one being watched
+asked = {}
+ORPHAN_AFTER = 15
 lock = threading.Lock()
 
 
@@ -472,10 +476,21 @@ def start_render(clip, n, upto=None, background=False):
     return j
 
 
-def ensure(clip, n):
+def is_probe(headers):
+    """Jellyfin reading a stream to learn what it is (its ffprobe), not a player: it needs the first segments only"""
+    return (headers.get("User-Agent") or "").startswith("Lavf")
+
+
+def ensure(clip, n, limit=None):
     """A render that has segment n or will have it soon: the running one when it's at most a few segments short of n,
-    else a new one from n (a seek), the old one stopped. Someone watching comes first: a background render stops"""
+    else a new one from n (a seek), the old one stopped. Someone watching comes first: a background render stops, and so
+    does one nobody has asked for in ORPHAN_AFTER s. limit: at most that many segments (a probe's)"""
     with lock:
+        now = time.time()
+        for k, v in jobs.items():
+            if k != clip["id"] and not v["background"] and v["proc"].poll() is None and now - asked.get(k, v["started"]) > ORPHAN_AFTER:
+                log("stopping the render of", k, ": nobody asks for it")
+                v["proc"].terminate()
         out = clip_dir(clip)
         j = jobs.get(clip["id"])
         if os.path.exists(segment_path(clip, n)):
@@ -495,6 +510,8 @@ def ensure(clip, n):
         count = info(clip)["count"]
         while upto < count and not os.path.exists(segment_path(clip, upto)):
             upto += 1
+        if limit:
+            upto = min(upto, n + limit)
         return start_render(clip, n, upto if upto < count else None)
 
 
@@ -743,16 +760,27 @@ class Handler(BaseHTTPRequestHandler):
                 look = TV_LOOK
             clip = with_look(clip, look)
             name = os.path.basename(parts[2])
+            asked[clip["id"]] = time.time()
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
-                first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                # (Jellyfin's probe: only those it reads)
+                count = info(clip)["count"]
+                first = next((k for k in range(min(6, count)) if not os.path.exists(segment_path(clip, k))), None)
                 if first is not None:
-                    ensure(clip, first)
+                    ensure(clip, first, 2 if is_probe(self.headers) else None)
                 # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
                 # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
                 # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
                 # the stream from us, with its own User-Agent, and gets TS or fMP4 as it plays
                 if (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server"):
+                    # A TV is about to play: its look's render starts now from the first segment it doesn't have (past a
+                    # pre-rendered opening), seconds before the TV asks
+                    if not look:
+                        tv = with_look(clip, TV_LOOK)
+                        asked[tv["id"]] = time.time()
+                        k = next((k for k in range(count) if not os.path.exists(segment_path(tv, k))), None)
+                        if k is not None:
+                            ensure(tv, k)
                     i = info(clip)
                     w, h = (shader_for(clip, clip_dir(clip), i).get("output") or [1920, 1080])
                     height = min(HEIGHT, h)
@@ -767,10 +795,11 @@ class Handler(BaseHTTPRequestHandler):
                 n = int(m.group(1))
                 if n >= info(clip)["count"]:
                     return self.send(404, "past the end", "text/plain")
-                j = ensure(clip, n)
+                probe = is_probe(self.headers)
+                j = ensure(clip, n, 2 if probe else None)
                 # A cached stretch (a pre-rendered opening, what played before) ends somewhere: the render picks up a
-                # few segments before the player gets there
-                ahead = next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                # few segments before the player gets there (not for a probe)
+                ahead = None if probe else next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if ahead is not None:
                     ensure(clip, ahead)
                 path = segment_path(clip, n)
