@@ -1113,6 +1113,7 @@ end
 local render_scale = 1
 -- The short side it renders at, for quality.lua (nil: not the GPU path)
 local gpu_render_short = nil
+local render_logged = nil
 local function gpu_render_scale()
     if not gpu or not gpu.shader or gpu.sphere then return end
     local d = mp.get_property_native("osd-dimensions") or {}
@@ -1130,12 +1131,13 @@ local function gpu_render_scale()
     end
     s = math.max(0.1, math.min(4, s))
     gpu_render_short = math.floor(math.min(dw, dh) * s + 0.5)
+    local line = string.format("GPU path: rendering at %dx%d (%s), shown at %dx%d", math.floor(dw * s + 0.5), math.floor(dh * s + 0.5), o.resolution, dw, dh)
+    if line ~= render_logged then render_logged = line; mp.msg.info(line) end
     if math.abs(s - render_scale) < 1e-4 and (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_render_scale then return end
     render_scale = s
     local opts = mp.get_property_native("glsl-shader-opts") or {}
     opts.gyroflow_render_scale = string.format("%.4f", s)
     mp.set_property_native("glsl-shader-opts", opts)
-    mp.msg.info(string.format("GPU path: rendering at %dx%d (%s), shown at %dx%d", math.floor(dw * s + 0.5), math.floor(dh * s + 0.5), o.resolution, dw, dh))
 end
 
 local function gpu_apply(reply)

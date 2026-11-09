@@ -601,6 +601,10 @@ is the sum of `vo-passes`' fresh averages:
 - Frames drop from about 8 ms of passes, half of the frame's 16.7 ms. Not mpv's 120 Hz vsync: with
   `--override-display-fps=60` or `--swapchain-depth=2` as many drop.
 
+With #153's lighter denoise (the same screen, the panel hidden): at the screen's size Full drops 23 % (14.2 ms) and
+Light 14 % (11.8 ms); at 1080p neither drops (6.9 and 6.0 ms). With the panel open (the video ~2340x1320) Light held
+at the screen's size, but full screen it doesn't, so Auto caps both.
+
 So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader;
 paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
 When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
