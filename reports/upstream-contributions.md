@@ -364,42 +364,55 @@ PR — несколько строк (`mapSetFloat(map, "_AbsoluteTime", pts)`),
 Все тексты — на английском, в голосе Антона, для правки им. Перед отправкой: видео-демо (записывает Антон), и раскрытие
 работы с Claude — короткое и честное (CLA Gyroflow §3(e) этого требует, mpv — тоже).
 
-### D1. Первое сообщение Адриану (Discord `#dev-live-stabilization` или комментарий в #635)
+### D1. Комментарий в #635 «Realtime stabilization» (рекомендую) — коротко дублировать ссылкой в Discord
 
-> Hi Adrian — Anton here (static zoom / the iGPU memory PR; thanks for the credit in 1.7).
+Почему #635: это открытый issue ровно про реальное время, с ответом Адриана «planned but no timeline»; его читают все,
+кто ищет живую стабилизацию; комментарий остаётся и находится поиском. Discord (`#dev-live-stabilization`) — для
+разговора: одна строка со ссылкой на комментарий. Перед отправкой: видео 30–60 с (NAS-стрим на телевизоре или
+телефоне + плеер на Mac), ссылка вместо `<video>`.
+
+> Real-time Gyroflow stabilization, entirely on the GPU — it runs even on a small NAS.
 >
-> Re #635: I've got Gyroflow's undistort kernel running in real time as an mpv/libplacebo user shader, and thought you
-> might want to see the numbers.
+> I've ported gyroflow-core's undistort kernel to an mpv/libplacebo user shader (GLSL) and use it in
+> ActionFootagePlayer, an mpv-based player for action-camera footage. Gyroflow does the motion, smoothing and lens
+> work on the CPU as usual; the per-pixel warp runs as a shader and the frame never leaves the GPU.
 >
-> - It's a GLSL port of `undistort_coord` (your lens models' GLSL except Sony and the generic polynomial, the GoPro
->   digital lenses, rolling shutter, refraction, your bicubic/Lanczos4/EWA; full lens correction only so far). Checked
->   against `undistort_coord` at every pixel of a 1080p output, opencv_fisheye (Osmo Action 6) and gopro (HERO12):
->   max 0.037 px, mean ~0.001 px. The other models compile but I have no clips to check them.
-> - Per frame the shader gets a small table: the `KernelParams` fields plus the row rotations as quaternion knots.
->   33 knots per frame are within 0.021 px of per-row matrices on a vibrating HERO7 clip (9 knots: 0.07). ~600 bytes a
->   frame. mpv ≥ 0.42 gives the shader the frame's PTS, so it finds its own row in the table.
-> - The frame never leaves the GPU (VideoToolbox / VAAPI zero-copy). On an M1 Pro: 4K60 D-Log M stabilized at 34 % CPU
->   vs 86 % through a VapourSynth filter with gyroflow-core, clips open in < 1 s.
-> - On an Intel N100 (6 W iGPU) it plays 4K60 → 1080p with your bicubic in 7.9 ms a frame. What made it fit: on that GPU
->   a pass costs its texture fetches, not its math, so the geometry is computed on an 8 px grid (≤ 0.06 px from exact;
->   the Newton loops of the GoPro/Insta360 models run only at grid points) and the bicubic is done from 9 bilinear
->   fetches instead of 16. The same NAS streams it as 1080p HDR HLS (VAAPI → libplacebo → VDEnc) at 67-69 fps.
-> - Underwater, red and blue get their own refraction index inside the same warp, so the water's colour fringes go
->   away without a second resample.
+> **On a UGREEN DXP2800 NAS (Intel N100, 6 W iGPU):** 4K60 10-bit HEVC (Osmo Action 6, D-Log M) → stabilized 1080p
+> HDR at 60 fps with Gyroflow's bicubic, 7.9 ms of the 16.7 ms frame budget, in mpv. The same box serves it as a
+> live HLS stream (VAAPI decode → the warp in libplacebo → VDEnc HEVC Main10, HLG) at 67-69 fps, so a TV or phone
+> plays any clip of the library stabilized while it's rendered.
 >
-> Short video: <link>. The code is GPL-3.0 in anton-belkin/ActionFootagePlayer (`shaders/gyroflow/warp.glsl`,
-> `vs-gyroflow/src/gpu_table.rs`, credited as a derivative of gyroflow-core); measurements in
-> `docs/gpu-render-spike.md`. Written with Claude's help; every number above is measured, and the per-pixel check is a
-> test in the repo. This message and the links are shared for information — Not a Contribution under the CLA.
+> **On a Mac (M1 Pro):** 4K60 stabilized at 34 % CPU (86 % through a VapourSynth filter with gyroflow-core), clips
+> open in under a second, also straight from an SD card or the NAS.
 >
-> Separately, I have a few changes to gyroflow-core itself that I'd be glad to send as PRs, if you want them: an
-> equirect output projection (with a rig lens's pose and offset, for 360 cameras; re #800), a view rotation applied
-> after the smoothing (a tripod-style pan that doesn't need re-smoothing), and the RadtanPro terms of Insta360's
-> offset_v6 (X4, X5). Each with tests, rebased on 1.7.
+> How it fits on a 6 W GPU:
+> - Accuracy: every pixel of a 1080p output is within 0.037 px of `undistort_coord` (opencv_fisheye and gopro
+>   checked; your lens models' GLSL, the GoPro digital lenses, rolling shutter and refraction are in).
+> - Per frame the shader reads a small table: the `KernelParams` fields and the row rotations as 33 quaternion knots
+>   (within 0.021 px of per-row matrices on a vibrating HERO7 clip), ~600 bytes a frame. mpv ≥ 0.42 gives the shader
+>   the frame's PTS, so it finds its own row.
+> - On that iGPU a pass costs its texture fetches, not its math: the geometry is computed on an 8 px grid (≤ 0.06 px
+>   from exact; the GoPro/Insta360 Newton loops run only at grid points) and the bicubic uses 9 bilinear fetches
+>   instead of 16.
+>
+> Video: <video>. Code (GPL-3.0, a derivative of gyroflow-core): `shaders/gyroflow/warp.glsl` and
+> `vs-gyroflow/src/gpu_table.rs` in https://github.com/anton-belkin/ActionFootagePlayer; measurements in
+> `docs/gpu-render-spike.md`. Built with Claude Code; every number here is measured, and the per-pixel check is a
+> test in the repo. Shared for information — Not a Contribution under the CLA.
+>
+> Separately, two changes to gyroflow-core itself are up as PRs: #1289 (view_rotation, a pan after the smoothing)
+> and #1290 (equirect output + a rig lens's pose, re #800).
+
+Discord, одной строкой:
+
+> Hi Adrian — posted real-time numbers for #635 (Gyroflow's warp as an mpv/libplacebo shader, 4K60 → 1080p HDR at
+> 60 fps on an N100 NAS): <link to the comment>. Not a Contribution, just for info.
 
 Решено (Антон, 2026-11-09): **рассказать, но не отдавать** GPU-путь и фильтры — они остаются в ActionFootagePlayer;
-правки самого gyroflow-core предложить PR'ами по CLA. Если выбрать #635, первую строку убрать; текст тот же. Пометка
-«Not a Contribution» нужна и в комментарии, и в Discord: CLA считает вкладом и сообщения в чате.
+правки самого gyroflow-core — PR'ами по CLA: [#1289](https://github.com/gyroflow/gyroflow/pull/1289) (view_rotation)
+и [#1290](https://github.com/gyroflow/gyroflow/pull/1290) (equirect + RigLens) открыты 2026-11-09. Insta360 RadtanPro
+(d130105) придержан: Gyroflow строит профиль X4/X5 из `offset_v3` (telemetry-parser `insert_lens_profile`), так что
+без второй половины (профиль из `offset_v6`) он ничего не меняет, а улучшение от v6 на плоских клипах не измерено.
 
 ### D2. Issue в telemetry-parser: медленное чтение с сетевых дисков
 
