@@ -570,7 +570,13 @@ Anton, 2026-11-09:
   *Find moved files*) are commands on the selection, since a whole big project takes long; the project's own menu
   (by its name) holds the projects, *Project settings…* (locations edited: order, place in the tree, path, copies
   only; what this computer keeps for it: local copies, caches with their size and a Clear, its own choices; general:
-  name, id, the NAS's other names), *Take in…* and *Move the project to…*. Commands act only on what's selected: with nothing selected they're greyed out (their settings can still be set); *Select all*, *Select none*, ⌘A and Esc are at hand. Filters (a panel of nested lists with counts, and tokens in the search field) work two ways: while browsing, they narrow the folder you're in, in place; a search (words typed, or *List every match*) is a flat list, in this folder or everywhere. Filters with nothing to show are hidden.
+  name, id, the NAS's other names), *Take in…* and *Move the project to…*. Commands act only on what's selected: with nothing selected they're greyed out (their settings can still be set); *Select all*, *Select none*, ⌘A and Esc are at hand. Filters (a panel of nested lists with counts, and tokens in the search field) work two ways: while browsing, they narrow the folder you're in, in place; a search (words typed, or *List every match*) is a flat list, in this folder or everywhere. Filters with nothing to show are hidden. After Anton's first try (2026-11-09): Footage shows the clips as arranged in _Clips (each in its preview's folder; the
+  ones without a preview in a folder of their own), and **Sources** is a tab of its own: the project's locations as
+  folders, each explored as it is on its disk, added and removed there; nothing in it is renamed. The list follows the
+  system's keys (arrows, Shift; a Mac's Return renames, ⌘↓ opens, ⌘↑ goes up, space is Quick Look; Windows' Enter opens,
+  F2 renames, Alt+↑ goes up). A clip or moment with a Gyroflow project has Open in Gyroflow. What the Library last saw of
+  a project shows at once while it looks again. The player opens without its side panel (Tab shows it), and a video
+  opened in a paused player plays.
 
 ## Open questions
 

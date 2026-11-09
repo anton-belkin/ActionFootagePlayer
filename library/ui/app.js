@@ -19,10 +19,14 @@ const ICON = {
   list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
 };
-const VIEWS = [["footage", "Footage"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+const VIEWS = [["footage", "Footage"], ["sources", "Sources"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+// Footage is the clips as arranged in _Clips (their previews' folders); the ones without a preview are in this one
+const NOPREV = "Without a clip preview";
 // Where each view is in the project, for the paths a batch is kept to
-const BASE = { footage: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/" };
-const NOUN = { footage: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"] };
+const BASE = { footage: "", sources: "", moments: "_Moments/", stills: "_Stills/", exports: "_Exports/" };
+const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"] };
+// Where each view's folders are, for renaming them: Footage's are _Clips'
+const FOLDER_BASE = { footage: "_Clips", moments: "_Moments", stills: "_Stills", exports: "_Exports" };
 
 const S = {
   root: null, name: "", info: null, macos: true,
@@ -34,7 +38,9 @@ const S = {
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
   profiles: { HDR: true, SDR: false },
+  scanning: {}, cachedViews: {}, renaming: null,
 };
+let RAW_FOOTAGE = null; // the footage view as scanned: one item per clip, at its path in the tree
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
 let probesVersion = 0, probesPending = 0;
@@ -129,7 +135,11 @@ function tfText(it) {
 }
 
 function derive(view) {
-  const d = DATA[view];
+  if (view === "footage" || view === "sources") { arrange(); return; }
+  deriveItems(view);
+}
+function deriveItems(view) {
+  const d = DATA[view === "sources" ? "footage" : view];
   if (!d) return;
   const root = S.root;
   for (const it of d.items) {
@@ -178,6 +188,45 @@ function derive(view) {
     it.dur = it.kind === "still" ? (it.form === "Live Photo" ? "Live" : "") : clock(it.durS);
   }
 }
+// Footage and Sources from the scan: Footage, each clip in the folder its preview is in (_Clips, as arranged by hand);
+// Sources, each location's own folders as they are on its disk, a clip once per location that has it
+function arrange() {
+  if (!RAW_FOOTAGE) return;
+  const label = {};
+  const used = {};
+  S.locations.forEach((l, i) => {
+    let n = l.name || "Location " + (i + 1);
+    while (used[n]) n += " ·";
+    used[n] = true;
+    label[i] = n;
+  });
+  const fitems = RAW_FOOTAGE.items.map((it) => Object.assign({}, it, { key: it.id, tdir: it.dir, dir: it.pdir == null ? NOPREV : it.pdir }));
+  const fdirs = (RAW_FOOTAGE.clips_dirs || []).slice();
+  if (fitems.some((it) => it.dir === NOPREV)) fdirs.push(NOPREV);
+  DATA.footage = { dirs: fdirs, items: fitems };
+  const sitems = [];
+  for (const it of RAW_FOOTAGE.items) {
+    for (const c of it.copies || []) {
+      const rel = c.rel || it.name;
+      const i = rel.lastIndexOf("/");
+      const dir = label[c.li] + (i > 0 ? "/" + rel.slice(0, i) : "");
+      sitems.push(Object.assign({}, it, { key: "s:" + c.li + "/" + rel, tdir: it.dir, dir, name: rel.slice(i + 1), path: c.path, srcLoc: c.loc }));
+    }
+  }
+  const sdirs = [];
+  S.locations.forEach((l, i) => { sdirs.push(label[i]); for (const d of l.dirs || []) sdirs.push(label[i] + "/" + d); });
+  DATA.sources = { dirs: sdirs, items: sitems, labels: label };
+  for (const v of ["footage", "sources"]) derive1(v);
+}
+function derive1(view) {
+  const d = DATA[view];
+  if (!d) return;
+  const keep = DATA.footage;
+  DATA.footage = d;
+  deriveItems(view);
+  DATA.footage = keep;
+}
+
 function countMoments() {
   MOMENTS_OF = {};
   for (const m of (DATA.moments && DATA.moments.items) || []) {
@@ -196,7 +245,7 @@ let FACETS = [];
 function buildFacets() {
   const items = (DATA[S.view] && DATA[S.view].items) || [];
   const sections = [];
-  if (S.view === "footage" || S.view === "moments") {
+  if (S.view === "footage" || S.view === "sources" || S.view === "moments") {
     const brands = distinct(items, (i) => i.brand);
     const camOpts = brands.map((b) => P("cam:" + b, b, distinct(items.filter((i) => i.brand === b), (i) => i.model).map((m) => L("cam:" + b + "|" + m, m, (it) => it.brand === b && it.model === m))));
     if (items.some((i) => i.probed && !i.brand)) camOpts.push(L("cam:?", "Unknown", (it) => it.probed && !it.brand));
@@ -222,16 +271,16 @@ function buildFacets() {
       { id: "hor", title: "Horizon", opts: [L("hor:l", "Level", (it) => it.horizon === "Level"), L("hor:f", "Free", (it) => it.horizon === "Free")] },
       { id: "frm", title: "Frame", opts: [L("frm:own", "As recorded", (it) => it.frame === "As recorded")].concat(frames.length ? [P("frm:ch", "Changed", frames.map((f) => L("frm:" + f, f, (it) => it.frame === f)))] : []) },
       { id: "prj", title: "Projection", opts: [L("prj:lin", "Linear", (it) => it.proj === "Linear")].concat(projs.map((p) => L("prj:" + p, p, (it) => it.proj === p))) },
-    ].concat(S.view === "footage" ? [{ id: "trn", title: "Recorded turned", opts: [L("trn:y", "Turned", (it) => it.turned), L("trn:n", "As is", (it) => !it.turned)] }] : []) });
+    ].concat(S.view === "footage" || S.view === "sources" ? [{ id: "trn", title: "Recorded turned", opts: [L("trn:y", "Turned", (it) => it.turned), L("trn:n", "As is", (it) => !it.turned)] }] : []) });
   }
-  if (S.view === "footage") {
+  if (S.view === "footage" || S.view === "sources") {
     sections.push({ id: "mk", title: "Marks & previews", facets: [
       { id: "mrk", title: "Marks", opts: [L("mrk:y", "Has marks", (it) => it.marks > 0), L("mrk:n", "No marks", (it) => !(it.marks > 0))] },
       { id: "mom", title: "Moments", opts: [L("mom:y", "Has moments", (it) => it.moments > 0), L("mom:todo", "Marks without moments", (it) => it.marks > 0 && !it.moments)] },
       { id: "prv", title: "Clip preview", opts: [L("prv:y", "Made", (it) => !!it.preview), L("prv:n", "Not made", (it) => !it.preview)] },
     ] });
   }
-  if (S.view === "footage") {
+  if (S.view === "footage" || S.view === "sources") {
     const names = distinct(items, (i) => i.loc);
     const wh = [];
     if (names.length > 1) wh.push({ id: "loc", title: "Plays from", opts: names.map((n) => L("loc:" + n, n, (it) => it.loc === n)) });
@@ -283,13 +332,14 @@ function childDirs(dir) {
 function scopeItems() { return S.scope === "all" || !S.path.length ? items() : under(dirKey()); }
 function plural(n) { const w = NOUN[S.view]; return n + " " + (n === 1 ? w[0] : w[1]); }
 
+function keyOf(it) { return it.kind === "folder" ? "f:" + it.path : "i:" + (it.key || it.id); }
 function ctx() {
   const viewName = VIEWS.find((v) => v[0] === S.view)[1];
   const folderName = S.path.length ? S.path[S.path.length - 1] : viewName;
   const selFolders = Object.keys(S.sel).filter((k) => k.startsWith("f:")).map((k) => k.slice(2));
-  const direct = items().filter((it) => S.sel["i:" + it.id]);
+  const direct = items().filter((it) => S.sel["i:" + (it.key || it.id)]);
   const seen = {}, selItems = [];
-  direct.concat(...selFolders.map((p) => under(p).filter((it) => matches(it)))).forEach((it) => { if (!seen[it.id]) { seen[it.id] = 1; selItems.push(it); } });
+  direct.concat(...selFolders.map((p) => under(p).filter((it) => matches(it)))).forEach((it) => { const k = it.key || it.id; if (!seen[k]) { seen[k] = 1; selItems.push(it); } });
   const any = selFolders.length + direct.length > 0;
   const fnames = selFolders.map((p) => p.split("/").pop());
   let selName = "";
@@ -301,7 +351,9 @@ function ctx() {
   }
   // What a batch is kept to: the items, and the folders whole (the player takes what's under a folder) unless filtered
   const filt = filtering() || S.q.trim() !== "";
-  const only = filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
+  // Footage's and Sources' folders aren't the project's tree: their clips, by their paths in it
+  const clipsView = S.view === "footage" || S.view === "sources";
+  const only = clipsView ? Array.from(new Set(selItems.map((it) => it.id))) : filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
   return { viewName, folderName, selFolders, direct, selItems, any, selName, only, label: plural(selItems.length) };
 }
 
@@ -360,30 +412,34 @@ function renderMain() {
   } else {
     h += '<div class="crumbs"><button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
-    h += '<span class="where">' + esc(S.view === "footage" ? (S.locations.length > 1 ? "From " + S.locations.filter((l) => l.dir).map((l) => l.name + (l.at ? " (" + l.at + "/)" : "")).join(", ") : S.root) : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    h += '<span class="where">' + esc(S.view === "footage" ? "As arranged in _Clips" : S.view === "sources" ? (S.path.length ? sourceOf(S.path[0]) : "Where the footage is, first wins") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    if (S.view === "sources" && !S.path.length) h += '<div class="selbar"><button type="button" class="btn sm" data-a="addsource">Add a source…</button><button type="button" class="btn sm" data-a="sheet" data-v="settings">Sources settings…</button></div>';
     if (filt) {
       const all = under(dir).filter((x) => matches(x)).length;
       h += '<div class="scope"><span class="chip fast">Filtered</span><span class="sub" style="display:inline">' + list.length + ' of ' + here.length + ' here' + (hiddenFolders ? " · " + hiddenFolders + " folder" + (hiddenFolders > 1 ? "s" : "") + " with no match hidden" : "") + '</span>' +
         '<button type="button" class="btn sm" data-a="flat" style="margin-left:auto">List every match below here (' + all + ')</button></div>';
     }
   }
-  if (probesPending && (S.view === "footage" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
-  const keyOf = (it) => it.kind === "folder" ? "f:" + it.path : "i:" + it.id;
+  const scanView = S.view === "sources" ? "footage" : S.view;
+  if (S.scanning[scanView] && S.cachedViews[scanView]) h += '<div class="indexing"><span class="spin" aria-hidden="true"></span> Looking at the disk again: what was there last time shows meanwhile</div>';
+  if (probesPending && (S.view === "footage" || S.view === "sources" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
+  if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button></div>';
   const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
-  const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
+  const subOf = (it) => it.kind === "folder" ? (S.view === "sources" && !it.dir ? sourceOf(it.name) + " · " + folderSub(it) : folderSub(it)) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   if (!list.length) {
     h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
   } else if (S.layout === "list") {
-    const cnt = S.view === "footage" ? "Marks · mom." : "";
-    h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (S.view === "footage" ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div><div class="list">';
+    const clipsV = S.view === "footage" || S.view === "sources";
+    const cnt = clipsV ? "Marks · mom." : "";
+    h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (clipsV ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div><div class="list">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
       h += '<button type="button" class="row' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
-        '<span style="min-width:0"><span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(subOf(it)) + '</span></span>' +
+        '<span style="min-width:0">' + (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
         '<span class="chips hide-s">' + chips(it) + '</span><span class="cell">' + (f ? "" : (S.locations.length > 1 && it.kind === "clip" ? esc(it.loc) : sizeText(it.size))) + '</span></button>';
@@ -394,7 +450,7 @@ function renderMain() {
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key];
       h += '<button type="button" class="card' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
-        '<span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
+        (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     }
     h += '</div>';
   }
@@ -402,6 +458,8 @@ function renderMain() {
   main.innerHTML = h;
   main.scrollTop = scrollTop;
   fillThumbs();
+  const ren = $("rename");
+  if (ren) { ren.focus(); ren.select(); }
 }
 function sizeText(n) {
   if (!(n > 0)) return "";
@@ -415,7 +473,7 @@ function chips(it) {
   if (it.kind === "folder") {
     const inner = under(it.path);
     const prev = inner.filter((x) => x.preview).length;
-    if (S.view === "footage" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
+    if ((S.view === "footage" || S.view === "sources") && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
   } else if (it.kind === "clip") {
     if (it.conflict) c.push(["chip warn", it.own_conflict.length + " own files"]);
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
@@ -580,13 +638,17 @@ function renderSide() {
   if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
   h += '<div class="summary">' + (c.any
     ? '<b>' + esc(c.selName) + '</b><span class="sub wrap" style="margin-top:2px">' + esc("Commands below act on " + plural(c.selItems.length) + (c.selFolders.length ? ", everything inside the selected folders included." : ".")) + '</span>' +
-      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (S.view === "stills" ? "Open" : "Open in the player") + '</button><button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
+      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (S.view === "stills" ? "Open" : "Open in the player") + '</button>' +
+      (c.selItems.length === 1 && c.selItems[0].gyroflow ? '<button type="button" class="btn sm" data-a="opengf">Open in Gyroflow</button>' : "") + '<button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
     : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
-  if (S.view === "footage" || S.view === "moments") h += checksSection(c);
+  if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) {
+    h += '<div class="summary"><div class="btns"><button type="button" class="btn sm" data-a="removesource">Remove from the project</button></div><span class="sub wrap" style="margin-top:6px">Its clips stay where they are: the project stops looking there, and its pointer file goes.</span></div>';
+  }
+  if (S.view === "footage" || S.view === "sources" || S.view === "moments") h += checksSection(c);
   h += tagsSection(c);
-  if (S.view === "footage") {
+  if (S.view === "footage" || S.view === "sources") {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
@@ -835,17 +897,184 @@ async function saveLocations() {
   } catch (e) { showError(String(e)); }
 }
 
+// ---------- Sources, renaming, the keyboard, Quick Look ----------
+
+// A source's line: where it is, its place in the tree, copies only, not here
+function sourceOf(label) {
+  const labels = (DATA.sources && DATA.sources.labels) || {};
+  const i = Object.keys(labels).find((k) => labels[k] === label);
+  const l = i != null ? S.locations[+i] : null;
+  if (!l) return "";
+  return [l.path === "." ? "the project’s own folder" : l.path, l.at ? "in the tree at " + l.at + "/" : "at the top of the tree", l.copies ? "copies only" : "", l.local ? "this computer’s" : "", l.dir ? "" : "not reachable here"].filter(Boolean).join(" · ");
+}
+async function addSource() {
+  const r = await call("choose_location").catch(() => null);
+  if (!r) return;
+  const st = await call("project_settings").catch(() => null);
+  if (!st) return;
+  const list = st.locations.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies }));
+  // A project next to its footage keeps its own folder as a source
+  if (st.next_to_footage) list.unshift({ name: S.name, at: "", path: ".", copies: false });
+  list.push({ name: r.name, at: "", path: r.path, copies: false });
+  try {
+    const problems = await invoke("save_locations", { list, hosts: st.hosts || {} });
+    toast("Added " + r.name + (problems.length ? ". But: " + problems.join(" · ") : ". Its place in the tree and order are in Sources settings"));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function removeSources(labels) {
+  const st = await call("project_settings").catch(() => null);
+  if (!st) return;
+  const all = DATA.sources && DATA.sources.labels || {};
+  const gone = new Set(Object.keys(all).filter((k) => labels.includes(all[k])).map((k) => S.locations[+k] && S.locations[+k].path));
+  const list = st.locations.filter((l) => !gone.has(l.path)).map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies }));
+  if (list.length === st.locations.length) { showError("That source is this computer’s own or the project’s folder: change it in Sources settings"); return; }
+  try {
+    await invoke("save_locations", { list, hosts: st.hosts || {} });
+    S.sel = {}; S.anchor = null;
+    toast("Removed from the project: its clips stay where they are");
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+
+// What a rename starts from: a moment's name, a photo's or export's without its extension, a folder's
+function renameStem(it) {
+  if (it.kind === "folder" || it.kind === "moment") return it.name;
+  const n = it.name;
+  if (/\.mp\.jpg$/i.test(n)) return n.slice(0, -7);
+  const i = n.lastIndexOf(".");
+  return i > 0 ? n.slice(0, i) : n;
+}
+function startRename() {
+  const keys = Object.keys(S.sel);
+  if (keys.length !== 1) return;
+  const it = currentItems().find((x) => keyOf(x) === keys[0]);
+  if (!it) return;
+  if (S.view === "sources" || (S.view === "footage" && (it.kind === "clip" || it.path === NOPREV))) {
+    toast(it.kind === "folder" ? "Sources’ folders are renamed in Finder (Find moved files then follows)" : "A clip is renamed in Finder: Find moved files then follows. Here: its folders in _Clips, moments, photos, exports");
+    return;
+  }
+  S.renaming = keys[0];
+  renderMain();
+}
+async function commitRename(name) {
+  const key = S.renaming;
+  const it = currentItems().find((x) => keyOf(x) === key);
+  S.renaming = null;
+  if (!it || !name.trim() || name.trim() === renameStem(it)) { renderMain(); return; }
+  const path = it.kind === "folder" ? S.root + "/" + FOLDER_BASE[S.view] + "/" + it.path : it.path;
+  try {
+    await invoke("rename_item", { view: S.view, kind: it.kind, path, name: name.trim() });
+    S.sel = {}; S.anchor = null;
+    await refresh();
+  } catch (e) { showError(String(e)); renderMain(); }
+}
+// The rows shown: folders and items, as VISIBLE has them
+function currentItems() {
+  const dir = dirKey();
+  const folders = childDirs(dir).map((d) => ({ kind: "folder", path: d, name: d.split("/").pop(), dir }));
+  return folders.concat(items());
+}
+function quickLook() {
+  const c = ctx();
+  const files = [];
+  for (const k of Object.keys(S.sel)) {
+    if (k.startsWith("f:")) continue;
+    const it = items().find((x) => keyOf(x) === k);
+    // A clip's preview (its flipbook, in color) when it has one: what Finder's space bar would show of _Clips
+    if (it) files.push(it.kind === "clip" && it.preview ? it.preview : it.path);
+  }
+  if (!files.length && !c.any) return;
+  invoke("quick_look", { paths: files }).catch((e) => toast(String(e)));
+}
+function openSelection() {
+  const keys = Object.keys(S.sel);
+  if (keys.length === 1 && keys[0].startsWith("f:")) { S.path = keys[0].slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
+  const p = selectedPaths();
+  if (p.length) call("open_items", { paths: p }).catch(() => {});
+}
+function goUp() {
+  if (!S.path.length || searching()) return;
+  const left = S.path[S.path.length - 1];
+  S.path = S.path.slice(0, -1);
+  const k = "f:" + (S.path.length ? S.path.join("/") + "/" : "") + left;
+  S.sel = {}; S.sel[k] = true; S.anchor = k;
+  renderAll();
+}
+// The grid's columns, from where its cards are
+function gridColumns() {
+  const cards = document.querySelectorAll("#main .card");
+  if (cards.length < 2) return 1;
+  const top = cards[0].getBoundingClientRect().top;
+  let n = 0;
+  for (const c of cards) { if (Math.abs(c.getBoundingClientRect().top - top) < 2) n++; else break; }
+  return Math.max(1, n);
+}
+function moveTo(index, extend) {
+  if (!VISIBLE.length) return;
+  index = Math.max(0, Math.min(VISIBLE.length - 1, index));
+  const k = VISIBLE[index];
+  if (extend && S.anchor && VISIBLE.indexOf(S.anchor) >= 0) {
+    const a = VISIBLE.indexOf(S.anchor), lo = Math.min(a, index), hi = Math.max(a, index);
+    S.sel = {};
+    VISIBLE.slice(lo, hi + 1).forEach((x) => { S.sel[x] = true; });
+  } else { S.sel = {}; S.sel[k] = true; S.anchor = k; }
+  S.cursor = k;
+  S.checked = null; S.found = null;
+  renderMain(); renderSide();
+  const el = document.querySelector('#main [data-v="' + CSS.escape(k) + '"]');
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+// The list's keys, as the system has them: Finder's on a Mac (Return renames, ⌘↓ opens, ⌘↑ goes up, space is Quick
+// Look), Explorer's on Windows (Enter opens, F2 renames, Alt+↑ or Backspace goes up). true: taken
+function listKeys(e) {
+  const mac = S.macos;
+  const cur = S.cursor && VISIBLE.indexOf(S.cursor) >= 0 ? VISIBLE.indexOf(S.cursor) : (S.anchor ? VISIBLE.indexOf(S.anchor) : -1);
+  const grid = S.layout === "grid";
+  const cols = grid ? gridColumns() : 1;
+  const cmd = mac ? e.metaKey : e.ctrlKey;
+  if (e.key === "ArrowDown" && cmd && mac) { openSelection(); return true; }
+  if (e.key === "ArrowUp" && ((cmd && mac) || (e.altKey && !mac))) { goUp(); return true; }
+  if (e.key === "Backspace" && !mac) { goUp(); return true; }
+  if (e.key === "ArrowDown") { moveTo(cur < 0 ? 0 : cur + cols, e.shiftKey); return true; }
+  if (e.key === "ArrowUp") { moveTo(cur < 0 ? 0 : cur - cols, e.shiftKey); return true; }
+  if (grid && e.key === "ArrowRight") { moveTo(cur < 0 ? 0 : cur + 1, e.shiftKey); return true; }
+  if (grid && e.key === "ArrowLeft") { moveTo(cur < 0 ? 0 : cur - 1, e.shiftKey); return true; }
+  if (e.key === "Home") { moveTo(0, e.shiftKey); return true; }
+  if (e.key === "End") { moveTo(VISIBLE.length - 1, e.shiftKey); return true; }
+  if (e.key === "Enter") { if (mac) startRename(); else openSelection(); return true; }
+  if (e.key === "F2" && !mac) { startRename(); return true; }
+  if ((e.key === "o" || e.key === "O") && cmd) { openSelection(); return true; }
+  if (e.key === " " ) { if (mac) quickLook(); else openSelection(); return true; }
+  return false;
+}
+
 // ---------- loading ----------
 
-async function loadView(view) {
-  const r = await call("scan", { view });
-  if (r.root !== S.root) return;
-  DATA[view] = { dirs: r.dirs || [], items: r.items || [] };
-  if (view === "footage") S.locations = r.locations || [];
+function applyView(view, r) {
+  if (view === "footage") { RAW_FOOTAGE = { items: r.items || [], clips_dirs: r.clips_dirs || [] }; S.locations = r.locations || []; }
+  else DATA[view] = { dirs: r.dirs || [], items: r.items || [] };
   mergeProbes(r.probes);
   if (view === "moments") countMoments();
   derive(view);
   if (view === "moments") derive("footage");
+}
+// A view: what was there last time (the app's cache) at once, then the disk looked at again
+async function loadView(view) {
+  if (view === "sources") view = "footage";
+  const root = S.root;
+  if (!(view === "footage" ? RAW_FOOTAGE : DATA[view])) {
+    const c = await invoke("cached_view", { view }).catch(() => null);
+    if (c && root === S.root && !(view === "footage" ? RAW_FOOTAGE : DATA[view])) { applyView(view, c); S.cachedViews[view] = true; }
+  }
+  S.scanning[view] = true;
+  renderMain();
+  try {
+    const r = await call("scan", { view });
+    if (r.root !== S.root) return;
+    applyView(view, r);
+    S.cachedViews[view] = false;
+  } finally { S.scanning[view] = false; }
 }
 function mergeProbes(p) {
   if (!p) return false;
@@ -859,18 +1088,26 @@ async function loadProject() {
   S.info = await invoke("project").catch(() => null);
   S.name = S.info ? S.info.name : "";
   for (const k of Object.keys(DATA)) delete DATA[k];
+  RAW_FOOTAGE = null; S.cachedViews = {}; S.scanning = {};
   S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
   renderAll();
+  // What was there last time, at once; then the disk
+  for (const v of ["moments", "footage"]) {
+    const c = await invoke("cached_view", { view: v }).catch(() => null);
+    if (c) { applyView(v, c); S.cachedViews[v] = true; }
+  }
+  renderAll();
   await loadView("moments").catch(() => {});
+  renderAll();
   await loadView("footage").catch(() => {});
-  if (S.view !== "footage" && S.view !== "moments") await loadView(S.view).catch(() => {});
+  if (!["footage", "sources", "moments"].includes(S.view)) await loadView(S.view).catch(() => {});
   renderAll();
 }
 async function refresh() {
   if (!S.root) return;
   S.info = await invoke("project").catch(() => S.info);
   await loadView("moments").catch(() => {});
-  await loadView(S.view === "moments" ? "footage" : S.view).catch(() => {});
+  await loadView(S.view === "moments" || S.view === "sources" ? "footage" : S.view).catch(() => {});
   renderAll();
 }
 
@@ -943,9 +1180,10 @@ document.addEventListener("click", async (e) => {
     case "openrecent": S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
     case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
     case "view":
-      S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
+      S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false; S.renaming = null;
       if (!DATA[v]) { renderAll(); await loadView(v).catch(() => {}); }
       break;
+    case "addsource": return addSource();
     case "filters": S.filtersOpen = !S.filtersOpen; break;
     case "fclear": S.filters = {}; break;
     case "fsec": S.fsec[v] = !S.fsec[v]; break;
@@ -960,6 +1198,7 @@ document.addEventListener("click", async (e) => {
     case "crumb": S.path = S.path.slice(0, +v); S.sel = {}; S.anchor = null; S.flat = false; break;
     case "pick": {
       if (e.detail > 1) return;
+      if (e.target.id === "rename") return;
       const multi = e.metaKey || e.ctrlKey;
       if (e.shiftKey && S.anchor && VISIBLE.indexOf(S.anchor) >= 0) {
         const i = VISIBLE.indexOf(S.anchor), j = VISIBLE.indexOf(v), lo = Math.min(i, j), hi = Math.max(i, j);
@@ -987,6 +1226,8 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "opengf": { const it = ctx().selItems[0]; if (it) call("open_in_gyroflow", { paths: it.kind === "clip" ? (it.copies || []).map((x) => x.path) : [it.path] }).catch(() => {}); return; }
+    case "removesource": return removeSources(ctx().selFolders);
     case "delrenders": {
       const c = ctx(); if (!c.any) return;
       try { const r = await invoke("delete_renders", { moments: c.selItems.map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
@@ -1023,7 +1264,8 @@ document.addEventListener("dblclick", (e) => {
   if (!el) return;
   const v = el.dataset.v;
   if (v.startsWith("f:")) { S.q = ""; S.flat = false; S.path = v.slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
-  const it = items().find((x) => "i:" + x.id === v);
+  if (S.renaming) return;
+  const it = items().find((x) => keyOf(x) === v);
   if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); call("open_items", { paths: [it.path] }).catch(() => {}); }
 });
 document.addEventListener("input", (e) => {
@@ -1062,13 +1304,14 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && S.root) { e.preventDefault(); const q = $("q"); if (q) q.focus(); return; }
   if (e.key === "Escape" && S.sheet) { S.sheet = null; renderSheet(); return; }
   if (e.key === "Escape" && S.menu) { S.menu = false; renderTop(); return; }
-  if (e.key === "Escape" && !typing && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); return; }
-  if (e.key === "Enter" && !typing && Object.keys(S.sel).length) {
-    // Enter: a folder opens, as a double click does; items open in the player
-    const keys = Object.keys(S.sel);
-    if (keys.length === 1 && keys[0].startsWith("f:")) { S.path = keys[0].slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); return; }
-    const p = selectedPaths(); if (p.length) call("open_items", { paths: p }).catch(() => {});
+  if (e.target.id === "rename") {
+    if (e.key === "Enter") { e.preventDefault(); commitRename(e.target.value); }
+    else if (e.key === "Escape") { e.preventDefault(); S.renaming = null; renderMain(); }
+    return;
   }
+  if (e.key === "Escape" && !typing && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); return; }
+  if (typing || S.sheet || !S.root) return;
+  if (listKeys(e)) e.preventDefault();
 });
 
 // A Project.afproject (or a folder of the project) dropped on the window

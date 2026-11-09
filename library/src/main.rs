@@ -445,9 +445,36 @@ fn recent(app: tauri::AppHandle) -> Vec<Recent> {
 // ---------- browsing ----------
 
 // A view of the open project (index.rs), its clips' probes asked for in the background
+// The last look at a view of a project, kept in the app's cache folder: shown at once when the project opens, while
+// it's looked at again
+fn view_cache(app: &tauri::AppHandle, root: &Path, view: &str) -> Option<PathBuf> {
+    let c = app.path().app_cache_dir().ok()?;
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in root.display().to_string().bytes() { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
+    Some(c.join("views").join(format!("{h:016x}-{view}.json")))
+}
+
 #[tauri::command]
-async fn scan(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
+async fn cached_view(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let Some(file) = view_cache(&app, &root, &view) else { return Ok(Value::Null) };
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut v) = locations::read_json(&file) else { return Value::Null };
+        let want: Vec<String> = v["items"].as_array().into_iter().flatten().filter_map(|it| match it["kind"].as_str() {
+            Some("clip") => it["path"].as_str().map(str::to_string),
+            Some("moment") => it["original"].as_str().map(str::to_string),
+            _ => None }).collect();
+        v["probes"] = probes.lock().unwrap().known(&want);
+        v["cached"] = json!(true);
+        v
+    }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let cache_file = view_cache(&app, &root, &view);
     let flat = read_doc(&root).get("settings").and_then(|s| s.get("clips_flat")).and_then(Value::as_bool).unwrap_or(false);
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -462,7 +489,16 @@ async fn scan(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>,
             }
         }
         let known = { let mut p = probes.lock().unwrap(); p.want(&want); p.known(&want) };
-        json!({ "root": root.display().to_string(), "view": view, "dirs": out["dirs"], "items": out["items"], "probes": known })
+        let mut v = out.clone();
+        v["root"] = json!(root.display().to_string());
+        v["view"] = json!(view);
+        if let Some(f) = &cache_file {
+            if let Some(d) = f.parent() { let _ = std::fs::create_dir_all(d); }
+            let tmp = f.with_extension("tmp");
+            if std::fs::write(&tmp, serde_json::to_vec(&v).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, f); }
+        }
+        v["probes"] = known;
+        v
     }).await.map_err(|e| e.to_string())
 }
 
@@ -770,6 +806,116 @@ async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) ->
     }).await.map_err(|e| e.to_string())?
 }
 
+// ---------- Quick Look, renaming ----------
+
+// The system's Quick Look of these files (macOS): what Finder's space bar shows. A second call closes it
+static QUICKLOOK: Mutex<Option<std::process::Child>> = Mutex::new(None);
+
+#[tauri::command]
+fn quick_look(paths: Vec<String>) -> Result<bool, String> {
+    let mut q = QUICKLOOK.lock().unwrap();
+    if let Some(mut c) = q.take() {
+        if c.try_wait().ok().flatten().is_none() { let _ = c.kill(); let _ = c.wait(); return Ok(false); }
+    }
+    if paths.is_empty() { return Ok(false); }
+    if !cfg!(target_os = "macos") { return Err("Quick Look is macOS's: on this system, open the file instead".into()); }
+    let child = Command::new("/usr/bin/qlmanage").arg("-p").args(&paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .spawn().map_err(|e| e.to_string())?;
+    *q = Some(child);
+    Ok(true)
+}
+
+// A name a file can have on every system
+fn good_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if n.is_empty() || n == "." || n == ".." || n.starts_with('.') { return Err("That name can't be a file's".into()); }
+    if n.chars().any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control()) {
+        return Err("A name can't have / \\ : * ? \" < > |".into());
+    }
+    Ok(n.to_string())
+}
+
+// Renamed in the project's own folders: a moment (its own Gyroflow project and renders with it), a photo (a Live
+// Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
+// Footage isn't renamed here: Finder renames it, and Find moved files then follows
+#[tauri::command]
+fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
+    let name = good_name(&name)?;
+    let from = PathBuf::from(&path);
+    if !from.starts_with(&root) || !["_Moments", "_Clips", "_Stills", "_Exports"].iter().any(|d| from.starts_with(root.join(d))) {
+        return Err("Footage is renamed in Finder (Find moved files then updates what points at it). Here: moments, clip previews, photos, exports and their folders".into());
+    }
+    let dir = from.parent().ok_or("no folder")?.to_path_buf();
+    let fname = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mv = |a: &Path, b: &Path| -> Result<(), String> {
+        if b.exists() { return Err(format!("{} exists already", b.display())); }
+        std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))
+    };
+    if kind == "folder" {
+        let to = dir.join(&name);
+        mv(&from, &to)?;
+        // The moments' renders follow their folder
+        if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+            let r = root.join("_Renders").join(rel);
+            if r.is_dir() { let _ = std::fs::rename(&r, r.with_file_name(&name)); }
+        }
+        return Ok(to.display().to_string());
+    }
+    match kind.as_str() {
+        "moment" => {
+            let old = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname).to_string();
+            let to = dir.join(format!("{name}{}", index::LINK_EXT));
+            mv(&from, &to)?;
+            let g = dir.join(format!("{old}.gyroflow"));
+            if g.is_file() { let _ = std::fs::rename(&g, dir.join(format!("{name}.gyroflow"))); }
+            if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                for p in index::RENDER_PROFILES {
+                    let r = index::render_path(&root, &rel, p);
+                    if r.is_file() { let _ = std::fs::rename(&r, r.with_file_name(format!("{name}.{p}.mov"))); }
+                }
+            }
+            Ok(to.display().to_string())
+        }
+        _ => {
+            // A photo or an export: its extension kept (a Motion Photo's .MP.jpg whole), a Live Photo's video along
+            let lower = fname.to_lowercase();
+            let ext = if lower.ends_with(".mp.jpg") { fname[fname.len() - 7..].to_string() } else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
+            let stem = &fname[..fname.len() - ext.len()];
+            let to = dir.join(format!("{name}{ext}"));
+            mv(&from, &to)?;
+            if view == "stills" {
+                for e in [".mov", ".MOV"] {
+                    let v = dir.join(format!("{stem}{e}"));
+                    if v.is_file() { let _ = std::fs::rename(&v, dir.join(format!("{name}{e}"))); }
+                }
+            }
+            Ok(to.display().to_string())
+        }
+    }
+}
+
+// A clip's or moment's Gyroflow project opened in Gyroflow (the system's app for .gyroflow): `paths`, the clip's
+// copies or the moment's file; its project beside one of them (<name>.gyroflow or <name.ext>.gyroflow)
+#[tauri::command]
+fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
+    for p in &paths {
+        let p = PathBuf::from(p);
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut cands = vec![p.with_extension("gyroflow"), PathBuf::from(format!("{}.gyroflow", p.display()))];
+        if let Some(stem) = name.strip_suffix(index::LINK_EXT) { cands.insert(0, p.with_file_name(format!("{stem}.gyroflow"))); }
+        if let Some(g) = cands.into_iter().find(|c| c.is_file()) {
+            let r = if cfg!(target_os = "macos") { Command::new("open").arg(&g).status() }
+                else if cfg!(windows) { Command::new("cmd").args(["/d", "/c", "start", ""]).arg(&g).status() }
+                else { Command::new("xdg-open").arg(&g).status() };
+            return match r { Ok(s) if s.success() => Ok(()), _ => Err(format!("Couldn't open {}: is Gyroflow installed?", g.display())) };
+        }
+    }
+    Err("It has no Gyroflow project".into())
+}
+
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
 #[tauri::command]
 fn open_items(paths: Vec<String>) -> Result<(), String> {
@@ -946,7 +1092,17 @@ fn main() {
     let probes: index::SharedProbes = Arc::new(Mutex::new(index::Probes::default()));
     probes.lock().unwrap().tool = index::probe_tool(player().ok().as_deref());
     let probe_worker = probes.clone();
-    std::thread::spawn(move || index::probe_worker(probe_worker));
+    // What's known of the clips is kept between runs: the app's cache folder, found once Tauri is up (setup below)
+    let keep_probes: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    let keep_for_worker = keep_probes.clone();
+    std::thread::spawn(move || {
+        let keep = loop {
+            if let Some(k) = keep_for_worker.lock().unwrap().clone() { break k; }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        index::probe_worker(probe_worker, Some(keep))
+    });
+    let probes_for_setup = probes.clone();
     let worker = shared.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
@@ -965,9 +1121,17 @@ fn main() {
         }))
         .manage(shared)
         .manage(probes)
+        .setup(move |app| {
+            if let Ok(c) = app.path().app_cache_dir() {
+                let f = c.join("probes.json");
+                probes_for_setup.lock().unwrap().load(&f);
+                *keep_probes.lock().unwrap() = Some(f);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
-                                                 thumb, open_items, reveal_path, project_settings, save_locations, choose_location,
+                                                 thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, delete_renders])
         .on_window_event(move |window, event| {
