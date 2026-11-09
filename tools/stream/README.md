@@ -120,7 +120,13 @@ Looks: a stream id may end in `~pq` (the hdr look's HLG made HDR10 by libplacebo
 player's nbcu look, `nbcu_hlg2sdr.glsl` last, BT.709: `--sdr`); the TS players get `AFP_TV_LOOK` unless the URL names
 one. On the NAS it's `pq` since 2026-11-08: the Samsung TV (Tizen 3.0) showed our HLG gray through Jellyfin's app
 (its web engine doesn't take HLG as HDR), while HDR10 and SDR looked right and alike (Anton, on "Maks diving close
-up"); HDR10 keeps the HDR.
+up"); HDR10 keeps the HDR. The HDR10 is the HLG as BT.2100 displays it, at its nominal 1000 nits: libplacebo renders HLG
+for the target's peak, which for PQ without metadata is 10000 nits, and the first version had it so (Anton: "very
+contrasty, colors not saturated, shadows crushed, sky to white"). Measured on a Mountains clip, 2026-11-09: mid-tones
+2.5x the HLG's, highlights 6x (peaks 2450-3080 nits), shadows halved. Fixed: mid-tones 1.03x, highlights 1.006x, peaks
+442 against 440 nits; the frames carry HDR10's static metadata (mastering display BT.2020/D65 0.005-1000 nits, MaxCLL
+1000) as SEI, in the TS segments too. HDR10+ (per-frame metadata) isn't written: hevc_vaapi can't, and whether a 2017
+Tizen honours it in Jellyfin's web player is unknown.
 
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's
