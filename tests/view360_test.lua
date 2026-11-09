@@ -57,6 +57,13 @@ local function fake_mp()
         remove_key_binding = function(name) f.bindings[name] = nil end,
         register_script_message = function(name, fn) f.messages[name] = fn end,
         osd_message = function(text) f.osd = text end,
+        -- The OSD overlay: what it shows last, nil when removed
+        create_osd_overlay = function()
+            local o = { data = "" }
+            function o.update(self) f.overlay = self.data end
+            function o.remove() f.overlay = nil end
+            return o
+        end,
         -- Run at once, or (f.defer) when f.flush() says the messages waiting are handled
         add_timeout = function(_, fn)
             if f.defer then table.insert(f.timers, fn) else fn() end
@@ -424,7 +431,46 @@ do
     f.props["macos-gesture-messages"] = false
     g:pause(false)
     expect("unpaused: messages again", f.props["macos-gesture-messages"], true)
+    -- Beside the video (the side panel: video-margin-ratio-right; the bar: -bottom), the gestures are the panel's
+    f.props["video-margin-ratio-right"] = 0.2
+    f.props["video-margin-ratio-bottom"] = 0.1
+    local m = #got
+    f.set("mouse-pos", { x = 1400, y = 300, hover = true })
+    expect("over the panel: messages off", f.props["macos-gesture-messages"], false)
+    f.message("gesture", "scroll", "3", "-2", "changed")
+    f.bindings["test-key-wheel-up"].fn({ event = "down", scale = 1 })
+    f.bindings["test-key-reset-dbl"].fn()
+    expect("over the panel: left alone", #got, m)
+    f.set("mouse-pos", { x = 600, y = 850, hover = true })
+    expect("over the bar: messages off", f.props["macos-gesture-messages"], false)
+    f.set("mouse-pos", { x = 600, y = 300, hover = true })
+    expect("back over the video: messages on", f.props["macos-gesture-messages"], true)
+    f.message("gesture", "scroll", "3", "-2", "changed")
+    expect("back over the video: taken", #got, m + 1)
+    -- A drag from the video into the panel goes on, and the panel has it back once it's let go
+    f.bindings["test-key-drag"].fn({ event = "down" })
+    f.set("mouse-pos", { x = 1400, y = 300, hover = true })
+    expect("a drag goes on over the panel", got[#got][1], "pan")
+    expect("…messages kept", f.props["macos-gesture-messages"], true)
+    f.bindings["test-key-drag"].fn({ event = "up" })
+    expect("let go over the panel: messages off", f.props["macos-gesture-messages"], false)
+    -- Leaving the window: as over the video
+    f.set("mouse-pos", { x = 1400, y = 300, hover = false })
+    expect("outside the window: messages on", f.props["macos-gesture-messages"], true)
+    -- Turned on with the mouse over the panel (Look around clicked there): messages off from the start
     g:set(false)
+    f.props["mouse-pos"] = { x = 1400, y = 300, hover = true }
+    g:set(true)
+    expect("on from the panel: messages off", f.props["macos-gesture-messages"], false)
+    -- Paused, then taken again over the panel: still off
+    g:pause(true)
+    g:pause(false)
+    expect("unpaused over the panel: off", f.props["macos-gesture-messages"], false)
+    f.set("mouse-pos", { x = 600, y = 300, hover = true })
+    expect("then over the video: on", f.props["macos-gesture-messages"], true)
+    f.props["video-margin-ratio-right"], f.props["video-margin-ratio-bottom"] = nil, nil
+    g:set(false)
+    n = #got
     expect("off: bindings gone", f.forced(), 0)
     expect("off: window dragged again", f.props["window-dragging"], true)
     expect("off: messages given back", f.props["macos-gesture-messages"], false)
@@ -773,8 +819,201 @@ do
     f.bindings["toggle"].fn()
     expect("rec: leaving the view ends it", st().taking, false)
     expect("rec: and keeps it", st().parts, 1)
+    f.bindings["toggle"].fn()
+    -- A take to the clip's end: the clip doesn't end into the next one, the recording plays again from its start
+    f.props["keep-open"] = "no"
+    f.set("time-pos", 20)
+    f.bindings["record"].fn()
+    expect("rec: the clip stays at its end during a take", f.props["file-local-options/keep-open"], "always")
+    for i = 1, 25 do f.set("time-pos", 20 + i / 25) end
+    -- keep-open: paused at the end
+    f.props["eof-reached"] = true
+    f.set("pause", true)
+    expect("rec: the end ends it", st().taking, false)
+    local c = f.commands[#f.commands] or {}
+    expect("rec: played again from the recording's start", c[1] == "seek" and c[2], string.format("%.3f", st().spans[1][1]))
+    expect("rec: playing", f.props["pause"], false)
+    expect("rec: by the recording", st().playing, true)
+    expect("rec: still staying until the start's shown", f.props["file-local-options/keep-open"], "always")
+    f.props["eof-reached"] = false
+    f.event("playback-restart")
+    expect("rec: then the clip ends as before", f.props["file-local-options/keep-open"], "no")
+    -- A take ended by hand: keep-open back at once
+    f.set("time-pos", 5)
+    f.bindings["record"].fn()
+    expect("rec: kept during the take", f.props["file-local-options/keep-open"], "always")
+    for i = 1, 10 do f.set("time-pos", 5 + i / 25) end
+    local n = #f.commands
+    f.bindings["record"].fn()
+    expect("rec: back once it's stopped", f.props["file-local-options/keep-open"], "no")
+    expect("rec: no seek", #f.commands, n)
     f.event("end-file")
     os.remove(file)
+    os.execute("rmdir '" .. dir .. "'")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
+do
+    -- How the recording is tidied: kept with it, defaults when it says nothing
+    local recording = require 'recording'
+    local r = recording.new():load({ follows = "camera", parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: medium by default", r.tidy.turns, "medium")
+    expect("tidy: level by default", r.tidy.level, true)
+    expect("tidy: something to do", r:untidied(), false)
+    r:load({ follows = "camera", tidy = { turns = "strong", level = false, picture = true },
+             parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: read", r.tidy.turns .. tostring(r.tidy.level) .. tostring(r.tidy.picture), "strongfalsetrue")
+    expect("tidy: written", r:to_table().tidy.turns, "strong")
+    expect("tidy: not kept as an unknown key", r.extra.tidy, nil)
+    r:load({ follows = "camera", tidy = { turns = "wobbly" }, parts = { { samples = { { 1, 0, 0, 0, 100 }, { 2, 10, 0, 0, 100 } } } } })
+    expect("tidy: an unknown one is the default", r.tidy.turns, "medium")
+    r.tidy.turns, r.tidy.level = "off", false
+    expect("tidy: off and not level is nothing to do", r:untidied(), true)
+end
+
+do
+    -- The preview plays the recording tidied: gyroflow-probe --reframe <clip> after a take and each change of how,
+    -- the samples as recorded until it answers, an answer for a recording since changed dropped
+    local utils = package.loaded['mp.utils']
+    package.loaded['sidecar'] = nil
+    package.loaded['recording'] = nil
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p '" .. dir .. "'")
+    local clip = dir .. "/VID_20250416_143628_00_006.insv"
+    local file = dir .. "/VID_20250416_143628_00_006.afp.json"
+    local f = load_view360()
+    local runs = {}
+    f.mp.command_native_async = function(cmd, fn) table.insert(runs, { args = cmd.args, fn = fn }) end
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.props["path"] = clip
+    f.props["pause"] = true
+    f.props["time-pos"] = 10
+    f.load(false)
+    expect("tidy: nothing recorded, nothing run", #runs, 0)
+    local function st() return f.props["user-data/view360"].recording end
+    local function yaw() return tonumber(f.props["glsl-shader-opts"].view360_yaw) end
+    f.bindings["record"].fn()
+    for i = 1, 50 do
+        f.message("view360-set", "yaw", tostring(i))
+        f.set("time-pos", 10 + i / 25)
+    end
+    f.set("pause", true)
+    expect("tidy: run after the take", #runs, 1)
+    local args = runs[1].args
+    expect("tidy: gyroflow-probe beside", args[1], "mpv/scripts/gyroflow/gyroflow-probe")
+    expect("tidy: --reframe the clip", args[2] .. " " .. args[3], "--reframe " .. clip)
+    expect("tidy: working on it", st().tidying, true)
+    -- Meanwhile, as recorded
+    f.set("time-pos", 11)
+    near("tidy: as recorded meanwhile", yaw(), 25, 1e-3)
+    local answer = { follows = "camera", parts = { { from = 10, to = 12, samples = { { 10, 0, 0, 0, 100, "auto" }, { 12, 80, 0, 0, 100 } } } } }
+    runs[1].fn(true, { status = 0, stdout = utils.format_json(answer) })
+    expect("tidy: done", st().tidying, false)
+    near("tidy: the tidied path plays", yaw(), 40, 1e-3)
+    -- A change of how: run again; the old answer, coming late, is dropped
+    f.message("view360-tidy", "turns", "strong")
+    expect("tidy: kept in the file", st().tidy.turns, "strong")
+    local fh = io.open(file, "r")
+    local text = fh and fh:read("*a") or ""
+    if fh then fh:close() end
+    expect("tidy: in the clip's file", text:find('"strong"', 1, true) ~= nil, true)
+    expect("tidy: run again", #runs, 2)
+    near("tidy: as recorded until it answers", yaw(), 25, 1e-3)
+    runs[1].fn(true, { status = 0, stdout = utils.format_json(answer) })
+    near("tidy: a stale answer dropped", yaw(), 25, 1e-3)
+    -- Toggled off and on again: the strength comes back
+    f.message("view360-tidy", "turns", "toggle")
+    expect("tidy: turns off", st().tidy.turns, "off")
+    f.message("view360-tidy", "turns", "toggle")
+    expect("tidy: back to strong", st().tidy.turns, "strong")
+    -- Nothing to do: nothing run, as recorded
+    f.message("view360-tidy", "turns", "off")
+    local before = #runs
+    f.message("view360-tidy", "level", "no")
+    expect("tidy: level off", st().tidy.level, false)
+    expect("tidy: nothing to tidy, nothing run", #runs, before)
+    f.set("time-pos", 11)
+    near("tidy: off plays as recorded", yaw(), 25, 1e-3)
+    -- An error from the probe: as recorded, no crash
+    f.message("view360-tidy", "level", "toggle")
+    runs[#runs].fn(true, { status = 0, stdout = utils.format_json({ error = "nothing recorded" }) })
+    near("tidy: an error plays as recorded", yaw(), 25, 1e-3)
+    -- The hold on what's in the middle: asked for, the probe says it's to be measured, so it is, in the background
+    f.message("view360-tidy", "picture", "yes")
+    expect("hold: asked for", st().tidy.picture, true)
+    local probe = runs[#runs]
+    expect("hold: the probe first", probe.args[2], "--reframe")
+    local aborted = {}
+    f.mp.abort_async_command = function(c) table.insert(aborted, c) end
+    f.mp.command_native_async = function(cmd, fn) table.insert(runs, { args = cmd.args, fn = fn }); return #runs end
+    probe.fn(true, { status = 0, stdout = utils.format_json({ follows = "camera", hold = "needed", parts = answer.parts }) })
+    local m = runs[#runs]
+    expect("hold: measured by gyroflow-export", m.args[1], "mpv/scripts/gyroflow/gyroflow-export")
+    expect("hold: --measure-hold", table.concat(m.args, " "):find("--reframe recording --measure-hold --progress", 1, true) ~= nil, true)
+    expect("hold: the clip last", m.args[#m.args], clip)
+    expect("hold: measuring shown", st().measuring, 0)
+    near("hold: the smoothed turns meanwhile", yaw(), 40, 1e-3)
+    -- Done: tidied again, with the hold
+    local before_done = #runs
+    m.fn(true, { status = 0, stdout = "", stderr = "" })
+    expect("hold: no longer measuring", st().measuring, false)
+    expect("hold: tidied again", #runs, before_done + 1)
+    expect("hold: by the probe", runs[#runs].args[2], "--reframe")
+    -- A change while it measures: stopped
+    runs[#runs].fn(true, { status = 0, stdout = utils.format_json({ follows = "camera", hold = "needed", parts = answer.parts }) })
+    expect("hold: measuring again", st().measuring, 0)
+    f.message("view360-tidy", "picture", "no")
+    expect("hold: a change stops it", #aborted, 1)
+    expect("hold: not measuring", st().measuring, false)
+    f.event("end-file")
+    os.remove(file)
+    os.execute("rmdir '" .. dir .. "'")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
+do
+    -- The export's frame over the view while a take records and while the recording plays: a 9:16 strip in the
+    -- middle of a 1600×900 area; none for 16:9 there (the area has its shape)
+    package.loaded['sidecar'] = nil
+    package.loaded['recording'] = nil
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p '" .. dir .. "'")
+    local clip = dir .. "/VID_20250416_143628_00_007.insv"
+    local f = load_view360()
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.props["path"] = clip
+    f.props["pause"] = true
+    f.props["time-pos"] = 10
+    f.load(false)
+    local function st() return f.props["user-data/view360"].recording end
+    expect("frame: nothing drawn before", f.overlay, nil)
+    f.bindings["record"].fn()
+    local o = f.overlay or ""
+    expect("frame: 16:9 in a 16:9 area, no outline", o:find("\\p1", 1, true), nil)
+    expect("frame: the dot", o:find("●", 1, true) ~= nil, true)
+    f.message("view360-frame", "9:16")
+    o = f.overlay or ""
+    -- 9/16 · 900 = 506.25 wide, from 546.875
+    expect("frame: 9:16 outlined", o:find("m 0 0 l 546 0 546 900 0 900", 1, true) ~= nil, true)
+    expect("frame: right of it dimmed", o:find("m 1053 0 l 1600 0 1600 900 1053 900", 1, true) ~= nil, true)
+    f.message("view360-frame", "1:1")
+    expect("frame: 1:1 a square", (f.overlay or ""):find("m 350 0 l 350 0", 1, true) == nil and (f.overlay or ""):find("m 0 0 l 350 0", 1, true) ~= nil, true)
+    for i = 1, 30 do f.set("time-pos", 10 + i / 25) end
+    f.set("pause", true)
+    expect("frame: playing the recording", st().playing, true)
+    o = f.overlay or ""
+    expect("frame: still outlined while it plays", o:find("m 0 0 l 350 0", 1, true) ~= nil, true)
+    expect("frame: no dot when not recording", o:find("●", 1, true), nil)
+    -- The side panel narrows the area: the outline follows it
+    f.set("video-margin-ratio-right", 0.25)
+    expect("frame: in the narrower area", (f.overlay or ""):find("m 0 0 l 150 0", 1, true) ~= nil, true)
+    -- A gesture: your view, no outline
+    f.bindings["view360-key-wheel-up"].fn({ event = "down", scale = 1 })
+    expect("frame: gone with your view", f.overlay, nil)
+    f.event("end-file")
+    os.remove(dir .. "/VID_20250416_143628_00_007.afp.json")
     os.execute("rmdir '" .. dir .. "'")
     f.props["user-data/gyroflow/rig360"] = nil
 end

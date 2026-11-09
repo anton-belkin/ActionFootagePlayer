@@ -45,6 +45,10 @@
 --   view360-undo                            the last take taken back (up to 20, for as long as the clip is open)
 --   view360-clear                           nothing recorded (the panel asks first)
 --   view360-frame 16:9|9:16|1:1, view360-size 1080p|4K   the flat export's, kept with the recording
+--   view360-tidy turns off|light|medium|strong|toggle, view360-tidy level|picture yes|no|toggle   how the recording
+--                                           is tidied (smoothed, leveled, held on what's in the middle), kept with it:
+--                                           the preview and the export both. The hold is measured in the background
+--                                           (gyroflow-export --measure-hold) the first time it's asked for a path
 -- The state is in user-data/view360/ for the panel: available (the clip is a sphere it shows), active, yaw, pitch,
 -- roll, fov, fov_min, fov_max, projection, heading, stamped (the frames carry the camera and the headings: a 360
 -- camera's own file), stereo, note (why a 360° clip isn't shown), modes (per heading mode: available, why not,
@@ -89,6 +93,18 @@ if not ok_gestures then
 end
 
 local SHADER = mp.get_script_directory() and (mp.get_script_directory() .. "/view360.glsl")
+-- gyroflow-probe, in the gyroflow plugin's folder beside this one: the recording tidied (--reframe) for the preview
+local PROBE = nil
+-- gyroflow-export beside it: the hold on what's in the middle measured (--measure-hold), in the background
+local EXPORT = nil
+do
+    local here = mp.get_script_directory()
+    local sep = package.config:sub(1, 1)
+    local parent = here and here:match("^(.*)[/\\][^/\\]+$")
+    local windows = (mp.get_property("platform") or "") == "windows" or sep == "\\"
+    if parent then PROBE = parent .. sep .. "gyroflow" .. sep .. "gyroflow-probe" .. (windows and ".exe" or "") end
+    if parent then EXPORT = parent .. sep .. "gyroflow" .. sep .. "gyroflow-export" .. (windows and ".exe" or "") end
+end
 local HEADING_INDEX = { world = 0, camera = 1, travel = 2, north = 3 }
 local STEREO_INDEX = { mono = 0, ["top-bottom"] = 1, ["left-right"] = 2 }
 
@@ -126,6 +142,14 @@ local input = nil
 local rec = recording.new()
 local rec_clip, rec_why = nil, nil
 local rec_playing = false
+-- The recording tidied as its tidy says (gyroflow-probe --reframe: reframe.rs, as the export does it), what the view
+-- follows while the recording plays; nil while it's worked out (the samples as recorded meanwhile) or not needed
+local tidied = nil
+local tidy_run, tidying = 0, false
+-- The hold's measuring under way: its command (to stop it), its progress file and how far it is (0-100), or nil
+local measuring = nil
+-- The smoothing chosen before it was turned off, to turn it on again with
+local turns_before = "medium"
 local rec_overlay = mp.create_osd_overlay and mp.create_osd_overlay("ass-events") or nil
 local rec_shown = nil
 local HEADING_LABELS = { camera = "along the camera", world = "in the world", travel = "along the way", north = "north" }
@@ -149,9 +173,13 @@ local function rec_state()
     return {
         can = rec_clip ~= nil and sphere ~= nil, why = rec_why or false, taking = rec:taking(), seconds = rec:take_seconds(),
         spans = spans, parts = #rec.parts, follows = rec.follows or false, playing = rec_playing, frame = rec.frame,
-        size = rec.size, undo = rec:undoable(),
+        size = rec.size, undo = rec:undoable(), tidy = { turns = rec.tidy.turns, level = rec.tidy.level, picture = rec.tidy.picture }, tidying = tidying,
+        measuring = measuring and measuring.percent or false,
     }
 end
+
+-- The recording's overlay (below): redrawn with every state published
+local draw_rec
 
 local function publish()
     local r = view.FOV[cur.projection]
@@ -161,6 +189,7 @@ local function publish()
         stereo = sphere and sphere.stereo or "mono", note = note or false, modes = modes, heading_confidence = confidence_now,
         recording = rec_state(),
     })
+    if draw_rec then draw_rec() end
 end
 
 -- The shader's parameters, with whatever else glsl-shader-opts has
@@ -272,24 +301,55 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
--- The red dot and the time recorded so far, in the video's top right corner (mpv's messages are top left)
-local function draw_rec()
+-- The export's frame (16:9, 9:16, 1:1) over the view at the same scale, as a rectangle in the video's area, or nil when
+-- the area already has its shape or is narrower. The FOV spans a 16:9 picture's width at the area's height (view.lua),
+-- and a flat export is that picture's middle at its frame's shape (reframe.rs): its height is the area's
+local FRAME_ASPECT = { ["16:9"] = 16 / 9, ["9:16"] = 9 / 16, ["1:1"] = 1 }
+local function frame_outline(a, frame)
+    local aspect = FRAME_ASPECT[frame]
+    if not a or not aspect then return nil end
+    local w = aspect * a.h
+    if w >= a.w - 1 then return nil end
+    return { x = a.x + (a.w - w) / 2, y = a.y, w = w, h = a.h }
+end
+
+-- While a take records: the red dot and the time recorded so far, in the video's top right corner (mpv's messages are
+-- top left). While a take records or the recording plays: the export's frame, a light outline with what's outside it
+-- dimmed, as crop mode draws its frame
+function draw_rec()
     if not rec_overlay then return end
     local a = area()
-    if not rec:taking() or not a then
+    local taking = rec:taking()
+    local framed = active and (taking or rec_playing) and a and frame_outline(a, rec.frame) or nil
+    if not a or not active or not (taking or framed) then
         if rec_shown then rec_overlay:remove(); rec_shown = nil end
         return
     end
-    local text = clock(rec:take_seconds())
+    local text = taking and clock(rec:take_seconds()) or ""
     local d = mp.get_property_native("osd-dimensions") or {}
-    local key = text .. ":" .. a.x .. ":" .. a.y .. ":" .. tostring(d.w)
+    local key = table.concat({ text, a.x, a.y, a.w, a.h, tostring(d.w), framed and rec.frame or "" }, ":")
     if key == rec_shown then return end
     rec_shown = key
     local s = mp.get_property_number("display-hidpi-scale") or 1
     rec_overlay.res_x, rec_overlay.res_y = d.w or 0, d.h or 0
-    rec_overlay.data = string.format("{\\an9\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
-                                     math.floor(a.x + a.w - 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
-                                     math.floor(18 * s), text)
+    local lines = {}
+    if framed then
+        local function rect(x0, y0, x1, y1)
+            return string.format("m %d %d l %d %d %d %d %d %d", math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y0),
+                                 math.floor(x1), math.floor(y1), math.floor(x0), math.floor(y1))
+        end
+        local style = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}"
+        local x0, x1, y0, y1 = framed.x, framed.x + framed.w, framed.y, framed.y + framed.h
+        table.insert(lines, string.format(style, "000000", "70") .. rect(a.x, a.y, x0, a.y + a.h) .. " " .. rect(x1, a.y, a.x + a.w, a.y + a.h))
+        local e = math.max(1, math.floor(s + 0.5))
+        table.insert(lines, string.format(style, "FFFFFF", "40") .. rect(x0 - e, y0, x0, y1) .. " " .. rect(x1, y0, x1 + e, y1))
+    end
+    if taking then
+        table.insert(lines, string.format("{\\an9\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
+                                          math.floor(a.x + a.w - 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
+                                          math.floor(18 * s), text))
+    end
+    rec_overlay.data = table.concat(lines, "\n")
     rec_overlay:update()
 end
 
@@ -308,16 +368,95 @@ local function save_recording()
     end
 end
 
--- The view at t from the recording, while it plays
+-- The view at t from the recording, while it plays: tidied when that's worked out
 local function follow_recording(t)
     if not rec_playing or not active then return end
     t = t or mp.get_property_number("time-pos")
-    local h = t and rec:head(t)
+    local h = t and (tidied or rec):head(t)
     if not h then return end
     cur.yaw, cur.pitch, cur.roll = view.wrap(h.yaw), math.max(-view.PITCH_MAX, math.min(view.PITCH_MAX, h.pitch)), view.wrap(h.roll)
     cur.projection = view.FOV[h.projection] and h.projection or "auto"
     cur.fov = view.clamp_fov(cur.projection, h.fov)
     apply()
+end
+
+-- The recording tidied again (after a take, an undo, a change of how): gyroflow-probe reads the clip's file, so it's
+-- saved first. The samples as recorded play meanwhile; an answer for a recording since changed is dropped
+local function stop_measuring()
+    if not measuring then return end
+    if measuring.command and mp.abort_async_command then mp.abort_async_command(measuring.command) end
+    if measuring.timer then measuring.timer:kill() end
+    if measuring.progress then os.remove(measuring.progress) end
+    measuring = nil
+end
+
+local retidy
+
+-- The hold on what's in the middle measured along the angle tidying (gyroflow-export --measure-hold: it renders, a
+-- frame of the recording at a time), its progress read from its file; tidied again when it's done
+local function measure(run)
+    stop_measuring()
+    if not EXPORT or not rec_clip then return end
+    local ok_utils, utils = pcall(require, 'mp.utils')
+    local dir = os.getenv("TMPDIR") or os.getenv("TEMP") or "/tmp"
+    local progress = dir .. "/afp-hold-" .. tostring(ok_utils and utils.getpid and utils.getpid() or os.time()) .. ".json"
+    measuring = { percent = 0, progress = progress }
+    local m = measuring
+    m.command = mp.command_native_async({ name = "subprocess", args = { EXPORT, "--background", "--reframe", "recording", "--measure-hold", "--progress", progress, rec_clip },
+                                          capture_stdout = true, capture_stderr = true, playback_only = false },
+        function(_, r)
+            if measuring ~= m then return end
+            m.command = nil
+            stop_measuring()
+            if not r or r.status ~= 0 then
+                local why = r and r.stderr and r.stderr:match("failed, ([^\n]+)") or (r and r.error_string) or "it stopped"
+                mp.msg.warn("the hold on what's in the middle couldn't be measured: " .. tostring(why))
+                mp.osd_message("Hold on what's in the middle: couldn't measure it (" .. tostring(why) .. ")", 4)
+                return publish()
+            end
+            if run == tidy_run then retidy() end
+            publish()
+        end)
+    if mp.add_periodic_timer then
+        m.timer = mp.add_periodic_timer(0.5, function()
+            local fh = io.open(progress, "r")
+            if not fh then return end
+            local text = fh:read("*a")
+            fh:close()
+            local done, total = text:match('"done":(%d+)'), text:match('"total":(%d+)')
+            if done and total and tonumber(total) > 0 then
+                local p = math.floor(100 * tonumber(done) / tonumber(total))
+                if p ~= m.percent then m.percent = p; publish() end
+            end
+        end)
+    end
+    publish()
+end
+
+function retidy()
+    tidy_run = tidy_run + 1
+    tidied, tidying = nil, false
+    stop_measuring()
+    if rec:empty() or (rec:untidied() and not rec.tidy.picture) or not rec_clip or not PROBE or not mp.command_native_async then return end
+    local run = tidy_run
+    tidying = true
+    mp.command_native_async({ name = "subprocess", args = { PROBE, "--reframe", rec_clip }, capture_stdout = true, playback_only = false },
+        function(_, r)
+            if run ~= tidy_run then return end
+            tidying = false
+            local ok_utils, utils = pcall(require, 'mp.utils')
+            local doc = ok_utils and r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
+            if type(doc) ~= "table" or doc.error then
+                mp.msg.warn("the 360 recording couldn't be tidied: " .. tostring(type(doc) == "table" and doc.error or (r and r.error_string) or "no answer"))
+            else
+                local t = recording.new():load(doc)
+                if not t:empty() then tidied = t end
+                -- The hold asked for and not measured along this path yet: measured, the angle tidying meanwhile
+                if doc.hold == "needed" then measure(run) end
+            end
+            follow_recording()
+            publish()
+        end)
 end
 
 local function set_playing(on, quiet)
@@ -332,20 +471,44 @@ local function set_playing(on, quiet)
     elseif not quiet then
         mp.osd_message("Your view: the recording is paused", 2)
     end
+    draw_rec()
     publish()
+end
+
+-- During a take the clip doesn't end into the next one (keep-open=always, file-local): at its end it stays, and the
+-- recording plays from its start. keep_open: the value before the take (nil: none taken); given back once the
+-- recording's start is shown (playback-restart), or when the take ends otherwise
+local keep_open = nil
+local keep_open_back = false
+local function give_keep_open_back()
+    if keep_open == nil then return end
+    mp.set_property("file-local-options/keep-open", keep_open)
+    keep_open, keep_open_back = nil, false
 end
 
 local function stop_take(why)
     if not rec:taking() then return end
+    local at_end = mp.get_property_native("eof-reached") == true
     local part = rec:stop()
     draw_rec()
+    if at_end then why = "the end of the clip" end
     if part then
         save_recording()
+        retidy()
         mp.osd_message(string.format("Recorded %s–%s%s", clock(part.from), clock(part.to), why and (" (" .. why .. ")") or ""), 2.5)
         -- What was recorded, shown
         set_playing(true, true)
     else
         mp.osd_message("Recording stopped: too short to keep", 2)
+    end
+    -- At the clip's end: played again by the recording, from its start
+    local spans = rec:spans()
+    if at_end and rec_playing and #spans > 0 then
+        keep_open_back = true
+        mp.commandv("seek", string.format("%.3f", spans[1].from), "absolute+exact")
+        mp.set_property_native("pause", false)
+    else
+        give_keep_open_back()
     end
     publish()
 end
@@ -372,6 +535,10 @@ local function start_take()
                                             FOLLOWS_NAMES[other] or tostring(other)), 4)
     end
     rec_playing = false
+    if keep_open == nil then
+        keep_open = mp.get_property("keep-open") or "no"
+        mp.set_property("file-local-options/keep-open", "always")
+    end
     if mp.get_property_native("pause") then mp.set_property_native("pause", false) end
     add_frame(mp.get_property_number("time-pos"))
     mp.osd_message("Recording: look around. Alt+r stops", 2)
@@ -499,6 +666,7 @@ mp.add_hook("on_load", 60, function()
             rec:load(v.recording)
         end
     end
+    retidy()
     -- Set up before the first frame shows
     set_active(sphere ~= nil)
     if not sphere then apply() end
@@ -512,6 +680,10 @@ mp.register_event("end-file", function()
     -- The hint isn't the next clip's
     if active then mp.osd_message("", 0) end
     stop_take("the end of the clip")
+    stop_measuring()
+    tidy_run = tidy_run + 1
+    -- (file-local: mpv puts it back itself)
+    keep_open, keep_open_back = nil, false
     set_active(false, true)
     sphere, note = nil, nil
     rec:load(nil)
@@ -522,7 +694,7 @@ end)
 -- The window or the side panel changing the video's area: the view's size
 for _, prop in ipairs({ "osd-dimensions", "video-margin-ratio-right", "video-margin-ratio-left", "video-margin-ratio-top",
                         "video-margin-ratio-bottom" }) do
-    mp.observe_property(prop, "native", function() if active then fit() end end)
+    mp.observe_property(prop, "native", function() if active then fit() end; draw_rec() end)
 end
 
 mp.observe_property("display-fps", "native", function() pace() end)
@@ -630,6 +802,9 @@ end)
 mp.observe_property("pause", "bool", function(_, paused) if paused then stop_take() end end)
 mp.observe_property("eof-reached", "bool", function(_, eof) if eof then stop_take("the end of the clip") end end)
 mp.register_event("seek", function() stop_take("a seek") end)
+mp.register_event("playback-restart", function()
+    if keep_open_back and mp.get_property_native("eof-reached") ~= true then give_keep_open_back() end
+end)
 mp.observe_property("osd-dimensions", "native", function() draw_rec() end)
 
 local function toggle_take()
@@ -662,6 +837,7 @@ mp.register_script_message("view360-undo", function()
     if rec:taking() then return end
     if not rec:undo() then return mp.osd_message("Nothing to undo", 1.5) end
     save_recording()
+    retidy()
     if rec:empty() then rec_playing = false else follow_recording() end
     mp.osd_message(rec:empty() and "The last take undone: nothing recorded now" or "The last take undone", 2)
     publish()
@@ -672,6 +848,7 @@ mp.register_script_message("view360-clear", function()
     rec:clear()
     rec_playing = false
     save_recording()
+    retidy()
     mp.osd_message("The recording cleared", 2)
     publish()
 end)
@@ -680,6 +857,28 @@ mp.register_script_message("view360-frame", function(f)
     if not recording.FRAMES[f] then return end
     rec.frame = f
     if not rec:empty() then save_recording() end
+    draw_rec()
+    publish()
+end)
+
+-- How the recording is tidied: view360-tidy turns off|light|medium|strong|toggle, view360-tidy level yes|no|toggle
+mp.register_script_message("view360-tidy", function(what, how)
+    if rec:taking() then return end
+    if what == "turns" then
+        if how == "toggle" then how = rec.tidy.turns == "off" and turns_before or "off" end
+        if not recording.TURNS[how] or how == rec.tidy.turns then return end
+        if rec.tidy.turns ~= "off" then turns_before = rec.tidy.turns end
+        rec.tidy.turns = how
+    elseif what == "level" or what == "picture" then
+        local on = how == "yes" or (how == "toggle" and not rec.tidy[what])
+        if how ~= "yes" and how ~= "no" and how ~= "toggle" or on == rec.tidy[what] then return end
+        rec.tidy[what] = on
+    else
+        return
+    end
+    if not rec:empty() then save_recording() end
+    retidy()
+    follow_recording()
     publish()
 end)
 

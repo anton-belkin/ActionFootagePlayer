@@ -22,6 +22,7 @@
 --
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
+--   popover [<id>]                  open a list over the panel (export: the Output tab's Export kinds), or close it
 --   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file (for checking its look
 --                                   without a window)
 
@@ -30,6 +31,7 @@ local options = require 'mp.options'
 local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
+local exportkind = require 'exportkind'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -60,6 +62,11 @@ local RENAMED = { clip = "source", stabilization = "transform", look = "output" 
 local shown, open, tab = o.shown, o.open, RENAMED[o.tab] or o.tab
 local scroll = {}
 local hover, hits = nil, {}
+-- The list open over the panel (its id: "export"), or nil; set_popover opens or closes it (defined with the mouse's
+-- bindings, below)
+local popover, set_popover = nil, nil
+-- The panel's scroll bar held
+local scrolling_bar = false
 local overlay = mp.create_osd_overlay("ass-events")
 overlay.z = 10
 
@@ -802,6 +809,9 @@ local function dv_part(u, x, w, y)
                     "script-message-to dlogm dv-neutral", { disabled = d.dv_neutral })
 end
 
+-- The Export button's kind chosen, per kind of clip ("360", "flat"): for this session
+local export_choice = {}
+
 -- Output: how it's shown on this screen (Display: the looks, this computer's), and a file of what plays (Export)
 local function output_part(u, x, w, y)
     local s = u.s
@@ -853,13 +863,27 @@ local function output_part(u, x, w, y)
         if g.exporting then
             y = u:button(x, w, y, "export", "Cancel export", "script-message-to gyroflow cancel-export")
         else
-            local label = (a and b and b > a) and ("Export the part " .. clock(a) .. "–" .. clock(b)) or "Export the clip"
-            y = u:button(x, w, y, "export", label, "script-binding gyroflow/export", { primary = true })
+            -- One button, its kind picked in its list (docs/360-reframe.md, "One Export button in the Output tab"),
+            -- remembered for the session per kind of clip
+            local v = state("view360")
+            local rows = exportkind.rows(d, v)
+            local clip_kind = exportkind.clip_kind(v)
+            local kind = exportkind.chosen(rows, export_choice[clip_kind])
+            for _, r in ipairs(rows) do
+                local k = r.kind
+                r.cmd = function() export_choice[clip_kind] = k; set_popover(nil) end
+            end
+            local busy = exportkind.busy(kind, v)
+            -- Cut only when it's sure not to fit: the part's times are digits, which the estimate takes as wide
+            local label, room = exportkind.label(kind, d, a, b, clock), w - (ui.SPLIT_ARROW + 12) * s
+            if ui.text_width(label, 12, s, true) > room then label = fit(label, room, 12, s, true) end
+            local top = y
+            y = u:split_button(x, w, y, "export", label, "script-message-to gyroflow export " .. kind,
+                               function() set_popover("export") end, { open = popover == "export", disabled = busy ~= nil })
+            if popover == "export" then u:dropdown(x, x + w, top, top + 28 * s, "export-kind", rows, kind) end
+            if busy then y = u:caption(x, w, y, busy) end
         end
-        if d and (d.sdr_look or "") ~= "" then
-            u:button(x, half, y, "export-sdr", "Export in SDR", "script-message-to gyroflow export sdr", { disabled = g.exporting })
-        end
-        y = u:button(x + half + 8 * s, half, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
+        y = u:button(x, w, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
         y = u:caption(x, w, y, "A still or a Live Photo: Save frame")
     end
     return y
@@ -1319,6 +1343,8 @@ local PROJECTION_ROWS = { { { "auto", "Auto" }, { "rectilinear", "Rectilinear" }
 -- What the view follows: along the way you move (GPS), the camera, north (the compass, or GPS), the world
 local HEADING_OPTIONS = { { "travel", "Way" }, { "camera", "Camera" }, { "north", "North" }, { "world", "World" } }
 local FOLLOWS_NAMES = { travel = "the way", camera = "the camera", north = "north", world = "the world" }
+-- The smoothing's strengths (reframe.rs: a Gaussian of 0.25, 0.6, 1.5 s)
+local TIDY_TURNS = { { "light", "Light" }, { "medium", "Medium" }, { "strong", "Strong" } }
 local FLAT_FRAMES = { { "16:9", 1, 9 / 16 }, { "9:16", 9 / 16, 1 }, { "1:1", 0.8, 0.8 } }
 local FLAT_SIZES = { "1080p", "4K" }
 -- Clear the recording asks first: a second click within this many seconds clears
@@ -1352,6 +1378,28 @@ local function flat_video_part(u, x, w, y, v, r)
                      alt_shift ~= "" and alt_shift or nil, r.taking)
         y = u:caption(x, w, y, "Relative to what the view follows: " .. (FOLLOWS_NAMES[r.follows] or tostring(r.follows))
                                .. (r.playing and "" or ". A drag, a scroll or a pinch gives you the view"))
+
+        -- How it's tidied: for the preview and the export alike, relative to what the view follows
+        local tidy = type(r.tidy) == "table" and r.tidy or {}
+        local smooth = tidy.turns ~= nil and tidy.turns ~= "off"
+        y = u:switch(x, w, y, "view360-tidy-turns", "Smooth the turns", smooth, msg("view360-tidy", "turns", "toggle"), nil, r.taking)
+        if smooth then
+            local options, sel = {}, nil
+            for i, k in ipairs(TIDY_TURNS) do
+                table.insert(options, { k[2], msg("view360-tidy", "turns", k[1]) })
+                if k[1] == tidy.turns then sel = i end
+            end
+            y = u:segmented(x, w, y, "view360-tidy-strength", options, sel, r.taking)
+        end
+        y = u:switch(x, w, y, "view360-tidy-level", "Level the horizon", tidy.level == true, msg("view360-tidy", "level", "toggle"), nil, r.taking)
+        y = u:switch(x, w, y, "view360-tidy-picture", "Hold on what's in the middle", tidy.picture == true, msg("view360-tidy", "picture", "toggle"), nil, r.taking)
+        if r.measuring then
+            y = u:caption(x, w, y, string.format("Measuring… %d %%. The smoothed turns play meanwhile", r.measuring))
+        elseif r.tidying then
+            y = u:caption(x, w, y, "Tidying the recording…")
+        elseif tidy.picture then
+            y = u:caption(x, w, y, "By the picture: the view follows what's in its middle, up to 8°")
+        end
     end
 
     -- The frame and the size of the flat video
@@ -1515,14 +1563,21 @@ local function view360_part(u, x, w, y)
     return flat_video_part(u, x, w, y, v, r)
 end
 
--- The playlist: the files mpv plays one after the other (the videos in the clip's folder: autocreate-playlist), the
--- one playing marked; a click opens one. Shown with the one playing in view, when it opens and as the next one starts
+-- The playlist: the files mpv plays one after the other (the videos in the clip's folder: autocreate-playlist, then
+-- those of its subfolders, stabilized/, as it goes on into them), what has played kept, the one playing marked; a
+-- click opens one. Shown with the one playing in view, when it opens and as the next one starts
 local reveal, redraw = true, false
 function reveal_playlist() reveal = true end
+-- What has played: listed, though not a video by its extension (a 360° clip, .insv), once the playlist goes on from it
+local played = {}
+mp.register_event("start-file", function()
+    local file = mp.get_property("playlist/" .. (mp.get_property_number("playlist-playing-pos") or -1) .. "/filename")
+    if file then played[file] = true end
+end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")))
+    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played)
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
     local dir = tl.common_folder(list)
     if dir and local_file(dir) then
@@ -1572,8 +1627,13 @@ local TITLE_BAR = 28
 local function draw(w, h, s, hovered)
     local u = ui.new(s)
     u.hover = hovered
-    if not shown then return u end
+    if not shown then
+        if popover then set_popover(nil) end
+        return u
+    end
     local rx = w - RAIL * s
+    -- What shows of the scrolled area, once it's drawn
+    local seen = nil
     local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false)
                and TITLE_BAR * s or 0
 
@@ -1594,6 +1654,7 @@ local function draw(w, h, s, hovered)
 
         local footer = (DOCKED[tab] and mp.get_property("path") and DOCK * s) or (REMEMBER[tab] and mp.get_property("path") and FOOTER * s) or 0
         local top, bottom = t0 + HEADER * s + 1, h - footer
+        seen = { top, bottom }
         local before = #u.events
         u.clip = { px, top, px + PANEL * s, bottom }
         local y0 = top + 14 * s
@@ -1618,10 +1679,22 @@ local function draw(w, h, s, hovered)
             return nil
         end
         if max > 0 then
-            -- The scroll bar
+            -- The scroll bar: held by its thumb, it follows the mouse; a click beside the thumb brings it there
             local bh = math.max(24 * s, room * room / content)
             local by = top + (room - bh) * off / max
-            u:box(px + PANEL * s - 6 * s, by + 2 * s, 3 * s, bh - 4 * s, 2, C.line)
+            local lit = u:hovered("scrollbar") or scrolling_bar
+            u:box(px + PANEL * s - (lit and 7 or 6) * s, by + 2 * s, (lit and 5 or 3) * s, bh - 4 * s, 2, lit and C.dim or C.line)
+            local part, grab = tab, nil
+            u:hit(px + PANEL * s - 12 * s, top, 12 * s, room, "scrollbar", {
+                drag = function(_, my)
+                    if not my then return end
+                    if not grab then grab = (my >= by and my < by + bh) and (my - by) or bh / 2 end
+                    scrolling_bar = true
+                    scroll[part] = math.max(0, math.min(max, (my - grab - top) / math.max(1, room - bh) * max))
+                end,
+                release = function() scrolling_bar = false end,
+                redraw = true,
+            })
         end
         if footer > 0 and DOCKED[tab] then
             u:divider(px, PANEL * s, bottom)
@@ -1646,6 +1719,8 @@ local function draw(w, h, s, hovered)
         rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], t0 + (8 + (i - 1) * 44) * s)
     end
     rail_button(0, "support", "Support", function() choose("support") end, open and tab == "support", h - (8 + 36) * s)
+    -- The list open over it all; closed when what it's for isn't there any more (another tab, the export started)
+    if not u:popover(t0 + 8 * s, h - 8 * s, seen) and popover then set_popover(nil) end
     return u
 end
 
@@ -1766,9 +1841,18 @@ redraw_flat = update
 -- The mouse: clicks and the wheel are the panel's and the bar's while it's over them, the player's elsewhere
 local captured = false
 
+local function in_panel(pos)
+    return pos ~= nil and pos.hover and shown and pos.x >= dims.w - width(scale())
+end
+
 local function wheel(dir)
     return function(info)
         if info.event == "up" then return end
+        -- The list open closes as the panel scrolls; over the video (the mouse is the panel's while it's open), that's all
+        if popover then
+            set_popover(nil)
+            if not in_panel(mouse) and not over_bar then return render() end
+        end
         if over_bar then
             -- Over the bar: a frame on (up, right) or back (down, left), as mpv's wheel seeks forward going up
             mp.command(dir < 0 and "frame-step" or "frame-back-step")
@@ -1781,24 +1865,32 @@ local function wheel(dir)
     end
 end
 
--- A slider held: its drag(x) follows the mouse until the button is let go, then its release(x)
-local dragging, released = nil, nil
+-- A slider held: its drag(x, y) follows the mouse until the button is let go, then its release(x); drawn again as
+-- it moves when it's the panel's own (redraw: the scroll bar)
+local dragging, released, drag_redraw = nil, nil, false
 
 local function click(info)
     if info.event == "up" then
         local pos = mp.get_property_native("mouse-pos")
         if released and pos then released(pos.x) end
-        dragging, released = nil, nil
+        local again = drag_redraw
+        dragging, released, drag_redraw = nil, nil, false
+        if again then render() end
         render_bar()
         return
     end
     if info.event ~= "down" and info.event ~= "press" then return end
     local pos = mp.get_property_native("mouse-pos")
     local h = pos and hit_at(pos.x, pos.y)
+    -- A list open: a click off it closes it, and does nothing else
+    if popover and not (h and h.popover) then
+        set_popover(nil)
+        return update()
+    end
     if not h then return end
     if type(h.cmd) == "table" and h.cmd.drag then
-        h.cmd.drag(pos.x)
-        if info.event == "down" then dragging, released = h.cmd.drag, h.cmd.release
+        h.cmd.drag(pos.x, pos.y)
+        if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
         elseif h.cmd.release then h.cmd.release(pos.x) end
     elseif type(h.cmd) == "function" then h.cmd() else mp.command(h.cmd) end
     -- What the plugins change shows on their next publish; render now for what's the panel's own
@@ -1828,18 +1920,35 @@ local function capture(on)
     end
 end
 
+-- A list over the panel, opened (its id) or closed (nil): Esc closes it, and the mouse is the panel's while it's open,
+-- so a click anywhere else closes it
+set_popover = function(id)
+    if id == popover then return end
+    popover = id
+    if id then
+        mp.add_forced_key_binding("ESC", "popover-esc", function() set_popover(nil); update() end)
+    else
+        mp.remove_key_binding("popover-esc")
+    end
+    capture((in_panel(mouse) or over_bar or popover ~= nil) and true or false)
+end
+
 mp.observe_property("mouse-pos", "native", function(_, pos)
     if not pos then return end
     mouse = pos
-    if dragging then dragging(pos.x); return render_bar() end
+    if dragging then
+        dragging(pos.x, pos.y)
+        if drag_redraw then return render() end
+        return render_bar()
+    end
     local s = scale()
-    local in_panel = pos.hover and shown and pos.x >= dims.w - width(s)
+    local inside = in_panel(pos)
     local was_over = over_bar
-    over_bar = (pos.hover and not in_panel and not bar_never and pos.y >= dims.h - bar.HEIGHT * s) or false
-    capture(in_panel or over_bar)
+    over_bar = (pos.hover and not inside and not bar_never and pos.y >= dims.h - bar.HEIGHT * s) or false
+    capture((inside or over_bar or popover ~= nil) and true or false)
     -- Over the video, a move shows it; leaving the window hides it
     if pos.hover then bar_until = mp.get_time() + SHOW_FOR else bar_until = 0 end
-    local h = (in_panel or over_bar) and hit_at(pos.x, pos.y) or nil
+    local h = (inside or over_bar) and hit_at(pos.x, pos.y) or nil
     local id = h and h.id or nil
     if id ~= hover then
         hover = id
@@ -1863,6 +1972,11 @@ end)
 mp.register_script_message("tab", function(name)
     name = RENAMED[name] or name
     if PARTS[name] then tab, open, shown = name, true, true; reveal_playlist(); update() end
+end)
+
+mp.register_script_message("popover", function(id)
+    set_popover((id or "") ~= "" and id or nil)
+    update()
 end)
 
 -- In place of mpv's playlist as text
@@ -1950,6 +2064,7 @@ end)
 mp.register_event("file-loaded", function()
     read_keys()
     scroll = {}
+    set_popover(nil)
     reveal_playlist()
     update()
 end)

@@ -120,6 +120,17 @@ expect("not current", rows[1].current, false)
 -- The one playing even when it isn't a video by its extension
 local odd = tl.playlist_rows({ { filename = "/v/a.mp4" }, { filename = "/v/b.xyz", current = true } }, tl.set_of({ "mp4" }))
 expect("the one playing stays", #odd, 2)
+-- A 360° clip played, then its exports in stabilized/: the clip, not a video by its extension, stays
+local on = {
+    { filename = "/x5/VID_005.insv" }, { filename = "/x5/stabilized/VID_005_reframe.mp4", current = true },
+    { filename = "/x5/stabilized/VID_005_reframe_9x16.mp4" },
+}
+local went = tl.playlist_rows(on, tl.set_of({ "mp4" }), { ["/x5/VID_005.insv"] = true })
+expect("what played stays", #went, 3)
+expect("what played, first", went[1].name, "VID_005")
+expect("what played, its index", went[1].index, 0)
+expect("then the one playing", went[2].current, true)
+expect("not played, not listed", #tl.playlist_rows(on, tl.set_of({ "mp4" }), {}), 2)
 expect("no list", #tl.playlist_rows(nil), 0)
 -- Windows paths
 local win = tl.playlist_rows({ { filename = "C:\\Trips\\Egypt\\GX010123.MP4" } }, tl.set_of({ "mp4" }))
@@ -129,6 +140,11 @@ expect("windows name", win[1].name, "GX010123")
 expect("common folder", tl.common_folder({ { filename = "/v/a.mp4" }, { filename = "/v/b.mp4" } }), "/v")
 expect("two folders", tl.common_folder({ { filename = "/v/a.mp4" }, { filename = "/w/b.mp4" } }), nil)
 expect("windows folder", tl.common_folder({ { filename = "C:\\Trips\\a.mp4" } }), "C:\\Trips")
+expect("a clip and its stabilized/", tl.common_folder(on), "/x5")
+expect("a folder and its subfolder", tl.common_folder({ { filename = "/v/s/a.mp4" }, { filename = "/v/b.mp4" } }), "/v")
+expect("only subfolders", tl.common_folder({ { filename = "/v/s/a.mp4" }, { filename = "/v/t/b.mp4" } }), nil)
+expect("two disks", tl.common_folder({ { filename = "/Volumes/A/a.mp4" }, { filename = "/Volumes/B/b.mp4" } }), nil)
+expect("windows subfolder", tl.common_folder({ { filename = "C:\\T\\a.mp4" }, { filename = "C:\\T\\s\\b.mp4" } }), "C:\\T")
 
 -- A name cut in its middle
 expect("short stays", tl.cut_middle("DJI_0068_D", 20), "DJI_0068_D")

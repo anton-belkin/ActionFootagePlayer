@@ -85,6 +85,9 @@ flat video".
   into the recording's (below), so a recording is always relative to one thing.
 - **Stop** (Alt+r again, or the end of the clip) ends the take. So do pausing, seeking and leaving the 360 view: a
   take is a single stretch of playback. Recording resumes with the next Record.
+- **At the clip's end** a take doesn't go on into the next clip of the playlist: the clip stays (`keep-open=always`
+  while the take records) and plays again from the recording's start, by the recording. Once that's shown, the clip
+  ends into the next one as before.
 - **Punch-in.** A take replaces only the time it covers. Recording 0:20–0:30 over a recording of 0:12–0:47 keeps
   0:12–0:20 and 0:30–0:47 as they were. Where two parts meet, the smoothing below blends them; with smoothing off,
   it's a cut.
@@ -322,6 +325,7 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 | Recording, punch-in, undo, sidecar writes | `mpv/scripts/view360/recording.lua` (plain Lua, tested in `tests/view360_test.lua` with recorded sample streams) |
 | The 360° tab's *Flat video* part | `side-panel/main.lua`, `view360_part` |
 | Split button and dropdown | `side-panel/ui.lua` |
+| The Export button's kinds, rows and label | `side-panel/exportkind.lua` (plain Lua, `tests/exportkind_test.lua`) |
 | Tidying: re-expressing between heading modes, SO(3) Gaussian, level, picture hold | `vs-gyroflow/src/reframe.rs`, with Rust tests: a synthetic jittered path comes out smooth, a level path stays level, a held subject's drift is taken out in a rendered synthetic sphere |
 | `gyroflow-probe --reframe <clip>` | the tidied head per frame, for the player's preview |
 | `gyroflow-export --reframe recording` | reads the sidecar, renders through `export360.rs` |
@@ -379,9 +383,140 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    but its export needs the 360 camera's file, so the part isn't shown); the named export into `_Exports` with a link;
    I-Log clips' look checked by eye (only the pipeline was run); the recording dot's size on a non-Retina screen.
 2. **Smooth the turns and Level**, in `reframe.rs`, with the preview through `gyroflow-probe --reframe`.
+
+   **Built** (branch `claude/360-reframe-steps2-5`):
+   - `reframe.rs`: `Tidy` (`turns` off/light/medium/strong, `level`, `picture`) read from the recording's `tidy`;
+     **not there: medium and level**, so a recording from step 1 exports smoothed. `Recording::tidied()`:
+     - parts that touch (within 0.1 s, a punch-in's remains) are one run, so where they meet is blended;
+     - each stretch of one projection is tidied on its own (a change stays a cut);
+     - on a grid of 100 a second: level sets the roll to 0, then the head as a quaternion (`rot_yaw · rot_pitch ·
+       rot_roll`, as the shader composes it) and the FOV's log are averaged with a Gaussian (σ 0.25/0.6/1.5 s, ±3σ),
+       its σ shrinking to a third of the distance to the stretch's end, so the ends stay where they were recorded;
+     - back to angles, the yaw unwrapped along the way, thinned as the player thins (RDP, 0.05°).
+     The result is a recording again, so the player plays it with `recording.lua`'s own `head()`.
+   - `gyroflow-probe --reframe <clip>` prints the tidied recording as the player keeps one (`{follows, parts, tidy}`), or
+     `{error}`. ~0.5 s on the X5 sample (four parts, two of them touching, became two).
+   - `gyroflow-export --reframe recording` renders along the tidied path.
+   - `view360/main.lua`: after each take, undo, clear, change of how and when a clip opens, it runs the probe (async);
+     the samples as recorded play until it answers, and an answer for a recording since changed is dropped. Script
+     message `view360-tidy turns off|light|medium|strong|toggle` and `view360-tidy level yes|no|toggle`, kept with the
+     recording in the clip's file (toggling the smoothing back on restores the strength chosen before).
+   - The 360° tab: *Smooth the turns* (a switch, then Light / Medium / Strong) and *Level the horizon*, under the
+     recording's line; "Tidying the recording…" while the probe works.
+
+   **Checked:** Rust tests (angles ↔ quaternions; a steady turn with a 1° 8 Hz shake comes out within 0.1° of the turn;
+   a 1 Hz sway kept in part by Light and gone with Medium; the ends kept; level takes out the roll and leaves the rest;
+   the yaw continuous past 180°; a punch-in blended, parts apart and a projection change kept apart; the JSON read back).
+   `tests/view360_test.lua`: the tidy options kept and read; the probe run after a take with the clip, the tidied path
+   played once it answers, a stale answer dropped, nothing run with nothing to tidy, an error playing as recorded.
+   Headless: the probe and a 3 s Export flat along the tidied recording of the X5 sample.
+
+   **Open:** the preview on screen and by eye; whether Strong is too strong for a whip pan (the design's one-euro idea).
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
+
+   **Built** (branch `claude/360-reframe-step3-5442f5`, 2026-11-09; Export 360° in the 360° tab came with step 1):
+   - `side-panel/ui.lua`: `split_button` (the main part, primary; the ▾ part lit while its list is open, and still
+     clickable while the main part is disabled) and `dropdown` + `popover`, the panel's first popover: rows with a
+     check on the chosen one, greyed rows that can't be picked, under the button with its right edge at the button's,
+     above it when there's no room below, not drawn when the button is scrolled out of sight. It's drawn after
+     everything else, the rail too, so it's on top and the mouse finds its rows first.
+   - `side-panel/main.lua`: *Export the clip* and *Export in SDR* are one split button; Cancel export in its place
+     while exporting, and Show the last export under it, now the panel's width. The list closes on a pick, Esc (bound
+     only while it's open), a click anywhere else (on the panel, the bar or the video: the mouse is the panel's while
+     it's open, and that click does nothing else), the wheel, another tab, the panel hidden, the button gone (an export
+     started) and another file. `script-message-to side_panel popover export` opens it, for IPC tests.
+   - `side-panel/exportkind.lua`: the kinds. *As it plays* says what the file will be: "HDR", "HDR + Dolby Vision"
+     (the dv looks), "SDR" (the maker's LUT, NBCU, an SDR clip), "log, as recorded"; the button's word is the short
+     one. *In SDR* is listed where the clip has an SDR look and doesn't play in it already (it would be As it plays
+     twice). *360° video* and *Flat* for a 360 camera's own file only (`stamped`: a stitched clip can't export
+     either, as in the 360° tab); Flat greyed "Flat: record a view first" until there's a recording. The choice is
+     kept per kind of clip for the session; a kind not listed now (In SDR while it plays in SDR, Flat without a
+     recording) makes the button As it plays, and the choice comes back when it's listed again. While a take
+     records, the main part is disabled for 360° and flat, saying why. Labels as above: "Export the part 0:12–0:47 ·
+     flat".
+
+   **Checked:** `tests/exportkind_test.lua` (the rows for log, HDR, SDR, dv, 360 with and without a recording,
+   stitched; the choice falling back; the labels; the split button's places; the list's geometry, its flip above,
+   the greyed row, the check, not clipped by the scrolled area, not drawn when its button is out of sight) and
+   `tests/sidepanel_test.lua`: `main.lua` itself over a stand-in for mpv, clicked where it drew: ▾ opens, a pick
+   sets what `export <how>` gets, a click outside, ▾ again, Esc, a click on the video, the wheel, another tab,
+   hiding the panel and an export starting all close it and run nothing else; a 360 clip with its own choice, Flat
+   greyed then picked, Cancel export while exporting. Headless renders of the panel (`dump`, over a frame) for a
+   flat clip, a 360 clip with and without a recording, and a part marked. On screen (Anton's OK, 2026-11-09), the X5
+   sample with its recording in a copy of the app with this branch's panel, the mouse moved and clicked over IPC:
+   ▾ opens the list, a row lit under the mouse, 360° picked; a click on the video closes it without turning the view,
+   one on the bar's Play without playing; Esc closes it in full screen and stays in full screen; the wheel closes
+   it; with A–B at 0:02–0:03, Flat picked: "Export the part 0:02–0:03 · flat" ran `gyroflow-export --reframe
+   recording --size 1080x1920 --from 2.000 --to 3.000`, and Cancel export stopped it.
+
+   **After Anton's try (2026-11-09),** on branch `claude/360-panel-input`, on top of this one:
+   - A take that reaches the clip's end plays the clip again by the recording, from its start, instead of the
+     playlist going on (above, under Stop).
+   - Over the side panel and the bar the 360 view's gestures are left alone (`gyroflow/gestures.lua`): the trackpad's
+     messages (`macos-gesture-messages`) are off while the mouse is beside the video, so the panel scrolls by the
+     wheel and the trackpad as before, and the VO doesn't turn the view by them either. A drag that starts over the
+     video goes on into the panel. Turned on from the panel (Look around), they start off.
+   - The panel's scroll bar can be held and dragged (and clicked beside the thumb); it's lit while held or under the
+     mouse.
+   Checked: `tests/view360_test.lua` (the gestures beside the video, the take to the clip's end and by hand, keep-open
+   given back), `tests/sidepanel_test.lua` (the scroll bar dragged both ways); the app's mpv headless: keep-open set
+   while playing keeps the clip at its end, a seek plays it again, and with keep-open back it ends into the next file.
+   On screen by Anton (2026-11-09) in a copy of the app with this branch: all three work.
+
+   **Open:** a click with a real mouse and trackpad (IPC's only so far); Shift+E still exports as it plays, not the
+   kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an hour is cut with an
+   ellipsis in the button's label.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
+
+   **Built** (branch `claude/360-reframe-steps2-5`), with these changes from the design above:
+   - **The measuring** (`gyroflow-export --reframe recording --measure-hold`, `measure_hold`): the view rendered at
+     480×270 along the angle tidying, from a 2048-wide sphere, over the recorded span; luma only. The match is on the
+     **CPU** (`reframe::measure_shift`), not `still.rs`'s GPU search: 8×8 blocks over the middle 40 %, those with
+     nothing in them (sky, open water) left out, each searched within ±10 px **around where the view's own turn moved
+     it** (the head's turn and the turn of what it follows, from the frame's stamp), to a fraction of a pixel; the
+     median, sure by how many blocks agree with it (within 1 px) and how many had something in them. What's followed
+     is **what's left after the view's own turn**: what moved in the world (parallax, what the stabilization left, a
+     subject).
+   - **The hold** (`reframe::hold`): per stretch, those turns add up, each weighted by how sure it is (nothing below
+     0.4 of the blocks agreeing, fully from 0.8), **letting go over 4 s** (so the head comes back to where you looked),
+     kept within 8° of the angle-tidied path, the matching's noise smoothed out over **0.1 s** (not the chosen
+     strength: that would take out the shake it's there to hold). A screen turn across becomes a yaw over cos(pitch),
+     so the horizon stays level. Not for the little planet.
+   - **Kept** in the app's cache (`file_cache("reframe-hold")`), keyed by the clip and the angle-tidied path, so a
+     change of smoothing or of the recording measures again, and turning the option off and on is instant.
+   - **The player:** *Hold on what's in the middle* in the 360° tab (`view360-tidy picture`). The probe says
+     `"hold": "needed"`; view360 runs the measuring at background priority, shows "Measuring… N %" from its progress
+     file, plays the angle tidying meanwhile, and tidies again when it's done; a change of the recording or of how stops
+     it. **An export** with the hold asked for and not measured measures first ("measuring the hold" in its progress).
+
+   **Checked:** Rust tests (a textured picture moved by whole and half pixels and by 24 px around a predicted turn is
+   found; nothing to match is not sure; the focal length at the middle; the head's own turn is no shift; the hold
+   follows a steady drift, stays within 8°, ignores unsure frames, keeps its start; the cache is keyed by the path).
+   `tests/view360_test.lua`: the switch, the probe saying it's needed, the measuring started with the clip, its
+   progress, tidied again when done, stopped by a change. Headless on the X5 sample (a ride past a field): 387 frames
+   measured in 35 s (**~11 fps**, far from the design's estimate: the sphere's stitching on the CPU dominates; a
+   10-minute clip would take ~25 min); an export along the held path; an export measuring first when the smoothing
+   changed.
+
+   **Seen on the X5 sample:** the middle is mostly grass close to the road flowing past, so most frames are unsure
+   (median 0.19) and add nothing; where enough blocks agree, the hold follows the field and moves the view up to ~6°
+   off the smoothed path. That's what it promises (hold what's in the middle), but on a ride it's rarely what you want:
+   **off by default**, worth trying on walking and diving clips. **Open:** by eye on screen; the speed (measuring on a
+   GPU sphere, or every other frame).
 5. **The frame outline while recording**, and 9:16 and 1:1.
+
+   **Built** (branch `claude/360-reframe-steps2-5`): `view360/main.lua` draws the export's frame over the view while a
+   take records **and while the recording plays** (the preview of the export, so it shows what the export keeps): a
+   light 1-point edge left and right, what's outside dimmed, in the video's area beside the panel. At the same scale as
+   the export (the FOV spans a 16:9 picture's width at the area's height; the frame is that height, its shape's width,
+   in the middle), so 16:9 in a 16:9 area draws nothing, and a frame wider than the area draws nothing either. It
+   follows the area (the panel opening, the window) and the Frame chosen in the tab; a gesture taking the view back
+   removes it. 9:16 and 1:1 exports were already there (step 1).
+
+   **Checked:** `tests/view360_test.lua` over a fake OSD overlay: 16:9 in a 1600×900 area has no outline, 9:16 and 1:1
+   their strips, kept while the recording plays (without the dot), following a narrower area, gone with a gesture.
+
+   **Open:** on screen, by eye.
 
 Each step's live check (recording with real gestures, the preview, the exports played back) needs Anton's OK for
 the screen.

@@ -139,6 +139,8 @@ local function line(job)
     local text = job.name .. job.range .. "  "
     if job.cancelling then return text .. "cancelling" end
     if not st.total then return text .. "starting" end
+    -- A flat 360 export measures the hold on what's in the middle first, when it's asked for and not measured yet
+    if st.stage == "measuring" then text = text .. "measuring the hold " end
     text = text .. string.format("%d%%", math.floor(st.done / st.total * 100))
     if st.background then return text .. "  slowed while playing" end
     return text .. string.format("  %.0f fps  %s left", st.fps, clock(st.eta))

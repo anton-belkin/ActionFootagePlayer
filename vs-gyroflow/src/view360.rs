@@ -48,6 +48,13 @@ impl Projection {
             _ => return None,
         })
     }
+    /// As the player names it
+    pub fn name(self) -> &'static str {
+        match self {
+            Projection::Auto => "auto", Projection::Rectilinear => "rectilinear", Projection::Stereographic => "stereographic",
+            Projection::Planet => "planet", Projection::Equirect => "equirect",
+        }
+    }
 }
 
 #[repr(C)]

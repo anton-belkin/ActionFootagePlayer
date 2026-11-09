@@ -109,7 +109,7 @@ done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
-install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
 install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua mpv/scripts/workspace/longpath.lua "$workspace/"

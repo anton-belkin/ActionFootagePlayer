@@ -121,15 +121,16 @@ end
 
 -- The playlist's rows: { index (0-based, for playlist-play-index), name (the file's name, without its extension),
 -- current }, from mpv's playlist property. exts (a set, lowercase: mpv's video-exts): only the videos, not the folders
--- and other files mpv put in it beside them (the one playing is always there)
-function M.playlist_rows(playlist, exts)
+-- and other files mpv put in it beside them. played (a set of file names): what has played, which stays whatever its
+-- extension, as the one playing does: a 360° clip (.insv) opened, then its exports in stabilized/ after it
+function M.playlist_rows(playlist, exts, played)
     local rows = {}
     for i, e in ipairs(type(playlist) == "table" and playlist or {}) do
         local file = e.filename or ""
         local base = file:match("([^/\\]+)[/\\]*$") or file
         local stem, ext = base:match("^(.+)%.([^.]+)$")
         local current = e.current == true or e.playing == true
-        if current or not exts or (ext and exts[ext:lower()]) then
+        if current or not exts or (ext and exts[ext:lower()]) or (played and played[file]) then
             local name = (e.title and e.title ~= "") and e.title or stem or base
             rows[#rows + 1] = { index = i - 1, name = name, current = current }
         end
@@ -155,16 +156,32 @@ function M.cut_middle(text, n)
     return table.concat(chars, "", 1, head) .. "…" .. table.concat(chars, "", #chars - tail + 1, #chars)
 end
 
--- The folder the playlist's files are in, when they're all in one: its path, else nil
+-- The folder the playlist's files are in: the one they share, when some are in it and the others in its subfolders
+-- (a clip's folder, when the playlist went on into its stabilized/): its path, else nil
 function M.common_folder(playlist)
-    local dir = nil
+    local parts, sep, dirs = nil, "/", {}
     for _, e in ipairs(type(playlist) == "table" and playlist or {}) do
         local d = (e.filename or ""):match("^(.*)[/\\][^/\\]+$")
-        if not d then return nil end
-        if dir and d ~= dir then return nil end
-        dir = d
+        if not d or d == "" then return nil end
+        if d:find("\\", 1, true) then sep = "\\" end
+        dirs[d] = true
+        local these = {}
+        for p in (d .. "/"):gmatch("(.-)[/\\]") do these[#these + 1] = p end
+        if not parts then
+            parts = these
+        else
+            local n = 0
+            while n < #parts and n < #these and parts[n + 1] == these[n + 1] do n = n + 1 end
+            for i = #parts, n + 1, -1 do parts[i] = nil end
+        end
     end
-    return dir
+    if not parts then return nil end
+    local dir = table.concat(parts, sep)
+    -- Only a folder one of them is in: not /Volumes for two disks' files
+    for d in pairs(dirs) do
+        if d:gsub("\\", "/") == dir:gsub("\\", "/") then return d end
+    end
+    return nil
 end
 
 return M
