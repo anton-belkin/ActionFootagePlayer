@@ -61,6 +61,11 @@ expect("made kept", doc.clips_made[1], "Day 1/A.MP4\t100")
 expect("unknown kept", doc.mine, "kept")
 expect("setting", doc.settings.clips_flat, true)
 expect("no temporary left", exists(pf.path(root) .. ".tmp"), false)
+expect("version 1", doc.version, 1)
+-- A newer file's version (2: with locations) isn't lowered by writing it
+expect("version 2 written", pf.update(root, function(d) d.version = 2 end), true)
+expect("update after it", pf.update(root, function(d) d.settings.moments_alone = true end), true)
+expect("version 2 kept", pf.read(root).version, 2)
 
 -- The folder of before, with no file: read from it, then moved into the file and removed
 local root2 = root .. "/old"

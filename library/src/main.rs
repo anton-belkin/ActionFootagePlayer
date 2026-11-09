@@ -195,6 +195,8 @@ struct ProjectInfo {
     // Before 0.9: the player moves the folder into Project.afproject when it next opens a clip of it
     legacy: bool,
     clips_flat: bool,
+    // How clip previews are laid out in _Clips: tree, flat or trips (the player's workspace plugin, clips_layout)
+    clips_layout: String,
     moments_alone: bool,
     clips_made: u64,
     clips_failed: Vec<(String, String)>,
@@ -217,6 +219,8 @@ fn project_info(root: &Path) -> ProjectInfo {
         name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string()),
         legacy: !root.join(PROJECT_FILE).is_file(),
         clips_flat: flag("clips_flat"),
+        clips_layout: settings.get("clips_layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).map(str::to_string)
+            .unwrap_or_else(|| if flag("clips_flat") { "flat".into() } else { "tree".into() }),
         moments_alone: flag("moments_alone"),
         clips_made: doc.get("clips_made").and_then(Value::as_array).map_or(0, |a| a.len() as u64),
         clips_failed: failed,
@@ -475,7 +479,7 @@ async fn cached_view(app: tauri::AppHandle, shared: State<'_, Shared>, probes: S
 async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let cache_file = view_cache(&app, &root, &view);
-    let flat = read_doc(&root).get("settings").and_then(|s| s.get("clips_flat")).and_then(Value::as_bool).unwrap_or(false);
+    let flat = project_info(&root).clips_layout != "tree";
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let out = index::scan(&root, &view, flat);
@@ -1209,10 +1213,15 @@ fn clear_finished(shared: State<Shared>) {
 }
 
 #[tauri::command]
-fn set_setting(shared: State<Shared>, key: String, value: bool) -> Result<(), String> {
-    if key != "clips_flat" && key != "moments_alone" { return Err(format!("no such setting: {key}")); }
+fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    update_doc(&root, |doc| { doc["settings"][&key] = json!(value); })
+    match (key.as_str(), &value) {
+        ("clips_flat" | "moments_alone", Value::Bool(_)) => update_doc(&root, |doc| { doc["settings"][&key] = value.clone(); }),
+        // The layout, and clips_flat as it says (what players before it read)
+        ("clips_layout", Value::String(l)) if ["tree", "flat", "trips"].contains(&l.as_str()) =>
+            update_doc(&root, |doc| { doc["settings"]["clips_layout"] = value.clone(); doc["settings"]["clips_flat"] = json!(l == "flat"); }),
+        _ => Err(format!("no such setting: {key} = {value}")),
+    }
 }
 
 #[tauri::command]
