@@ -64,8 +64,8 @@
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
 --   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
---                           edge_fill_rate auto|50|25, edges <mode>, chromatic yes|no or ask_when_slow yes|no, kept in
---                           gyroflow.conf at once (quality.lua)
+--                           edge_fill_rate auto|50|25, edges <mode>, chromatic yes|no, temporal_denoise full|light|off
+--                           or ask_when_slow yes|no, kept in gyroflow.conf at once (quality.lua)
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
 -- and export.lua's. The state is in user-data/gyroflow/ for the menu: available (a Gyroflow filter can be set up: a
@@ -134,12 +134,13 @@
 --                and its short side no longer than that, for a GPU that doesn't keep up at the display's size
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
---   still=yes    the paused frame cleaned of its noise (Ctrl+p), from it and still_radius=5 frames on each side,
---                still_delay=0.4 s after it pauses; still_grain=0.25 of the brightness's grain stays, so it doesn't
---                look smeared (0: none). On the GPU path also while it plays (warp.glsl's dn_ passes), still_radius
---                up to 5, with still_tolerance=1.5: how much a patch may differ from the frame's own and still be
---                averaged in (higher cleans more of what moves, and smears it more). The three are the defaults of the
---                transform's denoise (the panel's Transform: frames, strength, motion), kept with a clip's transform
+--   still=yes    the temporal denoise (Ctrl+p, the panel's Transform): the paused frame cleaned of its noise from it
+--                and the frames on each side, still_delay=0.4 s after it pauses; on the GPU path also while it plays
+--                (warp.glsl's dn_ passes). still_grain=0.25 of the grain stays, so it doesn't look smeared (0: none)
+--   temporal_denoise=full  how much of it this computer does (Performance & Quality): full, 5 frames on each side
+--                (on the GPU path the picture 5 frames behind, the sound delayed as much); light, 3 (about a quarter
+--                cheaper, a little less clean); off, none, whatever Ctrl+p says (Ctrl+p's switch kept for when it's
+--                on again). still_radius and still_tolerance, from before it, are read and ignored
 --   paused_full_size=off  paused, the frame stays as it played; Ctrl+f renders it at full size. auto: still_delay after
 --                it pauses, it's rendered at full size (no input scaling, the output at the project's or the video's own
 --                size up to 4K's pixels) with every frame there, whatever resolution and fps_limit are, in the same
@@ -188,13 +189,18 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
     local rate = tostring(o.edge_fill_rate):match("^%d+$") and tonumber(o.edge_fill_rate)
     if not (rate and rate >= 1 and rate <= 100) then o.edge_fill_rate = "auto" end
 end
+-- The temporal denoise's frames on each side, by how much of it this computer does (still.lua's, the shader's)
+local DENOISE_FRAMES = { full = 5, light = 3 }
+if o.temporal_denoise ~= "light" and o.temporal_denoise ~= "off" then o.temporal_denoise = "full" end
+o.still_radius = DENOISE_FRAMES[o.temporal_denoise] or 5
+o.still_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25))
 
 local platform = require 'platform'
 local still = require 'still'
@@ -526,10 +532,6 @@ local function defaults_bundle()
         orientation = select(2, split_aspect(o.aspect, o.orientation)),
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
         lens = o.lens == "as-recorded" and "as-recorded" or "corrected",
-        -- The temporal denoise's (Ctrl+p) frames on each side, the grain it keeps, its motion tolerance
-        denoise_frames = math.max(1, math.min(5, math.floor(tonumber(o.still_radius) or 5))),
-        denoise_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25)),
-        denoise_tolerance = math.max(0.25, math.min(8, tonumber(o.still_tolerance) or 1.5)),
         preset_horizon = preset_horizon(),
     }
 end
@@ -565,8 +567,6 @@ local HORIZON = { yes = true, no = false }
 -- stabilized or not, and one with a lens profile and no motion data (kind "lens"), has it corrected or not
 local lens_mode = "corrected"
 local horizon = session.horizon_lock == "yes"
--- The temporal denoise's settings as they play (the transform's denoise_ keys)
-local denoise = { frames = session.denoise_frames, grain = session.denoise_grain, tolerance = session.denoise_tolerance }
 -- The lens under water with a flat port (yes), above water or behind a dome port (no), as the camera's telemetry says
 -- (auto), or as the project says (project, a clip with one). Input: the source's own correction (the workspace
 -- plugin's input), written there as it's changed; the app's default (underwater=) for sources without one. A clip's
@@ -610,11 +610,6 @@ local function take(b)
     if b.lens == "corrected" or b.lens == "as-recorded" then lens_mode = b.lens
     elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
     else lens_mode = session.lens end
-    for k in pairs(denoise) do
-        local v = tonumber(b["denoise_" .. k])
-        denoise[k] = v or session["denoise_" .. k]
-    end
-    if dn_sync then dn_sync() end
     return b.view == "off"
 end
 
@@ -811,7 +806,7 @@ local function publish()
         rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
-        denoise_frames = denoise.frames, denoise_grain = denoise.grain, denoise_tolerance = denoise.tolerance,
+        temporal_denoise = o.temporal_denoise,
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
@@ -1061,8 +1056,8 @@ end
 
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
-    -- Ctrl+p (the clean frame): on the GPU path the temporal denoise, 5 frames on each side, while it plays and paused
-    -- (warp.glsl's dn_ passes; dn_sync delays the audio)
+    -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
+    -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
     -- Written before with these settings (and the project as it is now): that file again
     local project = source.project and utils.file_info(source.project)
@@ -1173,16 +1168,14 @@ end
 -- shown: the frame on screen before a new shader (gpu_apply), nil otherwise
 dn_sync = setmetatable({ shown = dn_shown, new_ring = dn_new_ring }, { __call = function(_, shown)
     local crop_on = (mp.get_property_native("user-data/gyroflow/crop") or {}).active == true
-    local after = crop_on and 0 or math.max(1, math.min(DN_AFTER, denoise.frames or DN_AFTER))
-    -- The frames on each side, the grain kept and the motion tolerance: the shader's own parameters, nothing rebuilt
-    local want = { gyroflow_dn_radius = string.format("%d", denoise.frames or DN_AFTER), gyroflow_dn_keep = string.format("%.3f", denoise.grain or 0.25),
-                   gyroflow_dn_tolerance = string.format("%.3f", denoise.tolerance or 1.5) }
+    local frames = DENOISE_FRAMES[o.temporal_denoise] or DN_AFTER
+    local after = crop_on and 0 or math.min(DN_AFTER, frames)
+    -- The frames on each side (Full or Light) and the grain kept: the shader's own parameters, nothing rebuilt
+    local want = { gyroflow_dn_radius = string.format("%d", frames), gyroflow_dn_keep = string.format("%.3f", o.still_grain) }
     local opts = mp.get_property_native("glsl-shader-opts") or {}
     local differ = false
     for k, v in pairs(want) do if opts[k] ~= v then opts[k], differ = v, true end end
     if differ then mp.set_property_native("glsl-shader-opts", opts) end
-    -- The paused frame on the VapourSynth path (still.lua): its frames on each side and the grain it keeps
-    o.still_radius, o.still_grain = denoise.frames, denoise.grain
     local fps = current_source and tonumber(current_source.fps)
     local on = gpu ~= nil and gpu.shader ~= nil and gpu.denoise and fps and fps > 0
     local before = shown or dn_shown()
@@ -1975,6 +1968,8 @@ local QUALITY = {
     chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
     paused_full_size = { off = "paused, the frame as it played (Ctrl+f: at full size)", auto = "paused, the frame at full size" },
+    temporal_denoise = { full = "temporal denoise: full, 5 frames on each side", light = "temporal denoise: light, 3 frames on each side",
+                         off = "temporal denoise: off on this computer" },
     edges = EDGE_LABELS,
 }
 
@@ -1994,6 +1989,13 @@ local function set_quality(key, value)
         write_edge_control()
     elseif key == "paused_full_size" then
         o.paused_full_size = value
+    elseif key == "temporal_denoise" then
+        -- Light or full: the shader's parameters (dn_sync); off or back from it: still.lua says so, and the shader is
+        -- written again without the denoise or with it
+        o.temporal_denoise = value
+        o.still_radius = DENOISE_FRAMES[value] or o.still_radius
+        dn_sync()
+        still.available_changed()
     else
         o.ask_when_slow = value == "yes"
     end
@@ -2023,23 +2025,10 @@ quality.init(o, {
     edges = function() return edge_mode end,
     -- The color fringes being taken out where it can: the shader there, the lens not set above water
     chromatic = function() return chromatic and chromatic_shader and underwater ~= "no" and not o.chromatic_skip end,
+    -- The temporal denoise as it runs while it plays (the GPU path's): full, light, or nil for none
+    denoise = function() return gpu and gpu.denoise and o.temporal_denoise ~= "off" and o.temporal_denoise or nil end,
     set = set_quality,
 })
-
--- The temporal denoise's settings (the panel's Transform): denoise <frames|grain|tolerance> <value>. Part of the
--- transform: kept with a clip's, the session's where that plays. On the GPU path the shader takes them at once
-local DENOISE_RANGE = { frames = { 1, 5 }, grain = { 0, 1 }, tolerance = { 0.25, 8 } }
-mp.register_script_message("denoise", function(key, value)
-    local r, v = DENOISE_RANGE[key], tonumber(value)
-    if not r or not v then return end
-    v = math.max(r[1], math.min(r[2], v))
-    if key == "frames" then v = math.floor(v + 0.5) end
-    denoise[key] = v
-    sticks("denoise_" .. key, v)
-    dn_sync()
-    publish()
-    mp.msg.info(string.format("temporal denoise: %s %g", key, v))
-end)
 
 -- The transform as it plays, whole, as the app's defaults and the session's (the panel's Use as default); what a
 -- Gyroflow project has stays the session's. With the edge fill and the clean still frame, which aren't a clip's
@@ -2054,7 +2043,6 @@ local function as_plays()
         orientation = project and session.orientation or frame.orientation,
         projection = project and session.projection or frame.projection,
         lens = project and session.lens or lens_mode,
-        denoise_frames = denoise.frames, denoise_grain = denoise.grain, denoise_tolerance = denoise.tolerance,
     }
 end
 
@@ -2064,11 +2052,9 @@ mp.register_script_message("remember", function()
         { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
         { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "orientation", b.orientation }, { "projection", b.projection },
         { "lens", b.lens }, { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
-        { "still", still.enabled() and "yes" or "no" }, { "still_radius", string.format("%d", b.denoise_frames) },
-        { "still_grain", string.format("%g", b.denoise_grain) }, { "still_tolerance", string.format("%g", b.denoise_tolerance) },
+        { "still", still.switched() and "yes" or "no" },
     })
     if saved then
-        o.still_tolerance = b.denoise_tolerance
         o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection, o.lens = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection, b.lens
         DEFAULTS = defaults_bundle()
         for k, v in pairs(b) do session[k] = v end
@@ -2081,7 +2067,7 @@ end)
 mp.register_script_message("remember-quality", function()
     local saved = platform.save_options("gyroflow", {
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
-        { "still", still.enabled() and "yes" or "no" },
+        { "still", still.switched() and "yes" or "no" },
     })
     mp.osd_message(saved and "Gyroflow: the edge fill and the clean still frame are the defaults now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)

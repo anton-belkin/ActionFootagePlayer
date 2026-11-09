@@ -1,6 +1,7 @@
 -- When the stabilization doesn't keep up: playback pauses and offers lighter settings, and the one picked sticks (in
 -- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges), the
--- color aberration correction skipped on this screen (chromatic_skip: the clip's transform keeps it, exports have it).
+-- color aberration correction skipped on this screen (chromatic_skip: the clip's transform keeps it, exports have it),
+-- a lighter temporal denoise or none (temporal_denoise).
 --
 -- A laptop's GPU keeps up for its first half-minute or so, at its boost power, then slows to half at its sustained
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
@@ -59,6 +60,9 @@ mp.observe_property("pause", "bool", function(_, paused) if not paused then quie
 local function choices()
     local list = {}
     local function add(label, settings) table.insert(list, { label, settings }) end
+    -- The temporal denoise lighter first: a little less clean, and the picture no less smooth
+    local dn = hooks.denoise()
+    if dn == "full" then add("Lighter temporal denoise: 3 frames on each side", { { "temporal_denoise", "light" } }) end
     local fps = mp.get_property_number("container-fps") or 0
     local limit = o.fps_limit > 0 and o.fps_limit or fps
     local can30, can15 = fps > 31 and limit > 30, fps > 16 and limit > 15
@@ -74,6 +78,7 @@ local function choices()
     local side = hooks.short_side()
     if side and side > 1080 then add("Render at 1080p", { { "resolution", "1080" } }) end
     if hooks.chromatic() then add("Skip the color aberration correction on this screen", { { "chromatic_skip", "yes" } }) end
+    if dn then add("No temporal denoise on this computer", { { "temporal_denoise", "off" } }) end
     return list
 end
 
@@ -128,8 +133,8 @@ local function check()
 end
 
 -- options: main.lua's (fps_limit, ask_when_slow); hooks: stabilizing() the stabilization is on, short_side() the short
--- side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be,
--- set(key, value) applies and keeps a setting
+-- side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
+-- the temporal denoise while it plays (full, light, nil), set(key, value) applies and keeps a setting
 function M.init(options, h)
     o, hooks = options, h
     mp.add_periodic_timer(1, check)

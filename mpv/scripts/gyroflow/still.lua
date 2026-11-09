@@ -1,5 +1,5 @@
--- Paused, the frame at its best: without its noise (Ctrl+p, on or off: it sticks; still=yes in gyroflow.conf), and at
--- full size (Ctrl+f now; by itself with paused_full_size=auto).
+-- Paused, the frame at its best: without its noise (Ctrl+p, on or off: it sticks; still=yes in gyroflow.conf; none
+-- with temporal_denoise=off, this computer's Performance & Quality, whatever Ctrl+p says), and at full size (Ctrl+f now; by itself with paused_full_size=auto).
 --
 -- While it plays, the stabilized frame may be rendered smaller than the source (to fit the display, or resolution=1080
 -- or 720) from an input scaled down first, and with fps_limit only every 2nd or 4th frame is there. With Ctrl+f, or a
@@ -73,8 +73,12 @@ mp.observe_property("vf", "native", function() failed = false end)
 -- ours = its seek event not seen yet }
 local pending = nil
 
+-- On: Ctrl+p's switch, where this computer does the temporal denoise (temporal_denoise not off)
+local function on() return enabled and o ~= nil and o.temporal_denoise ~= "off" end
+local published = nil
 local function publish()
-    mp.set_property_native("user-data/gyroflow/still", enabled)
+    published = on()
+    mp.set_property_native("user-data/gyroflow/still", published)
 end
 
 local function finish()
@@ -114,7 +118,7 @@ local function start(full_now)
     -- The frames there are: with fps_limit, every step-th (main.lua), and all of them at full size
     local r = o.still_radius
     fps = fps and fps / (bigger and 1 or step()) or nil
-    local clean = enabled and fps and fps > 0 and not (duration and t + (r + 2) / fps > duration)
+    local clean = on() and fps and fps > 0 and not (duration and t + (r + 2) / fps > duration)
     clean = clean and write_control({ time = t, radius = r, skip_before = t - (r + 1.5) / fps, luma_keep = o.still_grain })
     if not clean and not bigger then return end
     if not clean then frame_only(t) end
@@ -196,7 +200,7 @@ mp.register_event("end-file", function()
 end)
 mp.register_event("shutdown", function() os.remove(M.CONTROL) end)
 
--- options: main.lua's (still, still_radius, still_delay, still_grain); stabilizing(): the stabilization is on;
+-- options: main.lua's (still, temporal_denoise, still_radius, still_delay, still_grain); stabilizing(): the stabilization is on;
 -- frame_step(): every how many frames one plays (fps_limit)
 function M.init(options, is_stabilizing, frame_step)
     o, stabilizing, step = options, is_stabilizing, frame_step
@@ -211,13 +215,16 @@ function M.full_size(hooks)
     full = hooks
 end
 
-function M.enabled() return enabled end
+-- The temporal denoise as it is: on (Ctrl+p's switch, and this computer does it); Ctrl+p's switch alone
+function M.enabled() return on() end
+function M.switched() return enabled end
 
-mp.add_key_binding("Ctrl+p", "still", function()
-    enabled = not enabled
+-- On again: the paused frame cleaned a moment after; off: the frame as it is again
+local function changed()
+    local was = published
     publish()
-    mp.osd_message("Temporal denoise of the paused frame: " .. (enabled and "on" or "off"), 1.5)
-    if enabled then
+    if published == was then return end
+    if published then
         schedule()
     elseif mp.get_property_native("pause") and not pending then
         -- The frame as it is again (the frames before it left out, the sphere carrying on)
@@ -227,7 +234,19 @@ mp.add_key_binding("Ctrl+p", "still", function()
             mp.command_native({ "seek", t, "absolute+exact" })
         end
     end
+end
+
+mp.add_key_binding("Ctrl+p", "still", function()
+    if o.temporal_denoise == "off" then
+        return mp.osd_message("Temporal denoise: off on this computer (Performance & Quality)", 2)
+    end
+    enabled = not enabled
+    mp.osd_message("Temporal denoise: " .. (enabled and "on" or "off"), 1.5)
+    changed()
 end)
+
+-- temporal_denoise changed (main.lua, Performance & Quality): off, or on again
+function M.available_changed() changed() end
 
 -- Ctrl+f: the paused frame at full size now (pausing first), cleaned up in the same re-render when Ctrl+p is on
 mp.add_key_binding("Ctrl+f", "full", function()

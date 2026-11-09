@@ -48,6 +48,8 @@ local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", 
 local RESOLUTIONS = { { "video", "The video's own size" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" } }
 local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
 local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
+-- How much temporal denoise (Ctrl+p) this computer does: gyroflow.conf's temporal_denoise
+local DENOISE_LEVELS = { { "full", "Full: 5 frames on each side" }, { "light", "Light: 3 frames, lighter on the GPU" }, { "off", "Off on this computer" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
 local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
@@ -72,7 +74,7 @@ local KEY_LABELS = {
     { "script-binding dlogm/curve", "The next log curve, by hand (saved with the source)" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
-    { "script-binding gyroflow/still", "Temporal denoise of the paused frame on / off" },
+    { "script-binding gyroflow/still", "Temporal denoise on / off" },
     { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/crop", "Save frame: a frame for a photo, the picture panned and zoomed under it" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
@@ -253,7 +255,9 @@ local function stabilization_menu(g, key)
                shortcut = key["script-binding gyroflow/fringes"] }),
         SEPARATOR,
         submenu("Edges", edges, { shortcut = key["script-binding gyroflow/edges"] }),
-        item("Temporal denoise on pause", "script-binding gyroflow/still", { checked = g.still, shortcut = key["script-binding gyroflow/still"] }),
+        -- None with Performance & Quality's temporal denoise off on this computer
+        item("Temporal denoise", "script-binding gyroflow/still", { checked = g.still, disabled = g.temporal_denoise == "off",
+                                                                   shortcut = key["script-binding gyroflow/still"] }),
         item("Save frame…", "script-binding gyroflow/crop", { checked = (g.crop or {}).active == true, shortcut = key["script-binding gyroflow/crop"] }),
         SEPARATOR,
         item("Edit in Gyroflow…", "script-binding gyroflow/edit", { shortcut = key["script-binding gyroflow/edit"] }),
@@ -277,6 +281,11 @@ local function quality_menu(g)
         table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
     end
     table.insert(items, submenu("Paused frame", paused))
+    local dn = {}
+    for _, r in ipairs(DENOISE_LEVELS) do
+        table.insert(dn, item(r[2], "script-message-to gyroflow quality temporal_denoise " .. r[1], { checked = (g.temporal_denoise or "full") == r[1] }))
+    end
+    table.insert(items, submenu("Temporal denoise", dn))
     table.insert(items, SEPARATOR)
     local fill = {}
     for _, r in ipairs(FILL_RATES) do
