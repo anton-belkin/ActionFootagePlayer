@@ -410,11 +410,16 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    sets what `export <how>` gets, a click outside, ▾ again, Esc, a click on the video, the wheel, another tab,
    hiding the panel and an export starting all close it and run nothing else; a 360 clip with its own choice, Flat
    greyed then picked, Cancel export while exporting. Headless renders of the panel (`dump`, over a frame) for a
-   flat clip, a 360 clip with and without a recording, and a part marked.
+   flat clip, a 360 clip with and without a recording, and a part marked. On screen (Anton's OK, 2026-11-09), the X5
+   sample with its recording in a copy of the app with this branch's panel, the mouse moved and clicked over IPC:
+   ▾ opens the list, a row lit under the mouse, 360° picked; a click on the video closes it without turning the view,
+   one on the bar's Play without playing; Esc closes it in full screen and stays in full screen; the wheel closes
+   it; with A–B at 0:02–0:03, Flat picked: "Export the part 0:02–0:03 · flat" ran `gyroflow-export --reframe
+   recording --size 1080x1920 --from 2.000 --to 3.000`, and Cancel export stopped it.
 
-   **Open:** a live check in the app (hover, a real click outside the window, Esc in full screen); Shift+E still
-   exports as it plays, not the kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an
-   hour is cut with an ellipsis in the button's label.
+   **Open:** a click with a real mouse and trackpad (IPC's only so far); Shift+E still exports as it plays, not the
+   kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an hour is cut with an
+   ellipsis in the button's label.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
 5. **The frame outline while recording**, and 9:16 and 1:1.
 
