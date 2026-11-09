@@ -170,6 +170,9 @@ local function rec_state()
     }
 end
 
+-- The recording's overlay (below): redrawn with every state published
+local draw_rec
+
 local function publish()
     local r = view.FOV[cur.projection]
     mp.set_property_native("user-data/view360", {
@@ -178,6 +181,7 @@ local function publish()
         stereo = sphere and sphere.stereo or "mono", note = note or false, modes = modes, heading_confidence = confidence_now,
         recording = rec_state(),
     })
+    if draw_rec then draw_rec() end
 end
 
 -- The shader's parameters, with whatever else glsl-shader-opts has
@@ -289,24 +293,55 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
--- The red dot and the time recorded so far, in the video's top right corner (mpv's messages are top left)
-local function draw_rec()
+-- The export's frame (16:9, 9:16, 1:1) over the view at the same scale, as a rectangle in the video's area, or nil when
+-- the area already has its shape or is narrower. The FOV spans a 16:9 picture's width at the area's height (view.lua),
+-- and a flat export is that picture's middle at its frame's shape (reframe.rs): its height is the area's
+local FRAME_ASPECT = { ["16:9"] = 16 / 9, ["9:16"] = 9 / 16, ["1:1"] = 1 }
+local function frame_outline(a, frame)
+    local aspect = FRAME_ASPECT[frame]
+    if not a or not aspect then return nil end
+    local w = aspect * a.h
+    if w >= a.w - 1 then return nil end
+    return { x = a.x + (a.w - w) / 2, y = a.y, w = w, h = a.h }
+end
+
+-- While a take records: the red dot and the time recorded so far, in the video's top right corner (mpv's messages are
+-- top left). While a take records or the recording plays: the export's frame, a light outline with what's outside it
+-- dimmed, as crop mode draws its frame
+function draw_rec()
     if not rec_overlay then return end
     local a = area()
-    if not rec:taking() or not a then
+    local taking = rec:taking()
+    local framed = active and (taking or rec_playing) and a and frame_outline(a, rec.frame) or nil
+    if not a or not active or not (taking or framed) then
         if rec_shown then rec_overlay:remove(); rec_shown = nil end
         return
     end
-    local text = clock(rec:take_seconds())
+    local text = taking and clock(rec:take_seconds()) or ""
     local d = mp.get_property_native("osd-dimensions") or {}
-    local key = text .. ":" .. a.x .. ":" .. a.y .. ":" .. tostring(d.w)
+    local key = table.concat({ text, a.x, a.y, a.w, a.h, tostring(d.w), framed and rec.frame or "" }, ":")
     if key == rec_shown then return end
     rec_shown = key
     local s = mp.get_property_number("display-hidpi-scale") or 1
     rec_overlay.res_x, rec_overlay.res_y = d.w or 0, d.h or 0
-    rec_overlay.data = string.format("{\\an9\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
-                                     math.floor(a.x + a.w - 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
-                                     math.floor(18 * s), text)
+    local lines = {}
+    if framed then
+        local function rect(x0, y0, x1, y1)
+            return string.format("m %d %d l %d %d %d %d %d %d", math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y0),
+                                 math.floor(x1), math.floor(y1), math.floor(x0), math.floor(y1))
+        end
+        local style = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}"
+        local x0, x1, y0, y1 = framed.x, framed.x + framed.w, framed.y, framed.y + framed.h
+        table.insert(lines, string.format(style, "000000", "70") .. rect(a.x, a.y, x0, a.y + a.h) .. " " .. rect(x1, a.y, a.x + a.w, a.y + a.h))
+        local e = math.max(1, math.floor(s + 0.5))
+        table.insert(lines, string.format(style, "FFFFFF", "40") .. rect(x0 - e, y0, x0, y1) .. " " .. rect(x1, y0, x1 + e, y1))
+    end
+    if taking then
+        table.insert(lines, string.format("{\\an9\\pos(%d,%d)\\bord%.1f\\shad0\\fs%d\\1c&H3030E8&}●{\\1c&HFFFFFF&\\fs%d}  %s",
+                                          math.floor(a.x + a.w - 18 * s), math.floor(a.y + 14 * s), 1.5 * s, math.floor(22 * s),
+                                          math.floor(18 * s), text))
+    end
+    rec_overlay.data = table.concat(lines, "\n")
     rec_overlay:update()
 end
 
@@ -374,6 +409,7 @@ local function set_playing(on, quiet)
     elseif not quiet then
         mp.osd_message("Your view: the recording is paused", 2)
     end
+    draw_rec()
     publish()
 end
 
@@ -566,7 +602,7 @@ end)
 -- The window or the side panel changing the video's area: the view's size
 for _, prop in ipairs({ "osd-dimensions", "video-margin-ratio-right", "video-margin-ratio-left", "video-margin-ratio-top",
                         "video-margin-ratio-bottom" }) do
-    mp.observe_property(prop, "native", function() if active then fit() end end)
+    mp.observe_property(prop, "native", function() if active then fit() end; draw_rec() end)
 end
 
 mp.observe_property("display-fps", "native", function() pace() end)
@@ -726,6 +762,7 @@ mp.register_script_message("view360-frame", function(f)
     if not recording.FRAMES[f] then return end
     rec.frame = f
     if not rec:empty() then save_recording() end
+    draw_rec()
     publish()
 end)
 

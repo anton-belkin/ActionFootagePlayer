@@ -57,6 +57,13 @@ local function fake_mp()
         remove_key_binding = function(name) f.bindings[name] = nil end,
         register_script_message = function(name, fn) f.messages[name] = fn end,
         osd_message = function(text) f.osd = text end,
+        -- The OSD overlay: what it shows last, nil when removed
+        create_osd_overlay = function()
+            local o = { data = "" }
+            function o.update(self) f.overlay = self.data end
+            function o.remove() f.overlay = nil end
+            return o
+        end,
         -- Run at once, or (f.defer) when f.flush() says the messages waiting are handled
         add_timeout = function(_, fn)
             if f.defer then table.insert(f.timers, fn) else fn() end
@@ -867,6 +874,52 @@ do
     near("tidy: an error plays as recorded", yaw(), 25, 1e-3)
     f.event("end-file")
     os.remove(file)
+    os.execute("rmdir '" .. dir .. "'")
+    f.props["user-data/gyroflow/rig360"] = nil
+end
+
+do
+    -- The export's frame over the view while a take records and while the recording plays: a 9:16 strip in the
+    -- middle of a 1600×900 area; none for 16:9 there (the area has its shape)
+    package.loaded['sidecar'] = nil
+    package.loaded['recording'] = nil
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p '" .. dir .. "'")
+    local clip = dir .. "/VID_20250416_143628_00_007.insv"
+    local f = load_view360()
+    f.props["user-data/gyroflow/rig360"] = { brand = "Insta360", model = "X5", lenses = 2, tracks = 2 }
+    f.props["path"] = clip
+    f.props["pause"] = true
+    f.props["time-pos"] = 10
+    f.load(false)
+    local function st() return f.props["user-data/view360"].recording end
+    expect("frame: nothing drawn before", f.overlay, nil)
+    f.bindings["record"].fn()
+    local o = f.overlay or ""
+    expect("frame: 16:9 in a 16:9 area, no outline", o:find("\\p1", 1, true), nil)
+    expect("frame: the dot", o:find("●", 1, true) ~= nil, true)
+    f.message("view360-frame", "9:16")
+    o = f.overlay or ""
+    -- 9/16 · 900 = 506.25 wide, from 546.875
+    expect("frame: 9:16 outlined", o:find("m 0 0 l 546 0 546 900 0 900", 1, true) ~= nil, true)
+    expect("frame: right of it dimmed", o:find("m 1053 0 l 1600 0 1600 900 1053 900", 1, true) ~= nil, true)
+    f.message("view360-frame", "1:1")
+    expect("frame: 1:1 a square", (f.overlay or ""):find("m 350 0 l 350 0", 1, true) == nil and (f.overlay or ""):find("m 0 0 l 350 0", 1, true) ~= nil, true)
+    for i = 1, 30 do f.set("time-pos", 10 + i / 25) end
+    f.set("pause", true)
+    expect("frame: playing the recording", st().playing, true)
+    o = f.overlay or ""
+    expect("frame: still outlined while it plays", o:find("m 0 0 l 350 0", 1, true) ~= nil, true)
+    expect("frame: no dot when not recording", o:find("●", 1, true), nil)
+    -- The side panel narrows the area: the outline follows it
+    f.set("video-margin-ratio-right", 0.25)
+    expect("frame: in the narrower area", (f.overlay or ""):find("m 0 0 l 150 0", 1, true) ~= nil, true)
+    -- A gesture: your view, no outline
+    f.bindings["view360-key-wheel-up"].fn({ event = "down", scale = 1 })
+    expect("frame: gone with your view", f.overlay, nil)
+    f.event("end-file")
+    os.remove(dir .. "/VID_20250416_143628_00_007.afp.json")
     os.execute("rmdir '" .. dir .. "'")
     f.props["user-data/gyroflow/rig360"] = nil
 end

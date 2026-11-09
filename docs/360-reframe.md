@@ -412,6 +412,19 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
 5. **The frame outline while recording**, and 9:16 and 1:1.
 
+   **Built** (branch `claude/360-reframe-steps2-5`): `view360/main.lua` draws the export's frame over the view while a
+   take records **and while the recording plays** (the preview of the export, so it shows what the export keeps): a
+   light 1-point edge left and right, what's outside dimmed, in the video's area beside the panel. At the same scale as
+   the export (the FOV spans a 16:9 picture's width at the area's height; the frame is that height, its shape's width,
+   in the middle), so 16:9 in a 16:9 area draws nothing, and a frame wider than the area draws nothing either. It
+   follows the area (the panel opening, the window) and the Frame chosen in the tab; a gesture taking the view back
+   removes it. 9:16 and 1:1 exports were already there (step 1).
+
+   **Checked:** `tests/view360_test.lua` over a fake OSD overlay: 16:9 in a 1600×900 area has no outline, 9:16 and 1:1
+   their strips, kept while the recording plays (without the dot), following a narrower area, gone with a gesture.
+
+   **Open:** on screen, by eye.
+
 Each step's live check (recording with real gestures, the preview, the exports played back) needs Anton's OK for
 the screen.
 
