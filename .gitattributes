@@ -1,0 +1,6 @@
+# Shaders keep \n line ends in every checkout: vs-gyroflow builds them in (include_str!) and finds their sections by
+# their \n (gpu_table.rs), and Git for Windows' core.autocrlf (GitHub's Windows runners have it too) would otherwise
+# write them with \r\n
+*.glsl text eol=lf
+*.glsl.in text eol=lf
+*.wgsl text eol=lf
