@@ -762,8 +762,14 @@ mp.register_script_message("photo-at", function(json)
     local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
     if mode == "live" or mode == "motion" then table.insert(args, "--live") end
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
-    view_args(args, type(req.view) == "table" and req.view or {})
-    if mp.get_property_native("user-data/gyroflow/still") == false then table.insert(args, "--radius"); table.insert(args, "0") end
+    local view = type(req.view) == "table" and req.view or {}
+    view_args(args, view)
+    -- Cleaned up as that clip's transform says (else as the one playing is), where this computer does the denoise
+    local denoise = view.denoise
+    if type(denoise) ~= "boolean" then denoise = mp.get_property_native("user-data/gyroflow/still") ~= false end
+    if not denoise or mp.get_property_native("user-data/gyroflow/temporal_denoise") == "off" then
+        table.insert(args, "--radius"); table.insert(args, "0")
+    end
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)

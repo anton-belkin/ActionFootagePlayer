@@ -32,6 +32,13 @@
     <footer><span class="sp"></span><button type="button" class="btn" data-a="quit">Stop them and quit</button><button type="button" class="btn pri" data-a="keep">Keep them going</button></footer>
   </div>
 </div>
+<div id="moving" class="scrim" hidden>
+  <div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="movingTitle">
+    <header><h2 id="movingTitle">Moving the project…</h2><span class="mono" id="movingTo"></span></header>
+    <div class="sb"><div class="bar2" role="progressbar" aria-labelledby="movingTitle" aria-valuemin="0" aria-valuemax="100" id="movingBar"><i style="width:0%"></i></div>
+      <p class="sub wrap" id="movingText">Starting…</p></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" data-a="toastok">OK</button></div>
 <script src="app.js"></script>
 </body>

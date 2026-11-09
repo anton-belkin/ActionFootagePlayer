@@ -200,10 +200,13 @@ mp.register_event("end-file", function()
 end)
 mp.register_event("shutdown", function() os.remove(M.CONTROL) end)
 
+-- Ctrl+p switched it (main.lua's: the clip's transform keeps it)
+local switched_by_hand = nil
+
 -- options: main.lua's (still, temporal_denoise, still_radius, still_delay, still_grain); stabilizing(): the stabilization is on;
--- frame_step(): every how many frames one plays (fps_limit)
-function M.init(options, is_stabilizing, frame_step)
-    o, stabilizing, step = options, is_stabilizing, frame_step
+-- frame_step(): every how many frames one plays (fps_limit); by_hand(on): Ctrl+p switched it
+function M.init(options, is_stabilizing, frame_step, by_hand)
+    o, stabilizing, step, switched_by_hand = options, is_stabilizing, frame_step, by_hand
     enabled = o.still
     publish()
 end
@@ -226,7 +229,7 @@ local function changed()
     if published == was then return end
     if published then
         schedule()
-    elseif mp.get_property_native("pause") and not pending then
+    elseif shown and mp.get_property_native("pause") and not pending then
         -- The frame as it is again (the frames before it left out, the sphere carrying on)
         local t = mp.get_property_number("time-pos")
         if t then
@@ -241,12 +244,21 @@ mp.add_key_binding("Ctrl+p", "still", function()
         return mp.osd_message("Temporal denoise: off on this computer (Performance & Quality)", 2)
     end
     enabled = not enabled
-    mp.osd_message("Temporal denoise: " .. (enabled and "on" or "off"), 1.5)
+    mp.osd_message("Temporal denoise: " .. (enabled and "on" or "off") .. " for this clip", 1.5)
     changed()
+    if switched_by_hand then switched_by_hand(enabled) end
 end)
 
 -- temporal_denoise changed (main.lua, Performance & Quality): off, or on again
 function M.available_changed() changed() end
+
+-- The clip's transform says on or off (main.lua's take: a clip's saved bundle, else the session's)
+function M.set(on)
+    on = on == true
+    if on == enabled then return end
+    enabled = on
+    if o then changed() end
+end
 
 -- Ctrl+f: the paused frame at full size now (pausing first), cleaned up in the same re-render when Ctrl+p is on
 mp.add_key_binding("Ctrl+f", "full", function()

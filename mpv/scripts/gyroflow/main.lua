@@ -40,8 +40,8 @@
 --                     the frame's own colors spread out from its edge (both blurred)
 --   Ctrl+u   lens     the lens above water, and back to what it was (under water, as the camera says, or as the
 --                     project says); it sticks for the next clips without a project
---   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off; it
---                     sticks (still.lua)
+--   Ctrl+p   still    the paused frame cleaned of its noise from the frames on both sides of it, on or off: the
+--                     clip's transform keeps it (still.lua)
 --   Ctrl+f   full     the paused frame rendered at full size now, every frame there, cleaned too when Ctrl+p is on;
 --                     pauses first. What paused_full_size=auto does by itself (still.lua)
 --   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
@@ -83,7 +83,7 @@
 --
 -- The horizon lock and the lens set here stick for the next clips without a project. A clip with a project starts with
 -- the project's own (Gyroflow's: it was made there on purpose), whatever gyroflow.conf says; set here, they're for that
--- clip only. The edge fill, the color fringes and the clean still frame aren't Gyroflow's: they stick for every clip
+-- clip only. The edge fill isn't Gyroflow's: it sticks for every clip
 --
 -- Options (~~/script-opts/gyroflow.conf):
 --   hwdec=yes    decode the videos it stabilizes on the GPU (VideoToolbox; on Linux and Windows whatever mpv finds,
@@ -139,7 +139,8 @@
 --                denoise and the looks render at that size and mpv scales it to the screen (gyroflow_render_scale)
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
---   still=yes    the temporal denoise (Ctrl+p, the panel's Transform): the paused frame cleaned of its noise from it
+--   still=yes    the temporal denoise by default (Ctrl+p, the panel's Transform; a clip's transform keeps its own, Use
+--                as default sets this; temporal_denoise=off leaves it out): the paused frame cleaned of its noise from it
 --                and the frames on each side, still_delay=0.4 s after it pauses; on the GPU path also while it plays
 --                (warp.glsl's dn_ passes). still_grain=0.25 of the grain stays, so it doesn't look smeared (0: none)
 --   translation=yes  on the GPU path, the hand's sideways jerks taken out too where they've been computed for the clip
@@ -498,6 +499,8 @@ local play_again
 local gpu_camera
 -- The denoise's delay kept in step (further down)
 local dn_sync
+-- (further down: still.lua's Ctrl+p calls it)
+local publish
 -- The lens as Gyroflow takes it for the clip playing (gyroflow-probe --lens, read once it plays): { camera, lens }
 local current_lens = nil
 -- Paused, the chain is set up at full size, every frame (still.lua): no input scaling, no frames skipped, the output
@@ -548,6 +551,7 @@ local function defaults_bundle()
         orientation = select(2, split_aspect(o.aspect, o.orientation)),
         projection = PROJECTIONS[o.projection] and o.projection or "linear",
         lens = o.lens == "as-recorded" and "as-recorded" or "corrected",
+        denoise = o.still == true,
         denoise_strong = o.denoise_strong == true,
         preset_horizon = preset_horizon(),
     }
@@ -630,6 +634,9 @@ local function take(b)
     elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
     else lens_mode = session.lens end
     if type(b.denoise_strong) == "boolean" then denoise_strong = b.denoise_strong else denoise_strong = session.denoise_strong end
+    -- The temporal denoise on or off (Ctrl+p): the clip's (off where it harms, as on the water's surface); Performance
+    -- & Quality's Off leaves it out whatever this says (still.lua)
+    if type(b.denoise) == "boolean" then still.set(b.denoise) else still.set(session.denoise) end
     if dn_sync then dn_sync() end
     return b.view == "off"
 end
@@ -766,7 +773,11 @@ still.init(o, function()
         if f.label == LABEL and f.enabled ~= false then return true end
     end
     return false
-end, function() return filtering() and frame_step(current_source) or 1 end)
+end, function() return filtering() and frame_step(current_source) or 1 end, function(on)
+    -- Ctrl+p: the clip's transform keeps it (Save there), the session's too when the session's plays
+    sticks("denoise", on)
+    publish()
+end)
 
 -- Crop mode (c): the camera turned and zoomed by the plugin where it stabilizes the clip, mpv's own pan and zoom elsewhere
 crop.init({
@@ -810,7 +821,7 @@ shown_aspect = function()
 end
 
 -- For the right-click menu (mpv/menu.conf)
-local function publish()
+function publish()
     local state = {
         available = current_source ~= nil, kind = current_source and current_source.kind or "",
         project = has_project(current_source) and current_source.project or "",
@@ -827,7 +838,7 @@ local function publish()
         rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
         chromatic_skip = o.chromatic_skip,
-        temporal_denoise = o.temporal_denoise, denoise_strong = denoise_strong,
+        temporal_denoise = o.temporal_denoise, denoise = still.switched(), denoise_strong = denoise_strong,
         -- The hand's sideways jerks: unavailable (off in gyroflow.conf, or not on the GPU path), measuring, none
         -- (not computed for the clip yet), on, off
         translation = (not o.translation or not (gpu and gpu.shader)) and "unavailable" or trans.job and "measuring"
@@ -2203,6 +2214,7 @@ local function as_plays()
         orientation = project and session.orientation or frame.orientation,
         projection = project and session.projection or frame.projection,
         lens = project and session.lens or lens_mode,
+        denoise = still.switched(),
         denoise_strong = denoise_strong,
     }
 end
@@ -2213,10 +2225,10 @@ mp.register_script_message("remember", function()
         { "view", b.view }, { "level", b.level }, { "horizon_lock", b.horizon_lock },
         { "chromatic", b.chromatic and "yes" or "no" }, { "aspect", b.aspect }, { "orientation", b.orientation }, { "projection", b.projection },
         { "lens", b.lens }, { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
-        { "still", still.switched() and "yes" or "no" }, { "denoise_strong", b.denoise_strong and "yes" or "no" },
+        { "still", b.denoise and "yes" or "no" }, { "denoise_strong", b.denoise_strong and "yes" or "no" },
     })
     if saved then
-        o.denoise_strong = b.denoise_strong
+        o.still, o.denoise_strong = b.denoise, b.denoise_strong
         o.view, o.level, o.horizon_lock, o.chromatic, o.aspect, o.orientation, o.projection, o.lens = b.view, b.level, b.horizon_lock, b.chromatic, b.aspect, b.orientation, b.projection, b.lens
         DEFAULTS = defaults_bundle()
         for k, v in pairs(b) do session[k] = v end
@@ -2225,13 +2237,13 @@ mp.register_script_message("remember", function()
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
--- The edge fill and the clean still frame as the defaults (Performance & Quality's): this computer's, not a clip's
+-- The edge fill as the default (Performance & Quality's): this computer's, not a clip's. The temporal denoise's switch
+-- is the clip's transform's (Use as default there)
 mp.register_script_message("remember-quality", function()
     local saved = platform.save_options("gyroflow", {
         { "edges", edge_mode }, { "edges_blur", string.format("%g", edge_blur) },
-        { "still", still.switched() and "yes" or "no" },
     })
-    mp.osd_message(saved and "Gyroflow: the edge fill and the clean still frame are the defaults now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
+    mp.osd_message(saved and "Gyroflow: the edge fill is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
 -- A bundle played now, for this viewing (the panel's Revert to saved): what a Gyroflow project has stays its own

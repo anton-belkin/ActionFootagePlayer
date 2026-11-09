@@ -1527,6 +1527,20 @@ async function poll() {
   }
   renderQueueOnly();
   $("ask").hidden = !s.close_asked;
+  renderMoving(s.moving);
+}
+
+// Move the project…: how far the copy is (a move on one disk is a rename, done at once)
+function renderMoving(m) {
+  $("moving").hidden = !m;
+  if (!m) return;
+  $("movingTo").textContent = "To " + m.to;
+  const pct = m.total > 0 ? Math.min(100, (m.done / m.total) * 100) : 0;
+  $("movingBar").firstElementChild.style.width = pct.toFixed(1) + "%";
+  $("movingBar").setAttribute("aria-valuenow", Math.round(pct));
+  $("movingText").textContent = m.total > 0
+    ? (m.done > 0 ? sizeText(m.done) : "0 B") + " of " + sizeText(m.total) + " copied (" + Math.floor(pct) + " %)" + (m.current ? " · " + m.current : "") + ". Another disk: each folder is copied, then removed here."
+    : "Moving…";
 }
 
 // ---------- doing ----------
@@ -1657,7 +1671,10 @@ document.addEventListener("click", async (e) => {
     }
     case "moveproject": {
       S.menu = false; S.sheet = null; renderSheet(); renderTop();
+      // The page polls how far it is meanwhile, more often than usual
+      const fast = setInterval(poll, 250);
       try { const r = await invoke("move_project"); if (r) { toast("The project is now in " + r); return poll(); } } catch (er) { showError(String(er)); }
+      finally { clearInterval(fast); renderMoving(null); }
       return;
     }
     default: return;
