@@ -64,7 +64,7 @@
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   denoise-strong yes|no|toggle  the temporal denoise's Stronger, for a very noisy clip (part of the transform)
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
---   quality <key> <value>   fps_limit 0|30|15, resolution display|1080|720|video, paused_full_size off|auto,
+--   quality <key> <value>   fps_limit 0|30|15, resolution auto|display|1080|720|video, paused_full_size off|auto,
 --                           edge_fill_rate auto|50|25, edges <mode>, chromatic yes|no, temporal_denoise full|light|off
 --                           or ask_when_slow yes|no, kept in gyroflow.conf at once (quality.lua)
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
@@ -130,9 +130,13 @@
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction, the rest the colors around
 --                spread in), smooth (the frame's colors spread out), off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
---   resolution=display  the stabilized frame no bigger than the display shows it (above), or video: at the video's own
---                size (up to 4K's pixels), whatever the display. A number, 1080 or 720: no bigger than the display
---                and its short side no longer than that, for a GPU that doesn't keep up at the display's size
+--   resolution=auto  the stabilized frame no bigger than the display shows it (above); on the GPU path at most 1080p
+--                while the temporal denoise is on (at the screen's size it doesn't keep up full screen on a Retina
+--                display: on the M1 Pro's XDR 31 % of the frames dropped, at 1080p 4 %). display: no bigger than the
+--                display shows it, denoise or not. video: at the video's own size (up to 4K's pixels), whatever the
+--                display. A number, 1080 or 720: no bigger than the display and its short side no longer than that,
+--                for a GPU that doesn't keep up at the display's size. On the GPU path the warp, the edge fill, the
+--                denoise and the looks render at that size and mpv scales it to the screen (gyroflow_render_scale)
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   still=yes    the temporal denoise (Ctrl+p, the panel's Transform): the paused frame cleaned of its noise from it
@@ -193,7 +197,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "display", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -203,6 +207,7 @@ end
 -- The temporal denoise's frames on each side, by how much of it this computer does (still.lua's, the shader's)
 local DENOISE_FRAMES = { full = 5, light = 3 }
 if o.temporal_denoise ~= "light" and o.temporal_denoise ~= "off" then o.temporal_denoise = "full" end
+if not ({ auto = true, display = true, video = true })[o.resolution] and not tonumber(o.resolution) then o.resolution = "auto" end
 o.still_radius = DENOISE_FRAMES[o.temporal_denoise] or 5
 o.still_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25))
 
@@ -1100,6 +1105,39 @@ end
 
 -- What the shader renders, applied: the warp in the list, the video's rectangle in the output's shape, no
 -- interpolation (PTS is the frame's, not the mix's)
+-- The size the GPU path renders at (warp.glsl's RT: the warp, the edge fill, the denoise, the looks after them), as a
+-- share of the video's rectangle on screen (gyroflow_render_scale); mpv scales it to the screen. resolution=display:
+-- as on screen; 1080, 720: its short side at most that; auto: as on screen, at most 1080 while the denoise is in the
+-- shader (paused too: a new size starts its ring of frames again, and the paused frame would have none around it);
+-- video: the video's own, at most 4K's (the denoise's frames and the warp's grid are made for that much)
+local render_scale = 1
+-- The short side it renders at, for quality.lua (nil: not the GPU path)
+local gpu_render_short = nil
+local function gpu_render_scale()
+    if not gpu or not gpu.shader or gpu.sphere then return end
+    local d = mp.get_property_native("osd-dimensions") or {}
+    local dw, dh = (d.w or 0) - (d.ml or 0) - (d.mr or 0), (d.h or 0) - (d.mt or 0) - (d.mb or 0)
+    if dw <= 0 or dh <= 0 then return end
+    local s = 1
+    local short = tonumber(o.resolution)
+    if o.resolution == "auto" and gpu.denoise then short = 1080 end
+    if o.resolution == "video" then
+        local ow, oh = gpu.output and gpu.output[1], gpu.output and gpu.output[2]
+        if ow and oh then s = math.min(ow / dw, oh / dh) end
+        s = math.min(s, 3840 / dw, 2160 / dh)
+    elseif short then
+        s = math.min(1, short / math.min(dw, dh))
+    end
+    s = math.max(0.1, math.min(4, s))
+    gpu_render_short = math.floor(math.min(dw, dh) * s + 0.5)
+    if math.abs(s - render_scale) < 1e-4 and (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_render_scale then return end
+    render_scale = s
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    opts.gyroflow_render_scale = string.format("%.4f", s)
+    mp.set_property_native("glsl-shader-opts", opts)
+    mp.msg.info(string.format("GPU path: rendering at %dx%d (%s), shown at %dx%d", math.floor(dw * s + 0.5), math.floor(dh * s + 0.5), o.resolution, dw, dh))
+end
+
 local function gpu_apply(reply)
     -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
     local shown = dn_sync.shown()
@@ -1120,6 +1158,7 @@ local function gpu_apply(reply)
     gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic,
             focal = type(reply.focal) == "table" and reply.focal or nil, denoise = reply.denoise or false }
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
+    gpu_render_scale()
     dn_sync(shown)
 end
 
@@ -1219,6 +1258,7 @@ end)
 mp.observe_property("user-data/gyroflow/crop", "native", function() dn_sync() end)
 -- A new size of the picture starts the ring again too
 mp.observe_property("osd-dimensions", "native", function()
+    gpu_render_scale()
     if dn.delay > 0 then dn_sync(dn_shown()) end
 end)
 
@@ -1988,7 +2028,7 @@ end)
 -- setting of this computer's, and the chain set up again for a new rate or size
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
-    resolution = { display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
+    resolution = { auto = "auto: fits the display, at most 1080p while the temporal denoise is on", display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
     edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
     chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
@@ -2006,6 +2046,7 @@ local function set_quality(key, value)
         o.fps_limit = tonumber(value)
     elseif key == "resolution" then
         o.resolution = value
+        gpu_render_scale()
     elseif key == "edge_fill_rate" then
         o.edge_fill_rate = value
         write_edge_control()
@@ -2042,6 +2083,8 @@ quality.init(o, {
     stabilizing = function() return filtering() end,
     short_side = function()
         if not current_source then return nil end
+        -- The GPU path's: what the shader renders, mpv scaling it to the screen
+        if gpu and gpu.shader and not gpu.sphere and gpu_render_short then return gpu_render_short end
         local out = render_sizes(current_source).output
         local w, h = current_source.out_width or current_source.width, current_source.out_height or current_source.height
         if out then w, h = out[1], out[2] end

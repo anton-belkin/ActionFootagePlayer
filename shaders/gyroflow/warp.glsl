@@ -66,6 +66,12 @@
 //!TYPE DYNAMIC int
 0
 
+//!PARAM gyroflow_render_scale
+//!TYPE DYNAMIC float
+//!MINIMUM 0.1
+//!MAXIMUM 4.0
+1.0
+
 //!PARAM gyroflow_dn_radius
 //!TYPE DYNAMIC int
 //!MINIMUM 1
@@ -93,6 +99,12 @@
 @PASSES@
 
 // ==== common ====
+// The size this renders at (RT): the video's rectangle on screen (target_size) times gyroflow_render_scale, which
+// main.lua sets from the resolution chosen (Performance & Quality: at most 1080p or 720p, the video's own size), as
+// libplacebo rounds the passes' sizes; mpv scales the result to the screen. A shader of its own size defines it first
+#ifndef RT
+#define RT round(target_size * gyroflow_render_scale)
+#endif
 
 // The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0 to PARAM_TEXELS - 1 the
 // frame's parameters, then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows
@@ -407,7 +419,7 @@ bool frame_setup()
     return t2.w >= 0.5;
 }
 
-// Output pixel j (0 .. target_size - 1, pixel centers at whole numbers) -> its source coordinate in Gyroflow's frame
+// Output pixel j (0 .. RT - 1, pixel centers at whole numbers) -> its source coordinate in Gyroflow's frame
 // (SRC_W x SRC_H, centers at whole numbers): Stabilization::undistort_coord. False where the ray has no image. The
 // output pixel goes into the kernel's output frame (OUT_W x OUT_H) as the VapourSynth path maps its pixel j there:
 // j * OUT_W / width
@@ -418,7 +430,7 @@ bool frame_setup()
 vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
-    vec2 out_pos = j * size / target_size + t2.xy;
+    vec2 out_pos = j * size / RT + t2.xy;
 #if PROJ == 5
     // The equirect (a 360 camera's sphere): its plane is the sphere's, all of it 360 x 180 degrees at zoom (fov) 1;
     // longitude across, latitude down, +z at the middle, +x at +90 degrees, up (-y) at the top (the fork's
@@ -488,7 +500,7 @@ float feather(vec2 uv)
 vec4 edge_fill(vec2 uv)
 {
 #if EDGE_FILL && !defined(UV_OUT)
-    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / target_size) * FILL_MUL;
+    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / RT) * FILL_MUL;
     vec2 edge = clamp(uv, vec2(-0.5), vec2(SRC_W, SRC_H) - 0.5);
     float t = clamp(length(uv - edge) / (FILL_MUTE_RAMP * float(SRC_H)), 0.0, 1.0);
     float m = t * t * (3.0 - 2.0 * t);
@@ -622,7 +634,7 @@ vec4 finish_rgb(vec2 uv, vec4 rb)
 
 #ifdef GRID_STEP
 // The grid: point (i, g) at output pixel ((i, g) - 1) * GRID_STEP, one before the edge to two past it
-ivec2 grid_size() { return ivec2(ceil(target_size / float(GRID_STEP))) + 3; }
+ivec2 grid_size() { return ivec2(ceil(RT / float(GRID_STEP))) + 3; }
 
 float cr0(float t) { return ((-0.5 * t + 1.0) * t - 0.5) * t; }
 float cr1(float t) { return (1.5 * t - 2.5) * t * t + 1.0; }
@@ -685,7 +697,7 @@ bool grid_coord(vec2 j, out vec2 uv)
 vec4 hook()
 {
     if (!frame_setup()) return BACKGROUND;
-    vec2 j = HOOKED_pos * target_size - 0.5;
+    vec2 j = HOOKED_pos * RT - 0.5;
     cur_j = j;
     vec2 uv;
     want_boundary = EDGE_FILL == 1;
@@ -740,7 +752,7 @@ void hook()
 // ==== pass sample ====
 vec4 hook()
 {
-    vec2 j = HOOKED_pos * target_size - 0.5;
+    vec2 j = HOOKED_pos * RT - 0.5;
     cur_j = j;
     vec2 uv;
     // The frame's parameters only where the grid has no image (each is a fetch per pixel). Not one condition with &&:
@@ -776,7 +788,7 @@ vec4 hook()
     int n = 0;
     if (frame_setup()) {
         for (int t = 0; t < 9; t++) {
-            vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * target_size / vec2(FILL_W, FILL_H) - 0.5;
+            vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * RT / vec2(FILL_W, FILL_H) - 0.5;
             vec2 uv;
 #ifdef GRID_STEP
             // The warp's own grid where it has the place (the frame's parameters are set either way)
@@ -865,7 +877,7 @@ void hook()
     // its color, by its direction of the world, with the time it was seen
 #ifdef SPHERE_PASS
     vec2 j = vec2(gl_GlobalInvocationID.xy) * 2.0;
-    if (any(greaterThanEqual(j, target_size))) return;
+    if (any(greaterThanEqual(j, RT))) return;
     vec2 uv;
     if (!grid_coord(j, uv) || any(lessThan(uv, vec2(1.0))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 2.0))) return;
     if (!frame_setup()) return;
@@ -923,7 +935,7 @@ bool dn_strong() { return gyroflow_dn_strong > 0; }
 ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
 // The ring holds frames of this render's kind: not after a reset (main.lua's epoch: the camera's mode, a realign) or a
 // change of the output's size
-bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, target_size)); }
+bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, RT)); }
 // This render's frame is the newest one again (paused, a redraw)
 bool dn_same() { return dn_ok() && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
 // The frames on each side it takes (Performance & Quality's temporal denoise: Full 5, Light 3), and of them the ones
@@ -966,9 +978,9 @@ int dn_slot_at(int o) { return dn_back_slot(dn_kc - o); }
 int dn_offset(int n) { return n < DN_RADIUS ? -(n + 1) : n - DN_RADIUS + 1; }
 bool dn_has(int n) { int o = dn_offset(n); return o < 0 ? -o <= dn_nb_back : o <= dn_nb_fwd; }
 
-vec3 dn_frame(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size) - 1); return imageLoad(GDN_FRAMES, p + dn_cell(s) * DN_SLOT).rgb; }
-float dn_quart(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size / 4.0) - 1); return imageLoad(GDN_QUART, p + dn_cell(s) * (DN_SLOT / 4)).x; }
-ivec2 dn_blocks() { return ivec2(ceil(target_size / 32.0)); }
+vec3 dn_frame(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(RT) - 1); return imageLoad(GDN_FRAMES, p + dn_cell(s) * DN_SLOT).rgb; }
+float dn_quart(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(RT / 4.0) - 1); return imageLoad(GDN_QUART, p + dn_cell(s) * (DN_SLOT / 4)).x; }
+ivec2 dn_blocks() { return ivec2(ceil(RT / 32.0)); }
 #endif
 
 // ==== pass dn_store ====
@@ -977,7 +989,7 @@ void hook()
 {
     // The frame into its slot, as decoded and warped; its quarter-size luma too
     ivec2 j = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(j, ivec2(target_size))) || any(greaterThan(ivec2(target_size), DN_SLOT)) || !dn_fresh()) return;
+    if (any(greaterThanEqual(j, ivec2(RT))) || any(greaterThan(ivec2(RT), DN_SLOT)) || !dn_fresh()) return;
     int s = dn_newest();
     imageStore(GDN_FRAMES, j + dn_cell(s) * DN_SLOT, vec4((HOOKED_mul * texelFetch(HOOKED_raw, j, 0)).rgb, 1.0));
     if (all(equal(j % 4, ivec2(0))))
@@ -1005,7 +1017,7 @@ vec2 predict(vec2 j, vec4 qp, vec4 cam, float zoom)
 #else
     vec2 n = d.xy / rxy * atan(rxy, d.z);
 #endif
-    return (n * out_f + 0.5 * size - t2.xy) * target_size / size;
+    return (n * out_f + 0.5 * size - t2.xy) * RT / size;
 }
 
 void hook()
@@ -1169,7 +1181,7 @@ vec3 frame_bilinear(int slot, vec2 p)
 vec4 hook()
 {
     ivec2 j = ivec2(HOOKED_pos * HOOKED_size);
-    if (any(greaterThan(ivec2(target_size), DN_SLOT))) return HOOKED_tex(HOOKED_pos);
+    if (any(greaterThan(ivec2(RT), DN_SLOT))) return HOOKED_tex(HOOKED_pos);
     dn_window();
     int sc = dn_center();
     vec3 cur = dn_frame(sc, j);
@@ -1420,7 +1432,7 @@ void hook()
         if (frame_setup()) gdn_quat[nw] = table(15);
         gdn_cam[nw] = vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w);
         gdn_zoom[nw] = gyroflow_cam_zoom;
-        gdn_size = target_size;
+        gdn_size = RT;
         gdn_epoch = gyroflow_dn_epoch;
         gdn_magic = DN_MAGIC;
     }

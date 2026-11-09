@@ -565,7 +565,7 @@ What a pass costs scales with one of three things, and that decides which knob h
 |---|---|---|---|
 | Interpolation | EWA (Robidoux) · Lanczos4 · bicubic · bilinear | output px × taps: EWA up to hundreds, Lanczos 64, bicubic 16 (or 4 fetches as a B-spline, softer), bilinear 1 | The biggest single knob at a given size |
 | Shrinking a large source | EWA · a prefiltered half-size source (one pass over the source) · widened taps · none (aliasing) | the prefilter: source px; widened taps: output px × 4 | Whenever the window is much smaller than the video (4K in a 1080p window, 8K 360). mpv's default downscaler cost the N100 half its frames (35 vs 75 fps) |
-| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`); on a 4K or 5K screen a factor of 4 or more |
+| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`, `gyroflow_render_scale` on the GPU path); on a 4K or 5K screen a factor of 4 or more. `auto`: the display's, at most 1080p while the temporal denoise is on (measured below) |
 | Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | Exists (`fps_limit`); the most visible (judder), so last |
 | Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
 | Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
@@ -577,6 +577,34 @@ What a pass costs scales with one of three things, and that decides which knob h
 
 Paused, none of this has to keep up: the paused frame is rendered again at the best settings (EWA, the exact lens,
 full chromatic, the video's size), as `paused_full_size` does now.
+
+### Measured on the M1 Pro's XDR
+
+The GPU path renders the warp, the edge fill, the denoise and the looks after them at `gyroflow_render_scale` times
+the video's rectangle on screen (warp.glsl's `RT`; the passes' sizes are `OUTPUT.w gyroflow_render_scale *`), and mpv
+scales the result to the screen. A 3840x2160 59.94 fps D-Log M clip into HLG, color fringes taken out, the sphere
+edge fill, full screen on the built-in XDR (the video 3024x1701), 720 frames after 12 s of warming up; the GPU's time
+is the sum of `vo-passes`' fresh averages:
+
+| Rendered at | GPU, no denoise | dropped | GPU, denoise 5 + 5 | dropped |
+|---|---|---|---|---|
+| the video's (3840x2160) | 9.9 ms | 0 | 20.7 ms | 48 % |
+| the screen's (3024x1701) | 7.3 ms | 0 | 15.8 ms | 31 % |
+| at most 1440p | 5.3 ms | 0 | 13.3 ms | 27 % |
+| at most 1080p | 4.3 ms | 0 | 8.4 ms | 4 % |
+| at most 720p | 3.7 ms | 0 | 4.8 ms | 0 |
+
+- About 3.5 ms doesn't shrink with the size: the color decoding, mpv's scaler, the OSD and the output's encoding.
+- The denoise's frames at the screen's size: 5 → 31 %, 3 → 22 %, 2 → 18 %, 1 → 11 % dropped; at 1080p 3 frames drop
+  none. Its composite is the pass that grows with the pixels (6.4 ms at the screen's size, 2.5 at 1080p).
+- Bilinear instead of bicubic in the warp: 0.24 ms less at the screen's size, not worth its softness.
+- Frames drop from about 8 ms of passes, half of the frame's 16.7 ms. Not mpv's 120 Hz vsync: with
+  `--override-display-fps=60` or `--swapchain-depth=2` as many drop.
+
+So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader;
+paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
+When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
+denoise.
 
 ### Choosing them
 
