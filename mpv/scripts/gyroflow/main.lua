@@ -1579,6 +1579,40 @@ play_again = function()
     mp.commandv("playlist-play-index", "current")
 end
 
+-- What it does until the first frame shows: the filter reads the clip's motion and is set up (seconds from a NAS),
+-- and the window, there at once (the Windows app's force-window=immediate), stays black meanwhile. The label as
+-- before, and past a second without a frame, that the first one is being prepared, until it shows
+local first_frame = { timer = nil, observer = nil, waiting = false }
+local function first_frame_done()
+    if first_frame.timer then first_frame.timer:kill() end
+    if first_frame.observer then mp.unobserve_property(first_frame.observer) end
+    local was = first_frame.waiting
+    first_frame.timer, first_frame.observer, first_frame.waiting = nil, nil, false
+    return was
+end
+local function first_frame_message(label)
+    first_frame_done()
+    mp.osd_message(label, 1.5)
+    if mp.get_property_native("video-frame-info") ~= nil then return end
+    first_frame.observer = function(_, info)
+        if info == nil then return end
+        if first_frame_done() then
+            mp.msg.verbose("the first frame shows")
+            mp.osd_message(label, 1.5)
+        end
+    end
+    mp.observe_property("video-frame-info", "native", first_frame.observer)
+    first_frame.timer = mp.add_timeout(1, function()
+        first_frame.timer = nil
+        first_frame.waiting = true
+        mp.msg.verbose("no frame yet: the first one is being prepared")
+        mp.osd_message(label .. "\nPreparing the first frame…", 120)
+    end)
+end
+mp.register_event("end-file", function()
+    if first_frame_done() then mp.osd_message("", 0) end
+end)
+
 mp.register_event("file-loaded", function()
     -- The lens, for the Source tab: read after it starts, so the start doesn't wait for it
     current_lens = nil
@@ -1592,12 +1626,14 @@ mp.register_event("file-loaded", function()
             end
         end)
     end
+    local label
     if current_source and current_source.kind == "lens" then
-        if filtering() then mp.osd_message("Gyroflow: no motion data, the lens corrected", 1.5) end
+        if filtering() then label = "Gyroflow: no motion data, the lens corrected" end
     elseif current_source and filtering() then
-        mp.osd_message("Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
-                       .. (view == "wide" and ", wider view" or ""), 1.5)
+        label = "Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+                .. (view == "wide" and ", wider view" or "")
     end
+    if label then first_frame_message(label) end
 end)
 
 -- Sticks for the next clips, like the dlogm plugin's modes

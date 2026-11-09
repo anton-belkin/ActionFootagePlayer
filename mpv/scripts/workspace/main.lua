@@ -152,7 +152,21 @@ fs.read_json = function(p)
     local v = utils.parse_json(t)
     return type(v) == "table" and v or nil
 end
-fs.files = function(p) turn(); return utils.readdir(p, "files") end
+-- A folder's files, for the project lookup (its .afplocation files: workspace.lua's projects_in, in every folder
+-- from the clip's up to its project's). On a NAS a big folder takes a second or more to list, and a clip's
+-- lookup runs a few times as it opens (twice for a clip preview), and again for the next clip: kept while the
+-- folder's modification time stays the same (it changes as a file is added or removed), a few minutes at most
+local listed = {}
+local LISTED_SECONDS = 300
+fs.files = function(p)
+    turn()
+    local info = utils.file_info(p)
+    local c = listed[p]
+    if c and info and c.mtime == info.mtime and mp.get_time() - c.at < LISTED_SECONDS then return c.names end
+    local names = utils.readdir(p, "files")
+    listed[p] = info and names and { names = names, mtime = info.mtime, at = mp.get_time() } or nil
+    return names
+end
 fs.mounts = function()
     local out = {}
     if windows then return out end

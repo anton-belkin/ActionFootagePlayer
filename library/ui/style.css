@@ -259,3 +259,4 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .mono.blk{display:block}
 .mono.blk+.mono.blk{margin-top:3px}
 .th.mk{display:flex;align-items:center;justify-content:center;color:var(--accent);background:var(--accent-soft)}
+body.waiting,body.waiting *{cursor:progress}
