@@ -322,6 +322,7 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 | Recording, punch-in, undo, sidecar writes | `mpv/scripts/view360/recording.lua` (plain Lua, tested in `tests/view360_test.lua` with recorded sample streams) |
 | The 360° tab's *Flat video* part | `side-panel/main.lua`, `view360_part` |
 | Split button and dropdown | `side-panel/ui.lua` |
+| The Export button's kinds, rows and label | `side-panel/exportkind.lua` (plain Lua, `tests/exportkind_test.lua`) |
 | Tidying: re-expressing between heading modes, SO(3) Gaussian, level, picture hold | `vs-gyroflow/src/reframe.rs`, with Rust tests: a synthetic jittered path comes out smooth, a level path stays level, a held subject's drift is taken out in a rendered synthetic sphere |
 | `gyroflow-probe --reframe <clip>` | the tidied head per frame, for the player's preview |
 | `gyroflow-export --reframe recording` | reads the sidecar, renders through `export360.rs` |
@@ -380,6 +381,40 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    I-Log clips' look checked by eye (only the pipeline was run); the recording dot's size on a non-Retina screen.
 2. **Smooth the turns and Level**, in `reframe.rs`, with the preview through `gyroflow-probe --reframe`.
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
+
+   **Built** (branch `claude/360-reframe-step3-5442f5`, 2026-11-09; Export 360° in the 360° tab came with step 1):
+   - `side-panel/ui.lua`: `split_button` (the main part, primary; the ▾ part lit while its list is open, and still
+     clickable while the main part is disabled) and `dropdown` + `popover`, the panel's first popover: rows with a
+     check on the chosen one, greyed rows that can't be picked, under the button with its right edge at the button's,
+     above it when there's no room below, not drawn when the button is scrolled out of sight. It's drawn after
+     everything else, the rail too, so it's on top and the mouse finds its rows first.
+   - `side-panel/main.lua`: *Export the clip* and *Export in SDR* are one split button; Cancel export in its place
+     while exporting, and Show the last export under it, now the panel's width. The list closes on a pick, Esc (bound
+     only while it's open), a click anywhere else (on the panel, the bar or the video: the mouse is the panel's while
+     it's open, and that click does nothing else), the wheel, another tab, the panel hidden, the button gone (an export
+     started) and another file. `script-message-to side_panel popover export` opens it, for IPC tests.
+   - `side-panel/exportkind.lua`: the kinds. *As it plays* says what the file will be: "HDR", "HDR + Dolby Vision"
+     (the dv looks), "SDR" (the maker's LUT, NBCU, an SDR clip), "log, as recorded"; the button's word is the short
+     one. *In SDR* is listed where the clip has an SDR look and doesn't play in it already (it would be As it plays
+     twice). *360° video* and *Flat* for a 360 camera's own file only (`stamped`: a stitched clip can't export
+     either, as in the 360° tab); Flat greyed "Flat: record a view first" until there's a recording. The choice is
+     kept per kind of clip for the session; a kind not listed now (In SDR while it plays in SDR, Flat without a
+     recording) makes the button As it plays, and the choice comes back when it's listed again. While a take
+     records, the main part is disabled for 360° and flat, saying why. Labels as above: "Export the part 0:12–0:47 ·
+     flat".
+
+   **Checked:** `tests/exportkind_test.lua` (the rows for log, HDR, SDR, dv, 360 with and without a recording,
+   stitched; the choice falling back; the labels; the split button's places; the list's geometry, its flip above,
+   the greyed row, the check, not clipped by the scrolled area, not drawn when its button is out of sight) and
+   `tests/sidepanel_test.lua`: `main.lua` itself over a stand-in for mpv, clicked where it drew: ▾ opens, a pick
+   sets what `export <how>` gets, a click outside, ▾ again, Esc, a click on the video, the wheel, another tab,
+   hiding the panel and an export starting all close it and run nothing else; a 360 clip with its own choice, Flat
+   greyed then picked, Cancel export while exporting. Headless renders of the panel (`dump`, over a frame) for a
+   flat clip, a 360 clip with and without a recording, and a part marked.
+
+   **Open:** a live check in the app (hover, a real click outside the window, Esc in full screen); Shift+E still
+   exports as it plays, not the kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an
+   hour is cut with an ellipsis in the button's label.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
 5. **The frame outline while recording**, and 9:16 and 1:1.
 

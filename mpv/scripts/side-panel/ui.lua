@@ -300,6 +300,102 @@ function Ui:slider(x, w, y, id, value, set, left, right, disabled)
     return y + 18 * s
 end
 
+-- A straight stroke from one point to another, t thick, as a filled shape's path
+local function stroke_path(x1, y1, x2, y2, t)
+    local dx, dy = x2 - x1, y2 - y1
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len == 0 then return "" end
+    local nx, ny = -dy / len * t / 2, dx / len * t / 2
+    return string.format("m %s %s l %s %s %s %s %s %s", num(x1 + nx), num(y1 + ny), num(x2 + nx), num(y2 + ny),
+                         num(x2 - nx), num(y2 - ny), num(x1 - nx), num(y1 - ny))
+end
+
+-- Drawn within a rectangle besides the scrolled area (a part of a rounded shape)
+function Ui:within(x0, y0, x1, y1, fn)
+    local c = self.clip
+    self.clip = c and { math.max(x0, c[1]), math.max(y0, c[2]), math.min(x1, c[3]), math.min(y1, c[4]) } or { x0, y0, x1, y1 }
+    fn()
+    self.clip = c
+end
+
+M.SPLIT_ARROW = 30
+
+-- A button in two: the main part (primary) runs cmd; the ▾ part at its right (id .. ":more") runs more, which opens a
+-- list (dropdown). opts: open (the list is open: the ▾ part lit), disabled (the main part; the ▾ part still opens the
+-- list, so another kind can be picked)
+function Ui:split_button(x, w, y, id, label, cmd, more, opts)
+    opts = opts or {}
+    local s = self.s
+    local h, aw = 28 * s, M.SPLIT_ARROW * s
+    local mw = w - aw
+    self:box(x, y, w, h, 7, M.C.accent, { border = 1 * s, border_color = M.C.accent, alpha = opts.disabled and "80" or "00" })
+    local more_id = id .. ":more"
+    if opts.open or self:hovered(more_id) then
+        self:within(x + mw, y, x + w, y + h, function()
+            self:box(x + mw - 8 * s, y, aw + 8 * s, h, 7, "000000", { alpha = opts.open and "A0" or "C8" })
+        end)
+    end
+    self:box(x + mw, y + 5 * s, math.max(1, s), h - 10 * s, 0, M.C.knob, { alpha = "90" })
+    self:text(x + mw / 2, y + h / 2, label, { align = 5, size = 12, bold = true, color = M.C.knob, alpha = dim_alpha(opts.disabled) })
+    local cx, cy = x + mw + aw / 2, y + h / 2
+    self:shape(string.format("m %s %s l %s %s %s %s", num(cx - 4 * s), num(cy - 2 * s), num(cx + 4 * s), num(cy - 2 * s),
+                             num(cx), num(cy + 2.5 * s)), M.C.knob)
+    if not opts.disabled then self:hit(x, y, mw, h, id, cmd) end
+    self:hit(x + mw, y, aw, h, more_id, more)
+    return y + h + 6 * s
+end
+
+M.ROW = 28
+
+-- A list to pick from, over the panel's content: under the place [left, right] × [top, bottom] (a button), its right
+-- edge at the button's, or above it when there's no room below. rows: { kind, label, disabled, cmd }; chosen: the kind
+-- checked. Only noted here: popover() draws it, after everything else, so it's above it all and the mouse finds its
+-- rows first
+function Ui:dropdown(left, right, top, bottom, id, rows, chosen)
+    self.pending = { left = left, right = right, top = top, bottom = bottom, id = id, rows = rows, chosen = chosen }
+end
+
+-- The list noted by dropdown, drawn within [top, bottom] of the window. Its places are marked popover = true: a click
+-- elsewhere closes it. seen: { y0, y1 }, what shows of the scrolled area: a list whose button is out of it isn't drawn.
+-- Returns where it is ({ x0, y0, x1, y1 }), or nil when there's none
+function Ui:popover(top, bottom, seen)
+    local p = self.pending
+    if not p then return nil end
+    self.pending = nil
+    if seen and (p.bottom <= seen[1] or p.top >= seen[2]) then return nil end
+    local s = self.s
+    local rh, pad = M.ROW * s, 4 * s
+    local lw = 0
+    for _, r in ipairs(p.rows) do lw = math.max(lw, M.text_width(r.label, 12, s)) end
+    local w = math.min(math.max(180 * s, lw + 46 * s), p.right - p.left)
+    local h = #p.rows * rh + 2 * pad
+    local x = p.right - w
+    local y = p.bottom + 4 * s
+    if y + h > bottom and p.top - 4 * s - h >= top then y = p.top - 4 * s - h end
+    local saved_clip = self.clip
+    self.clip = nil
+    self:box(x, y + 3 * s, w, h, 8, "000000", { alpha = "A0" })
+    self:box(x, y, w, h, 8, M.C.card, { border = 1 * s, border_color = M.C.line })
+    -- The list's own area: a click on it off a row (a greyed one, the edge) does nothing, and the list stays
+    table.insert(self.hits, { x0 = x, y0 = y, x1 = x + w, y1 = y + h, id = p.id, cmd = function() end, popover = true })
+    for i, r in ipairs(p.rows) do
+        local ry = y + pad + (i - 1) * rh
+        local key = p.id .. ":" .. r.kind
+        if self:hovered(key) and not r.disabled then self:box(x + pad, ry, w - 2 * pad, rh, 5, M.C.hover) end
+        local cx, cy = x + 16 * s, ry + rh / 2
+        if r.kind == p.chosen then
+            self:shape(stroke_path(cx - 4.5 * s, cy + 0.2 * s, cx - 1.5 * s, cy + 3.2 * s, 1.8 * s), M.C.accent)
+            self:shape(stroke_path(cx - 2.1 * s, cy + 3.2 * s, cx + 4.5 * s, cy - 3.6 * s, 1.8 * s), M.C.accent)
+        end
+        self:text(x + 30 * s, cy, r.label, { size = 12, color = r.disabled and M.C.dim or M.C.text, alpha = r.disabled and "50" or "00" })
+        if not r.disabled then
+            table.insert(self.hits, { x0 = x + pad, y0 = ry, x1 = x + w - pad, y1 = ry + rh, id = key, cmd = r.cmd, popover = true })
+        end
+    end
+    self.clip = saved_clip
+    return { x, y, x + w, y + h }
+end
+
 function Ui:divider(x, w, y)
     self:box(x, y, w, math.max(1, self.s), 0, M.C.divider)
     return y + math.max(1, self.s)
