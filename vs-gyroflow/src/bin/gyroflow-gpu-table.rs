@@ -97,9 +97,13 @@ fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::P
     let stamp = |p: &str| std::fs::metadata(p).ok().map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
     let preset = obj.get("preset").and_then(|v| v.as_str()).map(stamp).unwrap_or_default();
     let build = std::env::current_exe().ok().map(|e| stamp(&e.to_string_lossy())).unwrap_or_default();
+    // The translation compensation computed for the clip, as it is now (Ctrl+j computes it while the clip plays)
+    let translation = if obj.get("gpu_translation").and_then(|v| v.as_bool()).unwrap_or(false) {
+        vs_gyroflow::translation::cache_path(&project).map(|p| stamp(&p.to_string_lossy())).unwrap_or_default()
+    } else { String::new() };
     // In key order: the player's JSON comes from a Lua table, in an order of its own each run
     let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
-    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}", serde_json::to_string(&sorted).ok()?))?;
+    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}|{translation}", serde_json::to_string(&sorted).ok()?))?;
     Some((base.with_extension("glsl"), base.with_extension("json")))
 }
 
@@ -142,7 +146,10 @@ fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &st
                          denoise: j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), knots: 33, interp, shrink: false, range: None };
     let table = match loaded.table(view, &clip, &opts) { Ok(t) => t, Err(e) => return serde_json::json!({ "error": e }) };
     lap("table");
-    let text = gpu_table::shader(&clip, &opts, &table);
+    // The translation compensation, where it was computed for the clip (gyroflow-export --translation) and is wanted
+    let trans = if j.get("gpu_translation").and_then(|v| v.as_bool()).unwrap_or(false) { loaded.translation() } else { None };
+    lap("translation");
+    let text = gpu_table::shader_with(&clip, &opts, &table, trans.as_deref());
     lap("shader");
     if let Err(e) = std::fs::write(out, text) { return serde_json::json!({ "error": format!("{out}: {e}") }); }
     lap("written");
@@ -150,7 +157,7 @@ fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &st
     let mid = (clip.frame_count / 2) as f64 * 1_000_000.0 / clip.fps;
     let (fx, fy) = vs_gyroflow::sphere::View::at(&clip.params, mid.round() as i64 + clip.frame_offset_us).focal();
     serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
-                        "chromatic": wet, "sphere": sphere, "focal": [fx, fy], "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
+                        "chromatic": wet, "sphere": sphere, "focal": [fx, fy], "translation": trans.is_some(), "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
 }
 
 /// The request to a server: one line of { json, out }, one line back. None: no server there (the caller does it).
