@@ -819,8 +819,12 @@ fn quick_look(paths: Vec<String>) -> Result<bool, String> {
     }
     if paths.is_empty() { return Ok(false); }
     if !cfg!(target_os = "macos") { return Err("Quick Look is macOS's: on this system, open the file instead".into()); }
-    let child = Command::new("/usr/bin/qlmanage").arg("-p").args(&paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn().map_err(|e| e.to_string())?;
+    // The system's panel, by the app's own helper (afp-quicklook, beside it); qlmanage -p crashes on videos on macOS 27
+    let helper = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("afp-quicklook"))).filter(|h| h.is_file());
+    let child = match helper {
+        Some(h) => Command::new(h).args(&paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn(),
+        None => Command::new("/usr/bin/qlmanage").arg("-p").args(&paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn(),
+    }.map_err(|e| e.to_string())?;
     *q = Some(child);
     Ok(true)
 }
@@ -914,6 +918,22 @@ fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
         }
     }
     Err("It has no Gyroflow project".into())
+}
+
+// A new folder in a view's own folder (_Clips, _Moments, _Stills, _Exports), inside `parent` (its path there): its
+// path there, named "untitled folder" (" 2"… when taken), for renaming at once
+#[tauri::command]
+fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<String, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let base = match view.as_str() { "footage" => "_Clips", "moments" => "_Moments", "stills" => "_Stills", "exports" => "_Exports",
+                                     _ => return Err("Folders of the sources are made in Finder".into()) };
+    let mut dir = root.join(base);
+    for p in parent.split('/').filter(|p| !p.is_empty() && *p != "..") { dir.push(p); }
+    let mut name = "untitled folder".to_string();
+    let mut n = 1;
+    while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
+    std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
+    Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
 }
 
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them
@@ -1131,7 +1151,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
-                                                 thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, project_settings, save_locations, choose_location,
+                                                 thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, delete_renders])
         .on_window_event(move |window, event| {
