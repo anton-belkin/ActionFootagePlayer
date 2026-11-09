@@ -345,7 +345,7 @@ def fingerprint(clip):
     i = info(clip)
     a = i["args"]
     what = json.dumps({k: a.get(k) for k in ("clip", "offset", "length", "render", "dlogm", "deps")}, sort_keys=True)
-    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}|{hashlib.sha1(what.encode()).hexdigest()}"
+    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}{'2' if clip.get('look') == 'pq' else ''}|{hashlib.sha1(what.encode()).hexdigest()}"
 
 
 def clip_dir(clip):
