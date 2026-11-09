@@ -14,7 +14,7 @@
 -- would go under the panel).
 --
 -- Options (~~/script-opts/side_panel.conf):
---   shown=yes        the rail shows when the player starts
+--   shown=no         the rail shows when the player starts (off: the video alone, Tab shows the panel)
 --   open=yes         and the panel beside it
 --   tab=project      the part it opens on: project, clip, look, stabilization, quality, telemetry, dv, view360, support
 --
@@ -27,7 +27,7 @@ local mp = require 'mp'
 local options = require 'mp.options'
 local ui = require 'ui'
 
-local o = { shown = true, open = true, tab = "project" }
+local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
 
 local C = ui.C

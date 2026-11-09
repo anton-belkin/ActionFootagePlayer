@@ -165,6 +165,19 @@ pub fn keys_and_cover(path: &Path) -> (HashMap<String, String>, Option<Vec<u8>>)
     (keys, cover)
 }
 
+/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/,
+/// as vs-gyroflow's photo.rs and afp-photo write it), within the file's first 64 KiB
+fn photo_link(path: &Path) -> Option<Value> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(65536);
+    std::fs::File::open(path).ok()?.take(65536).read_to_end(&mut head).ok()?;
+    let s = String::from_utf8_lossy(&head);
+    let from = s.find("<afp:link>")? + "<afp:link>".len();
+    let to = from + s[from..].find("</afp:link>")?;
+    let text = s[from..to].replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&");
+    serde_json::from_str(&text).ok()
+}
+
 pub fn link(path: &Path) -> Option<Value> {
     // Kept by the file's size and time: a folder of them is read again on each look
     static LINKS: Mutex<Option<HashMap<PathBuf, (u64, i64, Option<Value>)>>> = Mutex::new(None);
@@ -174,7 +187,9 @@ pub fn link(path: &Path) -> Option<Value> {
             if (*s, *m) == st { return v.clone(); }
         }
     }
-    let v = keys_and_cover(path).0.get("ch.actionfootageplayer.link").and_then(|t| serde_json::from_str::<Value>(t).ok());
+    let lower = path.to_string_lossy().to_lowercase();
+    let v = if [".heic", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e)) { photo_link(path) }
+        else { keys_and_cover(path).0.get("ch.actionfootageplayer.link").and_then(|t| serde_json::from_str::<Value>(t).ok()) };
     if let Some((s, m)) = st { LINKS.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (s, m, v.clone())); }
     v
 }
@@ -213,13 +228,6 @@ fn read_json(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-/// A clip's own file: <clip>.afp.json, or the older <clip>.marks.json
-fn own_file(clip: &Path) -> Option<Value> {
-    let stem = clip.file_stem()?.to_string_lossy().into_owned();
-    let dir = clip.parent()?;
-    read_json(&dir.join(format!("{stem}.afp.json"))).or_else(|| read_json(&dir.join(format!("{stem}.marks.json"))))
-}
-
 fn has_gyroflow(file: &Path) -> bool {
     let Some(dir) = file.parent() else { return false };
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -229,15 +237,93 @@ fn has_gyroflow(file: &Path) -> bool {
 
 // ---------- the views ----------
 
+/// The footage view: every location of the project, each at its place in the tree, a path the first one has winning
+/// (a working copy before the archive's). Each clip with where it plays from (`loc`), every location that has it
+/// (`copies`), its own file wherever it is (two: `own_conflict`)
+fn footage(root: &Path, flat_previews: bool) -> Value {
+    let mounts = crate::locations::mounts();
+    let locs = crate::locations::locations(root, &mounts);
+    let linked = previews(root);
+    let mut dirs: Vec<String> = Vec::new();
+    let mut seen_dirs: HashSet<String> = HashSet::new();
+    let mut add_dir = |d: &str, dirs: &mut Vec<String>| {
+        let mut parts = Vec::new();
+        for p in d.split('/').filter(|p| !p.is_empty()) {
+            parts.push(p);
+            let x = parts.join("/");
+            if seen_dirs.insert(x.clone()) { dirs.push(x); }
+        }
+    };
+    let mut items: Vec<Value> = Vec::new();
+    let mut by_tree: HashMap<String, usize> = HashMap::new();
+    // Each location's own folders, as it is on its disk (the Library's Sources)
+    let mut loc_dirs: Vec<Vec<String>> = vec![Vec::new(); locs.len()];
+    for (li, l) in locs.iter().enumerate() {
+        let Some(dir) = &l.dir else { continue };
+        if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
+        // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
+        // aren't footage
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+        for (rel, is_dir, size, mtime) in walk(dir, &skip) {
+            let tree = if l.at.is_empty() { rel.clone() } else { format!("{}/{rel}", l.at) };
+            if is_dir { add_dir(&tree, &mut dirs); loc_dirs[li].push(rel.clone()); continue; }
+            let lower = rel.to_lowercase();
+            if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
+            let path = dir.join(&rel);
+            let own_here = { let f = path.with_extension("afp.json"); if f.is_file() { Some(f) } else { let o = path.with_extension("marks.json"); o.is_file().then_some(o) } };
+            if let Some(&i) = by_tree.get(&tree) {
+                let it = &mut items[i];
+                it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }));
+                if has_gyroflow(&path) { it["gyroflow"] = json!(true); }
+                if let Some(o) = own_here { it["own_files"].as_array_mut().unwrap().push(json!(o.display().to_string())); }
+                continue;
+            }
+            let mut it = json!({ "id": tree, "dir": parent_of(&tree), "name": name_of(&tree), "path": path.display().to_string(), "size": size,
+                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }],
+                                 "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
+            it["gyroflow"] = json!(has_gyroflow(&path));
+            let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
+                .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
+            // Where it is as arranged in _Clips (the folder its preview was put in): the Library shows footage that way
+            it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, &root.join("_Clips")).or_else(|| (d == root.join("_Clips")).then(String::new)))
+                .map(Value::from).unwrap_or(Value::Null);
+            it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
+            by_tree.insert(tree, items.len());
+            items.push(it);
+        }
+    }
+    // Each clip's own file: the one there is (two or more: none read, the clip shows the problem)
+    for it in items.iter_mut() {
+        let files: Vec<String> = it["own_files"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        if files.len() > 1 { it["own_conflict"] = json!(files); }
+        if let Some(f) = files.first() {
+            if let Some(own) = read_json(Path::new(f)) {
+                it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
+                                    "source": own.get("source").cloned().unwrap_or(Value::Null) });
+                it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+            }
+        }
+    }
+    let locs_json: Vec<Value> = locs.iter().enumerate().map(|(i, l)| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
+                                                             "copies": l.copies, "local": l.local, "dirs": loc_dirs[i] })).collect();
+    let clips_dirs: Vec<String> = walk(&root.join("_Clips"), &|_, _| false).into_iter().filter(|e| e.1).map(|e| e.0).collect();
+    json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
+}
+
 pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
+    if view == "footage" { return footage(root, flat_previews); }
     let Some(sub) = view_dir(view) else { return json!({ "dirs": [], "items": [] }) };
     let base = if sub.is_empty() { root.to_path_buf() } else { root.join(sub) };
-    let skip = |rel: &str, lower: &str| view == "footage" && !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+    // Photos' tags are kept in the project's file (a HEIC's own metadata isn't written here)
+    // A moment's original, through the project's locations (the first that has it)
+    let locs = if view == "moments" { crate::locations::locations(root, &crate::locations::mounts()) } else { Vec::new() };
+    let original_of = |tree: &str| -> Option<PathBuf> { locs.iter().filter_map(|l| crate::locations::in_location(tree, l)).find(|f| f.is_file()) };
+    let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
+    let skip = |_: &str, _: &str| false;
     let entries = walk(&base, &skip);
     let mut dirs = Vec::new();
     let mut items = Vec::new();
     let files: HashSet<String> = entries.iter().filter(|e| !e.1).map(|e| e.0.to_lowercase()).collect();
-    let linked = if view == "footage" { previews(root) } else { HashMap::new() };
     for (rel, is_dir, size, mtime) in &entries {
         if *is_dir { dirs.push(json!(rel)); continue; }
         let name = name_of(rel);
@@ -245,44 +331,117 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         let path = base.join(rel);
         let mut it = json!({ "id": rel, "dir": parent_of(rel), "name": name, "path": path.display().to_string(), "size": size, "mtime": mtime });
         match view {
-            "footage" => {
-                if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
-                it["kind"] = json!("clip");
-                if let Some(own) = own_file(&path) {
-                    it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
-                                        "source": own.get("source").cloned().unwrap_or(Value::Null) });
-                }
-                it["gyroflow"] = json!(has_gyroflow(&path));
-                let preview = linked.get(rel.as_str()).cloned().or_else(|| [clip_preview_relative(rel, flat_previews), clip_preview_relative(rel, !flat_previews)]
-                    .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
-                it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
-            }
             "moments" => {
                 if !lower.ends_with(LINK_EXT) { continue; }
                 it["kind"] = json!("moment");
                 it["name"] = json!(&name[..name.len() - LINK_EXT.len()]);
                 it["link"] = link(&path).unwrap_or(Value::Null);
+                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 it["gyroflow"] = json!(has_gyroflow(&path));
+                it["renders"] = renders_of(root, rel, &path, &it["link"]);
+                it["original"] = it["link"]["clip"].as_str().and_then(&original_of).map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
             }
             "stills" => {
                 let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
                 if !photo { continue; }
                 it["kind"] = json!("still");
+                it["tags"] = photo_tags.get(rel.as_str()).cloned().filter(Value::is_array).unwrap_or(json!([]));
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
                 it["form"] = json!(if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
                     else if lower.ends_with(".heic") { "HEIC with gain map" } else { "Ultra HDR JPEG" });
+                // Its clip and time, from the photo itself (older ones have none: their name tells)
+                it["link"] = link(&path).unwrap_or(Value::Null);
             }
             "exports" => {
                 if !(lower.ends_with(".mov") || lower.ends_with(".mp4")) { continue; }
                 it["kind"] = json!("export");
                 it["link"] = link(&path).unwrap_or(Value::Null);
+                it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
             _ => {}
         }
         items.push(it);
     }
     json!({ "dirs": dirs, "items": items })
+}
+
+// ---------- renders (the player's render batch; docs/library-management.md, "Renders") ----------
+
+pub const RENDER_PROFILES: [&str; 2] = ["HDR", "SDR"];
+const RENDER_VERSION: u64 = 1;
+
+/// A value as the player's JSON keeps it: nulls and empty objects or arrays left out, for comparing recipes
+pub fn trimmed(v: &Value) -> Option<Value> {
+    match v {
+        Value::Null => None,
+        Value::Object(o) => {
+            let m: serde_json::Map<String, Value> = o.iter().filter_map(|(k, x)| trimmed(x).map(|t| (k.clone(), t))).collect();
+            (!m.is_empty()).then_some(Value::Object(m))
+        }
+        Value::Array(a) => {
+            let l: Vec<Value> = a.iter().filter_map(trimmed).collect();
+            (!l.is_empty()).then_some(Value::Array(l))
+        }
+        x => Some(x.clone()),
+    }
+}
+
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-9,
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same(v, w)),
+        _ => a == b,
+    }
+}
+
+/// The recipe of a moment's render in `profile` now, as the player's render_recipe makes it
+pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) -> Value {
+    let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
+    let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
+    let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
+    trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
+                     "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
+}
+
+/// Where a moment's render in a profile is: _Renders/<its path in _Moments without .afplink.mp4>.<profile>.mov
+pub fn render_path(root: &Path, rel: &str, profile: &str) -> PathBuf {
+    let mut p = root.join("_Renders");
+    let base = rel.strip_suffix(LINK_EXT).unwrap_or(rel);
+    let parts: Vec<&str> = base.split('/').collect();
+    for (i, part) in parts.iter().enumerate() { p.push(if i + 1 == parts.len() { format!("{part}.{profile}.mov") } else { part.to_string() }); }
+    p
+}
+
+/// Each profile's render of a moment: { HDR: "current" | "stale" }, absent: none
+fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for p in RENDER_PROFILES {
+        let file = render_path(root, rel, p);
+        if !file.is_file() { continue; }
+        let ok = crate::index::link(&file).filter(|l| l["kind"] == "render")
+            .and_then(|l| trimmed(&l["recipe"])).is_some_and(|r| same(&r, &render_recipe(root, moment, link, p)));
+        out.insert(p.to_string(), json!(if ok { "current" } else { "stale" }));
+    }
+    Value::Object(out)
+}
+
+/// Renders of these moments (paths in _Moments) removed: the stale ones only, or all of them
+pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usize, Vec<String>) {
+    let (mut n, mut problems) = (0, Vec::new());
+    for rel in moments {
+        let moment = root.join("_Moments").join(rel);
+        let link = link(&moment).unwrap_or(Value::Null);
+        let status = renders_of(root, rel, &moment, &link);
+        for p in RENDER_PROFILES {
+            let Some(st) = status.get(p).and_then(Value::as_str) else { continue };
+            if stale_only && st != "stale" { continue; }
+            match std::fs::remove_file(render_path(root, rel, p)) { Ok(_) => n += 1, Err(e) => problems.push(format!("{rel} {p}: {e}")) }
+        }
+    }
+    (n, problems)
 }
 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
@@ -306,6 +465,20 @@ fn stamp(path: &str) -> Option<(u64, i64)> {
 }
 
 impl Probes {
+    /// What's known, kept between runs (in the Library's cache folder): read at start, written as it grows
+    pub fn load(&mut self, file: &Path) {
+        let Some(v) = read_json(file) else { return };
+        for (k, e) in v.as_object().into_iter().flatten() {
+            let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
+            self.known.insert(k.clone(), (s, m, e["v"].clone()));
+        }
+    }
+    pub fn save(&self, file: &Path) {
+        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, v))| (k.clone(), json!({ "s": s, "m": m, "v": v }))).collect();
+        if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+        let tmp = file.with_extension("tmp");
+        if std::fs::write(&tmp, serde_json::to_vec(&Value::Object(m)).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, file); }
+    }
     /// Asked for these clips: the ones not known (or changed since) are queued
     pub fn want(&mut self, paths: &[String]) {
         for p in paths {
@@ -330,7 +503,8 @@ impl Probes {
 }
 
 /// The worker: one clip at a time, the tool run as a process (it's the player's own; its answers kept per file)
-pub fn probe_worker(probes: SharedProbes) {
+pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
+    let mut unsaved = 0;
     loop {
         let next = {
             let mut p = probes.lock().unwrap();
@@ -340,6 +514,7 @@ pub fn probe_worker(probes: SharedProbes) {
             n.zip(p.tool.clone())
         };
         let Some((path, tool)) = next else {
+            if unsaved > 0 { if let Some(f) = &keep { probes.lock().unwrap().save(f); } unsaved = 0; }
             std::thread::sleep(std::time::Duration::from_millis(250));
             continue;
         };
@@ -359,6 +534,8 @@ pub fn probe_worker(probes: SharedProbes) {
             p.log.push((v, path));
         }
         p.busy = false;
+        unsaved += 1;
+        if unsaved >= 50 { if let Some(f) = &keep { p.save(f); } unsaved = 0; }
     }
 }
 
@@ -481,6 +658,11 @@ mod tests {
         let s = scan(&root, "stills", false);
         let forms: Vec<&str> = s["items"].as_array().unwrap().iter().map(|i| i["form"].as_str().unwrap()).collect();
         assert_eq!(forms, ["Live Photo", "Motion Photo"]);
+        // A photo's link, read from its XMP
+        std::fs::write(root.join("_Stills/B.MP.jpg"), "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1,&quot;kind&quot;:&quot;photo&quot;,&quot;clip&quot;:&quot;Day 1/A &amp; B.MP4&quot;,&quot;t&quot;:2.5}</afp:link></x:xmpmeta>").unwrap();
+        let s = scan(&root, "stills", false);
+        assert_eq!(s["items"][1]["link"]["clip"], json!("Day 1/A & B.MP4"));
+        assert_eq!(s["items"][0]["link"], Value::Null);
         assert_eq!(scan(&root, "exports", false)["items"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -503,7 +685,7 @@ mod dump {
             for it in v["items"].as_array().into_iter().flatten() {
                 let p = match it["kind"].as_str() {
                     Some("clip") => it["path"].as_str().map(str::to_string),
-                    Some("moment") => it["link"]["clip"].as_str().map(|c| root.join(c).display().to_string()),
+                    Some("moment") => it["original"].as_str().map(str::to_string),
                     _ => None,
                 };
                 if let (Some(p), Some(t)) = (p, tool.as_ref()) {

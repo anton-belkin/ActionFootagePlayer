@@ -570,7 +570,33 @@ Anton, 2026-11-09:
   *Find moved files*) are commands on the selection, since a whole big project takes long; the project's own menu
   (by its name) holds the projects, *Project settings…* (locations edited: order, place in the tree, path, copies
   only; what this computer keeps for it: local copies, caches with their size and a Clear, its own choices; general:
-  name, id, the NAS's other names), *Take in…* and *Move the project to…*. Commands act only on what's selected: with nothing selected they're greyed out (their settings can still be set); *Select all*, *Select none*, ⌘A and Esc are at hand. Filters (a panel of nested lists with counts, and tokens in the search field) work two ways: while browsing, they narrow the folder you're in, in place; a search (words typed, or *List every match*) is a flat list, in this folder or everywhere. Filters with nothing to show are hidden.
+  name, id, the NAS's other names), *Take in…* and *Move the project to…*. Commands act only on what's selected: with nothing selected they're greyed out (their settings can still be set); *Select all*, *Select none*, ⌘A and Esc are at hand. Filters (a panel of nested lists with counts, and tokens in the search field) work two ways: while browsing, they narrow the folder you're in, in place; a search (words typed, or *List every match*) is a flat list, in this folder or everywhere. Filters with nothing to show are hidden. After Anton's first try (2026-11-09): Footage shows the clips as arranged in _Clips (each in its preview's folder; the
+  ones without a preview in a folder of their own), and **Sources** is a tab of its own: the project's locations as
+  folders, each explored as it is on its disk, added and removed there; nothing in it is renamed. The list follows the
+  system's keys (arrows, Shift; a Mac's Return renames, ⌘↓ opens, ⌘↑ goes up, space is Quick Look; Windows' Enter opens,
+  F2 renames, Alt+↑ goes up). A clip or moment with a Gyroflow project has Open in Gyroflow. What the Library last saw of
+  a project shows at once while it looks again. The player opens without its side panel (Tab shows it), and a video
+  opened in a paused player plays.
+- **The list's own menu and Info** (Anton's second round, 2026-11-09). A right-click holds the summary's commands and
+  Finder's around them: Open, Open in Gyroflow, Quick Look, Show in Finder, Rename, New folder, Delete, Select all and
+  none. Delete moves to the Trash, and only the project's own files: folders, moments (with their Gyroflow project and
+  renders), photos (with a Live Photo's video), exports, and in Footage a clip's preview (the clip stays; footage is
+  deleted in Finder). On a network share, where Finder has no Trash, it goes to the share's own `#recycle`, or isn't
+  deleted. **Info**, a tab beside Commands and Queue, tells all there is of the selection: a clip's recording, picture,
+  marks, transform, its copies and own file; a moment's clip and times, renders, files; folders and several items
+  summed up. A moment, photo or export has **Go to the footage** (its clip in Footage, selected); a clip has **Show
+  moments and photos**, a folder of its own with them in the order they are in the clip (up goes back to the clip).
+- **Third round** (2026-11-09). A photo keeps its clip in itself: `afp:link` in its XMP (the player's namespace,
+  `https://actionfootageplayer.ch/ns/1.0/`, the same JSON a moment keeps as its MP4 key, kind `photo`, `t` the frame's
+  time), written by gyroflow-export in a JPEG and by afp-photo in a HEIC (its image data copied as it is: the gain map
+  and the Live Photo's identifier stay). Renamed or moved, a photo is still its clip's; older ones go by their name. A
+  clip's folder shows its marks too, each before what was made of it. **Export the library as JSON…** (the project's
+  menu) writes everything the library keeps, in the open: the project's file and this computer's additions, the
+  locations and their pointer files, each clip's own file and what the clip says of itself, every MP4 key of the
+  moments, previews, renders and exports, every photo's link. Clip previews: a clip identical to another (the same
+  size and fingerprint) gets its preview in `_Clips/Duplicates/<its location>/<its folders>`, the first location's
+  copy keeping its place; and a third layout, **by trips** (clips at most 2 days apart: `2026-10 October 20-26`), new
+  previews going into the folder their trip's are in already.
 
 ## Open questions
 

@@ -279,7 +279,7 @@ pub struct Motion<'a> {
 
 /// The primary image's XMP for a Motion Photo: GCamera's flags and the Container directory of what follows the
 /// primary image, in order and tightly packed (its gain map, if any, then the video, which ends the file)
-fn motion_xmp(gain_map_len: Option<usize>, motion: &Motion) -> Vec<u8> {
+fn motion_xmp(gain_map_len: Option<usize>, motion: &Motion, link: Option<&str>) -> Vec<u8> {
     let item = |mime: &str, semantic: &str, len: Option<usize>| format!(
         "<rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"{mime}\" Item:Semantic=\"{semantic}\"{}/></rdf:li>",
         len.map(|l| format!(" Item:Length=\"{l}\"")).unwrap_or_default());
@@ -289,11 +289,12 @@ fn motion_xmp(gain_map_len: Option<usize>, motion: &Motion) -> Vec<u8> {
     let xml = format!(concat!(
         "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>",
         "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">",
-        "<rdf:Description rdf:about=\"\" xmlns:GCamera=\"http://ns.google.com/photos/1.0/camera/\" ",
+        "<rdf:Description rdf:about=\"\" xmlns:GCamera=\"http://ns.google.com/photos/1.0/camera/\" {}",
         "xmlns:Container=\"http://ns.google.com/photos/1.0/container/\" xmlns:Item=\"http://ns.google.com/photos/1.0/container/item/\" ",
         "GCamera:MotionPhoto=\"1\" GCamera:MotionPhotoVersion=\"1\" GCamera:MotionPhotoPresentationTimestampUs=\"{}\">",
-        "<Container:Directory><rdf:Seq>{}</rdf:Seq></Container:Directory>",
-        "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"), motion.presentation_us, items);
+        "<Container:Directory><rdf:Seq>{}</rdf:Seq></Container:Directory>{}",
+        "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"),
+        if link.is_some() { format!("xmlns:afp=\"{AFP_NS}\" ") } else { String::new() }, motion.presentation_us, items, link_element(link));
     let mut v = XMP_NS.to_vec();
     v.extend_from_slice(xml.as_bytes());
     v
@@ -301,13 +302,45 @@ fn motion_xmp(gain_map_len: Option<usize>, motion: &Motion) -> Vec<u8> {
 
 const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 
+/// The player's own XMP namespace: `afp:link`, a photo's link to the clip it was taken from (the JSON a moment keeps
+/// as its MP4 key ch.actionfootageplayer.link, kind "photo", `t` the frame's time in the clip), so it's found again
+/// however the photo is renamed or moved. Other apps leave a namespace they don't know alone
+pub const AFP_NS: &str = "https://actionfootageplayer.ch/ns/1.0/";
+
+fn xml_escape(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }
+fn link_element(link: Option<&str>) -> String { link.map(|l| format!("<afp:link>{}</afp:link>", xml_escape(l))).unwrap_or_default() }
+
+/// An XMP packet holding the link alone (a photo that's no Motion Photo)
+fn link_xmp(link: &str) -> Vec<u8> {
+    let xml = format!(concat!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>",
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">",
+        "<rdf:Description rdf:about=\"\" xmlns:afp=\"{}\">{}</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"), AFP_NS, link_element(Some(link)));
+    let mut v = XMP_NS.to_vec();
+    v.extend_from_slice(xml.as_bytes());
+    v
+}
+
+/// The link a photo keeps (`afp:link`, as this writes it in a JPEG and afp-photo in a HEIC), from the file's start:
+/// its XMP is there in both
+pub fn read_link(head: &[u8]) -> Option<String> {
+    let s = String::from_utf8_lossy(head);
+    let from = s.find("<afp:link>")? + "<afp:link>".len();
+    let to = from + s[from..].find("</afp:link>")?;
+    Some(s[from..to].replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&"))
+}
+
 /// An Ultra HDR JPEG: `sdr` as the image, and `hdr`'s gain map if there's one (else a plain JPEG). `exif`: an APP1
 /// Exif segment's payload, if any. With `motion`, a Motion Photo: the video after it all, and the XMP that says so
-pub fn ultra_hdr_jpeg(sdr: &Image, hdr: Option<&Image>, quality: u8, exif: Option<Vec<u8>>, motion: Option<&Motion>) -> Result<Vec<u8>, String> {
+pub fn ultra_hdr_jpeg(sdr: &Image, hdr: Option<&Image>, quality: u8, exif: Option<Vec<u8>>, motion: Option<&Motion>, link: Option<&str>) -> Result<Vec<u8>, String> {
     let base = to_rgb8(sdr);
     // XMP, then Exif before it: each goes right after the APP0
     let head = |mut jpeg: Vec<u8>, map_len: Option<usize>| -> Result<Vec<u8>, String> {
-        if let Some(m) = motion { jpeg = insert_app1(jpeg, motion_xmp(map_len, m))?; }
+        match (motion, link) {
+            (Some(m), _) => jpeg = insert_app1(jpeg, motion_xmp(map_len, m, link))?,
+            (None, Some(l)) => jpeg = insert_app1(jpeg, link_xmp(l))?,
+            _ => {}
+        }
         if let Some(exif) = exif.clone() { jpeg = insert_app1(jpeg, exif)?; }
         Ok(jpeg)
     };
@@ -450,7 +483,7 @@ mod tests {
             let (x, y) = ((i % w) as f32 / w as f32, (i / w) as f32 / h as f32);
             let v = if (0.4..0.6).contains(&y) { 0.75 + 0.25 * x } else { 0.75 * x };
             [v, v * 0.95, v * 0.8] }).collect() };
-        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None).unwrap()).unwrap();
+        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None, None).unwrap()).unwrap();
     }
 
     #[test]
@@ -458,7 +491,7 @@ mod tests {
         let (w, h) = (64, 32);
         let sdr = Image { width: w, height: h, pixels: vec![[0.5, 0.4, 0.3]; w * h] };
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None, None).unwrap();
         // The MPF's entries: the primary's size, and the gain map where it says
         let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
         let tiff = at + 4;
@@ -479,7 +512,7 @@ mod tests {
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
         let video = b"\0\0\0\x18ftypmp42 a video, not really".to_vec();
         let m = Motion { video: &video, presentation_us: 1_500_000 };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None)), Some(&m)).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None)), Some(&m), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#)).unwrap();
         assert!(file.ends_with(&video));
         // The directory's lengths: the gain map and the video tightly after the primary
         let xmp = String::from_utf8_lossy(&file[file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap()..]).to_string();
@@ -494,6 +527,8 @@ mod tests {
         assert_eq!(&file[primary..primary + 2], &[0xFF, 0xD8]);
         assert_eq!(&file[primary + map_len - 2..primary + map_len], &[0xFF, 0xD9]);
         assert!(xmp.contains("GCamera:MotionPhotoPresentationTimestampUs=\"1500000\""));
+        // The link, read back as written
+        assert_eq!(read_link(&file[..file.len().min(65536)]).as_deref(), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#));
         // The MPF still finds the gain map: its size and offset unchanged by the video after it
         let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
         let be = |i: usize| u32::from_be_bytes(file[i..i + 4].try_into().unwrap()) as usize;

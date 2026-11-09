@@ -3,10 +3,15 @@
 #
 # case <name>      a new case: an empty folder (a temporary one; the Lua test fakes it), which is also the home folder
 # home <dir>       the home folder is <dir> in it instead
-# tree             then one path per line, indented, made in it: a folder ends with /, else it's an empty file
+# tree             then one path per line, indented, made in it: a folder ends with /, else it's an empty file;
+#                  "<path> = <text>" a file with that text in it (a Project.afproject with locations, an .afplocation)
+# mount <//host/share> <dir>   this computer has that share mounted at <dir> (a folder of the case)
 # clip <path>      then, indented, what's expected for that clip:
 #   project <dir>    the project it belongs to (- for none)
-#   relative <path>  its path in that project
+#   projects <a|b>   all the projects found for it, in order
+#   relative <path>  its path in that project's tree
+#   original <tree path> <file>   the file at that path of the project's tree: the first location that has it
+#   own <file>       where its own file is read and written over the locations (conflict: two of them)
 #   new <dir>        where a project for it would be made
 #   gyroflow <file>  its Gyroflow project (- for none)
 #   gyroflow-new <file>  where a new one is written
@@ -166,3 +171,87 @@ volume windows D:\Egypt no
 volume windows \\nas\video yes
 volume windows \\nas\video\ yes
 volume windows \\nas\video\Egypt no
+
+case a project apart from its footage, a location relative to it
+tree
+  SSD/Projects/Footage/Project.afproject = {"format":"actionfootage-project","version":2,"locations":[{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
+  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage"}
+  HDD/Footage/Action 6/A.MP4
+  HDD/Footage/Action 6/A.gyroflow
+clip HDD/Footage/Action 6/A.MP4
+  project SSD/Projects/Footage
+  relative Action 6/A.MP4
+  gyroflow HDD/Footage/Action 6/A.gyroflow
+  own HDD/Footage/Action 6/A.afp.json
+
+case a working copy first, the archive keeps the clip's own file
+tree
+  SSD/Projects/Footage/Project.afproject = {"version":2,"locations":[{"name":"Working","at":"","path":"../../Work","copies":true},{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
+  SSD/Work/Footage.afplocation = {"project":"../Projects/Footage"}
+  SSD/Work/Action 6/A.MP4
+  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage"}
+  HDD/Footage/Action 6/A.MP4
+  HDD/Footage/Action 6/A.afp.json
+  HDD/Footage/Action 6/B.MP4
+clip SSD/Work/Action 6/A.MP4
+  project SSD/Projects/Footage
+  relative Action 6/A.MP4
+  original Action 6/A.MP4 SSD/Work/Action 6/A.MP4
+  own HDD/Footage/Action 6/A.afp.json
+clip HDD/Footage/Action 6/B.MP4
+  relative Action 6/B.MP4
+  original Action 6/B.MP4 HDD/Footage/Action 6/B.MP4
+  own HDD/Footage/Action 6/B.afp.json
+
+case two own files of one clip: nothing is saved
+tree
+  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Archive"},{"at":"Action 6","path":"../Inbox"}]}
+  Archive/x.afplocation = {"project":"../P"}
+  Archive/Action 6/A.MP4
+  Archive/Action 6/A.afp.json
+  Inbox/x.afplocation = {"project":"../P"}
+  Inbox/A.MP4
+  Inbox/A.afp.json
+clip Inbox/A.MP4
+  project P
+  relative Action 6/A.MP4
+  own conflict
+
+case the inbox placed in a subfolder of the tree
+tree
+  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Archive"},{"at":"/Action 6/","path":"../Inbox"}]}
+  Archive/x.afplocation = {"project":"../P"}
+  Archive/GoPro/G.MP4
+  Inbox/x.afplocation = {"project":"../P"}
+  Inbox/DJI_0141_D.MP4
+clip Inbox/DJI_0141_D.MP4
+  project P
+  relative Action 6/DJI_0141_D.MP4
+  original Action 6/DJI_0141_D.MP4 Inbox/DJI_0141_D.MP4
+  own Inbox/DJI_0141_D.afp.json
+clip Archive/GoPro/G.MP4
+  relative GoPro/G.MP4
+
+case a location on a share, by its network path
+tree
+  SSD/P/Project.afproject = {"version":2,"locations":[{"at":"","path":"//DiskStationDXP/video/Footage"}],"hosts":{"DISKSTATIONDXP":["web.nas"]}}
+  Mnt/video/Footage/F.afplocation = {"project":"../../../SSD/P"}
+  Mnt/video/Footage/2026/A.MP4
+mount //antonadmin@diskstationdxp._smb._tcp.local/video Mnt/video
+clip Mnt/video/Footage/2026/A.MP4
+  project SSD/P
+  relative 2026/A.MP4
+  own Mnt/video/Footage/2026/A.afp.json
+
+case two projects use one footage, the first by name; a pointer to a project that's gone is passed over
+tree
+  A/Project.afproject = {"version":2,"locations":[{"at":"","path":"../F"}]}
+  B/Project.afproject = {"version":2,"locations":[{"at":"Trips","path":"../F"}]}
+  F/a.afplocation = {"project":"../A"}
+  F/b.afplocation = {"project":"../B"}
+  F/c.afplocation = {"project":"../Gone"}
+  F/Day 1/A.MP4
+clip F/Day 1/A.MP4
+  projects A|B
+  project A
+  relative Day 1/A.MP4
