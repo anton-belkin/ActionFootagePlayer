@@ -146,14 +146,15 @@ local function draw()
     local r = frame_rect(v)
     local W, H = v.osd_w, v.osd_h
     local x0, y0, x1, y1 = r.x, r.y, r.x + r.w, r.y + r.h
-    -- Not over the side panel; turned about the frame's middle the other way from a roll the paused frame doesn't
+    -- Not over the side panel nor the navigation bar below the video; turned about the frame's middle the other way from a roll the paused frame doesn't
     -- have yet (what's in it is then what the frame rendered with the roll will show)
     local right = W * (1 - (mp.get_property_number("video-margin-ratio-right") or 0))
+    local bottom = H * (1 - (mp.get_property_number("video-margin-ratio-bottom") or 0))
     local turn = 0
     if cam and shown and not hooks.shader and mp.get_property_native("pause") then turn = -ROLL_SIGN * (cam.roll - shown.roll) end
     local function style(color, alpha)
         return string.format("{\\an7\\pos(0,0)\\org(%d,%d)\\frz%.2f\\clip(0,0,%d,%d)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}",
-                             (x0 + x1) / 2, (y0 + y1) / 2, turn, right, H, color, alpha)
+                             (x0 + x1) / 2, (y0 + y1) / 2, turn, right, bottom, color, alpha)
     end
     local dim = style("000000", "50")
     -- Far enough out to cover the window turned
@@ -533,7 +534,8 @@ mp.observe_property("pause", "bool", function(_, paused)
     draw()
 end)
 
-for _, prop in ipairs({ "osd-dimensions", "video-out-params", "video-margin-ratio-right", "video-margin-ratio-left" }) do
+for _, prop in ipairs({ "osd-dimensions", "video-out-params", "video-margin-ratio-right", "video-margin-ratio-left",
+                        "video-margin-ratio-bottom" }) do
     mp.observe_property(prop, "native", function() if active then draw(); publish() end end)
 end
 mp.register_event("end-file", function() M.set(false) end)

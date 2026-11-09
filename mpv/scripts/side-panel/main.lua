@@ -10,8 +10,10 @@
 --   TAB    toggle   the panel and its rail shown or hidden
 -- Clicking the chosen icon again, or the arrow in the panel's header, leaves only the rail.
 --
--- While it shows, mpv's on-screen controller is the box one at half its size, at the bottom of the video (the bottom bar
--- would go under the panel).
+-- The navigation bar at the bottom of the video is this plugin's too (bar.lua, docs/navigation-bar.md), in place of mpv's
+-- own on-screen controller (osc=no in the app; elsewhere it's hidden): over the video, shown by the mouse, while the
+-- panel is closed; below the video, always there, while it's open.
+--   F8     playlist   the Playlist part (mpv's own F8 shows the playlist as text)
 --
 -- Options (~~/script-opts/side_panel.conf):
 --   shown=yes        the rail shows when the player starts
@@ -26,6 +28,8 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local ui = require 'ui'
+local bar = require 'bar'
+local tl = require 'timeline'
 
 local o = { shown = true, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -174,6 +178,12 @@ local function icon(u, name, cx, cy, color)
                 .. at(k, 8) .. " " .. at(0, 8) .. " b " .. at(-k, 8) .. " " .. at(-4, k * 2) .. " " .. at(-4, 0) .. " b " .. at(-4, -k * 2)
                 .. " " .. at(-k, -8) .. " " .. at(0, -8), color, { fill = false, border = 1.2 * s })
         u:box(cx - 8 * s, cy - 0.6 * s, 16 * s, 1.2 * s, 0, color)
+    elseif name == "playlist" then
+        -- A list: a play mark by its first line, two more lines below
+        u:shape("m " .. at(-9, -7) .. " l " .. at(-3.5, -4) .. " " .. at(-9, -1), color)
+        u:box(cx - 1 * s, cy - 4.75 * s, 10 * s, 1.5 * s, 0, color)
+        u:box(cx - 9 * s, cy + 0.75 * s, 18 * s, 1.5 * s, 0, color)
+        u:box(cx - 9 * s, cy + 5.25 * s, 18 * s, 1.5 * s, 0, color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -184,7 +194,7 @@ end
 -- Source, Transform, Output: how it's read (the source's input), how it's shown (its transform), where (this screen,
 -- a file) (docs/moments-and-workspaces.md, "Source and transform")
 local TABS = {
-    { "project", "Project" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" }, { "crop", "Save frame" },
+    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" }, { "crop", "Save frame" },
     { "quality", "Performance & Quality" }, { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" }, { "view360", "360° view" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -203,8 +213,10 @@ local function shown_tabs()
     return list
 end
 
+local reveal_playlist
 local function choose(name)
     if tab == name and open then open = false else tab, open = name, true end
+    if name == "playlist" and open then reveal_playlist() end
 end
 
 -- The parts. Each draws into u from y (pixels) in the column x..x+w and returns where it ended
@@ -1480,7 +1492,43 @@ local function view360_part(u, x, w, y)
     return flat_video_part(u, x, w, y, v, r)
 end
 
-local PARTS = { project = project_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
+-- The playlist: the files mpv plays one after the other (the videos in the clip's folder: autocreate-playlist), the
+-- one playing marked; a click opens one. Shown with the one playing in view, when it opens and as the next one starts
+local reveal, redraw = true, false
+function reveal_playlist() reveal = true end
+local function playlist_part(u, x, w, y)
+    local s = u.s
+    local list = mp.get_property_native("playlist") or {}
+    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")))
+    if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
+    local dir = tl.common_folder(list)
+    if dir and local_file(dir) then
+        u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
+        y = y + 20 * s
+    end
+    y = u:caption(x, w, y, #rows == 1 and "1 video" or (#rows .. " videos")) + 6 * s
+    for _, r in ipairs(rows) do
+        if r.current and reveal and u.clip then
+            reveal = false
+            local top, bottom = u.clip[2], u.clip[4]
+            if y < top or y + 28 * s > bottom then
+                scroll.playlist = math.max(0, (scroll.playlist or 0) + y - (top + bottom) / 2)
+                redraw = true
+            end
+        end
+        local label, room = r.name, w - (r.current and 13 * s or 0)
+        if ui.text_width(label, 13, s) > room * 0.9 then
+            local n = #label
+            while n > 4 and ui.text_width(tl.cut_middle(label, n), 13, s) > room * 0.9 do n = n - 1 end
+            label = tl.cut_middle(label, n)
+        end
+        y = list_row(u, x, w, y, "pl:" .. r.index, label, nil, r.current and "play" or false,
+                     r.current and function() end or ("playlist-play-index " .. r.index))
+    end
+    return y
+end
+
+local PARTS = { project = project_part, playlist = playlist_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
                 dv = dv_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
                 view360 = view360_part }
 -- Each part's "these as the defaults" (Transform has its own, Use as default)
@@ -1530,6 +1578,12 @@ local function draw(w, h, s, hovered)
         local fn = PARTS[tab]
         local y_end = fn and fn(u, x, cw, y0 - off) or y0
         u.clip = nil
+        if redraw then
+            redraw = false
+            for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
+            u.hits = {}
+            return nil
+        end
         -- Scrolled within what there is
         local content = y_end + off - y0 + 24 * s
         local room = bottom - top
@@ -1579,7 +1633,76 @@ local function scale()
     return mp.get_property_number("display-hidpi-scale", 1) or 1
 end
 
-local place_osc
+-- The navigation bar: its own overlay (it's drawn again as the time goes, the panel isn't), below the panel's
+local bar_overlay = mp.create_osd_overlay("ass-events")
+bar_overlay.z = 9
+local bar_hits = {}
+-- Over the video (the panel closed), shown until then (mp.get_time()); "never" while the agent's note hides it
+local bar_until, bar_never, bar_drawn = 0, false, false
+local SHOW_FOR = 1.5
+-- The mouse: where it is, whether it's over the bar; the track held (its time, while it's dragged)
+local mouse, over_bar = nil, false
+local drag_t = nil
+-- The time shown as the time left
+local remaining = false
+
+-- Below the video, always there, while the panel's open; else over it
+local function docked()
+    return shown and open and not bar_never
+end
+
+local function bar_shown()
+    if bar_never or dims.w <= 0 then return false end
+    return docked() or over_bar or drag_t ~= nil or mp.get_time() < bar_until
+end
+
+local bar_timer
+local function render_bar()
+    local d = dims
+    if d.w <= 0 then return end
+    local s = scale()
+    -- The video above it, not under it, while it's docked
+    local margin = docked() and math.min(0.5, bar.HEIGHT * s / d.h) or 0
+    if math.abs((mp.get_property_number("video-margin-ratio-bottom") or 0) - margin) > 1e-6 then
+        mp.set_property_number("video-margin-ratio-bottom", margin)
+    end
+    if not bar_shown() then
+        bar_hits = {}
+        if bar_drawn then bar_overlay:remove(); bar_drawn = false end
+        bar_timer:kill()
+        return
+    end
+    local u = ui.new(s)
+    u.hover = hover
+    bar.draw(u, 0, d.w - width(s), d.h, bar.snapshot(), {
+        docked = docked(), hover = hover, mouse = over_bar and mouse or nil, dragging = drag_t ~= nil, drag_t = drag_t,
+        remaining = remaining, keys = keys,
+        toggle_time = function() remaining = not remaining end,
+        seek = function(t, exact)
+            drag_t = not exact and t or nil
+            mp.commandv("seek", tostring(t), exact and "absolute+exact" or "absolute+keyframes")
+        end,
+    })
+    bar_hits = u.hits
+    bar_overlay.res_x, bar_overlay.res_y = d.w, d.h
+    bar_overlay.data = u:render()
+    bar_overlay:update()
+    bar_drawn = true
+    if not bar_timer:is_enabled() then bar_timer:resume() end
+end
+-- The time as it plays, and the bar hidden once its time is up
+bar_timer = mp.add_periodic_timer(0.1, function()
+    -- Paused and docked, nothing moves: what changes is drawn as it changes (the properties observed, a seek done)
+    if bar_drawn and docked() and mp.get_property_native("pause") and not over_bar then return end
+    render_bar()
+end)
+bar_timer:kill()
+
+-- Shown for a while (over the video: the mouse moved, a seek)
+local function show_bar()
+    bar_until = mp.get_time() + SHOW_FOR
+    render_bar()
+end
 
 local function render()
     local d = mp.get_property_native("osd-dimensions")
@@ -1594,80 +1717,66 @@ local function render()
     overlay:update()
     -- The video beside it, not under it
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
-    place_osc()
+    render_bar()
 end
 
 local function hit_at(x, y)
-    for i = #hits, 1, -1 do
-        local h = hits[i]
-        if x >= h.x0 and x < h.x1 and y >= h.y0 and y < h.y1 then return h end
+    for _, list in ipairs({ bar_hits, hits }) do
+        for i = #list, 1, -1 do
+            local h = list[i]
+            if x >= h.x0 and x < h.x1 and y >= h.y0 and y < h.y1 then return h end
+        end
     end
 end
 
--- mpv's on-screen controller: while the panel shows, the box one at half its size, at the bottom, centered over the
--- video (the bottom bar would go under the panel). Its own settings come back as they were when it hides
-local OSC_SCALE = 0.5
-local OSC_KEYS = { "osc-layout", "osc-halign", "osc-valign", "osc-scalewindowed", "osc-scalefullscreen" }
-local osc_before = nil
-function place_osc()
-    local w = width(scale())
+-- mpv's own on-screen controller hidden: the bar is in its place (the app has osc=no; an mpv the plugin is put into
+-- has it on)
+if mp.get_property_native("osc") then
     local opts = mp.get_property_native("script-opts") or {}
-    if w > 0 and dims.w > 0 then
-        -- osc.lua's box: 550 x 138 at a height of 720 / its scale, placed by get_align with no margin
-        local playresy = 720 / OSC_SCALE
-        local playresx = playresy * dims.w / dims.h
-        local room = playresx / 2 - 275
-        local want = {
-            ["osc-layout"] = "box",
-            ["osc-halign"] = string.format("%.3f", room > 0 and math.max(-1, -(w / dims.w) * playresx / 2 / room) or -1),
-            -- 12 px above the window's bottom
-            ["osc-valign"] = string.format("%.3f", math.min(1, (playresy / 2 - 69 - 12 * playresy / dims.h) / (playresy / 2 - 69))),
-            ["osc-scalewindowed"] = tostring(OSC_SCALE), ["osc-scalefullscreen"] = tostring(OSC_SCALE),
-        }
-        -- Each change sets the controller up again. Compared with what's there: script-opts may be set anew by others
-        local same = true
-        for _, k in ipairs(OSC_KEYS) do same = same and opts[k] == want[k] end
-        if same then return end
-        if not osc_before then
-            osc_before = {}
-            for _, k in ipairs(OSC_KEYS) do osc_before[k] = opts[k] or false end
-        end
-        for k, v in pairs(want) do opts[k] = v end
-        mp.set_property_native("script-opts", opts)
-    elseif osc_before then
-        for _, k in ipairs(OSC_KEYS) do opts[k] = osc_before[k] or nil end
-        osc_before = nil
-        mp.set_property_native("script-opts", opts)
-    end
+    opts["osc-visibility"] = "never"
+    mp.set_property_native("script-opts", opts)
 end
 
 local update = render
 redraw_flat = update
 
--- The mouse: clicks and the wheel are the panel's while it's over it, the player's elsewhere
+-- The mouse: clicks and the wheel are the panel's and the bar's while it's over them, the player's elsewhere
 local captured = false
 
 local function wheel(dir)
     return function(info)
         if info.event == "up" then return end
+        if over_bar then
+            -- Over the bar: a frame on (up, right) or back (down, left), as mpv's wheel seeks forward going up
+            mp.command(dir < 0 and "frame-step" or "frame-back-step")
+            return
+        end
+        if dir == 2 or dir == -2 then return end
         local s = scale()
         scroll[tab] = math.max(0, (scroll[tab] or 0) + dir * 48 * s * (info.scale or 1))
         render()
     end
 end
 
--- A slider held: its drag(x) follows the mouse until the button is let go
-local dragging = nil
+-- A slider held: its drag(x) follows the mouse until the button is let go, then its release(x)
+local dragging, released = nil, nil
 
 local function click(info)
-    if info.event == "up" then dragging = nil; return end
+    if info.event == "up" then
+        local pos = mp.get_property_native("mouse-pos")
+        if released and pos then released(pos.x) end
+        dragging, released = nil, nil
+        render_bar()
+        return
+    end
     if info.event ~= "down" and info.event ~= "press" then return end
     local pos = mp.get_property_native("mouse-pos")
     local h = pos and hit_at(pos.x, pos.y)
     if not h then return end
     if type(h.cmd) == "table" and h.cmd.drag then
         h.cmd.drag(pos.x)
-        if info.event == "down" then dragging = h.cmd.drag end
+        if info.event == "down" then dragging, released = h.cmd.drag, h.cmd.release
+        elseif h.cmd.release then h.cmd.release(pos.x) end
     elseif type(h.cmd) == "function" then h.cmd() else mp.command(h.cmd) end
     -- What the plugins change shows on their next publish; render now for what's the panel's own
     update()
@@ -1687,8 +1796,10 @@ local function capture(on)
         mp.add_forced_key_binding("MBTN_LEFT_DBL", "click-dbl", function() end)
         mp.add_forced_key_binding("WHEEL_UP", "wheel-up", wheel(-1), { complex = true })
         mp.add_forced_key_binding("WHEEL_DOWN", "wheel-down", wheel(1), { complex = true })
+        mp.add_forced_key_binding("WHEEL_RIGHT", "wheel-right", wheel(-2), { complex = true })
+        mp.add_forced_key_binding("WHEEL_LEFT", "wheel-left", wheel(2), { complex = true })
     else
-        for _, name in ipairs({ "click", "click-dbl", "wheel-up", "wheel-down" }) do mp.remove_key_binding(name) end
+        for _, name in ipairs({ "click", "click-dbl", "wheel-up", "wheel-down", "wheel-right", "wheel-left" }) do mp.remove_key_binding(name) end
         if dragging_before ~= nil then mp.set_property_native("window-dragging", dragging_before) end
         dragging_before = nil
     end
@@ -1696,16 +1807,28 @@ end
 
 mp.observe_property("mouse-pos", "native", function(_, pos)
     if not pos then return end
-    if dragging then return dragging(pos.x) end
-    local inside = pos.hover and shown and pos.x >= dims.w - width(scale())
-    capture(inside or false)
-    local h = inside and hit_at(pos.x, pos.y) or nil
+    mouse = pos
+    if dragging then dragging(pos.x); return render_bar() end
+    local s = scale()
+    local in_panel = pos.hover and shown and pos.x >= dims.w - width(s)
+    local was_over = over_bar
+    over_bar = (pos.hover and not in_panel and not bar_never and pos.y >= dims.h - bar.HEIGHT * s) or false
+    capture(in_panel or over_bar)
+    -- Over the video, a move shows it; leaving the window hides it
+    if pos.hover then bar_until = mp.get_time() + SHOW_FOR else bar_until = 0 end
+    local h = (in_panel or over_bar) and hit_at(pos.x, pos.y) or nil
     local id = h and h.id or nil
     if id ~= hover then
         hover = id
         render()
+    elseif over_bar or was_over or not bar_drawn then
+        render_bar()
     end
 end)
+
+-- A seek with the keys shows where it went
+mp.register_event("seek", function() if not docked() then show_bar() end end)
+mp.register_event("playback-restart", function() render_bar() end)
 
 mp.add_key_binding("TAB", "toggle", function()
     shown = not shown
@@ -1716,14 +1839,37 @@ end)
 
 mp.register_script_message("tab", function(name)
     name = RENAMED[name] or name
-    if PARTS[name] then tab, open, shown = name, true, true; update() end
+    if PARTS[name] then tab, open, shown = name, true, true; reveal_playlist(); update() end
 end)
 
--- What it draws, as an .ass file, at a window size given
-mp.register_script_message("dump", function(path, w, h, s)
+-- In place of mpv's playlist as text
+mp.add_key_binding("F8", "playlist", function()
+    tab, open, shown = "playlist", true, true
+    reveal_playlist()
+    update()
+end)
+
+-- The bar hidden (never) while the agent's note is written, and back (auto)
+mp.register_script_message("bar", function(v)
+    bar_never = v == "never"
+    if bar_never then over_bar = false; capture(false) end
+    update()
+end)
+
+-- What it draws, as an .ass file, at a window size given; the bar too, and what the mouse would show over it at x, y
+-- with hover the id there ("bar:track", "bar:mark", "pl:3")
+mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
     read_keys()
     w, h, s = tonumber(w), tonumber(h), tonumber(s) or 1
-    local u = draw(w, h, s, nil) or draw(w, h, s, nil)
+    local u = draw(w, h, s, hovered) or draw(w, h, s, hovered)
+    if not bar_never then
+        local b = ui.new(s)
+        b.hover = hovered
+        bar.draw(b, 0, w - width(s), h, bar.snapshot(), { docked = docked(), hover = hovered, keys = keys,
+                 mouse = mx and { x = tonumber(mx), y = tonumber(my) } or nil, remaining = remaining })
+        for _, e in ipairs(u.events) do b.events[#b.events + 1] = e end
+        u = b
+    end
     local f = io.open(path, "w")
     if not f then return mp.msg.error("can't write " .. path) end
     f:write("[Script Info]\nScriptType: v4.00+\nPlayResX: " .. w .. "\nPlayResY: " .. h .. "\nScaledBorderAndShadow: yes\n\n")
@@ -1742,7 +1888,8 @@ for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_
                         "user-data/view360",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
-                        "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count" }) do
+                        "ab-loop-a", "ab-loop-b", "playlist-pos", "playlist-count", "playlist", "mute", "duration",
+                        "chapter-list" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
 -- Crop mode on: its part shows; off again: back to the one there was
@@ -1780,6 +1927,7 @@ end)
 mp.register_event("file-loaded", function()
     read_keys()
     scroll = {}
+    reveal_playlist()
     update()
 end)
 -- The highlight that plays now
