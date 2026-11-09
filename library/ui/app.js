@@ -19,7 +19,7 @@ const ICON = {
   list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
 };
-const VIEWS = [["footage", "Footage"], ["sources", "Sources"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+const VIEWS = [["sources", "Sources"], ["footage", "Footage"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
 // Footage is the clips as arranged in _Clips (their previews' folders); the ones without a preview are in this one
 const NOPREV = "Without a clip preview";
 // Where each view is in the project, for the paths a batch is kept to
