@@ -1097,7 +1097,7 @@ off, so a wrong guess about a camera means its clips play as they are, not worse
 - the model, firmware and settings (lens/FOV, frame rate) in a word.
 
 Share them through a link (Google Drive, Dropbox, WeTransfer, ...) in a
-[new issue](https://github.com/anton-belkin/ActionFootagePlayer/issues/new). The clips are used only to work out
+[new issue](https://github.com/anton-belkin/ActionFootagePlayer/issues/new?template=my-camera.yml). The clips are used only to work out
 the camera's metadata; if anything from them goes into the repo, it's the metadata alone as test data (a few kB,
 no picture), and only if you're fine with that. The files carry the camera's serial number, and the place they
 were shot if the camera had GPS, so shoot somewhere you don't mind showing.

@@ -1,0 +1,57 @@
+name: My camera
+description: Your camera's clips play wrong, or it isn't listed yet. A clip straight from the camera helps the most.
+title: "Camera: "
+labels: ["camera"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Each camera's clips are worked out from real files: a few seconds straight from the camera
+        (not exported or trimmed by an app, which drops the metadata) are worth more than any description.
+
+        In the player, **Report this camera…** (right-click menu, or at the bottom of the side panel) opens an issue
+        with what the player found in the clip already filled in.
+  - type: input
+    id: camera
+    attributes:
+      label: Camera
+      description: Model and firmware version
+      placeholder: Osmo Action 6, firmware 01.02.03
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: What the clip was recorded with, in a word each
+      placeholder: |
+        Color profile: D-Log M / GP-Log / I-Log / normal
+        Stabilization: off / on (RockSteady, HyperSmooth, FlowState...)
+        Resolution and frame rate: 4K 60
+        Lens / FOV: wide
+        Under water: yes, 18 m
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What the player did, and what you expected. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: clip
+    attributes:
+      label: Link to a clip
+      description: |
+        Google Drive, Dropbox, WeTransfer... A few seconds are enough. The file carries the camera's serial number,
+        and the place it was shot if the camera has GPS, so share one you don't mind showing.
+  - type: input
+    id: player
+    attributes:
+      label: Player and system
+      placeholder: ActionFootagePlayer 0.10.0, macOS 26 / Windows 11 / Linux mpv 0.41
+  - type: checkboxes
+    id: test-data
+    attributes:
+      label: Test data
+      options:
+        - label: Fine to keep the clip's metadata (a few kB, no picture) in the repository as test data
