@@ -335,10 +335,23 @@ local function set_playing(on, quiet)
     publish()
 end
 
+-- During a take the clip doesn't end into the next one (keep-open=always, file-local): at its end it stays, and the
+-- recording plays from its start. keep_open: the value before the take (nil: none taken); given back once the
+-- recording's start is shown (playback-restart), or when the take ends otherwise
+local keep_open = nil
+local keep_open_back = false
+local function give_keep_open_back()
+    if keep_open == nil then return end
+    mp.set_property("file-local-options/keep-open", keep_open)
+    keep_open, keep_open_back = nil, false
+end
+
 local function stop_take(why)
     if not rec:taking() then return end
+    local at_end = mp.get_property_native("eof-reached") == true
     local part = rec:stop()
     draw_rec()
+    if at_end then why = "the end of the clip" end
     if part then
         save_recording()
         mp.osd_message(string.format("Recorded %s–%s%s", clock(part.from), clock(part.to), why and (" (" .. why .. ")") or ""), 2.5)
@@ -346,6 +359,15 @@ local function stop_take(why)
         set_playing(true, true)
     else
         mp.osd_message("Recording stopped: too short to keep", 2)
+    end
+    -- At the clip's end: played again by the recording, from its start
+    local spans = rec:spans()
+    if at_end and rec_playing and #spans > 0 then
+        keep_open_back = true
+        mp.commandv("seek", string.format("%.3f", spans[1].from), "absolute+exact")
+        mp.set_property_native("pause", false)
+    else
+        give_keep_open_back()
     end
     publish()
 end
@@ -372,6 +394,10 @@ local function start_take()
                                             FOLLOWS_NAMES[other] or tostring(other)), 4)
     end
     rec_playing = false
+    if keep_open == nil then
+        keep_open = mp.get_property("keep-open") or "no"
+        mp.set_property("file-local-options/keep-open", "always")
+    end
     if mp.get_property_native("pause") then mp.set_property_native("pause", false) end
     add_frame(mp.get_property_number("time-pos"))
     mp.osd_message("Recording: look around. Alt+r stops", 2)
@@ -512,6 +538,8 @@ mp.register_event("end-file", function()
     -- The hint isn't the next clip's
     if active then mp.osd_message("", 0) end
     stop_take("the end of the clip")
+    -- (file-local: mpv puts it back itself)
+    keep_open, keep_open_back = nil, false
     set_active(false, true)
     sphere, note = nil, nil
     rec:load(nil)
@@ -630,6 +658,9 @@ end)
 mp.observe_property("pause", "bool", function(_, paused) if paused then stop_take() end end)
 mp.observe_property("eof-reached", "bool", function(_, eof) if eof then stop_take("the end of the clip") end end)
 mp.register_event("seek", function() stop_take("a seek") end)
+mp.register_event("playback-restart", function()
+    if keep_open_back and mp.get_property_native("eof-reached") ~= true then give_keep_open_back() end
+end)
 mp.observe_property("osd-dimensions", "native", function() draw_rec() end)
 
 local function toggle_take()

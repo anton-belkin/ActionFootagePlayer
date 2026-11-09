@@ -229,5 +229,29 @@ expect("popover export opens it", find("export-kind:hdr") ~= nil, true)
 messages.popover("")
 expect("popover with nothing closes it", find("export-kind:hdr"), nil)
 
+-- The scroll bar: a short window, the bar held and dragged down scrolls the panel, let go it stays
+mp.set_property_native("osd-dimensions", { w = 1280, h = 420 })
+messages.tab("output")
+local bar_hit = find("scrollbar")
+expect("a short window: a scroll bar", bar_hit ~= nil, true)
+if bar_hit then
+    expect("the Export button below what shows", find("export"), nil)
+    move(bar_hit.x0 + 3, bar_hit.y0 + 5)
+    bindings.click.fn({ event = "down" })
+    mp.set_property_native("mouse-pos", { x = bar_hit.x0 + 3, y = bar_hit.y0 + 120, hover = true })
+    local moved = find("export")
+    expect("dragged down: the panel scrolls to it", moved ~= nil, true)
+    bindings.click.fn({ event = "up" })
+    local after = find("scrollbar")
+    -- Dragged back up past its top: at the top again
+    move(after.x0 + 3, after.y1 - 5)
+    bindings.click.fn({ event = "down" })
+    mp.set_property_native("mouse-pos", { x = after.x0 + 3, y = -500, hover = true })
+    bindings.click.fn({ event = "up" })
+    expect("dragged up past the top: back at the top", find("export"), nil)
+    expect("…the top part showing", find("collapse") ~= nil and find("look:maker") ~= nil, true)
+end
+mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

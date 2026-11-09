@@ -25,6 +25,11 @@
 -- it's on and not paused. The last one set on has the mouse (forced bindings: the newest are on top). One that's on
 -- under another pauses, rather than giving back what the other has taken (the window's dragging, the gestures'
 -- messages), and takes the messages again when the other is done.
+--
+-- Only over the video: with the mouse beside it (the side panel, the bar below: video-margin-ratio-*) the gestures
+-- are left alone and the trackpad's messages turned off, so the panel scrolls by the wheel and the trackpad as usual
+-- (and the app's VO, which turns the view by the messages, doesn't either). A drag that started over the video goes on
+-- wherever the mouse goes.
 
 local mp = require 'mp'
 
@@ -41,13 +46,30 @@ local function whole(scale)
     return scale and scale >= 1 and math.abs(scale - math.floor(scale + 0.5)) < 1e-6
 end
 
+-- Whether the mouse (mouse-pos) is over the video, not beside it in a margin (video-margin-ratio-*); d: osd-dimensions,
+-- margins: { left, right, top, bottom } ratios. Outside the window (hover false), it's left as over it
+function M.over_video(pos, d, margins)
+    if not pos or pos.hover == false or not d or (d.w or 0) <= 0 or (d.h or 0) <= 0 then return true end
+    local m = margins or {}
+    local x0, x1 = d.w * (m.left or 0), d.w * (1 - (m.right or 0))
+    local y0, y1 = d.h * (m.top or 0), d.h * (1 - (m.bottom or 0))
+    return pos.x >= x0 and pos.x < x1 and pos.y >= y0 and pos.y < y1
+end
+
+local function margins()
+    local function r(name) return mp.get_property_number("video-margin-ratio-" .. name) or 0 end
+    return { left = r("left"), right = r("right"), top = r("top"), bottom = r("bottom") }
+end
+
 function M.new(h)
-    local g = { on = false, paused = false, drag = nil, messages = false, saved = nil, input_time = nil, input_seq = 0 }
-    local function acting() return g.on and not g.paused end
+    local g = { on = false, paused = false, away = false, drag = nil, messages = false, saved = nil, input_time = nil, input_seq = 0 }
+    local function acting() return g.on and not g.paused and (not g.away or g.drag ~= nil) end
     function g:acting() return acting() end
     local prefix = h.prefix
 
     local function pan(dx, dy, x, y) h.pan(dx, dy, x, y) end
+    -- Whether the mouse is beside the video (set below, with the mouse's observer)
+    local check_away
 
     -- The mouse: a drag pans, Alt+drag turns the horizon
     local function button(alt)
@@ -57,13 +79,30 @@ function M.new(h)
                 local pos = mp.get_property_native("mouse-pos")
                 if pos then g.drag = { x = pos.x, y = pos.y, alt = alt } end
             elseif info.event == "up" then
+                local was = g.drag
                 g.drag = nil
                 if h.released then h.released() end
+                -- Let go beside the video: it's the panel's again
+                if was then check_away() end
             end
         end
     end
 
+    -- The mouse beside the video or back over it: the trackpad's messages off there, on again here (only while these
+    -- gestures have them: on and not paused)
+    local function set_away(away)
+        if away == g.away then return end
+        g.away = away
+        if g.on and not g.paused and g.messages then mp.set_property_native("macos-gesture-messages", not away) end
+    end
+    g.set_away = set_away
+    check_away = function(pos)
+        if g.drag then return end
+        set_away(not M.over_video(pos or mp.get_property_native("mouse-pos"), mp.get_property_native("osd-dimensions"), margins()))
+    end
+
     mp.observe_property("mouse-pos", "native", function(_, pos)
+        check_away(pos)
         if not acting() or not g.drag or not pos then return end
         local dx, dy = pos.x - g.drag.x, pos.y - g.drag.y
         g.drag.x, g.drag.y = pos.x, pos.y
@@ -140,15 +179,17 @@ function M.new(h)
         if on then
             self.saved = mp.get_property_native("window-dragging")
             mp.set_property_native("window-dragging", false)
-            -- The app's mpv (tools/mpv-patches/0008); others have no such option
-            self.messages = mp.set_property_native("macos-gesture-messages", true) == true
+            -- The app's mpv (tools/mpv-patches/0008); others have no such option. Off while the mouse is beside the
+            -- video (turned on from the panel, it is)
+            self.away = not M.over_video(mp.get_property_native("mouse-pos"), mp.get_property_native("osd-dimensions"), margins())
+            self.messages = mp.set_property_native("macos-gesture-messages", not self.away) == true
             for _, b in ipairs(self.bindings) do mp.add_forced_key_binding(b[1], b[2], b[3], b[4]) end
         else
             for _, b in ipairs(self.bindings) do mp.remove_key_binding(b[2]) end
             if self.saved ~= nil then mp.set_property_native("window-dragging", self.saved) end
             -- Paused, the other one still has them
             if self.messages and not self.paused then mp.set_property_native("macos-gesture-messages", false) end
-            self.saved, self.messages, self.drag, self.paused = nil, false, nil, false
+            self.saved, self.messages, self.drag, self.paused, self.away = nil, false, nil, false, false
         end
     end
 
@@ -156,7 +197,7 @@ function M.new(h)
         if paused == self.paused then return end
         self.paused, self.drag = paused, nil
         -- The other one gave the messages back as it left
-        if not paused and self.on and self.messages then mp.set_property_native("macos-gesture-messages", true) end
+        if not paused and self.on and self.messages then mp.set_property_native("macos-gesture-messages", not self.away) end
     end
 
     return g

@@ -65,6 +65,8 @@ local hover, hits = nil, {}
 -- The list open over the panel (its id: "export"), or nil; set_popover opens or closes it (defined with the mouse's
 -- bindings, below)
 local popover, set_popover = nil, nil
+-- The panel's scroll bar held
+local scrolling_bar = false
 local overlay = mp.create_osd_overlay("ass-events")
 overlay.z = 10
 
@@ -1630,10 +1632,22 @@ local function draw(w, h, s, hovered)
             return nil
         end
         if max > 0 then
-            -- The scroll bar
+            -- The scroll bar: held by its thumb, it follows the mouse; a click beside the thumb brings it there
             local bh = math.max(24 * s, room * room / content)
             local by = top + (room - bh) * off / max
-            u:box(px + PANEL * s - 6 * s, by + 2 * s, 3 * s, bh - 4 * s, 2, C.line)
+            local lit = u:hovered("scrollbar") or scrolling_bar
+            u:box(px + PANEL * s - (lit and 7 or 6) * s, by + 2 * s, (lit and 5 or 3) * s, bh - 4 * s, 2, lit and C.dim or C.line)
+            local part, grab = tab, nil
+            u:hit(px + PANEL * s - 12 * s, top, 12 * s, room, "scrollbar", {
+                drag = function(_, my)
+                    if not my then return end
+                    if not grab then grab = (my >= by and my < by + bh) and (my - by) or bh / 2 end
+                    scrolling_bar = true
+                    scroll[part] = math.max(0, math.min(max, (my - grab - top) / math.max(1, room - bh) * max))
+                end,
+                release = function() scrolling_bar = false end,
+                redraw = true,
+            })
         end
         if footer > 0 and DOCKED[tab] then
             u:divider(px, PANEL * s, bottom)
@@ -1804,14 +1818,17 @@ local function wheel(dir)
     end
 end
 
--- A slider held: its drag(x) follows the mouse until the button is let go, then its release(x)
-local dragging, released = nil, nil
+-- A slider held: its drag(x, y) follows the mouse until the button is let go, then its release(x); drawn again as
+-- it moves when it's the panel's own (redraw: the scroll bar)
+local dragging, released, drag_redraw = nil, nil, false
 
 local function click(info)
     if info.event == "up" then
         local pos = mp.get_property_native("mouse-pos")
         if released and pos then released(pos.x) end
-        dragging, released = nil, nil
+        local again = drag_redraw
+        dragging, released, drag_redraw = nil, nil, false
+        if again then render() end
         render_bar()
         return
     end
@@ -1825,8 +1842,8 @@ local function click(info)
     end
     if not h then return end
     if type(h.cmd) == "table" and h.cmd.drag then
-        h.cmd.drag(pos.x)
-        if info.event == "down" then dragging, released = h.cmd.drag, h.cmd.release
+        h.cmd.drag(pos.x, pos.y)
+        if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
         elseif h.cmd.release then h.cmd.release(pos.x) end
     elseif type(h.cmd) == "function" then h.cmd() else mp.command(h.cmd) end
     -- What the plugins change shows on their next publish; render now for what's the panel's own
@@ -1872,7 +1889,11 @@ end
 mp.observe_property("mouse-pos", "native", function(_, pos)
     if not pos then return end
     mouse = pos
-    if dragging then dragging(pos.x); return render_bar() end
+    if dragging then
+        dragging(pos.x, pos.y)
+        if drag_redraw then return render() end
+        return render_bar()
+    end
     local s = scale()
     local inside = in_panel(pos)
     local was_over = over_bar

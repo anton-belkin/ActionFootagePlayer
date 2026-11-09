@@ -85,6 +85,9 @@ flat video".
   into the recording's (below), so a recording is always relative to one thing.
 - **Stop** (Alt+r again, or the end of the clip) ends the take. So do pausing, seeking and leaving the 360 view: a
   take is a single stretch of playback. Recording resumes with the next Record.
+- **At the clip's end** a take doesn't go on into the next clip of the playlist: the clip stays (`keep-open=always`
+  while the take records) and plays again from the recording's start, by the recording. Once that's shown, the clip
+  ends into the next one as before.
 - **Punch-in.** A take replaces only the time it covers. Recording 0:20–0:30 over a recording of 0:12–0:47 keeps
   0:12–0:20 and 0:30–0:47 as they were. Where two parts meet, the smoothing below blends them; with smoothing off,
   it's a cut.
@@ -416,6 +419,20 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    one on the bar's Play without playing; Esc closes it in full screen and stays in full screen; the wheel closes
    it; with A–B at 0:02–0:03, Flat picked: "Export the part 0:02–0:03 · flat" ran `gyroflow-export --reframe
    recording --size 1080x1920 --from 2.000 --to 3.000`, and Cancel export stopped it.
+
+   **After Anton's try (2026-11-09),** on branch `claude/360-panel-input`, on top of this one:
+   - A take that reaches the clip's end plays the clip again by the recording, from its start, instead of the
+     playlist going on (above, under Stop).
+   - Over the side panel and the bar the 360 view's gestures are left alone (`gyroflow/gestures.lua`): the trackpad's
+     messages (`macos-gesture-messages`) are off while the mouse is beside the video, so the panel scrolls by the
+     wheel and the trackpad as before, and the VO doesn't turn the view by them either. A drag that starts over the
+     video goes on into the panel. Turned on from the panel (Look around), they start off.
+   - The panel's scroll bar can be held and dragged (and clicked beside the thumb); it's lit while held or under the
+     mouse.
+   Checked: `tests/view360_test.lua` (the gestures beside the video, the take to the clip's end and by hand, keep-open
+   given back), `tests/sidepanel_test.lua` (the scroll bar dragged both ways); the app's mpv headless: keep-open set
+   while playing keeps the clip at its end, a seek plays it again, and with keep-open back it ends into the next file.
+   Not yet on screen.
 
    **Open:** a click with a real mouse and trackpad (IPC's only so far); Shift+E still exports as it plays, not the
    kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an hour is cut with an

@@ -424,7 +424,46 @@ do
     f.props["macos-gesture-messages"] = false
     g:pause(false)
     expect("unpaused: messages again", f.props["macos-gesture-messages"], true)
+    -- Beside the video (the side panel: video-margin-ratio-right; the bar: -bottom), the gestures are the panel's
+    f.props["video-margin-ratio-right"] = 0.2
+    f.props["video-margin-ratio-bottom"] = 0.1
+    local m = #got
+    f.set("mouse-pos", { x = 1400, y = 300, hover = true })
+    expect("over the panel: messages off", f.props["macos-gesture-messages"], false)
+    f.message("gesture", "scroll", "3", "-2", "changed")
+    f.bindings["test-key-wheel-up"].fn({ event = "down", scale = 1 })
+    f.bindings["test-key-reset-dbl"].fn()
+    expect("over the panel: left alone", #got, m)
+    f.set("mouse-pos", { x = 600, y = 850, hover = true })
+    expect("over the bar: messages off", f.props["macos-gesture-messages"], false)
+    f.set("mouse-pos", { x = 600, y = 300, hover = true })
+    expect("back over the video: messages on", f.props["macos-gesture-messages"], true)
+    f.message("gesture", "scroll", "3", "-2", "changed")
+    expect("back over the video: taken", #got, m + 1)
+    -- A drag from the video into the panel goes on, and the panel has it back once it's let go
+    f.bindings["test-key-drag"].fn({ event = "down" })
+    f.set("mouse-pos", { x = 1400, y = 300, hover = true })
+    expect("a drag goes on over the panel", got[#got][1], "pan")
+    expect("…messages kept", f.props["macos-gesture-messages"], true)
+    f.bindings["test-key-drag"].fn({ event = "up" })
+    expect("let go over the panel: messages off", f.props["macos-gesture-messages"], false)
+    -- Leaving the window: as over the video
+    f.set("mouse-pos", { x = 1400, y = 300, hover = false })
+    expect("outside the window: messages on", f.props["macos-gesture-messages"], true)
+    -- Turned on with the mouse over the panel (Look around clicked there): messages off from the start
     g:set(false)
+    f.props["mouse-pos"] = { x = 1400, y = 300, hover = true }
+    g:set(true)
+    expect("on from the panel: messages off", f.props["macos-gesture-messages"], false)
+    -- Paused, then taken again over the panel: still off
+    g:pause(true)
+    g:pause(false)
+    expect("unpaused over the panel: off", f.props["macos-gesture-messages"], false)
+    f.set("mouse-pos", { x = 600, y = 300, hover = true })
+    expect("then over the video: on", f.props["macos-gesture-messages"], true)
+    f.props["video-margin-ratio-right"], f.props["video-margin-ratio-bottom"] = nil, nil
+    g:set(false)
+    n = #got
     expect("off: bindings gone", f.forced(), 0)
     expect("off: window dragged again", f.props["window-dragging"], true)
     expect("off: messages given back", f.props["macos-gesture-messages"], false)
@@ -773,6 +812,34 @@ do
     f.bindings["toggle"].fn()
     expect("rec: leaving the view ends it", st().taking, false)
     expect("rec: and keeps it", st().parts, 1)
+    f.bindings["toggle"].fn()
+    -- A take to the clip's end: the clip doesn't end into the next one, the recording plays again from its start
+    f.props["keep-open"] = "no"
+    f.set("time-pos", 20)
+    f.bindings["record"].fn()
+    expect("rec: the clip stays at its end during a take", f.props["file-local-options/keep-open"], "always")
+    for i = 1, 25 do f.set("time-pos", 20 + i / 25) end
+    -- keep-open: paused at the end
+    f.props["eof-reached"] = true
+    f.set("pause", true)
+    expect("rec: the end ends it", st().taking, false)
+    local c = f.commands[#f.commands] or {}
+    expect("rec: played again from the recording's start", c[1] == "seek" and c[2], string.format("%.3f", st().spans[1][1]))
+    expect("rec: playing", f.props["pause"], false)
+    expect("rec: by the recording", st().playing, true)
+    expect("rec: still staying until the start's shown", f.props["file-local-options/keep-open"], "always")
+    f.props["eof-reached"] = false
+    f.event("playback-restart")
+    expect("rec: then the clip ends as before", f.props["file-local-options/keep-open"], "no")
+    -- A take ended by hand: keep-open back at once
+    f.set("time-pos", 5)
+    f.bindings["record"].fn()
+    expect("rec: kept during the take", f.props["file-local-options/keep-open"], "always")
+    for i = 1, 10 do f.set("time-pos", 5 + i / 25) end
+    local n = #f.commands
+    f.bindings["record"].fn()
+    expect("rec: back once it's stopped", f.props["file-local-options/keep-open"], "no")
+    expect("rec: no seek", #f.commands, n)
     f.event("end-file")
     os.remove(file)
     os.execute("rmdir '" .. dir .. "'")
