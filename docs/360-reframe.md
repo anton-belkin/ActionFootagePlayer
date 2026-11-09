@@ -85,6 +85,9 @@ flat video".
   into the recording's (below), so a recording is always relative to one thing.
 - **Stop** (Alt+r again, or the end of the clip) ends the take. So do pausing, seeking and leaving the 360 view: a
   take is a single stretch of playback. Recording resumes with the next Record.
+- **At the clip's end** a take doesn't go on into the next clip of the playlist: the clip stays (`keep-open=always`
+  while the take records) and plays again from the recording's start, by the recording. Once that's shown, the clip
+  ends into the next one as before.
 - **Punch-in.** A take replaces only the time it covers. Recording 0:20–0:30 over a recording of 0:12–0:47 keeps
   0:12–0:20 and 0:30–0:47 as they were. Where two parts meet, the smoothing below blends them; with smoothing off,
   it's a cut.
@@ -322,6 +325,7 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 | Recording, punch-in, undo, sidecar writes | `mpv/scripts/view360/recording.lua` (plain Lua, tested in `tests/view360_test.lua` with recorded sample streams) |
 | The 360° tab's *Flat video* part | `side-panel/main.lua`, `view360_part` |
 | Split button and dropdown | `side-panel/ui.lua` |
+| The Export button's kinds, rows and label | `side-panel/exportkind.lua` (plain Lua, `tests/exportkind_test.lua`) |
 | Tidying: re-expressing between heading modes, SO(3) Gaussian, level, picture hold | `vs-gyroflow/src/reframe.rs`, with Rust tests: a synthetic jittered path comes out smooth, a level path stays level, a held subject's drift is taken out in a rendered synthetic sphere |
 | `gyroflow-probe --reframe <clip>` | the tidied head per frame, for the player's preview |
 | `gyroflow-export --reframe recording` | reads the sidecar, renders through `export360.rs` |
@@ -409,6 +413,59 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
 
    **Open:** the preview on screen and by eye; whether Strong is too strong for a whip pan (the design's one-euro idea).
 3. **The Output tab's one Export button** with its list, and Export 360° in the 360° tab.
+
+   **Built** (branch `claude/360-reframe-step3-5442f5`, 2026-11-09; Export 360° in the 360° tab came with step 1):
+   - `side-panel/ui.lua`: `split_button` (the main part, primary; the ▾ part lit while its list is open, and still
+     clickable while the main part is disabled) and `dropdown` + `popover`, the panel's first popover: rows with a
+     check on the chosen one, greyed rows that can't be picked, under the button with its right edge at the button's,
+     above it when there's no room below, not drawn when the button is scrolled out of sight. It's drawn after
+     everything else, the rail too, so it's on top and the mouse finds its rows first.
+   - `side-panel/main.lua`: *Export the clip* and *Export in SDR* are one split button; Cancel export in its place
+     while exporting, and Show the last export under it, now the panel's width. The list closes on a pick, Esc (bound
+     only while it's open), a click anywhere else (on the panel, the bar or the video: the mouse is the panel's while
+     it's open, and that click does nothing else), the wheel, another tab, the panel hidden, the button gone (an export
+     started) and another file. `script-message-to side_panel popover export` opens it, for IPC tests.
+   - `side-panel/exportkind.lua`: the kinds. *As it plays* says what the file will be: "HDR", "HDR + Dolby Vision"
+     (the dv looks), "SDR" (the maker's LUT, NBCU, an SDR clip), "log, as recorded"; the button's word is the short
+     one. *In SDR* is listed where the clip has an SDR look and doesn't play in it already (it would be As it plays
+     twice). *360° video* and *Flat* for a 360 camera's own file only (`stamped`: a stitched clip can't export
+     either, as in the 360° tab); Flat greyed "Flat: record a view first" until there's a recording. The choice is
+     kept per kind of clip for the session; a kind not listed now (In SDR while it plays in SDR, Flat without a
+     recording) makes the button As it plays, and the choice comes back when it's listed again. While a take
+     records, the main part is disabled for 360° and flat, saying why. Labels as above: "Export the part 0:12–0:47 ·
+     flat".
+
+   **Checked:** `tests/exportkind_test.lua` (the rows for log, HDR, SDR, dv, 360 with and without a recording,
+   stitched; the choice falling back; the labels; the split button's places; the list's geometry, its flip above,
+   the greyed row, the check, not clipped by the scrolled area, not drawn when its button is out of sight) and
+   `tests/sidepanel_test.lua`: `main.lua` itself over a stand-in for mpv, clicked where it drew: ▾ opens, a pick
+   sets what `export <how>` gets, a click outside, ▾ again, Esc, a click on the video, the wheel, another tab,
+   hiding the panel and an export starting all close it and run nothing else; a 360 clip with its own choice, Flat
+   greyed then picked, Cancel export while exporting. Headless renders of the panel (`dump`, over a frame) for a
+   flat clip, a 360 clip with and without a recording, and a part marked. On screen (Anton's OK, 2026-11-09), the X5
+   sample with its recording in a copy of the app with this branch's panel, the mouse moved and clicked over IPC:
+   ▾ opens the list, a row lit under the mouse, 360° picked; a click on the video closes it without turning the view,
+   one on the bar's Play without playing; Esc closes it in full screen and stays in full screen; the wheel closes
+   it; with A–B at 0:02–0:03, Flat picked: "Export the part 0:02–0:03 · flat" ran `gyroflow-export --reframe
+   recording --size 1080x1920 --from 2.000 --to 3.000`, and Cancel export stopped it.
+
+   **After Anton's try (2026-11-09),** on branch `claude/360-panel-input`, on top of this one:
+   - A take that reaches the clip's end plays the clip again by the recording, from its start, instead of the
+     playlist going on (above, under Stop).
+   - Over the side panel and the bar the 360 view's gestures are left alone (`gyroflow/gestures.lua`): the trackpad's
+     messages (`macos-gesture-messages`) are off while the mouse is beside the video, so the panel scrolls by the
+     wheel and the trackpad as before, and the VO doesn't turn the view by them either. A drag that starts over the
+     video goes on into the panel. Turned on from the panel (Look around), they start off.
+   - The panel's scroll bar can be held and dragged (and clicked beside the thumb); it's lit while held or under the
+     mouse.
+   Checked: `tests/view360_test.lua` (the gestures beside the video, the take to the clip's end and by hand, keep-open
+   given back), `tests/sidepanel_test.lua` (the scroll bar dragged both ways); the app's mpv headless: keep-open set
+   while playing keeps the clip at its end, a seek plays it again, and with keep-open back it ends into the next file.
+   On screen by Anton (2026-11-09) in a copy of the app with this branch: all three work.
+
+   **Open:** a click with a real mouse and trackpad (IPC's only so far); Shift+E still exports as it plays, not the
+   kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an hour is cut with an
+   ellipsis in the button's label.
 4. **Hold on what's in the middle:** the measurement, its cache and its progress.
 
    **Built** (branch `claude/360-reframe-steps2-5`), with these changes from the design above:
