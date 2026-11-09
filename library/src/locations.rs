@@ -153,6 +153,14 @@ pub fn local_file(id: &str) -> Option<PathBuf> {
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| base.join("ActionFootage/projects").join(format!("{id}.json")))
 }
 
+/// "I never rename my footage" (Project settings, this computer's choices, kept in its own file): a clip's name counts
+/// when it's looked for (checks.rs's find_clip)
+pub fn never_rename(project: &Path) -> bool {
+    let doc = read_json(&project.join(PROJECT_FILE)).unwrap_or(Value::Null);
+    doc.get("id").and_then(Value::as_str).and_then(local_file).and_then(|f| read_json(&f))
+        .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
+}
+
 fn from_json(list: Option<&Value>, project: &Path, hosts: Option<&Value>, mounts: &[(String, PathBuf)], local: bool) -> Vec<Location> {
     list.and_then(Value::as_array).into_iter().flatten().filter(|l| l.is_object()).map(|l| {
         let path = l.get("path").and_then(Value::as_str).unwrap_or("").to_string();

@@ -56,7 +56,8 @@
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
 --   sidecar_file    the clip's own file, its marks and saved view (sidecar.lua): beside the clip, in whichever of the
 --                   project's locations has it (a working copy's is the archive's clip's)
---   own_conflict    when the clip has two or more own files (in two locations): their paths; nothing is saved for it
+--   own_others      the clip's own files beside its other copies (in other locations): read, never written; the main
+--                   one is sidecar_file (workspace.lua's own_file)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
@@ -196,12 +197,14 @@ local function locations_of(root)
     if c and c.stamp == stamp then return c.list end
     local doc = fs.read_json(ws.join(root, workspace.PROJECT_FILE)) or {}
     local list = ws.locations(root, doc)
+    local never_rename = false
     -- This computer's own copies of the project's clips (the Library's On this computer), looked at first
     local id = type(doc.id) == "string" and doc.id:match("^[%w%-]+$")
     if id then
         local base = windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
                      or os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") or "") .. "/.config"
         local mine = fs.read_json(ws.join(ws.join(ws.join(base, "ActionFootage"), "projects"), id .. ".json"))
+        never_rename = mine and mine.never_rename == true
         if mine and type(mine.locations) == "table" then
             for i = #mine.locations, 1, -1 do
                 local l = mine.locations[i]
@@ -212,22 +215,30 @@ local function locations_of(root)
             end
         end
     end
-    locs_cache[root] = { stamp = stamp, list = list }
+    locs_cache[root] = { stamp = stamp, list = list, never_rename = never_rename }
     return list
 end
 fs.locations_of = locations_of
+-- "I never rename my footage" (the Library's Project settings, this computer's choices): a clip's name counts when
+-- it's looked for (moments.lua's original)
+fs.never_rename = function(root)
+    locations_of(root)
+    return locs_cache[root] ~= nil and locs_cache[root].never_rename
+end
+fs.created = link.created
 -- A file's path in its project's tree ("Action 6/A.MP4"): the location holding it, its place plus the path under it
 local function tree_of(file, root)
     if not file or not root then return nil end
     return ws.tree_path(file, locations_of(root))
 end
 local moments = moments_lib.new(ws, fs)
+-- The writer of a link's JSON in place (further down)
+local rewrite_link
 -- The clip's own file is wherever it is over the project's locations (workspace.lua's own_file): beside the archive's
 -- clip while its working copy plays; two of them, none written
 local state
 local function own_path(clip)
     if state and state.clip == clip and state.project then
-        if state.own_conflict then return nil, state.own_conflict end
         if state.sidecar_file then return state.sidecar_file end
     end
     local root = ws.project_root(clip)
@@ -280,6 +291,7 @@ local extras = nil
 -- The project's settings (further down)
 local settings
 local clips_layout, fingerprint
+fs.fingerprint = function(file) return fingerprint and fingerprint(file) or nil end
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
 -- Input and transform (transform.lua, docs/moments-and-workspaces.md "Source and transform"): the source's input is
@@ -335,6 +347,32 @@ local tracked_cache = setmetatable({}, {
     __newindex = function(_, k, v) cache[k] = v; cache_dirty = true end,
 })
 
+-- Where this computer last found a link's clip away from the path the link names (moments.lua's original), by the
+-- clip's identity: kept with the scan's cache
+fs.found_get = function(project, key)
+    local f = cache.found
+    return type(f) == "table" and f[project .. "\t" .. key] or nil
+end
+fs.found_set = function(project, key, tree)
+    if type(cache.found) ~= "table" then cache.found = {} end
+    cache.found[project .. "\t" .. key] = tree
+    cache_dirty = true
+end
+
+-- A link's clip (moments.lua's original); found away from the path the link names, the path is written into the
+-- link (docs/library-management.md §8), so that the next look finds it at once, from any computer. Not for a clip
+-- found in this computer's own copy, nor where the file can't be written (it's remembered here then)
+local function original_of(l, project, file)
+    local original, tree, loc, how = moments.original(l, project)
+    if original and tree and file and (how == "search" or how == "cache") and loc and not loc.here and tree ~= l.clip then
+        if rewrite_link(file, function(x) x.clip = tree end) then
+            mp.msg.info("found " .. tostring(l.clip) .. " at " .. tree .. ": written into " .. file)
+            l.clip = tree
+        end
+    end
+    return original
+end
+
 -- A project of before 0.9, its state folder: moved into Project.afproject the first time it's met (once a session)
 local migrated = {}
 local function migrate(root)
@@ -344,6 +382,7 @@ local function migrate(root)
 end
 
 -- What's known about the file at `path`, as published
+local told_others = {}
 local function describe(path)
     if not path or path == "" then return {} end
     if path:find("://", 1, true) then return { path = path } end
@@ -353,7 +392,7 @@ local function describe(path)
     local locs = locations_of(root)
     local tree = root and ws.tree_path(clip, locs) or nil
     -- Its own file and its Gyroflow project are the clip's wherever it is: looked for beside it in every location
-    local own, conflict = ws.own_file(clip, root and locs or nil)
+    local own, others = ws.own_file(clip, root and locs or nil)
     local gyroflow_projects = {}
     if tree then
         for _, c in ipairs(ws.files_at(tree, locs)) do
@@ -371,7 +410,7 @@ local function describe(path)
         gyroflow_projects = gyroflow_projects,
         gyroflow_new = gyroflow_new,
         sidecar_file = own,
-        own_conflict = conflict,
+        own_others = others and #others > 0 and others or nil,
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
         project_choices = not root and ws.project_choices(clip) or nil,
         project_new = not root and ws.new_project_root(clip) or nil,
@@ -426,7 +465,7 @@ local function refresh()
     scanned_project = project
     save_cache()
     local info = utils.file_info(state.clip)
-    local mine = moments.of_clip(found.list, { relative = state.relative, size = info and info.size, created = state.created })
+    local mine = moments.of_clip(found.list, { relative = state.relative, size = info and info.size, created = state.created, hash = state.hash })
     local list, chapters = {}, {}
     for _, m in ipairs(mine) do
         list[#list + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out,
@@ -465,7 +504,7 @@ local function open_moment(path)
     local l = utils.parse_json(raw)
     if type(l) == "table" and l.v == 1 and l.kind == "export" then
         -- It plays as it is (stabilized, in its look already); its original is a menu item
-        local original = moments.original(l, moments.project_of(state.clip, moments_lib.EXPORTS))
+        local original = original_of(l, moments.project_of(state.clip, moments_lib.EXPORTS), state.clip)
         state.export = { name = moments_lib.display_name(state.clip), original = original,
                          ["in"] = l["in"], out = l.out }
         return
@@ -473,7 +512,7 @@ local function open_moment(path)
     if type(l) == "table" and l.v == 1 and l.kind == "clip" then
         -- A clip preview: its original, all of it
         if before_autocreate() then return end
-        local original = moments.original(l, moments.project_of(state.clip, moments_lib.CLIPS))
+        local original = original_of(l, moments.project_of(state.clip, moments_lib.CLIPS), state.clip)
         if not original then
             mp.osd_message(moments_lib.display_name(state.clip) .. ": the clip isn't at " .. tostring(l.clip), 6)
             return
@@ -507,7 +546,7 @@ local function open_moment(path)
     local file = state.clip
     local name = moments_lib.display_name(file)
     local project = moments.project_of(file)
-    local original = moments.original(l, project)
+    local original = original_of(l, project, file)
     if not original then
         local where = project and ws.join(project, windows and tostring(l.clip):gsub("/", "\\") or tostring(l.clip)) or tostring(l.clip)
         mp.osd_message(name .. ": the original isn't at " .. where, 6)
@@ -581,12 +620,12 @@ mp.add_hook("on_load", 10, function()
             open_moment(path)
         end
     end
-    -- Two own files of this clip (in two of the project's locations): it plays with the first's, nothing is saved
-    if state.own_conflict then
-        local names = {}
-        for i, f in ipairs(state.own_conflict) do names[i] = f end
-        mp.msg.warn("two own files of this clip, nothing saved until one goes: " .. table.concat(names, ", "))
-        mp.osd_message("This clip has " .. #names .. " files of its own:\n" .. table.concat(names, "\n") .. "\nKeep one: until then nothing is saved for it", 8)
+    -- Other own files of this clip (beside its copies in other locations): the main one plays and is saved, they're
+    -- read only. Said once a session per clip
+    if state.own_others and not told_others[state.clip] then
+        told_others[state.clip] = true
+        mp.msg.warn("other own files of this clip, not written: " .. table.concat(state.own_others, ", ") .. "; saved to " .. tostring(state.sidecar_file))
+        mp.osd_message("This clip has another file of its own:\n" .. table.concat(state.own_others, "\n") .. "\nIt's not used: saved to\n" .. tostring(state.sidecar_file), 6)
     end
     -- The source's own file beside it: its input, always; its bundle, unless a link with settings of its own plays.
     -- An old file's input moves out of its view, and a link's input it didn't have yet goes into it
@@ -1867,7 +1906,7 @@ mp.register_script_message("cut-after", function()
 end)
 
 -- A link's JSON rewritten in place (afp-cut --set-key), fn changing it; true when written
-local function rewrite_link(file, fn)
+rewrite_link = function(file, fn)
     local exe = plugin_tool("afp-cut")
     local raw = exe and fs.read_link(file)
     local l = raw and utils.parse_json(raw)
@@ -2270,7 +2309,7 @@ local function marks_queue(kind, root)
                 end
             else
                 local taken = {}
-                for _, m in ipairs(moments.of_clip(all, { relative = c.relative, size = size })) do
+                for _, m in ipairs(moments.of_clip(all, { relative = c.relative, size = size, created = link.created(c.file) })) do
                     taken[#taken + 1] = { m.link["in"], m.link.out }
                 end
                 for _, p in ipairs(moments_lib.loose_parts(times, taken, movie and movie.duration, MOMENT_AROUND)) do
@@ -2494,7 +2533,7 @@ local function export_moments(root, sdr)
         if not m.name:match("^export_") and type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"]
            and in_only(ws.relative(m.file, root) or "")
            and not done[tostring(l.clip) .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] then
-            local original = moments.original(l, root)
+            local original = original_of(l, root, m.file)
             if original then
                 local movie = markers and markers.movie and markers.movie(original) or nil
                 local _, rendered = made_view_of(original, movie, l.stab)
@@ -2539,7 +2578,7 @@ local function render_moments(root, profiles)
     for _, m in ipairs(moments.scan(root, nil).list) do
         local l = m.link
         if type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"] and in_only(ws.relative(m.file, root) or "") then
-            local original = moments.original(l, root)
+            local original = original_of(l, root, m.file)
             if not original then
                 failures[#failures + 1] = { m.name, "its original isn't found" }
             else

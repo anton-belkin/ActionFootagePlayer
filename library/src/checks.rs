@@ -4,7 +4,8 @@
 // selected: a whole big project would take long (fingerprints are 2 MiB read per clip, off a NAS).
 //
 // What Check finds:
-//   own2      a clip with two own files (in two locations): the player saves nothing for it until one goes
+//   own2      a clip with two own files (in two locations): the first location's is the main one, the others are
+//             read, never written (docs/library-management.md §8)
 //   orphan    a clip's own file with no clip beside it (the clip moved without it)
 //   twice     the same clip (size and fingerprint) at two places in the tree
 //   missing   a moment's, clip preview's or export's original not found where its link says
@@ -33,6 +34,17 @@ pub fn fingerprint(path: &Path) -> Option<String> {
     f.read_exact(&mut buf).ok()?;
     h.update(&buf);
     Some(h.hex())
+}
+
+/// The same, kept while the file's size and time stay (a moved clip searched for again on each look reads nothing)
+pub fn fingerprint_kept(path: &Path) -> Option<String> {
+    static KEPT: std::sync::Mutex<Option<HashMap<PathBuf, (u64, std::time::SystemTime, Option<String>)>>> = std::sync::Mutex::new(None);
+    let m = std::fs::metadata(path).ok()?;
+    let st = (m.len(), m.modified().ok()?);
+    if let Some((s, t, h)) = KEPT.lock().unwrap().get_or_insert_with(HashMap::new).get(path) { if (*s, *t) == st { return h.clone(); } }
+    let h = fingerprint(path);
+    KEPT.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (st.0, st.1, h.clone()));
+    h
 }
 
 // ---- SHA-256 (no crate for one hash) ----
@@ -85,7 +97,47 @@ impl Sha256 {
     }
 }
 
-struct Clip { tree: String, path: PathBuf, size: u64 }
+pub struct Clip { pub tree: String, pub path: PathBuf, pub size: u64, pub local: bool }
+
+impl Clip {
+    fn name(&self) -> &str { self.tree.rsplit('/').next().unwrap_or(&self.tree) }
+}
+
+/// The clip a link names ({ clip, size, created, hash }), by what it is (docs/library-management.md §8), among the
+/// project's clips: only those of its size (sources never change), the steps in Anton's order, each taken while it
+/// leaves one: name, size and creation time; size and creation time; name and size; size alone. With the link's
+/// fingerprint, each step's clips are compared by it (its name's first), so nothing is a guess. `ask`: the last
+/// step's clips are given back to choose from when there are several (Find moved files); else only a match by
+/// fingerprint, or the one match of a step with the creation time or the name, is taken; with "I never rename my
+/// footage" (`never_rename`) only the steps with the name.
+/// -> the clip, how it was found, the clips to choose from
+pub fn find_clip<'a>(link: &Value, clips: &'a [Clip], ask: bool, never_rename: bool, fp: &mut dyn FnMut(&Path) -> Option<String>,
+                     made: &mut dyn FnMut(&Path) -> Option<i64>) -> (Option<&'a Clip>, &'static str, Vec<&'a Clip>) {
+    let Some(size) = link["size"].as_u64() else { return (None, "", Vec::new()) };
+    let name = link["clip"].as_str().map(|c| c.rsplit('/').next().unwrap_or(c).to_lowercase()).unwrap_or_default();
+    let mut cands: Vec<&Clip> = clips.iter().filter(|c| c.size == size).collect();
+    if cands.is_empty() { return (None, "", Vec::new()) }
+    if let Some(h) = link["hash"].as_str().filter(|h| !h.is_empty()) {
+        cands.sort_by_key(|c| (c.name().to_lowercase() != name, c.local));
+        let hit = cands.into_iter().find(|c| fp(&c.path).as_deref() == Some(h));
+        return (hit, if hit.is_some() { "fingerprint" } else { "" }, Vec::new());
+    }
+    let want = link["created"].as_str().and_then(crate::index::parse_time);
+    let mut times: HashMap<PathBuf, Option<i64>> = HashMap::new();
+    let mut at = |c: &Clip| *times.entry(c.path.clone()).or_insert_with(|| made(&c.path));
+    let same_name = |c: &Clip| c.name().to_lowercase() == name;
+    let steps: [(&'static str, bool, bool); 4] = [("name, size and creation time", true, true), ("size and creation time", false, true),
+                                                    ("name and size", true, false), ("size alone", false, false)];
+    for (by, by_name, by_time) in steps {
+        if by_time && want.is_none() { continue; }
+        if !ask && never_rename && !by_name { continue; }
+        let hit: Vec<&Clip> = cands.iter().copied().filter(|c| (!by_name || same_name(c)) && (!by_time || at(c) == want)).collect();
+        if hit.len() == 1 && (ask || by_time || by_name) { return (Some(hit[0]), by, Vec::new()); }
+        if hit.len() > 1 && (by_time || by_name) && !(by_name && by_time) { return (None, by, if ask { hit } else { Vec::new() }); }
+        if !by_name && !by_time && ask && hit.len() > 1 { return (None, by, hit); }
+    }
+    (None, "", Vec::new())
+}
 
 fn is_video(name: &str) -> bool {
     let l = name.to_lowercase();
@@ -94,7 +146,7 @@ fn is_video(name: &str) -> bool {
 const OWN: [&str; 9] = ["_moments", "_clips", "_exports", "_stills", "moments", "clips", "exports", "stabilized", "_actionfootageplayer"];
 
 /// Every clip of the project, at its tree path (all copies), and every own file found on the way
-fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
+pub fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
     let mut clips = Vec::new();
     let mut owns = Vec::new();
     for l in locs {
@@ -111,7 +163,7 @@ fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
                     if depth == 0 && OWN.contains(&name.to_lowercase().as_str()) { continue; }
                     if depth < 8 { todo.push((e.path(), r, depth + 1)); }
                 } else if is_video(&name) {
-                    clips.push(Clip { tree, path: e.path(), size: m.len() });
+                    clips.push(Clip { tree, path: e.path(), size: m.len(), local: l.local });
                 } else if name.to_lowercase().ends_with(".afp.json") || name.to_lowercase().ends_with(".marks.json") {
                     owns.push((tree, e.path()));
                 }
@@ -171,7 +223,7 @@ pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
             if !beside {
                 let doc = locations::read_json(f).unwrap_or(Value::Null);
                 issues.push(json!({ "kind": "orphan", "file": f.display().to_string(), "tree": tree,
-                                    "size": doc["clip"]["size"], "hash": doc["clip"]["hash"] }));
+                                    "size": doc["clip"]["size"], "hash": doc["clip"]["hash"], "created": doc["clip"]["created"] }));
             }
         }
         let with_clip: Vec<&&PathBuf> = files.iter().filter(|f| { let b = f.to_string_lossy(); let s = b.trim_end_matches(".afp.json").trim_end_matches(".marks.json").to_string(); ["MP4", "mp4", "MOV", "mov"].iter().any(|e| Path::new(&format!("{s}.{e}")).is_file()) }).collect();
@@ -210,27 +262,23 @@ pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
     json!({ "issues": issues, "clips": clips.len() })
 }
 
-/// Find moved files: for each missing original and orphan own file of `issues`, the clip it's now: same size in the
-/// project's locations, then the same fingerprint (or the only one of that size when there's no fingerprint to
-/// compare). [{ issue, found: [tree, path] | null, by }]
+/// Find moved files: for each missing original and orphan own file of `issues`, the clip it's now (find_clip, its
+/// steps; the last one's clips to choose from when there are several). [{ issue, found: { tree, path } | null, by,
+/// candidates: [{ tree, path }] }]
 pub fn find_moved(root: &Path, issues: &[Value]) -> Value {
     let mounts = locations::mounts();
     let locs = locations::locations(root, &mounts);
     let (clips, _) = footage(&locs);
-    let mut by_size: HashMap<u64, Vec<&Clip>> = HashMap::new();
-    for c in &clips { by_size.entry(c.size).or_default().push(c); }
+    let mut prints: HashMap<PathBuf, Option<String>> = HashMap::new();
+    let mut fp = |p: &Path| prints.entry(p.to_path_buf()).or_insert_with(|| fingerprint_kept(p)).clone();
+    let mut made = |p: &Path| crate::index::created(p);
     let mut out = Vec::new();
     for i in issues.iter().filter(|i| matches!(i["kind"].as_str(), Some("missing" | "orphan"))) {
-        let (size, hash) = if i["kind"] == "missing" { (i["link"]["size"].as_u64(), i["link"]["hash"].as_str()) } else { (i["size"].as_u64(), i["hash"].as_str()) };
-        let cands: Vec<&Clip> = size.and_then(|s| by_size.get(&s)).map(|v| v.to_vec()).unwrap_or_default();
-        let mut found: Option<&Clip> = None;
-        let mut by = "";
-        if let Some(h) = hash {
-            for c in &cands { if fingerprint(&c.path).as_deref() == Some(h) { found = Some(c); by = "fingerprint"; break; } }
-        } else if cands.len() == 1 {
-            found = Some(cands[0]); by = "size alone";
-        }
-        out.push(json!({ "issue": i, "found": found.map(|c| json!({ "tree": c.tree, "path": c.path.display().to_string() })), "by": by }));
+        let link = if i["kind"] == "missing" { i["link"].clone() }
+            else { json!({ "clip": i["tree"], "size": i["size"], "hash": i["hash"], "created": i["created"] }) };
+        let (found, by, choose) = find_clip(&link, &clips, true, false, &mut fp, &mut made);
+        let place = |c: &Clip| json!({ "tree": c.tree, "path": c.path.display().to_string() });
+        out.push(json!({ "issue": i, "found": found.map(place), "by": by, "candidates": choose.into_iter().map(place).collect::<Vec<_>>() }));
     }
     json!(out)
 }
@@ -297,6 +345,33 @@ pub fn apply(root: &Path, found: &[Value], relink: &dyn Fn(&Path, &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn found_by_what_it_is() {
+        let clip = |tree: &str, size: u64| Clip { tree: tree.into(), path: PathBuf::from(format!("/x/{tree}")), size, local: false };
+        let clips = vec![clip("New/D.MP4", 5), clip("New/E.MP4", 5), clip("Trip/X.MP4", 3), clip("Trip/Y.MP4", 3), clip("G.MP4", 6)];
+        let t0 = crate::index::parse_time("2026-10-24T06:45:41Z").unwrap();
+        let times: HashMap<&str, i64> = [("/x/New/D.MP4", t0 + 5), ("/x/New/E.MP4", t0 + 9), ("/x/G.MP4", t0)].into_iter().collect();
+        let mut fp = |p: &Path| Some(if p.ends_with("Trip/Y.MP4") { "h1".to_string() } else { "h2".to_string() });
+        let mut made = |p: &Path| times.get(p.to_str().unwrap()).copied();
+        let find = |l: Value, ask: bool, nr: bool, fp: &mut dyn FnMut(&Path) -> Option<String>, made: &mut dyn FnMut(&Path) -> Option<i64>| {
+            let (c, by, ch) = find_clip(&l, &clips, ask, nr, fp, made);
+            (c.map(|c| c.tree.clone()), by, ch.len())
+        };
+        // The fingerprint decides, whatever the name and time
+        assert_eq!(find(json!({ "clip": "Day 1/X.MP4", "size": 3, "hash": "h1", "created": "1999-01-01T00:00:00Z" }), false, true, &mut fp, &mut made), (Some("Trip/Y.MP4".into()), "fingerprint", 0));
+        assert_eq!(find(json!({ "clip": "X.MP4", "size": 3, "hash": "h9" }), true, false, &mut fp, &mut made).0, None);
+        // Without one: creation time; changed, the name; size alone only when asked
+        assert_eq!(find(json!({ "clip": "Old/Q.MP4", "size": 5, "created": "2026-10-24T06:45:50Z" }), false, false, &mut fp, &mut made), (Some("New/E.MP4".into()), "size and creation time", 0));
+        assert_eq!(find(json!({ "clip": "Old/D.MP4", "size": 5, "created": "2025-01-01T00:00:00Z" }), false, false, &mut fp, &mut made), (Some("New/D.MP4".into()), "name and size", 0));
+        assert_eq!(find(json!({ "clip": "Old/F.MP4", "size": 6, "created": "2025-01-01T00:00:00Z" }), false, false, &mut fp, &mut made).0, None);
+        assert_eq!(find(json!({ "clip": "Old/F.MP4", "size": 6, "created": "2025-01-01T00:00:00Z" }), true, false, &mut fp, &mut made), (Some("G.MP4".into()), "size alone", 0));
+        assert_eq!(find(json!({ "clip": "Old/Q.MP4", "size": 5 }), true, false, &mut fp, &mut made), (None, "size alone", 2));
+        // "I never rename my footage": not by time alone
+        assert_eq!(find(json!({ "clip": "Old/Q.MP4", "size": 5, "created": "2026-10-24T06:45:50Z" }), false, true, &mut fp, &mut made).0, None);
+        assert_eq!(crate::index::parse_time("2026-10-24T09:45:41+03:00"), Some(t0));
+        assert_eq!(crate::index::parse_time("2026-10-24T06:45:41.000000Z"), Some(t0));
+    }
 
     #[test]
     fn sha256_and_fingerprint() {

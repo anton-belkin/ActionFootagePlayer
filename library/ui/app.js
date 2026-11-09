@@ -739,7 +739,7 @@ function renderSide() {
 const KIND_TEXT = { own2: ["warn", "2 own files"], orphan: ["stale", "no clip"], twice: ["stale", "twice"], missing: ["warn", "original missing"] };
 function issueText(i) {
   const short = (p) => String(p || "").split("/").slice(-2).join("/");
-  if (i.kind === "own2") return i.tree + " has its own file in " + i.files.length + " places: " + i.files.map(short).join(", ") + ". Nothing is saved for it until one goes.";
+  if (i.kind === "own2") return i.tree + " has its own file in " + i.files.length + " places: " + i.files.map(short).join(", ") + ". The first location’s is used and saved; the others are only read: delete them.";
   if (i.kind === "orphan") return short(i.file) + " has no clip beside it. Find moved files puts it back by the clip’s fingerprint.";
   if (i.kind === "twice") return "The same clip at " + i.trees.join(" and ") + ". Delete one.";
   if (i.kind === "missing") return short(i.file) + ": its original isn’t at " + i.tree + ".";
@@ -758,7 +758,11 @@ function checksSection(c) {
   if (S.found) {
     const ok = S.found.filter((f) => f.found);
     body += '<div class="result"><b>Found ' + ok.length + ' of ' + S.found.length + '</b>' +
-      S.found.map((f) => '<div class="it"><span class="mono">' + esc(f.issue.tree) + (f.found ? '<br>→ ' + esc(f.found.tree) + ' <span class="sub" style="display:inline">(' + esc(f.by) + ')</span>' : '<br>not found') + '</span></div>').join("") +
+      S.found.map((f, i) => '<div class="it"><span class="mono">' + esc(f.issue.tree) +
+        (f.found ? '<br>→ ' + esc(f.found.tree) + ' <span class="sub" style="display:inline">(' + esc(f.by) + ')</span>'
+          : (f.candidates || []).length ? '<br><span class="sub" style="display:inline">' + f.candidates.length + ' of the same ' + esc(f.by) + ', choose:</span>' +
+            f.candidates.map((c, j) => '<br><button type="button" class="btn sm" data-a="pickmoved" data-v="' + i + ':' + j + '">' + esc(c.tree) + '</button>').join("")
+          : '<br>not found') + '</span></div>').join("") +
       (ok.length ? '<div class="btns"><button type="button" class="btn sm pri" data-a="applymoved">Update ' + ok.length + '</button></div>' : "") + '</div>';
   }
   return sec("checks", "Checks", "issues, moved files", body);
@@ -846,6 +850,7 @@ async function openSettings() {
   const ptr = st.name + ".afplocation";
   S.locEdit = st.locations.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies,
     st: (l.reachable ? "Reachable" : "Not reachable here") + (l.pointer ? " · " + ptr + " in it" : l.reachable ? " · its " + ptr + " is written on Save" : "") }));
+  S.neverRename = !!st.never_rename;
   S.localEdit = st.local.map((l) => ({ name: l.name, at: l.at, path: l.path, bytes: l.bytes, files: l.files, reachable: l.reachable }));
   S.hostsText = hostsToText(st.hosts);
   S.sheet = "settings";
@@ -926,6 +931,8 @@ function renderSheet() {
       h += '<div class="kv"><span style="min-width:0"><span class="nm">' + esc(l.path) + '</span><span class="sub">In the tree at ' + esc(l.at ? l.at + "/" : "the top") + (l.reachable === false ? " · not there now" : "") + '</span></span><span class="num">' + (l.files != null ? l.files + " files · " + sizeText(l.bytes) : "") + '</span><button type="button" class="btn sm" data-a="localrm" data-v="' + i + '">Remove</button></div>';
     });
     h += '<div class="btns"><button type="button" class="btn sm" data-a="localadd">Add a local copy…</button></div>' +
+      '<div class="lab">Finding moved clips</div>' +
+      '<label class="switch"><input type="checkbox" id="neverrename" data-a="neverrename"' + (S.neverRename ? " checked" : "") + '><span class="wrap">I never rename my footage: a clip that moved is found by its name too, not by its size and recording time alone. A fingerprint, where a link has one, decides either way.</span></label>' +
       '<div class="lab">Caches on this computer, for all projects</div><div class="kv">';
     for (const c of st.caches) h += '<span style="min-width:0"><span class="nm">' + esc(c.key) + '</span><span class="sub">' + esc(c.what) + '</span></span><span class="num">' + c.files + " files · " + sizeText(c.bytes) + '</span><button type="button" class="btn sm" data-a="clearcache" data-v="' + esc(c.key) + '"' + (c.files ? "" : " disabled") + '>Clear</button>';
     h += '</div></div><footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Close</button><button type="button" class="btn pri" data-a="savelocal">Save</button></footer>';
@@ -1661,6 +1668,7 @@ document.addEventListener("click", async (e) => {
     case "untag": return setTags([], [v]);
     case "findmoved": return findMoved();
     case "applymoved": return applyMoved();
+    case "pickmoved": { const [i, j] = String(v).split(":").map(Number); const f = S.found && S.found[i]; if (f && f.candidates[j]) { f.found = f.candidates[j]; f.by = "chosen"; renderSide(); } return; }
     case "scrim": if (e.target !== el) return; S.sheet = null; renderSheet(); return;
     case "closesheet": S.sheet = null; renderSheet(); return;
     case "stab": S.stab = v; renderSheet(); return;
@@ -1672,7 +1680,7 @@ document.addEventListener("click", async (e) => {
     case "savelocs": return saveLocations();
     case "localadd": { const d = await call("choose_local").catch(() => null); if (d) { S.localEdit.push({ name: "On this computer", at: "", path: d }); renderSheet(); } return; }
     case "localrm": S.localEdit.splice(+v, 1); renderSheet(); return;
-    case "savelocal": try { await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })) }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
+    case "savelocal": try { const nr = $("neverrename"); await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })), neverRename: nr ? nr.checked : S.neverRename }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
     case "clearcache": try { await invoke("clear_cache", { key: v }); toast("Cleared"); await openSettings(); } catch (er) { showError(String(er)); } return;
     case "exportjson": {
       S.menu = false; renderTop();
@@ -1709,6 +1717,7 @@ document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
+  if (a === "neverrename") { S.neverRename = el.checked; return; }
   if (a === "prof") { S.profiles[v] = el.checked; renderSide(); return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;

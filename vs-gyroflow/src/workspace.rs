@@ -198,18 +198,20 @@ pub fn files_at<'a>(tree: &str, locations: &'a [Location]) -> Vec<(PathBuf, &'a 
     out
 }
 
-/// Where the clip's own file is over the locations: the one there is, else beside the clip in the first location that
-/// has it and isn't copies only. Err: two or more (nothing is saved for the clip until one goes)
-pub fn own_file(clip: &Path, locations: &[Location]) -> Result<PathBuf, Vec<PathBuf>> {
-    let Some(tree) = tree_path(clip, locations) else { return Ok(sidecar_file(clip)) };
-    let copies = files_at(&tree, locations);
-    let mut found: Vec<PathBuf> = copies.iter().map(|(f, _)| sidecar_file(f)).filter(|o| o.is_file()).collect();
-    if found.is_empty() {
-        found = copies.iter().filter(|(f, _)| f.with_extension("marks.json").is_file()).map(|(f, _)| sidecar_file(f)).collect();
-    }
-    if found.len() > 1 { return Err(found); }
+/// Where the clip's own file is over the locations, decided the same way on every computer (docs/library-management.md
+/// §8): the copies in the library's locations in their order, then the copies-only ones; the main file is beside the
+/// first copy that has one; none has one: beside the first copy that isn't copies only (where the first save writes
+/// it). Second: the other copies' files, read never written
+pub fn own_file(clip: &Path, locations: &[Location]) -> (PathBuf, Vec<PathBuf>) {
+    let Some(tree) = tree_path(clip, locations) else { return (sidecar_file(clip), Vec::new()) };
+    let mut copies = files_at(&tree, locations);
+    copies.sort_by_key(|(_, l)| l.copies);
+    let mut found: Vec<PathBuf> = copies.iter().map(|(f, _)| sidecar_file(f))
+        .filter(|o| o.is_file() || o.with_extension("").with_extension("marks.json").is_file()).collect();
     let home = copies.iter().find(|(_, l)| !l.copies).map(|(f, _)| sidecar_file(f));
-    Ok(found.pop().or(home).unwrap_or_else(|| sidecar_file(clip)))
+    if found.is_empty() { return (home.unwrap_or_else(|| sidecar_file(clip)), Vec::new()) }
+    let main = found.remove(0);
+    (main, found)
 }
 
 fn projects_in(dir: &Path) -> Vec<PathBuf> {
@@ -404,7 +406,11 @@ mod tests {
                     }
                     "own" => {
                         let locs = project_root_in(clip, Some(&home)).map(|r| locations(&r)).unwrap_or_default();
-                        Some(match own_file(clip, &locs) { Ok(p) => p.display().to_string(), Err(_) => "conflict".into() })
+                        Some(own_file(clip, &locs).0.display().to_string())
+                    }
+                    "others" => {
+                        let locs = project_root_in(clip, Some(&home)).map(|r| locations(&r)).unwrap_or_default();
+                        Some(own_file(clip, &locs).1.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("|"))
                     }
                     "new" => Some(new_project_root(clip).display().to_string()),
                     "gyroflow" => gyroflow_project(clip).map(|p| p.display().to_string()),
@@ -414,7 +420,8 @@ mod tests {
                 };
                 let want = match key {
                     "relative" | "projects" => Some(value.to_string()),
-                    "own" if value == "conflict" => Some(value.to_string()),
+                    "others" if value == "-" => Some(String::new()),
+                    "others" => Some(value.split('|').filter_map(|v| at(&base, v)).map(|p| p.display().to_string()).collect::<Vec<_>>().join("|")),
                     "original" => at(&base, value.split_inclusive(".MP4").nth(1).unwrap_or("").trim()).map(|p| p.display().to_string()),
                     _ => at(&base, value).map(|p| p.display().to_string()),
                 };

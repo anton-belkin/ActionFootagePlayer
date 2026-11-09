@@ -21,13 +21,14 @@ fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
     std::fs::write(&tmp, serde_json::to_vec(doc).unwrap()).and_then(|_| std::fs::rename(&tmp, file)).map_err(|e| format!("{}: {e}", file.display()))
 }
 
-/// A clip's own file over the project's locations (workspace.rs's own_file): the one there is, else beside the clip
-/// in the first location that has it and isn't copies only. Err: two of them
+/// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
+/// copies in the library's locations in their order, then copies-only and this computer's own; the main file is beside
+/// the first copy that has one, else beside the first copy that isn't copies only or local
 pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
     let locs = locations::locations(root, &locations::mounts());
-    let copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies))).collect();
+    let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies || l.local))).collect();
+    copies.sort_by_key(|(_, late)| *late);
     let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| f.with_extension("afp.json").is_file()).collect();
-    if found.len() > 1 { return Err(format!("{tree} has {} own files: keep one first", found.len())); }
     let clip = found.first().map(|f| (*f).clone()).or_else(|| copies.iter().find(|(_, c)| !c).map(|(f, _)| f.clone()))
         .or_else(|| copies.first().map(|(f, _)| f.clone())).ok_or(format!("{tree} isn't in the project's locations"))?;
     Ok((clip.with_extension("afp.json"), clip))
@@ -112,9 +113,11 @@ mod tests {
         // Removed: B's file, holding nothing else, goes
         assert!(set(&p, &items[1..2], &[], &["TURTLE".into(), "best".into()], &|_, _| Ok(())).is_empty());
         assert!(!a.join("Day 1/B.afp.json").exists());
-        // Two own files: refused
+        // Two own files: the archive's is the main one (the working folder is copies only), the other isn't touched
         std::fs::write(w.join("Day 1/A.afp.json"), "{}").unwrap();
-        assert_eq!(set(&p, &items[..1], &["x".into()], &[], &|_, _| Ok(())).len(), 1);
+        assert!(set(&p, &items[..1], &["x".into()], &[], &|_, _| Ok(())).is_empty());
+        assert_eq!(locations::read_json(&a.join("Day 1/A.afp.json")).unwrap()["tags"], json!(["turtle", "best", "x"]));
+        assert_eq!(std::fs::read_to_string(w.join("Day 1/A.afp.json")).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(&top);
     }
 }

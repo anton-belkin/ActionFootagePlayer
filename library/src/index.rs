@@ -99,6 +99,47 @@ fn mem_boxes(s: &[u8], first: usize, last: usize) -> Vec<([u8; 4], usize, usize)
     out
 }
 
+/// A video's own creation time (moov/mvhd), unix seconds: what ffmpeg and mpv show as creation_time and links keep as
+/// `created`. Written by the camera inside the file, so a copy, a move or a restore from a backup keeps it
+pub fn created(path: &Path) -> Option<i64> {
+    let mut f = File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let (_, a, b) = file_boxes(&mut f, 0, size).into_iter().find(|(t, _, _)| t == b"moov")?;
+    let (_, ma, _) = file_boxes(&mut f, a, b).into_iter().find(|(t, _, _)| t == b"mvhd")?;
+    let mut h = [0u8; 12];
+    f.seek(SeekFrom::Start(ma)).ok()?;
+    f.read_exact(&mut h).ok()?;
+    let t = if h[0] == 1 { u64::from_be_bytes(h[4..12].try_into().unwrap()) } else { u32::from_be_bytes(h[4..8].try_into().unwrap()) as u64 };
+    (t > 0).then(|| t as i64 - 2_082_844_800)
+}
+
+/// A link's `created` ("2026-10-22T13:28:42.000000Z", "2026-10-22T15:28:42+02:00"), unix seconds
+pub fn parse_time(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 { return None; }
+    let n = |r: std::ops::Range<usize>| s.get(r).and_then(|x| x.parse::<i64>().ok());
+    let (y, mo, d, h, mi, se) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    let mut rest = &s[19..];
+    if rest.starts_with('.') { rest = rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit()); }
+    let offset = match rest {
+        "" | "Z" | "z" => 0,
+        r => {
+            let sign = if r.starts_with('-') { -1 } else if r.starts_with('+') { 1 } else { return None };
+            let digits: String = r[1..].chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.len() != 4 { return None; }
+            sign * (digits[0..2].parse::<i64>().ok()? * 60 + digits[2..4].parse::<i64>().ok()?)
+        }
+    };
+    // Days from 1970-01-01 (Howard Hinnant's days_from_civil)
+    let yy = if mo <= 2 { y - 1 } else { y };
+    let era = if yy >= 0 { yy } else { yy - 399 } / 400;
+    let yoe = yy - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + h * 3600 + mi * 60 + se - offset * 60)
+}
+
 /// The moov box's body, read whole (a preview's is some hundred KB with its cover), None when too big or missing
 fn moov(path: &Path) -> Option<Vec<u8>> {
     let mut f = File::open(path).ok()?;
@@ -317,7 +358,20 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     // Photos' tags are kept in the project's file (a HEIC's own metadata isn't written here)
     // A moment's original, through the project's locations (the first that has it)
     let locs = if view == "moments" { crate::locations::locations(root, &crate::locations::mounts()) } else { Vec::new() };
-    let original_of = |tree: &str| -> Option<PathBuf> { locs.iter().filter_map(|l| crate::locations::in_location(tree, l)).find(|f| f.is_file()) };
+    let at_hint = |link: &Value| -> Option<PathBuf> {
+        let tree = link["clip"].as_str()?;
+        locs.iter().filter_map(|l| crate::locations::in_location(tree, l))
+            .find(|f| std::fs::metadata(f).is_ok_and(|m| m.is_file() && link["size"].as_u64().is_none_or(|s| s == m.len())))
+    };
+    // Not at its path: looked for by what it is (checks.rs's find_clip), the footage listed once for the view
+    let never_rename = view == "moments" && crate::locations::never_rename(root);
+    let mut clips: Option<Vec<crate::checks::Clip>> = None;
+    let mut original_of = |link: &Value| -> (Option<PathBuf>, Option<String>) {
+        if let Some(f) = at_hint(link) { return (Some(f), None); }
+        let list = clips.get_or_insert_with(|| crate::checks::footage(&locs).0);
+        let (hit, _, _) = crate::checks::find_clip(link, list, false, never_rename, &mut |p| crate::checks::fingerprint_kept(p), &mut |p| created(p));
+        match hit { Some(c) => (Some(c.path.clone()), (!c.local).then(|| c.tree.clone())), None => (None, None) }
+    };
     let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
     let skip = |_: &str, _: &str| false;
     let entries = walk(&base, &skip);
@@ -339,7 +393,10 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 it["tags"] = it["link"].get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 it["gyroflow"] = json!(has_gyroflow(&path));
                 it["renders"] = renders_of(root, rel, &path, &it["link"]);
-                it["original"] = it["link"]["clip"].as_str().and_then(&original_of).map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
+                let (original, moved_to) = original_of(&it["link"]);
+                it["original"] = original.map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
+                // Found away from the path its link names: the new path, written into the link (main.rs's scan)
+                if let Some(t) = moved_to { it["relink"] = json!(t); }
             }
             "stills" => {
                 let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
@@ -621,6 +678,22 @@ mod tests {
         assert_eq!(clip_preview_relative("DCIM/100MEDIA/GX01.MP4", false), "GX01.afplink.mp4");
         assert_eq!(clip_preview_relative("Card/DCIM/DJI_001/D.MP4", false), "Card/D.afplink.mp4");
         assert_eq!(clip_preview_relative("Day 1/A.MP4", true), "A.afplink.mp4");
+    }
+
+    #[test]
+    fn creation_time_from_mvhd() {
+        let bx = |t: &[u8], body: &[u8]| { let mut v = ((8 + body.len()) as u32).to_be_bytes().to_vec(); v.extend_from_slice(t); v.extend_from_slice(body); v };
+        let t0 = parse_time("2026-10-22T13:28:42Z").unwrap();
+        let mut mvhd = vec![0u8; 4];
+        mvhd.extend_from_slice(&((t0 + 2_082_844_800) as u32).to_be_bytes());
+        mvhd.extend_from_slice(&[0u8; 92]);
+        let mut file = bx(b"ftyp", b"isom\0\0\0\0isom");
+        file.extend(bx(b"mdat", &[1u8; 64]));
+        file.extend(bx(b"moov", &bx(b"mvhd", &mvhd)));
+        let p = std::env::temp_dir().join(format!("afl-created-{}.mp4", std::process::id()));
+        std::fs::write(&p, file).unwrap();
+        assert_eq!(created(&p), Some(t0));
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]

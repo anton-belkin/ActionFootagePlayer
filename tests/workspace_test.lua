@@ -112,8 +112,13 @@ for _, c in ipairs(cases) do
                 local got = ws.files_at(tree, ws.locations(ws.project_root(path)))[1]
                 expect(what, got and got.file, in_base(file))
             elseif key == "own" then
-                local own, list = ws.own_file(path, ws.locations(ws.project_root(path)))
-                expect(what, own or (list and "conflict"), value == "conflict" and "conflict" or in_base(value))
+                local own = ws.own_file(path, ws.locations(ws.project_root(path)))
+                expect(what, own, in_base(value))
+            elseif key == "others" then
+                local _, others = ws.own_file(path, ws.locations(ws.project_root(path)))
+                local want = {}
+                if value ~= "-" then for f in value:gmatch("[^|]+") do want[#want + 1] = in_base(f) end end
+                expect(what, table.concat(others, "|"), table.concat(want, "|"))
             elseif key == "new" then
                 expect(what, ws.new_project_root(path), in_base(value))
             elseif key == "gyroflow" then

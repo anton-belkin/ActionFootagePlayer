@@ -482,7 +482,17 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     let flat = project_info(&root).clips_layout != "tree";
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let out = index::scan(&root, &view, flat);
+        let mut out = index::scan(&root, &view, flat);
+        // Moments whose clip was found away from the path their link names: the path written into the link
+        // (docs/library-management.md §8), so the next look, from any computer, finds it at once
+        let tool = link_tool();
+        for it in out["items"].as_array_mut().into_iter().flatten() {
+            let (Some(to), Some(file)) = (it["relink"].as_str().map(str::to_string), it["path"].as_str().map(PathBuf::from)) else { continue };
+            let mut l = it["link"].clone();
+            l["clip"] = json!(to);
+            if write_link(tool.as_ref(), &file, &l.to_string()).is_ok() { it["link"] = l; }
+            it.as_object_mut().unwrap().remove("relink");
+        }
         let mut want: Vec<String> = Vec::new();
         for it in out["items"].as_array().into_iter().flatten() {
             match it["kind"].as_str() {
@@ -585,6 +595,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         let caches: Vec<Value> = caches(&app).into_iter().map(|(k, what, dir)| { let (b, f) = dir_size(&dir); json!({ "key": k, "what": what, "path": dir.display().to_string(), "bytes": b, "files": f }) }).collect();
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
+                   "never_rename": locations::never_rename(&root),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
 }
@@ -631,7 +642,7 @@ fn choose_local(shared: State<Shared>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn save_local(shared: State<Shared>, list: Vec<Value>) -> Result<(), String> {
+fn save_local(shared: State<Shared>, list: Vec<Value>, never_rename: Option<bool>) -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let id = project_id(&root)?;
     let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
@@ -640,8 +651,12 @@ fn save_local(shared: State<Shared>, list: Vec<Value>) -> Result<(), String> {
         (!p.is_empty()).then(|| json!({ "name": l.get("name").and_then(Value::as_str).unwrap_or("On this computer"), "at": l.get("at").and_then(Value::as_str).unwrap_or("").trim_matches('/'), "path": p }))
     }).collect();
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
-    if clean.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
-    std::fs::write(&file, serde_json::to_vec_pretty(&json!({ "project": root.display().to_string(), "locations": clean })).unwrap()).map_err(|e| e.to_string())
+    // "I never rename my footage": kept, unless this save says otherwise
+    let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
+    if clean.is_empty() && !never_rename { let _ = std::fs::remove_file(&file); return Ok(()); }
+    let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
+    if never_rename { doc["never_rename"] = json!(true); }
+    std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -552,22 +552,27 @@ into the photos, the old file is kept beside it once as `Project.afproject.befor
 ### A link finds its clip by what the clip is
 
 Every link (moment, clip preview, export, render, photo) already carries what identifies its clip: `clip` (its path in
-the tree), `size`, `created` (the MP4's own `creation_time`, written by the camera inside the file) and `hash` (SHA-256
-of its first and last MiB; links older than it have none). From now on:
+the tree), `size`, `created` (the MP4's own `creation_time`, written by the camera inside the file, in `moov/mvhd`:
+not the file system's dates, which a copy, an archive or a restore from a backup may change) and `hash` (SHA-256 of
+its first and last MiB; links older than it have none). The rule under all of it: **sources never change**, so their
+size, fingerprint and own creation time don't either. From now on:
 
 - **`clip` is where it was last seen**, a hint to look first. Nothing depends on it being right, but it's **kept up to
   date** (Anton): when the clip is found elsewhere (opening a moment, the Library's look, a repair), the new path in
   the tree is written into the link, so the next time it's found at once, from any computer.
   - Written in place: a moment's, preview's, export's or render's MP4 key (as tags are now, the `moov` keeping its
-    size), a photo's XMP (with the same writer as its tags). The file's modification time is put back, so Finder's
-    order by date and the caches don't see a change of content.
+    size), a photo's XMP (with the same writer as its tags). The file's modification time changes, and is left so:
+    the player's and the Library's caches of what's in a file go by its size and time, and with the time put back
+    the other one wouldn't read the new path.
   - Only a path in the library: a clip found in this computer's own location (a local copy) leaves the hint as it
     is, since other computers can't see it there.
   - A file that can't be written (a read-only share, a card) keeps its old hint; the cache on this computer remembers
     where it was found.
-- **The clip is the file that matches the criteria.** By default **size and `created`**, the `hash` deciding between
-  candidates and confirming a find away from the hint. With **"I never rename my footage"** ticked (Project settings,
-  this computer's choices), the **name** counts too (the hint's last part), and the hash is read only on a tie.
+- **The clip is the file that matches the criteria**, only the files of the link's size. With a `hash`, it decides:
+  each candidate's fingerprint is compared, the ones with the link's name first; `created` isn't needed. Without one
+  (older links): name, size and `created`, then size and `created`, then name and size, each taken while it leaves
+  one; never size alone, which would be a guess (Find moved files offers it, to confirm). With **"I never rename my
+  footage"** ticked (Project settings, this computer's choices), the steps without the name are skipped.
 - **Finding:**
   1. The hint: the file at that path in the tree, through the locations in order, if it matches. Most links stop here.
   2. Otherwise the cache: where this computer last found a file with these criteria, if it still matches.

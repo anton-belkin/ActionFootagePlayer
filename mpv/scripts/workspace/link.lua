@@ -11,6 +11,8 @@
 --   local link = require 'link'
 --   link.read(path)        -> the link's JSON text, nil for none
 --   link.read_keys(path)   -> { [key] = value } of all the mdta keys, nil when it can't be read
+--   link.created(path)     -> the file's own creation time (moov/mvhd), unix seconds, nil when it has none: what
+--                             ffmpeg and mpv show as creation_time and links keep as `created`
 
 local M = {}
 
@@ -120,6 +122,33 @@ function M.read_keys(path)
             for _, u in ipairs(udta) do
                 for ut, ua, ub in boxes(f, u[1], u[2]) do
                     if ut == "meta" then read_meta(f, ua, ub, out) end
+                end
+            end
+            break
+        end
+    end
+    f:close()
+    return out
+end
+
+-- Seconds from 1904-01-01 (QuickTime's epoch) to 1970-01-01
+local EPOCH_1904 = 2082844800
+
+function M.created(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    f:setvbuf("full", BUFFER)
+    local size = f:seek("end")
+    local out
+    for typ, a, b in boxes(f, 0, size) do
+        if typ == "moov" then
+            for mt, ma in boxes(f, a, b) do
+                if mt == "mvhd" then
+                    f:seek("set", ma)
+                    local h = f:read(12) or ""
+                    local t = h:byte(1) == 1 and u64(h, 5) or u32(h, 5)
+                    if t and t > 0 then out = t - EPOCH_1904 end
+                    break
                 end
             end
             break

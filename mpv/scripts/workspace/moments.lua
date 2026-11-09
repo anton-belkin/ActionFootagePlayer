@@ -341,16 +341,25 @@ function M.new(ws, fs)
         return { list = list, dirs = dirs }
     end
 
-    -- The moments of a clip: its path in the project, and its size and creation time where the link has them, in
-    -- the order of their in
+    -- Whether a link names this clip ({ relative, size, created, hash }), by what the clip is (docs/library-
+    -- management.md §8): the same fingerprint where both have one; else the same size and creation time; a link
+    -- with neither (older ones), its path and size
+    function self.names_clip(l, clip)
+        if type(l.hash) == "string" and type(clip.hash) == "string" then return l.hash == clip.hash end
+        if l.size ~= nil and clip.size ~= nil and l.size ~= clip.size then return false end
+        local function secs(x) if type(x) == "number" then return x end return (M.parse_time(x)) end
+        local a, b = secs(l.created), secs(clip.created)
+        if a and b and l.size ~= nil and clip.size ~= nil then return math.floor(a) == math.floor(b) end
+        if a and b and math.floor(a) ~= math.floor(b) then return false end
+        return type(l.clip) == "string" and clip.relative ~= nil and same(l.clip, clip.relative)
+    end
+
+    -- The moments of a clip (names_clip), in the order of their in
     function self.of_clip(list, clip)
         local out = {}
         for _, m in ipairs(list) do
             local l = m.link
-            if type(l.clip) == "string" and clip.relative and same(l.clip, clip.relative)
-               and (l.size == nil or clip.size == nil or l.size == clip.size)
-               and (l.created == nil or clip.created == nil or M.parse_time(l.created) == M.parse_time(clip.created))
-               and type(l["in"]) == "number" and type(l.out) == "number" then
+            if self.names_clip(l, clip) and type(l["in"]) == "number" and type(l.out) == "number" then
                 out[#out + 1] = m
             end
         end
@@ -376,16 +385,95 @@ function M.new(ws, fs)
         return nil
     end
 
-    -- Where the original is: the clip's path under the project, then under each of the roots it was made with.
-    -- Its size must match where the link has it
+    -- The project's footage (self.footage), kept a minute: a search for each of a run's moments lists it once
+    local footage_memo = {}
+    local function footage_of(project)
+        local m = footage_memo[project]
+        local now = os.time()
+        if not m or now - m.t > 60 then m = { t = now, list = self.footage(project) }; footage_memo[project] = m end
+        return m.list
+    end
+    function self.forget_footage() footage_memo = {} end
+
+    -- What identifies a link's clip, for this computer's memory of where it was found: its fingerprint, else its
+    -- size and creation time
+    local function identity(link)
+        if type(link.hash) == "string" and link.hash ~= "" then return link.hash end
+        return tostring(link.size) .. "|" .. tostring(M.parse_time(link.created))
+    end
+
+    local function last_part(p) return (p:match("([^/\\]+)$") or p) end
+
+    -- The clip a link names (docs/library-management.md §8): found by what the clip is, its path in the tree only a
+    -- hint of where it was last seen.
+    --   1. the hint: the file at link.clip in the project's tree, through its locations in order, of the link's size;
+    --   2. where this computer last found it (fs.found_get, by the clip's identity), if it's still there;
+    --   3. the project's footage searched, the files of the link's size only (sources never change): with the
+    --      link's fingerprint, the one whose fingerprint (fs.fingerprint) is it, those of its name first; without,
+    --      the one match by its creation time (fs.created; with "I never rename my footage", fs.never_rename, by
+    --      name and creation time first), else by its name: never by size alone, which would be a guess;
+    --   4. a moment copied out of its project: its path under each of the roots it was made with.
+    -- -> the file, its path in the tree now, its location, and how it was found ("hint", "cache", "search", "roots")
     function self.original(link, project)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
-        -- In the project's locations first: the first that has it (a working copy before the archive's)
-        if project and ws.files_at then
-            local locs = fs.locations_of and fs.locations_of(project) or ws.locations(project)
+        local locs = project and ws.files_at and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or nil
+        local function sized(file)
+            local info = fs.info(file)
+            return info and info.is_file and (link.size == nil or info.size == link.size)
+        end
+        if locs then
             for _, c in ipairs(ws.files_at(link.clip, locs)) do
-                local info = fs.info(c.file)
-                if info and (link.size == nil or info.size == link.size) then return c.file end
+                if sized(c.file) then return c.file, link.clip, c.location, "hint" end
+            end
+            local key = identity(link)
+            local seen = fs.found_get and fs.found_get(project, key)
+            if seen and seen ~= link.clip then
+                for _, c in ipairs(ws.files_at(seen, locs)) do
+                    if sized(c.file) then return c.file, seen, c.location, "cache" end
+                end
+            end
+            if type(link.size) == "number" then
+                local name = last_part(link.clip)
+                local cands = {}
+                for _, f in ipairs(footage_of(project)) do
+                    if f.size == link.size then cands[#cands + 1] = f end
+                end
+                local function found(f)
+                    if fs.found_set then fs.found_set(project, key, f.relative) end
+                    return f.file, f.relative, f.location, "search"
+                end
+                if #cands > 0 then
+                    if type(link.hash) == "string" and link.hash ~= "" and fs.fingerprint then
+                        table.sort(cands, function(a, b)
+                            local na, nb = same(last_part(a.relative), name), same(last_part(b.relative), name)
+                            if na ~= nb then return na end
+                            return a.relative < b.relative
+                        end)
+                        for _, f in ipairs(cands) do
+                            if fs.fingerprint(f.file) == link.hash then return found(f) end
+                        end
+                    else
+                        local want = M.parse_time(link.created)
+                        local function created(f)
+                            if f.created == nil then f.created = fs.created and fs.created(f.file) or false end
+                            return f.created
+                        end
+                        -- Anton's steps (checks.rs's find_clip): name, size and creation time; size and creation
+                        -- time (not with "I never rename my footage"); name and size. Never size alone
+                        local tests = {}
+                        local function at(f) return created(f) and math.floor(created(f)) == math.floor(want) end
+                        if want then tests[#tests + 1] = { function(f) return same(last_part(f.relative), name) and at(f) end, true } end
+                        if want and not (fs.never_rename and fs.never_rename(project)) then tests[#tests + 1] = { at } end
+                        tests[#tests + 1] = { function(f) return same(last_part(f.relative), name) end }
+                        for _, t in ipairs(tests) do
+                            local hit = {}
+                            for _, f in ipairs(cands) do if t[1](f) then hit[#hit + 1] = f end end
+                            if #hit == 1 then return found(hit[1]) end
+                            -- Several of that name and time go on to the next step; several of a looser one: no find
+                            if #hit > 1 and not t[2] then break end
+                        end
+                    end
+                end
             end
         end
         local rel = windows and link.clip:gsub("/", "\\") or link.clip
@@ -396,8 +484,7 @@ function M.new(ws, fs)
         end
         for _, place in ipairs(places) do
             local file = ws.join(place, rel)
-            local info = fs.info(file)
-            if info and info.is_file and (link.size == nil or info.size == link.size) then return file end
+            if sized(file) then return file, nil, nil, "roots" end
         end
         return nil
     end
@@ -420,7 +507,7 @@ function M.new(ws, fs)
     function self.footage(project)
         local out = {}
         local seen = {}
-        local loc, at, li = nil, "", 0
+        local loc, at, li, cur = nil, "", 0, nil
         local function walk(dir, rel, depth)
             local files, subdirs = entries(dir)
             for _, e in ipairs(files) do
@@ -432,7 +519,7 @@ function M.new(ws, fs)
                     if not seen[r] then
                         seen[r] = true
                         local in_loc = (at ~= "" and r:sub(1, #at + 1) == at .. "/") and r:sub(#at + 2) or r
-                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size, mtime = e.info.mtime, loc = loc, li = li, loc_rel = in_loc }
+                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size, mtime = e.info.mtime, loc = loc, li = li, loc_rel = in_loc, location = cur }
                     end
                 end
             end
@@ -447,7 +534,7 @@ function M.new(ws, fs)
         -- Every location of the project, in its order (a path the first one has wins), each at its place in the tree
         local locs = ws.locations and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or { { dir = project, at = "" } }
         for i, l in ipairs(locs) do
-            li = i
+            li, cur = i, l
             if l.dir then
                 loc, at = (l.name and l.name ~= "") and l.name or (l.dir:match("([^/\\]+)[/\\]*$") or "Location"), l.at or ""
                 walk(l.dir, l.at ~= "" and l.at or nil, 0)
