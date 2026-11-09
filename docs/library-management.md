@@ -582,8 +582,20 @@ of its first and last MiB; links older than it have none). From now on:
   one played. There's nothing to fix: the inbox inside the archive is simply seen twice. Taking a location out of the
   project is just taking it out: what reached clips through it finds them through the other. *Swallow a location*
   isn't needed (PR #181 closed), and neither is `_Clips/Duplicates`.
-- **The clip's own file** (`<clip>.afp.json`, `<clip>.gyroflow`) is still beside the clip, wherever it is: it moves with
-  the clip, and carries `clip.hash` to be matched back if it's left behind.
+- **The clip's own file** (`<clip>.afp.json`, `<clip>.gyroflow`) is still beside the clip: it moves with the clip, and
+  carries `clip.hash` to be matched back if it's left behind. When the project has the clip in several places (the
+  same size, `created` and hash), **which copy's file is the main one** is decided the same way on every computer
+  ([The clip's own file](#the-clips-own-file) said "two: nothing saved"; this replaces it):
+  1. The copies are put in one order: by the location, in the project's order, copies-only locations (a working
+     folder) and this computer's own last; within a location, by the path in the tree, compared as plain text.
+  2. **The main file** is the one beside the first copy in that order that has one. None has one: the first save
+     writes it beside the first copy that isn't in a copies-only or local location.
+  3. Every other copy's file is **read, never written**: the player plays with the main one's values and saves there,
+     and says once that another one exists. *Check the project* lists them, to delete (or to make one the main, by
+     deleting the others).
+
+  With Working, Archive, Inbox in that order, a clip copied (not moved) from the inbox into the archive with its file:
+  the archive's file is the main one, the inbox's is listed. The `.gyroflow` beside it follows the same rule.
 
 What the cache knows is this computer's (`<data>/ActionFootage/cache/<project id>/`: each file's path, size,
 modification time, `created`, hash, link), never the library's, so two computers on one NAS never write over each
@@ -738,7 +750,9 @@ Anton, 2026-11-09:
   never renames footage (a tick). Repair drops criteria one at a time, name, then `created`, then both, size always
   kept, the hash comparing what's found. No list of what was made: you make what you ask for. New files land in
   `Generated/<date> <time> <what>/`, laid out as chosen in that run's dialog, and are found wherever you move them.
-  Photos keep their tags in their own XMP.
+  Photos keep their tags in their own XMP. A clip in several places has one main own file, chosen the same way
+  everywhere: the first copy that has one, by the locations' order (copies-only and local ones last), then the path in
+  the tree; the others are read, never written.
 
 ## Open questions
 
