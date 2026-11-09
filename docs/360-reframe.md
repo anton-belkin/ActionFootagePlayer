@@ -432,7 +432,7 @@ Alt+r is free in the player's bindings and mpv's defaults. Both can be rebound a
    Checked: `tests/view360_test.lua` (the gestures beside the video, the take to the clip's end and by hand, keep-open
    given back), `tests/sidepanel_test.lua` (the scroll bar dragged both ways); the app's mpv headless: keep-open set
    while playing keeps the clip at its end, a seek plays it again, and with keep-open back it ends into the next file.
-   Not yet on screen.
+   On screen by Anton (2026-11-09) in a copy of the app with this branch: all three work.
 
    **Open:** a click with a real mouse and trackpad (IPC's only so far); Shift+E still exports as it plays, not the
    kind chosen (the key belongs to `export.lua`, the choice to the panel); a part over an hour is cut with an
