@@ -41,7 +41,7 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
       -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M \
-      -e AFP_TV_LOOK=pq afp-stream:f43 \
+      -e AFP_TV_LOOK=pqg2.5r30 afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
@@ -120,7 +120,49 @@ Looks: a stream id may end in `~pq` (the hdr look's HLG made HDR10 by libplacebo
 player's nbcu look, `nbcu_hlg2sdr.glsl` last, BT.709: `--sdr`); the TS players get `AFP_TV_LOOK` unless the URL names
 one. On the NAS it's `pq` since 2026-11-08: the Samsung TV (Tizen 3.0) showed our HLG gray through Jellyfin's app
 (its web engine doesn't take HLG as HDR), while HDR10 and SDR looked right and alike (Anton, on "Maks diving close
-up"); HDR10 keeps the HDR.
+up"); HDR10 keeps the HDR. The HDR10 is the HLG as BT.2100 displays it, at its nominal 1000 nits: libplacebo renders HLG
+for the target's peak, which for PQ without metadata is 10000 nits, and the first version had it so (Anton: "very
+contrasty, colors not saturated, shadows crushed, sky to white"). Measured on a Mountains clip, 2026-11-09: mid-tones
+2.5x the HLG's, highlights 6x (peaks 2450-3080 nits), shadows halved. Fixed: mid-tones 1.03x, highlights 1.006x, peaks
+442 against 440 nits; the frames carry HDR10's static metadata (mastering display BT.2020/D65 0.005-1000 nits, MaxCLL
+1000) as SEI, in the TS segments too. HDR10+ (per-frame metadata) isn't written: hevc_vaapi can't, and whether a 2017
+Tizen honours it in Jellyfin's web player is unknown.
+
+Brighter for a room: a look may add `x<peak>` (`hlg_highlights.glsl`: the highlights expanded into the headroom, the
+LUT's top, 422 nits, to `peak`, mid grey kept) and `g<gain>` (`hlg_gain.glsl`: every pixel's display light times the
+gain, up to 500 nits, then a shoulder below 1000). The HDR10 at BT.2100's levels (mid-tones 35-55 nits, the brightest
+at ~203, peaks 300-450) looked dark on the TV in a lit room, its HDR mode keeping to absolute nits where a Mac's EDR
+follows the brightness slider; expanding the highlights alone didn't help (Anton: the mid-tones and shadows are what's
+dark). Of x1, 1.5, 2 and 2.5 on clip 0065 (median 45 -> 67, 90, 112 nits; peaks up to 760) Anton chose 2.5 for that TV,
+2026-11-09: `AFP_TV_LOOK=pqg2.5`.
+
+At 30 fps for the TV: with the PQ conversion and the gain the TV's renders ran at 33-54 fps against the clips' 59.94,
+and it stopped between segments. A look may end in `r<fps>` (`afp-render -every n`: all frames decoded, every n-th
+rendered and encoded, keyframes and segments where they were; the TV interpolates). Clip 0087 (57.8 s): 103.8 s to
+render at 60 fps (0.56x real time), 40.1 s at 30 (1.44x); clip 0082: 0.57x and 1.34x. `AFP_TV_LOOK=pqg2.5r30` since.
+
+Pre-rendering for the TV: the TV plays its own renders (its look), so what was pre-rendered for the player's HLG doesn't
+help it. `GET /prerender` takes `look=tv` (`AFP_TV_LOOK`, or a look as in a stream id), `recursive=1` (the folder and
+all below it; `folder=` empty: everything) and `links=1` (only moments and clip previews, what Jellyfin shows). The
+openings (8 s each, `AFP_OPENING`) of everything in Jellyfin, for the TV, so that a folder played in a row starts each
+clip at once:
+
+    curl "http://192.168.50.186:8099/prerender?folder=&recursive=1&links=1&what=opening&look=tv"
+
+A whole run (337 openings) took 43 min on 2026-11-09, 9 GB.
+
+What renders while the TV plays (found from the cache files' times, 2026-11-09): Jellyfin's own probe of each stream
+(ffprobe, User-Agent `Lavf`, ~5 s before the TV starts) set off a render of the whole clip in HLG, which nobody watched
+and which halved the GPU for the TV's (27-29 fps where alone it does 40+). A probe now gets at most the 2 segments it
+reads rendered. When Jellyfin passes a stream on (`Jellyfin-Server`), the TV look's render starts at once from the
+first segment not in the cache, instead of when the TV gets near it, and nothing in the look Jellyfin's request names
+(that started a second HLG render too); and a render nobody has asked for in 15 s (the player went to another clip)
+stops. Measured after (clip 0127, opening pre-rendered): only the TV's render runs, 1.7x real time at 30 fps. What
+was rendered stays in the cache (`AFP_CACHE_GB`): played again or sought back, it's served from there with nothing
+rendered.
+
+It renders one clip at a time at low priority, only while nobody watches; `/status` shows it. Per folder, the index page
+has "openings for the TV". Run 2026-11-09: 337 openings in 43 min, 9 GB.
 
 Jellyfin's iOS app (1.8) with **Use Native Video Player** (beta) on says it takes HEVC only as SDR or HDR10, so
 Jellyfin converts the HLG to SDR itself (tone-mapped, desaturated) on the N100. With it off (the default) the app's

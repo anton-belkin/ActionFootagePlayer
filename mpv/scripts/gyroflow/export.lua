@@ -648,8 +648,14 @@ local function gpu_frame()
         saved[k] = mp.get_property(k)
         mp.set_property(k, v)
     end
+    -- At the video's own size whatever the resolution chosen for playback (main.lua's gyroflow_render_scale: the
+    -- screenshot renders at the video's size, the scale is of that)
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    local scale = opts.gyroflow_render_scale
+    if scale then opts.gyroflow_render_scale = "1"; mp.set_property_native("glsl-shader-opts", opts) end
     local t0 = mp.get_time()
     mp.command_native({ "screenshot-to-file", file, "video" })
+    if scale then opts.gyroflow_render_scale = scale; mp.set_property_native("glsl-shader-opts", opts) end
     for k, v in pairs(saved) do mp.set_property(k, v) end
     if not utils.file_info(file) then return nil end
     mp.msg.info(string.format("photo: the frame as rendered, in %d ms", math.floor((mp.get_time() - t0) * 1000)))

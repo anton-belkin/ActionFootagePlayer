@@ -47,6 +47,46 @@ function M.clip_preview_relative(relative, flat)
     return table.concat(out, "/")
 end
 
+-- When a clip was recorded, in seconds (local time): a DJI file's name says it (DJI_20261022152841_...), else its
+-- file's time
+function M.recorded(c)
+    local y, mo, d, h, mi, se = (c.relative or ""):match("DJI_(%d%d%d%d)(%d%d)(%d%d)(%d%d)(%d%d)(%d%d)[^/]*$")
+    if y then return os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(se) }) end
+    return c.mtime
+end
+
+local MONTHS = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" }
+-- A trip's folder: its year and month first (they sort), then its days: "2026-10 October 20-26",
+-- "2026-09 September 28 - October 3", "2026-12 December 28 - January 2, 2027", "2026-10 October 20"
+function M.trip_name(t0, t1)
+    local a, b = os.date("*t", t0), os.date("*t", t1)
+    local head = string.format("%04d-%02d %s %d", a.year, a.month, MONTHS[a.month], a.day)
+    if a.year == b.year and a.month == b.month then
+        return a.day == b.day and head or (head .. "-" .. b.day)
+    end
+    return head .. " - " .. MONTHS[b.month] .. " " .. b.day .. (a.year ~= b.year and (", " .. b.year) or "")
+end
+
+-- The clips in trips: one trip while the next clip is at most `gap` seconds (2 days) after the last. Sets each clip's
+-- `trip` to its trip's folder name; a clip with no time gets none
+function M.trips(clips, gap)
+    gap = gap or 2 * 86400
+    local timed = {}
+    for _, c in ipairs(clips) do
+        c.recorded = M.recorded(c)
+        if c.recorded then timed[#timed + 1] = c end
+    end
+    table.sort(timed, function(x, y) return x.recorded < y.recorded end)
+    local i = 1
+    while i <= #timed do
+        local j = i
+        while j < #timed and timed[j + 1].recorded - timed[j].recorded <= gap do j = j + 1 end
+        local name = M.trip_name(timed[i].recorded, timed[j].recorded)
+        for k = i, j do timed[k].trip = name; timed[k].trip_first = timed[i] end
+        i = j + 1
+    end
+end
+
 -- The project file's clips_made: a line per clip a preview was made for, its path in the project and its size
 function M.parse_made(text)
     local made = {}
@@ -340,6 +380,14 @@ function M.new(ws, fs)
     -- Its size must match where the link has it
     function self.original(link, project)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
+        -- In the project's locations first: the first that has it (a working copy before the archive's)
+        if project and ws.files_at then
+            local locs = fs.locations_of and fs.locations_of(project) or ws.locations(project)
+            for _, c in ipairs(ws.files_at(link.clip, locs)) do
+                local info = fs.info(c.file)
+                if info and (link.size == nil or info.size == link.size) then return c.file end
+            end
+        end
         local rel = windows and link.clip:gsub("/", "\\") or link.clip
         local places = {}
         if project then places[#places + 1] = project end
@@ -368,9 +416,11 @@ function M.new(ws, fs)
     end
 
     -- The project's clips: its videos, but the player's own folders, hidden ones and link files. { file, relative,
-    -- size }
+    -- size, mtime, loc (its location's name), loc_rel (its path in that location) }
     function self.footage(project)
         local out = {}
+        local seen = {}
+        local loc, at, li = nil, "", 0
         local function walk(dir, rel, depth)
             local files, subdirs = entries(dir)
             for _, e in ipairs(files) do
@@ -378,17 +428,31 @@ function M.new(ws, fs)
                 local lower = name:lower()
                 local ext = lower:match("%.([^.]+)$")
                 if ext and M.FOOTAGE[ext] and lower:sub(-#M.EXT) ~= M.EXT then
-                    out[#out + 1] = { file = ws.join(dir, name), relative = rel and (rel .. "/" .. name) or name, size = e.info.size }
+                    local r = rel and (rel .. "/" .. name) or name
+                    if not seen[r] then
+                        seen[r] = true
+                        local in_loc = (at ~= "" and r:sub(1, #at + 1) == at .. "/") and r:sub(#at + 2) or r
+                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size, mtime = e.info.mtime, loc = loc, li = li, loc_rel = in_loc }
+                    end
                 end
             end
             if depth >= 8 then return end
             for _, name in ipairs(subdirs) do
+                -- A project's own folders at the top of a location aren't footage (this project's, or the one there before)
                 if not (depth == 0 and OWN_FOLDERS[name:lower()]) then
                     walk(ws.join(dir, name), rel and (rel .. "/" .. name) or name, depth + 1)
                 end
             end
         end
-        walk(project, nil, 0)
+        -- Every location of the project, in its order (a path the first one has wins), each at its place in the tree
+        local locs = ws.locations and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or { { dir = project, at = "" } }
+        for i, l in ipairs(locs) do
+            li = i
+            if l.dir then
+                loc, at = (l.name and l.name ~= "") and l.name or (l.dir:match("([^/\\]+)[/\\]*$") or "Location"), l.at or ""
+                walk(l.dir, l.at ~= "" and l.at or nil, 0)
+            end
+        end
         table.sort(out, function(a, b) return a.relative < b.relative end)
         return out
     end

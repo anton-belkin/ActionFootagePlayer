@@ -16,7 +16,7 @@
 --   F8     playlist   the Playlist part (mpv's own F8 shows the playlist as text)
 --
 -- Options (~~/script-opts/side_panel.conf):
---   shown=yes        the rail shows when the player starts
+--   shown=no         the rail shows when the player starts (off: the video alone, Tab shows the panel)
 --   open=yes         and the panel beside it
 --   tab=project      the part it opens on: project, clip, look, stabilization, quality, telemetry, dv, view360, support
 --
@@ -31,7 +31,7 @@ local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
 
-local o = { shown = true, open = true, tab = "project" }
+local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
 
 local C = ui.C
@@ -1045,6 +1045,12 @@ local function transform_part(u, x, w, y)
     y = u:caption(x, w, y - 2 * s, none and "Off on this computer (Performance & Quality)"
         or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows"
         or "The paused frame from the frames around it, moved onto it")
+    -- Stronger: the clip's (its transform), on the GPU path
+    local saved_strong = nil
+    if saved then saved_strong = saved.denoise_strong == true end
+    y = u:switch(x, w, y, "strong", "Stronger, for a very noisy clip", g.denoise_strong == true, "script-message-to gyroflow denoise-strong toggle",
+                 nil, none or not g.still or not gpu, saved_strong)
+    y = u:caption(x, w, y - 2 * s, "No grain kept, more frames taken in, dark specks out and the flat areas smoothed: open water clean, fine texture softer")
     return y
 end
 
@@ -1066,14 +1072,15 @@ local function quality_part(u, x, w, y)
     }, rates[tostring(g.fps_limit or 0)])
     y = u:caption(x, w, y, "How often the stabilized frame is rendered")
     y = u:heading(x, w, y + 8 * s, "Size")
-    local sizes = { video = 1, display = 2, ["1080"] = 3, ["720"] = 4 }
+    local sizes = { auto = 1, display = 2, ["1080"] = 3, ["720"] = 4, video = 5 }
     y = u:segmented(x, w, y, "size", {
-        { "Video", "script-message-to gyroflow quality resolution video" },
-        { "Display", "script-message-to gyroflow quality resolution display" },
+        { "Auto", "script-message-to gyroflow quality resolution auto" },
+        { "Screen", "script-message-to gyroflow quality resolution display" },
         { "1080p", "script-message-to gyroflow quality resolution 1080" },
         { "720p", "script-message-to gyroflow quality resolution 720" },
+        { "Video", "script-message-to gyroflow quality resolution video" },
     }, sizes[tostring(g.resolution)])
-    y = u:caption(x, w, y, "The size it's rendered at: the video's own, fitting the display, or at most 1080p or 720p")
+    y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
     y = u:heading(x, w, y + 8 * s, "Paused frame", keys["script-binding gyroflow/full"])
     local paused = { off = 1, auto = 2 }
     y = u:segmented(x, w, y, "paused", {

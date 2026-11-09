@@ -66,11 +66,23 @@
 //!TYPE DYNAMIC int
 0
 
+//!PARAM gyroflow_render_scale
+//!TYPE DYNAMIC float
+//!MINIMUM 0.1
+//!MAXIMUM 4.0
+1.0
+
 //!PARAM gyroflow_dn_radius
 //!TYPE DYNAMIC int
 //!MINIMUM 1
 //!MAXIMUM 5
 5
+
+//!PARAM gyroflow_dn_strong
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 1
+0
 
 //!PARAM gyroflow_dn_keep
 //!TYPE DYNAMIC float
@@ -87,6 +99,12 @@
 @PASSES@
 
 // ==== common ====
+// The size this renders at (RT): the video's rectangle on screen (target_size) times gyroflow_render_scale, which
+// main.lua sets from the resolution chosen (Performance & Quality: at most 1080p or 720p, the video's own size), as
+// libplacebo rounds the passes' sizes; mpv scales the result to the screen. A shader of its own size defines it first
+#ifndef RT
+#define RT round(target_size * gyroflow_render_scale)
+#endif
 
 // The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0 to PARAM_TEXELS - 1 the
 // frame's parameters, then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows
@@ -401,7 +419,7 @@ bool frame_setup()
     return t2.w >= 0.5;
 }
 
-// Output pixel j (0 .. target_size - 1, pixel centers at whole numbers) -> its source coordinate in Gyroflow's frame
+// Output pixel j (0 .. RT - 1, pixel centers at whole numbers) -> its source coordinate in Gyroflow's frame
 // (SRC_W x SRC_H, centers at whole numbers): Stabilization::undistort_coord. False where the ray has no image. The
 // output pixel goes into the kernel's output frame (OUT_W x OUT_H) as the VapourSynth path maps its pixel j there:
 // j * OUT_W / width
@@ -412,7 +430,7 @@ bool frame_setup()
 vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
-    vec2 out_pos = j * size / target_size + t2.xy;
+    vec2 out_pos = j * size / RT + t2.xy;
 #if PROJ == 5
     // The equirect (a 360 camera's sphere): its plane is the sphere's, all of it 360 x 180 degrees at zoom (fov) 1;
     // longitude across, latitude down, +z at the middle, +x at +90 degrees, up (-y) at the top (the fork's
@@ -482,7 +500,7 @@ float feather(vec2 uv)
 vec4 edge_fill(vec2 uv)
 {
 #if EDGE_FILL && !defined(UV_OUT)
-    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / target_size) * FILL_MUL;
+    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / RT) * FILL_MUL;
     vec2 edge = clamp(uv, vec2(-0.5), vec2(SRC_W, SRC_H) - 0.5);
     float t = clamp(length(uv - edge) / (FILL_MUTE_RAMP * float(SRC_H)), 0.0, 1.0);
     float m = t * t * (3.0 - 2.0 * t);
@@ -616,7 +634,7 @@ vec4 finish_rgb(vec2 uv, vec4 rb)
 
 #ifdef GRID_STEP
 // The grid: point (i, g) at output pixel ((i, g) - 1) * GRID_STEP, one before the edge to two past it
-ivec2 grid_size() { return ivec2(ceil(target_size / float(GRID_STEP))) + 3; }
+ivec2 grid_size() { return ivec2(ceil(RT / float(GRID_STEP))) + 3; }
 
 float cr0(float t) { return ((-0.5 * t + 1.0) * t - 0.5) * t; }
 float cr1(float t) { return (1.5 * t - 2.5) * t * t + 1.0; }
@@ -679,7 +697,7 @@ bool grid_coord(vec2 j, out vec2 uv)
 vec4 hook()
 {
     if (!frame_setup()) return BACKGROUND;
-    vec2 j = HOOKED_pos * target_size - 0.5;
+    vec2 j = HOOKED_pos * RT - 0.5;
     cur_j = j;
     vec2 uv;
     want_boundary = EDGE_FILL == 1;
@@ -734,7 +752,7 @@ void hook()
 // ==== pass sample ====
 vec4 hook()
 {
-    vec2 j = HOOKED_pos * target_size - 0.5;
+    vec2 j = HOOKED_pos * RT - 0.5;
     cur_j = j;
     vec2 uv;
     // The frame's parameters only where the grid has no image (each is a fetch per pixel). Not one condition with &&:
@@ -770,7 +788,7 @@ vec4 hook()
     int n = 0;
     if (frame_setup()) {
         for (int t = 0; t < 9; t++) {
-            vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * target_size / vec2(FILL_W, FILL_H) - 0.5;
+            vec2 j = (cell + (vec2(t % 3, t / 3) + 0.5) / 3.0) * RT / vec2(FILL_W, FILL_H) - 0.5;
             vec2 uv;
 #ifdef GRID_STEP
             // The warp's own grid where it has the place (the frame's parameters are set either way)
@@ -859,7 +877,7 @@ void hook()
     // its color, by its direction of the world, with the time it was seen
 #ifdef SPHERE_PASS
     vec2 j = vec2(gl_GlobalInvocationID.xy) * 2.0;
-    if (any(greaterThanEqual(j, target_size))) return;
+    if (any(greaterThanEqual(j, RT))) return;
     vec2 uv;
     if (!grid_coord(j, uv) || any(lessThan(uv, vec2(1.0))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 2.0))) return;
     if (!frame_setup()) return;
@@ -897,10 +915,27 @@ vec4 hook()
 #define DN_SLOT ivec2(DN_SLOT_W, DN_SLOT_H)
 #define DN_MAGIC 0x5E21u
 float lum(vec3 c) { return dot(c, vec3(0.2627, 0.678, 0.0593)); }
+// The noise at a brightness, between its bins: the luma's (gdn_sigma[0-15]) and the color's (B-Y, gdn_sigma[16-31]);
+// a bin not measured yet holds the start value negated (dn_state)
+float sigma_at(float l)
+{
+    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
+    int i = int(b);
+    return mix(abs(gdn_sigma[i]), abs(gdn_sigma[min(i + 1, 15)]), b - float(i));
+}
+float sigc_at(float l)
+{
+    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
+    int i = int(b);
+    return mix(abs(gdn_sigma[16 + i]), abs(gdn_sigma[16 + min(i + 1, 15)]), b - float(i));
+}
+vec2 chroma(vec3 c) { float y = lum(c); return vec2(c.b - y, c.r - y); }
+// The clip's Stronger (the panel's Transform, for very noisy clips)
+bool dn_strong() { return gyroflow_dn_strong > 0; }
 ivec2 dn_cell(int s) { return ivec2(s % DN_COLS, s / DN_COLS); }
 // The ring holds frames of this render's kind: not after a reset (main.lua's epoch: the camera's mode, a realign) or a
 // change of the output's size
-bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, target_size)); }
+bool dn_ok() { return gdn_magic == DN_MAGIC && gdn_epoch == gyroflow_dn_epoch && all(equal(gdn_size, RT)); }
 // This render's frame is the newest one again (paused, a redraw)
 bool dn_same() { return dn_ok() && abs(PTS - gdn_pts[gdn_head]) < 1e-4; }
 // The frames on each side it takes (Performance & Quality's temporal denoise: Full 5, Light 3), and of them the ones
@@ -943,9 +978,9 @@ int dn_slot_at(int o) { return dn_back_slot(dn_kc - o); }
 int dn_offset(int n) { return n < DN_RADIUS ? -(n + 1) : n - DN_RADIUS + 1; }
 bool dn_has(int n) { int o = dn_offset(n); return o < 0 ? -o <= dn_nb_back : o <= dn_nb_fwd; }
 
-vec3 dn_frame(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size) - 1); return imageLoad(GDN_FRAMES, p + dn_cell(s) * DN_SLOT).rgb; }
-float dn_quart(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(target_size / 4.0) - 1); return imageLoad(GDN_QUART, p + dn_cell(s) * (DN_SLOT / 4)).x; }
-ivec2 dn_blocks() { return ivec2(ceil(target_size / 32.0)); }
+vec3 dn_frame(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(RT) - 1); return imageLoad(GDN_FRAMES, p + dn_cell(s) * DN_SLOT).rgb; }
+float dn_quart(int s, ivec2 p) { p = clamp(p, ivec2(0), ivec2(RT / 4.0) - 1); return imageLoad(GDN_QUART, p + dn_cell(s) * (DN_SLOT / 4)).x; }
+ivec2 dn_blocks() { return ivec2(ceil(RT / 32.0)); }
 #endif
 
 // ==== pass dn_store ====
@@ -954,7 +989,7 @@ void hook()
 {
     // The frame into its slot, as decoded and warped; its quarter-size luma too
     ivec2 j = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(j, ivec2(target_size))) || any(greaterThan(ivec2(target_size), DN_SLOT)) || !dn_fresh()) return;
+    if (any(greaterThanEqual(j, ivec2(RT))) || any(greaterThan(ivec2(RT), DN_SLOT)) || !dn_fresh()) return;
     int s = dn_newest();
     imageStore(GDN_FRAMES, j + dn_cell(s) * DN_SLOT, vec4((HOOKED_mul * texelFetch(HOOKED_raw, j, 0)).rgb, 1.0));
     if (all(equal(j % 4, ivec2(0))))
@@ -982,7 +1017,7 @@ vec2 predict(vec2 j, vec4 qp, vec4 cam, float zoom)
 #else
     vec2 n = d.xy / rxy * atan(rxy, d.z);
 #endif
-    return (n * out_f + 0.5 * size - t2.xy) * target_size / size;
+    return (n * out_f + 0.5 * size - t2.xy) * RT / size;
 }
 
 void hook()
@@ -1133,23 +1168,9 @@ vec4 hook()
 
 // ==== pass dn_blend ====
 #ifdef DN_BLEND
-// How much a patch may differ beyond the noise and still be averaged in: still.rs's weight's scale
-#define DN_TOLERANCE 1.5
-// The noise at a brightness, between its bins: the luma's (gdn_sigma[0-15]) and the color's (B-Y, gdn_sigma[16-31]);
-// a bin not measured yet holds the start value negated (dn_state)
-float sigma_at(float l)
-{
-    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
-    int i = int(b);
-    return mix(abs(gdn_sigma[i]), abs(gdn_sigma[min(i + 1, 15)]), b - float(i));
-}
-float sigc_at(float l)
-{
-    float b = clamp(l * 16.0 - 0.5, 0.0, 15.0);
-    int i = int(b);
-    return mix(abs(gdn_sigma[16 + i]), abs(gdn_sigma[16 + min(i + 1, 15)]), b - float(i));
-}
-vec2 chroma(vec3 c) { float y = lum(c); return vec2(c.b - y, c.r - y); }
+// How much a patch may differ beyond the noise and still be averaged in: still.rs's weight's scale (twice it with
+// Stronger: more frames taken in where the noise is heavy and blotchy)
+#define DN_TOLERANCE (dn_strong() ? 3.0 : 1.5)
 vec3 frame_bilinear(int slot, vec2 p)
 {
     vec2 f = fract(p);
@@ -1160,7 +1181,7 @@ vec3 frame_bilinear(int slot, vec2 p)
 vec4 hook()
 {
     ivec2 j = ivec2(HOOKED_pos * HOOKED_size);
-    if (any(greaterThan(ivec2(target_size), DN_SLOT))) return HOOKED_tex(HOOKED_pos);
+    if (any(greaterThan(ivec2(RT), DN_SLOT))) return HOOKED_tex(HOOKED_pos);
     dn_window();
     int sc = dn_center();
     vec3 cur = dn_frame(sc, j);
@@ -1216,6 +1237,13 @@ vec4 hook()
         }
     }
     vec3 den = sum / wsum;
+    // Stronger: the shown pixel judged too, against what the matched frames agree on. A spike of the noise in it (the
+    // dark specks HEVC leaves under water) gets a tenth of the weight instead of staying a part of every frame's own
+    if (dn_strong() && wsum >= 3.0) {
+        vec3 nbm = (sum - cur) / (wsum - 1.0);
+        float ws = mix(0.1, 1.0, 1.0 - smoothstep(2.0 * s, 4.0 * s, abs(l - lum(nbm))));
+        den = (sum - cur + ws * cur) / (wsum - 1.0 + ws);
+    }
     // The noise, from the shown frame against the one before where they match
     if (!dn_same() && noise_diff >= 0.0 && all(equal(j % 4, ivec2(0)))) {
         uint bin = uint(clamp(l * 16.0, 0.0, 15.0));
@@ -1223,8 +1251,138 @@ vec4 hook()
         atomicAdd(gdn_hist[bin * 256u + st], 1u);
         atomicAdd(gdn_hist[4096u + bin * 256u + uint(clamp(noise_c * 4096.0, 0.0, 255.0))], 1u);
     }
-    // Some of the grain kept, so it doesn't look smeared (gyroflow.conf's still_grain)
-    return vec4(den + gyroflow_dn_keep * (cur - den), 1.0);
+    // Some of the grain kept, so it doesn't look smeared (gyroflow.conf's still_grain); none with Stronger
+    return vec4(den + (dn_strong() ? 0.0 : gyroflow_dn_keep) * (cur - den), 1.0);
+}
+#endif
+
+// ==== pass dn_clean ====
+// After the frames are averaged, the frame itself (in both the denoise's modes): what averaging frames can't take out.
+// - Dark specks: HEVC under water leaves spikes of the noise, mostly in red (dark cyan dots on blue water, 1-7 px), new
+//   each frame; the frame's own pixel keeps part of them. Where a pixel is darker than the ring of 16 pixels two away by
+//   more than the noise, and that ring has no dark pixels opposite each other (a dark line or edge through it would),
+//   it takes the ring's color. Bright dots stay: particles in the water are white. In the filter's last pass.
+// - The color: a guided filter (He et al., "fast": its statistics at a quarter of the size) of B-Y and R-Y, each its own
+//   guide over ~20 px, so the color's blotches go and an edge of color well above its noise stays (a pink fin over water
+//   of its brightness: guided by the luma, its color would spread); with Stronger the luma too (its own guide, ~12 px).
+//   Their eps is the noise's (dn_state's measure).
+#ifdef DN_GF_LO
+// The quarter-size luma and color: each texel the mean of its 4x4 pixels (four bilinear reads)
+vec4 hook()
+{
+    vec2 d = HOOKED_pt;
+    vec3 c = 0.25 * (HOOKED_tex(HOOKED_pos + vec2(-d.x, -d.y)).rgb + HOOKED_tex(HOOKED_pos + vec2(d.x, -d.y)).rgb
+                   + HOOKED_tex(HOOKED_pos + vec2(-d.x, d.y)).rgb + HOOKED_tex(HOOKED_pos + vec2(d.x, d.y)).rgb);
+    float y = lum(c);
+    return vec4(y, c.b - y, c.r - y, 1.0);
+}
+#endif
+#if defined(DN_GF_AY) || defined(DN_GF_AC)
+// The filter's a and b per quarter texel, from the means over a window around it: the luma's (1 texel around: ~12 px)
+// and the color's (2 around: ~20 px), each its own guide
+vec4 hook()
+{
+#ifdef DN_GF_AY
+    const int R = 1;
+#else
+    const int R = 2;
+#endif
+    vec2 d = GDN_GF_LO_pt;
+    vec2 p = GDN_GF_LO_pos;
+    float my = 0.0, myy = 0.0;
+    vec2 mc = vec2(0.0), mcc = vec2(0.0);
+    for (int dy = -R; dy <= R; dy++)
+        for (int dx = -R; dx <= R; dx++) {
+            vec3 v = GDN_GF_LO_tex(p + vec2(dx, dy) * d).xyz;
+            my += v.x; myy += v.x * v.x; mc += v.yz; mcc += v.yz * v.yz;
+        }
+    float n = float((2 * R + 1) * (2 * R + 1));
+    my /= n; myy /= n; mc /= n; mcc /= n;
+#ifdef DN_GF_AY
+    float var = max(myy - my * my, 0.0);
+    float e = 0.4 * sigma_at(my);
+    float a = var / (var + e * e);
+    return vec4(a, my - a * my, 0.0, 1.0);
+#else
+    vec2 var = max(mcc - mc * mc, vec2(0.0));
+    float e = 0.8 * sigc_at(my);
+    vec2 a = var / (var + e * e);
+    return vec4(a.x, mc.x - a.x * mc.x, a.y, mc.y - a.y * mc.y);
+#endif
+}
+#endif
+#if defined(DN_GF_MY) || defined(DN_GF_MC)
+// The means of a and b over the same windows
+vec4 hook()
+{
+#ifdef DN_GF_MY
+    const int R = 1;
+    vec2 d = GDN_GF_AY_pt;
+    vec2 p = GDN_GF_AY_pos;
+#else
+    const int R = 2;
+    vec2 d = GDN_GF_AC_pt;
+    vec2 p = GDN_GF_AC_pos;
+#endif
+    vec4 m = vec4(0.0);
+    for (int dy = -R; dy <= R; dy++)
+        for (int dx = -R; dx <= R; dx++)
+#ifdef DN_GF_MY
+            m += GDN_GF_AY_tex(p + vec2(dx, dy) * d);
+#else
+            m += GDN_GF_AC_tex(p + vec2(dx, dy) * d);
+#endif
+    return m / float((2 * R + 1) * (2 * R + 1));
+}
+#endif
+#ifdef DN_GF_APPLY
+// The ring two pixels away, offset i of 16 (i and 15 - i opposite each other)
+vec2 ring_off(int i)
+{
+    int r = i < 5 ? i : (i < 11 ? (i % 2 == 1 ? 5 + (i - 5) / 2 * 5 : 9 + (i - 6) / 2 * 5) : 20 + (i - 11));
+    return vec2(r % 5 - 2, r / 5 - 2);
+}
+// The pixel without a dark speck: c, or its ring's color where c is one
+vec3 despeck(vec3 c)
+{
+    float yc = lum(c);
+    float t = (dn_strong() ? 1.0 : 1.3) * max(sigma_at(yc), 1e-4);
+    // Most pixels aren't darker than the four pixels two away: done at four reads
+    float m4 = 0.25 * (lum(HOOKED_texOff(vec2(2.0, 0.0)).rgb) + lum(HOOKED_texOff(vec2(-2.0, 0.0)).rgb)
+                     + lum(HOOKED_texOff(vec2(0.0, 2.0)).rgb) + lum(HOOKED_texOff(vec2(0.0, -2.0)).rgb));
+    if (yc >= m4 - 0.5 * t) return c;
+    float m0 = 0.0;
+    for (int i = 0; i < 16; i++) m0 += lum(HOOKED_texOff(ring_off(i)).rgb);
+    m0 /= 16.0;
+    // The ring's level without its own dark ones
+    float m1 = 0.0, n1 = 0.0;
+    vec3 c1 = vec3(0.0);
+    for (int i = 0; i < 16; i++) {
+        vec3 v = HOOKED_texOff(ring_off(i)).rgb;
+        if (lum(v) > m0 - t) { m1 += lum(v); c1 += v; n1 += 1.0; }
+    }
+    if (n1 < 8.0 || yc >= m1 / n1 - t) return c;
+    m1 /= n1;
+    // Dark on both sides: a line or an edge through it, kept
+    for (int i = 0; i < 8; i++)
+        if (lum(HOOKED_texOff(ring_off(i)).rgb) < m1 - t && lum(HOOKED_texOff(ring_off(15 - i)).rgb) < m1 - t) return c;
+    return c1 / n1;
+}
+// q = a I + b at full size, a and b between the quarter texels (the sampler's filter), I the pixel's own
+vec4 hook()
+{
+    // The dark specks first (in this pass, not one of their own: a full-size pass costs ~0.4 ms; the filter's statistics,
+    // from before, see them, few as they are)
+    vec3 c = despeck(HOOKED_texOff(vec2(0.0)).rgb);
+    float y = lum(c);
+    vec4 ac = GDN_GF_MC_tex(HOOKED_pos);
+    vec2 ay = GDN_GF_MY_tex(HOOKED_pos).xy;
+    float cb = ac.x * (c.b - y) + ac.y, cr = ac.z * (c.r - y) + ac.w;
+    if (dn_strong()) y = ay.x * y + ay.y;
+    // Back to RGB from the luma and B-Y, R-Y (lum's weights)
+    float r = cr + y, b = cb + y;
+    float g = (y - 0.2627 * r - 0.0593 * b) / 0.678;
+    return vec4(r, g, b, 1.0);
 }
 #endif
 
@@ -1274,7 +1432,7 @@ void hook()
         if (frame_setup()) gdn_quat[nw] = table(15);
         gdn_cam[nw] = vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w);
         gdn_zoom[nw] = gyroflow_cam_zoom;
-        gdn_size = target_size;
+        gdn_size = RT;
         gdn_epoch = gyroflow_dn_epoch;
         gdn_magic = DN_MAGIC;
     }

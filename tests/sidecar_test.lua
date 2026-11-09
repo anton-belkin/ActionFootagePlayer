@@ -99,6 +99,26 @@ expect("foreign: said", problem ~= nil, true)
 expect("foreign: not written", (s.update(clip, function(d) d.view = {} end)), false)
 os.remove(s.path(clip))
 
+-- Over a project's locations (own_path): written where that says; two own files, read the first, nothing written
+local elsewhere = dir .. "/archive.afp.json"
+local both = { dir .. "/copy.afp.json", elsewhere }
+local mode = "one"
+local o = sidecar_lib.new({ format_json = serialize, parse_json = env.parse_json,
+                            own_path = function() if mode == "one" then return elsewhere end; return nil, both end })
+expect("own: path", o.path(clip), elsewhere)
+expect("own: written there", (o.update(clip, function(d) d.marks = { { t = 1 } } end)), true)
+expect("own: the file", exists(elsewhere), true)
+expect("own: not beside the clip", exists(s.path(clip)), false)
+mode = "two"
+expect("two: no path", o.path(clip), nil)
+expect("two: read the first's", (o.read(clip)) == nil, true)
+local ok2, why = o.update(clip, function(d) d.marks = {} end)
+expect("two: nothing written", ok2, false)
+expect("two: says why", why and why:find("keep one", 1, true) ~= nil, true)
+mode = "one"
+expect("one again: read", o.read(clip).marks[1].t, 1)
+os.remove(elsewhere)
+
 -- Windows paths
 local w = sidecar_lib.new({ format_json = serialize, parse_json = env.parse_json, windows = true })
 expect("windows", w.path("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.afp.json")

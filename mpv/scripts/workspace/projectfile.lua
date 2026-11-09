@@ -73,7 +73,8 @@ function M.new(env)
         for k, v in pairs(b) do
             if type(doc[k]) ~= type(v) then doc[k] = v end
         end
-        doc.format, doc.version = M.FORMAT, 1
+        -- A newer one's version kept (2: with locations): only raised, never lowered
+        doc.format, doc.version = M.FORMAT, math.max(tonumber(doc.version) or 1, 1)
         return doc
     end
 

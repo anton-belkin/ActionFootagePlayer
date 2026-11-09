@@ -410,6 +410,36 @@ out no more, at about 1.6 times the cost, so they stay out. Cost (offline, the w
 measures): as #151 at 1080p (3.7 ms), +5 % at the XDR's size and 4K; Light about 25 % less. No ghosts on 0126's
 bubbles and diver or 0087's fish; paused-frame crops and the rig in the review's notes.
 
+**What the frames can't take out, and Stronger, 2026-11-09** (Anton, on 0087 at 37 s, open water with the wreck faint
+through it: "fairly strong noise" left; the dark dots are noise, particles in the water are white). Measured on the
+player's shader, 1080p, a 480x360 crop of that water, noise in 10-bit codes by scale (fine: the picture minus a
+Gaussian of 1 px; mid: 1 to 3 px; coarse: 3 to 10 px):
+
+| | luma fine / mid / coarse | color (B-Y) | dark specks a crop |
+|---|---|---|---|
+| without | 10.6 / 9.9 / 5.2 | 11.4 | 323 |
+| Full until now (#153) | 5.9 / 6.1 / 4.0 | 5.2 | 850 |
+| Full now | 5.4 / 4.9 / 3.7 | 0.4 | 213 |
+| Stronger | 1.7 / 1.8 / 2.3 | 0.2 | (none to see) |
+
+What was left after the frames: the coarse blotches (~10 px) go least, 25-30 %, and part of them stays from frame to
+frame (HEVC carries it over), so more frames wouldn't take them; the color's noise was the part that showed; and dark
+cyan specks, 1-7 px, mostly red (-36 codes), new each frame: the shown frame's own spike stayed in its average. So
+`dn_clean` after the average (both modes): the **dark specks** (a pixel darker than its ring of 16 pixels two away by
+more than the noise, the ring with no dark pixels opposite each other, takes the ring's color; bright dots stay) and
+the **color's guided filter** (B-Y, R-Y, each its own guide over ~20 px, eps 0.8 of the color's noise: a pink fin over
+water of its brightness keeps its edge, which a luma-guided filter would spread). **Stronger** (the transform's
+`denoise_strong`, the panel's Transform, for a very noisy clip: `gyroflow_dn_strong`) also keeps no grain, takes in
+frames that differ up to twice as much (tolerance 3), gives the shown pixel a tenth of the weight where it differs from
+what the other frames agree on by 2-4 times the noise, and runs the guided filter on the luma too (~12 px, eps 0.4 of
+the noise). Fine texture softens with it (0090's wreck); the moving fins (0087, 0090) and 0126's bubbles and diver show
+no ghosts or bleeding, and 0126 in Full looks as before. The guided filter is He's "fast" one: its statistics at a
+quarter of the size (5 small passes), the filter at full size.
+
+Cost (offline wall-clock, about 1.8 times the player's): at 1080p the specks 0.6 ms, the guided filter 0.7 ms; at the
+XDR's 3024x1701, 3.1 ms the two. The first version of the specks (16 colors in arrays, Metal spilling them) cost 3.0 ms
+at 1080p; now most pixels are done at 4 reads.
+
 The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
 18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once
 it plays on (its ring starts again from it; stepping 5 frames on would fill half of it); frame-back-step while paused
@@ -535,7 +565,7 @@ What a pass costs scales with one of three things, and that decides which knob h
 |---|---|---|---|
 | Interpolation | EWA (Robidoux) · Lanczos4 · bicubic · bilinear | output px × taps: EWA up to hundreds, Lanczos 64, bicubic 16 (or 4 fetches as a B-spline, softer), bilinear 1 | The biggest single knob at a given size |
 | Shrinking a large source | EWA · a prefiltered half-size source (one pass over the source) · widened taps · none (aliasing) | the prefilter: source px; widened taps: output px × 4 | Whenever the window is much smaller than the video (4K in a 1080p window, 8K 360). mpv's default downscaler cost the N100 half its frames (35 vs 75 fps) |
-| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`); on a 4K or 5K screen a factor of 4 or more |
+| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`, `gyroflow_render_scale` on the GPU path); on a 4K or 5K screen a factor of 4 or more. `auto`: the display's, at most 1080p while the temporal denoise is on (measured below) |
 | Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | Exists (`fps_limit`); the most visible (judder), so last |
 | Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
 | Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
@@ -547,6 +577,38 @@ What a pass costs scales with one of three things, and that decides which knob h
 
 Paused, none of this has to keep up: the paused frame is rendered again at the best settings (EWA, the exact lens,
 full chromatic, the video's size), as `paused_full_size` does now.
+
+### Measured on the M1 Pro's XDR
+
+The GPU path renders the warp, the edge fill, the denoise and the looks after them at `gyroflow_render_scale` times
+the video's rectangle on screen (warp.glsl's `RT`; the passes' sizes are `OUTPUT.w gyroflow_render_scale *`), and mpv
+scales the result to the screen. A 3840x2160 59.94 fps D-Log M clip into HLG, color fringes taken out, the sphere
+edge fill, full screen on the built-in XDR (the video 3024x1701), 720 frames after 12 s of warming up; the GPU's time
+is the sum of `vo-passes`' fresh averages:
+
+| Rendered at | GPU, no denoise | dropped | GPU, denoise 5 + 5 | dropped |
+|---|---|---|---|---|
+| the video's (3840x2160) | 9.9 ms | 0 | 20.7 ms | 48 % |
+| the screen's (3024x1701) | 7.3 ms | 0 | 15.8 ms | 31 % |
+| at most 1440p | 5.3 ms | 0 | 13.3 ms | 27 % |
+| at most 1080p | 4.3 ms | 0 | 8.4 ms | 4 % |
+| at most 720p | 3.7 ms | 0 | 4.8 ms | 0 |
+
+- About 3.5 ms doesn't shrink with the size: the color decoding, mpv's scaler, the OSD and the output's encoding.
+- The denoise's frames at the screen's size: 5 → 31 %, 3 → 22 %, 2 → 18 %, 1 → 11 % dropped; at 1080p 3 frames drop
+  none. Its composite is the pass that grows with the pixels (6.4 ms at the screen's size, 2.5 at 1080p).
+- Bilinear instead of bicubic in the warp: 0.24 ms less at the screen's size, not worth its softness.
+- Frames drop from about 8 ms of passes, half of the frame's 16.7 ms. Not mpv's 120 Hz vsync: with
+  `--override-display-fps=60` or `--swapchain-depth=2` as many drop.
+
+With #153's lighter denoise (the same screen, the panel hidden): at the screen's size Full drops 23 % (14.2 ms) and
+Light 14 % (11.8 ms); at 1080p neither drops (6.9 and 6.0 ms). With the panel open (the video ~2340x1320) Light held
+at the screen's size, but full screen it doesn't, so Auto caps both.
+
+So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader;
+paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
+When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
+denoise.
 
 ### Choosing them
 

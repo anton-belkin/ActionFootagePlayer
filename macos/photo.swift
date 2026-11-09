@@ -2,6 +2,7 @@
 //
 //   afp-photo --width W --height H [--sdr <file>] [--hdr <file>] [--out <file.heic>] [--sdr-out <file>]
 //             [--quality 0-1] [--taken "YYYY:MM:DD HH:MM:SS"] [--make <name>] [--model <name>] [--content-id <UUID>]
+//             [--link <json>]
 //   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds>
 //
 // The renditions are 16-bit RGB, little-endian, row by row (vs-gyroflow's photo::write_rgb16): --sdr the SDR look as
@@ -19,6 +20,10 @@
 // and Dolby Vision stay) into --live-out with it as com.apple.quicktime.content.identifier, and a timed metadata
 // track with com.apple.quicktime.still-image-time at --still-time, the photo's frame. Photos and the iPhone take the
 // two as one Live Photo by them.
+//
+// --link: the photo's link to its clip, as XMP (afp:link in the player's namespace, https://actionfootageplayer.ch/ns/1.0/,
+// as vs-gyroflow's photo.rs writes it in a JPEG): added once the HEIC is written, its image data copied as it is
+// (ImageIO's CGImageDestinationCopyImageSource), the gain map and the Live Photo's identifier kept.
 
 import Foundation
 import ImageIO
@@ -207,4 +212,21 @@ do {
     try context.writeHEIFRepresentation(of: sdr, to: URL(fileURLWithPath: outPath), format: .RGBA8, colorSpace: srgb, options: options)
 } catch {
     fail("\(outPath): \(error.localizedDescription)")
+}
+
+// The link, in the HEIC's XMP: the file copied with it merged in, then put in its place
+if let link = args["link"] {
+    let url = URL(fileURLWithPath: outPath)
+    let tmp = url.deletingLastPathComponent().appendingPathComponent("." + url.lastPathComponent + ".link")
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(src),
+          let dst = CGImageDestinationCreateWithURL(tmp as CFURL, type, 1, nil) else { fail("\(outPath): can't add its link") }
+    let md = CGImageMetadataCreateMutable()
+    guard CGImageMetadataRegisterNamespaceForPrefix(md, "https://actionfootageplayer.ch/ns/1.0/" as CFString, "afp" as CFString, nil),
+          CGImageMetadataSetValueWithPath(md, nil, "afp:link" as CFString, link as CFString) else { fail("\(outPath): the link") }
+    var err: Unmanaged<CFError>?
+    guard CGImageDestinationCopyImageSource(dst, src, [kCGImageDestinationMetadata: md, kCGImageDestinationMergeMetadata: true] as CFDictionary, &err) else {
+        try? FileManager.default.removeItem(at: tmp)
+        fail("\(outPath): its link not added (\(err.map { String(describing: $0.takeRetainedValue()) } ?? "?"))")
+    }
+    do { _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp) } catch { fail("\(outPath): \(error.localizedDescription)") }
 }

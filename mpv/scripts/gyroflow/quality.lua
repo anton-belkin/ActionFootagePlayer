@@ -60,8 +60,14 @@ mp.observe_property("pause", "bool", function(_, paused) if not paused then quie
 local function choices()
     local list = {}
     local function add(label, settings) table.insert(list, { label, settings }) end
-    -- The temporal denoise lighter first: a little less clean, and the picture no less smooth
+    -- With the temporal denoise on and rendered bigger than 1080p, Auto first: at most 1080p while it's on, the
+    -- screen's size when it's off (on the M1 Pro's XDR full screen 31 % of the frames dropped at its size, 4 % at
+    -- 1080p); then the temporal denoise lighter: a little less clean, and the picture no less smooth
     local dn = hooks.denoise()
+    local side = hooks.short_side()
+    if dn and o.resolution ~= "auto" and side and side > 1080 then
+        add("Auto size: at most 1080p while the temporal denoise is on", { { "resolution", "auto" } })
+    end
     if dn == "full" then add("Lighter temporal denoise: 3 frames on each side", { { "temporal_denoise", "light" } }) end
     local fps = mp.get_property_number("container-fps") or 0
     local limit = o.fps_limit > 0 and o.fps_limit or fps
@@ -75,7 +81,6 @@ local function choices()
     if can15 then add("Play at 15 fps", { { "fps_limit", "15" } }) end
     if edges == "sphere" then add("Edges filled with the frame's edge spread out", { { "edges", "smooth" } }) end
     if edges ~= "off" then add("No edge fill: the background color", { { "edges", "off" } }) end
-    local side = hooks.short_side()
     if side and side > 1080 then add("Render at 1080p", { { "resolution", "1080" } }) end
     if hooks.chromatic() then add("Skip the color aberration correction on this screen", { { "chromatic_skip", "yes" } }) end
     if dn then add("No temporal denoise on this computer", { { "temporal_denoise", "off" } }) end
@@ -132,8 +137,8 @@ local function check()
     end
 end
 
--- options: main.lua's (fps_limit, ask_when_slow); hooks: stabilizing() the stabilization is on, short_side() the short
--- side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
+-- options: main.lua's (fps_limit, resolution, ask_when_slow); hooks: stabilizing() the stabilization is on,
+-- short_side() the short side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
 -- the temporal denoise while it plays (full, light, nil), set(key, value) applies and keeps a setting
 function M.init(options, h)
     o, hooks = options, h

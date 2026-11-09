@@ -28,6 +28,8 @@ fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 install -m 755 "$bin" "$app/Contents/MacOS/ActionFootageLibrary"
+# Its Quick Look (the system's panel: qlmanage -p crashes on videos on macOS 27)
+swiftc -O -target arm64-apple-macos12 macos/quicklook.swift -o "$app/Contents/MacOS/afp-quicklook"
 install -m 644 library/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
 # Tauri's own version is the crate's: the app shows the player's, which ships with it
 plist_version=$(echo "$version" | sed -E 's/^([0-9]+(\.[0-9]+)*).*/\1/')
@@ -72,4 +74,5 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+codesign --force -s - "$app/Contents/MacOS/afp-quicklook"
 codesign --force -s - "$app" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }

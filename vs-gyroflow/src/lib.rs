@@ -32,6 +32,7 @@ pub mod motion;
 pub mod dovi;
 pub mod dv_mux;
 pub mod workspace;
+pub mod markers;
 pub mod mp4meta;
 pub mod cut;
 pub mod photo;

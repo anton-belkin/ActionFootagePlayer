@@ -21,11 +21,14 @@ for line in io.lines("tests/workspace_cases.txt") do
     if line:match("^#") or line:match("^%s*$") then
         -- skip
     elseif line:match("^case ") then
-        case = { name = line:sub(6), dirs = {}, files = {}, clips = {}, volumes = {} }
+        case = { name = line:sub(6), dirs = {}, files = {}, texts = {}, clips = {}, volumes = {}, mounts = {} }
         table.insert(cases, case)
         section = nil
     elseif line:match("^home ") then
         case.home = line:sub(6)
+    elseif line:match("^mount ") then
+        local source, dir = line:match("^mount (%S+) (.-)%s*$")
+        table.insert(case.mounts, { source = source, dir = dir })
     elseif line == "tree" then
         section = "tree"
     elseif line:match("^clip ") then
@@ -36,11 +39,23 @@ for line in io.lines("tests/workspace_cases.txt") do
         table.insert(case.volumes, { system = system, path = path, yes = answer == "yes" })
     elseif section == "tree" then
         local path = line:match("^%s+(.-)%s*$")
-        if path:sub(-1) == "/" then case.dirs[path:sub(1, -2)] = true else case.files[path] = true end
+        local name, text = path:match("^(.-) = (.*)$")
+        if name then case.files[name] = true; case.texts[name] = text
+        elseif path:sub(-1) == "/" then case.dirs[path:sub(1, -2)] = true else case.files[path] = true end
     elseif type(section) == "table" then
         local key, value = line:match("^%s+(%S+) (.-)%s*$")
         table.insert(section.expect, { key, value })
     end
+end
+
+-- JSON as the cases write it, made a Lua table: enough for objects, arrays, strings, numbers, true and false
+local function json(text)
+    local lua = text:gsub('"([^"]*)"%s*:', '["%1"]='):gsub("%[", "{"):gsub("%]", "}"):gsub('{"', '{"'):gsub("{%[", "{[")
+    -- The keys' brackets turned to braces above: put them back
+    lua = lua:gsub('{{"([^"]*)"}=', '{["%1"]='):gsub(',{"([^"]*)"}=', ',["%1"]=')
+    local f = (loadstring or load)("return " .. lua)
+    local ok, v = pcall(f)
+    return ok and v or nil
 end
 
 local function in_base(rel)
@@ -61,11 +76,22 @@ for _, c in ipairs(cases) do
     for rel in pairs(c.dirs) do dirs[BASE .. "/" .. rel] = true; add_parents(rel) end
     local files = {}
     for rel in pairs(c.files) do files[BASE .. "/" .. rel] = true; add_parents(rel) end
+    local texts = {}
+    for rel, t in pairs(c.texts) do texts[BASE .. "/" .. rel] = t end
+    local mounts = {}
+    for _, m in ipairs(c.mounts) do mounts[#mounts + 1] = { source = m.source, dir = BASE .. "/" .. m.dir } end
     local ws = workspace.new({
         is_dir = function(p) return dirs[p] == true end,
         is_file = function(p) return files[p] == true end,
         home = c.home and in_base(c.home) or BASE,
         windows = false,
+        read_json = function(p) return texts[p] and json(texts[p]) or nil end,
+        files = function(d)
+            local out = {}
+            for f in pairs(files) do if f:match("^(.*)/[^/]+$") == d then out[#out + 1] = f:match("([^/]+)$") end end
+            return out
+        end,
+        mounts = function() return mounts end,
     })
     for _, clip in ipairs(c.clips) do
         local path = in_base(clip.path)
@@ -74,7 +100,20 @@ for _, c in ipairs(cases) do
             if key == "project" then
                 expect(what, ws.project_root(path), in_base(value))
             elseif key == "relative" then
-                expect(what, ws.relative(path, ws.project_root(path)), value)
+                local root = ws.project_root(path)
+                expect(what, root and ws.tree_path(path, ws.locations(root)), value)
+            elseif key == "projects" then
+                local list = {}
+                for i, p in ipairs(ws.projects_of(path)) do list[i] = p:sub(#BASE + 2) end
+                expect(what, table.concat(list, "|"), value)
+            elseif key == "original" then
+                local tree, file = value:match("^(.-) (%S+/%S.-)$")
+                tree, file = value:match("^(.-%.%w+) (.+)$")
+                local got = ws.files_at(tree, ws.locations(ws.project_root(path)))[1]
+                expect(what, got and got.file, in_base(file))
+            elseif key == "own" then
+                local own, list = ws.own_file(path, ws.locations(ws.project_root(path)))
+                expect(what, own or (list and "conflict"), value == "conflict" and "conflict" or in_base(value))
             elseif key == "new" then
                 expect(what, ws.new_project_root(path), in_base(value))
             elseif key == "gyroflow" then

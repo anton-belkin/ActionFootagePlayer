@@ -11,8 +11,10 @@
 -- `view360` (the view360 plugin's): a 360° clip's recorded view, `view360.recording` (docs/360-reframe.md).
 --
 -- Plain Lua, no mpv (tests/sidecar_test.lua):
---   local sidecar = require('sidecar').new({ parse_json, format_json, windows })
---   sidecar.path(clip)               where it's written: <clip without its extension>.afp.json
+--   local sidecar = require('sidecar').new({ parse_json, format_json, windows, own_path })
+--   sidecar.path(clip)               where it's written: <clip without its extension>.afp.json; with own_path, where
+--                                    that says (the clip's own file over the project's locations), nil when there are
+--                                    two (then nothing is written: update fails, read gives the first)
 --   sidecar.old_path(clip)           <clip>.marks.json
 --   sidecar.read(clip)               -> doc, file (nil: none, or not one of ours)
 --   sidecar.update(clip, fn)         fn(doc) changes the doc read fresh (a new one when there's none): ok, err
@@ -32,8 +34,20 @@ function M.new(env)
     local function base(clip)
         return clip:match(windows and "^(.*)%.[^./\\]+$" or "^(.*)%.[^./]+$") or clip
     end
-    function s.path(clip) return base(clip) .. M.EXT end
-    function s.old_path(clip) return base(clip) .. M.OLD_EXT end
+    -- The clip's own file: own_path(clip) -> the file, or nil and the files when there are two or more
+    local function own(clip)
+        if env.own_path then
+            local p, list = env.own_path(clip)
+            if p or list then return p, list end
+        end
+        return base(clip) .. M.EXT
+    end
+    function s.path(clip) return (own(clip)) end
+    function s.old_path(clip)
+        local p, list = own(clip)
+        p = p or (list and list[1])
+        return p and (p:gsub("%.afp%.json$", "") .. M.OLD_EXT) or base(clip) .. M.OLD_EXT
+    end
 
     local function read_file(file)
         local f = io.open(file, "r")
@@ -54,7 +68,8 @@ function M.new(env)
 
     -- The clip's doc and the file it's in: the .afp.json, else the .marks.json from before
     function s.read(clip)
-        for _, file in ipairs({ s.path(clip), s.old_path(clip) }) do
+        local p, list = own(clip)
+        for _, file in ipairs({ p or list[1], s.old_path(clip) }) do
             local doc = parse(file)
             if doc then return doc, file end
             if doc == false then return nil, nil, file .. ": not one of the player's files, left alone" end
@@ -79,16 +94,21 @@ function M.new(env)
     end
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
-    -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water) and no
-    -- 360 recording: the file removed
+    -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water), no
+    -- 360 recording and no tags: the file removed
     function s.update(clip, fn)
+        local p, list = own(clip)
+        if not p then
+            return false, "this clip has " .. #list .. " files of its own (" .. table.concat(list, ", ") .. "): keep one, nothing is saved until then"
+        end
         local doc, from, problem = s.read(clip)
         if problem then return false, problem end
         doc = doc or { format = M.FORMAT, version = 1 }
         if fn(doc) == false then return true end
         doc.format = M.FORMAT
-        local file = s.path(clip)
-        if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil then
+        local file = p
+        if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil
+            and (type(doc.tags) ~= "table" or next(doc.tags) == nil) then
             if from then os.remove(from) end
             return true
         end

@@ -26,6 +26,10 @@
 // `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
 // tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" a profile's name from
 // Gyroflow's database, or "" when it has none (Unknown: pick one in Gyroflow).
+//
+// `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
+// (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights
+// the camera marked (markers.rs, as the highlights plugin reads them), or null. Kept per file as the plain answer is.
 
 use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
 
@@ -48,8 +52,11 @@ fn main() {
     // --lens: the camera and the lens profile Gyroflow takes for it, for the side panel's Source tab
     let lens = args.first().is_some_and(|a| a == "--lens");
     if lens { args.remove(0); }
+    // --library: everything Action Footage Library's index keeps about a clip
+    let library = args.first().is_some_and(|a| a == "--library");
+    if library { args.remove(0); }
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --library] <video>");
         std::process::exit(2);
     };
     if lens {
@@ -82,10 +89,39 @@ fn main() {
     // Kept per file (and per build of this tool): opening a clip waits for this answer, and reading the file for it
     // takes ~0.4 s cold (from a NAS more)
     let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
-    let cache = vs_gyroflow::file_cache("probe", &path, &build);
-    if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
-        println!("{}", text.trim());
+    if library {
+        let cache = vs_gyroflow::file_cache("library", &path, &build);
+        if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
+            println!("{}", text.trim());
+            return;
+        }
+        let mut out = plain(&path, &build);
+        if out["camera"].is_null() {
+            out["camera"] = camera_and_lens(&path).map(|(c, _)| c).unwrap_or_default().into();
+        }
+        out["movie"] = serde_json::to_value(vs_gyroflow::markers::movie(&path)).unwrap_or_default();
+        out["marks"] = vs_gyroflow::markers::highlights(&path)
+            .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
+        println!("{out}");
+        keep(cache, &out);
         return;
+    }
+    println!("{}", plain(&path, &build));
+}
+
+fn keep(cache: Option<std::path::PathBuf>, out: &serde_json::Value) {
+    if let Some(c) = cache {
+        let tmp = c.with_extension("tmp");
+        if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &c); }
+    }
+}
+
+// The plain answer (no option), from its cache or worked out and kept
+fn plain(path: &str, build: &str) -> serde_json::Value {
+    let path = path.to_string();
+    let cache = vs_gyroflow::file_cache("probe", &path, build);
+    if let Some(v) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        return v;
     }
     let mut out = match probe(&path) {
         Ok(v) => v,
@@ -115,9 +151,6 @@ fn main() {
             Err(e) => serde_json::json!({ "error": e }),
         };
     }
-    println!("{out}");
-    if let Some(c) = cache {
-        let tmp = c.with_extension("tmp");
-        if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &c); }
-    }
+    keep(cache, &out);
+    out
 }

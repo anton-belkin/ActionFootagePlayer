@@ -56,6 +56,10 @@ PLAYER = os.environ.get("AFP_PLAYER", "/stream/player")
 ARGS = os.environ.get("AFP_ARGS", "/stream/args")
 
 jobs = {}  # key -> {proc, dir, started}
+# When a player last asked for each clip's segments: a render nobody asks for any more (the player went to another
+# clip) stops, so that it doesn't halve the GPU for the one being watched
+asked = {}
+ORPHAN_AFTER = 15
 lock = threading.Lock()
 
 
@@ -242,9 +246,43 @@ def info(clip):
 # before 3.5). Jellyfin can't tell a TS stream from an fMP4 one (both are its "hls" container), so it hands them ours to
 # play directly; they get the same segments remuxed to TS (HEVC with its parameter sets in band, the clip's time kept)
 # Looks: hlg (the player's hdr look, as it is), pq (that made HDR10), sdr (the player's nbcu look). A URL's id may end
-# in ~pq or ~sdr; TS players get TV_LOOK unless the URL says
-LOOKS = ("hlg", "pq", "sdr")
+# in ~pq or ~sdr, and any of them in x<peak> (~pqx1000): its highlights expanded into the headroom up to that many nits
+# (hlg_highlights.glsl), and in g<gain> (~pqg2): the whole picture's light times that, a shoulder below 1000 nits
+# (hlg_gain.glsl), and in r<fps> (~pqg2.5r30): at most that many frames a second (afp-render -every: the rest decoded,
+# not rendered; the TV interpolates); TS players get TV_LOOK unless the URL says
+LOOK = re.compile(r"^(hlg|pq|sdr)(?:x(\d{3,4}))?(?:g(\d(?:\.\d)?))?(?:r(\d{2}))?$")
 TV_LOOK = os.environ.get("AFP_TV_LOOK", "hlg")
+
+
+def with_look(clip, look):
+    """The clip as rendered in a look (its own id, ~<look>), or as it is for hlg / none"""
+    if look and look != "hlg":
+        return dict(clip, id=f"{clip['id']}~{look}", look=look, base=clip)
+    return clip
+
+
+def gain_shader(gain):
+    """hlg_gain.glsl with its gain as the default"""
+    out = os.path.join(BIN, f"hlg_gain_{gain}.glsl")
+    src = os.path.join(BIN, "hlg_gain.glsl")
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+        text = open(src).read().replace("//!MAXIMUM 4.0\n2.0\n", f"//!MAXIMUM 4.0\n{float(gain):.2f}\n", 1)
+        with open(out + ".tmp", "w") as f:
+            f.write(text)
+        os.replace(out + ".tmp", out)
+    return out
+
+
+def highlights_shader(peak):
+    """hlg_highlights.glsl with its peak as the default (afp-render can't set a shader's parameters)"""
+    out = os.path.join(BIN, f"hlg_highlights_{peak}.glsl")
+    src = os.path.join(BIN, "hlg_highlights.glsl")
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+        text = open(src).read().replace("//!MAXIMUM 1000.0\n1000.0\n", f"//!MAXIMUM 1000.0\n{float(peak):.1f}\n", 1)
+        with open(out + ".tmp", "w") as f:
+            f.write(text)
+        os.replace(out + ".tmp", out)
+    return out
 TS_PLAYERS = re.compile(r"Tizen [1-4]\.|SMART-TV.*Tizen [1-4]|Web0S|webOS", re.I)
 
 
@@ -345,7 +383,7 @@ def fingerprint(clip):
     i = info(clip)
     a = i["args"]
     what = json.dumps({k: a.get(k) for k in ("clip", "offset", "length", "render", "dlogm", "deps")}, sort_keys=True)
-    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}|{hashlib.sha1(what.encode()).hexdigest()}"
+    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}{'2' if clip.get('look') == 'pq' else ''}|{hashlib.sha1(what.encode()).hexdigest()}"
 
 
 def clip_dir(clip):
@@ -399,11 +437,17 @@ def start_render(clip, n, upto=None, background=False):
     if curve == "dlogm":
         shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
         args.append("--hlg")
-        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10
-        if clip.get("look") == "sdr":
+        # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10; highlights expanded
+        m = LOOK.match(clip.get("look") or "hlg")
+        if m and m.group(2):
+            shaders.append(highlights_shader(int(m.group(2))))
+        if m and m.group(3):
+            shaders.append(gain_shader(m.group(3)))
+        base = m.group(1) if m else "hlg"
+        if base == "sdr":
             shaders.append(os.path.join(PLAYER, "dlogm", "shaders", "nbcu_hlg2sdr.glsl"))
             args.append("--sdr")
-        elif clip.get("look") == "pq":
+        elif base == "pq":
             args.append("--pq")
     elif curve:
         log("no look for the curve", curve, "of", clip["name"])
@@ -415,6 +459,11 @@ def start_render(clip, n, upto=None, background=False):
         args += ["-t", f"{min(end, i['duration']) - n * i['seg'] - 0.5 / i['fps']:.6f}"]
     if off:
         args += ["-offset", f"{off:.6f}"]
+    m = LOOK.match(clip.get("look") or "")
+    if m and m.group(4):
+        every = max(1, round(i["fps"] / int(m.group(4))))
+        if every > 1:
+            args += ["-every", str(every)]
     args += [i["source"], out] + shaders
     logf = open(os.path.join(out, "render.log"), "a")
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),
@@ -427,10 +476,21 @@ def start_render(clip, n, upto=None, background=False):
     return j
 
 
-def ensure(clip, n):
+def is_probe(headers):
+    """Jellyfin reading a stream to learn what it is (its ffprobe), not a player: it needs the first segments only"""
+    return (headers.get("User-Agent") or "").startswith("Lavf")
+
+
+def ensure(clip, n, limit=None):
     """A render that has segment n or will have it soon: the running one when it's at most a few segments short of n,
-    else a new one from n (a seek), the old one stopped. Someone watching comes first: a background render stops"""
+    else a new one from n (a seek), the old one stopped. Someone watching comes first: a background render stops, and so
+    does one nobody has asked for in ORPHAN_AFTER s. limit: at most that many segments (a probe's)"""
     with lock:
+        now = time.time()
+        for k, v in jobs.items():
+            if k != clip["id"] and not v["background"] and v["proc"].poll() is None and now - asked.get(k, v["started"]) > ORPHAN_AFTER:
+                log("stopping the render of", k, ": nobody asks for it")
+                v["proc"].terminate()
         out = clip_dir(clip)
         j = jobs.get(clip["id"])
         if os.path.exists(segment_path(clip, n)):
@@ -450,6 +510,8 @@ def ensure(clip, n):
         count = info(clip)["count"]
         while upto < count and not os.path.exists(segment_path(clip, upto)):
             upto += 1
+        if limit:
+            upto = min(upto, n + limit)
         return start_render(clip, n, upto if upto < count else None)
 
 
@@ -487,7 +549,7 @@ def prerender_worker():
             upto = first
             while upto < last and not os.path.exists(segment_path(clip, upto)):
                 upto += 1
-            current["name"] = clip["name"]
+            current["name"] = clip["name"] + (f" ({clip['look']})" if clip.get("look") else "")
             j = start_render(clip, first, upto if upto < i["count"] else None, background=True)
         j["proc"].wait()
         current["name"] = None
@@ -618,7 +680,8 @@ class Handler(BaseHTTPRequestHandler):
             for folder, cs in sorted(folders.items()):
                 q = urllib.parse.quote(folder)
                 body += (f"<h2>{html.escape(folder)}</h2><p><a href='/prerender?folder={q}&what=opening'>pre-render openings</a> · "
-                         f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a></p><ul>")
+                         f"<a href='/prerender?folder={q}&what=whole'>pre-render whole clips</a> · "
+                         f"<a href='/prerender?folder={q}&what=opening&look=tv'>openings for the TV ({html.escape(TV_LOOK)})</a></p><ul>")
                 for c in cs:
                     i = infos.get(c["id"])
                     done = len([f for f in os.listdir(os.path.join(CACHE, c["id"])) if f.startswith("seg") and f.endswith(".m4s")]) if os.path.isdir(os.path.join(CACHE, c["id"])) else 0
@@ -629,20 +692,34 @@ class Handler(BaseHTTPRequestHandler):
                                   f"<body style='font-family:system-ui;background:#111;color:#ddd'><style>a{{color:#8cf}}</style><h1>Clips</h1><p>Stabilized, HDR (HLG). "
                                   f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV. {status}.</p>{body}", "text/html; charset=utf-8")
         if parts == ["prerender"]:
+            # folder: a folder's clips (folders below it too with recursive=1; "" and recursive=1: everything);
+            # what: opening | whole; look: the look to render (tv: AFP_TV_LOOK, what TVs are given; else as in a
+            # stream's id, ~pqg2.5 without the ~; none: the player's HLG); links=1: only moments and clip previews
+            # (what Jellyfin shows), not the originals
             q = urllib.parse.parse_qs(u.query)
             folder, what = (q.get("folder") or [""])[0], (q.get("what") or ["opening"])[0]
+            look = (q.get("look") or [""])[0]
+            look = TV_LOOK if look == "tv" else look
+            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0] == "1"
             if what not in ("opening", "whole"):
                 return self.send(400, "what: opening or whole", "text/plain")
+            if look and not LOOK.match(look):
+                return self.send(400, "look: tv, or hlg, pq, sdr with x<peak> and g<gain>", "text/plain")
             added = 0
             with lock:
                 for c in clips():
-                    if folder_of(c) == folder and not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
+                    f = folder_of(c)
+                    inside = f == folder or (recursive and (folder in ("", ".") or f.startswith(folder.rstrip("/") + "/")))
+                    if not inside or (links and c["kind"] == "clip"):
+                        continue
+                    c = with_look(c, look)
+                    if not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
                         queue.append({"clip": c, "what": what})
                         added += 1
-            log("pre-render", what, folder, added, "clips")
+            log("pre-render", what, folder or "(all)", "recursive" if recursive else "", look or "hlg", added, "clips")
             return self.send(303, "", "text/plain", {"Location": "/"})
         if parts == ["status"]:
-            return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue),
+            return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue), "tv_look": TV_LOOK,
                                               "rendering": [{"clip": v["clip"], "from": v["from"], "background": v["background"]} for v in jobs.values() if v["proc"].poll() is None]}),
                              "application/json")
         if parts == ["playlist.m3u"]:
@@ -677,23 +754,34 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "clip":
             cid, _, look = parts[1].partition("~")
             clip = next((c for c in clips() if c["id"] == cid), None)
-            if not clip or info(clip) is None or (look and look not in LOOKS):
+            if not clip or info(clip) is None or (look and not LOOK.match(look)):
                 return self.send(404, "no such clip", "text/plain")
             if not look and wants_ts(self.headers, u.query):
                 look = TV_LOOK
-            if look and look != "hlg":
-                clip = dict(clip, id=f"{cid}~{look}", look=look, base=clip)
+            clip = with_look(clip, look)
             name = os.path.basename(parts[2])
+            asked[clip["id"]] = time.time()
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
-                first = next((k for k in range(min(6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
-                if first is not None:
-                    ensure(clip, first)
+                # (Jellyfin's probe: only those it reads)
+                count = info(clip)["count"]
+                relay = (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server")
+                first = next((k for k in range(min(6, count)) if not os.path.exists(segment_path(clip, k))), None)
+                if first is not None and not relay:
+                    ensure(clip, first, 2 if is_probe(self.headers) else None)
                 # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
                 # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
                 # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
                 # the stream from us, with its own User-Agent, and gets TS or fMP4 as it plays
-                if (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server"):
+                if relay:
+                    # A TV is about to play: its look's render starts now from the first segment it doesn't have (past a
+                    # pre-rendered opening), seconds before the TV asks. Nothing in the look Jellyfin itself asked for: it
+                    # only passes the playlist on, and a render nobody watches would halve the TV's
+                    tv = with_look(clip, look or TV_LOOK)
+                    asked[tv["id"]] = time.time()
+                    k = next((k for k in range(count) if not os.path.exists(segment_path(tv, k))), None)
+                    if k is not None:
+                        ensure(tv, k)
                     i = info(clip)
                     w, h = (shader_for(clip, clip_dir(clip), i).get("output") or [1920, 1080])
                     height = min(HEIGHT, h)
@@ -708,10 +796,11 @@ class Handler(BaseHTTPRequestHandler):
                 n = int(m.group(1))
                 if n >= info(clip)["count"]:
                     return self.send(404, "past the end", "text/plain")
-                j = ensure(clip, n)
+                probe = is_probe(self.headers)
+                j = ensure(clip, n, 2 if probe else None)
                 # A cached stretch (a pre-rendered opening, what played before) ends somewhere: the render picks up a
-                # few segments before the player gets there
-                ahead = next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                # few segments before the player gets there (not for a probe)
+                ahead = None if probe else next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if ahead is not None:
                     ensure(clip, ahead)
                 path = segment_path(clip, n)

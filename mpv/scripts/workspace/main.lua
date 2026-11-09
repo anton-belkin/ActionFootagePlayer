@@ -54,7 +54,9 @@
 --   relative        the clip's path in it ("Day 1/A.MP4"), absent for none
 --   gyroflow_projects  the paths the clip's Gyroflow project may have, in the order looked at
 --   gyroflow_new    where a new Gyroflow project for it goes (Ctrl+e, the gyroflow plugin)
---   sidecar_file    the clip's own file beside it, its marks and saved view (sidecar.lua)
+--   sidecar_file    the clip's own file, its marks and saved view (sidecar.lua): beside the clip, in whichever of the
+--                   project's locations has it (a working copy's is the archive's clip's)
+--   own_conflict    when the clip has two or more own files (in two locations): their paths; nothing is saved for it
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
 --   moments_folder  the project's _Moments/ folder
 --   saving          a moment's name while it's being saved
@@ -140,9 +142,85 @@ local fs = {
     home = os.getenv(windows and "USERPROFILE" or "HOME"),
     windows = windows,
 }
+-- For the project's locations (workspace.lua): a JSON file read, a folder's files, the shares mounted here
+fs.read_json = function(p)
+    turn()
+    local f = io.open(p, "r")
+    if not f then return nil end
+    local t = f:read("*a") or ""
+    f:close()
+    local v = utils.parse_json(t)
+    return type(v) == "table" and v or nil
+end
+fs.files = function(p) turn(); return utils.readdir(p, "files") end
+fs.mounts = function()
+    local out = {}
+    if windows then return out end
+    local text
+    if macos then
+        local r = mp.command_native({ name = "subprocess", args = { "/sbin/mount" }, playback_only = false, capture_stdout = true, capture_stderr = true })
+        text = r and r.stdout or ""
+        for src, dir in text:gmatch("(//[^\n]-) on (/[^\n]-) %(") do out[#out + 1] = { source = src, dir = dir } end
+    else
+        local f = io.open("/proc/mounts", "r")
+        text = f and f:read("*a") or ""
+        if f then f:close() end
+        for src, dir in text:gmatch("(//%S+) (%S+) cifs") do
+            out[#out + 1] = { source = src:gsub("\\040", " "), dir = dir:gsub("\\040", " ") }
+        end
+    end
+    return out
+end
 local ws = workspace.new(fs)
+-- A project's locations, read again when its file changes
+local locs_cache = {}
+local function locations_of(root)
+    if not root then return nil end
+    local info = utils.file_info(ws.join(root, workspace.PROJECT_FILE))
+    local stamp = info and (tostring(info.mtime) .. "/" .. tostring(info.size)) or "-"
+    local c = locs_cache[root]
+    if c and c.stamp == stamp then return c.list end
+    local doc = fs.read_json(ws.join(root, workspace.PROJECT_FILE)) or {}
+    local list = ws.locations(root, doc)
+    -- This computer's own copies of the project's clips (the Library's On this computer), looked at first
+    local id = type(doc.id) == "string" and doc.id:match("^[%w%-]+$")
+    if id then
+        local base = windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
+                     or os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") or "") .. "/.config"
+        local mine = fs.read_json(ws.join(ws.join(ws.join(base, "ActionFootage"), "projects"), id .. ".json"))
+        if mine and type(mine.locations) == "table" then
+            for i = #mine.locations, 1, -1 do
+                local l = mine.locations[i]
+                if type(l) == "table" and type(l.path) == "string" then
+                    table.insert(list, 1, { name = l.name, at = (type(l.at) == "string" and l.at or ""):gsub("^/+", ""):gsub("/+$", ""),
+                                            dir = ws.place(l.path, root), copies = true, path = l.path, here = true })
+                end
+            end
+        end
+    end
+    locs_cache[root] = { stamp = stamp, list = list }
+    return list
+end
+fs.locations_of = locations_of
+-- A file's path in its project's tree ("Action 6/A.MP4"): the location holding it, its place plus the path under it
+local function tree_of(file, root)
+    if not file or not root then return nil end
+    return ws.tree_path(file, locations_of(root))
+end
 local moments = moments_lib.new(ws, fs)
-local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows })
+-- The clip's own file is wherever it is over the project's locations (workspace.lua's own_file): beside the archive's
+-- clip while its working copy plays; two of them, none written
+local state
+local function own_path(clip)
+    if state and state.clip == clip and state.project then
+        if state.own_conflict then return nil, state.own_conflict end
+        if state.sidecar_file then return state.sidecar_file end
+    end
+    local root = ws.project_root(clip)
+    if not root then return nil end
+    return ws.own_file(clip, locations_of(root))
+end
+local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows, own_path = own_path })
 -- The project's own file, Project.afproject (projectfile.lua)
 local pf = projectfile.new({
     parse_json = fs.parse_json, format_json = utils.format_json, join = function(a, b) return ws.join(a, b) end,
@@ -156,7 +234,7 @@ local pf = projectfile.new({
     end,
 })
 
-local state = {}
+state = {}
 -- The project's _Moments/ as last read: every moment in it, and its folders' times
 local found = { list = {}, dirs = {} }
 local scanned_project = nil
@@ -187,6 +265,7 @@ end
 local extras = nil
 -- The project's settings (further down)
 local settings
+local clips_layout, fingerprint
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
 -- Input and transform (transform.lua, docs/moments-and-workspaces.md "Source and transform"): the source's input is
@@ -257,14 +336,28 @@ local function describe(path)
     local clip = ws.absolute(path, mp.get_property("working-directory"))
     local root = ws.project_root(clip)
     migrate(root)
+    local locs = locations_of(root)
+    local tree = root and ws.tree_path(clip, locs) or nil
+    -- Its own file and its Gyroflow project are the clip's wherever it is: looked for beside it in every location
+    local own, conflict = ws.own_file(clip, root and locs or nil)
+    local gyroflow_projects = {}
+    if tree then
+        for _, c in ipairs(ws.files_at(tree, locs)) do
+            for _, g in ipairs(ws.gyroflow_projects(c.file)) do gyroflow_projects[#gyroflow_projects + 1] = g end
+        end
+    end
+    if #gyroflow_projects == 0 then gyroflow_projects = ws.gyroflow_projects(clip) end
+    -- A new one goes beside its own file's clip (the archive's, not a working copy)
+    local gyroflow_new = own and own:gsub("%.afp%.json$", ".gyroflow") or ws.gyroflow_new(clip)
     return {
         path = path,
         clip = clip,
         project = root,
-        relative = root and ws.relative(clip, root) or nil,
-        gyroflow_projects = ws.gyroflow_projects(clip),
-        gyroflow_new = ws.gyroflow_new(clip),
-        sidecar_file = sidecar.path(clip),
+        relative = tree,
+        gyroflow_projects = gyroflow_projects,
+        gyroflow_new = gyroflow_new,
+        sidecar_file = own,
+        own_conflict = conflict,
         moments_folder = root and ws.join(root, moments_lib.FOLDER) or nil,
         project_choices = not root and ws.project_choices(clip) or nil,
         project_new = not root and ws.new_project_root(clip) or nil,
@@ -473,6 +566,13 @@ mp.add_hook("on_load", 10, function()
         elseif info and (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
             open_moment(path)
         end
+    end
+    -- Two own files of this clip (in two of the project's locations): it plays with the first's, nothing is saved
+    if state.own_conflict then
+        local names = {}
+        for i, f in ipairs(state.own_conflict) do names[i] = f end
+        mp.msg.warn("two own files of this clip, nothing saved until one goes: " .. table.concat(names, ", "))
+        mp.osd_message("This clip has " .. #names .. " files of its own:\n" .. table.concat(names, "\n") .. "\nKeep one: until then nothing is saved for it", 8)
     end
     -- The source's own file beside it: its input, always; its bundle, unless a link with settings of its own plays.
     -- An old file's input moves out of its view, and a link's input it didn't have yet goes into it
@@ -691,9 +791,14 @@ local function save(name, update, typed, quiet, opts)
     end
     local info = utils.file_info(state.clip)
     local l = {
-        v = 1, kind = "moment", clip = ws.relative(state.clip, root), size = info and info.size,
+        v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
+    -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
+    if update then
+        local old = utils.parse_json(fs.read_link(update.file) or "")
+        if type(old) == "table" then l.tags = old.tags end
+    end
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
     -- own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
     -- clip's project changed later doesn't change it. An update keeps them; a moment without settings of its own
@@ -1026,7 +1131,7 @@ mp.register_script_message("export-name", function(json)
         local output, final = moments.unique_file(ws.join(root, moments_lib.EXPORTS), safe, label .. ".mov")
         local info = utils.file_info(state.clip)
         local l = {
-            v = 1, kind = "export", clip = ws.relative(state.clip, root), size = info and info.size,
+            v = 1, kind = "export", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
             created = state.created, ["in"] = a and moments_lib.ms(a), out = b and moments_lib.ms(b), name = final,
             look = req.look, stabilized = req.stabilized == true, roots = { root },
         }
@@ -1066,6 +1171,16 @@ end)
 local clips_job = nil
 -- Batch mode (Action Footage Library runs the player without a window to make them): { finished(summary), ... }
 local batch = nil
+-- What a batch is kept to (Action Footage Library's selection): paths in the project ("Day 1/A.MP4", a folder
+-- "Day 1", a moment "_Moments/Reef/Turtle.afplink.mp4"), each taking what's under it too; nil: the whole project
+local batch_only = nil
+local function in_only(relative)
+    if not batch_only then return true end
+    for _, p in ipairs(batch_only) do
+        if relative == p or relative:sub(1, #p + 1) == p .. "/" then return true end
+    end
+    return false
+end
 local recount
 local overlay = mp.create_osd_overlay("ass-events")
 
@@ -1140,7 +1255,7 @@ end
 -- Where a new preview goes: at the clip's path in _Clips/ (flat: in _Clips/ itself). A name another clip's preview has
 -- gets the clip's folder in parentheses ("GX010123 (100GOPRO)"), then a number
 local function new_preview_path(root, c, flat)
-    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(moments_lib.clip_preview_relative(c.relative, flat)))
+    local file = ws.join(ws.join(root, moments_lib.CLIPS), native(c.preview_rel or moments_lib.clip_preview_relative(c.relative, flat)))
     if not fs.is_file(file) then return file end
     local raw = fs.read_link(file)
     local l = raw and utils.parse_json(raw)
@@ -1226,12 +1341,70 @@ local function start_clips(root, queue, what)
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
     clips_job = { project = root, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
-                  flat = pf.read(root).settings.clips_flat == true }
+                  flat = clips_layout(root) == "flat" }
     state.clips = { done = 0, total = #queue }
     publish()
     draw_progress()
     mp.osd_message(what, 3)
     next_clip()
+end
+
+-- How the clip previews are laid out in _Clips (the project file's settings): "tree" (as the footage is), "flat"
+-- (all in _Clips itself), "trips" (in a folder per trip: clips at most 2 days apart)
+clips_layout = function(root)
+    local s = pf.read(root).settings or {}
+    if s.clips_layout == "flat" or s.clips_layout == "trips" or s.clips_layout == "tree" then return s.clips_layout end
+    return s.clips_flat == true and "flat" or "tree"
+end
+
+-- Where each of `queue`'s previews goes, out of all the project's clips (`all`): an identical clip's (the same size
+-- and fingerprint as one before it, or as one that has its preview) into _Clips/Duplicates/, under its location's name
+-- and its folders there, as Sources show them; else by trips when that's the layout, into the folder its trip's
+-- previews are in already (renamed, it's kept), else the trip's own. Sets c.preview_rel, c.duplicate_of
+local function place_previews(root, all, queue)
+    local by_size = {}
+    for _, c in ipairs(all) do
+        if c.size then local k = tostring(c.size); by_size[k] = by_size[k] or {}; table.insert(by_size[k], c) end
+    end
+    -- The one kept in place: the first location's (the project's order), then the first in the tree
+    for _, list in pairs(by_size) do
+        table.sort(list, function(x, y) if (x.li or 0) ~= (y.li or 0) then return (x.li or 0) < (y.li or 0) end return x.relative < y.relative end)
+    end
+    local hashes = {}
+    local function hash(c)
+        if hashes[c.file] == nil then hashes[c.file] = fingerprint(c.file) or false end
+        return hashes[c.file]
+    end
+    for _, c in ipairs(queue) do
+        local mates = c.size and by_size[tostring(c.size)]
+        if mates and #mates > 1 and hash(c) then
+            local first
+            for _, m in ipairs(mates) do
+                if m.relative ~= c.relative and preview_for(m.relative, m.size) and hash(m) == hash(c) then first = m break end
+            end
+            if not first then for _, m in ipairs(mates) do if hash(m) == hash(c) then first = m break end end end
+            if first and first.relative ~= c.relative then c.duplicate_of = first.relative end
+        end
+    end
+    local trips = clips_layout(root) == "trips"
+    local folder_of = {}
+    if trips then
+        moments_lib.trips(all)
+        local clips_dir = ws.join(root, moments_lib.CLIPS)
+        for _, c in ipairs(all) do
+            local p = c.trip and not folder_of[c.trip] and preview_for(c.relative, c.size)
+            local rel = p and p:sub(1, #clips_dir + 1) == clips_dir .. (windows and "\\" or "/") and p:sub(#clips_dir + 2)
+            local top = rel and rel:match("^([^/\\]+)[/\\]")
+            if top and top ~= "Duplicates" then folder_of[c.trip] = top end
+        end
+    end
+    for _, c in ipairs(queue) do
+        if c.duplicate_of then
+            c.preview_rel = "Duplicates/" .. moments_lib.safe_name(c.loc or "Location") .. "/" .. moments_lib.clip_preview_relative(c.loc_rel or c.relative, false)
+        elseif trips and c.trip then
+            c.preview_rel = (folder_of[c.trip] or c.trip) .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
+        end
+    end
 end
 
 -- The project's clips without a preview made (again: the ones made and since deleted)
@@ -1245,9 +1418,13 @@ local function make_clips(again, root)
     end
     local made = read_made(root)
     local queue = {}
-    for _, c in ipairs(moments.footage(root)) do
+    local all = moments.footage(root)
+    for _, c in ipairs(all) do
         local listed = made[moments_lib.made_line(c.relative, c.size)]
-        if (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
+        if batch_only then
+            -- Chosen ones: each that has no preview now, removed ones too
+            if in_only(c.relative) and not preview_for(c.relative, c.size) then queue[#queue + 1] = c end
+        elseif (again and listed and not preview_for(c.relative, c.size)) or (not again and not listed) then
             queue[#queue + 1] = c
         end
     end
@@ -1256,7 +1433,10 @@ local function make_clips(again, root)
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
         return mp.osd_message(why, 4)
     end
-    start_clips(root, queue, "Clip previews: " .. #queue .. (#queue == 1 and " clip" or " clips") .. ", in the background")
+    place_previews(root, all, queue)
+    local dups = 0
+    for _, c in ipairs(queue) do if c.duplicate_of then dups = dups + 1 end end
+    start_clips(root, queue, "Clip previews: " .. #queue .. (dups > 0 and (", " .. dups .. " of them identical to another clip: into _Clips/Duplicates") or "") .. (#queue == 1 and " clip" or " clips") .. ", in the background")
 end
 
 mp.register_script_message("clips-stop", function()
@@ -1286,7 +1466,7 @@ mp.add_key_binding("X", "not-interesting", function()
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
     local root = state.project
     local info = utils.file_info(state.clip)
-    local c = { file = state.clip, relative = ws.relative(state.clip, root), size = info and info.size }
+    local c = { file = state.clip, relative = state.relative or tree_of(state.clip, root), size = info and info.size }
     start_clips(root, { c }, "Making this clip's preview again")
 end)
 
@@ -1372,7 +1552,7 @@ mp.register_script_message("init-project", function(dir)
         return mp.osd_message("Can't write in " .. dir, 4)
     end
     state.project = dir
-    state.relative = ws.relative(state.clip, dir)
+    state.relative = tree_of(state.clip, dir)
     state.moments_folder = ws.join(dir, moments_lib.FOLDER)
     state.project_choices, state.project_new = nil, nil
     mp.osd_message("Project initialized: " .. ws.name(dir), 3)
@@ -1406,7 +1586,7 @@ local function fingerprint_of(r)
     local h = r and r.status == 0 and type(r.stdout) == "string" and r.stdout:match("^(%x+)")
     return h and #h == 64 and h or nil
 end
-local function fingerprint(file)
+fingerprint = function(file)
     local cmd = fingerprint_args(file)
     return cmd and fingerprint_of(mp.command_native(cmd)) or nil
 end
@@ -1510,7 +1690,7 @@ local function cut_finish()
                 local info = utils.file_info(p.file)
                 p.size = info and info.size
                 p.created = cut_lib.later(c.created, p.from)
-                p.relative = c.project and ws.relative(p.file, c.project) or nil
+                p.relative = c.project and tree_of(p.file, c.project) or nil
                 p.hash = fingerprint(p.file)
             end
             -- Marks: each part's own, at its time
@@ -2062,7 +2242,7 @@ local function marks_queue(kind, root)
     local all = kind == "moments" and moments.scan(root, nil).list or nil
     local taken_names = {}
     for _, c in ipairs(moments.footage(root)) do
-        local times = marks_of(c.file)
+        local times = in_only(c.relative) and marks_of(c.file) or nil
         if times then
             local info = utils.file_info(c.file)
             local size = info and info.size
@@ -2150,6 +2330,65 @@ end)
 -- same part of the same clip) and the export_<name> moments exports leave are skipped
 local export_job = nil
 
+-- Renders (docs/library-management.md, "Renders"): a moment rendered once, _Renders/<its path in _Moments>.<profile>.mov
+-- (HDR: as Shift+E exports HDR; SDR: as it exports SDR), its link (kind render) carrying its recipe: everything that
+-- decides its pixels. Current while the recipe is the moment's now; an export copies a current one instead of
+-- rendering again. Deleting renders breaks nothing
+local RENDERS = "_Renders"
+local RENDER_VERSION = 1
+local RENDER_PROFILES = { HDR = false, SDR = true }
+
+-- A value as JSON keeps it: nils and empty tables left out, for comparing recipes
+local function trimmed(v)
+    if type(v) ~= "table" then return v end
+    local out, n = {}, 0
+    for k, x in pairs(v) do
+        local t = trimmed(x)
+        if t ~= nil then out[k] = t; n = n + 1 end
+    end
+    if n == 0 then return nil end
+    return out
+end
+local function same_value(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) == "number" then return math.abs(a - b) < 1e-9 end
+    if type(a) ~= "table" then return a == b end
+    for k, x in pairs(a) do if not same_value(x, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+-- What a moment's render in `profile` is made from: its part of its original, its own transform and Gyroflow project,
+-- the source's input, the profile, the renderer's version
+local function render_recipe(m, original, profile)
+    local l = m.link
+    local doc = original and sidecar.read(original)
+    local own = own_project(m.file)
+    return trimmed({ v = RENDER_VERSION, clip = { hash = l.hash, size = l.size }, ["in"] = l["in"], out = l.out,
+                     stab = l.stab, alone = l.alone, input = type(doc) == "table" and doc.source or nil,
+                     gyroflow = fs.is_file(own) and fingerprint(own) or nil, profile = profile })
+end
+local function render_file(root, m, profile)
+    local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+    local base = rel:gsub("%.afplink%.mp4$", "")
+    if windows then base = base:gsub("/", "\\") end
+    return ws.join(ws.join(root, RENDERS), base .. "." .. profile .. ".mov")
+end
+local function render_current(file, recipe)
+    if not fs.is_file(file) then return false end
+    local raw = fs.read_link(file)
+    local l = raw and utils.parse_json(raw)
+    return type(l) == "table" and l.kind == "render" and same_value(trimmed(l.recipe), recipe)
+end
+-- A file copied (a clone on APFS, so a render copied as an export takes no room until one changes)
+local function copy_file(from, to)
+    local args = macos and { "/bin/cp", "-c", from, to } or windows and { "cmd", "/d", "/c", "copy", "/y", from, to } or { "cp", "--reflink=auto", from, to }
+    local r = mp.command_native({ name = "subprocess", args = args, playback_only = false, capture_stderr = true })
+    if not (r and r.status == 0) and macos then
+        r = mp.command_native({ name = "subprocess", args = { "/bin/cp", from, to }, playback_only = false, capture_stderr = true })
+    end
+    return r and r.status == 0
+end
+
 local function exported_parts(root)
     local set = {}
     local dir = ws.join(root, moments_lib.EXPORTS)
@@ -2178,15 +2417,42 @@ local function export_next()
     local m = j.queue[j.done + 1]
     j.id = j.id + 1
     j.fraction = 0
-    local label = j.sdr and " (SDR)" or ""
-    local output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
-    local l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
-                ["in"] = m.link["in"], out = m.link.out, name = final, look = j.sdr and "nbcu" or "hdr",
-                stabilized = m.rendered.view ~= "off", roots = { j.root } }
+    local sdr = j.sdr
+    if m.sdr ~= nil then sdr = m.sdr end
+    local output, l
+    if m.render_out then
+        -- A render: its fixed file, made again over the stale one
+        output, l = m.render_out, m.render_link
+        mkdir(ws.parent(output))
+        os.remove(output)
+    else
+        local label = sdr and " (SDR)" or ""
+        local final
+        output, final = moments.unique_file(ws.join(j.root, moments_lib.EXPORTS), moments_lib.safe_name(m.name) or "Moment", label .. ".mov")
+        l = { v = 1, kind = "export", clip = m.link.clip, size = m.link.size, created = m.link.created,
+              ["in"] = m.link["in"], out = m.link.out, name = final, look = sdr and "nbcu" or "hdr",
+              stabilized = m.rendered.view ~= "off", roots = { j.root }, hash = m.link.hash }
+        -- A current render of it in this look: copied, its link made the export's
+        if m.copy_from then
+            local tool = plugin_tool("afp-cut")
+            local ok = copy_file(m.copy_from, output)
+            if ok and tool then
+                local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                              args = { tool, "--set-key", output, link.KEY, utils.format_json(l) } })
+                ok = r and r.status == 0
+            end
+            if ok then j.made = j.made + 1 else
+                j.failed = j.failed + 1
+                j.failures[#j.failures + 1] = { m.name, "couldn't copy its render" }
+            end
+            j.done = j.done + 1
+            return mp.add_timeout(0, export_next)
+        end
+    end
     m.output = output
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
-        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = j.sdr,
+        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr,
         progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
     }))
 end
@@ -2212,6 +2478,7 @@ local function export_moments(root, sdr)
     for _, m in ipairs(moments.scan(root, nil).list) do
         local l = m.link
         if not m.name:match("^export_") and type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"]
+           and in_only(ws.relative(m.file, root) or "")
            and not done[tostring(l.clip) .. "|" .. string.format("%.3f|%.3f", l["in"], l.out) .. "|" .. tostring(sdr)] then
             local original = moments.original(l, root)
             if original then
@@ -2222,6 +2489,10 @@ local function export_moments(root, sdr)
                 m.project = fs.is_file(own) and own or nil
                 -- A moment kept as made (snap): stabilized on its own or as part of its clip, as Shift+E has it
                 if l.snap then m.alone = l.alone == true else m.alone = nil end
+                -- Rendered already in this look, and current: copied instead
+                local profile = sdr and "SDR" or "HDR"
+                local rf = render_file(root, m, profile)
+                if render_current(rf, render_recipe(m, original, profile)) then m.copy_from = rf end
                 queue[#queue + 1] = m
             else
                 failures[#failures + 1] = { m.name, "its original isn't found" }
@@ -2245,13 +2516,64 @@ local function export_moments(root, sdr)
     export_next()
 end
 
+-- Renders of the moments (Action Footage Library's Render, kept to its selection): each moment in each profile asked
+-- for whose render isn't current, made (again) in _Renders/. The ones current are left as they are
+local function render_moments(root, profiles)
+    if export_job then return end
+    if batch then batch.looking() end
+    local queue, failures = {}, {}
+    for _, m in ipairs(moments.scan(root, nil).list) do
+        local l = m.link
+        if type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"] and in_only(ws.relative(m.file, root) or "") then
+            local original = moments.original(l, root)
+            if not original then
+                failures[#failures + 1] = { m.name, "its original isn't found" }
+            else
+                local movie = markers and markers.movie and markers.movie(original) or nil
+                local _, rendered = made_view_of(original, movie, l.stab)
+                local own = own_project(m.file)
+                for _, p in ipairs(profiles) do
+                    if RENDER_PROFILES[p] ~= nil then
+                        local recipe = render_recipe(m, original, p)
+                        local out = render_file(root, m, p)
+                        if not render_current(out, recipe) then
+                            local rel = ws.relative(m.file, ws.join(root, moments_lib.FOLDER)) or ws.name(m.file)
+                            queue[#queue + 1] = {
+                                name = m.name .. " (" .. p .. ")", link = l, original = original, rendered = rendered,
+                                project = fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
+                                sdr = RENDER_PROFILES[p], render_out = out,
+                                render_link = { v = 1, kind = "render", clip = l.clip, size = l.size, created = l.created, hash = l.hash,
+                                                ["in"] = l["in"], out = l.out, name = m.name, moment = rel, profile = p, recipe = recipe,
+                                                look = RENDER_PROFILES[p] and "nbcu" or "hdr", roots = { root } },
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #queue == 0 then
+        if batch then
+            return batch.finished({ made = 0, failed = #failures, failures = failures,
+                                    nothing = #failures == 0 and "Every render asked for is current" or nil })
+        end
+        return
+    end
+    mkdir(ws.join(root, RENDERS))
+    local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
+    export_job = { root = root, sdr = false, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
+                   progress = utils.join_path(tmp, "afp-batch-render-" .. tostring(utils.getpid()) .. ".json") }
+    export_next()
+end
+
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
--- { kind, project, status, stop, photo, sdr }: kind clips (previews of the clips without one), clips-again (the ones
+-- { kind, project, status, stop, photo, sdr, only }: kind clips (previews of the clips without one), clips-again (the ones
 -- removed), moments (moments of all marks), photos (photos of all marks; photo: no, live or motion), export (all
--- moments; sdr: in SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
+-- moments; sdr: in SDR), render (renders of the moments in _Renders/; profiles: HDR, SDR). The player makes them for that project as the menu used to, writes how far it is to `status`
 -- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
 -- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
--- is cancelled) and quits when it's done
+-- is cancelled) and quits when it's done. `only`: the paths in the project it's kept to (clips, folders, moment files):
+-- clip previews then are made for each of those without one, removed ones too
 do
     local req_file = os.getenv("AFP_BATCH")
     if req_file and req_file ~= "" then
@@ -2263,6 +2585,7 @@ do
             mp.add_timeout(0.1, function() mp.commandv("quit", "2") end)
         else
             local root = ws.normalize(req.project)
+            if type(req.only) == "table" and #req.only > 0 then batch_only = req.only end
             local status = { kind = req.kind, project = root, state = "starting", done = 0, total = 0, failed = 0 }
             local function write_status()
                 local out = io.open(req.status .. ".tmp", "w")
@@ -2350,6 +2673,9 @@ do
                     start_marks_job("photos", root)
                 elseif kind == "export" then
                     export_moments(root, req.sdr == true)
+                elseif kind == "render" then
+                    local profiles = type(req.profiles) == "table" and req.profiles or { "HDR" }
+                    render_moments(root, profiles)
                 else
                     batch.finished({ error = "no such batch: " .. tostring(kind) })
                 end
