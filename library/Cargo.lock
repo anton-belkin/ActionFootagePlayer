@@ -28,6 +28,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "libc",
+ "notify",
  "serde",
  "serde_json",
  "sha2",
