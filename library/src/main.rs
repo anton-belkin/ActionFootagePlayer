@@ -572,9 +572,11 @@ async fn cached_view(app: tauri::AppHandle, shared: State<'_, Shared>, probes: S
 async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let cache_file = view_cache(&app, &root, &view);
-    let flat = project_info(&root).clips_layout != "tree";
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let flat = project_info(&root).clips_layout != "tree";
+        // The project's catalog being read (a second or two): waited for, not the disks walked meanwhile (minutes)
+        seen::wait_ready(&root, std::time::Duration::from_secs(60));
         let mut out = index::scan(&root, &view, flat);
         // Moments whose clip was found away from the path their link names: the path written into the link
         // (docs/library-management.md §8), so the next look, from any computer, finds it at once

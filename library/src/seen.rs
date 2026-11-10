@@ -31,6 +31,20 @@ pub struct Seen {
 
 pub static SEEN: RwLock<Option<Seen>> = RwLock::new(None);
 
+/// The project whose catalog is being read now (the views wait for it rather than walk the disks)
+static STARTING: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Until the project's catalog is read (or found not to be there: then the views read the disks)
+pub fn wait_ready(root: &Path, most: Duration) {
+    let t = Instant::now();
+    while t.elapsed() < most && STARTING.lock().unwrap().as_deref() == Some(root) { std::thread::sleep(Duration::from_millis(50)); }
+}
+
+fn started(root: &Path, on: bool) {
+    let mut g = STARTING.lock().unwrap();
+    if on { *g = Some(root.to_path_buf()); } else if g.as_deref() == Some(root) { *g = None; }
+}
+
 /// Tests that set SEEN, one at a time (it's the process's)
 #[cfg(test)]
 pub static TESTS: Mutex<()> = Mutex::new(());
@@ -141,15 +155,19 @@ fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(
 fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
+    // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
+    let has = root.join(".afp").join("catalog").join("snap").is_dir();
+    if has { started(&root, true); }
     let (roots, ours) = project::roots(&root);
     let (own_roots, own) = project::own_roots(&root);
     let mut worker = project::open(&root);
     // Read; nothing there yet: built (the first look at every folder, every file of ours read)
     loop {
-        if stop.load(Ordering::Relaxed) { return; }
+        if stop.load(Ordering::Relaxed) { started(&root, false); return; }
         set(&status, "Reading the project's catalog…");
         match load(&mut worker, &Want::All) {
             Ok(info) if info.empty && info.snapshot.is_none() => {
+                started(&root, false);
                 set(&status, "Making the project's catalog (a first look at every folder)…");
                 if worker.sweep(&roots, &ours, &Sweep::default()).is_ok() { let _ = worker.compact(); break; }
             }
@@ -162,12 +180,14 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
             }
             Err(_) => {}
         }
+        started(&root, false);
         set(&status, "The project's catalog can't be read now (the share?): trying again…");
-        for _ in 0..40 { if stop.load(Ordering::Relaxed) { return; } std::thread::sleep(Duration::from_millis(250)); }
+        for _ in 0..40 { if stop.load(Ordering::Relaxed) { started(&root, false); return; } std::thread::sleep(Duration::from_millis(250)); }
     }
     let mut reader = project::open(&root);
     if load(&mut reader, &Want::All).is_err() { reader = project::open(&root); }
     *SEEN.write().unwrap() = Some(Seen { id, root: root.clone(), roots: roots.clone(), cat: reader });
+    started(&root, false);
     set(&status, "");
     changed(&changes, &last);
     // A source the catalog has never looked at (just added): looked at now (until then the views ask the disk for each
