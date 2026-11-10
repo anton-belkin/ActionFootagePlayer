@@ -848,6 +848,14 @@ Project). Then, as buttons:
 - **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
+- **Stabilize optically** (Footage, Originals): for the selected clips whose motion the player can't take from the
+  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), Gyroflow
+  measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
+  with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
+  listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
+  whose lens isn't known (no lens profile for that camera and mode). It needs a Gyroflow with the optical analysis
+  (built from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow): it isn't in Gyroflow's own releases
+  yet), found where Gyroflow installs itself, or by `AFP_GYROFLOW`.
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with

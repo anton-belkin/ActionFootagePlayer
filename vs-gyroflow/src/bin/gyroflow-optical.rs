@@ -89,7 +89,7 @@ fn run(clips: Vec<PathBuf>, settings: Settings, status_file: Option<PathBuf>, st
             Ok(p) => { made += 1; eprintln!("\r{}: {} in {secs:.0} s", clip.display(), p.display()); }
             Err(e) if e == "stopped" => {
                 st.set("state", json!("stopped"));
-                st.set("message", json!(format!("{made} stabilized before it stopped")));
+                st.set("message", json!(if made == 0 { "Stopped before one was stabilized".to_string() } else { format!("{made} stabilized before it stopped") }));
                 st.write();
                 let _ = std::fs::remove_dir_all(&work);
                 return 0;

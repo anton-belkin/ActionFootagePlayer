@@ -231,7 +231,7 @@ pub fn check_project(text: &str) -> Result<(), String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("Gyroflow wrote a project that isn't JSON: {e}"))?;
     let measured = v.pointer("/gyro_source/optical_correction").is_some_and(|o| !o.is_null() && o != &json!("") && o != &json!({}));
     if measured { Ok(()) } else {
-        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs ActionFootagePlayer's Gyroflow build)".into())
+        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs the build from github.com/anton-belkin/gyroflow)".into())
     }
 }
 
