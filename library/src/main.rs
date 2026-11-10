@@ -19,6 +19,7 @@ mod locations;
 mod seen;
 mod tags;
 mod takein;
+mod thumbs;
 
 use serde::Serialize;
 use serde_json::{ json, Value };
