@@ -304,6 +304,17 @@ function catalog.look(project, every)
         if type(v) == "table" and (v.changes or 0) > 0 and state.project == project and catalog.changed then catalog.changed() end
     end)
 end
+-- The same, waited for (a batch's list, half a second): the parsed JSON's items, nil without a catalog
+function catalog.now(args_after)
+    local exe = catalog.tool()
+    if not exe then return nil end
+    local args = { exe }
+    for _, a in ipairs(args_after) do args[#args + 1] = a end
+    local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true, args = args })
+    local v = r and r.status == 0 and utils.parse_json(r.stdout or "")
+    if type(v) ~= "table" or v.catalog ~= true then return nil end
+    return v.items or {}
+end
 function catalog.derived(project, hash, clip, cb)
     local args = { "derived", project }
     if hash then args[#args + 1] = "--hash"; args[#args + 1] = hash end
@@ -1426,10 +1437,18 @@ local function previews(force)
     if not project then return {} end
     if not force and previews_cache.project == project and mp.get_time() - previews_cache.time < 60 then return previews_cache.index end
     local index = {}
-    for _, p in ipairs(moments.scan(project, tracked_cache, nil, "clip").list) do
-        if type(p.link.clip) == "string" then index[p.link.clip] = { file = p.file, size = p.link.size } end
+    -- From the project's catalog (no walk of its folder, no file looked at), else its folder walked
+    local items = catalog.now({ "list", project, "--kind", "clip" })
+    if items then
+        for _, it in ipairs(items) do
+            if type(it.link) == "table" and type(it.link.clip) == "string" then index[it.link.clip] = { file = it.path, size = it.link.size, seen = true } end
+        end
+    else
+        for _, p in ipairs(moments.scan(project, tracked_cache, nil, "clip").list) do
+            if type(p.link.clip) == "string" then index[p.link.clip] = { file = p.file, size = p.link.size } end
+        end
+        save_cache()
     end
-    save_cache()
     previews_cache = { project = project, time = mp.get_time(), index = index }
     return index
 end
@@ -1437,7 +1456,7 @@ end
 -- A clip's preview file, nil for none
 local function preview_for(relative, size)
     local p = relative and previews()[relative]
-    if p and (p.size == nil or size == nil or p.size == size) and fs.is_file(p.file) then return p.file end
+    if p and (p.size == nil or size == nil or p.size == size) and (p.seen or fs.is_file(p.file)) then return p.file end
     return nil
 end
 
@@ -1445,6 +1464,7 @@ end
 -- that folder itself). A name another clip's preview has gets the clip's folder in parentheses ("GX010123 (100GOPRO)"),
 -- then a number
 local function new_preview_path(dir, c, flat)
+    if c.place then c.place() end
     local file = ws.join(dir, native(c.preview_rel or moments_lib.clip_preview_relative(c.relative, flat)))
     if not fs.is_file(file) then return file end
     local raw = fs.read_link(file)
@@ -1567,24 +1587,27 @@ local function place_previews(root, all, queue)
         if hashes[c.file] == nil then hashes[c.file] = fingerprint(c.file) or false end
         return hashes[c.file]
     end
-    for _, c in ipairs(queue) do
-        local mates = c.size and by_size[tostring(c.size)]
-        if mates and #mates > 1 and hash(c) then
-            local first
-            for _, m in ipairs(mates) do
-                if m.relative ~= c.relative and preview_for(m.relative, m.size) and hash(m) == hash(c) then first = m break end
-            end
-            if not first then for _, m in ipairs(mates) do if hash(m) == hash(c) then first = m break end end end
-            if first and first.relative ~= c.relative then c.duplicate_of = first.relative end
-        end
-    end
     local trips = clips_layout() == "trips"
     if trips then moments_lib.trips(all) end
+    -- Whether a clip is identical to another is found as its turn comes (fingerprints read over the share take a
+    -- while: not all of them before the first preview)
     for _, c in ipairs(queue) do
-        if c.duplicate_of then
-            c.preview_rel = "Duplicates/" .. moments_lib.safe_name(c.loc or "Location") .. "/" .. moments_lib.clip_preview_relative(c.loc_rel or c.relative, false)
-        elseif trips and c.trip then
-            c.preview_rel = c.trip .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
+        c.place = function()
+            c.place = nil
+            local mates = c.size and by_size[tostring(c.size)]
+            if mates and #mates > 1 and hash(c) then
+                local first
+                for _, m in ipairs(mates) do
+                    if m.relative ~= c.relative and preview_for(m.relative, m.size) and hash(m) == hash(c) then first = m break end
+                end
+                if not first then for _, m in ipairs(mates) do if hash(m) == hash(c) then first = m break end end end
+                if first and first.relative ~= c.relative then c.duplicate_of = first.relative end
+            end
+            if c.duplicate_of then
+                c.preview_rel = "Duplicates/" .. moments_lib.safe_name(c.loc or "Location") .. "/" .. moments_lib.clip_preview_relative(c.loc_rel or c.relative, false)
+            elseif trips and c.trip then
+                c.preview_rel = c.trip .. "/" .. moments_lib.clip_preview_relative(c.relative, true)
+            end
         end
     end
 end
@@ -1601,7 +1624,8 @@ local function make_clips(again, root)
     end
     local queue = {}
     previews(true)
-    local all = moments.footage(root)
+    -- The clips from the project's catalog (no walk of the shares), else its locations walked
+    local all = catalog.now({ "footage", root }) or moments.footage(root)
     for _, c in ipairs(all) do
         if (not batch_only or in_only(c.relative)) and not preview_for(c.relative, c.size) then queue[#queue + 1] = c end
     end
@@ -1611,9 +1635,7 @@ local function make_clips(again, root)
         return mp.osd_message(why, 4)
     end
     place_previews(root, all, queue)
-    local dups = 0
-    for _, c in ipairs(queue) do if c.duplicate_of then dups = dups + 1 end end
-    start_clips(root, queue, "Clip previews: " .. #queue .. (dups > 0 and (", " .. dups .. " of them identical to another clip: into Duplicates") or "") .. (#queue == 1 and " clip" or " clips") .. ", in the background")
+    start_clips(root, queue, "Clip previews: " .. #queue .. (#queue == 1 and " clip" or " clips") .. " (one identical to another's into Duplicates), in the background")
 end
 
 mp.register_script_message("clips-stop", function()

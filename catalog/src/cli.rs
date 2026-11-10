@@ -21,6 +21,7 @@ const USAGE: &str = "usage: afp-catalog derived <project> [--hash <fingerprint>]
                                           the project's own files with a link (JSON)
        afp-catalog note <project> <file>...  files written or removed: their folders touched, noted in this computer's journal
                                           (project -: found from where each file is)
+       afp-catalog footage <project>      the project's clips, location by location (JSON)
        afp-catalog status <project>       the catalog: its snapshot, journals, size
        afp-catalog look <project> [--own] [--every <s>] [--deep]
                                           look at the folders and note what changed (--own: the project's own files,
@@ -275,6 +276,40 @@ pub fn main() -> ExitCode {
             for d in &dirs { let _ = cat.touch(d); }
             if let Err(e) = load(&mut cat, &Want::Keys(Vec::new())) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } }
             match cat.note(entries) { Ok(()) => ExitCode::SUCCESS, Err(e) => fail(e.to_string()) }
+        }
+        "footage" => {
+            // The project's clips, location by location in its order (a path the first one has wins), from the catalog
+            // (what the player's batches go through: no walk of the shares)
+            let info = match load(&mut cat, &Want::All) { Ok(i) => i, Err(e) => return fail(e.to_string()) };
+            if info.empty && info.snapshot.is_none() { println!("{}", json!({ "catalog": false })); return ExitCode::SUCCESS; }
+            let locs = crate::locations::locations(&proj, &crate::locations::mounts());
+            let mut out: Vec<Value> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for (i, l) in locs.iter().enumerate() {
+                let Some(dir) = &l.dir else { continue };
+                // A location the catalog hasn't looked at (this computer's own copies): the player walks it
+                let Some((rid, prefix)) = project::locate(&roots, dir).filter(|(r, _)| cat.state.get(r, "").is_some()) else {
+                    println!("{}", json!({ "catalog": false })); return ExitCode::SUCCESS;
+                };
+                let name = if l.name.is_empty() { dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Location".into()) } else { l.name.clone() };
+                for (rel, r) in cat.state.under(&rid, &prefix) {
+                    let Some(f) = &r.f else { continue };
+                    if f.dir { continue; }
+                    let in_loc = if prefix.is_empty() { rel } else { &rel[prefix.len() + 1..] };
+                    let parts: Vec<&str> = in_loc.split('/').collect();
+                    if parts.len() > 9 { continue; }
+                    if parts.len() > 1 && crate::inspect::OWN_FOLDERS.contains(&parts[0].to_lowercase().as_str()) { continue; }
+                    let lower = in_loc.to_lowercase();
+                    if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(crate::inspect::LINK_EXT) { continue; }
+                    let tree = if l.at.is_empty() { in_loc.to_string() } else { format!("{}/{in_loc}", l.at) };
+                    if !seen.insert(tree.clone()) { continue; }
+                    out.push(json!({ "file": dir.join(in_loc).display().to_string(), "relative": tree, "size": f.size, "mtime": f.mtime.div_euclid(1_000_000_000),
+                                     "loc": name, "li": i + 1, "loc_rel": in_loc }));
+                }
+            }
+            out.sort_by(|a, b| a["relative"].as_str().cmp(&b["relative"].as_str()));
+            println!("{}", json!({ "catalog": true, "items": out }));
+            ExitCode::SUCCESS
         }
         "status" => {
             let info = match load(&mut cat, &Want::All) { Ok(i) => i, Err(e) => return fail(e.to_string()) };
