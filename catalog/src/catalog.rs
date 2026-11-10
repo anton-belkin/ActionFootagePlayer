@@ -164,6 +164,10 @@ impl Catalog {
             if !ok { info.passed += 1; continue; }
             self.applied = m.covers.clone();
             self.lamports = m.lamports.clone();
+            // Each journal read on from where the snapshot's reading ended (lines it has aren't read again)
+            for (c, (seg, off)) in &m.at {
+                self.offsets.insert(self.dir.join("journal").join(c).join(segment_name(*seg)), *off);
+            }
             self.lamport = m.l;
             self.partial = wanted.is_some();
             self.manifest = Some((name.clone(), m));
@@ -364,8 +368,17 @@ impl Catalog {
             parts.push(name);
         }
         let gen = self.snapshots()?.iter().filter_map(|n| name_parts(n)).map(|(g, _)| g).max().unwrap_or(0) + 1;
+        // Where its reading of each journal ended: the last segment it read, and how far
+        let jdir = self.dir.join("journal");
+        let mut at: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+        for (path, off) in &self.offsets {
+            let (Some(c), Some(seg)) = (path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()),
+                                        path.file_name().and_then(|n| segment_number(&n.to_string_lossy()))) else { continue };
+            if path.parent().and_then(|p| p.parent()) != Some(jdir.as_path()) { continue; }
+            if at.get(&c).is_none_or(|(s, _)| seg > *s) { at.insert(c, (seg, *off)); }
+        }
         let m = Manifest { gen, by: self.me.clone(), covers: self.applied.clone(), lamports: self.lamports.clone(), l: self.lamport, bits, parts,
-                           count: keep.len() as u64 };
+                           count: keep.len() as u64, at };
         let bytes = m.to_bytes();
         let name = m.name(&bytes);
         self.shared.mkdirs(&self.dir.join("snap"))?;
@@ -516,7 +529,8 @@ impl Catalog {
                 rep.listed += 1;
                 // Changed since it was last listed: once more later (not a folder listed only because it's due)
                 if !due.contains(&d) && !opts.deep { self.recheck.push((rid.clone(), d.clone(), std::time::Instant::now() + self.recheck_after)); }
-                let keep = |i: &Item| !i.name.starts_with(".tmp-") && !insp.skip(&rid, &join(&d, &i.name), &i.name, i.stat.dir);
+                let keep = |i: &Item| !i.name.starts_with(".tmp-") && !insp.skip(&rid, &join(&d, &i.name), &i.name, i.stat.dir)
+                    && !root.exclude.iter().any(|x| *x == join(&d, &i.name));
                 items.retain(|i| keep(i));
                 // A folder that had things in it, listed empty: listed again, and its root's marker looked for again
                 if items.is_empty() && known.len() > 8 {
@@ -530,6 +544,20 @@ impl Catalog {
                 let mut now: Vec<(String, File)> = Vec::new();
                 let mut failed = false;
                 let mut gone_dirs: Vec<String> = Vec::new();
+                // What's inside the new and changed files, read several at once (each a few round trips on a share)
+                let to_read: Vec<&Item> = items.iter().filter(|it| !it.stat.dir && insp.wants(&rid, &join(&d, &it.name))
+                    && !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime)).collect();
+                let read: HashMap<&str, io::Result<Option<Value>>> = {
+                    let threads = to_read.len().clamp(1, 8);
+                    let chunks: Vec<Vec<&Item>> = (0..threads).map(|t| to_read.iter().skip(t).step_by(threads).copied().collect()).collect();
+                    let (rid, d, full) = (&rid, &d, &full);
+                    std::thread::scope(|sc| {
+                        let hs: Vec<_> = chunks.into_iter().map(|c| sc.spawn(move || c.into_iter().map(|it| (it.name.as_str(), insp.inspect(&full.join(&it.name), rid, &join(d, &it.name)))).collect::<Vec<_>>())).collect();
+                        hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+                    })
+                };
+                rep.inspected += read.len();
+                let mut read = read;
                 for it in &items {
                     let rel = join(&d, &it.name);
                     let old = known_map.get(it.name.as_str()).copied();
@@ -551,13 +579,11 @@ impl Catalog {
                     let f = match old.filter(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime) {
                         Some(k) => k.clone(),
                         None => {
-                            let meta = if insp.wants(&rid, &rel) {
-                                rep.inspected += 1;
-                                match insp.inspect(&full.join(&it.name), &rid, &rel) {
-                                    Ok(m) => m,
-                                    Err(_) => { failed = true; rep.errors += 1; continue }
-                                }
-                            } else { None };
+                            let meta = match read.remove(it.name.as_str()) {
+                                None => None,
+                                Some(Ok(m)) => m,
+                                Some(Err(_)) => { failed = true; rep.errors += 1; continue }
+                            };
                             let f = File { dir: false, size: it.stat.size, mtime: it.stat.mtime, meta, digest: None };
                             out.push((rid.clone(), rel.clone(), Some(f.clone())));
                             f
@@ -598,10 +624,12 @@ pub struct Root {
     pub dir: PathBuf,
     /// A file that must be at its top for it to be looked at (Project.afproject; a location's .afplocation)
     pub marker: Option<String>,
+    /// Paths in it left out (the project's own folder, inside a location around it)
+    pub exclude: Vec<String>,
 }
 
 /// What a sweep keeps and reads: the Library's and afp-catalog's rules
-pub trait Inspect {
+pub trait Inspect: Sync {
     /// Left out of the catalog (and what's in it, a folder)
     fn skip(&self, root: &str, rel: &str, name: &str, dir: bool) -> bool;
     /// Whether what's inside it counts

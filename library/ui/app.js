@@ -1552,6 +1552,8 @@ async function poll() {
   let s;
   try { s = await invoke("snapshot"); } catch (e) { return; }
   S.macos = s.macos;
+  // What the project's catalog is doing (made the first time, read again, folded): said once as it changes
+  if ((s.catalog || "") !== (S.catalogStatus || "")) { S.catalogStatus = s.catalog || ""; if (S.catalogStatus) toast(S.catalogStatus); }
   if (s.project !== S.root) {
     S.changes = s.changes;
     S.root = s.project;

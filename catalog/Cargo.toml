@@ -6,9 +6,15 @@ license = "GPL-3.0-or-later"
 description = "A project's catalog: what's in its folders and locations, shared through the folders themselves (docs/library-management.md §9)"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 flate2 = "1"
+
+[target.'cfg(unix)'.dependencies]
+# A share's listing with each file's size and time in it (macOS getattrlistbulk: a stat a file over SMB costs ~5 ms);
+# fsync where F_FULLFSYNC isn't supported (SMB)
+libc = "0.2"
 
 [profile.release]
 debug = 1

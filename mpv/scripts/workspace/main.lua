@@ -248,7 +248,55 @@ local function own_path(clip)
     if not root then return nil end
     return ws.own_file(clip, locations_of(root))
 end
-local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows, own_path = own_path })
+-- The project's catalog (afp-catalog, docs/library-management.md §9): a clip's moments without looking through the
+-- project's folder (asked in the background: playing never waits for it), and what the player writes noted, for the
+-- Library and the other computers. The player never looks through folders for it nor folds it: the Library does
+local catalog = {}
+function catalog.tool()
+    local dir = mp.get_script_directory()
+    local plugins = dir and dir:match("^(.*)[/\\][^/\\]+[/\\]?$")
+    if not plugins then return nil end
+    local exe = utils.join_path(utils.join_path(plugins, "gyroflow"), "afp-catalog" .. (windows and ".exe" or ""))
+    return fs.is_file(exe) and exe or nil
+end
+-- Files written or removed: noted in the background (their folders touched, a line in this computer's journal).
+-- project nil: found from the files (their location's .afplocation)
+function catalog.note(project, files)
+    local exe = catalog.tool()
+    if not exe or #files == 0 then return end
+    local args = { exe, "note", project or "-" }
+    for _, f in ipairs(files) do args[#args + 1] = f end
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true, args = args }, function(ok, r)
+        if not (ok and r and r.status == 0) then mp.msg.verbose("afp-catalog note: " .. tostring(r and r.stderr)) end
+    end)
+end
+-- The project's own files with a link of a kind ("moment", "clip", "export", "photo"; nil: all), in the background:
+-- cb(list as moments.scan's: { file, name, link, kind }), cb(nil) when the project has no catalog (or no afp-catalog)
+function catalog.ask(args_after, cb)
+    local exe = catalog.tool()
+    if not exe then return cb(nil) end
+    local args = { exe }
+    for _, a in ipairs(args_after) do args[#args + 1] = a end
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true, args = args }, function(ok, r)
+        local v = ok and r and r.status == 0 and utils.parse_json(r.stdout or "")
+        if type(v) ~= "table" or v.catalog ~= true then return cb(nil) end
+        local list = {}
+        for _, it in ipairs(v.items or {}) do
+            if type(it.link) == "table" and type(it.path) == "string" then
+                list[#list + 1] = { file = it.path, name = moments_lib.display_name(it.path), link = it.link, kind = it.kind, tags = it.tags }
+            end
+        end
+        cb(list)
+    end)
+end
+function catalog.derived(project, hash, clip, cb)
+    local args = { "derived", project }
+    if hash then args[#args + 1] = "--hash"; args[#args + 1] = hash end
+    if clip then args[#args + 1] = "--clip"; args[#args + 1] = clip end
+    catalog.ask(args, cb)
+end
+local sidecar = sidecar_lib.new({ parse_json = fs.parse_json, format_json = utils.format_json, windows = windows, own_path = own_path,
+                                  note = function(f) catalog.note(state and state.project, { f }) end })
 -- The project's own file, Project.afproject (projectfile.lua)
 local pf = projectfile.new({
     parse_json = fs.parse_json, format_json = utils.format_json, join = function(a, b) return ws.join(a, b) end,
@@ -266,6 +314,11 @@ state = {}
 -- The project's _Moments/ as last read: every moment in it, and its folders' times
 local found = { list = {}, dirs = {} }
 local scanned_project = nil
+-- The clip's moments came from the project's catalog (asked again every few seconds), not a look through its folder
+local from_catalog = false
+local last_asked = 0
+-- The project's moments' names and how many (the catalog's, asked once a clip has its own)
+local project_moments = nil
 local watch_timer = nil
 -- The chapters this put in chapter-list, kept there when another plugin sets it
 local ours = {}
@@ -471,32 +524,66 @@ local function refresh()
         publish()
         return
     end
-    found = moments.scan(project, tracked_cache)
-    scanned_project = project
-    save_cache()
-    local info = utils.file_info(state.clip)
-    local mine = moments.of_clip(found.list, { relative = state.relative, size = info and info.size, created = state.created, hash = state.hash })
-    local list, chapters = {}, {}
-    for _, m in ipairs(mine) do
-        list[#list + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out,
-                            snap = m.link.snap == 1, alone = m.link.alone == true, stab = m.link.stab }
-        -- A moment playing is a video of its own: the clip's moments aren't on its seek bar
-        if not state.offset then
-            chapters[#chapters + 1] = { title = m.name, time = m.link["in"] }
-            chapters[#chapters + 1] = { title = m.name .. " end", time = m.link.out }
+    local clip = state.clip
+    local function show(list)
+        local info = utils.file_info(state.clip)
+        local mine = moments.of_clip(list, { relative = state.relative, size = info and info.size, created = state.created, hash = state.hash })
+        local out, chapters = {}, {}
+        for _, m in ipairs(mine) do
+            out[#out + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out,
+                              snap = m.link.snap == 1, alone = m.link.alone == true, stab = m.link.stab }
+            -- A moment playing is a video of its own: the clip's moments aren't on its seek bar
+            if not state.offset then
+                chapters[#chapters + 1] = { title = m.name, time = m.link["in"] }
+                chapters[#chapters + 1] = { title = m.name .. " end", time = m.link.out }
+            end
         end
+        state.moments = out
+        state.moments_total = project_moments and project_moments.total or (not from_catalog and #found.list) or state.moments_total
+        apply_chapters(chapters)
+        if extras then extras() end
+        publish()
     end
-    state.moments = list
-    state.moments_total = #found.list
-    apply_chapters(chapters)
-    if extras then extras() end
-    publish()
+    last_asked = mp.get_time()
+    -- The project's catalog first (docs/library-management.md §9): this clip's moments only, in the background
+    catalog.derived(project, state.hash, state.relative, function(list)
+        if state.clip ~= clip or state.project ~= project then return end
+        if list then
+            local ms = {}
+            for _, m in ipairs(list) do if m.link.v == 1 and m.link.kind == "moment" then ms[#ms + 1] = m end end
+            found, scanned_project, from_catalog = { list = ms, dirs = {} }, project, true
+            show(ms)
+            -- The project's moments' names and count, once (what the name dialog suggests from)
+            if not project_moments or project_moments.project ~= project then
+                project_moments = { project = project, names = {}, total = nil }
+                catalog.ask({ "list", project, "--kind", "moment" }, function(all)
+                    if not all or project_moments.project ~= project then return end
+                    local names = {}
+                    for _, m in ipairs(all) do names[#names + 1] = type(m.link.name) == "string" and m.link.name or m.name end
+                    project_moments.names, project_moments.total = names, #all
+                    state.moments_total = #all
+                    publish()
+                end)
+            end
+            return
+        end
+        -- No catalog yet (the Library hasn't made it): the project's folder looked through, as before
+        found = moments.scan(project, tracked_cache)
+        scanned_project, from_catalog = project, false
+        save_cache()
+        show(found.list)
+    end)
 end
 
 -- A folder with moments in it changed (a file added, removed or renamed in it), or the project's top or one of its own
 -- folders did (a folder of moments moved in): moments.scan's dirs
 local function watch()
     if not scanned_project or scanned_project ~= state.project then return end
+    -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal)
+    if from_catalog then
+        if mp.get_time() - last_asked >= 10 then refresh() end
+        return
+    end
     for dir, mtime in pairs(found.dirs) do
         local info = utils.file_info(dir)
         if not info or info.mtime ~= mtime then return refresh() end
@@ -730,6 +817,12 @@ local function project_update(fn) return state.project ~= nil and pf.update(stat
 -- and ↑ goes through. Read from the moments themselves (docs/library-management.md §8), not kept in the project's file
 local function moment_names()
     local list = {}
+    -- From the catalog: the project's moments' names as it listed them (the clip's own after them, the newest)
+    if from_catalog and project_moments and project_moments.project == state.project then
+        local out, seen = {}, {}
+        for _, n in ipairs(project_moments.names) do if not seen[n] then seen[n] = true; out[#out + 1] = n end end
+        return out
+    end
     for _, m in ipairs(found and found.list or {}) do
         local c = cache[m.file]
         list[#list + 1] = { name = type(m.link.name) == "string" and m.link.name or m.name, t = type(c) == "table" and c.mtime or 0 }
@@ -967,7 +1060,13 @@ mp.register_script_message("preview-done", function(id, json)
         end
     end
     if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
+    catalog.note(state.project or moments.project_of(p.file), { p.file })
     refresh()
+end)
+
+-- Another plugin wrote or removed a file of the project's (the highlights plugin's marks): noted in the catalog
+mp.register_script_message("catalog-note", function(file)
+    if type(file) == "string" and file ~= "" then catalog.note(state.project or moments.project_of(file), { file }) end
 end)
 
 -- k: the A-B part as a moment; on a moment playing whose part was moved, update it or save a new one
@@ -1651,6 +1750,8 @@ mp.register_event("file-loaded", function()
         if h and state.clip == clip then
             state.hash = h
             publish()
+            -- Its moments asked for again by what it is (links name their original by its fingerprint)
+            if from_catalog or not scanned_project then refresh() end
         end
     end)
 end)
@@ -1912,6 +2013,8 @@ rewrite_link = function(file, fn)
     local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
                                   args = { exe, "--set-key", file, link.KEY, utils.format_json(l) } })
     if not (r and r.status == 0) then mp.msg.warn("couldn't write the link of " .. file .. ": " .. tostring(r and r.stderr)) end
+    -- Written in place: noted (its folder touched, so a look lists it again whatever happens)
+    if r and r.status == 0 then catalog.note(moments.project_of(file), { file }) end
     return r and r.status == 0
 end
 

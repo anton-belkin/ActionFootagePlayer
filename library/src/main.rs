@@ -16,6 +16,7 @@
 mod checks;
 mod index;
 mod locations;
+mod seen;
 mod tags;
 mod takein;
 
@@ -109,6 +110,9 @@ struct Watch {
     _watcher: Option<notify::RecommendedWatcher>,
     changes: Arc<std::sync::atomic::AtomicU64>,
     last: Arc<Mutex<Instant>>,
+    /// The project's catalog kept up to date (seen.rs): what's changed here is sent to it, and it counts the changes
+    /// once it has them
+    runner: seen::Runner,
 }
 
 fn watch(root: &Path) -> Watch {
@@ -116,6 +120,8 @@ fn watch(root: &Path) -> Watch {
     let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (c, l) = (changes.clone(), last.clone());
+    let runner = seen::start(root, changes.clone(), last.clone());
+    let (events, me) = (runner.events.clone(), root.to_path_buf());
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(e) = res else { return };
         if matches!(e.kind, notify::EventKind::Access(_)) { return; }
@@ -123,6 +129,9 @@ fn watch(root: &Path) -> Watch {
         let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
                                           && !p.to_string_lossy().ends_with(".tmp"));
         if !ours { return; }
+        // The catalog looks at those folders, and counts the change once it has it; until it's read, counted here
+        let _ = events.send(e.paths.clone());
+        if seen::is_on(&me) { return; }
         c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *l.lock().unwrap() = Instant::now();
     }).ok().and_then(|mut w| {
@@ -135,7 +144,7 @@ fn watch(root: &Path) -> Watch {
         any.then_some(w)
     });
     let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
-    Watch { root: root.to_path_buf(), stamp, _watcher: watcher, changes, last }
+    Watch { root: root.to_path_buf(), stamp, _watcher: watcher, changes, last, runner }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -437,6 +446,8 @@ struct Snapshot {
     // Changes seen in the project's folder and locations, and how long since the last one (ms)
     changes: u64,
     quiet_ms: u64,
+    // What the project's catalog is doing ("": nothing to say)
+    catalog: String,
 }
 
 #[tauri::command]
@@ -459,6 +470,7 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
         }
         None => inner.watch = None,
     }
+    let catalog = seen::status(inner.watch.as_ref().map(|w| &w.runner));
     let (changes, quiet_ms) = inner.watch.as_ref().map(|w| (w.changes.load(std::sync::atomic::Ordering::Relaxed), w.last.lock().unwrap().elapsed().as_millis() as u64)).unwrap_or((0, 0));
     Snapshot {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
@@ -467,6 +479,7 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
         macos: cfg!(target_os = "macos"),
         changes,
         quiet_ms,
+        catalog,
     }
 }
 
@@ -1517,7 +1530,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("Generated")).unwrap();
         std::fs::write(root.join(PROJECT_FILE), "{}").unwrap();
-        let w = watch(&root.canonicalize().unwrap());
+        std::env::set_var("AFP_HOME", root.join(".home"));
+        let root = root.canonicalize().unwrap();
+        let w = watch(&root);
+        // The project's catalog made and read first (it counts a change when it is)
+        let t = Instant::now();
+        while !seen::is_on(&root) && t.elapsed() < Duration::from_secs(10) { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(seen::is_on(&root), "the catalog wasn't read: {}", seen::status(Some(&w.runner)));
         std::thread::sleep(Duration::from_millis(300));
         let n = |w: &Watch| w.changes.load(std::sync::atomic::Ordering::Relaxed);
         let start = n(&w);
@@ -1529,6 +1548,8 @@ mod tests {
         let t = Instant::now();
         while n(&w) == start && t.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(50)); }
         assert!(n(&w) > start, "the new file not seen");
+        // …and it's in the catalog the views read
+        assert!(seen::file(&root.join("Generated/Turtle.afplink.mp4")).is_some_and(|f| f.is_some()));
         let _ = std::fs::remove_dir_all(&root);
     }
 

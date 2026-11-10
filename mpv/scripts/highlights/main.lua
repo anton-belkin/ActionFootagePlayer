@@ -52,7 +52,9 @@ local function own_path(clip)
     return w.sidecar_file
 end
 local sidecar = has_sidecar and sidecar_lib.new({ parse_json = function(s) return (utils.parse_json(s)) end, format_json = utils.format_json,
-                                                  windows = platform == "windows" or package.config:sub(1, 1) == "\\", own_path = own_path })
+                                                  windows = platform == "windows" or package.config:sub(1, 1) == "\\", own_path = own_path,
+                                                  -- Noted in the project's catalog by the workspace plugin
+                                                  note = function(f) mp.commandv("script-message-to", "workspace", "catalog-note", f) end })
     or { read = function() return nil end, update = function() return false, "the workspace plugin isn't installed" end }
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's

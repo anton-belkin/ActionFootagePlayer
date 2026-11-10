@@ -45,6 +45,8 @@ serde = { version = "1", features = ["derive"] }
 jpeg-encoder = "0.7"
 # gyroflow-export --image: the player's 16-bit PNG of the frame (mpv's screenshot, in the video's own HLG)
 flate2 = "1"
+# afp-catalog: the project's catalog (catalog/, docs/library-management.md §9), the player's way into it
+afp-catalog = { path = "../catalog" }
 
 [dev-dependencies]
 # view360.rs's test: the player's view shader (GLSL) through naga's GLSL front end, beside the export's WGSL

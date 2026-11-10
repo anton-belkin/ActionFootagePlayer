@@ -13,8 +13,8 @@ pub const PROJECT: &str = "/nas/proj";
 pub const FOOTAGE: &str = "/nas/footage";
 
 pub fn roots() -> Vec<Root> {
-    vec![Root { id: "p".into(), dir: PathBuf::from(PROJECT), marker: Some("Project.afproject".into()) },
-         Root { id: "f".into(), dir: PathBuf::from(FOOTAGE), marker: Some("footage.afplocation".into()) }]
+    vec![Root { id: "p".into(), dir: PathBuf::from(PROJECT), marker: Some("Project.afproject".into()), exclude: vec![] },
+         Root { id: "f".into(), dir: PathBuf::from(FOOTAGE), marker: Some("footage.afplocation".into()), exclude: vec![] }]
 }
 
 pub struct Rng(pub u64);

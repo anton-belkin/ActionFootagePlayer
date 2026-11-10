@@ -86,6 +86,8 @@ fn rel_join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_strin
 /// Every file and folder under `base` (not hidden), as (path in the tree, is a folder, size, modified), folders kept
 /// out by `skip` (path in the tree, lower case name)
 fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool) -> Vec<(String, bool, u64, i64)> {
+    // As the project's catalog last saw it (seen.rs): no question to the disk for each file
+    if let Some(v) = crate::seen::walk(base, skip, MAX_DEPTH) { return v; }
     let mut out = Vec::new();
     let mut todo = VecDeque::from([(base.to_path_buf(), String::new(), 0usize)]);
     while let Some((dir, rel, depth)) = todo.pop_front() {
@@ -303,6 +305,10 @@ pub fn photo_tags(path: &Path) -> Vec<String> {
 }
 
 pub fn link(path: &Path) -> Option<Value> {
+    // As the catalog last read it
+    if let Some(Some(f)) = crate::seen::file(path) {
+        return f.meta.and_then(|m| m.get("link").cloned()).filter(|l| !l.is_null());
+    }
     // Kept by the file's size and time: a folder of them is read again on each look
     static LINKS: Mutex<Option<HashMap<PathBuf, (u64, i64, Option<Value>)>>> = Mutex::new(None);
     let st = stamp(&path.to_string_lossy());
@@ -358,7 +364,7 @@ fn has_gyroflow(file: &Path) -> bool {
     let Some(dir) = file.parent() else { return false };
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let stem = if let Some(s) = name.strip_suffix(LINK_EXT) { s.to_string() } else { file.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() };
-    dir.join(format!("{stem}.gyroflow")).is_file() || dir.join(format!("{name}.gyroflow")).is_file()
+    crate::seen::is_file(&dir.join(format!("{stem}.gyroflow"))) || crate::seen::is_file(&dir.join(format!("{name}.gyroflow")))
 }
 
 // ---------- the views ----------
@@ -396,7 +402,7 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             let lower = rel.to_lowercase();
             if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
             let path = dir.join(&rel);
-            let own_here = { let f = path.with_extension("afp.json"); if f.is_file() { Some(f) } else { let o = path.with_extension("marks.json"); o.is_file().then_some(o) } };
+            let own_here = { let f = path.with_extension("afp.json"); if crate::seen::is_file(&f) { Some(f) } else { let o = path.with_extension("marks.json"); crate::seen::is_file(&o).then_some(o) } };
             if let Some(&i) = by_tree.get(&tree) {
                 let it = &mut items[i];
                 it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }));
@@ -409,7 +415,7 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
                                  "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
             it["gyroflow"] = json!(has_gyroflow(&path));
             let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
-                .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| p.is_file()));
+                .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| crate::seen::is_file(p)));
             // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
             it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, root).or_else(|| (d == root).then(String::new)))
                 .map(Value::from).unwrap_or(Value::Null);
@@ -423,7 +429,9 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         let files: Vec<String> = it["own_files"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
         if files.len() > 1 { it["own_conflict"] = json!(files); }
         if let Some(f) = files.first() {
-            if let Some(own) = read_json(Path::new(f)) {
+            // The sidecar's marks, view, source and tags as the catalog read them, else the file
+            let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
+            if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
                                     "source": own.get("source").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
@@ -443,7 +451,10 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     let at_hint = |link: &Value| -> Option<PathBuf> {
         let tree = link["clip"].as_str()?;
         locs.iter().filter_map(|l| crate::locations::in_location(tree, l))
-            .find(|f| std::fs::metadata(f).is_ok_and(|m| m.is_file() && link["size"].as_u64().is_none_or(|s| s == m.len())))
+            .find(|f| match crate::seen::file(f) {
+                Some(r) => r.is_some_and(|r| !r.dir && link["size"].as_u64().is_none_or(|s| s == r.size)),
+                None => std::fs::metadata(f).is_ok_and(|m| m.is_file() && link["size"].as_u64().is_none_or(|s| s == m.len())),
+            })
     };
     // Not at its path: looked for by what it is (checks.rs's find_clip), the footage listed once for the view
     let never_rename = view == "moments" && crate::locations::never_rename(root);
@@ -498,7 +509,10 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
             "stills" => {
                 it["kind"] = json!("still");
                 // Its own (XMP), and what older versions kept for it in Project.afproject, until written into it
-                let mut tags = self::photo_tags(&path);
+                let mut tags = match crate::seen::meta(&path) {
+                    Some(m) => m.and_then(|m| m.get("tags").cloned()).and_then(|t| serde_json::from_value::<Vec<String>>(t).ok()).unwrap_or_default(),
+                    None => self::photo_tags(&path),
+                };
                 let old_id = rel.strip_prefix("_Stills/").unwrap_or(rel);
                 for t in photo_tags.get(old_id).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                     if !tags.iter().any(|x| x.eq_ignore_ascii_case(t)) { tags.push(t.to_string()); }
@@ -528,6 +542,10 @@ fn walk_names(root: &Path, entries: &[(String, u64, i64)]) -> HashSet<String> {
     let dirs: HashSet<String> = entries.iter().map(|(r, _, _)| parent_of(r)).collect();
     for d in dirs {
         let dir = if d.is_empty() { root.to_path_buf() } else { root.join(&d) };
+        if let Some(names) = crate::seen::names_in(&dir) {
+            for n in names { out.insert(rel_join(&d, &n).to_lowercase()); }
+            continue;
+        }
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             out.insert(rel_join(&d, &e.file_name().to_string_lossy()).to_lowercase());
         }
@@ -592,7 +610,7 @@ fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
     let mut out = serde_json::Map::new();
     for p in RENDER_PROFILES {
         let file = render_path(root, rel, p);
-        if !file.is_file() { continue; }
+        if !crate::seen::is_file(&file) { continue; }
         let ok = crate::index::link(&file).filter(|l| l["kind"] == "render")
             .and_then(|l| trimmed(&l["recipe"])).is_some_and(|r| same(&r, &render_recipe(root, moment, link, p)));
         out.insert(p.to_string(), json!(if ok { "current" } else { "stale" }));

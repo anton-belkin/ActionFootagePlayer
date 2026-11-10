@@ -31,6 +31,8 @@ pub struct Manifest {
     pub bits: u32,
     pub parts: Vec<String>,
     pub count: u64,
+    /// Where each computer's lines it has read end: (segment, byte), for a reader to read on from there
+    pub at: BTreeMap<String, (u64, u64)>,
 }
 
 pub fn sha(b: &[u8]) -> String { hex(&Sha256::digest(b)[..16]) }
@@ -38,7 +40,8 @@ pub fn sha(b: &[u8]) -> String { hex(&Sha256::digest(b)[..16]) }
 impl Manifest {
     pub fn to_bytes(&self) -> Vec<u8> {
         json!({ "format": FORMAT, "gen": self.gen, "by": self.by, "covers": self.covers, "lamports": self.lamports, "l": self.l,
-                "bits": self.bits, "parts": self.parts, "count": self.count }).to_string().into_bytes()
+                "bits": self.bits, "parts": self.parts, "count": self.count,
+                "at": self.at.iter().map(|(k, (s, o))| (k.clone(), json!([s, o]))).collect::<serde_json::Map<String, Value>>() }).to_string().into_bytes()
     }
     pub fn name(&self, bytes: &[u8]) -> String { format!("{:08}-{}.json", self.gen, sha(bytes)) }
 
@@ -60,6 +63,7 @@ impl Manifest {
             bits: v["bits"].as_u64().unwrap_or(0) as u32,
             parts: v["parts"].as_array().ok_or("no parts")?.iter().filter_map(|p| p.as_str().map(str::to_string)).collect(),
             count: v["count"].as_u64().unwrap_or(0),
+            at: v["at"].as_object().map(|o| o.iter().filter_map(|(k, x)| Some((k.clone(), (x.get(0)?.as_u64()?, x.get(1)?.as_u64()?)))).collect()).unwrap_or_default(),
         };
         if m.gen != gen || m.parts.len() != 1usize << m.bits { return Err("inconsistent".into()); }
         Ok(m)
