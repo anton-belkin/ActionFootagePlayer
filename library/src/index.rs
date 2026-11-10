@@ -356,6 +356,15 @@ pub fn clip_preview_relative(relative: &str, flat: bool) -> String {
     out.join("/")
 }
 
+/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL… proxy of a GX…/GH… clip
+pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
+    let dir = clip.parent()?;
+    let stem = clip.file_stem()?.to_string_lossy().into_owned();
+    let mut names: Vec<String> = ["LRF", "lrf", "THM", "thm"].iter().map(|e| format!("{stem}.{e}")).collect();
+    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) { names.push(format!("GL{}.LRF", &stem[2..])); }
+    names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::is_file(p))
+}
+
 fn read_json(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
@@ -414,6 +423,9 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
                                  "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }],
                                  "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
             it["gyroflow"] = json!(has_gyroflow(&path));
+            // What the camera wrote beside it for its own quick look (DJI's and GoPro's .LRF proxy, GoPro's .THM): the
+            // clip's picture until it has a preview
+            if let Some(t) = camera_thumb(&path) { it["thumb"] = json!(t.display().to_string()); }
             let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
                 .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| crate::seen::is_file(p)));
             // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
@@ -780,6 +792,21 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     if let Ok(b) = std::fs::read(&file) { return (!b.is_empty()).then(|| data_url(&b)); }
     let _ = std::fs::create_dir_all(cache);
     let lower = path.to_string_lossy().to_lowercase();
+    // A camera's proxy (.LRF: an MP4) or thumbnail (.THM: a JPEG): a frame by the player's ffmpeg (0.7 s for a DJI
+    // .LRF on the NAS; Quick Look hangs on them)
+    if lower.ends_with(".lrf") || lower.ends_with(".thm") {
+        let out = cache.join(format!("{key}.jpg"));
+        let ffmpeg = crate::player_ffmpeg();
+        let mut cmd = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg")));
+        cmd.args(["-v", "error", "-y"]);
+        if lower.ends_with(".lrf") { cmd.args(["-ss", "1"]); }
+        let ok = cmd.arg("-i").arg(path).args(["-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "4"]).arg(&out)
+            .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        let bytes = if ok { std::fs::read(&out).ok() } else { None };
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::write(&file, bytes.as_deref().unwrap_or(&[]));
+        return bytes.map(|b| data_url(&b));
+    }
     let mut bytes: Option<Vec<u8>> = None;
     if lower.ends_with(".mp4") || lower.ends_with(".mov") {
         bytes = keys_and_cover(path).1;

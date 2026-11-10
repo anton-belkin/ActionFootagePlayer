@@ -229,7 +229,8 @@ function deriveItems(view) {
       const mv = probe && probe.movie;
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
-      it.thumbPath = it.preview || null;
+      // Its preview's picture, else what the camera made for its own quick look (LRF, THM)
+      it.thumbPath = it.preview || it.thumb || null;
       it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
       it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
@@ -555,7 +556,8 @@ function chips(it) {
   if (it.kind === "folder") {
     const inner = under(it.path);
     const prev = inner.filter((x) => x.preview).length;
-    if ((S.view === "footage" || S.view === "sources") && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
+    // Footage's folders are its previews' already: the count says something only in Originals
+    if (S.view === "sources" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
   } else if (it.kind === "clip") {
     if (it.conflict) c.push(["chip warn", it.own_conflict.length + " own files"]);
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);

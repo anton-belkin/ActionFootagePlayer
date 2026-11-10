@@ -283,6 +283,13 @@ fn project_info(root: &Path) -> ProjectInfo {
 // ---------- the player, run without a window ----------
 
 // Where ActionFootagePlayer is: AFL_PLAYER (an .app, or its executable), else beside this app, else the usual places
+/// The player's ffmpeg (a frame of a camera's proxy for a thumbnail)
+pub fn player_ffmpeg() -> Option<PathBuf> {
+    let p = player().ok()?;
+    let f = if cfg!(target_os = "macos") { p.join("Contents/Helpers/ffmpeg") } else { p.with_file_name(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }) };
+    f.is_file().then_some(f)
+}
+
 fn player() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os("AFL_PLAYER").filter(|p| !p.is_empty()) {
         return Ok(PathBuf::from(p));
