@@ -307,9 +307,13 @@ const P = (id, label, kids) => ({ id, label, kids });
 function distinct(items, f) { const out = []; for (const it of items) { const v = f(it); if (v != null && out.indexOf(v) < 0) out.push(v); } return out.sort(); }
 
 let FACETS = [];
+// The files whose link's original isn't where it says (the Library counts them on its own)
+let MISSING = new Set();
 function buildFacets() {
   const items = (DATA[S.view] && DATA[S.view].items) || [];
   const sections = [];
+  if ((S.view === "moments" || S.view === "stills" || S.view === "exports") && MISSING.size)
+    sections.push({ id: "lk", title: "Link", facets: [{ id: "lk", title: "Original", opts: [L("lk:broken", "Not where the link says", (it) => MISSING.has(it.path))] }] });
   if (S.view === "footage" || S.view === "sources" || S.view === "moments") {
     const brands = distinct(items, (i) => i.brand);
     const camOpts = brands.map((b) => P("cam:" + b, b, distinct(items.filter((i) => i.brand === b), (i) => i.model).map((m) => L("cam:" + b + "|" + m, m, (it) => it.brand === b && it.model === m))));
@@ -497,7 +501,8 @@ function renderMain() {
   const scanView = S.view === "sources" ? "footage" : S.view;
   if (S.scanning[scanView] && S.cachedViews[scanView]) h += '<div class="indexing"><span class="spin" aria-hidden="true"></span> Looking at the disk again: what was there last time shows meanwhile</div>';
   if (S.missing > 0 || S.mending) h += '<div class="indexing">' + (S.mending ? '<span class="spin" aria-hidden="true"></span>Looking for the moved originals and mending the links…'
-    : S.missing + (S.missing === 1 ? " moment, clip preview, export or photo points" : " moments, clip previews, exports and photos point") + ' at an original that isn’t where it was. <button type="button" class="btn sm pri" data-a="mend">Find and mend</button>') + '</div>';
+    : S.missing + (S.missing === 1 ? " moment, clip preview, export or photo points" : " moments, clip previews, exports and photos point") + ' at an original that isn’t where it was. <button type="button" class="btn sm" data-a="showbroken">Show</button> <button type="button" class="btn sm pri" data-a="mend">Find and mend</button>' +
+      (S.showBrokenList ? '<div class="sub wrap" style="margin-top:6px">' + (S.missingList || []).map((x) => '<div><code>' + esc(x.file.replace(S.root + "/", "")) + '</code> → ' + esc(x.tree || "?") + ' <button type="button" class="btn sm" data-a="revealpath" data-v="' + esc(x.file) + '">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button></div>').join("") + '</div>' : "")) + '</div>';
   if (probesPending && (S.view === "footage" || S.view === "sources" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
@@ -1603,7 +1608,12 @@ async function poll() {
   S.macos = s.macos;
   // What the project's catalog is doing (made the first time, read again, folded): said once as it changes
   // Links whose original isn't where they say: the strip on top, at once
-  if ((s.missing ?? null) !== (S.missing ?? null)) { S.missing = s.missing ?? null; renderMain(); }
+  if ((s.missing ?? null) !== (S.missing ?? null)) {
+    S.missing = s.missing ?? null;
+    const list = S.missing ? await invoke("missing_links").catch(() => []) : [];
+    MISSING = new Set(list.map((x) => x.file)); S.missingList = list;
+    buildFacets(); renderMain(); renderFilters();
+  }
   if ((s.catalog || "") !== (S.catalogStatus || "")) { S.catalogStatus = s.catalog || ""; if (S.catalogStatus) toast(S.catalogStatus); }
   if (s.project !== S.root) {
     S.changes = s.changes;
@@ -1714,6 +1724,22 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "revealpath": { if (v) call("reveal_path", { path: v }).catch(() => {}); return; }
+    case "showbroken": {
+      // Where they are: the view that has them, filtered to them (across its folders); clip previews (not items of a
+      // view) listed in the strip itself
+      const list = S.missingList || [];
+      const inView = (view) => list.filter((x) => (x.kind === "moment" && view === "moments") || (x.kind === "export" && view === "exports") || (/\.(heic|jpe?g)$/i.test(x.file) && view === "stills")).length;
+      const view = ["moments", "stills", "exports"].find((w) => inView(w) > 0);
+      const previews = list.filter((x) => x.kind === "clip" || (!/\.(heic|jpe?g)$/i.test(x.file) && !["moment", "export"].includes(x.kind)));
+      S.showBrokenList = !view || previews.length > 0;
+      if (view) {
+        S.view = view; S.path = []; S.flat = true; S.q = ""; S.sel = {};
+        await needViews([view]);
+        buildFacets(); S.filters = { "lk:broken": true };
+      }
+      renderAll(); return;
+    }
     case "mend": {
       S.mending = true; renderMain();
       try {

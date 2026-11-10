@@ -123,6 +123,8 @@ pub struct Runner {
     /// Links whose original isn't where they say (checks.rs's missing, from the catalog), counted on its own as the
     /// project changes; u64::MAX: not known
     pub missing: Arc<AtomicU64>,
+    /// …and which they are (file, the path it names)
+    pub missing_list: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
 impl Drop for Runner {
@@ -141,11 +143,12 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) ->
     let status = Arc::new(Mutex::new(String::new()));
     let everything = Arc::new(AtomicBool::new(false));
     let missing = Arc::new(AtomicU64::new(u64::MAX));
-    let r = Runner { stop: stop.clone(), everything: everything.clone(), missing: missing.clone(), events: tx, status: status.clone() };
+    let missing_list = Arc::new(Mutex::new(Vec::new()));
+    let r = Runner { stop: stop.clone(), everything: everything.clone(), missing: missing.clone(), missing_list: missing_list.clone(), events: tx, status: status.clone() };
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
-    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, missing, rx, status, changes, last)).ok();
+    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, missing, missing_list, rx, status, changes, last)).ok();
     r
 }
 
@@ -156,7 +159,7 @@ fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }
 
-fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, missing_list: Arc<Mutex<Vec<serde_json::Value>>>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
     // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
@@ -213,7 +216,10 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
     }
     // Links whose original isn't there: counted now, and again a few seconds after what the catalog knows changed
     let count_missing = |missing: &AtomicU64| {
-        let n = crate::checks::missing(&root).map(|v| v.len() as u64).unwrap_or(u64::MAX);
+        let found = crate::checks::missing(&root);
+        let n = found.as_ref().map(|v| v.len() as u64).unwrap_or(u64::MAX);
+        *missing_list.lock().unwrap() = found.unwrap_or_default().into_iter()
+            .map(|i| serde_json::json!({ "file": i["file"], "tree": i["tree"], "kind": i["link"]["kind"] })).collect();
         missing.store(n, Ordering::Relaxed);
     };
     count_missing(&missing);
@@ -247,7 +253,9 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
             last_event = Instant::now();
         }
         if last_read.elapsed() >= Duration::from_secs(3) { refresh(&changes, &last); last_read = Instant::now(); }
-        if changes.load(Ordering::Relaxed) != counted_at && counted_when.elapsed() >= Duration::from_secs(5) {
+        // …or asked for again (after mending), or not known yet
+        let unknown = missing.load(Ordering::Relaxed) == u64::MAX && counted_when.elapsed() >= Duration::from_secs(2);
+        if unknown || changes.load(Ordering::Relaxed) != counted_at && counted_when.elapsed() >= Duration::from_secs(5) {
             counted_at = changes.load(Ordering::Relaxed);
             counted_when = Instant::now();
             count_missing(&missing);
@@ -298,6 +306,9 @@ pub fn status(r: Option<&Runner>) -> String { r.map(|r| r.status.lock().unwrap()
 
 /// How many links' originals aren't where they say (u64::MAX: not known yet)
 pub fn missing(r: Option<&Runner>) -> u64 { r.map(|r| r.missing.load(Ordering::Relaxed)).unwrap_or(u64::MAX) }
+
+/// Which links' originals aren't where they say
+pub fn missing_list(r: Option<&Runner>) -> Vec<serde_json::Value> { r.map(|r| r.missing_list.lock().unwrap().clone()).unwrap_or_default() }
 
 /// Counted again soon (after mending)
 pub fn recount(r: Option<&Runner>) { if let Some(r) = r { r.missing.store(u64::MAX, Ordering::Relaxed); } }

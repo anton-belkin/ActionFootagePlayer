@@ -899,6 +899,12 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
     }).await.map_err(|e| e.to_string())
 }
 
+// The links whose original isn't where they say, as last counted: [{ file, tree, kind }]
+#[tauri::command]
+async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> {
+    Ok(seen::missing_list(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner)))
+}
+
 // Mending on one click (Anton, 2026-11-10): every link whose original isn't where it says, looked for by what it is
 // (its fingerprint…), the ones found surely written again; the ones with several to choose from given back
 #[tauri::command]
@@ -1605,7 +1611,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend, missing_links])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
