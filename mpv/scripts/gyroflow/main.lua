@@ -90,8 +90,8 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
---   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) on macOS, where it has been tried;
---                yes: on Windows and Linux too (mpv 0.42, vo=gpu-next); no: always through VapourSynth
+--   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) wherever mpv can (mpv 0.42 or the
+--                app's, vo=gpu-next): macOS, Windows and Linux (tried on all three); no: always through VapourSynth
 --   gpu_flush=auto  an mpv without the app's patch 0015 keeps every shader the GPU path has had until its window
 --                closes (each with its textures: ~450 MB with Ctrl+p's denoise): once those it no longer uses pass
 --                1.5 GB, the window is made again as the next clip opens (at 4 GB, at once). auto: unless mpv is the
@@ -920,8 +920,9 @@ local function mpv_has_pts()
     return commits ~= nil and commits >= 499
 end
 
--- gpu=auto: on macOS (where it has been tried), yes: anywhere mpv can, no: never
-local function gpu_wanted() return o.gpu == "yes" or (o.gpu == "auto" and platform.macos) end
+-- gpu=auto and yes: wherever mpv can (macOS, Windows and Linux: tried on each, Windows on Anton's PC, Linux on the
+-- NAS, 2026-11), no: never. An mpv without the PTS (a distribution's 0.41) keeps VapourSynth (mpv_has_pts)
+local function gpu_wanted() return o.gpu ~= "no" end
 
 local function gpu_eligible(source)
     if not gpu_wanted() or not file_exists(GPU_TABLE) or not mpv_has_pts() then return false end
