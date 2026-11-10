@@ -83,6 +83,8 @@ pub struct Catalog {
     pub seen_changes: u64,
     /// How long a file must have been not needed before a clean-up removes it (10 minutes)
     pub grace: std::time::Duration,
+    /// Journal files that couldn't be read at the last reading (their computer's later lines wait)
+    pub unreadable: Vec<String>,
     /// Seconds added to this computer's clock (tests: time passing)
     pub clock_ahead: u64,
     /// How long after a folder was listed because it changed this computer lists it once more (60 s): the Mac gives a
@@ -97,7 +99,7 @@ impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
-                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0,
+                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0, unreadable: Vec::new(),
                   recheck_after: std::time::Duration::from_secs(60) }
     }
 
@@ -207,6 +209,7 @@ impl Catalog {
     }
 
     fn read_tails(&mut self) -> Result<usize, Error> {
+        self.unreadable.clear();
         let jdir = self.dir.join("journal");
         let computers: Vec<String> = match self.shared.list(&jdir) {
             Ok(l) => l.into_iter().filter(|i| i.stat.dir && !i.name.starts_with('.')).map(|i| i.name).collect(),
@@ -226,6 +229,7 @@ impl Catalog {
             let done = self.applied.get(&c).copied().unwrap_or(0);
             if first > done + 1 { return Err(Error::Gap(format!("{c}'s lines {}..{} are gone", done + 1, first - 1))); }
             let by = self.state.id(&c);
+            let mut stuck = false;
             for (i, seg) in segs.iter().enumerate() {
                 let done = self.applied.get(&c).copied().unwrap_or(0);
                 if segs.get(i + 1).is_some_and(|next| *next <= done + 1) { continue; }
@@ -235,7 +239,10 @@ impl Catalog {
                     Ok(b) => b,
                     // Removed since it was listed: a newer snapshot has its lines
                     Err(e) if not_found(&e) => return Err(Error::Gap(format!("{c}'s segment {seg} went while read"))),
-                    Err(e) => return Err(e.into()),
+                    // One file that can't be read now (seen on the NAS: the Mac's SMB client answering "Invalid
+                    // argument" for a file another computer had just written, a healthy file there): this computer's
+                    // lines from here on wait for the next read; the others' are read
+                    Err(e) => { self.unreadable.push(format!("{}: {e}", path.display())); stuck = true; break }
                 };
                 let p = journal::parse(&bytes);
                 for line in p.lines {
@@ -252,6 +259,7 @@ impl Catalog {
                 self.tail_bytes += p.consumed as u64;
                 self.offsets.insert(path, off + p.consumed as u64);
             }
+            if stuck { continue; }
             // A segment started since the folder was listed: looked for by the name it would have (macOS keeps a
             // share's listings some 30 s; a file opened by its name is read as it is now)
             loop {

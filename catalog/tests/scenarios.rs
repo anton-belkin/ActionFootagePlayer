@@ -366,3 +366,28 @@ fn a_clean_up_behind_on_the_listings_removes_nothing_still_needed() {
     c.cat.load(&Want::All).unwrap();
     assert!(diff(&truth(&fs), &view(&c.cat)).is_empty());
 }
+
+#[test]
+fn a_journal_file_that_cant_be_read_holds_back_only_its_computers_lines() {
+    // Found on the NAS: the Mac's SMB client answered "Invalid argument" opening one journal file another computer had
+    // just written (the file healthy on the NAS); the whole catalog then didn't read
+    let fs = Fs::new();
+    project(&fs, 2, 3, 1);
+    let mut a = built(&fs);
+    let mut b = Computer::new(&fs, "b", 2);
+    let rec = |n: u64| vec![("p".to_string(), format!("Generated/x{n}.mp4"), Some(File { dir: false, size: n, mtime: n as i64, meta: None, digest: None }))];
+    b.cat.load(&Want::Keys(vec![])).unwrap();
+    b.cat.note(rec(1)).unwrap();
+    a.cat.note(rec(2)).unwrap();
+    let mut c = Computer::new(&fs, "c", 3);
+    let bseg = Path::new(PROJECT).join(".afp/catalog/journal/b/000000000001.log");
+    c.net.lock().unwrap().bad.push(bseg.clone());
+    c.cat.load(&Want::All).unwrap();
+    assert_eq!(c.cat.unreadable.len(), 1);
+    assert!(c.cat.state.get("p", "Generated/x2.mp4").is_some(), "a's line read");
+    assert!(c.cat.state.get("p", "Generated/x1.mp4").is_none(), "b's waits");
+    c.net.lock().unwrap().bad.clear();
+    c.cat.refresh().unwrap();
+    assert!(c.cat.state.get("p", "Generated/x1.mp4").is_some(), "read once it can be");
+    assert!(c.cat.unreadable.is_empty());
+}

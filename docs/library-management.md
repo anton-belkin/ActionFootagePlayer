@@ -854,6 +854,9 @@ The files never are; the catalog can say something old about them for a while. W
 - **A note lost** (the program stopped between writing the file and the journal line, the connection gone for both the
   line and the folder's touch): the next look finds the file by its folder's time; only a change in place with both
   lost waits for the deep look.
+- **A journal file this Mac can't open** (seen once on the NAS after 100 kills: macOS's SMB client answering
+  "Invalid argument" for a file another computer had written, healthy on the NAS, for minutes): that computer's later
+  lines wait on this Mac until the file reads or a snapshot folded elsewhere covers them; everything else is read.
 - **A card or USB disk formatted FAT/exFAT** as a location: folder times there are coarse (2 s, 10 ms), so a change
   in the same tick as a listing can wait for the deep look. Not tested.
 - **Names in two Unicode forms** (a Mac and a Windows PC writing the same name differently): not normalized yet; could

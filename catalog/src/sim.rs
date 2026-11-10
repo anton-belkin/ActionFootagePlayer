@@ -131,6 +131,8 @@ pub struct Net {
     /// Chance a write fails (on top of `fail`)
     pub wfail: f64,
     pub down: bool,
+    /// Files this computer's connection can't read (an SMB client's "Invalid argument" for one file)
+    pub bad: Vec<PathBuf>,
     /// Operations a listing or a size stays as it was seen
     pub lag: u32,
     cache: HashMap<PathBuf, (Option<Vec<Item>>, u32)>,
@@ -140,7 +142,7 @@ pub struct Net {
 
 impl Net {
     pub fn new(seed: u64) -> Arc<Mutex<Net>> {
-        Arc::new(Mutex::new(Net { rng: seed.max(1), fail: 0.0, wfail: 0.0, down: false, lag: 0, cache: HashMap::new(), stat_cache: HashMap::new(), counts: Counts::default() }))
+        Arc::new(Mutex::new(Net { rng: seed.max(1), fail: 0.0, wfail: 0.0, down: false, bad: Vec::new(), lag: 0, cache: HashMap::new(), stat_cache: HashMap::new(), counts: Counts::default() }))
     }
     pub fn rand(&mut self) -> u64 { let mut x = self.rng; x ^= x << 13; x ^= x >> 7; x ^= x << 17; self.rng = x; x }
     pub fn chance(&mut self, p: f64) -> bool { p > 0.0 && (self.rand() % 1_000_000) as f64 / 1e6 < p }
@@ -193,6 +195,7 @@ impl Store for SimStore {
         let mut net = self.net.lock().unwrap();
         net.counts.reads += 1;
         if net.fails() { return Err(lost()); }
+        if net.bad.iter().any(|b| b == p) { return Err(io::Error::from_raw_os_error(22)); }
         let fs = self.fs.lock().unwrap();
         match fs.nodes.get(p) {
             Some(n) if !n.dir => { let b = n.data.get(offset as usize..).unwrap_or(&[]).to_vec(); net.counts.read_bytes += b.len() as u64; Ok(b) }
