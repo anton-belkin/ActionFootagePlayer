@@ -710,6 +710,121 @@ Checked with unit tests (luajit: 12 suites; Rust: the Library's 16, vs-gyroflow'
 Library's page against a mock in jsdom. Not checked yet: the player and the Library live on a real project (the
 player's batch writing into `Generated/`, a moment opened whose clip moved).
 
+## 9. The catalog: the files, without looking at all of them
+
+Anton, 2026-11-10, after §8 was built: the player looked through the whole project folder each time a clip opened,
+to find its moments — on a NAS seconds at 10 000 files, minutes at 100 000 — and the Library didn't hear of what
+another computer changed. Two kinds of things link to each other (originals; moments, clip previews, exports, photos),
+and finding them by walking the folders doesn't scale. What he settled, step by step:
+
+- The files stay the truth (§8). What's kept besides is a **catalog**: what was last seen of them, which can be lost
+  and built again from them, and is never needed for a file to be right.
+- It's **shared through the project's own folder** (`.afp/catalog/`), so a computer joining reads it instead of
+  looking at every file — not kept on each computer alone.
+- What our programs do reaches every computer at once; what's done in **Finder** reaches them when an open Library
+  next looks at the folders, and once found it's written for all.
+- **The player never folds or looks through folders**: it plays. It reads what it needs of the catalog beside the
+  playing video, without waiting for it, and notes what it wrote.
+- Nothing open-source fitted (research 2026-11-10): SQLite and LMDB must not be used on a network share (their own
+  documentation), delta-rs and SlateDB commit with hard links or a no-overwrite rename the Mac's SMB client and Samba
+  don't do safely, restic and Kopia clean up by clocks and locks. So a small format of our own, on what restic,
+  Kopia and automerge-repo do: files named by their content, written once, never written over; each computer's own
+  journal; snapshots that fold them; no locks, no clocks.
+
+### What's in it
+
+For every file and folder in the project's folder and its locations (hidden ones aside): its size and time, and for
+the ones whose insides count what's inside — a moment's, clip preview's, export's or photo's link, a clip's sidecar's
+marks and tags. For each folder, its time and a digest of what was in it when it was last listed. Each record has a
+version (a Lamport clock: above every version its writer had read; the computer's name breaks ties): a record replaces
+another only with a higher version, so every computer that has read the same lines knows the same, whatever order it
+read them in.
+
+### On the share
+
+```
+.afp/catalog/journal/<computer>/<first line's number>.log   each computer's own, appended only by it
+.afp/catalog/snap/<generation>-<hash>.json                  a snapshot's list: which line of each journal it has
+                                                            read up to, its parts
+.afp/catalog/parts/<hash>.gz                                its records, about 2000 a part, gzipped
+```
+
+- A journal line: 8 hex digits of its text's SHA-256, its text (JSON: number, version, records), a newline. A line
+  cut off by a lost connection or a stopped program has no newline or the wrong sum: it's left out. After a write that
+  failed, the next line starts a new segment (named by its number), so nothing is appended after a broken line; a line
+  that had arrived after all is read once (its number was read).
+- Snapshots and parts are named by their content's hash: written into a temporary file and renamed to a name nobody
+  else uses (two computers writing it wrote the same bytes). Read, they're checked against their name; a damaged one is
+  passed over for the snapshot before it.
+- Records go into parts by what a reader looks for: a moment, clip preview, export or photo by its original's
+  fingerprint (else its path), anything else by its folder. The player opening a clip reads one or two parts.
+- **This computer's name**: made once, kept with the machine's own id (macOS's platform UUID), so a home folder copied
+  to another Mac becomes a new computer there, not a second writer of one journal.
+
+### Who does what
+
+- **Reading** (both): the newest snapshot that reads whole (its parts from this computer's cache when it has them:
+  they never change), then every journal's lines after what the snapshot covers. A reader whose lines were cleaned up
+  meanwhile is told so and reads again from the newer snapshot.
+- **Noting** (the player, the Library, afp-meta, afp-catalog): what was written — a moment saved, a link or tags
+  rewritten, a sidecar saved — appended to this computer's journal, after reading what's new (so its version is above
+  what it could read). A file written in place (a link in a moment's MP4) also has its folder **touched** (a hidden
+  file made and removed), so that the folder's time changes and the next look lists it, whatever else happens.
+- **Looking** (the Library only, while open): every few minutes it looks at the time of each folder of the project and
+  its locations — one question a folder — and lists again only the ones whose time, or whose files on record, aren't
+  what was written when they were last listed; what changed is written to its journal. Its own computer's changes it
+  hears of from the system (FSEvents) and looks at those folders at once. A folder listed because it changed is listed
+  once more 90 s later (the Mac keeps a share's listings up to a minute). Once a day a deep look lists every folder
+  (in the background, slowly): it finds a file changed in place by something not ours.
+- **Folding** (the Library only): when the journals have grown past 2000 lines or 2 MB, a new snapshot; only parts
+  that changed are written. Two Libraries folding at once both make good snapshots.
+- **Cleaning** (the Library only): snapshots older than the newest three, parts none of those has, temporary files
+  left, this computer's segments those have read — each only when it was seen to be so at the clean-up before (a
+  computer folding meanwhile isn't robbed of the parts it has just written).
+
+### What a look won't do
+
+- **A connection lost is not a folder emptied**: a folder that can't be listed is left as it was. A root (the project,
+  a location) is looked at only when its marker is there (`Project.afproject`, the location's `.afplocation`): a share
+  not mounted, an empty mount point where it was, removes nothing. A folder that had things in it listed empty is
+  listed again and its root's marker looked for again first.
+- **Moved folders keep their times**: what's new is found by the folder it moved into (that one's time changed), then
+  listed whole, whatever its own time.
+- **A file noted in a folder never listed** (the player's moment in a new folder) makes that folder one to list.
+
+### What it costs (simulated, 2026-11-10)
+
+Counted on a simulated NAS (the round trips and bytes each thing takes), priced at a local SSD (0.05 ms, 2 GB/s), a
+wired NAS (0.4 ms, 110 MB/s), Wi-Fi (4 ms, 30 MB/s) and a VPN (40 ms, 5 MB/s), plus this computer's own time;
+`catalog/tests/cost.rs`. 100 000 clips and 100 000 moments in folders of 100:
+
+| | local | NAS wired | Wi-Fi | VPN |
+|---|---|---|---|---|
+| Built (every folder listed, every moment read — what each look cost before) | 17 s | 2 min | 21 min | 3.4 h |
+| A new computer reads it | 0.4 s | 0.6 s | 2 s | 17 s |
+| The Library opened again | 0.4 s | 0.4 s | 0.5 s | 1 s |
+| The player opens a clip | 12 ms | 23 ms | 95 ms | 0.8 s |
+| The player notes a moment; another computer sees it | 1 ms | 15 ms | 0.15 s | 1.5 s |
+| A look, nothing changed (each few minutes, in the background) | 0.3 s | 1 s | 8 s | 82 s |
+| The deep look (once a day, in the background) | 0.8 s | 4 s | 34 s | 6 min |
+| A new snapshot | 0.6 s | 0.6 s | 0.8 s | 2.6 s |
+
+At 10 000 the looks are ten times less; the rest about the same.
+
+### How it's tested
+
+`catalog/tests/`: the scenarios (a new computer reads the snapshot, not the files; an unchanged look lists nothing and
+writes nothing; the player's note seen at once elsewhere; Finder moving, copying, renaming, removing; a file changed in
+place; a share not mounted; a connection lost mid-look; the player's parts; segments cleaned while a reader is behind;
+two computers folding at once; a damaged snapshot; a cut-off note; a stale listing under a fresh folder time) and a
+random run: three computers (two Libraries, one player) and Finder doing 400 random things to a project, the
+connection losing 5–20 % of operations (writes cut off midway, written but the answer lost, temporary files left),
+going down for a while, listings and sizes a few operations stale; then the connection good again, one look — and
+every computer's catalog must say exactly what the files say, a second look must list nothing, a newcomer must read
+the same, the player must find each clip's moments. 300 seeds pass with and without faults; it found three faults
+in the first version, now fixed (two records of one key in one line; a computer's note losing to an older record it
+hadn't read; a file noted in a folder never listed, left behind when the folder went).
+
 ## Steps
 
 Each a PR, each usable on its own:

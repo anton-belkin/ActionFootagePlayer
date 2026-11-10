@@ -1,0 +1,14 @@
+[package]
+name = "afp-catalog"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "A project's catalog: what's in its folders and locations, shared through the folders themselves (docs/library-management.md §9)"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+flate2 = "1"
+
+[profile.release]
+debug = 1
