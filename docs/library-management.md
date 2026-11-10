@@ -833,6 +833,17 @@ question per file; new files are read 8 at a time.
 | Anything new? | 1 ms | 1 ms |
 | A look, nothing changed | 0.7–1.2 s | 0.6–1.5 s |
 
+100 000 clips and 100 000 moments (NVMe volume): built in ~23 min (once); a new computer reads it in 1.3 s (3 MB),
+again 0.45 s; the player opens a clip in 12–15 ms (the catalog), 50–200 ms through `afp-catalog` as the player calls it;
+anything new 3 ms; a look with nothing changed 10–60 s in the background (2 000 folders, 5–30 ms each as the NAS is
+busy).
+
+A stress run on the NAS: two Macs' writers killed with -9 at random ~100 times in 12 minutes while noting, looking,
+folding and cleaning, Finder-like changes and a third computer's journal on the NAS's side: the catalog read whole
+throughout (81 snapshots); it is what found the clean-up and stale-listing faults above, and that after such a beating
+the Mac's SMB client can't open a few files for minutes (Invalid argument, 17 s opens) — which a look counts as errors
+and leaves as they were.
+
 What another computer changes reaches this Mac: a line appended to its journal at once (a file opened is read as it
 is); a new file or folder (a new segment, a new computer's journal, a moment saved) **after ~30 s**, as macOS caches
 a share's listings that long — the journals' next segment is therefore also looked for by its name.
