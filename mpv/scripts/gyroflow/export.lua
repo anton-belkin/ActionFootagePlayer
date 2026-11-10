@@ -679,6 +679,22 @@ local function shown_time()
     return math.max(restart, t - d.delay)
 end
 
+-- Where a photo goes: the project's _Stills/Generated/ (docs/library-management.md §8), as the workspace plugin says
+-- the project is; with the project's generated_runs, a folder a day in it (<date>); nil: gyroflow-export's own choice
+-- (stabilized/ beside a clip of no project)
+local function photo_dir()
+    local ws = mp.get_property_native("user-data/workspace")
+    local project = type(ws) == "table" and ws.project
+    if type(project) ~= "string" or project == "" then return nil end
+    local sep = platform.windows and "\\" or "/"
+    local dir = project .. sep .. "_Stills" .. sep .. "Generated"
+    local f = io.open(project .. sep .. "Project.afproject", "r")
+    local doc = f and utils.parse_json(f:read("*a") or "")
+    if f then f:close() end
+    if type(doc) == "table" and doc.generated_runs == true then dir = dir .. sep .. os.date("%Y-%m-%d") end
+    return dir
+end
+
 local function photo()
     local path = local_path()
     if not path or not installed("Photo") then return end
@@ -720,6 +736,8 @@ local function photo()
             table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", x0, y0, x1 - x0, y1 - y0))
         end
     end
+    local dir = photo_dir()
+    if dir then table.insert(args, "--out"); table.insert(args, dir) end
     -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
     local frame_args, frame_file = gpu_frame()
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
@@ -754,7 +772,8 @@ mp.register_script_message("photo", photo)
 
 -- A photo of any clip at a time, with its saved view, for the workspace plugin (the Project tab's photos of marks):
 -- { id, clip, t, view, reply }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
--- frame on or off; into the project's _Stills. The answer: photo-done (or req.done) <id> { ok, error, out }
+-- frame on or off; into `out_dir` (the run's Generated/ folder), else the project's Generated/<date> Photos. The
+-- answer: photo-done (or req.done) <id> { ok, error, out }
 mp.register_script_message("photo-at", function(json)
     local req = utils.parse_json(json or "")
     if type(req) ~= "table" or not req.clip or not req.t or not req.reply then return end
@@ -775,6 +794,9 @@ mp.register_script_message("photo-at", function(json)
     if not denoise or mp.get_property_native("user-data/gyroflow/temporal_denoise") == "off" then
         table.insert(args, "--radius"); table.insert(args, "0")
     end
+    -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
+    local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
+    if dir then table.insert(args, "--out"); table.insert(args, dir) end
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)

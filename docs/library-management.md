@@ -15,7 +15,11 @@ Second version, the same day, after Anton's first comments: locations as network
 (no lists per computer); what a computer adds kept on it, outside the library; the app moves no footage (*Archive* and
 *Work on* gone), *Find moved files* instead; *Take in* without moving footage when it's already inside. Third, after his
 second round: a clip may be in several projects; what belongs to a clip lives beside it, one file per clip, and two
-stop saving; `.afplocation` files lead from a clip to its projects; from a laptop to the NAS.
+stop saving; `.afplocation` files lead from a clip to its projects; from a laptop to the NAS. Fourth, 2026-11-10,
+after the *Swallow a location* command (PR #181) showed what changing the locations costs: [the project is its
+files](#8-the-project-is-its-files): `Project.afproject` keeps only where the footage is, a link finds its clip by what
+the clip is rather than where it was, and everything else is read from the files or is a cache. Where §1–§2 say
+otherwise, §8 wins.
 
 ## The workflow it's for
 
@@ -509,6 +513,460 @@ Anton, 2026-11-09: time to have them; the first use is Photos'.
 - **The app's**: *Deleted in Photos* (sync sets it), later others; shown apart, removable like any.
 - Search and filters take tags; *Marks to the editor* passes them on as keywords.
 
+## 8. The project is its files
+
+Anton, 2026-11-10, back to where this started. *Swallow a location* (PR #181) had to rewrite the links of moments,
+previews, exports and renders, move previews, rewrite lines of `Project.afproject`, and still left photos pointing at
+the old paths, all because one location was taken out while not a single file moved. The cause: a link names its clip
+by its **path in the project's tree**, and the tree exists only in `Project.afproject`'s `locations`. Change the
+tree, and every path written anywhere is stale.
+
+So: the project file keeps **only where the footage is**. Everything else is either in the files themselves (the
+clip's own file, a moment's MP4 key, a photo's XMP) or a **cache** of where things were last seen, on this computer,
+read again and forgotten when it doesn't match.
+
+### What `Project.afproject` keeps
+
+```json
+{
+  "format": "actionfootage-project", "version": 3,
+  "id": "6f1c2e4a-…",
+  "locations": [ { "name": "Archive", "at": "", "path": "//DISKSTATIONDXP/video/Footage" }, … ],
+  "hosts": { "DISKSTATIONDXP": ["web.nas", "192.168.50.186"] }
+}
+```
+
+Nothing else. What was there goes:
+
+| Was | Becomes |
+|---|---|
+| `clips_made`, `stills_made` (so a deleted preview or photo isn't made again) | nothing. You make what you ask for: a right-click on a folder, *Make clip previews*. A deleted one is made again only if you ask again |
+| `settings.clips_layout` / `clips_flat`, `settings.moments_alone` | a choice in each run's dialog, remembered on this computer as the dialog's last choice |
+| `clips_failed` (the last previews that failed, and why) | a log in the app's own folder on this computer (`<data>/ActionFootage/logs/<project id>/`), shown in the Queue |
+| `moment_names` (the name dialog's suggestions) | the names of the moments found in the project |
+| `photo_tags` | the photo's own XMP, `dc:subject` ([below](#photos-carry-what-they-need)) |
+
+A project file with the old keys is read as before; the first time the Library opens it, the photo tags are written
+into the photos, the old file is kept beside it once as `Project.afproject.before-v3`, and the keys are dropped.
+
+### A link finds its clip by what the clip is
+
+Every link (moment, clip preview, export, render, photo) already carries what identifies its clip: `clip` (its path in
+the tree), `size`, `created` (the MP4's own `creation_time`, written by the camera inside the file, in `moov/mvhd`:
+not the file system's dates, which a copy, an archive or a restore from a backup may change) and `hash` (SHA-256 of
+its first and last MiB; links older than it have none). The rule under all of it: **sources never change**, so their
+size, fingerprint and own creation time don't either. From now on:
+
+- **`clip` is where it was last seen**, a hint to look first. Nothing depends on it being right, but it's **kept up to
+  date** (Anton): when the clip is found elsewhere (opening a moment, the Library's look, a repair), the new path in
+  the tree is written into the link, so the next time it's found at once, from any computer.
+  - Written in place: a moment's, preview's, export's or render's MP4 key (as tags are now, the `moov` keeping its
+    size), a photo's XMP (with the same writer as its tags). The file's modification time changes, and is left so:
+    the player's and the Library's caches of what's in a file go by its size and time, and with the time put back
+    the other one wouldn't read the new path.
+  - Only a path in the library: a clip found in this computer's own location (a local copy) leaves the hint as it
+    is, since other computers can't see it there.
+  - A file that can't be written (a read-only share, a card) keeps its old hint; the cache on this computer remembers
+    where it was found.
+- **The clip is the file that matches the criteria**, only the files of the link's size. With a `hash`, it decides:
+  each candidate's fingerprint is compared, the ones with the link's name first; `created` isn't needed. Without one
+  (older links): name, size and `created`, then size and `created`, then name and size, each taken while it leaves
+  one; never size alone, which would be a guess (Find moved files offers it, to confirm). With **"I never rename my
+  footage"** ticked (Project settings, this computer's choices), the steps without the name are skipped.
+- **Finding:**
+  1. The hint: the file at that path in the tree, through the locations in order, if it matches. Most links stop here.
+  2. Otherwise the cache: where this computer last found a file with these criteria, if it still matches.
+  3. Otherwise a search of the project's locations: their folder listings give every file's name and size for free;
+     only the files of the right size are opened, for `created` (a few KB of the file's header) and, when needed,
+     the hash (2 MiB). Camera files' sizes are almost unique, so that's a handful of reads, on a local disk or the
+     NAS. The listing of a big archive on the NAS is the main cost, seconds; what was read is cached by path, size
+     and modification time.
+- **Repair** (*Check the project*, *Find moved files*), Anton's order: what isn't found drops criteria by itself, one
+  step at a time, until something matches. **Size is always kept.**
+  1. name + size + `created`;
+  2. size + `created` (renamed);
+  3. name + size (something rewrote `created`: an editor's remux, a tool that sets it to the copy's time);
+  4. size alone.
+
+  At each step the candidates are few (camera files of one exact size), and where the link has a hash, each is
+  compared by it: a find is never a guess, however many criteria were dropped. A link without a hash shows what each
+  step found, to choose from.
+- **The same clip in two places** (the same size, `created` and hash) is one clip: the first location in order is the
+  one played. There's nothing to fix: the inbox inside the archive is simply seen twice. Taking a location out of the
+  project is just taking it out: what reached clips through it finds them through the other. *Swallow a location*
+  isn't needed (PR #181 closed), and neither is `_Clips/Duplicates`.
+- **The clip's own file** (`<clip>.afp.json`, `<clip>.gyroflow`) is still beside the clip: it moves with the clip, and
+  carries `clip.hash` to be matched back if it's left behind. When the project has the clip in several places (the
+  same size, `created` and hash), **which copy's file is the main one** is decided the same way on every computer
+  ([The clip's own file](#the-clips-own-file) said "two: nothing saved"; this replaces it):
+  1. The copies are put in one order: by the location, in the project's order, copies-only locations (a working
+     folder) and this computer's own last; within a location, by the path in the tree, compared as plain text.
+  2. **The main file** is the one beside the first copy in that order that has one. None has one: the first save
+     writes it beside the first copy that isn't in a copies-only or local location.
+  3. Every other copy's file is **read, never written**: the player plays with the main one's values and saves there,
+     and says once that another one exists. *Check the project* lists them, to delete (or to make one the main, by
+     deleting the others).
+
+  With Working, Archive, Inbox in that order, a clip copied (not moved) from the inbox into the archive with its file:
+  the archive's file is the main one, the inbox's is listed. The `.gyroflow` beside it follows the same rule.
+
+What the cache knows is this computer's (`<data>/ActionFootage/cache/<project id>/`: each file's path, size,
+modification time, `created`, hash, link), never the library's, so two computers on one NAS never write over each
+other. Deleting it costs one slower look.
+
+### The project's own files are wherever you put them
+
+Moments, clip previews, photos, exports and renders are recognized by **their link inside** (the MP4 key, the photo's
+XMP), in **any folder of the project folder**: not only `_Moments/`, `_Clips/`, `_Stills/`, `_Exports/`, `_Renders/`,
+which stay as ordinary folders. Organize them as you like, rename them, make folders: they're still found, and
+still find their clips.
+
+- The Library reads them when it opens the project, from the cache for files unchanged since, and looks again as
+  folders change.
+- The player finds a clip's moments the same way: by the clip's identity (size, `created`, hash), not its path. It
+  keeps watching the folders where it found moments (as it watches `_Moments/` now), and the project folder's top.
+- A project next to its footage reads its clips' keys once too (a clip has no link, so it's footage); cached like the
+  rest.
+
+### New files land in `Generated/`
+
+Each run writes into a folder of its own, `Generated/<date> <time> <what>/` (`Generated/2026-11-10 14-32 Clip
+previews/`), laid out as chosen in that run's dialog: as the footage's folders, flat, or by trips. From there you move
+them where you want; they stay found. Moments saved one by one in the player go to `Generated/<date> Moments/`, one
+folder a day. `_Cache/` (the NAS's opening data, [§6](#6-the-nas-prepares-clips-to-open-fast)) stays what it is, a
+cache.
+
+### Photos carry what they need
+
+A photo already keeps its clip in itself, `afp:link` in its XMP, as a moment keeps it in its MP4 key; with the link
+found by the clip's identity, it never needs writing again when locations change. What's left is the tags: they go
+into the photo's XMP too (`dc:subject`, which Photos and Lightroom read as keywords), written **in place, without
+re-encoding**:
+
+- HEIC: on a Mac, ImageIO copies the image data as it is with new metadata (`CGImageDestinationCopyImageSource`): the
+  gain map and the Live Photo's identifier stay (**to try**).
+- JPEG: the XMP segment rewritten; in a Motion Photo the video after the image keeps its length, which its XMP says,
+  so that stays right (**to try**).
+- Windows and Linux: a writer of our own for the XMP box/segment, or exiv2 (**to try**).
+
+### The Library sees what changes
+
+Anton, 2026-11-10: the player writes marks, moments, photos and settings while the Library is open, and the Library
+didn't know. Now it watches the project's folder and its locations with the system's own notices (FSEvents on a Mac,
+ReadDirectoryChangesW on Windows, inotify on Linux: `notify`), counts what changes there (hidden and temporary files
+aside), and reads the project again once the changes have settled for 0.8 s, while no batch runs (a batch's end reads
+it again anyway). Whoever changed the files: the player, Finder, afp-meta. A share watched from a Mac reports what this
+Mac changes on it, not another computer's changes.
+
+### Seeing and fixing it without the app: `afp-meta`
+
+The library is its files, so what the player keeps in them can be read and written from the command line (Anton,
+2026-11-10). `afp-meta` is beside the player's other tools (`ActionFootagePlayer.app/Contents/Resources/gyroflow/`
+on a Mac):
+
+```
+afp-meta <file>...                    what of ours each file keeps, as JSON: a video's link and all its MP4 keys,
+                                      a photo's link and tags
+afp-meta <file> --link <json>         its link written (a video's ch.actionfootageplayer.link, a photo's afp:link)
+afp-meta <file> --tags <json list>    its tags written (a video's in its link, a photo's dc:subject)
+afp-meta <file> --key <name> <value>  an MP4's metadata key written, its other keys kept
+```
+
+Videos (moments, clip previews, exports, renders) and JPEG photos are written by it on every system; a HEIC by
+afp-photo on a Mac (ImageIO, the image data copied as it is). Checked on a HEIC: tags and link written, replaced and
+cleared, the decoded pixels the same.
+
+Built (2026-11-10): the Library writes a photo's tags with afp-meta and reads them from the photo; tags an older
+version kept in `photo_tags` are shown with the photo's own and go into it at its next change of tags.
+
+### What was built (2026-11-10, PR #182)
+
+- **Finding by identity**: the player (`moments.lua`'s original, `link.lua`'s created from `moov/mvhd`) and the Library
+  (`checks.rs`'s find_clip, `index.rs`) look for a link's clip at its hint, then where this computer last found it
+  (the player's cache), then among the footage of its size: the fingerprint deciding, its name first; without one,
+  Anton's steps. Found elsewhere, the hint is written into the link (the player as it opens a moment, clip preview or
+  export; the Library as it reads Moments). Find moved files goes down to size alone and offers several to choose.
+- **A clip's moments** by fingerprint, else size and creation time, else (older links) path and size.
+- **The main own file** of a clip in several places: the rule above, in `workspace.lua`, `workspace.rs` and the
+  Library's `tags.rs`; the shared cases test it (`tests/workspace_cases.txt`). The player says once that another one
+  exists and saves to the main one.
+- **"I never rename my footage"**: Project settings → On this Mac (this computer's file for the project).
+- **Own files anywhere**: the player's scans (moments, clip previews, exports, photos of marks) and the Library's views
+  read the whole project folder: in its own folders (`_…`, `Generated`) and outside its footage every video and photo,
+  among its footage only `.afplink.mp4`. The Library's Moments, Photos and Exports show the project folder's own
+  folders (paths from the project's folder: `_Moments/Reef`, `Generated/2026-11-10 14-32 Moments`), empty folders too;
+  Footage shows clips as their previews are arranged, wherever. Rename, delete and New folder work there.
+- **Generated/**, in each kind's own folder (Anton, 2026-11-10): clip previews into `_Clips/Generated`, moments into
+  `_Moments/Generated`, photos into `_Stills/Generated`, exports into `_Exports/Generated`, made by a run or by hand,
+  all in it with no folder per run. The project's setting "A folder per run in Generated" (Project.afproject
+  `generated_runs`, off by default; Library, project settings, General) brings them back: `<date> <time>` for a run,
+  `<date>` for what's saved by hand. A name taken there gets another: a moment, photo or export a number ("Name 2"),
+  a clip preview the clip's folder in parentheses, then a number; a clip's own preview is replaced. Projects of
+  before keep their `Generated/` at the top as it is (nothing moved: renders sit at their moment's path, and a move
+  of thousands of previews over the NAS while a task runs is a risk for nothing); the Library shows it under Other
+  folders, from where it's moved like any folder. Clip previews' layout and "stabilized on their own" are chosen in the
+  Library for each run (remembered on this computer); in the player, "on their own" is this computer's.
+- **Clip previews empty first** (Anton, 2026-11-10: "I want to start organizing, not wait for the pictures"): the
+  Library's "Clip previews" writes every clip's preview at once as an empty one (a dark frame, 1.9 KB, the link inside
+  with `"draft": true`), 200 at a time by `afp-cut --empty-previews` (16 files at once), each 200 noted to the catalog
+  as written (`afp-catalog note` reads 16 at a time: 200 in 0.9 s, 5.3 s before): 450 on the NAS in 6.6 s, the progress
+  moving. Footage shows them with the camera's own quick look (LRF/THM) until their picture is there, and reads the
+  catalog again every 4 s while a task runs. A second task ("their pictures") then makes each one real where it is now
+  (moved meanwhile: found again by its link), each noted as it's done, the folders the Library shows first
+  (`set_focus` → `focus.json`, read before each clip). Not at macOS's background priority: that throttles the NAS reads
+  too (a minute and more for one clip). The player quits only once its notes are through (a quit cut them off). It
+  steps aside for any other task (stopped after the one being made, queued again after it). Drafts of 2 s of video
+  were tried first: 0.3–0.75 s and 22 MB a clip, too slow to start organizing.
+- **Tasks never lock the Library** (Anton, 2026-11-10: "anything can happen anyway, in Finder too"): rename, delete,
+  mend, fix paths, take in and delete renders run while tasks are queued or running; a task copes as with Finder (a
+  preview moved meanwhile is found by its link, one deleted is skipped). Moving the project's own files is the one
+  that can't run beside its tasks: the running one stops after what it's making, they all wait, the files move, and
+  they go on from the new place.
+- **Nothing more in Project.afproject**: no `clips_made`, `stills_made`, `clips_failed`, `moment_names` or settings
+  written (empty lists of before aren't written back either). Photos of marks made already are found by their links;
+  name suggestions are the moments' names; failures are in the player's log and the batch's status. Renders stay in
+  `_Renders/`, at the moment's path in `_Moments` or, elsewhere, in the project's folder.
+- **Photo tags** in the photo's XMP (afp-meta), **afp-meta** itself, and the Library **watching** the project.
+
+Checked with unit tests (luajit: 12 suites; Rust: the Library's 16, vs-gyroflow's workspace cases and XMP) and the
+Library's page against a mock in jsdom. Not checked yet: the player and the Library live on a real project (the
+player's batch writing into `Generated/`, a moment opened whose clip moved).
+
+## 9. The catalog: the files, without looking at all of them
+
+Anton, 2026-11-10, after §8 was built: the player looked through the whole project folder each time a clip opened,
+to find its moments — on a NAS seconds at 10 000 files, minutes at 100 000 — and the Library didn't hear of what
+another computer changed. Two kinds of things link to each other (originals; moments, clip previews, exports, photos),
+and finding them by walking the folders doesn't scale. What he settled, step by step:
+
+- The files stay the truth (§8). What's kept besides is a **catalog**: what was last seen of them, which can be lost
+  and built again from them, and is never needed for a file to be right.
+- It's **shared through the project's own folder** (`.afp/catalog/`), so a computer joining reads it instead of
+  looking at every file — not kept on each computer alone.
+- What our programs do reaches every computer at once; what's done in **Finder** reaches them when an open Library
+  next looks at the folders, and once found it's written for all.
+- **The player never folds or looks through folders**: it plays. It reads what it needs of the catalog beside the
+  playing video, without waiting for it, and notes what it wrote.
+- Nothing open-source fitted (research 2026-11-10): SQLite and LMDB must not be used on a network share (their own
+  documentation), delta-rs and SlateDB commit with hard links or a no-overwrite rename the Mac's SMB client and Samba
+  don't do safely, restic and Kopia clean up by clocks and locks. So a small format of our own, on what restic,
+  Kopia and automerge-repo do: files named by their content, written once, never written over; each computer's own
+  journal; snapshots that fold them; no locks, no clocks.
+
+### What's in it
+
+For every file and folder in the project's folder and its locations (hidden ones aside): its size and time, and for
+the ones whose insides count what's inside — a moment's, clip preview's, export's or photo's link, a clip's sidecar's
+marks and tags. For each folder, its time and a digest of what was in it when it was last listed. Each record has a
+version (a Lamport clock: above every version its writer had read; the computer's name breaks ties): a record replaces
+another only with a higher version, so every computer that has read the same lines knows the same, whatever order it
+read them in.
+
+### The Library's views (Anton, 2026-11-10)
+
+Each view's top is its own folder: Footage `_Clips` (clips as their previews are arranged there), Moments `_Moments`,
+Photos `_Stills`, Exports `_Exports`; what's found anywhere else in the project's folder is under **Other folders**, at
+its path there (a new folder at a view's top is made in its own folder, in Other folders at the project's top). Sources
+is now **Originals**: the clips at their paths in the project's tree; the sources themselves are in Sources settings.
+
+### Three layers, each only faster (Anton, 2026-11-10)
+
+Originals move only when the library is mended after (the Library's Restore: it finds them by what they are and
+rewrites the links); new clips come in by Take in, or by a command over a folder (clip previews), which notes what it
+meets. So links name their original by its path, and only the project's own files (moments, clip previews, exports,
+photos) are watched for what Finder does to them. Then:
+
+| | Who | Finder's changes reach the catalog |
+|---|---|---|
+| 1 | The player alone | As a clip opens (not more often than every 20 s) and every minute while it plays: `afp-catalog look --own` in the background, at low priority, looks at the time of each of the project's own folders and lists the ones that changed (~0.01–0.1 s on a small project); it folds the journals when they've grown |
+| 2 | + the Library | This Mac's changes at once (FSEvents), the rest at its regular look; the footage only when mended, on Take in, after a batch |
+| 3 | + the NAS's watcher | At once, for every computer: `afp-catalog watch` in Docker on the NAS, told by inotify what changes on its own disks, every folder's time looked at as it starts and when the system says it lost count |
+
+The player's moments of a clip come from the catalog by the clip's path at once; a moment not where it was is kept
+on the seek bar until the look says moved or removed. A moment put back from the trash isn't in any journal: the look
+finds it by its folder's time.
+
+### On the share
+
+```
+.afp/catalog/journal/<computer>/<first line's number>.log   each computer's own, appended only by it
+.afp/catalog/snap/<generation>-<hash>.json                  a snapshot's list: which line of each journal it has
+                                                            read up to, its parts
+.afp/catalog/parts/<hash>.gz                                its records, about 2000 a part, gzipped
+```
+
+- A journal line: 8 hex digits of its text's SHA-256, its text (JSON: number, version, records), a newline. A line
+  cut off by a lost connection or a stopped program has no newline or the wrong sum: it's left out. After a write that
+  failed, the next line starts a new segment (named by its number), so nothing is appended after a broken line; a line
+  that had arrived after all is read once (its number was read).
+- Snapshots and parts are named by their content's hash: written into a temporary file and renamed to a name nobody
+  else uses (two computers writing it wrote the same bytes). Read, they're checked against their name; a damaged one is
+  passed over for the snapshot before it.
+- Records go into parts by what a reader looks for: a moment, clip preview, export or photo by its original's
+  fingerprint (else its path), anything else by its folder. The player opening a clip reads one or two parts.
+- **This computer's name**: made once, kept with the machine's own id (macOS's platform UUID), so a home folder copied
+  to another Mac becomes a new computer there, not a second writer of one journal.
+
+### Who does what
+
+- **Reading** (both): the newest snapshot that reads whole (its parts from this computer's cache when it has them:
+  they never change), then every journal's lines after what the snapshot covers. A reader whose lines were cleaned up
+  meanwhile is told so and reads again from the newer snapshot.
+- **Noting** (the player, the Library, afp-meta, afp-catalog): what was written — a moment saved, a link or tags
+  rewritten, a sidecar saved — appended to this computer's journal, after reading what's new (so its version is above
+  what it could read). A file written in place (a link in a moment's MP4) also has its folder **touched** (a hidden
+  file made and removed), so that the folder's time changes and the next look lists it, whatever else happens.
+- **Looking** (the Library only, while open): every few minutes it looks at the time of each folder of the project and
+  its locations — one question a folder — and lists again only the ones whose time, or whose files on record, aren't
+  what was written when they were last listed; what changed is written to its journal. Its own computer's changes it
+  hears of from the system (FSEvents) and looks at those folders at once. A folder listed because it changed is listed
+  once more by the same computer a minute later (kept on its disk, so a restart doesn't forget): on the NAS the Mac
+  gave a folder's new time together with a listing from its cache, from before the rename that changed the time — a
+  record right about the time and wrong about the files, which no later look would have questioned. Once a day a deep look lists every folder
+  (in the background, slowly): it finds a file changed in place by something not ours.
+- **Folding** (the Library only): when the journals have grown past 2000 lines or 2 MB, a new snapshot; only parts
+  that changed are written. Two Libraries folding at once both make good snapshots.
+- **Cleaning** (the Library only): snapshots older than the newest three, parts none of those has, temporary files
+  left, this computer's segments those have read — each only once this computer has seen it so for 10 minutes (its
+  own clock against itself). Found on the real NAS: with "seen so at two clean-ups", a Mac whose listing of the
+  snapshots was 30 s behind removed the parts of another computer's newest snapshots, and none read whole.
+
+### The NAS's watcher
+
+`catalog/Dockerfile` builds `afp-catalog` alone; run as the project's watcher:
+
+```
+docker build -t afp-catalog catalog/
+docker run -d --name afp-catalog-trip --restart unless-stopped --hostname nas --user 1000:10 \
+  -v /volume1/ssd/Projects/Trip:/project -v /volume1/video:/shares/video -v afp-catalog-data:/data \
+  afp-catalog watch /project --share video=/shares/video
+```
+
+`--share` says where a share the project's locations name (`//DISKSTATIONDXP/video/…`) is inside the container. It's
+a computer of its own in the journals (its name kept in `/data`, a folder the `--user` can write: a Docker volume
+is root's). Built and run on the NAS (2026-11-10, Rust 1.91 on Debian bookworm, 88 MB): a test project whose
+footage is a location `//DISKSTATIONDXP/ssd/…`; a moment copied in, moved, removed and put back over SMB from a Mac
+reached that Mac's player in ~1.3 s each (the watcher waits 1 s for a change to settle), the player looking at
+nothing. Once, the first reading of the watcher's journal after a change came from the Mac's cache for some seconds
+(the NAS writes it itself, so Samba doesn't tell the Mac it changed): journals' tails are read past the Mac's cache
+(F_NOCACHE), and the player asks again every 10 s anyway.
+
+On a Mac a share's notices (FSEvents) are only of what this Mac changes there: another computer's or the NAS's own
+changes aren't told to it — which is what the NAS's watcher is for.
+
+### What a look won't do
+
+- **A connection lost is not a folder emptied**: a folder that can't be listed is left as it was. A root (the project,
+  a location) is looked at only when its marker is there (`Project.afproject`, the location's `.afplocation`): a share
+  not mounted, an empty mount point where it was, removes nothing. A folder that had things in it listed empty is
+  listed again and its root's marker looked for again first.
+- **Moved folders keep their times**: what's new is found by the folder it moved into (that one's time changed), then
+  listed whole, whatever its own time.
+- **A file noted in a folder never listed** (the player's moment in a new folder) makes that folder one to list.
+
+### What it costs (simulated, 2026-11-10)
+
+Counted on a simulated NAS (the round trips and bytes each thing takes), priced at a local SSD (0.05 ms, 2 GB/s), a
+wired NAS (0.4 ms, 110 MB/s), Wi-Fi (4 ms, 30 MB/s) and a VPN (40 ms, 5 MB/s), plus this computer's own time;
+`catalog/tests/cost.rs`. 100 000 clips and 100 000 moments in folders of 100:
+
+| | local | NAS wired | Wi-Fi | VPN |
+|---|---|---|---|---|
+| Built (every folder listed, every moment read — what each look cost before) | 17 s | 2 min | 21 min | 3.4 h |
+| A new computer reads it | 0.4 s | 0.6 s | 2 s | 17 s |
+| The Library opened again | 0.4 s | 0.4 s | 0.5 s | 1 s |
+| The player opens a clip | 12 ms | 23 ms | 95 ms | 0.8 s |
+| The player notes a moment; another computer sees it | 1 ms | 15 ms | 0.15 s | 1.5 s |
+| A look, nothing changed (each few minutes, in the background) | 0.3 s | 1 s | 8 s | 82 s |
+| The deep look (once a day, in the background) | 0.8 s | 4 s | 34 s | 6 min |
+| A new snapshot | 0.6 s | 0.6 s | 0.8 s | 2.6 s |
+
+At 10 000 the looks are ten times less; the rest about the same.
+
+### What it costs on the NAS (measured, 2026-11-10)
+
+The real NAS (UGREEN DXP2800, Samba, btrfs; the NVMe volume and the HDD mirror with its NVMe cache) over wired
+gigabit from a Mac (0.37 ms ping), with `catalog/examples/rig.rs` and test projects made on the NAS by
+`tools/catalog_rig.py`. macOS's SMB client is slower than the network: **a file's size and time ~5 ms, opening and
+reading a small file 11–24 ms, listing a folder of 100 ~80 ms** (1 ms once cached), a folder's time ~5 ms. Hence:
+folders are listed with their files' sizes and times in one call (`getattrlistbulk`, as Finder does), never a
+question per file; new files are read 8 at a time.
+
+| 10 000 clips, 10 000 moments | NVMe volume | HDD volume |
+|---|---|---|
+| Built (every moment opened once) | 4 min | 2 min |
+| Checked against every file | 0 differences | 0 differences |
+| A new computer reads it | 0.5 s | 0.5 s |
+| The Library opened again (parts on its disk) | 0.05 s | 0.04 s |
+| The player opens a clip | 15–18 ms | 15–16 ms |
+| Anything new? | 1 ms | 1 ms |
+| A look, nothing changed | 0.7–1.2 s | 0.6–1.5 s |
+
+100 000 clips and 100 000 moments (NVMe volume): built in ~23 min (once); a new computer reads it in 1.3 s (3 MB),
+again 0.45 s; the player opens a clip in 12–15 ms (the catalog), 50–200 ms through `afp-catalog` as the player calls it;
+anything new 3 ms; a look with nothing changed 10–60 s in the background (2 000 folders, 5–30 ms each as the NAS is
+busy).
+
+A stress run on the NAS: two Macs' writers killed with -9 at random ~100 times in 12 minutes while noting, looking,
+folding and cleaning, Finder-like changes and a third computer's journal on the NAS's side: the catalog read whole
+throughout (81 snapshots); it is what found the clean-up and stale-listing faults above, and that after such a beating
+the Mac's SMB client can't open a few files for minutes (Invalid argument, 17 s opens) — which a look counts as errors
+and leaves as they were.
+
+What another computer changes reaches this Mac: a line appended to its journal at once (a file opened is read as it
+is); a new file or folder (a new segment, a new computer's journal, a moment saved) **after ~30 s**, as macOS caches
+a share's listings that long — the journals' next segment is therefore also looked for by its name.
+
+### Where it can be wrong, and for how long
+
+The files never are; the catalog can say something old about them for a while. What was found, worst first:
+
+- **A file changed in place by something not ours** (an editor writing a sidecar over itself, a tool rewriting an
+  MP4's metadata without a temporary file): its folder's time doesn't change, so the looks don't list it. The player
+  sees it at once (it looks at its clip's moments' files when it opens the clip), the Library **only at the daily deep
+  look**. Ours always touch the folder.
+- **Two computers saying different things at the same moment** (one notes a moment while the other's look lists its
+  folder from a listing a few seconds old): the version decides, which may be the older truth; the folder then doesn't
+  match what was written of it, and the next look (≤ 5 min) lists it again and settles it. Found by the random test;
+  why every write first reads what's new.
+- **A computer's change reaches another after ~30 s** when it's a new file (macOS lists a share's folders from a cache
+  that long); the journal line saying so is read at once when its segment exists.
+- **A note lost** (the program stopped between writing the file and the journal line, the connection gone for both the
+  line and the folder's touch): the next look finds the file by its folder's time; only a change in place with both
+  lost waits for the deep look.
+- **A journal file this Mac can't open** (seen once on the NAS after 100 kills: macOS's SMB client answering
+  "Invalid argument" for a file another computer had written, healthy on the NAS, for minutes): that computer's later
+  lines wait on this Mac until the file reads or a snapshot folded elsewhere covers them; everything else is read.
+- **A card or USB disk formatted FAT/exFAT** as a location: folder times there are coarse (2 s, 10 ms), so a change
+  in the same tick as a listing can wait for the deep look. Not tested.
+- **Names in two Unicode forms** (a Mac and a Windows PC writing the same name differently): not normalized yet; could
+  show a file twice or make looks list a folder each time. Not tested.
+- **The NAS's recycle bin** keeps what the clean-ups remove (old segments, snapshots, parts): small, but it grows; the
+  `#recycle` folder can be emptied or `.afp` left out of it.
+- **The first build** opens every moment, clip preview, export, photo and sidecar once: ~2–4 min per 10 000 on this
+  NAS, the views read from the disks meanwhile. A Linux afp-catalog run on the NAS itself (Docker) would build it in
+  seconds — not done.
+- **A project no Library of this version has opened**: no catalog; the player looks through the folder as before.
+
+What doesn't happen, by construction and tested: a lost connection or a share not mounted removing anything from the
+catalog; a damaged or half-written file being used (each is checked against its name or sum); two computers' writes
+overwriting each other (each writes only its own files, or files named by their content); a reader left on cleaned-up
+lines without knowing (it reads again from the newer snapshot); a look listing folders that didn't change.
+
+### How it's tested
+
+`catalog/tests/`: the scenarios (a new computer reads the snapshot, not the files; an unchanged look lists nothing and
+writes nothing; the player's note seen at once elsewhere; Finder moving, copying, renaming, removing; a file changed in
+place; a share not mounted; a connection lost mid-look; the player's parts; segments cleaned while a reader is behind;
+two computers folding at once; a damaged snapshot; a cut-off note; a stale listing under a fresh folder time) and a
+random run: three computers (two Libraries, one player) and Finder doing 400 random things to a project, the
+connection losing 5–20 % of operations (writes cut off midway, written but the answer lost, temporary files left),
+going down for a while, listings and sizes a few operations stale; then the connection good again, one look — and
+every computer's catalog must say exactly what the files say, a second look must list nothing, a newcomer must read
+the same, the player must find each clip's moments. 300 seeds pass with and without faults; it found three faults
+in the first version, now fixed (two records of one key in one line; a computer's note losing to an older record it
+hadn't read; a file noted in a folder never listed, left behind when the folder went).
+
 ## Steps
 
 Each a PR, each usable on its own:
@@ -528,6 +986,16 @@ Each a PR, each usable on its own:
    1–6 (a folder of the inbox to start with).
 
 The order (Q9, the order of building): locations first, they're under everything else. 4 needs nothing from 1–3. 5 needs 4.
+
+[§8, the project is its files](#8-the-project-is-its-files), before anything else that writes paths, each a PR:
+
+1. **Finding by identity**: the hint, the cache, the search by size, `created`, name and hash, *"I never rename my
+   footage"*, the repair's steps; in the three twins with shared cases. Taking a location out then needs nothing more.
+2. **Own files anywhere**: the Library's index and the player's moments of a clip found by the link inside, in any
+   folder of the project.
+3. **`Generated/`**: batches write there with the layout chosen per run; `clips_made`, `stills_made` and the settings
+   dropped; failures to the log in the app's folder.
+4. **Photo tags in XMP**, `photo_tags` dropped; the old project files cleaned (`Project.afproject.before-v3` kept).
 
 ## Decided
 
@@ -597,6 +1065,16 @@ Anton, 2026-11-09:
   size and fingerprint) gets its preview in `_Clips/Duplicates/<its location>/<its folders>`, the first location's
   copy keeping its place; and a third layout, **by trips** (clips at most 2 days apart: `2026-10 October 20-26`), new
   previews going into the folder their trip's are in already.
+
+- **Fourth round** (2026-11-10): [the project is its files](#8-the-project-is-its-files). `Project.afproject` keeps
+  only the locations (and the id and the NAS's names); the rest is in the files or a cache on this computer. A link's
+  path is where its clip was last seen, written again when it's found elsewhere; the clip is found by size, `created` and hash, plus the name for someone who
+  never renames footage (a tick). Repair drops criteria one at a time, name, then `created`, then both, size always
+  kept, the hash comparing what's found. No list of what was made: you make what you ask for. New files land in
+  `Generated/<date> <time> <what>/`, laid out as chosen in that run's dialog, and are found wherever you move them.
+  Photos keep their tags in their own XMP. A clip in several places has one main own file, chosen the same way
+  everywhere: the first copy that has one, by the locations' order (copies-only and local ones last), then the path in
+  the tree; the others are read, never written.
 
 ## Open questions
 

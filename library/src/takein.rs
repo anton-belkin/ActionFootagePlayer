@@ -11,7 +11,7 @@ use crate::locations::{ self, Location };
 use serde_json::{ json, Value };
 use std::path::{ Path, PathBuf };
 
-const OWN: [&str; 5] = ["_Moments", "_Clips", "_Stills", "_Exports", "_Renders"];
+const OWN: [&str; 6] = ["_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "Generated"];
 
 /// Where a location of the other project lands in this one: its place in this tree ("" the top), and whether it's
 /// already inside this project's locations

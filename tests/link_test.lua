@@ -69,6 +69,13 @@ expect("cut short", link.read(write("h.mp4", whole:sub(1, 150))), nil)
 expect("text", link.read(write("i.txt", "hello, this is not an MP4 at all")), nil)
 expect("missing", link.read(dir .. "/nothing.mp4"), nil)
 
+-- The file's own creation time, from moov/mvhd (version 0: 32 bits; version 1: 64), as unix seconds
+-- 2026-10-22T13:28:42Z = 1792675722; + 2082844800 from 1904
+local t1904 = 1792675722 + 2082844800
+expect("created v0", link.created(write("j.mp4", ftyp .. box("moov", box("mvhd", "\0\0\0\0" .. be32(t1904) .. ("\0"):rep(92))) .. mdat)), 1792675722)
+expect("created v1", link.created(write("k.mp4", ftyp .. big .. box("moov", box("mvhd", "\1\0\0\0" .. be32(0) .. be32(t1904) .. ("\0"):rep(100))))), 1792675722)
+expect("created none", link.created(write("l.mp4", ftyp .. box("moov", mvhd) .. mdat)), nil)
+
 -- What ffmpeg makes and does
 local function run(cmd) return os.execute(cmd .. " >/dev/null 2>&1") end
 local function ok(r) return r == true or r == 0 end
@@ -78,6 +85,9 @@ if ok(run("ffmpeg -version")) then
     assert(ok(run(("ffmpeg -v error -y -f lavfi -i color=gray:s=320x180:r=10 -t 2 -c:v mpeg4 -movflags +faststart+use_metadata_tags -metadata %s %s")
         :format(q(link.KEY .. "=" .. LINK), q(made)))), "ffmpeg didn't make a file")
     expect("ffmpeg's", link.read(made), LINK)
+    local stamped = dir .. "/stamped.mp4"
+    run(("ffmpeg -v error -y -i %s -c copy -metadata creation_time=2026-10-22T13:28:42Z %s"):format(q(made), q(stamped)))
+    expect("ffmpeg's creation_time", link.created(stamped), 1792675722)
     run(("cp %s %s"):format(q(made), q(dir .. "/copy.mp4")))
     expect("copied", link.read(dir .. "/copy.mp4"), LINK)
     os.rename(dir .. "/copy.mp4", dir .. "/Черепаха 2.mp4")

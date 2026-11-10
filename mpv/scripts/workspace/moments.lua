@@ -5,7 +5,8 @@
 --
 --   local moments = require('moments').new(ws, fs)   -- ws: workspace.lua's; fs: is_dir, is_file, info, readdir,
 --                                                    -- read_link (link.lua's read), parse_json
---   moments.scan(project, cache)       -> { list = { {file, name, link, raw}... }, dirs = { [dir] = mtime } }
+--   moments.scan(project, cache[, folder, kind]) -> { list = { {file, name, link, raw}... }, dirs = { [dir] = mtime } }:
+--                                         the link files of a kind anywhere in the project's folder
 --   moments.of_clip(list, clip)        -> the moments of a clip ({relative, size, created})
 --   moments.original(link, project)    -> the original's path, nil when it isn't found
 --   moments.safe_name(name), moments.next_name(last, taken), moments.unique_file(dir, name)
@@ -21,13 +22,29 @@ M.FOLDER = "_Moments"
 M.EXT = ".afplink.mp4"
 -- Exports, videos of their own: _Exports/<name>[ (SDR)].mov
 M.EXPORTS = "_Exports"
--- Clip previews: _Clips/<the clip's path>.afplink.mp4
+-- Clip previews: _Clips/<the clip's path>.afplink.mp4 (made before 0.11)
 M.CLIPS = "_Clips"
+-- Where what's made goes (docs/library-management.md §8): Generated/ inside its kind's own folder (Anton, 2026-11-10:
+-- _Clips/Generated, _Moments/Generated, _Stills/Generated, _Exports/Generated), from where it's moved anywhere in the
+-- project folder; it's found there by the link inside. The project's "generated_runs" (Project.afproject) gives each
+-- run a folder of its own in it. Projects of before have Generated/ at the top: left there, found the same way
+M.GENERATED = "Generated"
+M.KIND_FOLDER = { ["Clip previews"] = "_Clips", Moments = "_Moments", Photos = "_Stills", Exports = "_Exports" }
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
 -- (and the photos' folder, whose Live Photos' .mov files aren't footage either)
-local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills = true, moments = true, clips = true, exports = true,
-                      stabilized = true }
+local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills = true, _renders = true, _cache = true, moments = true,
+                      clips = true, exports = true, stabilized = true, generated = true }
+M.OWN_FOLDERS = OWN_FOLDERS
+
+-- The folder for what a run makes, in the project: <kind's folder>/Generated (what: "Clip previews", "Moments",
+-- "Photos", "Exports"); with `runs` (the project's generated_runs), a folder of the run's own in it: <date> <time>
+-- (`day`: <date>, one a day, for what's saved by hand), by this computer's clock. `t` os.time()
+function M.generated_rel(what, t, day, runs)
+    local base = (M.KIND_FOLDER[what] or ("_" .. what)) .. "/" .. M.GENERATED
+    if not runs then return base end
+    return base .. "/" .. os.date(day and "%Y-%m-%d" or "%Y-%m-%d %H-%M", t)
+end
 
 -- A clip preview's path in _Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
 -- a camera's own folders (DCIM and the one in it). `flat`: all in _Clips/ itself ("A.afplink.mp4")
@@ -303,21 +320,35 @@ function M.new(ws, fs)
         return files, subdirs
     end
 
-    -- Every .mp4 under <project>/_Moments/ (or `folder`), subfolders included, with its link (of `kind`: moment, or
-    -- clip for _Clips/). cache[file] = { size, mtime, raw } keeps what was read of a file, read again only when its
-    -- size or time changes. dirs: each folder's modification time, which a file added, removed or renamed in it
-    -- changes. A link file renamed or moved is found all the same: by what's inside it
+    -- Every link file of `kind` (moment, or clip for clip previews, export) in the project's folder, wherever it was
+    -- put (docs/library-management.md §8): found by the link inside. In the project's own folders (_Moments, _Clips,
+    -- _Exports, Generated…) and outside its footage every .mp4 and .mov is read; among the footage (a project next to
+    -- it), only <name>.afplink.mp4, so as not to read every clip. cache[file] = { size, mtime, raw } keeps what was
+    -- read of a file, read again only when its size or time changes. dirs: the folders to watch (modification time,
+    -- which a file added, removed or renamed in it changes): the project's top, its own folders and every folder a
+    -- link file of this kind is in. `folder` (a path in the project) keeps it to that folder
     function self.scan(project, cache, folder, kind)
         kind = kind or "moment"
-        local root = ws.join(project, folder or M.FOLDER)
         local list, dirs = {}, {}
-        local function walk(dir, depth)
+        -- The footage's folders inside the project's (a project next to its footage)
+        local footage_dirs = {}
+        local locs = fs.locations_of and fs.locations_of(project) or (ws.locations and ws.locations(project)) or {}
+        for _, l in ipairs(locs) do
+            if l.dir and (same(l.dir, project) or ws.relative(l.dir, project)) then footage_dirs[#footage_dirs + 1] = l.dir end
+        end
+        local function among_footage(dir)
+            for _, d in ipairs(footage_dirs) do if same(dir, d) or ws.relative(dir, d) then return true end end
+            return false
+        end
+        local function walk(dir, depth, own)
             local info = fs.info(dir)
             if not info or not info.is_dir then return end
-            dirs[dir] = info.mtime
             local files, subdirs = entries(dir)
+            local any = false
+            local loose = own or not among_footage(dir)
             for _, e in ipairs(files) do
-                if e.name:lower():match("%.mp4$") then
+                local lower = e.name:lower()
+                if lower:sub(-#M.EXT) == M.EXT or (loose and (lower:match("%.mp4$") or lower:match("%.mov$"))) then
                     local file, fi = ws.join(dir, e.name), e.info
                     local c = cache and cache[file]
                     local raw
@@ -330,27 +361,88 @@ function M.new(ws, fs)
                     local link = raw and fs.parse_json(raw)
                     if type(link) == "table" and link.v == 1 and link.kind == kind then
                         list[#list + 1] = { file = file, name = M.display_name(file), link = link, raw = raw }
+                        any = true
+                    end
+                end
+            end
+            if any or depth == 0 or own then dirs[dir] = info.mtime end
+            if depth < 8 then
+                for _, name in ipairs(subdirs) do
+                    -- The NAS's recycle bin isn't the project's
+                    if name:sub(1, 1) ~= "#" then walk(ws.join(dir, name), depth + 1, own or (depth == 0 and OWN_FOLDERS[name:lower()] == true)) end
+                end
+            end
+        end
+        if folder then
+            walk(ws.join(project, windows and folder:gsub("/", "\\") or folder), 1, true)
+        else
+            walk(project, 0, false)
+        end
+        return { list = list, dirs = dirs }
+    end
+
+    -- The project's photos (.heic, .jpg) with a link to their clip, wherever they are in its folder: { file, link }.
+    -- Read through fs.read_photo_link; cache as scan's. Only the project's own folders and what isn't footage are looked
+    -- at (a project next to its footage has no photos among it)
+    function self.photos(project, cache)
+        local out = {}
+        local footage_dirs = {}
+        for _, l in ipairs(fs.locations_of and fs.locations_of(project) or {}) do
+            if l.dir and (same(l.dir, project) or ws.relative(l.dir, project)) then footage_dirs[#footage_dirs + 1] = l.dir end
+        end
+        local function among_footage(dir)
+            for _, d in ipairs(footage_dirs) do if same(dir, d) or ws.relative(dir, d) then return true end end
+            return false
+        end
+        local function walk(dir, depth, own)
+            local files, subdirs = entries(dir)
+            if own or not among_footage(dir) then
+                for _, e in ipairs(files) do
+                    local lower = e.name:lower()
+                    if lower:match("%.heic$") or lower:match("%.jpe?g$") then
+                        local file, fi = ws.join(dir, e.name), e.info
+                        local key = "photo\t" .. file
+                        local c = cache and cache[key]
+                        local raw
+                        if c and c.size == fi.size and c.mtime == fi.mtime then raw = c.raw
+                        else
+                            raw = fs.read_photo_link and fs.read_photo_link(file) or false
+                            if cache then cache[key] = { size = fi.size, mtime = fi.mtime, raw = raw } end
+                        end
+                        local l = raw and fs.parse_json(raw)
+                        if type(l) == "table" and type(l.clip) == "string" then out[#out + 1] = { file = file, link = l } end
                     end
                 end
             end
             if depth < 8 then
-                for _, name in ipairs(subdirs) do walk(ws.join(dir, name), depth + 1) end
+                for _, name in ipairs(subdirs) do
+                    if name:sub(1, 1) ~= "#" then walk(ws.join(dir, name), depth + 1, own or (depth == 0 and OWN_FOLDERS[name:lower()] == true)) end
+                end
             end
         end
-        walk(root, 0)
-        return { list = list, dirs = dirs }
+        walk(project, 0, false)
+        return out
     end
 
-    -- The moments of a clip: its path in the project, and its size and creation time where the link has them, in
-    -- the order of their in
+    -- Whether a link names this clip ({ relative, size, created, hash }), by what the clip is (docs/library-
+    -- management.md §8): the same fingerprint where both have one; else the same size and creation time; a link
+    -- with neither (older ones), its path and size
+    function self.names_clip(l, clip)
+        if type(l.hash) == "string" and type(clip.hash) == "string" then return l.hash == clip.hash end
+        if l.size ~= nil and clip.size ~= nil and l.size ~= clip.size then return false end
+        local function secs(x) if type(x) == "number" then return x end return (M.parse_time(x)) end
+        local a, b = secs(l.created), secs(clip.created)
+        if a and b and l.size ~= nil and clip.size ~= nil then return math.floor(a) == math.floor(b) end
+        if a and b and math.floor(a) ~= math.floor(b) then return false end
+        return type(l.clip) == "string" and clip.relative ~= nil and same(l.clip, clip.relative)
+    end
+
+    -- The moments of a clip (names_clip), in the order of their in
     function self.of_clip(list, clip)
         local out = {}
         for _, m in ipairs(list) do
             local l = m.link
-            if type(l.clip) == "string" and clip.relative and same(l.clip, clip.relative)
-               and (l.size == nil or clip.size == nil or l.size == clip.size)
-               and (l.created == nil or clip.created == nil or M.parse_time(l.created) == M.parse_time(clip.created))
-               and type(l["in"]) == "number" and type(l.out) == "number" then
+            if self.names_clip(l, clip) and type(l["in"]) == "number" and type(l.out) == "number" then
                 out[#out + 1] = m
             end
         end
@@ -361,31 +453,111 @@ function M.new(ws, fs)
         return out
     end
 
-    -- The project a moment's file is in: the folder above the _Moments/ it's in (subfolders too), with the
-    -- project's file (or the state folder of before) in it; an export's, `folder` Exports. nil: none (a moment copied out, to the Desktop say)
-    function self.project_of(file, folder)
-        folder = (folder or M.FOLDER):lower()
+    -- The project a moment's, clip preview's or export's file is in: the nearest folder above it with the project's
+    -- file (or the state folder of before), wherever in it the file was put. nil: none (copied out, to the Desktop)
+    function self.project_of(file)
         local dir = ws.parent(file)
         while dir do
-            local up = ws.parent(dir)
-            if not up then return nil end
-            if ws.name(dir):lower() == folder and (fs.is_file(ws.join(up, workspace_lib.PROJECT_FILE))
-                                                   or fs.is_dir(ws.join(up, workspace_lib.LEGACY_DIR))) then return up end
-            dir = up
+            if fs.is_file(ws.join(dir, workspace_lib.PROJECT_FILE)) or fs.is_dir(ws.join(dir, workspace_lib.LEGACY_DIR)) then return dir end
+            if ws.is_volume_root and ws.is_volume_root(dir) then return nil end
+            dir = ws.parent(dir)
         end
         return nil
     end
 
-    -- Where the original is: the clip's path under the project, then under each of the roots it was made with.
-    -- Its size must match where the link has it
-    function self.original(link, project)
+    -- The project's footage (self.footage), kept a minute: a search for each of a run's moments lists it once
+    local footage_memo = {}
+    local function footage_of(project)
+        local m = footage_memo[project]
+        local now = os.time()
+        if not m or now - m.t > 60 then m = { t = now, list = self.footage(project) }; footage_memo[project] = m end
+        return m.list
+    end
+    function self.forget_footage() footage_memo = {} end
+
+    -- What identifies a link's clip, for this computer's memory of where it was found: its fingerprint, else its
+    -- size and creation time
+    local function identity(link)
+        if type(link.hash) == "string" and link.hash ~= "" then return link.hash end
+        return tostring(link.size) .. "|" .. tostring(M.parse_time(link.created))
+    end
+
+    local function last_part(p) return (p:match("([^/\\]+)$") or p) end
+
+    -- The clip a link names (docs/library-management.md §8): found by what the clip is, its path in the tree only a
+    -- hint of where it was last seen.
+    --   1. the hint: the file at link.clip in the project's tree, through its locations in order, of the link's size;
+    --   2. where this computer last found it (fs.found_get, by the clip's identity), if it's still there;
+    --   3. the project's footage searched, the files of the link's size only (sources never change): with the
+    --      link's fingerprint, the one whose fingerprint (fs.fingerprint) is it, those of its name first; without,
+    --      the one match by its creation time (fs.created; with "I never rename my footage", fs.never_rename, by
+    --      name and creation time first), else by its name: never by size alone, which would be a guess;
+    --   4. a moment copied out of its project: its path under each of the roots it was made with.
+    -- -> the file, its path in the tree now, its location, and how it was found ("hint", "cache", "search", "roots")
+    -- opts.hint_only: only where the link says (originals move only when the library is mended after, which rewrites
+    -- the links: docs/library-management.md §9); the looking further is the Library's repair
+    function self.original(link, project, opts)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
-        -- In the project's locations first: the first that has it (a working copy before the archive's)
-        if project and ws.files_at then
-            local locs = fs.locations_of and fs.locations_of(project) or ws.locations(project)
+        local hint_only = opts and opts.hint_only
+        local locs = project and ws.files_at and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or nil
+        local function sized(file)
+            local info = fs.info(file)
+            return info and info.is_file and (link.size == nil or info.size == link.size)
+        end
+        if locs then
             for _, c in ipairs(ws.files_at(link.clip, locs)) do
-                local info = fs.info(c.file)
-                if info and (link.size == nil or info.size == link.size) then return c.file end
+                if sized(c.file) then return c.file, link.clip, c.location, "hint" end
+            end
+            if hint_only then return nil end
+            local key = identity(link)
+            local seen = fs.found_get and fs.found_get(project, key)
+            if seen and seen ~= link.clip then
+                for _, c in ipairs(ws.files_at(seen, locs)) do
+                    if sized(c.file) then return c.file, seen, c.location, "cache" end
+                end
+            end
+            if type(link.size) == "number" then
+                local name = last_part(link.clip)
+                local cands = {}
+                for _, f in ipairs(footage_of(project)) do
+                    if f.size == link.size then cands[#cands + 1] = f end
+                end
+                local function found(f)
+                    if fs.found_set then fs.found_set(project, key, f.relative) end
+                    return f.file, f.relative, f.location, "search"
+                end
+                if #cands > 0 then
+                    if type(link.hash) == "string" and link.hash ~= "" and fs.fingerprint then
+                        table.sort(cands, function(a, b)
+                            local na, nb = same(last_part(a.relative), name), same(last_part(b.relative), name)
+                            if na ~= nb then return na end
+                            return a.relative < b.relative
+                        end)
+                        for _, f in ipairs(cands) do
+                            if fs.fingerprint(f.file) == link.hash then return found(f) end
+                        end
+                    else
+                        local want = M.parse_time(link.created)
+                        local function created(f)
+                            if f.created == nil then f.created = fs.created and fs.created(f.file) or false end
+                            return f.created
+                        end
+                        -- Anton's steps (checks.rs's find_clip): name, size and creation time; size and creation
+                        -- time (not with "I never rename my footage"); name and size. Never size alone
+                        local tests = {}
+                        local function at(f) return created(f) and math.floor(created(f)) == math.floor(want) end
+                        if want then tests[#tests + 1] = { function(f) return same(last_part(f.relative), name) and at(f) end, true } end
+                        if want and not (fs.never_rename and fs.never_rename(project)) then tests[#tests + 1] = { at } end
+                        tests[#tests + 1] = { function(f) return same(last_part(f.relative), name) end }
+                        for _, t in ipairs(tests) do
+                            local hit = {}
+                            for _, f in ipairs(cands) do if t[1](f) then hit[#hit + 1] = f end end
+                            if #hit == 1 then return found(hit[1]) end
+                            -- Several of that name and time go on to the next step; several of a looser one: no find
+                            if #hit > 1 and not t[2] then break end
+                        end
+                    end
+                end
             end
         end
         local rel = windows and link.clip:gsub("/", "\\") or link.clip
@@ -396,8 +568,7 @@ function M.new(ws, fs)
         end
         for _, place in ipairs(places) do
             local file = ws.join(place, rel)
-            local info = fs.info(file)
-            if info and info.is_file and (link.size == nil or info.size == link.size) then return file end
+            if sized(file) then return file, nil, nil, "roots" end
         end
         return nil
     end
@@ -420,7 +591,7 @@ function M.new(ws, fs)
     function self.footage(project)
         local out = {}
         local seen = {}
-        local loc, at, li = nil, "", 0
+        local loc, at, li, cur = nil, "", 0, nil
         local function walk(dir, rel, depth)
             local files, subdirs = entries(dir)
             for _, e in ipairs(files) do
@@ -432,7 +603,7 @@ function M.new(ws, fs)
                     if not seen[r] then
                         seen[r] = true
                         local in_loc = (at ~= "" and r:sub(1, #at + 1) == at .. "/") and r:sub(#at + 2) or r
-                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size, mtime = e.info.mtime, loc = loc, li = li, loc_rel = in_loc }
+                        out[#out + 1] = { file = ws.join(dir, name), relative = r, size = e.info.size, mtime = e.info.mtime, loc = loc, li = li, loc_rel = in_loc, location = cur }
                     end
                 end
             end
@@ -447,7 +618,7 @@ function M.new(ws, fs)
         -- Every location of the project, in its order (a path the first one has wins), each at its place in the tree
         local locs = ws.locations and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or { { dir = project, at = "" } }
         for i, l in ipairs(locs) do
-            li = i
+            li, cur = i, l
             if l.dir then
                 loc, at = (l.name and l.name ~= "") and l.name or (l.dir:match("([^/\\]+)[/\\]*$") or "Location"), l.at or ""
                 walk(l.dir, l.at ~= "" and l.at or nil, 0)

@@ -8,14 +8,15 @@
 //
 // It plays and renders nothing itself: each batch is ActionFootagePlayer run with no window (the workspace plugin's
 // batch mode, AFP_BATCH), which makes them as the player does, with its plugins and settings, and writes how far it
-// is to a status file this reads. The project's settings for the batches (clip previews in _Clips/ itself, new
-// moments stabilized on their own) are in Project.afproject, which the player reads too.
+// is to a status file this reads. What a batch makes goes into Generated/<date> <time> <what>/, laid out as chosen for
+// that run (docs/library-management.md §8); nothing of it is kept in Project.afproject.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod checks;
 mod index;
 mod locations;
+mod seen;
 mod tags;
 mod takein;
 
@@ -84,6 +85,8 @@ struct Running {
     started: Instant,
     stop_asked: Option<Instant>,
     awake: Option<Child>,
+    // Stopped to let another job run first, to be queued again
+    yielding: bool,
 }
 
 #[derive(Default)]
@@ -96,6 +99,10 @@ struct Inner {
     close_asked: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
+    // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
+    watch: Option<Watch>,
+    // A project being moved: its tasks wait (start_job passes them over), then run from its new place
+    held: Option<String>,
     // The project's own files being moved (Move the project…): the page shows how far it is
     moving: Option<Moving>,
 }
@@ -108,6 +115,52 @@ struct Moving {
     done: u64,
     total: u64,
     current: String,
+}
+
+// The file system's own notices (FSEvents, ReadDirectoryChangesW, inotify) for the project's folder and its locations:
+// each change counted, and when it was, so that the page reads the project again once the changes settle. The
+// project's file's time is kept too: its locations changed, they're watched again
+struct Watch {
+    root: PathBuf,
+    stamp: Option<std::time::SystemTime>,
+    _watcher: Option<notify::RecommendedWatcher>,
+    changes: Arc<std::sync::atomic::AtomicU64>,
+    last: Arc<Mutex<Instant>>,
+    /// The project's catalog kept up to date (seen.rs): what's changed here is sent to it, and it counts the changes
+    /// once it has them
+    runner: seen::Runner,
+}
+
+fn watch(root: &Path) -> Watch {
+    use notify::Watcher;
+    let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let last = Arc::new(Mutex::new(Instant::now()));
+    let (c, l) = (changes.clone(), last.clone());
+    let runner = seen::start(root, changes.clone(), last.clone());
+    let (events, me) = (runner.events.clone(), root.to_path_buf());
+    let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(e) = res else { return };
+        if matches!(e.kind, notify::EventKind::Access(_)) { return; }
+        // Temporary and hidden files (a write through a temporary file shows as its final name too), the NAS's recycle bin
+        let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
+                                          && !p.to_string_lossy().ends_with(".tmp"));
+        if !ours { return; }
+        // The catalog looks at those folders, and counts the change once it has it; until it's read, counted here
+        let _ = events.send(e.paths.clone());
+        if seen::is_on(&me) { return; }
+        c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *l.lock().unwrap() = Instant::now();
+    }).ok().and_then(|mut w| {
+        let mut dirs = vec![root.to_path_buf()];
+        for l in locations::locations(root, &locations::mounts()) {
+            if let Some(d) = l.dir { if d.is_dir() && !dirs.iter().any(|x| d.starts_with(x)) { dirs.push(d); } }
+        }
+        let mut any = false;
+        for d in dirs { any |= w.watch(&d, notify::RecursiveMode::Recursive).is_ok(); }
+        any.then_some(w)
+    });
+    let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
+    Watch { root: root.to_path_buf(), stamp, _watcher: watcher, changes, last, runner }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -236,9 +289,9 @@ fn project_info(root: &Path) -> ProjectInfo {
         moments_alone: flag("moments_alone"),
         clips_made: doc.get("clips_made").and_then(Value::as_array).map_or(0, |a| a.len() as u64),
         clips_failed: failed,
-        clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8),
+        clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
-        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 2),
+        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
     }
 }
@@ -246,6 +299,13 @@ fn project_info(root: &Path) -> ProjectInfo {
 // ---------- the player, run without a window ----------
 
 // Where ActionFootagePlayer is: AFL_PLAYER (an .app, or its executable), else beside this app, else the usual places
+/// The player's ffmpeg (a frame of a camera's proxy for a thumbnail)
+pub fn player_ffmpeg() -> Option<PathBuf> {
+    let p = player().ok()?;
+    let f = if cfg!(target_os = "macos") { p.join("Contents/Helpers/ffmpeg") } else { p.with_file_name(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }) };
+    f.is_file().then_some(f)
+}
+
 fn player() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os("AFL_PLAYER").filter(|p| !p.is_empty()) {
         return Ok(PathBuf::from(p));
@@ -300,13 +360,19 @@ fn log_error(log: &Path) -> Option<String> {
 }
 
 fn start_job(inner: &mut Inner) {
-    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting) else { return };
+    let held = inner.held.clone();
+    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting && Some(&j.project) != held.as_ref()) else { return };
     let dir = jobs_dir().join(job.id.to_string());
     let request = dir.join("request.json");
     let log = dir.join("log.txt");
     let mut req = job.request.clone();
     req["status"] = json!(dir.join("status.json"));
     req["stop"] = json!(dir.join("stop"));
+    // The folders the Library shows now, to make first (set_focus keeps them)
+    req["focus"] = json!(jobs_dir().join("focus.json"));
+    // A job run again (one that stepped aside): what its last run said isn't this one's
+    let _ = std::fs::remove_file(dir.join("status.json"));
+    let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
         .and_then(|_| start_player(&request, &log));
@@ -317,7 +383,7 @@ fn start_job(inner: &mut Inner) {
                 Command::new("/usr/bin/caffeinate").args(["-i", "-w", &child.id().to_string()])
                     .stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
             } else { None };
-            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake });
+            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake, yielding: false });
         }
         Err(e) => {
             job.state = JobState::Failed;
@@ -347,6 +413,16 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
 }
 
 fn tick(inner: &mut Inner) {
+    // Clip previews' pictures, made for as long as it takes, step aside for any other job: stopped after the one being
+    // made, then queued again after it (the ones left are found again by their links)
+    if let Some(run) = inner.running.as_mut() {
+        let finishing = inner.jobs.iter().any(|j| j.id == run.id && j.kind == "clips-finish");
+        if finishing && run.stop_asked.is_none() && inner.jobs.iter().any(|j| j.state == JobState::Waiting && j.kind != "clips-finish") {
+            let _ = std::fs::write(run.dir.join("stop"), b"");
+            run.stop_asked = Some(Instant::now());
+            run.yielding = true;
+        }
+    }
     if let Some(run) = inner.running.as_mut() {
         let id = run.id;
         let exited = run.child.try_wait().ok().flatten();
@@ -374,6 +450,17 @@ fn tick(inner: &mut Inner) {
             finished = exited.is_some();
         }
         if finished {
+            if run.yielding {
+                if let Some(i) = inner.jobs.iter().position(|j| j.id == id) {
+                    let mut job = inner.jobs.remove(i);
+                    job.state = JobState::Waiting;
+                    (job.done, job.total, job.failed, job.made, job.fraction, job.current, job.message) = (0, 0, 0, None, None, None, None);
+                    job.failures.clear();
+                    inner.jobs.push(job);
+                }
+            }
+            // What a batch made, and the clips it looked at, into the catalog: a look at everything
+            seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
             if let Some(mut run) = inner.running.take() {
                 if let Some(mut a) = run.awake.take() { let _ = a.kill(); let _ = a.wait(); }
                 let _ = run.child.wait();
@@ -406,33 +493,73 @@ struct Snapshot {
     jobs: Vec<Job>,
     close_asked: bool,
     macos: bool,
+    // Changes seen in the project's folder and locations, and how long since the last one (ms)
+    changes: u64,
+    quiet_ms: u64,
+    // What the project's catalog is doing ("": nothing to say)
+    catalog: String,
+    // Links whose original isn't where they say (moments, clip previews, exports, photos), counted from the catalog;
+    // null: not known
+    missing: Option<u64>,
     moving: Option<Moving>,
 }
 
 #[tauri::command]
-fn snapshot(shared: State<Shared>) -> Snapshot {
+async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Snapshot {
     let mut inner = shared.lock().unwrap();
     if inner.project.is_none() {
         if let Some(p) = inner.pending_open.pop_front() { inner.project = Some(p); }
     }
+    // Watched: the project open, its locations as its file says now
+    match inner.project.clone() {
+        Some(root) => {
+            let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
+            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp) {
+                let before = inner.watch.as_ref().filter(|w| w.root == root).map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed) + 1);
+                let w = watch(&root);
+                // The same project watched again (its locations changed): counted on from where it was, and once more
+                if let Some(n) = before { w.changes.store(n, std::sync::atomic::Ordering::Relaxed); }
+                inner.watch = Some(w);
+            }
+        }
+        None => inner.watch = None,
+    }
+    let catalog = seen::status(inner.watch.as_ref().map(|w| &w.runner));
+    let missing = Some(seen::missing(inner.watch.as_ref().map(|w| &w.runner))).filter(|n| *n != u64::MAX);
+    let (changes, quiet_ms) = inner.watch.as_ref().map(|w| (w.changes.load(std::sync::atomic::Ordering::Relaxed), w.last.lock().unwrap().elapsed().as_millis() as u64)).unwrap_or((0, 0));
     Snapshot {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
         macos: cfg!(target_os = "macos"),
+        changes,
+        quiet_ms,
+        catalog,
+        missing,
         moving: inner.moving.clone(),
     }
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn project(shared: State<Shared>) -> Option<ProjectInfo> {
+async fn project(shared: State<'_, Shared>) -> Result<Option<ProjectInfo>, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Option<ProjectInfo> {
     let root = shared.lock().unwrap().project.clone()?;
     Some(project_info(&root))
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn engine() -> Result<String, String> {
+async fn engine() -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     player().map(|p| p.display().to_string())
+}).await.map_err(|e| e.to_string())?
 }
 
 fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<String, String> {
@@ -445,8 +572,12 @@ fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<Str
 }
 
 #[tauri::command]
-fn open_project(app: tauri::AppHandle, shared: State<Shared>, path: String) -> Result<String, String> {
+async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     open_path(&app, &shared, Path::new(&path))
+}).await.map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -454,10 +585,13 @@ struct Recent { path: String, name: String, here: bool }
 
 // The projects this computer has opened, the last first: the ones still there
 #[tauri::command]
-fn recent(app: tauri::AppHandle) -> Vec<Recent> {
+async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
     recent_list(&app).into_iter().filter(|p| Path::new(p).join(PROJECT_FILE).is_file() || Path::new(p).join(LEGACY_DIR).is_dir())
         .map(|p| Recent { name: Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()), here: true, path: p })
         .collect()
+}).await.map_err(|e| e.to_string())
 }
 
 // ---------- browsing ----------
@@ -493,10 +627,22 @@ async fn cached_view(app: tauri::AppHandle, shared: State<'_, Shared>, probes: S
 async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let cache_file = view_cache(&app, &root, &view);
-    let flat = project_info(&root).clips_layout != "tree";
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let out = index::scan(&root, &view, flat);
+        let flat = project_info(&root).clips_layout != "tree";
+        // The project's catalog being read (a second or two): waited for, not the disks walked meanwhile (minutes)
+        seen::wait_ready(&root, std::time::Duration::from_secs(60));
+        let mut out = index::scan(&root, &view, flat);
+        // Moments whose clip was found away from the path their link names: the path written into the link
+        // (docs/library-management.md §8), so the next look, from any computer, finds it at once
+        let tool = link_tool();
+        for it in out["items"].as_array_mut().into_iter().flatten() {
+            let (Some(to), Some(file)) = (it["relink"].as_str().map(str::to_string), it["path"].as_str().map(PathBuf::from)) else { continue };
+            let mut l = it["link"].clone();
+            l["clip"] = json!(to);
+            if write_link(tool.as_ref(), &file, &l.to_string()).is_ok() { it["link"] = l; }
+            it.as_object_mut().unwrap().remove("relink");
+        }
         let mut want: Vec<String> = Vec::new();
         for it in out["items"].as_array().into_iter().flatten() {
             match it["kind"].as_str() {
@@ -521,8 +667,12 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
 }
 
 #[tauri::command]
-fn probes_since(probes: State<index::SharedProbes>, since: u64) -> Value {
+async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Result<Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Value {
     probes.lock().unwrap().since(since)
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -599,6 +749,8 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         let caches: Vec<Value> = caches(&app).into_iter().map(|(k, what, dir)| { let (b, f) = dir_size(&dir); json!({ "key": k, "what": what, "path": dir.display().to_string(), "bytes": b, "files": f }) }).collect();
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
+                   "never_rename": locations::never_rename(&root),
+                   "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
 }
@@ -606,7 +758,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
 // The project's locations written: into Project.afproject (none: the project is next to its footage again), and its
 // .afplocation file into each of them (taken out of the ones removed)
 #[tauri::command]
-async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Option<Value>) -> Result<Vec<String>, String> {
+async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Option<Value>, generated_runs: Option<bool>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     tauri::async_runtime::spawn_blocking(move || {
         let mounts = locations::mounts();
@@ -621,6 +773,8 @@ async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Opti
         update_doc(&root, |d| {
             if clean.is_empty() { d.remove("locations"); } else { d.insert("locations".into(), json!(clean)); d.insert("version".into(), json!(2)); }
             if let Some(h) = &hosts { if h.as_object().is_some_and(|o| !o.is_empty()) { d.insert("hosts".into(), h.clone()); } else { d.remove("hosts"); } }
+            // A folder per run in Generated/ (the player reads it): written only when on
+            match generated_runs { Some(true) => { d.insert("generated_runs".into(), json!(true)); } Some(false) => { d.remove("generated_runs"); } None => {} }
         })?;
         let after: Vec<locations::Location> = locations::locations(&root, &mounts).into_iter().filter(|l| !l.local).collect();
         Ok(locations::write_pointers(&root, &after, &before, &mounts))
@@ -645,7 +799,10 @@ fn choose_local(shared: State<Shared>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn save_local(shared: State<Shared>, list: Vec<Value>) -> Result<(), String> {
+async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: Option<bool>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let id = project_id(&root)?;
     let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
@@ -654,15 +811,23 @@ fn save_local(shared: State<Shared>, list: Vec<Value>) -> Result<(), String> {
         (!p.is_empty()).then(|| json!({ "name": l.get("name").and_then(Value::as_str).unwrap_or("On this computer"), "at": l.get("at").and_then(Value::as_str).unwrap_or("").trim_matches('/'), "path": p }))
     }).collect();
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
-    if clean.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
-    std::fs::write(&file, serde_json::to_vec_pretty(&json!({ "project": root.display().to_string(), "locations": clean })).unwrap()).map_err(|e| e.to_string())
+    // "I never rename my footage": kept, unless this save says otherwise
+    let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
+    if clean.is_empty() && !never_rename { let _ = std::fs::remove_file(&file); return Ok(()); }
+    let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
+    if never_rename { doc["never_rename"] = json!(true); }
+    std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
+}).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
+async fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let (_, _, dir) = caches(&app).into_iter().find(|(k, _, _)| *k == key).ok_or("no such cache")?;
     if dir.is_dir() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
     Ok(())
+}).await.map_err(|e| e.to_string())?
 }
 
 // The project's own files moved to another folder (the SSD, say): Project.afproject and its _ folders. The clips and
@@ -690,7 +855,7 @@ fn move_to(root: &Path, dest: &Path, progress: &dyn Fn(Moving)) -> Result<Vec<St
     project_id(root)?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();
-    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache"].into_iter().filter(|n| root.join(n).exists()).collect();
+    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED].into_iter().filter(|n| root.join(n).exists()).collect();
     // On another disk they're copied: how much, for the page's bar (counted once a rename fails)
     let mut state = Moving { to: dest.display().to_string(), ..Default::default() };
     let mut counted = false;
@@ -769,20 +934,62 @@ fn copy_tree(from: &Path, to: &Path, state: &mut Moving, progress: &dyn Fn(Movin
     Ok(())
 }
 
-// Asked where, then moved in the background: the page polls snapshot's `moving` for its bar meanwhile
+// Asked where, then moved in the background: the page polls snapshot's `moving` for its bar meanwhile. Its tasks don't
+// stop it (Anton, 2026-11-10: nothing waits on the task list): the one running is stopped after what it's making and
+// they all wait, the files move, and they run again from the new place (the running one from the start: what it made
+// is found there)
 #[tauri::command]
 async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: move the project when they're done".into()); }
     if shared.lock().unwrap().moving.is_some() { return Err("The project is being moved already".into()); }
     let Some(dest) = rfd::AsyncFileDialog::new().set_title("Move the project's own files to this folder").pick_folder().await else { return Ok(None) };
     let dest = dest.path().to_path_buf();
     let s = shared.inner().clone();
     shared.lock().unwrap().moving = Some(Moving { to: dest.display().to_string(), ..Default::default() });
     let (r, d) = (root.clone(), dest.clone());
+    let old = root.display().to_string();
     let done = tauri::async_runtime::spawn_blocking(move || {
+        {
+            let mut inner = s.lock().unwrap();
+            inner.held = Some(old.clone());
+            let stop = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+            if stop {
+                let run = inner.running.as_mut().unwrap();
+                let _ = std::fs::write(run.dir.join("stop"), b"");
+                run.stop_asked = Some(Instant::now());
+                run.yielding = true;
+            }
+        }
+        // Until it has ended (tick kills it after STOP_TIMEOUT)
+        loop {
+            {
+                let mut inner = s.lock().unwrap();
+                tick(&mut inner);
+                let ours = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+                if !ours { break; }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
         let report = |m: Moving| { s.lock().unwrap().moving = Some(m); };
-        move_to(&r, &d, &report)
+        let moved = move_to(&r, &d, &report);
+        let mut inner = s.lock().unwrap();
+        inner.held = None;
+        if moved.is_ok() {
+            let new = d.display().to_string();
+            for j in inner.jobs.iter_mut().filter(|j| j.project == old && !j.state.finished()) {
+                j.project = new.clone();
+                j.request["project"] = json!(new);
+                // Paths it was kept to, in the project's folder, move with it
+                if let Some(only) = j.request.get_mut("only").and_then(Value::as_array_mut) {
+                    for o in only.iter_mut() {
+                        if let Some(rest) = o.as_str().and_then(|x| x.strip_prefix(&old)) { *o = json!(format!("{new}{rest}")); }
+                    }
+                }
+            }
+            inner.project = Some(d.clone());
+        }
+        tick(&mut inner);
+        moved
     }).await.map_err(|e| e.to_string());
     shared.lock().unwrap().moving = None;
     let problems = done??;
@@ -803,8 +1010,27 @@ fn link_tool() -> Option<PathBuf> {
 
 // A moment's, clip preview's or export's link written again (its original moved, tags changed)
 fn write_link(tool: Option<&PathBuf>, file: &Path, link: &str) -> Result<(), String> {
+    // A photo's link is in its XMP: afp-meta writes it (afp-cut writes an MP4's key)
+    let lower = file.to_string_lossy().to_lowercase();
+    if [".heic", ".heif", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e)) {
+        let meta = meta_tool().ok_or("ActionFootagePlayer's afp-meta isn't there to write a photo's link")?;
+        let o = Command::new(meta).arg(file).arg("--link").arg(link).output().map_err(|e| e.to_string())?;
+        return if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) };
+    }
     let tool = tool.ok_or("ActionFootagePlayer's afp-cut isn't there to write the links")?;
     let o = Command::new(tool).arg("--set-key").arg(file).arg("ch.actionfootageplayer.link").arg(link).output().map_err(|e| e.to_string())?;
+    if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
+}
+
+// The player's afp-meta, which writes a photo's own metadata (its tags in its XMP; a HEIC's through afp-photo)
+fn meta_tool() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "afp-meta.exe" } else { "afp-meta" };
+    link_tool().map(|t| t.with_file_name(name)).filter(|p| p.is_file())
+}
+
+fn write_photo_tags(tool: Option<&PathBuf>, file: &Path, tags: &[String]) -> Result<(), String> {
+    let tool = tool.ok_or("ActionFootagePlayer's afp-meta isn't there to write a photo's tags")?;
+    let o = Command::new(tool).arg(file).arg("--tags").arg(serde_json::to_string(tags).unwrap()).output().map_err(|e| e.to_string())?;
     if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
 }
 
@@ -819,13 +1045,15 @@ async fn run_check(shared: State<'_, Shared>, sel: Vec<String>, links: Vec<Strin
 #[tauri::command]
 async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    // The library being mended: the catalog looks at the footage too
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     tauri::async_runtime::spawn_blocking(move || checks::find_moved(&root, &issues)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -833,14 +1061,44 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
     }).await.map_err(|e| e.to_string())
 }
 
+// The links whose original isn't where they say, as last counted: [{ file, tree, kind }]
+#[tauri::command]
+async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> {
+    Ok(seen::missing_list(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner)))
+}
+
+// Mending on one click (Anton, 2026-11-10): every link whose original isn't where it says, looked for by what it is
+// (its fingerprint…), the ones found surely written again; the ones with several to choose from given back
+#[tauri::command]
+async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        let issues = checks::missing(&root).ok_or("A source of the project isn't reachable now: its clips would all look gone")?;
+        let found = checks::find_moved(&root, &issues);
+        let all = found.as_array().cloned().unwrap_or_default();
+        let (sure, left): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|f| !f["found"].is_null());
+        let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
+        let problems = checks::apply(&root, &sure, &relink);
+        Ok::<Value, String>(json!({ "missing": issues.len(), "mended": sure.len() - problems.len(), "problems": problems, "left": left }))
+    }).await.map_err(|e| e.to_string())??;
+    let g = shared.lock().unwrap();
+    seen::recount(g.watch.as_ref().map(|w| &w.runner));
+    seen::look_at_everything(g.watch.as_ref().map(|w| &w.runner));
+    Ok(out)
+}
+
 // ---------- renders ----------
 
 #[tauri::command]
-fn delete_renders(shared: State<Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete renders when they're done".into()); }
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
     Ok(json!({ "deleted": n, "problems": problems }))
+}).await.map_err(|e| e.to_string())?
 }
 
 // ---------- tags ----------
@@ -849,7 +1107,9 @@ fn delete_renders(shared: State<Shared>, moments: Vec<String>, stale_only: bool)
 async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l)))
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
+                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
         .await.map_err(|e| e.to_string())
 }
 
@@ -884,7 +1144,7 @@ async fn take_in_plan(shared: State<'_, Shared>, other: String, place: String) -
 #[tauri::command]
 async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: take it in when they're done".into()); }
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -898,7 +1158,9 @@ async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) ->
 static QUICKLOOK: Mutex<Option<std::process::Child>> = Mutex::new(None);
 
 #[tauri::command]
-fn quick_look(paths: Vec<String>) -> Result<bool, String> {
+async fn quick_look(paths: Vec<String>) -> Result<bool, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
     let mut q = QUICKLOOK.lock().unwrap();
     if let Some(mut c) = q.take() {
         if c.try_wait().ok().flatten().is_none() { let _ = c.kill(); let _ = c.wait(); return Ok(false); }
@@ -913,6 +1175,7 @@ fn quick_look(paths: Vec<String>) -> Result<bool, String> {
     }.map_err(|e| e.to_string())?;
     *q = Some(child);
     Ok(true)
+}).await.map_err(|e| e.to_string())?
 }
 
 // A name a file can have on every system
@@ -929,12 +1192,18 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
     let name = good_name(&name)?;
     let from = PathBuf::from(&path);
-    if !from.starts_with(&root) || !["_Moments", "_Clips", "_Stills", "_Exports"].iter().any(|d| from.starts_with(root.join(d))) {
+    // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
+    // footage (a project next to it), only a link file (a moment or clip preview beside its clip)
+    let footage = index::footage_dirs(&root);
+    let linked = kind != "folder" && index::link(&from).is_some();
+    if from == root || !from.starts_with(&root) || !(index::own_area(&root, &from, &footage) || linked) {
         return Err("Footage is renamed in Finder (Find moved files then updates what points at it). Here: moments, clip previews, photos, exports and their folders".into());
     }
     let dir = from.parent().ok_or("no folder")?.to_path_buf();
@@ -946,8 +1215,8 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     if kind == "folder" {
         let to = dir.join(&name);
         mv(&from, &to)?;
-        // The moments' renders follow their folder
-        if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+        // The moments' renders follow their folder (_Renders/<its path>, a folder of _Moments by its path there)
+        if let Ok(rel) = from.strip_prefix(root.join("_Moments")).or_else(|_| from.strip_prefix(&root)) {
             let r = root.join("_Renders").join(rel);
             if r.is_dir() { let _ = std::fs::rename(&r, r.with_file_name(&name)); }
         }
@@ -955,12 +1224,14 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
     }
     match kind.as_str() {
         "moment" => {
-            let old = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname).to_string();
-            let to = dir.join(format!("{name}{}", index::LINK_EXT));
+            let ext = if fname.to_lowercase().ends_with(index::LINK_EXT) { fname[fname.len() - index::LINK_EXT.len()..].to_string() }
+                else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
+            let old = fname[..fname.len() - ext.len()].to_string();
+            let to = dir.join(format!("{name}{ext}"));
             mv(&from, &to)?;
             let g = dir.join(format!("{old}.gyroflow"));
             if g.is_file() { let _ = std::fs::rename(&g, dir.join(format!("{name}.gyroflow"))); }
-            if let Ok(rel) = from.strip_prefix(root.join("_Moments")) {
+            if let Ok(rel) = from.strip_prefix(&root) {
                 let rel = rel.to_string_lossy().replace('\\', "/");
                 for p in index::RENDER_PROFILES {
                     let r = index::render_path(&root, &rel, p);
@@ -985,6 +1256,7 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
             Ok(to.display().to_string())
         }
     }
+}).await.map_err(|e| e.to_string())?
 }
 
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
@@ -1027,27 +1299,32 @@ fn to_trash(file: &Path) -> Result<String, String> {
 // Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
 // footage is deleted in Finder), an export. What went where, and what couldn't
 #[tauri::command]
-fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
-    let own = ["_Moments", "_Clips", "_Stills", "_Exports"];
+    let footage = index::footage_dirs(&root);
     let (mut done, mut problems) = (0usize, Vec::<String>::new());
     let mut went = std::collections::BTreeSet::new();
     for it in &items {
         let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
         let kind = it["kind"].as_str().unwrap_or("");
-        if !path.starts_with(&root) || !own.iter().any(|d| path.starts_with(root.join(d)) && path != root.join(d)) {
-            problems.push(format!("{}: not in the project's own folders. Footage is deleted in Finder", path.display()));
+        // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among
+        // its footage, only a link file
+        let linked = kind != "folder" && index::link(&path).is_some();
+        if path == root || !path.starts_with(&root) || !(index::own_area(&root, &path, &footage) || linked) || (kind == "folder" && footage.iter().any(|d| d.starts_with(&path))) {
+            problems.push(format!("{}: not the project's own. Footage is deleted in Finder", path.display()));
             continue;
         }
         if !path.exists() { continue; }
         let mut also: Vec<PathBuf> = Vec::new();
         let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        if let Ok(rel) = path.strip_prefix(root.join("_Moments")) {
+        if let Ok(rel) = path.strip_prefix(root.join("_Moments")).or_else(|_| path.strip_prefix(&root)) {
             let rel = rel.to_string_lossy().replace('\\', "/");
             if kind == "folder" { also.push(root.join("_Renders").join(&rel)); } else if kind == "moment" {
-                let stem = fname.strip_suffix(index::LINK_EXT).unwrap_or(&fname);
+                let stem = fname.strip_suffix(index::LINK_EXT).or_else(|| fname.rsplit_once('.').map(|(s, _)| s)).unwrap_or(&fname);
                 also.push(dir.join(format!("{stem}.gyroflow")));
                 for p in index::RENDER_PROFILES { also.push(index::render_path(&root, &rel, p)); }
             }
@@ -1065,6 +1342,7 @@ fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<
         }
     }
     Ok(serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems }))
+}).await.map_err(|e| e.to_string())?
 }
 
 // Everything the library keeps, written out in the open as one JSON file: the project's file and this computer's
@@ -1117,7 +1395,7 @@ fn library_json(root: &Path, probes: &index::SharedProbes) -> Value {
     }).collect();
     let photo_tags = doc.get("photo_tags").cloned().unwrap_or(json!({}));
     let photos: Vec<Value> = view("stills").iter().map(|it| json!({
-        "file": it["path"], "form": it["form"], "link_in_its_xmp": it["link"], "tags_in_the_project_file": photo_tags.get(it["id"].as_str().unwrap_or("")).cloned(),
+        "file": it["path"], "form": it["form"], "link_in_its_xmp": it["link"], "tags_in_its_xmp": it["path"].as_str().map(|p| index::photo_tags(Path::new(p))), "tags_in_the_project_file": photo_tags.get(it["id"].as_str().unwrap_or("")).cloned(),
     })).collect();
     let exports: Vec<Value> = view("exports").iter().map(|it| { let p = it["path"].as_str().unwrap_or(""); json!({ "file": p, "keys": keys(p) }) }).collect();
     json!({
@@ -1150,7 +1428,9 @@ async fn export_library(shared: State<'_, Shared>, probes: State<'_, index::Shar
 // A clip's or moment's Gyroflow project opened in Gyroflow (the system's app for .gyroflow): `paths`, the clip's
 // copies or the moment's file; its project beside one of them (<name>.gyroflow or <name.ext>.gyroflow)
 #[tauri::command]
-fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
+async fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     for p in &paths {
         let p = PathBuf::from(p);
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1164,22 +1444,27 @@ fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
         }
     }
     Err("It has no Gyroflow project".into())
+}).await.map_err(|e| e.to_string())?
 }
 
 // A new folder in a view's own folder (_Clips, _Moments, _Stills, _Exports), inside `parent` (its path there): its
 // path there, named "untitled folder" (" 2"… when taken), for renaming at once
 #[tauri::command]
-fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<String, String> {
+async fn new_folder(shared: State<'_, Shared>, view: String, parent: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let base = match view.as_str() { "footage" => "_Clips", "moments" => "_Moments", "stills" => "_Stills", "exports" => "_Exports",
-                                     _ => return Err("Folders of the sources are made in Finder".into()) };
-    let mut dir = root.join(base);
+    // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
+    if !matches!(view.as_str(), "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
+    let mut dir = root.clone();
     for p in parent.split('/').filter(|p| !p.is_empty() && *p != "..") { dir.push(p); }
     let mut name = "untitled folder".to_string();
     let mut n = 1;
     while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
     std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
     Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
+}).await.map_err(|e| e.to_string())?
 }
 
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them.
@@ -1277,10 +1562,13 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 6] = ["clips", "clips-again", "moments", "photos", "export", "render"];
+const KINDS: [&str; 7] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render"];
 
 #[tauri::command]
-fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     if !KINDS.contains(&kind.as_str()) { return Err(format!("no such batch: {kind}")); }
     let mut inner = shared.lock().unwrap();
     let root = inner.project.clone().ok_or("Open a project first")?;
@@ -1288,7 +1576,8 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
     let photo = options.get("photo").and_then(Value::as_str).unwrap_or("no").to_string();
     let sdr = options.get("sdr").and_then(Value::as_bool).unwrap_or(false);
     let title = match kind.as_str() {
-        "clips" => "Clip previews".to_string(),
+        "clips" => "Clip previews (empty, to arrange now)".to_string(),
+        "clips-finish" => "Clip previews: their pictures".to_string(),
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
@@ -1309,6 +1598,17 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
     if let Some(o) = &only { request["only"] = json!(o); }
     if kind == "photos" { request["photo"] = json!(photo); }
     if kind == "export" { request["sdr"] = json!(sdr); }
+    // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
+    // whether new moments are stabilized on their own
+    // Clip previews (Anton, 2026-11-10): empty ones at once (a dark frame with the link inside, all in a few seconds), to
+    // arrange in Footage right away; then a job making their pictures in their places, the folder in view first, out of
+    // the way of any other job
+    if kind == "clips" { request["draft"] = json!(true); }
+    if kind == "clips" || kind == "clips-again" {
+        let layout = options.get("layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).unwrap_or("tree");
+        request["layout"] = json!(layout);
+    }
+    if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
             .filter(|p| index::RENDER_PROFILES.contains(p)).map(str::to_string).collect();
@@ -1321,13 +1621,37 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
         failures: Vec::new(), request,
     };
+    let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
+    if let Some((project, project_name)) = follow {
+        if !inner.jobs.iter().any(|j| !j.state.finished() && j.project == project && j.kind == "clips-finish") {
+            inner.next_id += 1;
+            let request = json!({ "kind": "clips-finish", "project": project });
+            let id = inner.next_id;
+            inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), request });
+        }
+    }
     tick(&mut inner);
     Ok(())
+}).await.map_err(|e| e.to_string())?
+}
+
+// The folders the Library shows now (absolute, on disk): a clip previews' pictures job makes theirs first
+#[tauri::command]
+fn set_focus(dirs: Vec<String>) -> Result<(), String> {
+    let file = jobs_dir().join("focus.json");
+    let _ = std::fs::create_dir_all(jobs_dir());
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json!({ "dirs": dirs }).to_string()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn cancel_job(shared: State<Shared>, id: u64) {
+async fn cancel_job(shared: State<'_, Shared>, id: u64) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     let mut inner = shared.lock().unwrap();
     if inner.running.as_ref().is_some_and(|r| r.id == id) {
         let run = inner.running.as_mut().unwrap();
@@ -1339,15 +1663,23 @@ fn cancel_job(shared: State<Shared>, id: u64) {
     } else {
         inner.jobs.retain(|j| !(j.id == id && j.state == JobState::Waiting));
     }
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn clear_finished(shared: State<Shared>) {
+async fn clear_finished(shared: State<'_, Shared>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     shared.lock().unwrap().jobs.retain(|j| !j.state.finished());
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), String> {
+async fn set_setting(shared: State<'_, Shared>, key: String, value: Value) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     match (key.as_str(), &value) {
         ("clips_flat" | "moments_alone", Value::Bool(_)) => update_doc(&root, |doc| { doc["settings"][&key] = value.clone(); }),
@@ -1356,18 +1688,23 @@ fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), S
             update_doc(&root, |doc| { doc["settings"]["clips_layout"] = value.clone(); doc["settings"]["clips_flat"] = json!(l == "flat"); }),
         _ => Err(format!("no such setting: {key} = {value}")),
     }
+}).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn reveal(shared: State<Shared>, what: Option<String>) {
+async fn reveal(shared: State<'_, Shared>, what: Option<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     let Some(root) = shared.lock().unwrap().project.clone() else { return };
     let path = match what.as_deref() {
-        Some(sub @ ("_Clips" | "_Moments" | "_Stills" | "_Exports")) if root.join(sub).is_dir() => root.join(sub),
+        Some(sub @ ("_Clips" | "_Moments" | "_Stills" | "_Exports" | "Generated")) if root.join(sub).is_dir() => root.join(sub),
         _ => root,
     };
     let _ = if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
         else if cfg!(windows) { Command::new("explorer").arg(&path).spawn() }
         else { Command::new("xdg-open").arg(&path).spawn() };
+}).await.map_err(|e| e.to_string())
 }
 
 // The window's close, answered: stop the batches and quit, or keep them going (the window stays)
@@ -1452,11 +1789,11 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
+        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend, missing_links])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1487,6 +1824,36 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changes_seen() {
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("afl-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Generated")).unwrap();
+        std::fs::write(root.join(PROJECT_FILE), "{}").unwrap();
+        std::env::set_var("AFP_HOME", root.join(".home"));
+        let root = root.canonicalize().unwrap();
+        let w = watch(&root);
+        // The project's catalog made and read first (it counts a change when it is)
+        let t = Instant::now();
+        while !seen::is_on(&root) && t.elapsed() < Duration::from_secs(10) { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(seen::is_on(&root), "the catalog wasn't read: {}", seen::status(Some(&w.runner)));
+        std::thread::sleep(Duration::from_millis(300));
+        let n = |w: &Watch| w.changes.load(std::sync::atomic::Ordering::Relaxed);
+        let start = n(&w);
+        // A hidden temporary file isn't a change; the file it becomes is
+        std::fs::write(root.join("Generated/.a.tmp"), "x").unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(n(&w), start, "a hidden file counted");
+        std::fs::write(root.join("Generated/Turtle.afplink.mp4"), "x").unwrap();
+        let t = Instant::now();
+        while n(&w) == start && t.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(n(&w) > start, "the new file not seen");
+        // …and it's in the catalog the views read
+        assert!(seen::file(&root.join("Generated/Turtle.afplink.mp4")).is_some_and(|f| f.is_some()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("afl-test-{}-{name}", std::process::id()));

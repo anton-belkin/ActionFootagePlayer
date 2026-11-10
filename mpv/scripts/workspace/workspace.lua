@@ -16,8 +16,8 @@
 --   ws.locations(project)                             -> its locations here: { name, at, dir, copies }
 --   ws.tree_path(clip, locations)                     -> the clip's path in the project's tree ("Action 6/A.MP4")
 --   ws.files_at(tree_path, locations)                 -> the file at that path in each location that has it
---   ws.own_file(clip, locations)                      -> where the clip's own file is read and written, or nil, list
---                                                        when there are two
+--   ws.own_file(clip, locations)                      -> where the clip's own file is read and written (the main
+--                                                        one), and the other copies' files, read only
 --
 -- read_json(path) -> a table or nil; files(dir) -> the names of the files in it; mounts() -> { { source =
 -- "//host/share", dir = "/Volumes/share" } } (the shares this computer has mounted; not on Windows, which opens
@@ -229,28 +229,34 @@ function M.new(fs)
         return out
     end
 
-    -- Where the clip's own file is, over all the locations: the one there is; none, beside the clip in the first
-    -- location that has it and isn't copies only (where it's written at the first save). Two or more: nil, and their
-    -- list (the player then saves nothing for the clip until one goes). Without locations: beside the clip
+    -- The clip's copies over the locations (files_at's), in the order that decides its own file, the same on every
+    -- computer: the library's locations in their order, then the copies-only ones (a working folder) and this
+    -- computer's own (docs/library-management.md §8)
+    local function ordered_copies(copies)
+        local out = {}
+        for i, c in ipairs(copies) do out[i] = { c = c, i = i, late = (c.location.copies or c.location.here) and 1 or 0 } end
+        table.sort(out, function(a, b) if a.late ~= b.late then return a.late < b.late end return a.i < b.i end)
+        for i, x in ipairs(out) do out[i] = x.c end
+        return out
+    end
+
+    -- Where the clip's own file is, over all the locations: beside the first copy, in that order, that has one (the
+    -- main one, read and written). None has one: beside the first copy that isn't copies only or this computer's
+    -- (where the first save writes it). Second value: the other copies' files, read never written ({} none).
+    -- Without locations: beside the clip
     function ws.own_file(clip, locations)
         local tree = locations and ws.tree_path(clip, locations)
-        if not tree then return ws.sidecar_file(clip) end
-        local copies = ws.files_at(tree, locations)
+        if not tree then return ws.sidecar_file(clip), {} end
         local found, home = {}, nil
-        for _, c in ipairs(copies) do
+        for _, c in ipairs(ordered_copies(ws.files_at(tree, locations))) do
             local own = ws.sidecar_file(c.file)
-            if fs.is_file(own) then found[#found + 1] = own end
-            if not home and not c.location.copies then home = own end
+            -- The older name, <clip>.marks.json, counts as the clip's own file too (written as .afp.json)
+            if fs.is_file(own) or fs.is_file((own:gsub("%.afp%.json$", ".marks.json"))) then found[#found + 1] = own end
+            if not home and not c.location.copies and not c.location.here then home = own end
         end
-        -- The older name, <clip>.marks.json, counts as the clip's own file too
-        if #found == 0 then
-            for _, c in ipairs(copies) do
-                local old = ws.sidecar_file(c.file):gsub("%.afp%.json$", ".marks.json")
-                if fs.is_file(old) then found[#found + 1] = ws.sidecar_file(c.file) end
-            end
-        end
-        if #found > 1 then return nil, found end
-        return found[1] or home or ws.sidecar_file(clip)
+        local others = {}
+        for i = 2, #found do others[#others + 1] = found[i] end
+        return found[1] or home or ws.sidecar_file(clip), others
     end
 
     -- The projects whose markers are in a folder: its Project.afproject, its .afplocation files' projects (those that

@@ -105,7 +105,7 @@ file("/T/Egypt/Day 1/A.MP4", 100)
 file("/T/Egypt/Day 1/B.MP4", 100)
 file("/T/Egypt/_Moments/Turtle.afplink.mp4", 10, 1, link("Day 1/A.MP4", 20, 30))
 file("/T/Egypt/_Moments/Reef/Moray.afplink.mp4", 10, 1, link("Day 1/A.MP4", 5, 8))
-file("/T/Egypt/_Moments/Other.afplink.mp4", 10, 1, link("Day 1/B.MP4", 1, 2))
+file("/T/Egypt/_Moments/Other.afplink.mp4", 10, 1, (link("Day 1/B.MP4", 1, 2):gsub("06:45:41", "06:40:00")))
 file("/T/Egypt/_Moments/Wrong size.afplink.mp4", 10, 1, ('{"v":1,"kind":"moment","clip":"Day 1/A.MP4","size":999,"in":1,"out":2}'))
 file("/T/Egypt/_Moments/Clip preview.afplink.mp4", 10, 1, '{"v":1,"kind":"clip","clip":"Day 1/A.MP4"}')
 file("/T/Egypt/_Moments/plain video.mp4", 10, 1, nil)
@@ -122,6 +122,28 @@ expect("of clip: by in", mine[1].name, "Moray")
 expect("of clip: second", mine[2].name, "Turtle")
 expect("of clip: other created", #m.of_clip(found.list, { relative = "Day 1/A.MP4", size = 100, created = "2025-01-01T00:00:00Z" }), 0)
 expect("of clip: unknown size", #m.of_clip(found.list, { relative = "Day 1/A.MP4" }), 3)
+-- Moments anywhere in the project's folder (§8): in Generated/, beside the footage when named .afplink.mp4; among
+-- the footage a plain .mp4 isn't read
+file("/T/Egypt/Generated/2026-11-10 14-32 Moments/Gen.mp4", 10, 1, link("Day 1/A.MP4", 40, 41))
+file("/T/Egypt/Day 1/Beside.afplink.mp4", 10, 1, link("Day 1/A.MP4", 50, 51))
+file("/T/Egypt/Day 2/renamed.mp4", 10, 1, link("Day 1/A.MP4", 60, 61))
+local anywhere = m.scan("/T/Egypt", {})
+local names = {}
+for _, x in ipairs(anywhere.list) do names[x.name] = true end
+expect("anywhere: in Generated", names["Gen"], true)
+expect("anywhere: beside the footage", names["Beside"], true)
+expect("anywhere: a plain video among the footage isn't read", names["renamed"], nil)
+expect("anywhere: Generated's folder watched", anywhere.dirs["/T/Egypt/Generated/2026-11-10 14-32 Moments"], 7)
+expect("anywhere: a folder with none not watched", anywhere.dirs["/T/Egypt/Day 2"], nil)
+expect("anywhere: kept to a folder", #m.scan("/T/Egypt", {}, "Generated").list, 1)
+local t1432 = os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 })
+expect("generated", moments_lib.generated_rel("Moments", t1432), "_Moments/Generated")
+expect("generated, clip previews", moments_lib.generated_rel("Clip previews", t1432), "_Clips/Generated")
+expect("generated, photos", moments_lib.generated_rel("Photos", t1432, true), "_Stills/Generated")
+expect("generated, exports", moments_lib.generated_rel("Exports", t1432), "_Exports/Generated")
+expect("generated, a folder per run", moments_lib.generated_rel("Moments", t1432, false, true), "_Moments/Generated/2026-11-10 14-32")
+expect("generated, a folder a day", moments_lib.generated_rel("Moments", t1432, true, true), "_Moments/Generated/2026-11-10")
+for _, f in ipairs({ "/T/Egypt/Generated/2026-11-10 14-32 Moments/Gen.mp4", "/T/Egypt/Day 1/Beside.afplink.mp4", "/T/Egypt/Day 2/renamed.mp4" }) do files[f] = nil end
 local before = reads
 m.scan("/T/Egypt", cache)
 expect("cache: nothing read again", reads, before)
@@ -132,13 +154,59 @@ expect("by time", m.by_time(found.list)[1].name, "Other")
 
 -- Where a moment's original is
 expect("project of", m.project_of("/T/Egypt/_Moments/Reef/Moray.afplink.mp4"), "/T/Egypt")
-expect("project of: not in Moments", m.project_of("/T/Egypt/Day 1/A.MP4"), nil)
+expect("project of: anywhere in it", m.project_of("/T/Egypt/Day 1/A.MP4"), "/T/Egypt")
 expect("project of: copied out", m.project_of("/Users/me/Desktop/Turtle.afplink.mp4"), nil)
 local l = fs.parse_json(link("Day 1/A.MP4", 20, 30, ',"roots":["/Old/Egypt","/T/Egypt"]'))
 expect("original", m.original(l, "/T/Egypt"), "/T/Egypt/Day 1/A.MP4")
 expect("original by roots", m.original(l, nil), "/T/Egypt/Day 1/A.MP4")
 expect("original: size differs", m.original(fs.parse_json('{"v":1,"clip":"Day 1/A.MP4","size":5}'), "/T/Egypt"), nil)
 expect("original: missing", m.original(fs.parse_json('{"v":1,"clip":"Day 9/X.MP4"}'), "/T/Egypt"), nil)
+-- A clip's moments by what the clip is: the same clip at another path (moved, renamed) still has them
+expect("of clip: moved", #m.of_clip(found.list, { relative = "Elsewhere/A2.MP4", size = 100, created = "2026-10-24T06:45:41Z" }), 2)
+expect("of clip: same fingerprint", #m.of_clip({ { name = "x", link = { clip = "Old/A.MP4", hash = "h", size = 1, ["in"] = 1, out = 2 } } },
+    { relative = "New/A.MP4", size = 1, hash = "h" }), 1)
+expect("of clip: other fingerprint", #m.of_clip({ { name = "x", link = { clip = "A.MP4", hash = "h", size = 1, ["in"] = 1, out = 2 } } },
+    { relative = "A.MP4", size = 1, hash = "g" }), 0)
+
+-- A clip moved away from the path its link names: found by what it is (docs/library-management.md §8)
+local T0 = moments_lib.parse_time("2026-10-24T06:45:41Z")
+local hashes, created, remembered, never_rename = {}, {}, {}, false
+fs.fingerprint = function(f) return hashes[f] end
+fs.created = function(f) return created[f] end
+fs.found_get = function(project, key) return remembered[project .. "|" .. key] end
+fs.found_set = function(project, key, tree) remembered[project .. "|" .. key] = tree end
+fs.never_rename = function() return never_rename end
+dir("/T/Moved/_ActionFootagePlayer")
+file("/T/Moved/Trip/X.MP4", 300); hashes["/T/Moved/Trip/X.MP4"] = "h1"
+file("/T/Moved/Trip/Y.MP4", 300); hashes["/T/Moved/Trip/Y.MP4"] = "h2"
+file("/T/Moved/a/C1.MP4", 400); created["/T/Moved/a/C1.MP4"] = T0
+file("/T/Moved/b/C2.MP4", 400); created["/T/Moved/b/C2.MP4"] = T0 + 100
+file("/T/Moved/New/D.MP4", 500); created["/T/Moved/New/D.MP4"] = T0 + 5
+file("/T/Moved/New/E.MP4", 500); created["/T/Moved/New/E.MP4"] = T0 + 9
+file("/T/Moved/New/G.MP4", 600); created["/T/Moved/New/G.MP4"] = T0 + 1
+file("/T/Moved/_Moments/Y.MP4", 300); hashes["/T/Moved/_Moments/Y.MP4"] = "h1"
+local function find(json) return m.original(fs.parse_json(json), "/T/Moved") end
+-- The player looks only where the link says (originals move only when the library is mended after): not found
+expect("moved: where the link says only", m.original(fs.parse_json('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h1"}'), "/T/Moved", { hint_only = true }), nil)
+local o, tree, _, how = find('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h1"}')
+expect("moved: by fingerprint", o, "/T/Moved/Trip/X.MP4")
+expect("moved: its new path", tree, "Trip/X.MP4")
+expect("moved: searched", how, "search")
+expect("moved: remembered", remembered["/T/Moved|h1"], "Trip/X.MP4")
+o, tree, _, how = find('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h1"}')
+expect("moved: from memory", how, "cache")
+expect("moved: no such fingerprint", find('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h9"}'), nil)
+expect("moved: by creation time", (find('{"v":1,"clip":"Old/C9.MP4","size":400,"created":"2026-10-24T06:45:41Z"}')), "/T/Moved/a/C1.MP4")
+expect("moved: creation time changed, by name", (find('{"v":1,"clip":"Old/D.MP4","size":500,"created":"2026-10-24T06:45:41Z"}')), "/T/Moved/New/D.MP4")
+expect("moved: size alone is no find", (find('{"v":1,"clip":"Old/F.MP4","size":600,"created":"2026-10-24T06:45:41Z"}')), nil)
+created["/T/Moved/New/E.MP4"] = T0 + 5
+m.forget_footage()
+expect("moved: two of that time, no name", (find('{"v":1,"clip":"Old/Q.MP4","size":500,"created":"2026-10-24T06:45:46Z"}')), nil)
+expect("moved: name and time first", (find('{"v":1,"clip":"Old/E.MP4","size":500,"created":"2026-10-24T06:45:46Z"}')), "/T/Moved/New/E.MP4")
+never_rename, remembered = true, {}
+expect("moved: never renamed, the name counts", (find('{"v":1,"clip":"Old/C7.MP4","size":400,"created":"2026-10-24T06:45:41Z"}')), nil)
+never_rename = false
+expect("moved: at its path, nothing searched", select(4, find('{"v":1,"clip":"Trip/Y.MP4","size":300,"hash":"zz"}')), "hint")
 
 -- Unique files
 local f, n = m.unique_file("/T/Egypt/_Moments", "Turtle")
@@ -148,7 +216,6 @@ expect("free file", (m.unique_file("/T/Egypt/_Moments", "Dolphin")), "/T/Egypt/_
 file("/T/Egypt/_Exports/Turtle (SDR).mov", 10)
 expect("unique export", (m.unique_file("/T/Egypt/_Exports", "Turtle", " (SDR).mov")), "/T/Egypt/_Exports/Turtle 2 (SDR).mov")
 expect("export's project", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov", "_Exports"), "/T/Egypt")
-expect("not a moment's", m.project_of("/T/Egypt/_Exports/Turtle (SDR).mov"), nil)
 
 -- Clip previews
 expect("clip preview", moments_lib.clip_preview_relative("Day 1/DJI_0068_D.MP4"), "Day 1/DJI_0068_D.afplink.mp4")

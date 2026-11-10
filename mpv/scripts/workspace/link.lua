@@ -11,6 +11,9 @@
 --   local link = require 'link'
 --   link.read(path)        -> the link's JSON text, nil for none
 --   link.read_keys(path)   -> { [key] = value } of all the mdta keys, nil when it can't be read
+--   link.photo(path)       -> a photo's link (afp:link in its XMP), its JSON text, nil for none
+--   link.created(path)     -> the file's own creation time (moov/mvhd), unix seconds, nil when it has none: what
+--                             ffmpeg and mpv show as creation_time and links keep as `created`
 
 local M = {}
 
@@ -120,6 +123,45 @@ function M.read_keys(path)
             for _, u in ipairs(udta) do
                 for ut, ua, ub in boxes(f, u[1], u[2]) do
                     if ut == "meta" then read_meta(f, ua, ub, out) end
+                end
+            end
+            break
+        end
+    end
+    f:close()
+    return out
+end
+
+-- A photo's link (`afp:link` in its XMP, as gyroflow-export writes it in a JPEG and afp-photo or afp-meta in a HEIC:
+-- an element, or an attribute as ImageIO may write it), within the file's first 64 KiB: its JSON text, nil for none
+function M.photo(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local head = f:read(65536) or ""
+    f:close()
+    local text = head:match("<afp:link>(.-)</afp:link>") or head:match('afp:link="([^"]*)"')
+    if not text then return nil end
+    return (text:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"'):gsub("&#34;", '"'):gsub("&apos;", "'"):gsub("&amp;", "&"))
+end
+
+-- Seconds from 1904-01-01 (QuickTime's epoch) to 1970-01-01
+local EPOCH_1904 = 2082844800
+
+function M.created(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    f:setvbuf("full", BUFFER)
+    local size = f:seek("end")
+    local out
+    for typ, a, b in boxes(f, 0, size) do
+        if typ == "moov" then
+            for mt, ma in boxes(f, a, b) do
+                if mt == "mvhd" then
+                    f:seek("set", ma)
+                    local h = f:read(12) or ""
+                    local t = h:byte(1) == 1 and u64(h, 5) or u32(h, 5)
+                    if t and t > 0 then out = t - EPOCH_1904 end
+                    break
                 end
             end
             break

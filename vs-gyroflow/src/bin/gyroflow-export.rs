@@ -1033,7 +1033,8 @@ fn lowres(path: &Path) -> Option<PathBuf> {
         names.push(format!("GL{}.LRV", &stem[2..]));
         names.push(format!("GL{}.lrv", &stem[2..]));
     }
-    names.into_iter().map(|n| dir.join(n)).find(|p| p.is_file())
+    // An empty or cut-short one (the camera stopped before writing it: seen, 0 bytes) isn't one
+    names.into_iter().map(|n| dir.join(n)).find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() >= 1024))
 }
 
 // A flipbook's times without --at: about 12 through the clip, 10 s apart at least, after its first second
@@ -1059,9 +1060,12 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let name = out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
 
-    let low = lowres(&path);
+    // A low-resolution copy that doesn't read (damaged, cut short): the clip itself, then
+    let (low, src) = match lowres(&path).map(|l| { let p = ffprobe(&l); (l, p) }) {
+        Some((l, Ok(p))) => (Some(l), p),
+        _ => (None, ffprobe(&path)?),
+    };
     let source = low.clone().unwrap_or_else(|| path.clone());
-    let src = if low.is_some() { ffprobe(&source)? } else { ffprobe(&path)? };
     let last = (info.duration - 0.05).max(0.0);
     let times: Vec<f64> = if opts.at_list.is_empty() { flipbook_times(info.duration) } else { opts.at_list.clone() }
         .into_iter().map(|t| t.clamp(0.0, last)).collect();

@@ -11,7 +11,8 @@
 #   projects <a|b>   all the projects found for it, in order
 #   relative <path>  its path in that project's tree
 #   original <tree path> <file>   the file at that path of the project's tree: the first location that has it
-#   own <file>       where its own file is read and written over the locations (conflict: two of them)
+#   own <file>       where its own file is read and written over the locations (the main one)
+#   others <a|b>     the other copies' own files, read never written
 #   new <dir>        where a project for it would be made
 #   gyroflow <file>  its Gyroflow project (- for none)
 #   gyroflow-new <file>  where a new one is written
@@ -203,7 +204,7 @@ clip HDD/Footage/Action 6/B.MP4
   original Action 6/B.MP4 HDD/Footage/Action 6/B.MP4
   own HDD/Footage/Action 6/B.afp.json
 
-case two own files of one clip: nothing is saved
+case two own files of one clip: the first location's is the main one, the other's read only
 tree
   P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Archive"},{"at":"Action 6","path":"../Inbox"}]}
   Archive/x.afplocation = {"project":"../P"}
@@ -215,7 +216,30 @@ tree
 clip Inbox/A.MP4
   project P
   relative Action 6/A.MP4
-  own conflict
+  own Archive/Action 6/A.afp.json
+  others Inbox/A.afp.json
+clip Archive/Action 6/A.MP4
+  own Archive/Action 6/A.afp.json
+  others Inbox/A.afp.json
+
+case a copies-only location first: its own file is the main one only when no other copy has one; then the archive's
+tree
+  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Work","copies":true},{"at":"","path":"../Archive"}]}
+  Work/x.afplocation = {"project":"../P"}
+  Work/A.MP4
+  Work/A.afp.json
+  Work/B.MP4
+  Work/B.afp.json
+  Archive/x.afplocation = {"project":"../P"}
+  Archive/A.MP4
+  Archive/B.MP4
+  Archive/B.afp.json
+clip Work/A.MP4
+  own Work/A.afp.json
+  others -
+clip Work/B.MP4
+  own Archive/B.afp.json
+  others Work/B.afp.json
 
 case the inbox placed in a subfolder of the tree
 tree

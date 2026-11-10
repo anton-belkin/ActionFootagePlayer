@@ -45,15 +45,16 @@ local platform = mp.get_property("platform") or ""
 local has_sidecar, sidecar_lib = pcall(require, 'sidecar')
 if not has_sidecar then mp.msg.warn("the workspace plugin's sidecar.lua isn't beside this plugin: marks can't be written") end
 -- Where the clip's own file is: the workspace plugin says (beside the archive's clip while a working copy plays; two
--- of them, none written: workspace.lua's own_file)
+-- of them, the main one written: workspace.lua's own_file)
 local function own_path(clip)
     local w = mp.get_property_native("user-data/workspace")
     if type(w) ~= "table" or w.clip ~= clip then return nil end
-    if w.own_conflict then return nil, w.own_conflict end
     return w.sidecar_file
 end
 local sidecar = has_sidecar and sidecar_lib.new({ parse_json = function(s) return (utils.parse_json(s)) end, format_json = utils.format_json,
-                                                  windows = platform == "windows" or package.config:sub(1, 1) == "\\", own_path = own_path })
+                                                  windows = platform == "windows" or package.config:sub(1, 1) == "\\", own_path = own_path,
+                                                  -- Noted in the project's catalog by the workspace plugin
+                                                  note = function(f) mp.commandv("script-message-to", "workspace", "catalog-note", f) end })
     or { read = function() return nil end, update = function() return false, "the workspace plugin isn't installed" end }
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's

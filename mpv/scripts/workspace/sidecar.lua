@@ -18,6 +18,7 @@
 --   sidecar.old_path(clip)           <clip>.marks.json
 --   sidecar.read(clip)               -> doc, file (nil: none, or not one of ours)
 --   sidecar.update(clip, fn)         fn(doc) changes the doc read fresh (a new one when there's none): ok, err
+--   env.note(file), when given, is told of each file written or removed (the project's catalog notes it)
 
 local M = {}
 
@@ -109,12 +110,13 @@ function M.new(env)
         local file = p
         if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil
             and (type(doc.tags) ~= "table" or next(doc.tags) == nil) then
-            if from then os.remove(from) end
+            if from then os.remove(from); if env.note then env.note(from) end end
             return true
         end
         local ok, err = write(file, doc)
         if not ok then return false, err end
-        if from and from ~= file then os.remove(from) end
+        if from and from ~= file then os.remove(from); if env.note then env.note(from) end end
+        if env.note then env.note(file) end
         return true
     end
 

@@ -2,8 +2,9 @@
 //
 // Tags (docs/library-management.md, "Tags"): words on clips, moments, photos and exports, kept with each in the
 // library: a clip's in its own file (`tags`, beside the clip, wherever it is over the locations), a moment's, clip
-// preview's or export's in its link (written again in place), a photo's in Project.afproject (`photo_tags`, by its
-// path in _Stills). The app's own ("Deleted in Photos") are tags like the others.
+// preview's or export's in its link (written again in place), a photo's in its own XMP (`dc:subject`, written by
+// afp-meta). Older versions kept a photo's in Project.afproject (`photo_tags`, by its path in _Stills): taken into
+// the photo at its next change, and out of the project's file. The app's own ("Deleted in Photos") are tags like the others.
 
 use crate::locations;
 use serde_json::{ json, Value };
@@ -21,13 +22,14 @@ fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
     std::fs::write(&tmp, serde_json::to_vec(doc).unwrap()).and_then(|_| std::fs::rename(&tmp, file)).map_err(|e| format!("{}: {e}", file.display()))
 }
 
-/// A clip's own file over the project's locations (workspace.rs's own_file): the one there is, else beside the clip
-/// in the first location that has it and isn't copies only. Err: two of them
+/// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
+/// copies in the library's locations in their order, then copies-only and this computer's own; the main file is beside
+/// the first copy that has one, else beside the first copy that isn't copies only or local
 pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
     let locs = locations::locations(root, &locations::mounts());
-    let copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies))).collect();
+    let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies || l.local))).collect();
+    copies.sort_by_key(|(_, late)| *late);
     let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| f.with_extension("afp.json").is_file()).collect();
-    if found.len() > 1 { return Err(format!("{tree} has {} own files: keep one first", found.len())); }
     let clip = found.first().map(|f| (*f).clone()).or_else(|| copies.iter().find(|(_, c)| !c).map(|(f, _)| f.clone()))
         .or_else(|| copies.first().map(|(f, _)| f.clone())).ok_or(format!("{tree} isn't in the project's locations"))?;
     Ok((clip.with_extension("afp.json"), clip))
@@ -35,9 +37,11 @@ pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
 
 /// Changes the tags of `items` ({ kind, id (its path in its view), path }): `add` and `remove`. `relink` writes a link
 /// again. What couldn't be done
-pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], relink: &dyn Fn(&Path, &str) -> Result<(), String>) -> Vec<String> {
+pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], relink: &dyn Fn(&Path, &str) -> Result<(), String>,
+           photo: &dyn Fn(&Path, &[String]) -> Result<(), String>) -> Vec<String> {
     let mut problems = Vec::new();
-    let mut photos: Vec<(String, Vec<String>)> = Vec::new();
+    let mut moved_in: Vec<String> = Vec::new();
+    let old = locations::read_json(&root.join(locations::PROJECT_FILE)).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({}));
     for it in items {
         let id = it["id"].as_str().unwrap_or("");
         let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
@@ -67,19 +71,28 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
                 if tags.is_empty() { l.as_object_mut().map(|o| o.remove("tags")); } else { l["tags"] = json!(tags); }
                 if let Err(e) = relink(&path, &l.to_string()) { problems.push(format!("{}: {e}", path.display())); }
             }
-            Some("still") => photos.push((id.to_string(), Vec::new())),
+            Some("still") => {
+                let mut now = crate::index::photo_tags(&path);
+                for t in old.get(id).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                    if !now.iter().any(|x| x.eq_ignore_ascii_case(t)) { now.push(t.to_string()); }
+                }
+                let tags = changed(&json!(now), add, remove);
+                match photo(&path, &tags) {
+                    Ok(()) => if old.get(id).is_some() { moved_in.push(id.to_string()); },
+                    Err(e) => problems.push(format!("{}: {e}", path.display())),
+                }
+            }
             _ => {}
         }
     }
-    if !photos.is_empty() {
+    // What the photos now keep themselves goes out of the project's file
+    if !moved_in.is_empty() {
         let file = root.join(locations::PROJECT_FILE);
-        let mut doc = locations::read_json(&file).unwrap_or(json!({}));
-        if !doc.get("photo_tags").is_some_and(Value::is_object) { doc["photo_tags"] = json!({}); }
-        for (id, _) in photos {
-            let tags = changed(&doc["photo_tags"][&id], add, remove);
-            if tags.is_empty() { doc["photo_tags"].as_object_mut().unwrap().remove(&id); } else { doc["photo_tags"][&id] = json!(tags); }
+        if let Some(mut doc) = locations::read_json(&file) {
+            if let Some(o) = doc.get_mut("photo_tags").and_then(Value::as_object_mut) { for id in &moved_in { o.remove(id); } }
+            if doc.get("photo_tags").and_then(Value::as_object).is_some_and(|o| o.is_empty()) { doc.as_object_mut().unwrap().remove("photo_tags"); }
+            if let Err(e) = write_json(&file, &doc) { problems.push(e); }
         }
-        if let Err(e) = write_json(&file, &doc) { problems.push(e); }
     }
     problems
 }
@@ -102,19 +115,29 @@ mod tests {
         let items = vec![json!({ "kind": "clip", "id": "Day 1/A.MP4", "path": w.join("Day 1/A.MP4").display().to_string() }),
                          json!({ "kind": "clip", "id": "Day 1/B.MP4", "path": w.join("Day 1/B.MP4").display().to_string() }),
                          json!({ "kind": "still", "id": "A 1.heic", "path": p.join("_Stills/A 1.heic").display().to_string() })];
-        assert!(set(&p, &items, &["turtle".into(), "best".into()], &[], &|_, _| Ok(())).is_empty());
+        // A photo's tags go to its writer (afp-meta); what the project's file kept for it is taken along, then out
+        std::fs::write(p.join("_Stills/A 1.heic"), b"x").unwrap();
+        let mut doc = locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap();
+        doc["photo_tags"] = json!({ "A 1.heic": ["old"] });
+        std::fs::write(p.join(locations::PROJECT_FILE), doc.to_string()).unwrap();
+        let written = std::cell::RefCell::new(Vec::new());
+        let photo = |f: &Path, t: &[String]| { written.borrow_mut().push((f.to_path_buf(), t.to_vec())); Ok(()) };
+        assert!(set(&p, &items, &["turtle".into(), "best".into()], &[], &|_, _| Ok(()), &photo).is_empty());
+        assert_eq!(written.borrow()[0], (p.join("_Stills/A 1.heic"), vec!["old".to_string(), "turtle".into(), "best".into()]));
+        assert!(locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap().get("photo_tags").is_none());
         // The archive's own file (the working copy is copies only), marks kept; B's made in the archive
         let a_doc = locations::read_json(&a.join("Day 1/A.afp.json")).unwrap();
         assert_eq!(a_doc["tags"], json!(["turtle", "best"]));
         assert_eq!(a_doc["marks"], json!([]));
         assert!(a.join("Day 1/B.afp.json").is_file() && !w.join("Day 1/B.afp.json").exists());
-        assert_eq!(locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap()["photo_tags"]["A 1.heic"], json!(["turtle", "best"]));
         // Removed: B's file, holding nothing else, goes
-        assert!(set(&p, &items[1..2], &[], &["TURTLE".into(), "best".into()], &|_, _| Ok(())).is_empty());
+        assert!(set(&p, &items[1..2], &[], &["TURTLE".into(), "best".into()], &|_, _| Ok(()), &|_, _| Ok(())).is_empty());
         assert!(!a.join("Day 1/B.afp.json").exists());
-        // Two own files: refused
+        // Two own files: the archive's is the main one (the working folder is copies only), the other isn't touched
         std::fs::write(w.join("Day 1/A.afp.json"), "{}").unwrap();
-        assert_eq!(set(&p, &items[..1], &["x".into()], &[], &|_, _| Ok(())).len(), 1);
+        assert!(set(&p, &items[..1], &["x".into()], &[], &|_, _| Ok(()), &|_, _| Ok(())).is_empty());
+        assert_eq!(locations::read_json(&a.join("Day 1/A.afp.json")).unwrap()["tags"], json!(["turtle", "best", "x"]));
+        assert_eq!(std::fs::read_to_string(w.join("Day 1/A.afp.json")).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(&top);
     }
 }

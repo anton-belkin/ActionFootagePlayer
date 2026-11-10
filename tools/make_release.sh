@@ -51,7 +51,7 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut; do
+for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
