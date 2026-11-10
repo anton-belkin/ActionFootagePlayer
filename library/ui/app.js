@@ -184,6 +184,9 @@ function deriveSource(it, probe) {
   it.colorGroup = col ? col[0] : null;
   it.color = col ? col[1] : null;
   it.motion = probe ? probe.mode != null : null;
+  // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
+  // "EIS: RockSteady", "FlowState"); null: off, or not said
+  it.camStab = probe && typeof probe.stabilized_in_camera === "string" ? probe.stabilized_in_camera : null;
   it.is360 = !!(probe && (probe.spherical || probe.rig360));
 }
 function deriveTransform(it, view) {
@@ -201,7 +204,7 @@ function deriveTransform(it, view) {
 }
 function tfText(it) {
   const p = [];
-  if (it.motion === false && !it.gyroflow) p.push("no motion data");
+  if (it.motion === false && !it.gyroflow) p.push(it.camStab ? "stabilized in the camera" : "no motion data");
   else if (it.gyroflow) p.push("Gyroflow project");
   else if (it.stab) p.push(it.stab === "Stabilized" ? "stabilized" : it.stab === "Wider" ? "wider" : "not stabilized");
   if (it.horizon && it.stab !== "Off") p.push(it.horizon === "Level" ? "level" : "horizon free");
@@ -335,7 +338,7 @@ function buildFacets() {
     sections.push({ id: "src", title: "Source", facets: [
       { id: "cam", title: "Camera", opts: camOpts },
       { id: "col", title: "Color", opts: colOpts },
-      { id: "mot", title: "Motion data", opts: [L("mot:y", "Gyro in the file", (it) => it.motion === true), L("mot:n", "None", (it) => it.motion === false)] },
+      { id: "mot", title: "Motion data", opts: [L("mot:y", "Gyro in the file", (it) => it.motion === true), L("mot:cam", "None, stabilized in the camera", (it) => it.motion === false && !!it.camStab), L("mot:n", "None", (it) => it.motion === false && !it.camStab)] },
       { id: "shp", title: "Shape", opts: [L("shp:flat", "Flat", (it) => it.probed && !it.is360), L("shp:360", "360°", (it) => it.is360)] },
     ] });
     const frames = distinct(items.filter((i) => i.frame && i.frame !== "As recorded"), (i) => i.frame);
@@ -569,7 +572,7 @@ function chips(it) {
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
     if (!it.preview) c.push(["chip", "No preview"]);
     if (it.gyroflow) c.push(["chip ok", "Gyroflow project"]);
-    if (it.motion === false) c.push(["chip", "No motion data"]);
+    if (it.motion === false) c.push(["chip", it.camStab ? "Stabilized in the camera" : "No motion data"]);
     if (it.is360) c.push(["chip fast", "360°"]);
   } else if (it.kind === "moment") {
     for (const p of ["HDR", "SDR"]) { const st = (it.renders || {})[p]; if (st) c.push(["chip " + (st === "current" ? "ok" : "stale"), p + (st === "current" ? "" : " stale")]); }
@@ -1421,7 +1424,7 @@ function itemInfo(it) {
     const probe = PROBES[it.path];
     h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
-      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? "None" : ""],
+      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
     const tf = stabText(it.own && it.own.view);
