@@ -17,6 +17,7 @@ use vapoursynth4_sys::*;
 use gyroflow_core::{ StabilizationManager, filesystem };
 
 pub mod probe;
+pub mod lens_pick;
 pub mod project;
 pub mod gpu_lut;
 pub mod edges;
@@ -47,6 +48,7 @@ pub mod export360;
 pub mod reframe;
 pub mod gpu_table;
 pub mod translation;
+pub mod optical;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -454,6 +456,9 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays
         let (m, size) = motion::Motion::open(project, &url, lookahead).map_err(|e| format!("Can't open {project}: {e}"))?;
         m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
+        // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
+        lens_pick::apply(&stab, project);
         if lens_only && stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
             return Err(format!("{project}: no lens profile to correct the lens with"));
         }

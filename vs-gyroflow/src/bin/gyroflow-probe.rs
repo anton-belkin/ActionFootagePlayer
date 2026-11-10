@@ -7,12 +7,15 @@
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
 //                                                       stabilize it with the default preset
-//   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile Gyroflow
-//                                                       takes for it ("in the file", a profile's name, "" for none),
-//                                                       to correct the lens alone, and "camera"
+//   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
+//                                                       player takes for it ("in the file", the label of the one picked
+//                                                       from Gyroflow's database, lens_pick.rs, "" for none), to correct
+//                                                       the lens alone, and "camera"
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
-// the water, for the lens under water to follow it (water.rs), "rotation": how much a player turns the video to
+// the water, for the lens under water to follow it (water.rs), "stabilized_in_camera": how the camera stabilized the
+// picture itself ("HyperSmooth (HS EIS)", "EIS: RockSteady", "FlowState"), false when it recorded that it didn't, null
+// when it doesn't say (such a clip isn't stabilized again here, whatever motion data it has), "rotation": how much a player turns the video to
 // show it upright, clockwise, 0, 90, 180 or 270 (its display matrix, mp4meta.rs: a camera held vertical), which the
 // plugin's output already has, and "spherical": what a stitched 360° video says it is (its projection, stereo
 // layout, pose or initial view: probe::spherical), null for any other video. A 360 camera's own file (its lenses in
@@ -23,9 +26,15 @@
 // "north": {...}, "world": {"held_by"}, "seconds": [[travel, north confidence], ...]} (sphere360::Motion's report).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 //
-// `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
-// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" a profile's name from
-// Gyroflow's database, or "" when it has none (Unknown: pick one in Gyroflow).
+// `gyroflow-probe --lens <video>`: the camera and the lens profile the player takes for it, for the side panel's Source
+// tab, read once the clip plays, and the Library's lens type choice: {"camera":"DJI OsmoAction6","lens":"in the file",
+// "types":[{"id":"wide","label":"Wide","profile":null},...],"type":null,"recorded":"wide"}. "lens": the label of the
+// profile loaded (the database's pick with its name and stars, "Nearest: " when it isn't made for exactly this mode, or
+// "<Type>, from the curated list: <name>": lens_pick.rs), or "" when it has none (Unknown: pick one in Gyroflow);
+// "types": the lens types the curated list has for the camera (resources/curated_lenses.json, empty for most);
+// "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote,
+// "mode": the camera's own number for it (DJI's fov_type; null for cameras without lens types), which the side panel
+// shows while the list doesn't name it: "Unknown (mode 6)".
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights
@@ -36,7 +45,7 @@
 // recording, for the view360 plugin to play while it shows the recording, "hold" false (not asked for), "applied" or
 // "needed" (to be measured: gyroflow-export --reframe recording --measure-hold); {"error": why} when there's none.
 
-use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
+use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, camera_and_lens, lens_info, spherical }, water };
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
@@ -85,8 +94,7 @@ fn main() {
     if lens {
         // Gyroflow's readers take paths as URLs: a relative one reads nothing
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
-        let (camera, lens) = camera_and_lens(&path).unwrap_or_default();
-        println!("{}", serde_json::json!({ "camera": camera, "lens": lens }));
+        println!("{}", serde_json::to_value(lens_info(&path).unwrap_or_default()).unwrap_or_default());
         return;
     }
     if headings {
@@ -112,6 +120,8 @@ fn main() {
     // Kept per file (and per build of this tool): opening a clip waits for this answer, and reading the file for it
     // takes ~0.4 s cold (from a NAS more)
     let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
+    // The lens type given to the clip by hand decides its lens profile: an answer kept for another isn't this one
+    let build = format!("{build}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default());
     if library {
         let cache = vs_gyroflow::file_cache("library", &path, &build);
         if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
@@ -146,9 +156,15 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
     if let Some(v) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
         return v;
     }
-    let mut out = match probe(&path) {
+    let (answer, in_camera) = probe_with_camera_stabilization(&path);
+    let mut out = match answer {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
+    };
+    out["stabilized_in_camera"] = match in_camera {
+        Some(how) if how.is_empty() => false.into(),
+        Some(how) => how.into(),
+        None => serde_json::Value::Null,
     };
     // Nothing to stabilize with: whether the lens can be corrected on its own ("lens": the profile, "" for none)
     if out["mode"].is_null() {

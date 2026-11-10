@@ -5,7 +5,8 @@
 
 use std::io::{ Read, Seek, SeekFrom };
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
-use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
+use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier };
+use crate::lens_pick;
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
 /// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
@@ -20,6 +21,19 @@ pub fn camera(path: &str) -> Option<(String, Option<String>)> {
 }
 
 pub fn probe(path: &str) -> Result<serde_json::Value, String> {
+    probe_with_camera_stabilization(path).0
+}
+
+/// [probe]'s answer, and whether the camera stabilized the picture itself (HyperSmooth, EIS, FlowState): its name
+/// for it, "" when it recorded that it didn't, None when it doesn't say (or the file can't be read). Said whatever
+/// motion data the clip has: a DJI with EIS on records none, a GoPro with HyperSmooth on records it all the same
+pub fn probe_with_camera_stabilization(path: &str) -> (Result<serde_json::Value, String>, Option<String>) {
+    let mut in_camera = None;
+    let answer = probe_inner(path, &mut in_camera);
+    (answer, in_camera)
+}
+
+fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json::Value, String> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
@@ -32,6 +46,7 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
     let samples = input.samples.as_deref().unwrap_or_default();
+    *in_camera = stabilized_in_camera(&camera, samples);
 
     let mut motion_samples = 0;
     for s in samples {
@@ -49,33 +64,45 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
             _ => format!("{camera}: no motion data"),
         });
     }
-    in_camera_stabilization_off(&camera, samples)?;
+    match in_camera.as_deref() {
+        Some("") => (),
+        Some(how) => return Err(match camera.as_str() {
+            "DJI" => format!("in-camera stabilization is on ({how})"),
+            _ => format!("{how} is on in the camera"),
+        }),
+        None if ["DJI", "GoPro", "Insta360"].contains(&camera.as_str()) => return Err(format!("{camera}: in-camera stabilization state unknown")),
+        None => return Err(format!("{camera}: only DJI, GoPro and Insta360 files are stabilized without a project")),
+    }
     // DJI clips are left as they were before this check (the Osmo Action 6 plays well; no clip at hand to check that
     // its lens comes through here)
-    if camera != "DJI" && !has_lens_profile(&input, samples, video.width, video.height, video.fps) {
+    if camera != "DJI" && !has_lens_profile(path, &input, samples, video.width, video.height, video.fps) {
         return Err(format!("{camera}: no lens profile for this camera and mode in Gyroflow's database"));
     }
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
 }
 
-// Ok when the camera recorded that it didn't stabilize the picture itself (EIS). Footage the camera already
-// stabilized gets worse stabilized again, so on, or not said, is an Err with the reason: such clips play as they are.
-// The signs are the ones Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
-fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(), String> {
+// Whether the camera stabilized the picture itself: its name for how ("HyperSmooth (HS EIS)", "EIS: RockSteady",
+// "FlowState"), "" when it recorded that it didn't, None when it doesn't say. Footage the camera already stabilized
+// gets worse stabilized again, so only "" is stabilized here; on, or not said, plays as it is. The signs are the ones
+// Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
+fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> {
     let default_tags = || samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Default));
     let metadata = || default_tags().filter_map(|m| match m.get(&TagId::Metadata).map(|t| &t.value) {
         Some(TagValue::Json(v)) => Some(v.get()),
         _ => None,
     });
     match camera {
-        // ClipMeta.eis_status (dvtm_library.proto): EIS_OFF is 0. With EIS on the cameras don't record motion data at
-        // all (Osmo Action 6), so this mostly confirms it. EIS_OFF_WITH_CROP (7) and the horizon modes count as on
-        // until a clip shows what they do
-        "DJI" => match metadata().find_map(|v| find_key(v, "eis_status").and_then(|x| x["status"].as_i64())) {
-            Some(0) => Ok(()),
-            Some(s) => Err(format!("in-camera stabilization is on (EIS status {s})")),
-            None => Err("in-camera stabilization state unknown".into()),
-        },
+        // ClipMeta.eis_status (dvtm_library.proto's EisStatusType), written with EIS on or off. With EIS on the
+        // cameras don't record motion data at all (Osmo Action 6). Named only where the enum's name is DJI's own mode;
+        // the Osmo Action 6 writes 4 (EIS_TRADEOFF) for a mode not matched to its menu yet. EIS_OFF_WITH_CROP (7)
+        // counts as on until a clip shows what it does
+        "DJI" => metadata().find_map(|v| find_key(v, "eis_status").and_then(|x| x["status"].as_i64())).map(|s| match s {
+            0 => String::new(),
+            1 => "EIS: RockSteady".into(),
+            2 => "EIS: HorizonSteady".into(),
+            5 => "EIS: HorizonBalancing".into(),
+            s => format!("EIS (status {s})"),
+        }),
         // GoPro records the gyro whatever HyperSmooth is, so only its settings tell: EISA (what was applied: "N", "Y",
         // "HS EIS", "HS HLevel", ...; "N/A" says nothing), else EISE (enabled: "Y"/"N"). For HERO5/6 telemetry-parser
         // reads EISA from the SETT box. Checked on GoPro's sample clips (gopro/gpmf-parser): HERO5/6 "N", HERO7/8 "HS EIS"
@@ -84,40 +111,60 @@ fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(
                 Some(TagValue::String(v)) => Some(v.get().trim().to_string()).filter(|v| v != "N/A"),
                 _ => None,
             });
-            match tag(b"EISA").or_else(|| tag(b"EISE")).as_deref() {
-                Some("N") => Ok(()),
-                Some(v) => Err(format!("HyperSmooth is on ({v})")),
-                None => Err("GoPro: HyperSmooth state unknown".into()),
-            }
+            tag(b"EISA").or_else(|| tag(b"EISE")).map(|v| match v.as_str() {
+                "N" => String::new(),
+                "Y" => "HyperSmooth".into(),
+                v => format!("HyperSmooth ({v})"),
+            })
         },
         // Insta360 records the gyro always, and is_flowstate_online when the camera applied FlowState itself. A camera
         // that predates the field reads as false too (protobuf's default), as it does in Gyroflow
-        "Insta360" => match metadata().find_map(|v| v.get("is_flowstate_online")?.as_bool()) {
-            Some(false) => Ok(()),
-            Some(true) => Err("FlowState is on in the camera".into()),
-            None => Err("Insta360: FlowState state unknown".into()),
-        },
-        _ => Err(format!("{camera}: only DJI, GoPro and Insta360 files are stabilized without a project")),
+        "Insta360" => metadata().find_map(|v| v.get("is_flowstate_online")?.as_bool()).map(|on| if on { "FlowState".into() } else { String::new() }),
+        _ => None,
     }
 }
 
 // Without a lens profile the stabilization is worse than none. Newer GoPros and some Insta360s record their lens in
-// the file; the rest are looked up in Gyroflow's database the way Gyroflow does when it opens the video
-fn has_lens_profile(input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
-    let builtin = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
-        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    if builtin { return true; }
-    let Ok(id) = CameraIdentifier::from_telemetry_parser(input, width, height, fps) else { return false };
-    let id = id.get_identifier_for_autoload();
-    if id.is_empty() { return false; }
-    let mut db = LensProfileDatabase::default();
-    db.load_all();
-    db.contains_id(&id)
+// the file; for the rest a curated profile of the clip's lens type, or the best profile of the camera and lens mode
+// in Gyroflow's database (lens_pick.rs)
+fn has_lens_profile(path: &str, input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
+    let builtin = lens_in_file(samples);
+    builtin || chosen_lens(path, input, width, height, fps, builtin).is_some()
 }
 
-/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile Gyroflow would load for the video ("" when
-/// none): what a cut must still read as (cut.rs)
-pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
+// Whether the file has its own lens (DJI with EIS off, newer GoPros)
+fn lens_in_file(samples: &[SampleInfo]) -> bool {
+    samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
+        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name))
+}
+
+/// The profile the player loads for the video, as `lens_pick::apply` does when it plays: the curated one of its lens
+/// type, else (unless the lens is in the file) the database's pick
+fn chosen_lens(path: &str, input: &Input, width: usize, height: usize, fps: f64, in_file: bool) -> Option<lens_pick::Pick> {
+    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
+    lens_pick::for_video(path, &id, in_file)
+}
+
+/// The camera and its lens as the player takes them, for the side panel's Source tab and the Library
+#[derive(Debug, Default, serde::Serialize)]
+pub struct LensInfo {
+    /// As Gyroflow tells it: "DJI OsmoAction6"
+    pub camera: String,
+    /// "in the file", the label of the profile loaded (lens_pick.rs: the database's pick with its stars, "Nearest: "
+    /// when it isn't made for exactly this mode, or "<Type>, from the curated list: <name>"), or "" when none
+    pub lens: String,
+    /// The lens types the curated list has for the camera ({id, label, profile}), empty for most cameras
+    pub types: Vec<lens_pick::LensType>,
+    /// The type given to the clip by hand (source.lens_type in its .afp.json), and the one the camera recorded
+    #[serde(rename = "type")]
+    pub chosen: Option<String>,
+    pub recorded: Option<String>,
+    /// The lens mode the camera wrote, as its number (DJI's fov_type, the HERO4's SETT), for a camera with lens types: shown as
+    /// "Unknown (mode 6)" while the curated list doesn't name it
+    pub mode: Option<u64>,
+}
+
+pub fn lens_info(path: &str) -> Option<LensInfo> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len() as usize;
@@ -125,15 +172,22 @@ pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
     let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
-    let samples = input.samples.as_deref().unwrap_or_default();
-    // The lens the file itself has (DJI, newer GoPros), else the one Gyroflow's database has for it
-    let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
-        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    let lens = if in_file { "in the file".to_string() } else {
-        CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps)
-            .map(|id| id.get_identifier_for_autoload()).unwrap_or_default()
+    let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
+    let lens = match chosen_lens(path, &input, video.width, video.height, video.fps, in_file) {
+        Some(p) => p.label(),
+        None if in_file => "in the file".to_string(),
+        None => String::new(),
     };
-    Some((camera, lens))
+    let types = lens_pick::lens_types(&camera);
+    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path) };
+    let mode = if types.is_empty() { None } else { recorded_lens_mode(path) };
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens })
+}
+
+/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video
+/// (`LensInfo::lens`): what the side panel shows, and what a cut must still read as (cut.rs)
+pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
+    lens_info(path).map(|l| (l.camera, l.lens))
 }
 
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
@@ -179,6 +233,39 @@ pub fn color_profile(path: &str) -> Option<&'static str> {
         22 => "dlog2",
         _ => "other",
     })
+}
+
+/// The lens mode (FOV) a DJI camera recorded the video in: StreamMeta.fov_type (dvtm_library.proto's FOVType: 0
+/// default, 1 normal, 2 narrow, 3 wide, 4 snarrow, 5 natural wide, 6 extreme wide, 7 flat) in the first sample of its
+/// metadata track. The Osmo Action 6 writes it in every clip, with EIS on or off and with or without motion data,
+/// while its lens's own calibration only comes with EIS off in its usual mode. The enum's names aren't the camera's:
+/// what each is on the Action 6 is in resources/curated_lenses.json (lens_pick.rs). None for other cameras
+/// The lens mode the camera wrote, as its own number: DJI's fov_type, the HERO4's SETT (markers::hero4_lens_mode).
+/// What curated_lenses.json's "recorded" names
+pub fn recorded_lens_mode(path: &str) -> Option<u64> {
+    dji_fov_type(path).or_else(|| crate::markers::hero4_lens_mode(path))
+}
+
+pub fn dji_fov_type(path: &str) -> Option<u64> {
+    // Where each model's schema puts FOVType in StreamMeta (checked against the .proto, and on Action 6 clips)
+    const STREAM_FOV_FIELD: &[(&str, u64)] = &[
+        ("dvtm_ac206.proto", 5), // Osmo Action 6
+        ("dvtm_oq101.proto", 5), // Osmo 360
+    ];
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let mut fov = None;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel2 = cancel.clone();
+    let _ = telemetry_parser::util::get_metadata_track_samples(&mut file, size, true, |_info, data: &[u8], _pos, _md| {
+        if cancel2.load(Ordering::Relaxed) { return; }
+        cancel2.store(true, Ordering::Relaxed);
+        let Some(proto) = dji_schema(data) else { return };
+        let Some(&(_, field)) = STREAM_FOV_FIELD.iter().find(|(p, _)| *p == proto) else { return };
+        // A FOVType message without its field is the default (0) in proto3
+        fov = pb_bytes(data, 2).and_then(|s| pb_bytes(s, field)).map(|c| pb_varint(c, 1).unwrap_or(0));
+    }, cancel);
+    fov
 }
 
 // GP-Log as gplog_hlg.cube is made for: by the firmware where GoPro's own LUTs put 18 % grey where it does. Earlier

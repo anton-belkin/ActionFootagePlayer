@@ -73,6 +73,12 @@ struct Job {
     current: Option<String>,
     message: Option<String>,
     failures: Vec<(String, String)>,
+    /// What the batch left out, and why (Stabilize optically: clips with their own motion data, a lens not known...)
+    left_out: Vec<(String, String)>,
+    /// The clips Stabilize optically has made (its status' `made_paths`): left out of it when it runs again after
+    /// stepping aside (a move of the project)
+    #[serde(skip)]
+    made_paths: Vec<String>,
     #[serde(skip)]
     request: Value,
 }
@@ -348,6 +354,28 @@ fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
     cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", player.display()))
 }
 
+/// gyroflow-optical (vs-gyroflow's: Stabilize optically), beside the player's gyroflow-probe; AFL_OPTICAL first
+fn optical_tool() -> Result<PathBuf, String> {
+    if let Some(p) = std::env::var_os("AFL_OPTICAL").filter(|p| !p.is_empty()) { return Ok(PathBuf::from(p)); }
+    let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there: install ActionFootagePlayer again")?;
+    let tool = probe.with_file_name(if cfg!(windows) { "gyroflow-optical.exe" } else { "gyroflow-optical" });
+    if tool.is_file() { Ok(tool) } else { Err("This ActionFootagePlayer has no gyroflow-optical: update it".into()) }
+}
+
+// Stabilize optically: vs-gyroflow's gyroflow-optical, the request as the player's batches have it, its stderr the log
+fn start_optical(request: &Path, log: &Path) -> Result<Child, String> {
+    let tool = optical_tool()?;
+    let log = std::fs::File::create(log).map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(&tool);
+    cmd.arg("--batch").arg(request).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(log));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", tool.display()))
+}
+
 fn jobs_dir() -> PathBuf {
     std::env::temp_dir().join(format!("ActionFootageLibrary-{}", std::process::id()))
 }
@@ -375,7 +403,7 @@ fn start_job(inner: &mut Inner) {
     let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
-        .and_then(|_| start_player(&request, &log));
+        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log) });
     match started {
         Ok(child) => {
             job.state = JobState::Starting;
@@ -409,6 +437,15 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
             Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
         }).collect();
     }
+    if let Some(f) = st.get("made_paths").and_then(Value::as_array) {
+        job.made_paths = f.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    }
+    if let Some(f) = st.get("left_out").and_then(Value::as_array) {
+        job.left_out = f.iter().filter_map(|p| {
+            let p = p.as_array()?;
+            Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
+        }).collect();
+    }
     true
 }
 
@@ -435,14 +472,19 @@ fn tick(inner: &mut Inner) {
                 if !job.state.finished() {
                     job.state = if run.stop_asked.is_some() { JobState::Stopped } else { JobState::Failed };
                     if job.state == JobState::Failed {
-                        job.message = Some(log_error(&run.dir.join("log.txt"))
-                            .unwrap_or_else(|| format!("ActionFootagePlayer stopped ({status})")));
+                        let log = run.dir.join("log.txt");
+                        job.message = Some(if job.kind == "optical" {
+                            std::fs::read_to_string(&log).ok().and_then(|t| t.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string))
+                                .unwrap_or_else(|| format!("gyroflow-optical stopped ({status})"))
+                        } else {
+                            log_error(&log).unwrap_or_else(|| format!("ActionFootagePlayer stopped ({status})"))
+                        });
                     }
                 }
             } else if !has_status && run.started.elapsed() > START_TIMEOUT {
                 let _ = run.child.kill();
                 job.state = JobState::Failed;
-                job.message = Some("ActionFootagePlayer didn't start the batch".into());
+                job.message = Some(if job.kind == "optical" { "gyroflow-optical didn't start".into() } else { "ActionFootagePlayer didn't start the batch".into() });
             } else if run.stop_asked.is_some_and(|t| t.elapsed() > STOP_TIMEOUT) {
                 let _ = run.child.kill();
             }
@@ -456,6 +498,12 @@ fn tick(inner: &mut Inner) {
                     job.state = JobState::Waiting;
                     (job.done, job.total, job.failed, job.made, job.fraction, job.current, job.message) = (0, 0, 0, None, None, None, None);
                     job.failures.clear();
+                    job.left_out.clear();
+                    // Stabilize optically again: the clips it made already aren't made again
+                    if job.kind == "optical" && !job.made_paths.is_empty() {
+                        let made = std::mem::take(&mut job.made_paths);
+                        if let Some(c) = job.request.get_mut("clips").and_then(Value::as_array_mut) { c.retain(|p| !p.as_str().is_some_and(|p| made.iter().any(|m| m == p))); }
+                    }
                     inner.jobs.push(job);
                 }
             }
@@ -979,10 +1027,15 @@ async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Resul
             for j in inner.jobs.iter_mut().filter(|j| j.project == old && !j.state.finished()) {
                 j.project = new.clone();
                 j.request["project"] = json!(new);
-                // Paths it was kept to, in the project's folder, move with it
-                if let Some(only) = j.request.get_mut("only").and_then(Value::as_array_mut) {
-                    for o in only.iter_mut() {
-                        if let Some(rest) = o.as_str().and_then(|x| x.strip_prefix(&old)) { *o = json!(format!("{new}{rest}")); }
+                // Paths it was kept to, in the project's folder, move with it (Stabilize optically's clips: those of a
+                // location inside the project's folder)
+                for key in ["only", "clips"] {
+                    if let Some(only) = j.request.get_mut(key).and_then(Value::as_array_mut) {
+                        for o in only.iter_mut() {
+                            // Under the folder itself, not one whose name begins the same ("Trip" and "Trip 2")
+                            let rest = o.as_str().and_then(|x| x.strip_prefix(&old)).filter(|r| r.is_empty() || r.starts_with('/') || r.starts_with('\\'));
+                            if let Some(rest) = rest { *o = json!(format!("{new}{rest}")); }
+                        }
                     }
                 }
             }
@@ -1111,6 +1164,40 @@ async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>
     tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
                                                            &|f, t| write_photo_tags(meta.as_ref(), f, t)))
         .await.map_err(|e| e.to_string())
+}
+
+// ---------- Stabilize optically: the lens ----------
+
+/// The lens types to choose from for these clips (gyroflow-optical --lens-types: vs-gyroflow's lens_pick, per camera):
+/// for each path asked, its camera and [[type, label]]; none for a camera without (GoPro: its lens is in the file)
+#[tauri::command]
+async fn lens_types(paths: Vec<String>) -> Result<Vec<Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Value>, String> {
+        let tool = optical_tool()?;
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--lens-types").args(&paths).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        Ok(lens_types_of(&String::from_utf8_lossy(&out.stdout)))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// gyroflow-optical --lens-types' lines: {"path", "camera", "types": [[type, label]...]}, those that are
+fn lens_types_of(text: &str) -> Vec<Value> {
+    text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["path"].is_string() && v["types"].is_array())
+        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"] })).collect()
+}
+
+/// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
+#[tauri::command]
+async fn set_lens_type(shared: State<'_, Shared>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if lens_type.as_deref().is_some_and(|t| t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
+        return Err("no such lens type".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || tags::set_lens_type(&root, &clips, lens_type.as_deref())).await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------
@@ -1562,7 +1649,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 7] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render"];
+const KINDS: [&str; 8] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical"];
 
 #[tauri::command]
 async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
@@ -1581,6 +1668,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
+        "optical" => "Stabilize optically".to_string(),
         "render" => format!("Render ({})", options.get("profiles").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_else(|| "HDR".into())),
         _ => format!("Export all moments ({})", if sdr { "SDR" } else { "HDR" }),
     };
@@ -1609,6 +1697,15 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         request["layout"] = json!(layout);
     }
     if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
+    // The clips, by their paths in the project's tree: each one's file is the copy its own files are beside (the main
+    // one, tags::clip_own), where its Gyroflow project goes. Redo: those with a project made again
+    if kind == "optical" {
+        let trees: Vec<&str> = options.get("clips").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+        let clips: Vec<String> = trees.iter().filter_map(|t| tags::clip_own(&root, t).ok()).map(|(_, clip)| clip.display().to_string()).collect();
+        if clips.is_empty() { return Err("Select clips to stabilize".into()); }
+        request["clips"] = json!(clips);
+        request["redo"] = json!(options.get("redo").and_then(Value::as_bool).unwrap_or(false));
+    }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
             .filter(|p| index::RENDER_PROFILES.contains(p)).map(str::to_string).collect();
@@ -1619,7 +1716,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), request,
+        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request,
     };
     let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
@@ -1629,7 +1726,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
             let request = json!({ "kind": "clips-finish", "project": project });
             let id = inner.next_id;
             inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
-                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), request });
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request });
         }
     }
     tick(&mut inner);
@@ -1793,7 +1890,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend, missing_links])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items, export_library, mend, missing_links])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1950,6 +2047,108 @@ mod tests {
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a
     // trip with Project.afproject in it). Without them it's skipped
+    // Stabilize optically stepping aside (the project being moved): stopped, held, queued again without the clips it
+    // made already
+    #[cfg(unix)]
+    #[test]
+    fn an_optical_batch_steps_aside() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("afl-optical-aside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tool = dir.join("gyroflow-optical");
+        std::fs::write(&tool, "#!/bin/sh\n/usr/bin/python3 -I - \"$2\" <<'EOF'\n\
+import json, os, sys, time\n\
+req = json.load(open(sys.argv[1]))\n\
+st = {'state': 'running', 'done': 1, 'total': 2, 'made': 1, 'current': 'B.MP4', 'made_paths': [req['clips'][0]], 'left_out': [], 'failures': []}\n\
+open(req['status'], 'w').write(json.dumps(st))\n\
+while not os.path.exists(req['stop']): time.sleep(0.05)\n\
+st['state'] = 'stopped'; open(req['status'], 'w').write(json.dumps(st))\n\
+EOF\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _one = OPTICAL_TOOL.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AFL_OPTICAL", &tool);
+        let project = dir.to_string_lossy().into_owned();
+        let mut inner = Inner::default();
+        inner.jobs.push(Job {
+            id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: project.clone(), project_name: "trip".into(),
+            state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+        });
+        let t0 = Instant::now();
+        while inner.jobs[0].made_paths.is_empty() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
+        // As move_project asks it
+        inner.held = Some(project.clone());
+        let run = inner.running.as_mut().unwrap();
+        let _ = std::fs::write(run.dir.join("stop"), b"");
+        run.stop_asked = Some(Instant::now());
+        run.yielding = true;
+        while inner.running.is_some() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
+        std::env::remove_var("AFL_OPTICAL");
+        let job = &inner.jobs[0];
+        assert_eq!(job.state, JobState::Waiting);
+        assert!(inner.running.is_none(), "held while the project moves");
+        assert_eq!(job.request["clips"], json!(["/x/B.MP4"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lens_types_once_each() {
+        let text = "{\"path\":\"/a\",\"camera\":\"DJI OsmoAction6\",\"types\":[[\"wide\",\"Wide\"],[\"normal\",\"Normal\"]]}\nnoise\n{\"path\":\"/b\",\"types\":[[\"normal\",\"Normal\"],[\"linear\",\"Linear\"]]}\n";
+        let got = lens_types_of(text);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0]["types"], json!([["wide", "Wide"], ["normal", "Normal"]]));
+        assert_eq!(got[1]["path"], json!("/b"));
+    }
+
+    // Stabilize optically's job as the Library runs it: gyroflow-optical (here a stand-in that writes what the real one
+    // does) started with the request, its status read as it goes, what it left out kept with the job
+    static OPTICAL_TOOL: Mutex<()> = Mutex::new(());
+
+    #[cfg(unix)]
+    #[test]
+    fn an_optical_batch() {
+        use std::os::unix::fs::PermissionsExt;
+        let _one = OPTICAL_TOOL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("afl-optical-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tool = dir.join("gyroflow-optical");
+        std::fs::write(&tool, "#!/bin/sh\n[ \"$1\" = --batch ] || exit 2\n/usr/bin/python3 -I - \"$2\" <<'EOF'\n\
+import json, sys, time\n\
+req = json.load(open(sys.argv[1]))\n\
+st = {'state': 'running', 'done': 0, 'total': 1, 'failed': 0, 'made': 0, 'fraction': 0.5, 'current': 'A.MP4',\n\
+      'failures': [], 'left_out': [[req['clips'][1], 'it has motion data the player stabilizes it with']]}\n\
+open(req['status'], 'w').write(json.dumps(st)); time.sleep(0.5)\n\
+st.update(state='done', done=1, made=1, fraction=None, current=None, message='1 stabilized · 1 left out')\n\
+open(req['status'], 'w').write(json.dumps(st))\n\
+EOF\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AFL_OPTICAL", &tool);
+        let mut inner = Inner::default();
+        inner.next_id = 1;
+        inner.jobs.push(Job {
+            id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
+            state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+        });
+        let t0 = Instant::now();
+        let mut saw_running = false;
+        while !(inner.jobs[0].state.finished() && inner.running.is_none()) && t0.elapsed() < Duration::from_secs(20) {
+            tick(&mut inner);
+            saw_running |= inner.jobs[0].state == JobState::Running;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::env::remove_var("AFL_OPTICAL");
+        let job = &inner.jobs[0];
+        assert!(saw_running);
+        assert_eq!(job.state, JobState::Done, "{:?}", job.message);
+        assert_eq!((job.done, job.total, job.made), (1, 1, Some(1)));
+        assert_eq!(job.left_out, vec![("/x/B.MP4".to_string(), "it has motion data the player stabilizes it with".to_string())]);
+        assert_eq!(job.message.as_deref(), Some("1 stabilized · 1 left out"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_batch_with_the_player() {
         let (Some(_), Some(trip)) = (std::env::var_os("AFL_PLAYER"), std::env::var_os("AFL_TEST_TRIP")) else { return };
@@ -1960,7 +2159,7 @@ mod tests {
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit

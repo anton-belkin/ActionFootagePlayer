@@ -294,7 +294,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)), unless On, Wider or Off is saved for it | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
@@ -424,6 +424,32 @@ plays as it is. These clips get Gyroflow's default preset
 and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFootagePlayer/gyroflow/` if you put one
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
+
+**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the HERO12 Black does).
+Otherwise it comes from Gyroflow's database, picked the way you would pick it in Gyroflow's list. It must be the same
+camera, the same lens mode the camera recorded (GoPro: Wide, Linear, SuperView...) and the same aspect ratio. Of those,
+the player takes the one made for exactly this resolution, frame rate and HyperSmooth setting, else the same HyperSmooth
+setting, then the nearest resolution and frame rate, then an official profile, then the one with the most stars from
+Gyroflow's users (a profile they mostly voted down only when there's nothing else). Gyroflow itself loads a profile
+only on that exact match, and then the first of several, however it was rated. Source → Lens shows which one it took
+("Nearest: …" when it isn't made for exactly this mode). Clips with motion data get stabilized with it too, and clips
+without motion data (the camera's stabilization on) get their lens corrected on its own. The stars are a snapshot
+taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online.
+
+**Lens types, for cameras the database has nothing for.** Gyroflow's database has no Osmo Action 4/5/6 profiles; the
+Action 6 carries its lens in the file only in Wide with EIS off. Another Action camera's profile fits it, so a curated
+list (`vs-gyroflow/resources/curated_lenses.json`) gives the Action 6's lens types a profile chosen by hand. Today
+Normal has the original Osmo Action's standard lens, and Wide uses the lens in the file. The type is the one the
+camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off), unless one was chosen for the clip
+(`source.lens_type` in its `.afp.json`; the Library sets it for the clips selected). Source → Lens shows
+"Normal, from the curated list: …". A mode the list doesn't name yet shows as "Unknown (mode 6)": the camera's own
+number for it (DJI's fov_type), so a lens tried on such clips can be given that mode once it fits; a named type
+without a profile (Wide with EIS on) as "Unknown (Wide)".
+
+The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode and picks nothing,
+but its file's settings box (`udta/SETT`) has a number that looks like the mode: 0, 2 or 4, probably Wide, Medium and
+Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its one type, Wide, has the best-voted HERO4
+Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
@@ -754,9 +780,12 @@ under water, and the frame's ratio and orientation. It's kept only whole, every 
   its source; switched on, it keeps its own too. A transform written before a setting existed is filled with what
   it plays with as it opens.
 - **A clip with a Gyroflow project**: the project decides the smoothing, horizon, frame and projection, and of the
-  input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). Only a
-  wider view (how much the project's crop cuts off) or none, for viewing, never saved. What was saved beside the
-  clip before stays in its file, not played, and comes back if the project goes.
+  input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). The
+  stabilization itself is yours and is saved with the clip like any other setting: **On** plays the project as it is,
+  **Wider** plays it without its zoom (the whole picture; the edges show at times), and **Off** leaves a project that
+  came out badly unused without deleting it (the lens is still corrected as the project has it). With none saved, a
+  clip with a project starts On. What was saved beside the clip before stays in its file, not played, and comes back
+  if the project goes.
 - **Lens**: apart from the stabilization. **Corrected** (Gyroflow's lens correction, and the projection below) or **As
   recorded**. It needs a lens profile (Source → Lens), not motion data: the stabilization off with the lens
   corrected shows the lens alone corrected, nothing smoothed, and so does a clip with a lens profile and no motion
@@ -858,6 +887,17 @@ Project). Then, as buttons:
 - **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
+- **Stabilize optically** (Footage, Originals): for the selected clips whose motion the player can't take from the
+  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), Gyroflow
+  measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
+  with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
+  listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
+  whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
+  clips where their camera has types (Osmo Action 6: Wide, Normal), kept with each clip (the player uses it too); a
+  lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
+  measured anew. It needs a Gyroflow with the optical analysis
+  (built from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow): it isn't in Gyroflow's own releases
+  yet), found where Gyroflow installs itself, or by `AFP_GYROFLOW`.
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with

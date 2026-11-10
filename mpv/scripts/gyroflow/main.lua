@@ -1307,11 +1307,14 @@ local function add_filter(source, done)
         window_resize = nil
     end
     -- The bundle saved for it, else the session's; then the input's turn and lens. With a Gyroflow project, what it
-    -- has is its own: the view, horizon, frame and projection (a wider view or none is for viewing only)
-    local off = take(fixed())
+    -- has is its own: the horizon, frame and projection. Not the view: saved for the clip it plays so (on, wider: the
+    -- project's zoom left out, off: the project not used), with none saved the project as it is
+    local saved = fixed()
+    local off = take(saved)
     clip_settings(source)
     if has_project(source) then
-        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
+        if type(saved) ~= "table" or not saved.view then view, off = "normal", false end
+        horizon, lens_mode = nil, "corrected"
         frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
@@ -1632,7 +1635,15 @@ mp.register_event("file-loaded", function()
         mp.command_native_async({ name = "subprocess", args = { PROBE, "--lens", lens_for }, capture_stdout = true, playback_only = true }, function(_, r)
             local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
             if type(info) == "table" and clip_path() == lens_for then
-                current_lens = { camera = info.camera or "", lens = info.lens or "" }
+                -- With lens types (the curated list): the type given by hand, the one recorded, and the camera's own
+                -- number for its mode, for "Unknown (mode 6)" while the list doesn't name it
+                local label_of = {}
+                for _, t in ipairs(type(info.types) == "table" and info.types or {}) do
+                    if type(t) == "table" and t.id then label_of[t.id] = t.label or t.id end
+                end
+                local typ = type(info.type) == "string" and info.type or type(info.recorded) == "string" and info.recorded or nil
+                current_lens = { camera = info.camera or "", lens = info.lens or "", mode = tonumber(info.mode),
+                                 type_label = typ and (label_of[typ] or typ) or nil }
                 publish()
             end
         end)
@@ -2290,7 +2301,9 @@ mp.register_script_message("apply-view", function(json)
     local off = take(b)
     frame.rotation = turn
     if has_project(current_source) then
-        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
+        -- The bundle's view stays (on, wider, off over the project); the rest is the project's
+        if not b.view then view, off = "normal", false end
+        horizon, lens_mode = nil, "corrected"
         frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
     end
     stab_off = off
