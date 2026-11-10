@@ -1500,16 +1500,17 @@ local function ffmpeg_tool()
     return windows and "ffmpeg.exe" or "ffmpeg"
 end
 
--- What the camera wrote beside a clip for its own quick look, as a video: <stem>.LRF (DJI, GoPro: GL… for GX…/GH…)
+-- What the camera wrote beside a clip for its own quick look, as a video: <stem>.LRF (DJI; GoPro: GL<rest>.LRV for
+-- GX<rest>/GH<rest>). An empty or cut-short one (the camera stopped before writing it: seen, 0 bytes) isn't one
 local function camera_proxy(file)
     local dir, name = file:match("^(.*)[/\\]([^/\\]+)$")
     if not dir then return nil end
     local stem = name:gsub("%.[^.]+$", "")
     local names = { stem .. ".LRF", stem .. ".lrf" }
-    if stem:match("^G[XH]") then names[#names + 1] = "GL" .. stem:sub(3) .. ".LRF" end
+    if stem:match("^G[XH]") then names[#names + 1] = "GL" .. stem:sub(3) .. ".LRV"; names[#names + 1] = "GL" .. stem:sub(3) .. ".lrv" end
     for _, n in ipairs(names) do
-        local f = ws.join(dir, n)
-        if fs.is_file(f) then return f end
+        local info = utils.file_info(ws.join(dir, n))
+        if info and info.is_file and info.size >= 1024 then return ws.join(dir, n) end
     end
     return nil
 end
@@ -1544,12 +1545,18 @@ local function next_clip()
         c.place = nil
         local out = new_preview_path(job.dir, c, job.flat)
         mkdir(out:match("^(.*)[/\\][^/\\]+$"))
-        local proxy = camera_proxy(c.file)
+        local proxy = not c.no_proxy and camera_proxy(c.file) or nil
         local link_json = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true })
         local args = { ffmpeg_tool(), "-v", "error", "-y", "-t", proxy and "3" or "2", "-i", proxy or c.file, "-map", "0:v:0", "-c", "copy",
                        "-movflags", "+faststart+use_metadata_tags", "-metadata", "ch.actionfootageplayer.link=" .. link_json, out }
         job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
             if r and r.status == 0 then job.made = job.made + 1; job.notes[#job.notes + 1] = out
+            elseif proxy and not job.stopping then
+                -- The camera's copy didn't read: from the clip itself, then
+                os.remove(out)
+                c.no_proxy = true
+                table.insert(job.queue, 1, c)
+                return next_clip()
             elseif not job.stopping then
                 job.failed = job.failed + 1
                 table.insert(job.failures, { c.relative, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "ffmpeg failed" })
@@ -2923,6 +2930,11 @@ do
                 status.state = sum.stopped and "stopped" or (sum.error and "failed") or "done"
                 status.made, status.failed = sum.made or 0, sum.failed or 0
                 status.done = status.total > 0 and (sum.stopped and status.done or status.total) or status.done
+                -- Done before progress was first looked at (drafts can be): counted from what it says it made
+                if status.total == 0 and status.made + status.failed > 0 then
+                    status.total = status.made + status.failed
+                    status.done = status.total
+                end
                 status.failures = sum.failures
                 status.message = sum.nothing or sum.error
                 status.fraction, status.current = nil, nil

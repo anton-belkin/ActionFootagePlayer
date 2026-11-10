@@ -356,13 +356,17 @@ pub fn clip_preview_relative(relative: &str, flat: bool) -> String {
     out.join("/")
 }
 
-/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL… proxy of a GX…/GH… clip
+/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL<rest>.LRV of a GX<rest>/GH<rest>
+/// clip. An empty or cut-short one (the camera stopped before writing it) isn't one
 pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
     let dir = clip.parent()?;
     let stem = clip.file_stem()?.to_string_lossy().into_owned();
     let mut names: Vec<String> = ["LRF", "lrf", "THM", "thm"].iter().map(|e| format!("{stem}.{e}")).collect();
-    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) { names.push(format!("GL{}.LRF", &stem[2..])); }
-    names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::is_file(p))
+    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) {
+        names.push(format!("GL{}.LRV", &stem[2..]));
+        names.push(format!("GL{}.lrv", &stem[2..]));
+    }
+    names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::size(p).is_some_and(|s| s >= 1024))
 }
 
 fn read_json(path: &Path) -> Option<Value> {
