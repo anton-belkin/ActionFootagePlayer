@@ -294,7 +294,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 
 | Key | | `script-binding` |
 |---|---|---|
-| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)) | `gyroflow/toggle` |
+| `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)), unless On, Wider or Off is saved for it | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
@@ -763,9 +763,12 @@ under water, and the frame's ratio and orientation. It's kept only whole, every 
   its source; switched on, it keeps its own too. A transform written before a setting existed is filled with what
   it plays with as it opens.
 - **A clip with a Gyroflow project**: the project decides the smoothing, horizon, frame and projection, and of the
-  input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). Only a
-  wider view (how much the project's crop cuts off) or none, for viewing, never saved. What was saved beside the
-  clip before stays in its file, not played, and comes back if the project goes.
+  input the turn and the lens. They're shown as the project has them; change them in Gyroflow (`Ctrl+e`). The
+  stabilization itself is yours and is saved with the clip like any other setting: **On** plays the project as it is,
+  **Wider** plays it without its zoom (the whole picture; the edges show at times), and **Off** leaves a project that
+  came out badly unused without deleting it (the lens is still corrected as the project has it). With none saved, a
+  clip with a project starts On. What was saved beside the clip before stays in its file, not played, and comes back
+  if the project goes.
 - **Lens**: apart from the stabilization. **Corrected** (Gyroflow's lens correction, and the projection below) or **As
   recorded**. It needs a lens profile (Source → Lens), not motion data: the stabilization off with the lens
   corrected shows the lens alone corrected, nothing smoothed, and so does a clip with a lens profile and no motion

@@ -106,7 +106,7 @@ turned.level = "strong"
 expect("status changed", t.status(whole, turned, false), "changed")
 expect("status: a project's level isn't a change", t.status(whole, turned, true), "saved")
 turned.view = "wide"
-expect("status: a wider view over a project isn't a change", t.status(whole, turned, true), "saved")
+expect("status: a wider view over a project is a change, saved with it", t.status(whole, turned, true), "changed")
 turned.view, turned.level, turned.chromatic = "normal", "weak", false
 expect("status: chromatic over a project is", t.status(whole, turned, true), "changed")
 

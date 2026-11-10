@@ -1296,11 +1296,14 @@ local function add_filter(source, done)
         window_resize = nil
     end
     -- The bundle saved for it, else the session's; then the input's turn and lens. With a Gyroflow project, what it
-    -- has is its own: the view, horizon, frame and projection (a wider view or none is for viewing only)
-    local off = take(fixed())
+    -- has is its own: the horizon, frame and projection. Not the view: saved for the clip it plays so (on, wider: the
+    -- project's zoom left out, off: the project not used), with none saved the project as it is
+    local saved = fixed()
+    local off = take(saved)
     clip_settings(source)
     if has_project(source) then
-        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
+        if type(saved) ~= "table" or not saved.view then view, off = "normal", false end
+        horizon, lens_mode = nil, "corrected"
         frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
@@ -2278,7 +2281,9 @@ mp.register_script_message("apply-view", function(json)
     local off = take(b)
     frame.rotation = turn
     if has_project(current_source) then
-        view, off, horizon, lens_mode = "normal", false, nil, "corrected"
+        -- The bundle's view stays (on, wider, off over the project); the rest is the project's
+        if not b.view then view, off = "normal", false end
+        horizon, lens_mode = nil, "corrected"
         frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
     end
     stab_off = off

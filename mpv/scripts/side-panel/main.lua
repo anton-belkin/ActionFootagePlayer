@@ -972,8 +972,8 @@ local function transform_part(u, x, w, y)
     u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
     y = y + 14 * s
 
-    -- Stabilization: with motion data (a project, or the clip's own). Over a project, a wider view or none is for viewing
-    -- only (never saved)
+    -- Stabilization: with motion data (a project, or the clip's own). Over a project too it's saved with the clip: on (the
+    -- project as it is), wider (its zoom left out), off (the project kept, not used)
     y = u:heading(x, w, y, "Stabilization", keys["script-binding gyroflow/toggle"])
     local list = {}
     for _, v in ipairs(VIEWS) do table.insert(list, { v[2], "script-message-to gyroflow view " .. v[1] }) end
@@ -983,11 +983,12 @@ local function transform_part(u, x, w, y)
         if g.waiting then y = u:caption(x, w, y, "Waiting for the project from Gyroflow…")
         else y = u:button(x, w, y, "edit", "Stabilize in Gyroflow…", "script-binding gyroflow/edit", { key = edit }) end
     else
-        y = u:segmented(x, w, y, "view", list, index_of(VIEWS, g.view), false, not project and saved and index_of(VIEWS, saved.view) or (project and 1 or nil))
+        y = u:segmented(x, w, y, "view", list, index_of(VIEWS, g.view), false, saved and index_of(VIEWS, saved.view) or (project and 1 or nil))
     end
     local off = g.view == "off"
     if g.motion and project then
-        y = u:caption(x, w, y, "For viewing only, never saved. Wider shows how much the project's crop cuts off; Off shows the motion as recorded")
+        y = u:caption(x, w, y, g.view == "wide" and "The project without its zoom: the whole picture, the edges show at times"
+            or off and "The project kept but not used: as recorded" or "The project as it is")
     elseif g.motion then
         y = u:caption(x, w, y, g.view == "wide" and "No zoom: the edges show at times" or off and "Not stabilized: the lens below still applies"
             or "Zoomed in so no edge shows")
