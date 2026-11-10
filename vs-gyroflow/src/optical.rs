@@ -510,7 +510,7 @@ mod tests {
     fn plays_with_the_project() {
         let Some(project) = std::env::var_os("AFP_OPTICAL_PROJECT") else { return };
         let project = project.to_string_lossy().into_owned();
-        let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false).unwrap();
+        let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false, None).unwrap();
         stab.recompute_blocking();
         let g = stab.gyro.read();
         assert!(g.optical_correction.is_some(), "the measured motion isn't in the player's engine");

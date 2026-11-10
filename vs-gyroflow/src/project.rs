@@ -25,7 +25,7 @@ use crate::water::Underwater;
 /// `frame`: the output frame turned, cut to an aspect and its projection, as Engine::load has it (Frame): the
 /// project's rotation, output size and output projection; its rotation on top of the file's own turn
 pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool, project_path: &str, frame: crate::Frame) -> Result<String, String> {
-    let (stab, _, _) = crate::load_manager(video, preset, horizon_lock, underwater, 0.0, false)?;
+    let (stab, _, _) = crate::load_manager(video, preset, horizon_lock, underwater, 0.0, false, None)?;
     if !stab.gyro.read().has_motion() {
         return Err(format!("{video} has no motion data"));
     }

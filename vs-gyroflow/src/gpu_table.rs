@@ -94,6 +94,31 @@ pub struct PlayerClip {
     pub fps: f64,
     pub frame_count: usize,
     pub frame_offset_us: i64,
+    /// The stretch of the clip whose motion data it has (s into the clip), None: all of it. A clip without a project
+    /// opens with the seconds it starts playing at, or a moment's part (motion_range): from a NAS its whole motion
+    /// data took 20 s for a 1.5 GB clip, the stretch ~1-2 s
+    pub covers: Option<(f64, f64)>,
+}
+
+/// The motion data read for the first table, before where it starts playing (the smoothing's start: motion.rs's
+/// WARM_UP_S, with room) and after (HEAD_S: the rest comes while those play; a moment's part: AFTER_S past its end,
+/// the player's look-ahead of 4 s with room). From a NAS a second of 4K60 is ~15 MB to read through (prefetch.rs):
+/// a 3.4 GB clip's first 26 s took 4.9 s, cold
+pub const BEFORE_S: f64 = 4.0;
+pub const HEAD_S: f64 = 12.0;
+pub const AFTER_S: f64 = 6.0;
+
+/// The stretch of a clip without a project whose motion data the player's JSON asks for first: a moment's part
+/// (`time_offset` to `moment_end`), or the seconds from `start` (a clip that streams: the rest read after, "full");
+/// None: all of it (`full`, or neither). And whether that's all it will want (a moment's)
+pub fn motion_range(j: &serde_json::Value) -> (Option<(f64, f64)>, bool) {
+    let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
+    if j.get("full").and_then(|v| v.as_bool()).unwrap_or(false) { return (None, true); }
+    if let (Some(a), Some(b)) = (f("time_offset"), f("moment_end")) {
+        if b > a { return (Some(((a - BEFORE_S).max(0.0), b + AFTER_S)), true); }
+    }
+    if let Some(start) = f("start") { return (Some(((start - BEFORE_S).max(0.0), start.max(0.0) + HEAD_S)), false); }
+    (None, true)
 }
 
 /// The JSON's keys that change what PlayerClip::load computes; the rest (the view, the edges, the color fringes, the
@@ -116,11 +141,16 @@ impl PlayerClip {
         let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
         let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
         let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
-        // All of a clip's own motion data before it plays (lookahead 0): the table is written once
-        let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
+        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch it starts with
+        // (motion_range); a project has its own
+        let range = if crate::is_project_file(project) { None } else { motion_range(j).0 };
+        let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens, range)?;
         let sp = p.stab.params.read();
         let video = if crate::is_project_file(project) { gyroflow_core::filesystem::url_to_path(&p.stab.input_file.read().url) } else { project.to_string() };
-        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us })
+        // All of the clip after all: a stretch past both its ends
+        let duration = sp.frame_count as f64 / sp.fps.max(1.0);
+        let covers = range.filter(|(a, b)| *a > 0.0 || *b < duration);
+        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers })
     }
 
     /// The index of the view the JSON asks for (wide, level) in `views`
@@ -157,6 +187,15 @@ impl PlayerClip {
         crate::translation::cached(&self.video).filter(|v| v.len() == self.frame_count)
     }
 
+    /// Whether it has the motion data the JSON asks for (motion_range): all of it, or the stretch
+    pub fn has(&self, j: &serde_json::Value) -> bool {
+        match (self.covers, motion_range(j).0) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some((a, b)), Some((c, d))) => a <= c.max(0.0) && b >= d.min(self.frame_count as f64 / self.fps.max(1.0)),
+        }
+    }
+
     /// The clip in the view the JSON asks for (wide, level)
     pub fn clip(&self, j: &serde_json::Value) -> Clip {
         let index = self.view(j);
@@ -169,7 +208,7 @@ impl Clip {
     /// the plugin does for a clip with a project, edges off. `readout_ms`: the rolling shutter's readout time instead
     /// of the project's
     pub fn load(project: &str, readout_ms: Option<f64>) -> Result<Clip, String> {
-        let (stab, _, _) = crate::load_manager(project, None, None, Underwater::Project, 0.0, false)?;
+        let (stab, _, _) = crate::load_manager(project, None, None, Underwater::Project, 0.0, false, None)?;
         if let Some(ms) = readout_ms { stab.params.write().frame_readout_time = ms; }
         stab.invalidate_smoothing();
         stab.recompute_blocking();

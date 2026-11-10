@@ -19,7 +19,10 @@
 //
 //   gyroflow-gpu-table --player <json> <out.glsl> [--server <socket>]
 //     The player's GPU path (main.lua): its filter arguments in, the shader out, one JSON line printed (see player());
-//     asked of the server at <socket> when one listens there
+//     asked of the server at <socket> when one listens there. A clip without a project starts from the motion data of
+//     the seconds it starts playing at ("start"; the reply says "partial"), the rest read after: asked again with
+//     "full", the reply comes once it's all there (the server reads it meanwhile). A moment's part ("moment_end") is
+//     all it reads
 //
 //   gyroflow-gpu-table --serve <socket>
 //     The player's table server: keeps the clips it loaded, for changes that don't move the geometry (see serve())
@@ -60,7 +63,7 @@ fn player(json: &str, out: &str, server: Option<&str>) {
         }
     }
     let keep = |reply: &str| if let Some((shader, r)) = kept.as_ref() {
-        if !reply.contains("\"shader\"") { return; }
+        if !reply.contains("\"shader\"") || reply.contains("\"partial\":true") { return; }
         if shader.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::copy(out, shader).is_ok() {
             let _ = std::fs::write(r, reply);
             trim_disk_cache(shader.parent().unwrap());
@@ -92,7 +95,8 @@ fn player(json: &str, out: &str, server: Option<&str>) {
 fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     let mut j = j.clone();
     let obj = j.as_object_mut()?;
-    for k in ["still_control", "edges_control", "workers", "lookahead"] { obj.remove(k); }
+    // A clip's whole table serves a request for the seconds it starts with too (one with them alone isn't kept)
+    for k in ["still_control", "edges_control", "workers", "lookahead", "start", "full"] { obj.remove(k); }
     let project = obj.get("project")?.as_str()?.to_string();
     let stamp = |p: &str| std::fs::metadata(p).ok().map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
     let preset = obj.get("preset").and_then(|v| v.as_str()).map(stamp).unwrap_or_default();
@@ -156,8 +160,11 @@ fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &st
     // Crop mode's camera model (crop.lua): the output camera's focal length in output widths and heights, mid-clip
     let mid = (clip.frame_count / 2) as f64 * 1_000_000.0 / clip.fps;
     let (fx, fy) = vs_gyroflow::sphere::View::at(&clip.params, mid.round() as i64 + clip.frame_offset_us).focal();
+    // The motion data of the seconds it starts with alone: the rest to come ("full")
+    let partial = loaded.covers.is_some() && !gpu_table::motion_range(j).1;
     serde_json::json!({ "shader": out, "output": [clip.output_size.0, clip.output_size.1], "mode": if rgb { "grid" } else { "planes" },
-                        "chromatic": wet, "sphere": sphere, "focal": [fx, fy], "translation": trans.is_some(), "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
+                        "chromatic": wet, "sphere": sphere, "focal": [fx, fy], "translation": trans.is_some(), "partial": partial,
+                        "ms": (t.elapsed().as_secs_f64() * 1000.0).round() })
 }
 
 /// The request to a server: one line of { json, out }, one line back. None: no server there (the caller does it).
@@ -218,9 +225,18 @@ fn serve(sock: &str) {
     let cache: Arc<Mutex<Vec<(String, Arc<gpu_table::PlayerClip>)>>> = Arc::new(Mutex::new(Vec::new()));
     // One load per key at a time: a second request for it waits for the first's
     let loading: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+    // The clips whose whole motion data is being read after their first seconds, by key; done: notified
+    let filling: Arc<(Mutex<std::collections::HashSet<String>>, std::sync::Condvar)> = Arc::default();
+    let put = |cache: &Mutex<Vec<(String, Arc<gpu_table::PlayerClip>)>>, key: &str, c: Arc<gpu_table::PlayerClip>| {
+        let mut cache = cache.lock().unwrap();
+        // A whole clip takes the place of its stretches
+        if c.covers.is_none() { cache.retain(|(k, _)| k != key); }
+        cache.push((key.to_string(), c));
+        if cache.len() > 4 { cache.remove(0); }
+    };
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        let (cache, loading, last) = (cache.clone(), loading.clone(), last.clone());
+        let (cache, loading, last, filling) = (cache.clone(), loading.clone(), last.clone(), filling.clone());
         std::thread::spawn(move || {
             let t = Instant::now();
             *last.lock().unwrap() = t;
@@ -233,20 +249,22 @@ fn serve(sock: &str) {
             let reply = match req.get("json").and_then(|v| v.as_str()).map(serde_json::from_str::<serde_json::Value>) {
                 Some(Ok(j)) => {
                     let key = geometry_key(&j);
-                    let found = cache.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone());
-                    let loaded = match found {
+                    let find = || cache.lock().unwrap().iter().rev().find(|(k, c)| *k == key && c.has(&j)).map(|(_, c)| c.clone());
+                    // The whole clip asked for while it's being read: once it's there
+                    if gpu_table::motion_range(&j).0.is_none() {
+                        let (set, done) = &*filling;
+                        let mut set = set.lock().unwrap();
+                        while set.contains(&key) && find().is_none() { set = done.wait(set).unwrap(); }
+                    }
+                    let loaded = match find() {
                         Some(c) => Ok(c),
                         None => {
                             let _one = loading.lock().unwrap();
-                            let found = cache.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone());
-                            match found {
+                            match find() {
                                 Some(c) => Ok(c),
                                 None => gpu_table::PlayerClip::load(&j).map(|c| {
                                     let c = Arc::new(c);
-                                    let mut cache = cache.lock().unwrap();
-                                    cache.retain(|(k, _)| *k != key);
-                                    cache.push((key.clone(), c.clone()));
-                                    if cache.len() > 4 { cache.remove(0); }
+                                    put(&cache, &key, c.clone());
                                     c
                                 }),
                             }
@@ -256,8 +274,25 @@ fn serve(sock: &str) {
                         Ok(c) => {
                             // The latest used last
                             let mut list = cache.lock().unwrap();
-                            if let Some(i) = list.iter().position(|(k, _)| *k == key) { let e = list.remove(i); list.push(e); }
+                            if let Some(i) = list.iter().position(|(k, e)| *k == key && Arc::ptr_eq(e, &c)) { let e = list.remove(i); list.push(e); }
                             drop(list);
+                            // Its first seconds alone: the rest read now, in the background, gently (the clip plays
+                            // from the same share meanwhile), for the request with "full" that follows
+                            if c.covers.is_some() && !gpu_table::motion_range(&j).1 && filling.0.lock().unwrap().insert(key.clone()) {
+                                let (cache, filling, key) = (cache.clone(), filling.clone(), key.clone());
+                                let mut whole = j.clone();
+                                whole["full"] = true.into();
+                                std::thread::spawn(move || {
+                                    let t = Instant::now();
+                                    match vs_gyroflow::motion::gently(|| gpu_table::PlayerClip::load(&whole)) {
+                                        Ok(c) => { put(&cache, &key, Arc::new(c)); log::info!("gyroflow-gpu-table server: the whole clip in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0); }
+                                        Err(e) => log::info!("gyroflow-gpu-table server: the whole clip: {e}"),
+                                    }
+                                    let (set, done) = &*filling;
+                                    set.lock().unwrap().remove(&key);
+                                    done.notify_all();
+                                });
+                            }
                             player_shader(&c, &j, &out, t)
                         }
                         Err(e) => serde_json::json!({ "error": e }),
