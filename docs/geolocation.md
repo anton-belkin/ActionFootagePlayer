@@ -108,9 +108,19 @@ place looked up once, at most one lookup a second:
 
 ## In Info
 
-A clip: *Location*: the place (site, locality, region, country), the point and height, where it came from (Apple
-Photos with the photo's gap, by hand, or the camera's GPS), *Show on a map* (Apple Maps; OpenStreetMap elsewhere) and
-*Remove*. Several: *Places* counted. Camera GPS: the place looked up as the clip's probe comes in.
+A clip: *Location*: a small map with its dot, the place (site, locality, region, country), the point and height,
+where it came from (Apple Photos with the photo's gap, by hand, or the camera's GPS), *Show on a map* (Apple Maps;
+OpenStreetMap elsewhere) and *Remove*. Camera GPS: the place looked up as the clip's probe comes in.
+
+A folder or several clips: *Location*: a small map with a dot per spot, the places by name with how many clips each,
+and how many have none.
+
+The small maps are Apple Maps pictures made on the Mac (`afp-photos map`: MapKit's `MKMapSnapshotter`, no key, nothing
+but the map's area asked of Apple), dots drawn on them, in the page's light or dark look, kept in the cache
+(`<cache>/maps/`) by their points, size and look. Elsewhere there's no map, only the names.
+
+Access to Photos is asked only from *Suggest from Apple Photos*, after the Library's own explanation; opening the
+Library only looks whether it's allowed (`afp-photos status`, which never asks).
 
 ## The Location filter
 
@@ -120,7 +130,7 @@ other lists: ticking a country leaves its regions and places.
 
 ## Not yet
 
-- A map of the project (Map tab); the ⌖ badge on rows.
+- A map of the whole project (Map tab), clickable dots; the ⌖ badge on rows; maps on Windows and Linux.
 - Writing the location into what's made from a clip (moment MP4s' `©xyz`, photo EXIF GPS, exports): the original's is
   the one source; they can read it from there when made.
 - Dive-site names from a dive log or a list of sites.

@@ -17,12 +17,17 @@
 //                                         Apple, a pause between: it limits how often an app may ask):
 //                                         {"places": [{"lat", "lon", "name", "site", "locality", "sublocality", "region",
 //                                         "subregion", "country", "cc", "ocean", "water", "tz", "tz_offset_s"} | {"error"}]}
+//   afp-photos map <out.png> <w> <h> [--dark|--light] <lat> <lon> ...
+//                                         a small map (Apple Maps, MKMapSnapshotter) around the points, each drawn as a
+//                                         dot, written as a PNG at twice the size: {"ok": true} or {"error"}
 //
 // One JSON object on stdout; exit 0 even for "not allowed" (the Library reads the answer), 2 for a wrong call.
 
 import Foundation
 import Photos
 import CoreLocation
+import MapKit
+import AppKit
 
 func emit(_ obj: Any) {
     let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data("{}".utf8)
@@ -151,6 +156,52 @@ case "place":
         places.append(p)
     }
     emit(["places": places])
+
+case "map":
+    guard args.count >= 5, let w = Double(args[1]), let h = Double(args[2]) else {
+        FileHandle.standardError.write(Data("map: <out.png> <w> <h> <lat> <lon>...\n".utf8)); exit(2)
+    }
+    let out = URL(fileURLWithPath: args[0])
+    // --dark / --light: the page's look (the system's otherwise)
+    let dark = args.contains("--dark") ? true : args.contains("--light") ? false : nil
+    let nums = args.dropFirst(3).filter { !$0.hasPrefix("--") }.compactMap(Double.init)
+    let pts = stride(from: 0, to: nums.count - 1, by: 2).map { CLLocationCoordinate2D(latitude: nums[$0], longitude: nums[$0 + 1]) }
+    guard !pts.isEmpty else { emit(["error": "no points"]); exit(0) }
+    // The points' box, padded, at least ~6 km across so one point shows where it is
+    var (la0, la1, lo0, lo1) = (90.0, -90.0, 180.0, -180.0)
+    for p in pts { la0 = min(la0, p.latitude); la1 = max(la1, p.latitude); lo0 = min(lo0, p.longitude); lo1 = max(lo1, p.longitude) }
+    let span = MKCoordinateSpan(latitudeDelta: min(170, max(0.06, (la1 - la0) * 1.5)), longitudeDelta: min(350, max(0.06, (lo1 - lo0) * 1.5)))
+    let opts = MKMapSnapshotter.Options()
+    opts.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: (la0 + la1) / 2, longitude: (lo0 + lo1) / 2), span: span)
+    opts.size = NSSize(width: w, height: h)
+    opts.mapType = .mutedStandard
+    if let dark = dark { opts.appearance = NSAppearance(named: dark ? .darkAqua : .aqua) }
+    var snap: MKMapSnapshotter.Snapshot? = nil
+    var failure: Error? = nil
+    var done = false
+    MKMapSnapshotter(options: opts).start(with: DispatchQueue.global()) { s, e in snap = s; failure = e; done = true }
+    wait({ done }, seconds: 30)
+    guard let snap = snap else { emit(["error": failure.map { "\($0.localizedDescription)" } ?? "timed out"]); exit(0) }
+    // Drawn at twice the size, for a sharp picture on a Retina screen
+    let scale = 2.0
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(w * scale), pixelsHigh: Int(h * scale), bitsPerSample: 8,
+                                     samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+          let ctx = NSGraphicsContext(bitmapImageRep: rep) else { emit(["error": "no picture"]); exit(0) }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = ctx
+    ctx.cgContext.scaleBy(x: scale, y: scale)
+    snap.image.draw(in: NSRect(x: 0, y: 0, width: w, height: h))
+    for p in pts {
+        let at = snap.point(for: p)
+        let r = 4.5
+        // The snapshot's points are in its image's own (bottom-up) coordinates, as drawn here
+        let dot = NSBezierPath(ovalIn: NSRect(x: at.x - r, y: at.y - r, width: 2 * r, height: 2 * r))
+        NSColor(calibratedRed: 0.93, green: 0.27, blue: 0.2, alpha: 1).setFill(); dot.fill()
+        NSColor.white.setStroke(); dot.lineWidth = 1.5; dot.stroke()
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]), (try? png.write(to: out)) != nil else { emit(["error": "couldn't write"]); exit(0) }
+    emit(["ok": true])
 
 default:
     FileHandle.standardError.write(Data("afp-photos: unknown command \(cmd)\n".utf8))

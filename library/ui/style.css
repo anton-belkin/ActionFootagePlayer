@@ -270,3 +270,7 @@ body.waiting,body.waiting *{cursor:progress}
 .geoname{display:flex;gap:8px;align-items:center;padding:4px 4px;border-radius:6px}
 .geoname .wrap{flex:1;min-width:0;line-height:1.35}
 .geofar{max-height:140px;overflow:auto;border:1px solid var(--line2);border-radius:8px;padding:6px 8px;background:var(--win);display:flex;flex-direction:column;gap:2px}
+/* A small map of where clips were recorded, in Info (Apple Maps, drawn by the app) */
+.minimap{margin:2px 0 8px}
+.minimap img{display:block;width:100%;max-width:300px;aspect-ratio:300/170;border-radius:8px;border:1px solid var(--line2)}
+.kv dd .blk{display:block}

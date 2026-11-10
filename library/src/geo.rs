@@ -651,3 +651,32 @@ pub fn dump_for_test(shared: crate::Shared, probes: SharedProbes, places: Shared
         let _ = std::fs::write(&out, serde_json::to_vec_pretty(&json!({ "status": status, "clips": clips.len(), "seconds": started.elapsed().as_secs_f64(), "result": r })).unwrap());
     });
 }
+
+/// A small map of points (Apple Maps on a Mac, through afp-photos map), as a data URL; kept in the cache by its points,
+/// size and look, so a clip's or folder's map is drawn once. None elsewhere, or offline
+#[tauri::command]
+pub async fn mini_map(app: tauri::AppHandle, points: Vec<Vec<f64>>, w: u32, h: u32, dark: bool) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    let Some(tool) = photos_tool() else { return Ok(None) };
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("maps");
+    tauri::async_runtime::spawn_blocking(move || {
+        // The same spot once (~10 m), at most 300 of them
+        let mut pts: Vec<(f64, f64)> = points.iter().filter_map(|p| Some(((p.first()? * 1e4).round() / 1e4, (p.get(1)? * 1e4).round() / 1e4))).collect();
+        pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        pts.dedup();
+        pts.truncate(300);
+        if pts.is_empty() { return None; }
+        let id = pts.iter().map(|(a, b)| format!("{a},{b}")).collect::<Vec<_>>().join(";") + &format!("|{w}x{h}|{dark}");
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for b in id.bytes() { hash ^= b as u64; hash = hash.wrapping_mul(0x100000001b3); }
+        let file = dir.join(format!("{hash:016x}.png"));
+        if !file.is_file() {
+            let _ = std::fs::create_dir_all(&dir);
+            let mut args = vec!["map".to_string(), file.display().to_string(), w.to_string(), h.to_string(), (if dark { "--dark" } else { "--light" }).into()];
+            for (a, b) in &pts { args.push(format!("{a}")); args.push(format!("{b}")); }
+            let ok = run_json(&tool, &args).ok().is_some_and(|v| v["ok"].as_bool() == Some(true));
+            if !ok { return None; }
+        }
+        std::fs::read(&file).ok().map(|b| format!("data:image/png;base64,{}", crate::index::base64(&b)))
+    }).await.map_err(|e| e.to_string())
+}

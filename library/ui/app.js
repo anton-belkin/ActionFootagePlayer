@@ -750,7 +750,7 @@ function renderSide() {
   const c = ctx();
   let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Tasks<span class="count">' + activeCount() + '</span></button><button type="button" role="tab" class="' + (S.tab === "info" ? "on" : "") + '" data-a="tab" data-v="info">Info</button></div>';
   if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
-  if (S.tab === "info") { side.innerHTML = h + '<div class="itab">' + infoHtml(c) + '</div>'; fillThumbs(); return; }
+  if (S.tab === "info") { side.innerHTML = h + '<div class="itab">' + infoHtml(c) + '</div>'; fillThumbs(); fillMaps(); return; }
   h += '<div class="summary">' + (c.any
     ? '<b>' + esc(c.selName) + '</b><span class="sub wrap" style="margin-top:2px">' + esc("Commands below act on " + plural(c.selItems.length) + (c.selFolders.length ? ", everything inside the selected folders included." : ".")) + '</span>' +
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (c.selItems.length && c.selItems.every((x) => x.kind === "still") ? "Open" : "Open in the player") + '</button>' +
@@ -1389,7 +1389,17 @@ function manyInfo(c) {
   h += infoSec("All of it", kv([["Length", dur ? clock(dur) : ""], ["Size", sizeText(size)], ["Recorded", whens.length ? dateText(whens[0]) + (whens.length > 1 ? " – " + dateText(whens[whens.length - 1]) : "") : ""],
     ["Cameras", count((it) => it.cam)], ["Color", count((it) => it.color)], ["Marks", its.reduce((n, it) => n + (it.marks || 0), 0) || ""], ["Moments", its.reduce((n, it) => n + (it.moments || 0), 0) || ""],
     ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")],
-    ["Places", its.some((it) => it.kind === "clip") ? count((it) => it.kind !== "clip" ? "" : it.geo ? (it.locality !== "—" ? it.locality : it.country) : "No location") : ""]]));
+  ]));
+  // Where its clips were recorded: a small map with each place's dot, and the places by name
+  const clips = its.filter((it) => it.kind === "clip");
+  if (clips.length) {
+    const placed = clips.filter((it) => it.geo);
+    const m = {};
+    placed.forEach((it) => { const n = placeText(it.geo.place) || coordText(it.geo.lat, it.geo.lon); m[n] = (m[n] || 0) + 1; });
+    const names = Object.keys(m).sort((a, b) => m[b] - m[a]).map((n) => '<span class="blk">' + esc(n) + ' <span class="sub" style="display:inline">' + m[n] + '</span></span>').join("");
+    h += infoSec("Location", placed.length ? mapHtml(placed.map((it) => [it.geo.lat, it.geo.lon])) + kv([["Places", names, false, true], ["No location", clips.length - placed.length || ""]])
+      : '<p class="sub wrap">None of these clips has a location yet.</p>');
+  }
   if (one && FOLDER_VIEWS[S.view] && c.selFolders[0] !== NOPREV) h += infoSec("Files", kv([["Folder", pathsHtml([folderOnDisk(c.selFolders[0])]), false, true]]));
   return h;
 }
@@ -1454,6 +1464,28 @@ function placeText(p) {
   if (!parts.length && p.water) parts.push(p.water);
   return parts.join(", ");
 }
+// A small map of points (Apple Maps, drawn by the app on a Mac and kept), filled in after the Info is drawn
+const MAPS = new Map(); // its points' key -> data URL, or null: none
+function mapHtml(points) {
+  if (!S.macos || !points.length) return "";
+  const key = Array.from(new Set(points.map((p) => p[0].toFixed(4) + "," + p[1].toFixed(4)))).sort().join(";");
+  const u = MAPS.get(key);
+  if (u === null) return "";
+  return '<div class="minimap"><img data-map="' + esc(key) + '" alt="Map: where ' + (points.length === 1 ? "it was" : "they were") + ' recorded"' + (u ? ' src="' + u + '"' : " hidden") + '></div>';
+}
+function fillMaps() {
+  for (const el of document.querySelectorAll("img[data-map]")) {
+    const key = el.getAttribute("data-map");
+    if (MAPS.has(key)) continue;
+    MAPS.set(key, undefined);
+    const points = key.split(";").map((x) => x.split(",").map(Number));
+    const dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    invoke("mini_map", { points, w: 300, h: 170, dark }).then((u) => u || null, () => null).then((u) => {
+      MAPS.set(key, u);
+      for (const im of document.querySelectorAll('img[data-map="' + CSS.escape(key) + '"]')) { if (u) { im.src = u; im.hidden = false; } else im.parentNode.remove(); }
+    });
+  }
+}
 function coordText(lat, lon) {
   return Math.abs(lat).toFixed(5) + "° " + (lat < 0 ? "S" : "N") + ", " + Math.abs(lon).toFixed(5) + "° " + (lon < 0 ? "W" : "E");
 }
@@ -1488,7 +1520,7 @@ function locationInfo(it) {
   if (!g) return infoSec("Location", '<p class="sub wrap">None. Select it (or its folder) and use Location in Commands: from Apple Photos' + (S.macos ? "" : " (on a Mac)") + ' or by hand.</p>');
   const p = g.place;
   const name = placeText(p) || (g.source === "camera" && !p ? "Looking up the place…" : "");
-  return infoSec("Location", kv([["Place", name], ["Point", coordText(g.lat, g.lon) + (g.alt != null ? " · " + Math.round(g.alt) + " m" : ""), true],
+  return infoSec("Location", mapHtml([[g.lat, g.lon]]) + kv([["Place", name], ["Point", coordText(g.lat, g.lon) + (g.alt != null ? " · " + Math.round(g.alt) + " m" : ""), true],
     ["From", GEO_SOURCE[g.source] + (g.source === "photos" && g.gap != null ? ": the nearest photo " + gapText(g.gap) : "")]]) +
     '<div class="btns"><button type="button" class="btn sm" data-a="geomap" data-v="' + g.lat + "," + g.lon + '">Show on a map</button>' +
     (g.source !== "camera" ? '<button type="button" class="btn sm" data-a="georemove">Remove</button>' : "") + '</div>');
