@@ -163,6 +163,7 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
         };
         match r {
             Some(Ok(rep)) => {
+                if !rep.skipped_roots.is_empty() { eprintln!("afp-catalog: not there, or without its {} marker: {}", crate::locations::LOCATION_EXT, rep.skipped_roots.join(", ")); }
                 if rep.changes > 0 { eprintln!("afp-catalog: {} changes ({} folders listed, {} read)", rep.changes, rep.listed, rep.inspected); }
                 if cat.should_compact() || cat.manifest.is_none() {
                     match cat.compact() { Ok(n) => { let removed = cat.clean().unwrap_or(0); eprintln!("afp-catalog: folded into {n}, {removed} removed"); } Err(e) => eprintln!("afp-catalog: fold: {e}") }
