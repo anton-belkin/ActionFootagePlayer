@@ -85,6 +85,10 @@ pub struct Catalog {
     pub grace: std::time::Duration,
     /// Seconds added to this computer's clock (tests: time passing)
     pub clock_ahead: u64,
+    /// How long after a folder was listed because it changed this computer lists it once more (60 s): the Mac gives a
+    /// share's folder's new time with a listing from its cache up to ~30 s old (seen on the NAS), and only a listing
+    /// made after that is sure. Kept on this computer's disk (recheck.json): it's its cache that was behind
+    pub recheck_after: std::time::Duration,
 }
 
 fn not_found(e: &io::Error) -> bool { e.kind() == io::ErrorKind::NotFound }
@@ -93,7 +97,8 @@ impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
-                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0 }
+                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0,
+                  recheck_after: std::time::Duration::from_secs(60) }
     }
 
     fn reset(&mut self) {
@@ -363,6 +368,23 @@ impl Catalog {
         }
     }
 
+    fn clock(&self) -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) + self.clock_ahead }
+
+    fn rechecks(&self) -> Vec<(String, String, u64)> {
+        self.local.read(&self.cache.join("recheck.json")).ok().and_then(|b| serde_json::from_slice::<Vec<(String, String, u64)>>(&b).ok()).unwrap_or_default()
+    }
+
+    fn save_rechecks(&self, list: &[(String, String, u64)]) {
+        let _ = self.local.mkdirs(&self.cache);
+        let _ = self.local.put(&self.cache.join("recheck.json"), serde_json::to_string(list).unwrap().as_bytes());
+    }
+
+    /// Folders this computer is to list once more now (their time has come)
+    pub fn due_rechecks(&self) -> Vec<(String, String)> {
+        let t = self.clock();
+        self.rechecks().into_iter().filter(|(_, _, due)| *due <= t).map(|(r, d, _)| (r, d)).collect()
+    }
+
     /// A folder's time changed (a file made and removed in it): what was written into a file in place (a link, tags)
     /// leaves its folder's time as it was, and the next look wouldn't list it again
     pub fn touch(&self, dir: &Path) -> io::Result<()> {
@@ -438,14 +460,19 @@ impl Catalog {
         let state_file = self.cache.join("clean.json");
         let before: HashMap<String, u64> = self.local.read(&state_file).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok())
             .unwrap_or_default();
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) + self.clock_ahead;
+        let t = self.clock();
         let grace = self.grace.as_secs();
         let mut now: HashMap<String, u64> = HashMap::new();
         let mut removed = 0;
         let mut go = |shared: &Arc<dyn Store>, path: PathBuf, now: &mut HashMap<String, u64>| -> io::Result<()> {
             let k = path.display().to_string();
             match before.get(&k) {
-                Some(&since) if since <= t && t - since >= grace => { shared.remove(&path)?; removed += 1; }
+                // A file another computer has open can't go now (SMB: busy): next time
+                Some(&since) if since <= t && t - since >= grace => match shared.remove(&path) {
+                    Ok(()) => removed += 1,
+                    Err(e) if e.kind() == io::ErrorKind::ResourceBusy || e.raw_os_error() == Some(16) => { now.insert(k, since); }
+                    Err(e) => return Err(e),
+                },
                 Some(&since) => { now.insert(k, since.min(t)); }
                 None => { now.insert(k, t); }
             }
@@ -530,14 +557,15 @@ impl Catalog {
         let _ = self.shared.mkdirs(&self.dir.join("journal").join(&self.me));
         let batch = if opts.batch == 0 { 2000 } else { opts.batch };
         let mut pending: Vec<(String, String, Option<File>)> = Vec::new();
+        let mut recheck_new: Vec<(String, String, u64)> = Vec::new();
+        let mut recheck_done: Vec<(String, String)> = Vec::new();
         for root in roots {
             let starts: Vec<String> = if opts.only.is_empty() { vec![String::new()] } else {
                 opts.only.iter().filter(|(r, _)| *r == root.id).map(|(_, d)| d.clone()).collect()
             };
-            // A folder listed because it had changed is listed once more by the next regular look (minutes later): a
-            // listing can be older than the folder's time it came with (macOS keeps a share's listings some 30 s), and
-            // its new files would otherwise wait for the deep look. Its record says so (`recheck`), for any computer
-            let regular = opts.only.is_empty() && !opts.deep;
+            // Listed because they changed a while ago: listed again now
+            let t = self.clock();
+            let due: HashSet<String> = self.rechecks().into_iter().filter(|(r, _, d)| *r == root.id && *d <= t).map(|(_, d, _)| d).collect();
             if starts.is_empty() { continue; }
             let available = matches!(self.shared.stat(&root.dir), Ok(Some(s)) if s.dir)
                 && root.marker.as_ref().is_none_or(|m| matches!(self.shared.stat(&root.dir.join(m)), Ok(Some(_))));
@@ -562,8 +590,8 @@ impl Catalog {
                     Some(f) if f.dir => f.mtime != st.mtime || f.digest.as_deref() != Some(dg.as_str()),
                     _ => true,
                 };
-                let due = regular && rec.as_ref().is_some_and(|f| f.meta.as_ref().is_some_and(|m| m["recheck"] == json!(true)));
-                let changed = differs || due;
+                let is_due = due.contains(&d);
+                let changed = differs || is_due;
                 if !changed {
                     for (n, f) in &known { if f.dir { stack.push((join(&d, n), false)); } }
                     continue;
@@ -648,10 +676,11 @@ impl Catalog {
                     }
                     idx.retain(|dir, _| dir != &g && !dir.starts_with(&format!("{g}/")));
                 }
-                // Changed: to be listed once more (not when it's that second listing, nor a deep look's)
-                // (a folder never listed before, as on a first look, isn't: nothing of it was seen to change)
-                let again = differs && !opts.deep && rec.is_some();
-                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime }, meta: again.then(|| json!({ "recheck": true })),
+                // Changed: to be listed once more by this computer, a while later (not when it's that second listing,
+                // nor a folder never listed before, as on a first look: nothing of it was seen to change)
+                if differs && !is_due && rec.is_some() && !opts.deep { recheck_new.push((rid.clone(), d.clone(), t + self.recheck_after.as_secs())); }
+                if is_due { recheck_done.push((rid.clone(), d.clone())); }
+                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime }, meta: None,
                                      digest: Some(digest(now.iter().map(|(n, f)| (n.as_str(), f)))) };
                 if rec.as_ref() != Some(&dir_rec) { out.push((rid.clone(), d.clone(), Some(dir_rec))); }
                 rep.changes += out.len();
@@ -661,6 +690,13 @@ impl Catalog {
             }
         }
         if !pending.is_empty() { self.note(pending)?; }
+        // Folders listed again are off the list; folders that changed go on it (once, the latest time)
+        if !recheck_new.is_empty() || !recheck_done.is_empty() {
+            let mut list: Vec<(String, String, u64)> = self.rechecks().into_iter()
+                .filter(|(r, d, _)| !recheck_done.iter().any(|(r2, d2)| r == r2 && d == d2) && !recheck_new.iter().any(|(r2, d2, _)| r == r2 && d == d2)).collect();
+            list.extend(recheck_new);
+            self.save_rechecks(&list);
+        }
         Ok(rep)
     }
 }

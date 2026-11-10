@@ -197,6 +197,11 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
             let only: Vec<(String, String)> = std::mem::take(&mut pending).into_iter().collect();
             if worker.sweep(&roots, &ours, &Sweep { only, ..Default::default() }).is_ok() { refresh(&changes, &last); }
         }
+        // Folders that changed, listed once more a minute later (the Mac's listing then is sure)
+        let due = worker.due_rechecks();
+        if !due.is_empty() && last_look.elapsed() < Duration::from_secs(300) {
+            if worker.sweep(&roots, &ours, &Sweep { only: due, ..Default::default() }).is_ok() { refresh(&changes, &last); }
+        }
         if last_look.elapsed() >= Duration::from_secs(300) {
             if worker.sweep(&roots, &ours, &Sweep::default()).is_ok() { refresh(&changes, &last); }
             last_look = Instant::now();

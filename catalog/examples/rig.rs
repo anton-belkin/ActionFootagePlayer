@@ -61,6 +61,16 @@ fn main() {
             let n = cat.compact().unwrap();
             say(&format!("compact {n}"), t, &shared);
         }
+        "show" => {
+            cat.load(&Want::All).unwrap();
+            for rel in &a[5..] {
+                let r = cat.state.rec("p", rel);
+                let st = DiskStore.stat(&project.join(rel)).ok().flatten();
+                println!("{rel}: catalog {:?}\n  disk {:?}", r.map(|r| (r.v.l, r.v.by.to_string(), r.f.as_ref().map(|f| (f.mtime, f.size, f.digest.clone(), f.meta.clone())))), st);
+                if st.is_some_and(|s| s.dir) { println!("  listed: {:?}", DiskStore.list(&project.join(rel)).map(|l| l.into_iter().map(|i| i.name).collect::<Vec<_>>())); }
+                println!("  children on record: {:?}", cat.state.children("p", rel).into_iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>());
+            }
+        }
         "load" => { let i = cat.load(&Want::All).unwrap(); say(&format!("load {i:?} records {}", cat.state.len_live()), t, &shared); }
         "player" => {
             let h = &a[5];

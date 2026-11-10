@@ -53,14 +53,16 @@ impl Computer {
         let mut cat = Catalog::new(Arc::new(shared.clone()), Arc::new(local.clone()), Path::new(PROJECT), Path::new("/cache/proj"), name);
         // Clean-ups at once here (a test's time doesn't pass); one test gives them their 10 minutes
         cat.grace = std::time::Duration::ZERO;
+        cat.recheck_after = std::time::Duration::ZERO;
         Computer { name: name.into(), net, shared, local, cat }
     }
     pub fn insp(&self) -> Insp { Insp { store: Arc::new(self.shared.clone()) } }
     /// The program started again: what it had in memory gone, its own disk's cache kept
     pub fn restart(&mut self) {
-        let grace = self.cat.grace;
+        let (grace, recheck) = (self.cat.grace, self.cat.recheck_after);
         self.cat = Catalog::new(Arc::new(self.shared.clone()), Arc::new(self.local.clone()), Path::new(PROJECT), Path::new("/cache/proj"), &self.name);
         self.cat.grace = grace;
+        self.cat.recheck_after = recheck;
     }
     pub fn sweep(&mut self) -> Result<afp_catalog::Report, afp_catalog::Error> { let i = self.insp(); self.cat.sweep(&roots(), &i, &Default::default()) }
     pub fn deep(&mut self) -> Result<afp_catalog::Report, afp_catalog::Error> {
