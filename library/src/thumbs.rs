@@ -8,6 +8,8 @@
 //!   Video Extensions installed.
 //! A file it can't draw in time, and every file on Linux: the player's ffmpeg, decoding only the first keyframe, on the
 //! GPU where it can (VideoToolbox, D3D11VA, VA-API).
+//! Before all that, a picture the NAS already made beside the clip, when there is one: Synology's @eaDir, QNAP's
+//! .@__thumb (UGREEN's UGOS keeps its own in /volumeN/@thumbnail, outside the shares: not reachable).
 //! A log clip (D-Log M, GP-Log) looks flat, as it does in Finder.
 
 use std::collections::HashMap;
@@ -25,6 +27,7 @@ const QL_WAIT: Duration = Duration::from_secs(8);
 
 /// `path`'s picture as a JPEG at `out`; false: none made
 pub fn video_frame(path: &Path, out: &Path) -> bool {
+    if nas_thumb(path, out) { return true; }
     if cfg!(target_os = "macos") && quick_look(path, out) { return true; }
     #[cfg(windows)]
     if shell::thumb(path, out) { return true; }
@@ -45,6 +48,50 @@ pub fn ffmpeg_frame(path: &Path, out: &Path) -> bool {
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); } // no console window
     cmd.status().is_ok_and(|s| s.success()) && std::fs::metadata(out).is_ok_and(|m| m.len() > 0)
+}
+
+// ---------- a NAS's own pictures ----------
+
+/// Folders of a NAS's pictures, by the folder they're in: (Synology's @eaDir, QNAP's .@__thumb) there, and when looked.
+/// Looked once a folder, so a share without them costs two questions a folder, not some for each clip
+static NAS_DIRS: Mutex<Option<HashMap<PathBuf, (bool, bool, std::time::Instant)>>> = Mutex::new(None);
+
+/// A picture of `path` its NAS made (Synology Photos / Video Station, QNAP), copied to `out`. Untried on those NASes:
+/// names as they're documented, and only a JPEG of a sensible size is taken
+pub fn nas_thumb(path: &Path, out: &Path) -> bool {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().map(|n| n.to_string_lossy().into_owned())) else { return false };
+    let (syno, qnap) = {
+        let mut m = NAS_DIRS.lock().unwrap();
+        let m = m.get_or_insert_with(HashMap::new);
+        match m.get(dir) {
+            Some(&(a, b, at)) if at.elapsed() < Duration::from_secs(600) => (a, b),
+            _ => {
+                let v = (dir.join("@eaDir").is_dir(), dir.join(".@__thumb").is_dir());
+                m.insert(dir.to_path_buf(), (v.0, v.1, std::time::Instant::now()));
+                v
+            }
+        }
+    };
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if syno {
+        let d = dir.join("@eaDir").join(&name);
+        // Synology Photos: M 320 px, B 640, SM 240, S small; Video Station: a frame of the video
+        for f in ["SYNOPHOTO_THUMB_M.jpg", "SYNOPHOTO_THUMB_B.jpg", "SYNOPHOTO_THUMB_SM.jpg", "SYNOVIDEO_VIDEO_SCREENSHOT.jpg", "SYNOPHOTO_THUMB_S.jpg"] {
+            candidates.push(d.join(f));
+        }
+    }
+    if qnap {
+        let d = dir.join(".@__thumb");
+        for size in ["s400", "s800", "s100"] {
+            candidates.push(d.join(format!("{size}{name}")));
+            candidates.push(d.join(format!("{size}{name}.jpg")));
+        }
+    }
+    for c in candidates {
+        let Ok(b) = std::fs::read(&c) else { continue };
+        if b.len() >= 1024 && b.len() <= 512 * 1024 && b.starts_with(&[0xFF, 0xD8]) && std::fs::write(out, &b).is_ok() { return true; }
+    }
+    false
 }
 
 // ---------- the system's thumbnail service (macOS) ----------
@@ -179,6 +226,31 @@ mod shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nas_pictures_beside_clips() {
+        let root = std::env::temp_dir().join(format!("afl-nas-thumbs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let jpeg = |n: usize| { let mut v = vec![0xFF, 0xD8, 0xFF, 0xE0]; v.resize(n, 7); v };
+        let (syno, qnap, plain) = (root.join("syno"), root.join("qnap"), root.join("plain"));
+        std::fs::create_dir_all(syno.join("@eaDir/GX01.MP4")).unwrap();
+        std::fs::write(syno.join("@eaDir/GX01.MP4/SYNOPHOTO_THUMB_XL.jpg"), jpeg(4000)).unwrap(); // not one we take
+        std::fs::write(syno.join("@eaDir/GX01.MP4/SYNOPHOTO_THUMB_B.jpg"), jpeg(3000)).unwrap();
+        std::fs::create_dir_all(syno.join("@eaDir/GX02.MP4")).unwrap();
+        std::fs::write(syno.join("@eaDir/GX02.MP4/SYNOPHOTO_THUMB_M.jpg"), b"not a jpeg, long enough?".repeat(100)).unwrap();
+        std::fs::create_dir_all(qnap.join(".@__thumb")).unwrap();
+        std::fs::write(qnap.join(".@__thumb/s400DJI_1.MP4"), jpeg(2000)).unwrap();
+        std::fs::create_dir_all(&plain).unwrap();
+        let out = root.join("out.jpg");
+        assert!(nas_thumb(&syno.join("GX01.MP4"), &out));
+        assert_eq!(std::fs::read(&out).unwrap().len(), 3000);
+        assert!(!nas_thumb(&syno.join("GX02.MP4"), &out));
+        assert!(nas_thumb(&qnap.join("DJI_1.MP4"), &out));
+        assert_eq!(std::fs::read(&out).unwrap().len(), 2000);
+        assert!(!nas_thumb(&qnap.join("DJI_2.MP4"), &out));
+        assert!(!nas_thumb(&plain.join("A.MP4"), &out));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// Page-like timing over a folder of clips: AFL_THUMBS_DIR (its .mp4/.mov, AFL_THUMBS_MAX of them, sorted; or
     /// AFL_THUMBS_LIST, a file of paths, one a line), as the
