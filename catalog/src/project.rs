@@ -85,6 +85,18 @@ fn roots_from(project: &Path, mounts: &[(String, PathBuf)]) -> (Vec<Root>, Ours)
             .into_iter().collect();
         roots.push(Root { id: format!("l:{}", l.path), dir: dir.clone(), marker: Some(marker.clone()), exclude });
     }
+    // A source inside another (a folder of the camera's inside a whole share): left out of the outer one, so that its
+    // files are each in one root
+    let dirs: Vec<(String, PathBuf)> = roots.iter().map(|r| (r.id.clone(), r.dir.clone())).collect();
+    for r in roots.iter_mut() {
+        for (id, d) in &dirs {
+            if *id == r.id || r.id == "p" { continue; }
+            if let Ok(rel) = d.strip_prefix(&r.dir) {
+                let rel = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+                if !rel.is_empty() && !r.exclude.contains(&rel) { r.exclude.push(rel); }
+            }
+        }
+    }
     (roots, Ours { footage_in_project: footage, own_only: false })
 }
 
@@ -126,6 +138,11 @@ mod tests {
         assert_eq!(roots.len(), 2);
         assert_eq!(roots[1].id, "l://DISKSTATIONDXP/video/Footage/2026");
         assert_eq!(roots[1].dir, v.join("Footage/2026"));
+        // A source inside another: left out of the outer
+        std::fs::write(p.join(locations::PROJECT_FILE), r#"{"locations":[{"name":"All","path":"//DISKSTATIONDXP/video/Footage"},{"name":"Cam","path":"//DISKSTATIONDXP/video/Footage/2026"}]}"#).unwrap();
+        let (roots, _) = roots_with(&p, &[("video".into(), v.clone())]);
+        assert_eq!(roots[1].exclude, vec!["2026".to_string()]);
+        assert!(roots[2].exclude.is_empty());
         let (own, ours) = own_roots(&p);
         assert_eq!(own.len(), 1);
         assert!(ours.own_only);
