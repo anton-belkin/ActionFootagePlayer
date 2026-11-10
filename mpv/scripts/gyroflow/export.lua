@@ -679,14 +679,20 @@ local function shown_time()
     return math.max(restart, t - d.delay)
 end
 
--- Where a photo goes: the project's Generated/<date> Photos/, a folder a day (docs/library-management.md §8), as the
--- workspace plugin says the project is; nil: gyroflow-export's own choice (stabilized/ beside a clip of no project)
+-- Where a photo goes: the project's _Stills/Generated/ (docs/library-management.md §8), as the workspace plugin says
+-- the project is; with the project's generated_runs, a folder a day in it (<date>); nil: gyroflow-export's own choice
+-- (stabilized/ beside a clip of no project)
 local function photo_dir()
     local ws = mp.get_property_native("user-data/workspace")
     local project = type(ws) == "table" and ws.project
     if type(project) ~= "string" or project == "" then return nil end
     local sep = platform.windows and "\\" or "/"
-    return project .. sep .. "Generated" .. sep .. os.date("%Y-%m-%d") .. " Photos"
+    local dir = project .. sep .. "_Stills" .. sep .. "Generated"
+    local f = io.open(project .. sep .. "Project.afproject", "r")
+    local doc = f and utils.parse_json(f:read("*a") or "")
+    if f then f:close() end
+    if type(doc) == "table" and doc.generated_runs == true then dir = dir .. sep .. os.date("%Y-%m-%d") end
+    return dir
 end
 
 local function photo()
@@ -788,7 +794,7 @@ mp.register_script_message("photo-at", function(json)
     if not denoise or mp.get_property_native("user-data/gyroflow/temporal_denoise") == "off" then
         table.insert(args, "--radius"); table.insert(args, "0")
     end
-    -- Where it goes: the place asked for (a run's folder), else the project's Generated/<date> Photos
+    -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
     local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
     table.insert(args, req.clip)

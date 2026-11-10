@@ -761,7 +761,7 @@ function renderSide() {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
-      '<span class="sub wrap">The ones without a preview, anywhere in the project. They go into a folder of this run’s own, Generated/&lt;date&gt; &lt;time&gt; Clip previews, from where you move them as you like; a clip identical to another (the same file twice) gets its preview in its Duplicates.</span>' +
+      '<span class="sub wrap">The ones without a preview, anywhere in the project. They go into Generated in Footage’s own folder (a folder per run when the project’s settings say so), from where you move them as you like; a clip identical to another (the same file twice) gets its preview in its Duplicates.</span>' +
       '<div class="field"><label class="sub" for="clips_layout">Laid out</label><select id="clips_layout" data-a="layout_set">' +
       [["tree", "As the footage’s folders"], ["trips", "By trips: clips at most 2 days apart"], ["flat", "All in one folder"]].map((o) => '<option value="' + o[0] + '"' + (S.clipsLayout === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select></div>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="moments">Moments of the marks</button></div>' +
@@ -769,7 +769,7 @@ function renderSide() {
       '<div class="field"><label class="sub" for="pkind">Photos as</label><select id="pkind" data-a="pkind"><option value="no"' + (S.photoKind === "no" ? " selected" : "") + '>Stills</option>' +
       (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
-      '<span class="sub wrap">Of each mark without one anywhere in the project. Each run’s go into Generated/&lt;date&gt; &lt;time&gt; Moments or Photos.</span>');
+      '<span class="sub wrap">Of each mark without one anywhere in the project. They go into Generated in Moments’ or Photos’ own folder.</span>');
   } else if (S.view === "moments") {
     const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
     const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
@@ -781,7 +781,7 @@ function renderSide() {
       '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="render"' + (c.any && on.length && !toMake ? " disabled" : "") + '>' + (c.any ? (toMake ? "Render " + toMake + " (missing and stale)" : "All current") : "Render") + '</button>' +
       '<button type="button" class="btn sm" data-a="delrenders" data-v="stale">Delete stale</button><button type="button" class="btn sm" data-a="delrenders" data-v="all">Delete renders</button></div>' +
       '<span class="sub wrap">Kept in _Renders/ of the project. An export with the same look copies a current render instead of rendering again. Deleting renders breaks nothing.</span>');
-    h += sec("export", "Export", "to Generated/",
+    h += sec("export", "Export", "to Exports’ Generated",
       '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
       '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
       '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="export">Export ' + esc(c.any ? c.label : "") + '</button></div>');
@@ -1024,6 +1024,8 @@ function renderSheet() {
       '<div class="field"><span class="sub">Its id</span><span class="mono">' + esc(st.id || "made when it’s first needed") + '</span></div>' +
       '<div class="field" style="align-items:start"><label class="sub" for="hosts">The NAS’s other names</label><textarea id="hosts" rows="3" class="mono" style="border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:var(--surface);color:var(--fg)" placeholder="DISKSTATIONDXP = web.nas, 192.168.50.186">' + esc(S.hostsText) + '</textarea></div>' +
       '<p class="sub wrap">One line per NAS: the name its locations use, then the other names it answers to. Any of them matches a share mounted under that name.</p>' +
+      '<div class="lab">What’s made</div>' +
+      '<label class="switch"><input type="checkbox" id="genruns"' + (st.generated_runs ? " checked" : "") + '><span class="wrap">A folder per run in Generated: each run’s clip previews, moments, photos and exports in a folder of their own, named by its date and time (what’s saved by hand: one a day). Off: all in Generated itself (_Clips/Generated, _Moments/Generated, _Stills/Generated, _Exports/Generated).</span></label>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="moveproject">Move the project to…</button></div>' +
       '<p class="sub wrap">Moves Project.afproject and the project’s _ folders to another folder (the SSD, say). The clips and their own files stay where they are; this folder becomes a location.</p></div>' +
       '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
@@ -1033,7 +1035,8 @@ function renderSheet() {
 async function saveLocations() {
   const hosts = textToHosts(S.hostsText);
   try {
-    const problems = await invoke("save_locations", { list: S.locEdit.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: !!l.copies })), hosts });
+    const gr = $("genruns");
+    const problems = await invoke("save_locations", { list: S.locEdit.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: !!l.copies })), hosts, generatedRuns: gr ? gr.checked : null });
     S.sheet = null; renderSheet();
     toast(problems && problems.length ? "Saved. " + problems.join(" · ") : "Saved in Project.afproject; each location has its pointer file");
     await refresh();
