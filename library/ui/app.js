@@ -19,7 +19,38 @@ const ICON = {
   list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
 };
-const VIEWS = [["sources", "Sources"], ["footage", "Footage"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+const VIEWS = [["sources", "Originals"], ["footage", "Footage"], ["moments", "Moments"], ["stills", "Photos"], ["exports", "Exports"]];
+// Each view's own folder in the project (Anton, 2026-11-10): what's in it is the view's top; what's anywhere else in the
+// project's folder is under Other folders, at its path there
+const VIEW_ROOT = { footage: "_Clips", moments: "_Moments", stills: "_Stills", exports: "_Exports" };
+const OTHER = "Other folders";
+// A folder's path in the project's folder -> as the view shows it
+function shownDir(view, real) {
+  const r = VIEW_ROOT[view];
+  if (!r) return real;
+  const lr = real.toLowerCase(), lroot = r.toLowerCase();
+  if (lr === lroot) return "";
+  if (lr.startsWith(lroot + "/")) return real.slice(r.length + 1);
+  return real === "" ? OTHER : OTHER + "/" + real;
+}
+// …and back: a folder shown -> its path in the project's folder (Other folders itself: the project's folder)
+function diskRel(f, view) {
+  const r = VIEW_ROOT[view || S.view];
+  if (!r || f === NOPREV) return f;
+  if (f === OTHER) return "";
+  if (f.startsWith(OTHER + "/")) return f.slice(OTHER.length + 1);
+  return f ? r + "/" + f : r;
+}
+// A view's scan, its folders and items moved to where the view shows them (each item keeps its real folder as rdir)
+function rooted(view, d) {
+  if (!VIEW_ROOT[view]) return d;
+  const dirs = new Set();
+  for (const x of d.dirs || []) { const sd = shownDir(view, x); if (sd) dirs.add(sd); }
+  const items = (d.items || []).map((it) => Object.assign({}, it, { rdir: it.dir, dir: shownDir(view, it.dir || "") }));
+  for (const it of items) if (it.dir === OTHER || it.dir.startsWith(OTHER + "/")) dirs.add(OTHER);
+  for (const x of Array.from(dirs)) if (x.startsWith(OTHER + "/")) dirs.add(OTHER);
+  return Object.assign({}, d, { dirs: Array.from(dirs).sort((a, b) => (a.startsWith(OTHER) - b.startsWith(OTHER)) || a.localeCompare(b)), items });
+}
 // Footage is the clips as their previews are arranged (the previews' folders in the project's); the ones without a
 // preview are in this one
 const NOPREV = "Without a clip preview";
@@ -31,8 +62,14 @@ const NOUN = { footage: ["clip", "clips"], sources: ["clip", "clips"], moments: 
 // The views whose folders are the project folder's, made, renamed and deleted here (Footage's: its previews' folders)
 const ICON_MARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>';
 const FOLDER_VIEWS = { footage: true, moments: true, stills: true, exports: true };
-// A folder of a view (its path in the project's folder), on disk
-function folderOnDisk(f) { return S.root + (f ? "/" + f : ""); }
+// A folder of a view (as the view shows it), on disk
+// Other folders selected as a whole: what's in it (it stands for the project's folder outside the view's own)
+function otherExpanded(folders) {
+  if (!folders.includes(OTHER)) return folders;
+  const ds = ((DATA[S.view] && DATA[S.view].dirs) || []).filter((d) => d.startsWith(OTHER + "/") && !d.slice(OTHER.length + 1).includes("/"));
+  return folders.filter((f) => f !== OTHER).concat(ds);
+}
+function folderOnDisk(f) { const rel = diskRel(f); return S.root + (rel ? "/" + rel : ""); }
 
 // This computer's choices for the batches (the page's own storage; none: the defaults)
 function remembered(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } }
@@ -236,22 +273,14 @@ function arrange() {
     used[n] = true;
     label[i] = n;
   });
-  const fitems = RAW_FOOTAGE.items.map((it) => Object.assign({}, it, { key: it.id, tdir: it.dir, dir: it.pdir == null ? NOPREV : it.pdir }));
-  const fdirs = (RAW_FOOTAGE.clips_dirs || []).slice();
+  const fitems = RAW_FOOTAGE.items.map((it) => Object.assign({}, it, { key: it.id, tdir: it.dir, dir: it.pdir == null ? NOPREV : shownDir("footage", it.pdir) }));
+  const fdirs = rooted("footage", { dirs: RAW_FOOTAGE.clips_dirs || [], items: [] }).dirs;
+  if (fitems.some((it) => it.dir === OTHER || it.dir.startsWith(OTHER + "/")) && !fdirs.includes(OTHER)) fdirs.push(OTHER);
   if (fitems.some((it) => it.dir === NOPREV)) fdirs.push(NOPREV);
   DATA.footage = { dirs: fdirs, items: fitems };
-  const sitems = [];
-  for (const it of RAW_FOOTAGE.items) {
-    for (const c of it.copies || []) {
-      const rel = c.rel || it.name;
-      const i = rel.lastIndexOf("/");
-      const dir = label[c.li] + (i > 0 ? "/" + rel.slice(0, i) : "");
-      sitems.push(Object.assign({}, it, { key: "s:" + c.li + "/" + rel, tdir: it.dir, dir, name: rel.slice(i + 1), path: c.path, srcLoc: c.loc }));
-    }
-  }
-  const sdirs = [];
-  S.locations.forEach((l, i) => { sdirs.push(label[i]); for (const d of l.dirs || []) sdirs.push(label[i] + "/" + d); });
-  DATA.sources = { dirs: sdirs, items: sitems, labels: label };
+  // Originals: each clip at its path in the project's tree (the sources' places in it are Sources settings')
+  const sitems = RAW_FOOTAGE.items.map((it) => Object.assign({}, it, { key: "s:" + it.id, tdir: it.dir, dir: it.dir }));
+  DATA.sources = { dirs: (RAW_FOOTAGE.dirs || []).slice(), items: sitems, labels: label };
   for (const v of ["footage", "sources"]) derive1(v);
 }
 function derive1(view) {
@@ -389,7 +418,7 @@ function ctx() {
   const filt = filtering() || S.q.trim() !== "";
   // Footage's and Sources' folders aren't the project's tree: their clips, by their paths in it
   const clipsView = S.view === "footage" || S.view === "sources";
-  const only = clipsView ? Array.from(new Set(selItems.map((it) => it.id))) : S.view === "clip" ? selItems.map((it) => KIND_BASE[it.kind] + it.id) : filt ? selItems.map((it) => BASE[S.view] + it.id) : selFolders.map((p) => BASE[S.view] + p).concat(direct.map((it) => BASE[S.view] + it.id));
+  const only = clipsView ? Array.from(new Set(selItems.map((it) => it.id))) : S.view === "clip" ? selItems.map((it) => KIND_BASE[it.kind] + it.id) : filt ? selItems.map((it) => BASE[S.view] + it.id) : otherExpanded(selFolders).map((p) => diskRel(p)).concat(direct.map((it) => BASE[S.view] + it.id));
   return { viewName, folderName, selFolders, direct, selItems, any, selName, only, label: plural(selItems.length) };
 }
 
@@ -457,7 +486,7 @@ function renderMain() {
   } else {
     h += '<div class="crumbs">' + navButtons() + '<button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
     S.path.forEach((p, i) => { h += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
-    h += '<span class="where">' + esc(S.view === "footage" ? "As their previews are arranged" : S.view === "sources" ? (S.path.length ? sourceOf(S.path[0]) : "Where the footage is, first wins") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    h += '<span class="where">' + esc(S.view === "footage" ? "As their previews are arranged" : S.view === "sources" ? (S.path.length ? "The originals at " + S.path.join("/") : "The originals in the project’s tree (where each is: Sources settings)") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
     if (S.view === "sources" && !S.path.length) h += '<div class="selbar"><button type="button" class="btn sm" data-a="addsource">Add a source…</button><button type="button" class="btn sm" data-a="sheet" data-v="settings">Sources settings…</button></div>';
     if (filt) {
       const all = under(dir).filter((x) => matches(x)).length;
@@ -474,7 +503,7 @@ function renderMain() {
   if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button></div>';
   const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
-  const subOf = (it) => it.kind === "folder" ? (S.view === "sources" && !it.dir ? sourceOf(it.name) + " · " + folderSub(it) : folderSub(it)) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
+  const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   if (!list.length) {
     if (S.view === "clip" && !srch && !filt) h += '<div class="empty">No marks, moments or photos of this clip yet. Mark it in the player (M), then make Moments or Photos of the marks.</div>'; else
     h += '<div class="empty">' + (srch ? "Nothing found. Search all of " + c.viewName + ", or remove a filter." : filt ? "Nothing in this folder matches. List every match below here, or remove a filter." : "This folder is empty.") + '</div>';
@@ -702,9 +731,6 @@ function renderSide() {
     : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
       '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
   const info = S.info || {};
-  if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) {
-    h += '<div class="summary"><div class="btns"><button type="button" class="btn sm" data-a="removesource">Remove from the project</button></div><span class="sub wrap" style="margin-top:6px">Its clips stay where they are: the project stops looking there, and its pointer file goes.</span></div>';
-  }
   if (S.view === "footage" || S.view === "sources" || S.view === "moments") h += checksSection(c);
   h += tagsSection(c);
   if (S.view === "footage" || S.view === "sources") {
@@ -1012,9 +1038,9 @@ async function newFolder() {
   if (!FOLDER_VIEWS[S.view]) return;
   const parent = S.path.join("/");
   try {
-    const made = await invoke("new_folder", { view: S.view, parent: S.view === "footage" && parent === NOPREV ? "" : parent });
+    const made = await invoke("new_folder", { view: S.view, parent: S.view === "footage" && parent === NOPREV ? VIEW_ROOT.footage : diskRel(parent) });
     await refresh();
-    const k = "f:" + made;
+    const k = "f:" + shownDir(S.view, made);
     S.sel = {}; S.sel[k] = true; S.anchor = k; S.renaming = k;
     renderAll();
   } catch (e) { showError(String(e)); }
@@ -1108,7 +1134,7 @@ function clipName() { return S.clip ? S.clip.split("/").pop() : ""; }
 // (the clip stays); Sources' clips are footage, deleted in Finder
 function deletable(c) {
   if (S.view === "sources" || (!FOLDER_VIEWS[S.view] && S.view !== "clip")) return [];
-  const list = c.selFolders.filter((f) => f !== NOPREV && !f.startsWith(NOPREV + "/")).map((f) => ({ kind: "folder", path: folderOnDisk(f) }));
+  const list = c.selFolders.filter((f) => f !== NOPREV && !f.startsWith(NOPREV + "/") && f !== OTHER).map((f) => ({ kind: "folder", path: folderOnDisk(f) }));
   for (const it of c.direct) {
     if (it.kind === "mark") continue;
     if (it.kind === "clip") { if (it.preview) list.push({ kind: "preview", path: it.preview }); }
@@ -1138,6 +1164,7 @@ async function deleteSelection() {
 }
 function canRename(c) {
   if (c.selFolders.length + c.direct.length !== 1 || S.view === "sources") return false;
+  if (c.selFolders.length === 1 && c.selFolders[0] === OTHER) return false;
   if (S.view === "footage") return c.selFolders.length === 1 && c.selFolders[0] !== NOPREV;
   if (S.view === "clip") return c.direct.length === 1 && c.direct[0].kind !== "mark";
   return true;
@@ -1173,7 +1200,6 @@ function openMenu(x, y) {
     const del = deletable(c);
     const marksOnly = c.direct.length && !c.selFolders.length && c.direct.every((x) => x.kind === "mark");
     if (S.view !== "sources" && !marksOnly) e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
-    if (S.view === "sources" && c.selFolders.length && c.selFolders.every((f) => !f.includes("/")) && !c.direct.length) e.push(b("removesource", "Remove from the project"));
     if (e.length) parts.push(e.join(""));
     parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
   } else {
@@ -1194,15 +1220,18 @@ function openMenu(x, y) {
   m.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + "px";
   CMENU = m;
 }
+// A folder of the project's tree, on disk: where a clip in it is (the first source that has it)
+function treeOnDisk(f) {
+  const its = (DATA.sources && DATA.sources.items) || [];
+  const it = its.find((x) => x.id.startsWith(f ? f + "/" : ""));
+  if (!it || !it.path) return null;
+  const rest = f ? it.id.slice(f.length) : "/" + it.id;
+  return it.path.endsWith(rest) ? it.path.slice(0, it.path.length - rest.length) : null;
+}
 // The folder shown, on disk: its own folder, or a source's
 function hereOnDisk() {
   if (S.view === "clip") { const cl = DATA.clip && DATA.clip.clip; return cl ? cl.path : null; }
-  if (S.view === "sources") {
-    const labels = (DATA.sources && DATA.sources.labels) || {};
-    const i = Object.keys(labels).find((x) => labels[x] === S.path[0]);
-    const l = i != null ? S.locations[+i] : null;
-    return l && l.dir ? l.dir + (S.path.length > 1 ? "/" + S.path.slice(1).join("/") : "") : null;
-  }
+  if (S.view === "sources") return treeOnDisk(S.path.join("/"));
   const p = S.path.filter((x) => x !== NOPREV).join("/");
   return folderOnDisk(p);
 }
@@ -1476,8 +1505,8 @@ function listKeys(e) {
 // ---------- loading ----------
 
 function applyView(view, r) {
-  if (view === "footage") { RAW_FOOTAGE = { items: r.items || [], clips_dirs: r.clips_dirs || [] }; S.locations = r.locations || []; }
-  else DATA[view] = { dirs: r.dirs || [], items: r.items || [] };
+  if (view === "footage") { RAW_FOOTAGE = { items: r.items || [], clips_dirs: r.clips_dirs || [], dirs: r.dirs || [] }; S.locations = r.locations || []; }
+  else DATA[view] = rooted(view, { dirs: r.dirs || [], items: r.items || [] });
   mergeProbes(r.probes);
   if (view === "moments") countMoments();
   derive(view);
@@ -1652,7 +1681,7 @@ document.addEventListener("click", async (e) => {
     case "sec": S.open[v] = !S.open[v]; break;
     case "job": return addJob(v);
     case "openit": { const p = selectedPaths(); openItems(p); return; }
-    case "revealit": { const c = ctx(); const first = c.selFolders.length ? S.root + "/" + BASE[S.view] + c.selFolders[0] : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
+    case "revealit": { const c = ctx(); const first = c.selFolders.length ? (S.view === "sources" ? treeOnDisk(c.selFolders[0]) : folderOnDisk(c.selFolders[0])) : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();
     case "clearjobs": await call("clear_finished").catch(() => {}); return poll();
     case "keep": await call("answer_close", { quit: false }).catch(() => {}); return poll();

@@ -740,6 +740,13 @@ version (a Lamport clock: above every version its writer had read; the computer'
 another only with a higher version, so every computer that has read the same lines knows the same, whatever order it
 read them in.
 
+### The Library's views (Anton, 2026-11-10)
+
+Each view's top is its own folder: Footage `_Clips` (clips as their previews are arranged there), Moments `_Moments`,
+Photos `_Stills`, Exports `_Exports`; what's found anywhere else in the project's folder is under **Other folders**, at
+its path there (a new folder at a view's top is made in its own folder, in Other folders at the project's top). Sources
+is now **Originals**: the clips at their paths in the project's tree; the sources themselves are in Sources settings.
+
 ### Three layers, each only faster (Anton, 2026-11-10)
 
 Originals move only when the library is mended after (the Library's Restore: it finds them by what they are and
