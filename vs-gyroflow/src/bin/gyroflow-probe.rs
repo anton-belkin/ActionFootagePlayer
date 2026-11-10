@@ -7,9 +7,10 @@
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
 //                                                       stabilize it with the default preset
-//   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile Gyroflow
-//                                                       takes for it ("in the file", a profile's name, "" for none),
-//                                                       to correct the lens alone, and "camera"
+//   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
+//                                                       player takes for it ("in the file", the label of the one picked
+//                                                       from Gyroflow's database, lens_pick.rs, "" for none), to correct
+//                                                       the lens alone, and "camera"
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
 // the water, for the lens under water to follow it (water.rs), "rotation": how much a player turns the video to
@@ -24,8 +25,9 @@
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 //
 // `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
-// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" a profile's name from
-// Gyroflow's database, or "" when it has none (Unknown: pick one in Gyroflow).
+// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" the label of the profile
+// picked from Gyroflow's database (its name, stars, "Nearest: " when it isn't made for exactly this mode: lens_pick.rs),
+// or "" when it has none (Unknown: pick one in Gyroflow).
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights

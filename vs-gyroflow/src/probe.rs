@@ -5,7 +5,8 @@
 
 use std::io::{ Read, Seek, SeekFrom };
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
-use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
+use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier };
+use crate::lens_pick;
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
 /// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
@@ -102,21 +103,22 @@ fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(
 }
 
 // Without a lens profile the stabilization is worse than none. Newer GoPros and some Insta360s record their lens in
-// the file; the rest are looked up in Gyroflow's database the way Gyroflow does when it opens the video
+// the file; for the rest the best profile of the camera and lens mode in Gyroflow's database is taken (lens_pick.rs)
 fn has_lens_profile(input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
     let builtin = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
         .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    if builtin { return true; }
-    let Ok(id) = CameraIdentifier::from_telemetry_parser(input, width, height, fps) else { return false };
-    let id = id.get_identifier_for_autoload();
-    if id.is_empty() { return false; }
-    let mut db = LensProfileDatabase::default();
-    db.load_all();
-    db.contains_id(&id)
+    builtin || lens_from_database(input, width, height, fps).is_some()
 }
 
-/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile Gyroflow would load for the video ("" when
-/// none): what a cut must still read as (cut.rs)
+/// The profile the player takes from Gyroflow's database for the video, as `lens_pick::apply` loads it when it plays
+fn lens_from_database(input: &Input, width: usize, height: usize, fps: f64) -> Option<lens_pick::Pick> {
+    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
+    lens_pick::pick(&id)
+}
+
+/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video: "in the
+/// file", the label of the one picked from Gyroflow's database (lens_pick.rs: its name, stars, "Nearest: " when it isn't
+/// made for exactly this mode), or "" when none: what the side panel shows, and what a cut must still read as (cut.rs)
 pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
@@ -130,8 +132,7 @@ pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
     let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
         .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
     let lens = if in_file { "in the file".to_string() } else {
-        CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps)
-            .map(|id| id.get_identifier_for_autoload()).unwrap_or_default()
+        lens_from_database(&input, video.width, video.height, video.fps).map(|p| p.label()).unwrap_or_default()
     };
     Some((camera, lens))
 }
