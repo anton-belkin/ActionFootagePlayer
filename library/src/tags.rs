@@ -31,7 +31,11 @@ pub(crate) fn holds_nothing(doc: &Value) -> bool {
 /// copies in the library's locations in their order, then copies-only and this computer's own; the main file is beside
 /// the first copy that has one, else beside the first copy that isn't copies only or local
 pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
-    let locs = locations::locations(root, &locations::mounts());
+    clip_own_in(&locations::locations(root, &locations::mounts()), tree)
+}
+
+/// The same with the project's locations worked out already (many clips at once: the locations once, not per clip)
+pub fn clip_own_in(locs: &[locations::Location], tree: &str) -> Result<(PathBuf, PathBuf), String> {
     let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies || l.local))).collect();
     copies.sort_by_key(|(_, late)| *late);
     let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| f.with_extension("afp.json").is_file()).collect();

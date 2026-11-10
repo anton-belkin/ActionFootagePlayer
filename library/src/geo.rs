@@ -290,25 +290,83 @@ pub fn local_shift(group: &[ClipIn], photos: &[Photo], zone_at: &mut dyn FnMut(&
 
 /// Writes (or with None, removes) the location in the clips' own files. `ids`: their paths in the project's tree
 pub fn set_location(root: &Path, ids: &[String], loc: Option<&Value>) -> Vec<String> {
-    let mut problems = Vec::new();
-    for id in ids {
-        let (own, clip) = match crate::tags::clip_own(root, id) { Ok(x) => x, Err(e) => { problems.push(e); continue } };
-        let mut doc = crate::locations::read_json(&own).unwrap_or(json!({ "format": "actionfootageplayer-clip", "version": 1 }));
-        if doc.get("format").and_then(Value::as_str).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
-            problems.push(format!("{}: not the player's file, left alone", own.display())); continue;
-        }
-        doc["format"] = json!("actionfootageplayer-clip");
-        if doc.get("clip").is_none() {
-            let size = std::fs::metadata(&clip).map(|m| m.len()).unwrap_or(0);
-            doc["clip"] = json!({ "file": clip.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size });
-        }
-        match loc { Some(l) => doc["location"] = l.clone(), None => { doc.as_object_mut().unwrap().remove("location"); } }
-        let r = if crate::tags::holds_nothing(&doc) {
-            std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string())
-        } else { crate::tags::write_json(&own, &doc) };
-        if let Err(e) = r { problems.push(e); }
-    }
+    let jobs: Vec<(String, Option<Value>)> = ids.iter().map(|i| (i.clone(), loc.cloned())).collect();
+    let (written, problems) = write_many(root, &jobs);
+    note_to_catalog(&written);
     problems
+}
+
+/// A location without when it was set: two that differ only in that are the same
+fn same_location(a: Option<&Value>, b: Option<&Value>) -> bool {
+    let strip = |v: Option<&Value>| v.cloned().map(|mut v| { if let Some(o) = v.as_object_mut() { o.remove("set"); } v });
+    strip(a) == strip(b)
+}
+
+/// Each clip's own file given its location (None: taken out), 8 at a time (on a share each is a few round trips),
+/// the project's locations worked out once; a clip whose location wouldn't change isn't written. The files written
+/// or removed, and what couldn't be done
+pub fn write_many(root: &Path, jobs: &[(String, Option<Value>)]) -> (Vec<PathBuf>, Vec<String>) {
+    let locs = crate::locations::locations(root, &crate::locations::mounts());
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let out: Mutex<(Vec<PathBuf>, Vec<String>)> = Mutex::new((Vec::new(), Vec::new()));
+    std::thread::scope(|sc| for _ in 0..8.min(jobs.len()) { sc.spawn(|| loop {
+        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let Some((id, loc)) = jobs.get(i) else { break };
+        let r = write_one(&locs, id, loc.as_ref());
+        let mut o = out.lock().unwrap();
+        match r { Ok(Some(f)) => o.0.push(f), Ok(None) => {}, Err(e) => o.1.push(e) }
+    }); });
+    out.into_inner().unwrap()
+}
+
+/// One clip's own file: Some(file) when written or removed, None when nothing changed
+fn write_one(locs: &[crate::locations::Location], id: &str, loc: Option<&Value>) -> Result<Option<PathBuf>, String> {
+    let (own, clip) = crate::tags::clip_own_in(locs, id)?;
+    let had = crate::locations::read_json(&own);
+    let mut doc = had.clone().unwrap_or(json!({ "format": "actionfootageplayer-clip", "version": 1 }));
+    if doc.get("format").and_then(Value::as_str).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
+        return Err(format!("{}: not the player's file, left alone", own.display()));
+    }
+    if same_location(doc.get("location"), loc) && (had.is_some() || loc.is_none()) { return Ok(None); }
+    doc["format"] = json!("actionfootageplayer-clip");
+    if doc.get("clip").is_none() {
+        let size = std::fs::metadata(&clip).map(|m| m.len()).unwrap_or(0);
+        doc["clip"] = json!({ "file": clip.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size });
+    }
+    match loc { Some(l) => doc["location"] = l.clone(), None => { doc.as_object_mut().unwrap().remove("location"); } }
+    if crate::tags::holds_nothing(&doc) {
+        std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| format!("{}: {e}", own.display()))?;
+    } else {
+        crate::tags::write_json(&own, &doc)?;
+    }
+    Ok(Some(own))
+}
+
+/// What was written, told to the project's catalog at once (as the player's `afp-catalog note` does): the views read
+/// a clip's own file from the catalog, which would otherwise see the change only when it next looks at that folder on
+/// the share (a minute or more), and show the clip as before meanwhile
+pub fn note_to_catalog(files: &[PathBuf]) {
+    use afp_catalog::{ DiskStore, File, Store };
+    if files.is_empty() { return; }
+    let Some(roots) = crate::seen::SEEN.read().ok().and_then(|g| g.as_ref().map(|s| s.roots.clone())) else { return };
+    // Read before the catalog is held: on a share each is a round trip
+    let mut entries = Vec::new();
+    let mut dirs = std::collections::BTreeSet::new();
+    for f in files {
+        let Some((root, rel)) = afp_catalog::project::locate(&roots, f) else { continue };
+        let now = match DiskStore.stat(f) {
+            Ok(Some(st)) => Some(File { dir: false, size: st.size, mtime: st.mtime, meta: afp_catalog::inspect::read(f).ok().flatten(), digest: None }),
+            Ok(None) => None,
+            Err(_) => continue,
+        };
+        entries.push((root, rel, now));
+        if let Some(d) = f.parent() { dirs.insert(d.to_path_buf()); }
+    }
+    let Ok(mut g) = crate::seen::SEEN.write() else { return };
+    let Some(s) = g.as_mut() else { return };
+    // Other computers relist these folders
+    for d in &dirs { let _ = s.cat.touch(d); }
+    let _ = s.cat.note(entries);
 }
 
 /// A location as written: what's given, with its source and when
@@ -434,14 +492,63 @@ mod tests {
         let root = PathBuf::from(std::env::var("AFL_GEO_PROJECT").unwrap());
         let ids: Vec<String> = std::env::var("AFL_GEO_IDS").unwrap().split(',').map(str::to_string).collect();
         let loc = location_value(27.9158, 34.3299, None, "photos", Some(&json!({ "locality": "Sharm el-Sheikh", "region": "South Sinai", "country": "Egypt", "cc": "EG" })), Some(-1234.0), Some("Test site"));
+        let t = Instant::now();
         assert!(set_location(&root, &ids, Some(&loc)).is_empty());
+        println!("{} written in {:.1} s", ids.len(), t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        assert!(set_location(&root, &ids, Some(&loc)).is_empty());
+        println!("the same again (nothing to write) in {:.1} s", t.elapsed().as_secs_f64());
         let view = crate::index::scan(&root, "footage", false);
-        for id in &ids {
+        for id in ids.iter().take(3) {
             let it = view["items"].as_array().unwrap().iter().find(|i| i["id"].as_str() == Some(id)).unwrap();
             println!("{id}: {}", it["own"]["location"]);
             assert_eq!(it["own"]["location"]["place"]["site"], json!("Test site"));
         }
+        let t = Instant::now();
         assert!(set_location(&root, &ids, None).is_empty());
+        println!("taken out in {:.1} s", t.elapsed().as_secs_f64());
+    }
+
+    // Anton, 2026-11-10: "a part of the clips is skipped each time": the view read their own files from the catalog,
+    // which didn't know of the Library's writes yet. Now they're noted as written
+    #[test]
+    fn the_catalog_knows_at_once() {
+        let _one = crate::seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("afl-geo-seen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Day 1")).unwrap();
+        for f in ["Day 1/A.MP4", "Day 1/B.MP4"] { std::fs::write(root.join(f), b"x").unwrap(); }
+        std::fs::write(root.join("Project.afproject"), r#"{"id":"geo-seen","locations":[{"name":"Here","at":"","path":"."}]}"#).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), br#"{"format":"actionfootageplayer-clip","version":1,"marks":[{"t":1.5}]}"#).unwrap();
+        let root = root.canonicalize().unwrap();
+        let (roots, ours) = afp_catalog::project::roots(&root);
+        let store: std::sync::Arc<dyn afp_catalog::Store> = std::sync::Arc::new(afp_catalog::DiskStore);
+        let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
+        cat.load(&afp_catalog::Want::All).unwrap();
+        cat.sweep(&roots, &ours, &Default::default()).unwrap();
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen { id: 0, root: root.clone(), roots, cat });
+        let loc = location_value(27.9, 34.3, None, "photos", Some(&json!({ "country": "Egypt" })), Some(60.0), None);
+        let ids = vec!["Day 1/A.MP4".to_string(), "Day 1/B.MP4".to_string()];
+        assert!(set_location(&root, &ids, Some(&loc)).is_empty());
+        let view = crate::index::scan(&root, "footage", false);
+        for id in &ids {
+            let it = view["items"].as_array().unwrap().iter().find(|i| i["id"].as_str() == Some(id)).unwrap();
+            assert_eq!(it["own"]["location"]["lat"], json!(27.9), "{id} in the view");
+        }
+        // The same again: nothing written (its time left as it was)
+        let t = std::fs::metadata(root.join("Day 1/A.afp.json")).unwrap().modified().unwrap();
+        let (written, problems) = write_many(&root, &ids.iter().map(|i| (i.clone(), Some(location_value(27.9, 34.3, None, "photos", Some(&json!({ "country": "Egypt" })), Some(60.0), None)))).collect::<Vec<_>>());
+        assert!(written.is_empty() && problems.is_empty());
+        assert_eq!(std::fs::metadata(root.join("Day 1/A.afp.json")).unwrap().modified().unwrap(), t);
+        // Taken out: B's file (only a location) goes, and the view says so at once
+        assert!(set_location(&root, &ids, None).is_empty());
+        let view = crate::index::scan(&root, "footage", false);
+        let b = view["items"].as_array().unwrap().iter().find(|i| i["id"] == "Day 1/B.MP4").unwrap();
+        assert!(b["own"].is_null() && !root.join("Day 1/B.afp.json").exists());
+        let a = view["items"].as_array().unwrap().iter().find(|i| i["id"] == "Day 1/A.MP4").unwrap();
+        assert!(a["own"]["location"].is_null() && a["own"]["marks"].is_array());
+        *crate::seen::SEEN.write().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -589,14 +696,18 @@ pub async fn set_locations(shared: State<'_, crate::Shared>, places: State<'_, S
     let places = places.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut problems = Vec::new();
+        let mut jobs: Vec<(String, Option<Value>)> = Vec::new();
         for e in &entries {
-            let ids: Vec<String> = e["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
-            if e["remove"].as_bool() == Some(true) { problems.extend(set_location(&root, &ids, None)); continue; }
+            let ids = e["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string));
+            if e["remove"].as_bool() == Some(true) { jobs.extend(ids.map(|i| (i, None))); continue; }
             let (Some(lat), Some(lon)) = (e["lat"].as_f64(), e["lon"].as_f64()) else { problems.push("no point given".into()); continue };
             let pl = e.get("place").filter(|p| p.is_object()).cloned().or_else(|| place(&places, lat, lon, None));
             let loc = location_value(lat, lon, e["alt"].as_f64(), e["source"].as_str().unwrap_or("manual"), pl.as_ref(), e["photo_gap_s"].as_f64(), e["site"].as_str());
-            problems.extend(set_location(&root, &ids, Some(&loc)));
+            jobs.extend(ids.map(|i| (i, Some(loc.clone()))));
         }
+        let (written, more) = write_many(&root, &jobs);
+        problems.extend(more);
+        note_to_catalog(&written);
         problems
     }).await.map_err(|e| e.to_string())
 }
