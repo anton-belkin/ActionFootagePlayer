@@ -1821,7 +1821,13 @@ document.addEventListener("click", async (e) => {
     }
     case "moveproject": {
       S.menu = false; S.sheet = null; renderSheet(); renderTop();
-      try { const r = await invoke("move_project"); if (r) { toast("The project is now in " + r); return poll(); } } catch (er) { showError(String(er)); }
+      try {
+        const dest = await invoke("pick_move_place");
+        if (!dest) return;
+        toast("Moving the project's own files…" + (activeCount() ? " Its tasks wait, then go on from there" : ""));
+        const r = await invoke("move_project", { dest });
+        toast("The project is now in " + r); return poll();
+      } catch (er) { showError(String(er)); }
       return;
     }
     default: return;

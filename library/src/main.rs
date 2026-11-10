@@ -101,6 +101,8 @@ struct Inner {
     pending_open: VecDeque<PathBuf>,
     // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
     watch: Option<Watch>,
+    // A project being moved: its tasks wait (start_job passes them over), then run from its new place
+    held: Option<String>,
 }
 
 // The file system's own notices (FSEvents, ReadDirectoryChangesW, inotify) for the project's folder and its locations:
@@ -346,7 +348,8 @@ fn log_error(log: &Path) -> Option<String> {
 }
 
 fn start_job(inner: &mut Inner) {
-    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting) else { return };
+    let held = inner.held.clone();
+    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting && Some(&j.project) != held.as_ref()) else { return };
     let dir = jobs_dir().join(job.id.to_string());
     let request = dir.join("request.json");
     let log = dir.join("log.txt");
@@ -857,15 +860,66 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     Ok(locations::write_pointers(dest, &after, &[], &mounts))
 }
 
+// Where to move the project's own files (the dialog, on the main thread)
 #[tauri::command]
-fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<String>, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: move the project when they're done".into()); }
-    let Some(dest) = rfd::FileDialog::new().set_title("Move the project's own files to this folder").pick_folder() else { return Ok(None) };
-    let problems = move_to(&root, &dest)?;
-    shared.lock().unwrap().project = Some(dest.clone());
-    remember(&app, &dest);
-    Ok(Some(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) }))
+fn pick_move_place() -> Option<String> {
+    rfd::FileDialog::new().set_title("Move the project's own files to this folder").pick_folder().map(|d| d.display().to_string())
+}
+
+// The project's own files moved there. Its tasks don't stop it (Anton, 2026-11-10: nothing waits on the task list):
+// the one running is stopped after what it's making and they all wait, the files move, and they run again from the
+// new place (the running one from the start: what it made is found there)
+#[tauri::command]
+async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>, dest: String) -> Result<String, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let dest = PathBuf::from(dest);
+        let old = root.display().to_string();
+        {
+            let mut inner = shared.lock().unwrap();
+            inner.held = Some(old.clone());
+            let stop = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+            if stop {
+                let run = inner.running.as_mut().unwrap();
+                let _ = std::fs::write(run.dir.join("stop"), b"");
+                run.stop_asked = Some(Instant::now());
+                run.yielding = true;
+            }
+        }
+        // Until it has ended (tick kills it after STOP_TIMEOUT)
+        loop {
+            {
+                let mut inner = shared.lock().unwrap();
+                tick(&mut inner);
+                let ours = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+                if !ours { break; }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let moved = move_to(&root, &dest);
+        let mut inner = shared.lock().unwrap();
+        inner.held = None;
+        if moved.is_ok() {
+            let new = dest.display().to_string();
+            for j in inner.jobs.iter_mut().filter(|j| j.project == old && !j.state.finished()) {
+                j.project = new.clone();
+                j.request["project"] = json!(new);
+                // Paths it was kept to, in the project's folder, move with it
+                if let Some(only) = j.request.get_mut("only").and_then(Value::as_array_mut) {
+                    for o in only.iter_mut() {
+                        if let Some(rest) = o.as_str().and_then(|x| x.strip_prefix(&old)) { *o = json!(format!("{new}{rest}")); }
+                    }
+                }
+            }
+            inner.project = Some(dest.clone());
+        }
+        tick(&mut inner);
+        drop(inner);
+        let problems = moved?;
+        remember(&app, &dest);
+        Ok(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) })
+    }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- Check, Find moved files ----------
@@ -924,7 +978,6 @@ async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Val
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
-    if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -943,7 +996,6 @@ async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> 
 #[tauri::command]
 async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: mend when they're done".into()); }
     let tool = link_tool();
     let out = tauri::async_runtime::spawn_blocking(move || {
         let issues = checks::missing(&root).ok_or("A source of the project isn't reachable now: its clips would all look gone")?;
@@ -968,7 +1020,6 @@ async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_o
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete renders when they're done".into()); }
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
     Ok(json!({ "deleted": n, "problems": problems }))
 }).await.map_err(|e| e.to_string())?
@@ -1018,7 +1069,6 @@ async fn take_in_plan(shared: State<'_, Shared>, other: String, place: String) -
 async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
-    if busy(&shared) { return Err("Jobs are in the queue: take it in when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -1071,7 +1121,6 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
     let name = good_name(&name)?;
     let from = PathBuf::from(&path);
     // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
@@ -1179,7 +1228,6 @@ async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) 
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
     let footage = index::footage_dirs(&root);
     let (mut done, mut problems) = (0usize, Vec::<String>::new());
     let mut went = std::collections::BTreeSet::new();
@@ -1665,7 +1713,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus, pick_move_place,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
