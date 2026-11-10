@@ -104,12 +104,19 @@ pub fn main() -> ExitCode {
     let opt = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1)).cloned();
     let fail = |e: String| { eprintln!("afp-catalog: {e}"); ExitCode::from(1) };
     if !proj.join(crate::locations::PROJECT_FILE).is_file() { return fail(format!("{} isn't a project's folder", proj.display())); }
+    // AFP_CATALOG_TIMES=1: how long each step took, on stderr
+    let t0 = std::time::Instant::now();
+    let times = std::env::var_os("AFP_CATALOG_TIMES").is_some();
+    let lap = |what: &str| if times { eprintln!("{what}: {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0); };
     let mut cat = project::open(&proj);
+    lap("opened (this computer's name)");
     let (roots, ours) = project::roots(&proj);
+    lap("roots (locations, mounts)");
     match a[0].as_str() {
         "derived" => {
             let (hash, clip) = (opt("--hash"), opt("--clip"));
             let info = match load(&mut cat, &Want::Keys(Catalog::keys_for(hash.as_deref(), clip.as_deref()))) { Ok(i) => i, Err(e) => return fail(e.to_string()) };
+            lap("loaded");
             if info.empty && info.snapshot.is_none() { println!("{}", json!({ "catalog": false })); return ExitCode::SUCCESS; }
             let mut out = Vec::new();
             let mut notes = Vec::new();
@@ -130,6 +137,7 @@ pub fn main() -> ExitCode {
                     Err(_) => { if let Some(v) = item(&roots, &root, &rel, &f) { out.push(v); } }
                 }
             }
+            lap("looked at");
             println!("{}", json!({ "catalog": true, "items": out }));
             if !notes.is_empty() { let _ = cat.note(notes); }
             ExitCode::SUCCESS

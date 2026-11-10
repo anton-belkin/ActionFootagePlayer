@@ -834,6 +834,39 @@ What another computer changes reaches this Mac: a line appended to its journal a
 is); a new file or folder (a new segment, a new computer's journal, a moment saved) **after ~30 s**, as macOS caches
 a share's listings that long — the journals' next segment is therefore also looked for by its name.
 
+### Where it can be wrong, and for how long
+
+The files never are; the catalog can say something old about them for a while. What was found, worst first:
+
+- **A file changed in place by something not ours** (an editor writing a sidecar over itself, a tool rewriting an
+  MP4's metadata without a temporary file): its folder's time doesn't change, so the looks don't list it. The player
+  sees it at once (it looks at its clip's moments' files when it opens the clip), the Library **only at the daily deep
+  look**. Ours always touch the folder.
+- **Two computers saying different things at the same moment** (one notes a moment while the other's look lists its
+  folder from a listing a few seconds old): the version decides, which may be the older truth; the folder then doesn't
+  match what was written of it, and the next look (≤ 5 min) lists it again and settles it. Found by the random test;
+  why every write first reads what's new.
+- **A computer's change reaches another after ~30 s** when it's a new file (macOS lists a share's folders from a cache
+  that long); the journal line saying so is read at once when its segment exists.
+- **A note lost** (the program stopped between writing the file and the journal line, the connection gone for both the
+  line and the folder's touch): the next look finds the file by its folder's time; only a change in place with both
+  lost waits for the deep look.
+- **A card or USB disk formatted FAT/exFAT** as a location: folder times there are coarse (2 s, 10 ms), so a change
+  in the same tick as a listing can wait for the deep look. Not tested.
+- **Names in two Unicode forms** (a Mac and a Windows PC writing the same name differently): not normalized yet; could
+  show a file twice or make looks list a folder each time. Not tested.
+- **The NAS's recycle bin** keeps what the clean-ups remove (old segments, snapshots, parts): small, but it grows; the
+  `#recycle` folder can be emptied or `.afp` left out of it.
+- **The first build** opens every moment, clip preview, export, photo and sidecar once: ~2–4 min per 10 000 on this
+  NAS, the views read from the disks meanwhile. A Linux afp-catalog run on the NAS itself (Docker) would build it in
+  seconds — not done.
+- **A project no Library of this version has opened**: no catalog; the player looks through the folder as before.
+
+What doesn't happen, by construction and tested: a lost connection or a share not mounted removing anything from the
+catalog; a damaged or half-written file being used (each is checked against its name or sum); two computers' writes
+overwriting each other (each writes only its own files, or files named by their content); a reader left on cleaned-up
+lines without knowing (it reads again from the newer snapshot); a look listing folders that didn't change.
+
 ### How it's tested
 
 `catalog/tests/`: the scenarios (a new computer reads the snapshot, not the files; an unchanged look lists nothing and

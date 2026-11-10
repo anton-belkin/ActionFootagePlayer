@@ -39,6 +39,8 @@ fn main() {
     let shared = Arc::new(Counted::new(DiskStore));
     let cat_store: Arc<dyn Store> = shared.clone();
     let mut cat = Catalog::new(cat_store.clone(), Arc::new(DiskStore), &project, &cache, &me);
+    // AFP_GRACE=<seconds>: clean-ups sooner than 10 minutes (to see them in a test of some minutes)
+    if let Some(g) = std::env::var("AFP_GRACE").ok().and_then(|g| g.parse().ok()) { cat.grace = std::time::Duration::from_secs(g); }
     let roots = vec![Root { id: "p".into(), dir: project.clone(), marker: Some("Project.afproject".into()), exclude: vec![] },
                      Root { id: "f".into(), dir: footage.clone(), marker: Some("footage.afplocation".into()), exclude: vec![] }];
     let insp = Insp { store: cat_store.clone() };
@@ -102,7 +104,7 @@ fn main() {
                 }
             }
             let mine: std::collections::BTreeMap<_, _> = cat.state.live().filter(|(_, rel, _)| !rel.is_empty())
-                .map(|(r, rel, f)| ((r.to_string(), rel.to_string()), (f.dir, f.size, if f.dir { 0 } else { f.mtime }, f.meta.clone()))).collect();
+                .map(|(r, rel, f)| ((r.to_string(), rel.to_string()), (f.dir, f.size, if f.dir { 0 } else { f.mtime }, if f.dir { None } else { f.meta.clone() }))).collect();
             let mut bad = 0;
             for (k, v) in &truth { if mine.get(k) != Some(v) { bad += 1; if bad < 10 { println!("differs: {k:?} files {v:?} catalog {:?}", mine.get(k)); } } }
             for k in mine.keys() { if !truth.contains_key(k) { bad += 1; if bad < 10 { println!("extra: {k:?}"); } } }

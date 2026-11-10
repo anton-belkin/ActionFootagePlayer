@@ -50,13 +50,17 @@ impl Computer {
         let net = Net::new(seed);
         let shared = SimStore { fs: fs.clone(), net: net.clone() };
         let local = SimStore { fs: Fs::new(), net: Net::new(seed ^ 0x5555) };
-        let cat = Catalog::new(Arc::new(shared.clone()), Arc::new(local.clone()), Path::new(PROJECT), Path::new("/cache/proj"), name);
+        let mut cat = Catalog::new(Arc::new(shared.clone()), Arc::new(local.clone()), Path::new(PROJECT), Path::new("/cache/proj"), name);
+        // Clean-ups at once here (a test's time doesn't pass); one test gives them their 10 minutes
+        cat.grace = std::time::Duration::ZERO;
         Computer { name: name.into(), net, shared, local, cat }
     }
     pub fn insp(&self) -> Insp { Insp { store: Arc::new(self.shared.clone()) } }
     /// The program started again: what it had in memory gone, its own disk's cache kept
     pub fn restart(&mut self) {
+        let grace = self.cat.grace;
         self.cat = Catalog::new(Arc::new(self.shared.clone()), Arc::new(self.local.clone()), Path::new(PROJECT), Path::new("/cache/proj"), &self.name);
+        self.cat.grace = grace;
     }
     pub fn sweep(&mut self) -> Result<afp_catalog::Report, afp_catalog::Error> { let i = self.insp(); self.cat.sweep(&roots(), &i, &Default::default()) }
     pub fn deep(&mut self) -> Result<afp_catalog::Report, afp_catalog::Error> {
@@ -92,7 +96,7 @@ pub fn truth(fs: &Arc<Mutex<Fs>>) -> View {
 
 pub fn view(cat: &Catalog) -> View {
     cat.state.live().filter(|(_, rel, _)| !rel.is_empty())
-        .map(|(root, rel, f)| ((root.to_string(), rel.to_string()), (f.dir, f.size, if f.dir { 0 } else { f.mtime }, f.meta.clone()))).collect()
+        .map(|(root, rel, f)| ((root.to_string(), rel.to_string()), (f.dir, f.size, if f.dir { 0 } else { f.mtime }, if f.dir { None } else { f.meta.clone() }))).collect()
 }
 
 /// The differences, said briefly

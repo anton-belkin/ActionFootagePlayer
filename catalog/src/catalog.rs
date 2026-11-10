@@ -78,11 +78,10 @@ pub struct Catalog {
     pub tail_bytes: u64,
     pub partial: bool,
     offsets: HashMap<PathBuf, u64>,
-    /// Folders listed because they had changed, to be listed once more a while later: a listing can be some seconds
-    /// older than the folder's time (macOS keeps a share's listings up to a minute), and then its new files would
-    /// wait for the deep look
-    pub recheck: Vec<(String, String, std::time::Instant)>,
-    pub recheck_after: std::time::Duration,
+    /// How long a file must have been not needed before a clean-up removes it (10 minutes)
+    pub grace: std::time::Duration,
+    /// Seconds added to this computer's clock (tests: time passing)
+    pub clock_ahead: u64,
 }
 
 fn not_found(e: &io::Error) -> bool { e.kind() == io::ErrorKind::NotFound }
@@ -91,7 +90,7 @@ impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
-                  offsets: HashMap::new(), recheck: Vec::new(), recheck_after: std::time::Duration::from_secs(90) }
+                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0 }
     }
 
     fn reset(&mut self) {
@@ -421,14 +420,23 @@ impl Catalog {
     /// computer's segments those have read. Each only once seen at the clean-up before (a computer folding a snapshot
     /// meanwhile has its parts written before its list, and a reader on an older list is told to read again)
     pub fn clean(&mut self) -> Result<usize, Error> {
+        // What's to go, and since when this computer has seen it so (its own clock, against itself only): it goes once
+        // it has been so for `grace` — longer than another computer's listing can be behind (macOS: ~30 s), longer
+        // than a snapshot takes to write its parts and then its list
         let state_file = self.cache.join("clean.json");
-        let before: HashSet<String> = self.local.read(&state_file).ok().and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
-            .unwrap_or_default().into_iter().collect();
-        let mut now: Vec<String> = Vec::new();
+        let before: HashMap<String, u64> = self.local.read(&state_file).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok())
+            .unwrap_or_default();
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) + self.clock_ahead;
+        let grace = self.grace.as_secs();
+        let mut now: HashMap<String, u64> = HashMap::new();
         let mut removed = 0;
-        let mut go = |shared: &Arc<dyn Store>, path: PathBuf, now: &mut Vec<String>| -> io::Result<()> {
+        let mut go = |shared: &Arc<dyn Store>, path: PathBuf, now: &mut HashMap<String, u64>| -> io::Result<()> {
             let k = path.display().to_string();
-            if before.contains(&k) { shared.remove(&path)?; removed += 1; } else { now.push(k); }
+            match before.get(&k) {
+                Some(&since) if since <= t && t - since >= grace => { shared.remove(&path)?; removed += 1; }
+                Some(&since) => { now.insert(k, since.min(t)); }
+                None => { now.insert(k, t); }
+            }
             Ok(())
         };
         let snaps = self.snapshots()?;
@@ -514,10 +522,10 @@ impl Catalog {
             let starts: Vec<String> = if opts.only.is_empty() { vec![String::new()] } else {
                 opts.only.iter().filter(|(r, _)| *r == root.id).map(|(_, d)| d.clone()).collect()
             };
-            // Listed a while ago because they had changed: listed again now
-            let now_t = std::time::Instant::now();
-            let due: HashSet<String> = self.recheck.iter().filter(|(r, _, t)| *r == root.id && *t <= now_t).map(|(_, d, _)| d.clone()).collect();
-            self.recheck.retain(|(r, _, t)| !(*r == root.id && *t <= now_t));
+            // A folder listed because it had changed is listed once more by the next regular look (minutes later): a
+            // listing can be older than the folder's time it came with (macOS keeps a share's listings some 30 s), and
+            // its new files would otherwise wait for the deep look. Its record says so (`recheck`), for any computer
+            let regular = opts.only.is_empty() && !opts.deep;
             if starts.is_empty() { continue; }
             let available = matches!(self.shared.stat(&root.dir), Ok(Some(s)) if s.dir)
                 && root.marker.as_ref().is_none_or(|m| matches!(self.shared.stat(&root.dir.join(m)), Ok(Some(_))));
@@ -538,10 +546,12 @@ impl Catalog {
                 let known: Vec<(String, File)> = idx.get(&d).cloned().unwrap_or_default();
                 let rec = self.state.get(&rid, &d).cloned();
                 let dg = digest(known.iter().map(|(n, f)| (n.as_str(), f)));
-                let changed = force || opts.deep || due.contains(&d) || match &rec {
+                let differs = force || opts.deep || match &rec {
                     Some(f) if f.dir => f.mtime != st.mtime || f.digest.as_deref() != Some(dg.as_str()),
                     _ => true,
                 };
+                let due = regular && rec.as_ref().is_some_and(|f| f.meta.as_ref().is_some_and(|m| m["recheck"] == json!(true)));
+                let changed = differs || due;
                 if !changed {
                     for (n, f) in &known { if f.dir { stack.push((join(&d, n), false)); } }
                     continue;
@@ -552,8 +562,6 @@ impl Catalog {
                     Err(_) => { rep.errors += 1; continue }
                 };
                 rep.listed += 1;
-                // Changed since it was last listed: once more later (not a folder listed only because it's due)
-                if !due.contains(&d) && !opts.deep { self.recheck.push((rid.clone(), d.clone(), std::time::Instant::now() + self.recheck_after)); }
                 let keep = |i: &Item| !i.name.starts_with(".tmp-") && !insp.skip(&rid, &join(&d, &i.name), &i.name, i.stat.dir)
                     && !root.exclude.iter().any(|x| *x == join(&d, &i.name));
                 items.retain(|i| keep(i));
@@ -628,7 +636,10 @@ impl Catalog {
                     }
                     idx.retain(|dir, _| dir != &g && !dir.starts_with(&format!("{g}/")));
                 }
-                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime }, meta: None,
+                // Changed: to be listed once more (not when it's that second listing, nor a deep look's)
+                // (a folder never listed before, as on a first look, isn't: nothing of it was seen to change)
+                let again = differs && !opts.deep && rec.is_some();
+                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime }, meta: again.then(|| json!({ "recheck": true })),
                                      digest: Some(digest(now.iter().map(|(n, f)| (n.as_str(), f)))) };
                 if rec.as_ref() != Some(&dir_rec) { out.push((rid.clone(), d.clone(), Some(dir_rec))); }
                 rep.changes += out.len();
@@ -705,6 +716,15 @@ pub fn computer_id(data: &Path, machine: &str, host: &str) -> io::Result<String>
 
 /// The machine's own id (not a copied home folder's): macOS's platform UUID, Windows' MachineGuid, Linux's machine-id
 pub fn machine_id() -> String {
+    // macOS: the host's UUID by a system call (ioreg, a process, costs 0.1–0.3 s)
+    #[cfg(target_os = "macos")]
+    {
+        let mut uuid = [0u8; 16];
+        let wait = libc::timespec { tv_sec: 1, tv_nsec: 0 };
+        if unsafe { libc::gethostuuid(uuid.as_mut_ptr(), &wait) } == 0 {
+            return uuid.iter().map(|b| format!("{b:02X}")).collect();
+        }
+    }
     if cfg!(target_os = "macos") {
         if let Ok(o) = std::process::Command::new("/usr/sbin/ioreg").args(["-rd1", "-c", "IOPlatformExpertDevice"]).output() {
             let t = String::from_utf8_lossy(&o.stdout);

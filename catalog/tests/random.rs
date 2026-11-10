@@ -112,11 +112,13 @@ fn run(seed: u64) {
                     let who = rng.below(3) as usize;
                     let bytes = moment_bytes(&format!("h{}x0", rng.below(4)), "x", n);
                     fs.lock().unwrap().write(&f, &bytes);
-                    let _ = cs[who].cat.touch(f.parent().unwrap());
+                    let touched = cs[who].cat.touch(f.parent().unwrap()).is_ok();
                     let mtime = fs.lock().unwrap().nodes[&f].mtime;
                     let rel = f.strip_prefix(p).unwrap().to_string_lossy().into_owned();
                     let rec = afp_catalog::File { dir: false, size: bytes.len() as u64, mtime, meta: read_meta(&bytes), digest: None };
-                    let _ = cs[who].cat.note(vec![("p".into(), rel, Some(rec))]);
+                    let noted = cs[who].cat.note(vec![("p".into(), rel, Some(rec))]).is_ok();
+                    // Both lost (the connection gone after the file was written): only the deep look can see it
+                    if !touched || !noted { needs_deep = true; }
                 }
             }
             // Written over in place by something else, its folder's time left: only the deep look sees it
@@ -141,6 +143,7 @@ fn run(seed: u64) {
     for c in &cs { c.set(0.0, 0, false); }
     for i in 0..2 { if !load(&mut cs[i], &Want::All) { panic!("seed {seed}: {} can't load", cs[i].name); } }
     cs[0].sweep().unwrap();
+    cs[0].sweep().unwrap();
     if needs_deep { cs[0].deep().unwrap(); }
     let t = truth(&fs);
     if let Ok(w) = std::env::var("TRACE") {
@@ -156,7 +159,8 @@ fn run(seed: u64) {
     }
     let d = diff(&t, &view(&cs[0].cat));
     assert!(d.is_empty(), "seed {seed}: a differs from the files:\n{}", d.join("\n"));
-    // Nothing more to list
+    // Nothing more to list (after the second listing of what changed)
+    cs[0].sweep().unwrap();
     let r = cs[0].sweep().unwrap();
     assert_eq!(r.listed, 0, "seed {seed}: a second look listed {r:?}");
     refresh(&mut cs[1]);

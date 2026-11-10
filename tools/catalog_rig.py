@@ -27,7 +27,8 @@ def finder(base, seed, n):
     r = random.Random(seed)
     p = os.path.join(base, "proj")
     for i in range(n):
-        dirs = [os.path.join(dp, d) for dp, dn, fn in os.walk(p) for d in dn if not d.startswith(".")]
+        # Hidden folders (the catalog's .afp) left alone, as Finder doesn't show them
+        dirs = [os.path.join(dp, d) for dp, dn, fn in os.walk(p) if "/." not in dp for d in dn if not d.startswith(".")]
         files = [os.path.join(dp, x) for dp, dn, fn in os.walk(p) if "/." not in dp for x in fn if x.endswith(".mp4")]
         op = r.randrange(5)
         try:

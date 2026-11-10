@@ -143,7 +143,8 @@ fn finder_changes_are_found_by_folder_times() {
     assert!(diff(&truth(&fs), &view(&a.cat)).is_empty(), "{:#?}", diff(&truth(&fs), &view(&a.cat)));
     b.cat.refresh().unwrap();
     assert!(diff(&truth(&fs), &view(&b.cat)).is_empty());
-    // Nothing more to see
+    // The folders that changed listed once more by the next look, then nothing more to see
+    assert_eq!(a.sweep().unwrap().listed, 5);
     assert_eq!(a.sweep().unwrap().listed, 0);
 }
 
@@ -316,7 +317,6 @@ fn a_stale_listing_under_a_fresh_folder_time_is_listed_again_later() {
     let fs = Fs::new();
     project(&fs, 3, 4, 1);
     let mut a = built(&fs);
-    a.cat.recheck_after = std::time::Duration::ZERO;
     a.set(0.0, 50, false);
     // Seen once: the listings kept
     a.cat.sweep(&roots(), &a.insp(), &afp_catalog::Sweep { deep: true, ..Default::default() }).unwrap();
@@ -327,4 +327,42 @@ fn a_stale_listing_under_a_fresh_folder_time_is_listed_again_later() {
     a.set(0.0, 0, false);
     a.sweep().unwrap();
     assert!(diff(&truth(&fs), &view(&a.cat)).is_empty(), "{:?}", diff(&truth(&fs), &view(&a.cat)));
+}
+
+#[test]
+fn a_clean_up_behind_on_the_listings_removes_nothing_still_needed() {
+    // Found on the real NAS: a Mac lists a share's new files ~30 s late, so a clean-up there saw another computer's
+    // new snapshot's parts as needed by nothing, and removed them
+    let fs = Fs::new();
+    project(&fs, 4, 10, 2);
+    let mut a = built(&fs);
+    let mut b = Computer::new(&fs, "b", 2);
+    b.cat.grace = std::time::Duration::from_secs(600);
+    b.cat.load(&Want::All).unwrap();
+    b.set(0.0, 1000, false);
+    for i in 0..12 {
+        fs.lock().unwrap().write(&Path::new(PROJECT).join(format!("Generated/n{i}.mp4")), &moment_bytes(&format!("hn{i}"), "x", i));
+        a.sweep().unwrap();
+        a.cat.compact().unwrap();
+        // a cleans up after itself (its segments its snapshots have read go)
+        a.cat.clean().unwrap();
+        a.cat.clean().unwrap();
+        // b cleans from its old listings, again and again
+        b.cat.clean().unwrap();
+        b.cat.clean().unwrap();
+        let mut c = Computer::new(&fs, &format!("c{i}"), 9);
+        assert!(c.cat.load(&Want::All).is_ok(), "round {i}: the catalog no longer reads");
+        assert!(diff(&truth(&fs), &view(&c.cat)).is_empty());
+    }
+    // Ten minutes on, its listings fresh: what's no longer needed goes, the rest reads
+    b.set(0.0, 0, false);
+    b.cat.clock_ahead = 700;
+    b.cat.clean().unwrap();
+    b.cat.clock_ahead = 1400;
+    b.cat.clean().unwrap();
+    let parts = fs.lock().unwrap().files_under(&Path::new(PROJECT).join(".afp/catalog/parts")).len();
+    assert!(parts <= afp_catalog::catalog::KEEP, "{parts} parts left");
+    let mut c = Computer::new(&fs, "late", 9);
+    c.cat.load(&Want::All).unwrap();
+    assert!(diff(&truth(&fs), &view(&c.cat)).is_empty());
 }

@@ -195,7 +195,7 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
             let only: Vec<(String, String)> = std::mem::take(&mut pending).into_iter().collect();
             if worker.sweep(&roots, &ours, &Sweep { only, ..Default::default() }).is_ok() { refresh(&changes, &last); }
         }
-        if last_look.elapsed() >= Duration::from_secs(300) || worker.recheck.iter().any(|(_, _, t)| *t <= Instant::now()) && last_look.elapsed() >= Duration::from_secs(30) {
+        if last_look.elapsed() >= Duration::from_secs(300) {
             if worker.sweep(&roots, &ours, &Sweep::default()).is_ok() { refresh(&changes, &last); }
             last_look = Instant::now();
         }
