@@ -209,8 +209,8 @@ pub struct ClipIn {
 
 /// Clips in one folder whose recordings are within this of each other are one group (a dive, a walk)
 pub const GAP_S: f64 = 60.0 * 60.0;
-/// A photo further than this in time isn't suggested
-pub const FAR_S: f64 = 24.0 * 3600.0;
+/// A photo further than this in time isn't suggested (the sheet's slider goes up to it, Anton: 3 h to 5 days)
+pub const FAR_S: f64 = 5.0 * 86400.0;
 
 pub fn groups(mut clips: Vec<ClipIn>) -> Vec<Vec<ClipIn>> {
     clips.sort_by(|a, b| a.folder.cmp(&b.folder).then(a.start.total_cmp(&b.start)));
@@ -556,6 +556,19 @@ fn suggest(probes: &SharedProbes, places: &SharedPlaces, clips: &[Value], shifts
         s["default_shift"] = json!(default_shift);
         out.push(s);
     }
+    // Each clip's photo's place, by its point (0.01°: each looked up once), for the sheet to group them by name
+    let mut found: serde_json::Map<String, Value> = serde_json::Map::new();
+    for s in out.iter_mut() {
+        for c in s["clips"].as_array_mut().into_iter().flatten() {
+            let (Some(lat), Some(lon)) = (c["photo"]["lat"].as_f64(), c["photo"]["lon"].as_f64()) else { continue };
+            let k = key(lat, lon);
+            if !found.contains_key(&k) {
+                let pl = place(places, lat, lon, c["photo"]["t"].as_f64());
+                found.insert(k.clone(), json!({ "lat": lat, "lon": lon, "text": pl.as_ref().map(place_text).unwrap_or_default(), "place": pl.unwrap_or(Value::Null) }));
+            }
+            c["photo"]["place"] = json!(k);
+        }
+    }
     // The photos' own names, for the ones shown
     let mut ids: Vec<String> = out.iter().filter_map(|s| s["photo"]["id"].as_str().map(str::to_string)).collect();
     for s in &out { for c in s["clips"].as_array().into_iter().flatten() { if let Some(i) = c["photo"]["id"].as_str() { ids.push(i.into()); } } }
@@ -566,7 +579,7 @@ fn suggest(probes: &SharedProbes, places: &SharedPlaces, clips: &[Value], shifts
         name(s);
         for c in s["clips"].as_array_mut().into_iter().flatten() { name(c); }
     }
-    Ok(json!({ "status": status, "groups": out, "own_gps": own_gps, "unset": unset, "photos": photos.len() }))
+    Ok(json!({ "status": status, "groups": out, "places": found, "own_gps": own_gps, "unset": unset, "photos": photos.len() }))
 }
 
 /// Writes locations: [{ ids, lat, lon, alt?, source, place?, photo_gap_s?, site? }]; a missing place is looked up

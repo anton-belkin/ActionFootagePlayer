@@ -44,8 +44,8 @@ The probe reports it as `clock`: `{ utc, basis: gps | utc | local | unset | assu
   geocoder gives each place's time zone, summer time included): two rounds, the nearest photo to the naive time,
   then to the time it gives.
 - **unset** (before 2017): not suggested; set by hand.
-- A camera whose clock was simply wrong (set an hour off, never moved to the trip's zone without one that writes
-  TZON): each group has *Camera clock off by* −3…+3 h, which asks again with the clips shifted.
+- A camera whose clock was simply wrong (set an hour off) shows as a larger gap; the slider takes it in. (A per-group
+  clock shift was tried in the first version and dropped for the compact sheet; the Library still takes `shifts`.)
 
 ## Suggesting from Apple Photos
 
@@ -54,16 +54,23 @@ on a Mac only (elsewhere the section says so and offers *by hand*).
 
 1. Each clip's start in UTC and length (above). Clips with their own GPS are left out (said); ones with no usable time
    too (said: set them by hand).
-2. **Groups**: clips in the same folder whose recordings are at most 60 min apart (a dive, a walk). One suggestion per
-   group, not per clip.
-3. Photos with a place taken from a day and 14 h before the first clip to as long after the last (`afp-photos near`).
-4. Each clip's **nearest photo in time**: 0 when taken during it, else the gap to its start or end. The group's
-   suggestion is the place of the clip–photo pair closest in time. Shown with it: the photo's name and gap ("IMG_1234,
-   4 min before its clip"), the farthest any clip in the group is from its own nearest photo, and, when the clips'
-   nearest photos are more than 1 km apart, *N km apart: look per clip*. Over 3 h: *far in time*. Over a day: none.
-5. The place name (below), in the place's local time and zone.
-6. **Set for N clips** (with a dive site typed, optional), **Dismiss**, or **Per clip**: each clip's own nearest photo,
-   set or skipped one by one.
+2. Clips in the same folder whose recordings are at most 60 min apart are taken together for the clock (a local-time
+   camera's zone is found once for them).
+3. Photos with a place taken from 5 days and 14 h before the first clip to as long after the last (`afp-photos near`).
+4. Each clip's **nearest photo in time**: 0 when taken during it, else the gap to its start or end; its place looked
+   up (by 0.01°, once each).
+5. **One compact sheet for the whole selection** (Anton, 2026-11-10):
+   - a slider, **nearest photo at most** 3 h … 5 days (3, 6, 9, 12, 18 h, 1, 1.5, 2, 3, 4, 5 days; 12 h first);
+   - **the places found, by name** ("Sharm el-Sheikh, South Sinai, Egypt"), each with how many clips get it at that
+     limit, the range of their gaps to their photos, and how many spots (photo points) it covers; a Map button;
+   - **too far**: the clips beyond the limit (and those without a usable time), listed with why;
+   - one radio among the places (and "None") for what the too-far clips get; the place with most clips first;
+   - "Keep the N locations already set" when some have one;
+   - **Apply to N clips** / **Cancel**. Clips within the limit get their own nearest photo's point and place
+     (`source: photos`, `photo_gap_s`); the too-far ones the chosen place's most common point (`source: manual`).
+
+   On the Egypt trip (131 HERO12 clips, 25 photos with a place): one place, Sharm el-Sheikh (2 spots); at 3 h 17 clips
+   in and 114 too far, at 12 h 75 / 56, at 1 day 115 / 16, at 2 days 120 / 11, at 5 days all.
 
 How far off it can be: a diver's iPhone stays on the boat, so the nearest photos are those before and after the dive,
 typically 10–60 min from a clip; the boat is moored at the site, so the place is right to a few hundred metres. A

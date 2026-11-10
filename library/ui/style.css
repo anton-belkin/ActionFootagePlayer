@@ -261,13 +261,12 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .mono.blk+.mono.blk{margin-top:3px}
 .th.mk{display:flex;align-items:center;justify-content:center;color:var(--accent);background:var(--accent-soft)}
 body.waiting,body.waiting *{cursor:progress}
-/* Locations from Apple Photos (geo.rs): one card per group */
-.sheet .sb:has(.geog){max-height:70vh;overflow:auto}
-.geog{border:1px solid var(--line2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:var(--win)}
-.geog.done{opacity:.7}
-.geoh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.geoh .chip{margin-left:auto}
-.geos{display:flex;gap:10px;align-items:flex-start}
-.geos .wrap{flex:1;min-width:0}
-.geos .pin{font-size:18px;line-height:1.2}
-.geog .field{grid-template-columns:auto minmax(0,170px);justify-content:start}
+/* Locations from Apple Photos (geo.rs): one compact sheet for the selection */
+.sheet.geosheet{max-width:560px}
+.sheet.geosheet .sb{max-height:72vh;overflow:auto}
+.geomax{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto;gap:8px;align-items:center}
+.geomax input{width:100%}
+.geolist{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line2);border-radius:8px;padding:6px;background:var(--win)}
+.geoname{display:flex;gap:8px;align-items:center;padding:4px 4px;border-radius:6px}
+.geoname .wrap{flex:1;min-width:0;line-height:1.35}
+.geofar{max-height:140px;overflow:auto;border:1px solid var(--line2);border-radius:8px;padding:6px 8px;background:var(--win);display:flex;flex-direction:column;gap:2px}
