@@ -31,6 +31,10 @@ pub struct Seen {
 
 pub static SEEN: RwLock<Option<Seen>> = RwLock::new(None);
 
+/// Tests that set SEEN, one at a time (it's the process's)
+#[cfg(test)]
+pub static TESTS: Mutex<()> = Mutex::new(());
+
 /// What the views can say from it: (root, path in it), when the catalog is read and has looked at that root
 fn locate<'a>(s: &'a Seen, path: &Path) -> Option<(String, String)> {
     let (root, rel) = project::locate(&s.roots, path)?;
@@ -61,19 +65,28 @@ pub fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) ->
     let s = g.as_ref()?;
     let (root, prefix) = locate(s, base)?;
     if !prefix.is_empty() && !s.cat.state.get(&root, &prefix).is_some_and(|f| f.dir) { return Some(Vec::new()); }
-    let mut out = Vec::new();
-    let mut skipped: Vec<String> = Vec::new();
+    // As the disk's walk gives them: a folder's entries by name, folder after folder as they were found
+    let mut kids: std::collections::HashMap<&str, Vec<(&str, &File)>> = std::collections::HashMap::new();
     for (rel, r) in s.cat.state.under(&root, &prefix) {
         let Some(f) = &r.f else { continue };
         let mine = if prefix.is_empty() { rel } else { &rel[prefix.len() + 1..] };
-        if skipped.iter().any(|x| mine.starts_with(x.as_str())) { continue; }
-        if mine.split('/').count() > max_depth { continue; }
-        let name = mine.rsplit('/').next().unwrap_or(mine);
-        if f.dir && skip(mine, &name.to_lowercase()) { skipped.push(format!("{mine}/")); continue; }
-        out.push((mine.to_string(), f.dir, f.size, seconds(f.mtime)));
+        kids.entry(afp_catalog::state::parent(mine)).or_default().push((mine, f));
     }
-    // A folder before what's in it, each folder's files by name (as the disk's walk gives them)
-    out.sort_by(|a, b| a.0.cmp(&b.0));
+    for v in kids.values_mut() { v.sort_by(|a, b| a.0.cmp(b.0)); }
+    let mut out = Vec::new();
+    let mut todo = std::collections::VecDeque::from([("", 0usize)]);
+    while let Some((dir, depth)) = todo.pop_front() {
+        for (mine, f) in kids.get(dir).map(|v| v.as_slice()).unwrap_or(&[]) {
+            let name = mine.rsplit('/').next().unwrap_or(mine);
+            if f.dir {
+                if skip(mine, &name.to_lowercase()) { continue; }
+                out.push((mine.to_string(), true, 0, seconds(f.mtime)));
+                if depth + 1 < max_depth { todo.push_back((mine, depth + 1)); }
+            } else {
+                out.push((mine.to_string(), false, f.size, seconds(f.mtime)));
+            }
+        }
+    }
     Some(out)
 }
 

@@ -119,6 +119,20 @@ mode = "one"
 expect("one again: read", o.read(clip).marks[1].t, 1)
 os.remove(elsewhere)
 
+-- What's written or removed is told (the project's catalog notes it: docs/library-management.md §9)
+do
+    local told = {}
+    local n = sidecar_lib.new({ format_json = serialize, parse_json = env.parse_json, note = function(f) told[#told + 1] = f end })
+    local c = dir .. "/NOTE.MP4"
+    write(n.old_path(c), serialize({ format = "actionfootageplayer-marks", version = 1, marks = { { t = 2 } } }))
+    expect("note: written", n.update(c, function(d) d.view = { curve = "dlogm" } end), true)
+    expect("note: the old one removed, told", told[1], n.old_path(c))
+    expect("note: the new one, told", told[2], n.path(c))
+    expect("note: emptied", n.update(c, function(d) d.marks, d.view = nil, nil end), true)
+    expect("note: removed, told", told[3], n.path(c))
+    expect("note: nothing written, nothing told", n.update(c, function() return false end) and #told, 3)
+end
+
 -- Windows paths
 local w = sidecar_lib.new({ format_json = serialize, parse_json = env.parse_json, windows = true })
 expect("windows", w.path("Z:\\a.b\\clip.MP4"), "Z:\\a.b\\clip.afp.json")

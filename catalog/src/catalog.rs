@@ -236,6 +236,31 @@ impl Catalog {
                 self.tail_bytes += p.consumed as u64;
                 self.offsets.insert(path, off + p.consumed as u64);
             }
+            // A segment started since the folder was listed: looked for by the name it would have (macOS keeps a
+            // share's listings some 30 s; a file opened by its name is read as it is now)
+            loop {
+                let next = self.applied.get(&c).copied().unwrap_or(0) + 1;
+                if segs.contains(&next) { break; }
+                let path = cdir.join(segment_name(next));
+                let Ok(bytes) = self.shared.read_from(&path, 0) else { break };
+                segs.push(next);
+                let p = journal::parse(&bytes);
+                let before = self.applied.get(&c).copied().unwrap_or(0);
+                for line in p.lines {
+                    let last = self.applied.get(&c).copied().unwrap_or(0);
+                    if line.seq <= last { continue; }
+                    for (root, rel, f) in line.entries { self.state.apply(key(&root, &rel), Rec { v: Version { l: line.l, by: by.clone() }, f }); }
+                    self.applied.insert(c.clone(), line.seq);
+                    let ml = self.lamports.entry(c.clone()).or_insert(0);
+                    *ml = (*ml).max(line.l);
+                    self.lamport = self.lamport.max(line.l);
+                    self.tail_lines += 1;
+                    n += 1;
+                }
+                self.tail_bytes += p.consumed as u64;
+                self.offsets.insert(path, p.consumed as u64);
+                if self.applied.get(&c).copied().unwrap_or(0) == before { break; }
+            }
         }
         Ok(n)
     }

@@ -922,6 +922,55 @@ mod tests {
     }
 }
 
+// The views read from the project's catalog (seen.rs) are what they are read from the disks
+#[cfg(test)]
+mod from_the_catalog {
+    use super::*;
+
+    #[test]
+    fn views_the_same_from_the_catalog_as_from_the_files() {
+        let _one = crate::seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("afl-seen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mk = |kind: &str, clip: &str| tests::tests_mp4_with_link(&format!(r#"{{"v":1,"kind":"{kind}","clip":"{clip}","in":1,"out":2,"tags":["a"]}}"#));
+        for d in ["Day 1", "Day 2/Deep/Er", "_Moments/Reef", "_Clips/Day 1", "_Stills", "_Exports", "_Renders/Reef", ".hidden", "Generated/2026-11-10 14-32 Moments",
+                  "Generated/2026-11-10 14-40 Clip previews/Day 1", "Mine/Best", "Empty"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        for f in ["Day 1/A.MP4", "Day 1/A.LRF", "Day 1/B.mov", "Day 2/Deep/Er/C.MP4", "_Stills/A 1.heic", "_Stills/A 1.mov", "_Exports/T.mov", ".hidden/X.MP4",
+                  "_Renders/Reef/Turtle.HDR.mov"] {
+            std::fs::write(root.join(f), b"x").unwrap();
+        }
+        std::fs::write(root.join("Project.afproject"), r#"{"id":"seen-test","locations":[{"name":"Here","at":"","path":"."}]}"#).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), br#"{"marks":[{"t":1.5}],"view":{"view":"wide"},"tags":["reef"]}"#).unwrap();
+        std::fs::write(root.join("Day 1/A.gyroflow"), b"{}").unwrap();
+        std::fs::write(root.join("_Moments/Reef/Turtle.afplink.mp4"), mk("moment", "Day 1/A.MP4")).unwrap();
+        std::fs::write(root.join("Generated/2026-11-10 14-32 Moments/Gen.afplink.mp4"), mk("moment", "Day 1/B.mov")).unwrap();
+        std::fs::write(root.join("Mine/Best/One.afplink.mp4"), mk("moment", "Day 2/Deep/Er/C.MP4")).unwrap();
+        std::fs::write(root.join("Generated/2026-11-10 14-40 Clip previews/Day 1/B.afplink.mp4"), mk("clip", "Day 1/B.mov")).unwrap();
+        std::fs::write(root.join("_Exports/E.mp4"), mk("export", "Day 1/A.MP4")).unwrap();
+        std::fs::write(root.join("_Stills/B.MP.jpg"), "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1,&quot;kind&quot;:&quot;photo&quot;,&quot;clip&quot;:&quot;Day 1/A.MP4&quot;,&quot;t&quot;:2.5}</afp:link><dc:subject><rdf:Bag><rdf:li>sun</rdf:li></rdf:Bag></dc:subject></x:xmpmeta>").unwrap();
+        let root = root.canonicalize().unwrap();
+        let views = || ["footage", "moments", "stills", "exports"].map(|v| scan(&root, v, false));
+        let from_files = views();
+        // The catalog made (as the Library's thread does) and read
+        let (roots, ours) = afp_catalog::project::roots(&root);
+        let store: std::sync::Arc<dyn afp_catalog::Store> = std::sync::Arc::new(afp_catalog::DiskStore);
+        let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
+        cat.load(&afp_catalog::Want::All).unwrap();
+        cat.sweep(&roots, &ours, &Default::default()).unwrap();
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen { id: 0, root: root.clone(), roots, cat });
+        // Read from it: the disks not asked (a file removed behind its back still shows: it's what was last seen)
+        let from_catalog = views();
+        for (a, b) in from_files.iter().zip(from_catalog.iter()) { assert_eq!(a, b); }
+        assert_eq!(from_catalog[1]["items"].as_array().unwrap().len(), 3);
+        assert_eq!(from_catalog[2]["items"][1]["tags"], json!(["sun"]));
+        std::fs::remove_file(root.join("Mine/Best/One.afplink.mp4")).unwrap();
+        assert_eq!(scan(&root, "moments", false)["items"].as_array().unwrap().len(), 3);
+        *crate::seen::SEEN.write().unwrap() = None;
+        assert_eq!(scan(&root, "moments", false)["items"].as_array().unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 // The views of a project and its clips' probes, written as JSON for looking at the page outside the app:
 // AFL_DUMP=<project> AFL_DUMP_OUT=<file> cargo test --release -- --ignored dump_views
 #[cfg(test)]

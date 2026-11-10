@@ -811,6 +811,29 @@ wired NAS (0.4 ms, 110 MB/s), Wi-Fi (4 ms, 30 MB/s) and a VPN (40 ms, 5 MB/s), p
 
 At 10 000 the looks are ten times less; the rest about the same.
 
+### What it costs on the NAS (measured, 2026-11-10)
+
+The real NAS (UGREEN DXP2800, Samba, btrfs; the NVMe volume and the HDD mirror with its NVMe cache) over wired
+gigabit from a Mac (0.37 ms ping), with `catalog/examples/rig.rs` and test projects made on the NAS by
+`tools/catalog_rig.py`. macOS's SMB client is slower than the network: **a file's size and time ~5 ms, opening and
+reading a small file 11–24 ms, listing a folder of 100 ~80 ms** (1 ms once cached), a folder's time ~5 ms. Hence:
+folders are listed with their files' sizes and times in one call (`getattrlistbulk`, as Finder does), never a
+question per file; new files are read 8 at a time.
+
+| 10 000 clips, 10 000 moments | NVMe volume | HDD volume |
+|---|---|---|
+| Built (every moment opened once) | 4 min | 2 min |
+| Checked against every file | 0 differences | 0 differences |
+| A new computer reads it | 0.5 s | 0.5 s |
+| The Library opened again (parts on its disk) | 0.05 s | 0.04 s |
+| The player opens a clip | 15–18 ms | 15–16 ms |
+| Anything new? | 1 ms | 1 ms |
+| A look, nothing changed | 0.7–1.2 s | 0.6–1.5 s |
+
+What another computer changes reaches this Mac: a line appended to its journal at once (a file opened is read as it
+is); a new file or folder (a new segment, a new computer's journal, a moment saved) **after ~30 s**, as macOS caches
+a share's listings that long — the journals' next segment is therefore also looked for by its name.
+
 ### How it's tested
 
 `catalog/tests/`: the scenarios (a new computer reads the snapshot, not the files; an unchanged look lists nothing and
