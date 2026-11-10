@@ -314,6 +314,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
+| `v` | Subtitles off/on: the clip's own, or the camera's data that DJI's drones write as subtitles, which is off when a clip starts (see Telemetry); the camera's turned on sticks for the next clips | `dji_telemetry/subtitles` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
 | drag, wheel | On a 360° clip (stitched, with spherical metadata: Insta360 Studio's, DJI Studio's, GoPro Player's exports), the view to look around in: a drag, or two fingers on a trackpad, turns your head, what's under the mouse staying under it; the wheel or a pinch zooms; `Alt`+drag or a two-finger rotation turns the horizon; a double click or `Backspace` looks ahead again. Paused as playing. The window isn't dragged by the video meanwhile | |
@@ -675,6 +676,12 @@ Models: the Osmo Action 6 (its schema isn't published; the layout was worked out
 `gps` and `speed` follow the Osmo 360's layout and haven't been seen working yet. GoPro: checked on GoPro's own
 sample clips (HERO5 to 8, MAX, Fusion), against what telemetry-parser reads from them. Clips from other cameras, and
 files that aren't from a camera at all (exports included), show nothing.
+
+**DJI's drones** (Mini, Air, Mavic) write each frame's camera data as text instead: ISO, shutter, EV, GPS, height, as a
+subtitle track in the video or an `.SRT` next to it, which mpv loads with the clip. mpv would show it as subtitles,
+in big letters over the picture; here a subtitle track that reads as a camera's data is off when a clip starts, and
+`v`, or Show the camera's text in the side panel (Output, and Telemetry), shows it. Other subtitles play as usual,
+and `v` turns them off and on too. That text isn't read into the fields above yet.
 
 To look at what a clip recorded, or to work out another model's layout:
 

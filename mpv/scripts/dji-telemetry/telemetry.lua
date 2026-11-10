@@ -613,6 +613,77 @@ local function read_all(f, names)
     return out
 end
 
+-- Text tracks: what DJI's drones (Mini, Air, Mavic) write each frame's camera data into, ISO, shutter, EV, GPS and
+-- height as a line of text (3GPP timed text), which mpv shows as subtitles; a film's subtitles are the same kind.
+-- text_samples(path, count): the text of each such track's first count samples that have any, by the track's index
+-- in the file (mpv's ff-index), lines joined with newlines. Only the moov box and those few samples are read
+local TEXT_HANDLERS = { sbtl = true, text = true, subt = true }
+local MAX_TEXT_SAMPLE = 65536
+
+function M.text_samples(path, count)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    f:setvbuf("full", BUFFER)
+    local ok, out = pcall(function()
+        local moov, first = read_moov(f)
+        if not moov then return nil end
+        local out, index = {}, -1
+        for typ, ta, tb in boxes(moov, first, #moov) do
+            if typ == "trak" then
+                index = index + 1
+                local ma, mb = child(moov, ta, tb, "mdia")
+                local ha = ma and child(moov, ma, mb, "hdlr")
+                if ha and TEXT_HANDLERS[moov:sub(ha + 8, ha + 11)] then
+                    local ia, ib = child(moov, ma, mb, "minf")
+                    local sa, sb
+                    if ia then sa, sb = child(moov, ia, ib, "stbl") end
+                    local chunks, times, sizes
+                    if sa then chunks, times, sizes = sample_table(moov, sa, sb, 1) end
+                    local texts = {}
+                    for _, chunk in ipairs(chunks or {}) do
+                        local pos = chunk.offset
+                        for k = chunk.first, chunk.first + chunk.count - 1 do
+                            if #texts >= count then break end
+                            local size = sizes[k]
+                            -- A sample: the text's length (16 bits), the text, then style boxes
+                            if size >= 2 and size <= MAX_TEXT_SAMPLE then
+                                f:seek("set", pos)
+                                local data = f:read(size)
+                                local n = data and #data == size and data:byte(1) * 256 + data:byte(2)
+                                if n and n > 0 and n + 2 <= size then texts[#texts + 1] = data:sub(3, n + 2) end
+                            end
+                            pos = pos + size
+                        end
+                        if #texts >= count then break end
+                    end
+                    out[index] = table.concat(texts, "\n")
+                end
+            end
+        end
+        return out
+    end)
+    f:close()
+    if not ok then return nil end
+    return out
+end
+
+-- What a camera's text has: exposure, GPS, height and speed by their names, as DJI's drones write them, embedded
+-- ("F/2.8, SS 1000.15, ISO 100, EV 0, DZOOM 1.000, GPS (6.1, 46.2, 19), D 12m, H 5.6m, H.S 1.2m/s") or in the .SRT
+-- beside the clip ("FrameCnt: 1 ... [iso : 100] [shutter : 1/1000.0] [fnum : 280] [ev : 0] [latitude: 46.2] ...")
+local CAMERA_MARKS = { "iso[%s:]", "shutter", "ss %d", "f/%d", "fnum", "%f[%a]ev ?[:%-+%d]", "gps", "latitude", "longitude",
+                       "framecnt", "difftime", "dzoom", "rel_alt", "abs_alt", "focal_len", "color_md", "%f[%a]h%.s ", "%f[%a]v%.s " }
+
+-- Whether text reads as a camera's data rather than words: three of those names or more
+function M.camera_text(text)
+    if type(text) ~= "string" or text == "" then return false end
+    local s = text:sub(1, 8192):lower():gsub("<[^>]*>", " ")
+    local n = 0
+    for _, mark in ipairs(CAMERA_MARKS) do
+        if s:find(mark) then n = n + 1 end
+    end
+    return n >= 3
+end
+
 -- { model, values = { <name> = { t = { times }, v = { values } } } }: each series only where the value changes
 -- (false where it isn't recorded), for the names asked for that the model's layout has. Read in steps:
 -- reader(path, names) returns step(), which reads a part and returns false while there's more, else true, the result

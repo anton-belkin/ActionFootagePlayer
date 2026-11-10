@@ -79,6 +79,7 @@ local KEY_LABELS = {
     { "script-binding gyroflow/crop", "Save frame: a frame for a photo, the picture panned and zoomed under it" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
+    { "script-binding dji_telemetry/subtitles", "Subtitles on / off (a drone's camera data written as subtitles is off at first)" },
     { "playlist-prev", "Previous clip in the folder" },
     { "playlist-next", "Next clip in the folder" },
     { "script-binding agent/report", "A note for the agent: areas of the frame and a comment" },

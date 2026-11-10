@@ -19,8 +19,14 @@
 --   heartrate    from a paired device (Osmo 360)
 --   exposure     ISO, shutter, aperture, white balance
 --
+-- Subtitles a camera wrote: DJI's drones (Mini, Air, Mavic) write each frame's camera data (ISO, shutter, EV, GPS,
+-- height) as a text track in the video, or as an .SRT beside it, which mpv loads too. mpv would show it as subtitles,
+-- over the whole picture; here such a track is off when the clip starts, until v shows it (for this file and the
+-- next). Other subtitles play as mpv picks them, and v turns them off and on too.
+--
 -- Keys (rebind with `<key> script-binding dji_telemetry/<name>` in input.conf):
---   Ctrl+t  toggle  the overlay off/on, for this file and the next
+--   Ctrl+t  toggle     the overlay off/on, for this file and the next
+--   v       subtitles  the subtitles off/on (mpv's own v only hides or shows the track picked: here one is picked)
 --
 -- Script messages (`script-message-to dji_telemetry <message>`, what the right-click menu runs; mpv/menu.conf):
 --   position <corner>          where it shows: top-left, top-right, bottom-left, bottom-right
@@ -31,7 +37,8 @@
 --                              only once picked: until then each clip gets its own, as without fields=)
 -- The state is in user-data/dji_telemetry/ for the menu: available (the file has telemetry it reads), model (the
 -- camera's, as its telemetry says), visible,
--- position, units, and shown/<field> for each field.
+-- position, units, and shown/<field> for each field; subtitles: { count (the file's subtitle tracks), camera (one is
+-- the camera's data), shown (one shows now), camera_shown (that one) }.
 --
 -- Options (~~/script-opts/dji_telemetry.conf):
 --   fields=              which, from the list above. Not set: each clip's own, those of depth, water, gps, speed
@@ -360,6 +367,101 @@ mp.observe_property("osd-dimensions", "native", update)
 for _, side in ipairs({ "left", "right", "top", "bottom" }) do
     mp.observe_property("video-margin-ratio-" .. side, "number", function() shown = nil; update() end)
 end
+
+-- Subtitle tracks the camera wrote, by mpv's track id, for the file playing
+local camera_subs = {}
+-- The camera's text shown: asked for with v, for this file and the next
+local camera_text_wanted = false
+
+local function sub_tracks()
+    local list = {}
+    for _, tr in ipairs(mp.get_property_native("track-list") or {}) do
+        if tr.type == "sub" then list[#list + 1] = tr end
+    end
+    return list
+end
+
+local function publish_subtitles()
+    local subs = sub_tracks()
+    local cur = mp.get_property_native("current-tracks/sub")
+    local shown = type(cur) == "table" and mp.get_property_native("sub-visibility") == true
+    mp.set_property_native("user-data/dji_telemetry/subtitles", {
+        count = #subs, camera = next(camera_subs) ~= nil, shown = shown, camera_shown = shown and camera_subs[cur.id] == true })
+end
+
+-- A track's first lines: an external file's start, or the samples of a text track in an MP4 or MOV
+local function first_text(tr, path, embedded)
+    if tr.external then
+        local name = tr["external-filename"]
+        if not name or name:find("://", 1, true) then return nil end
+        local f = io.open(name, "rb")
+        if not f then return nil end
+        local text = f:read(4096)
+        f:close()
+        return text
+    end
+    return embedded and embedded[tr["ff-index"]]
+end
+
+-- Before mpv picks the tracks: which subtitles are the camera's, and none of those picked unless asked for. mpv would
+-- pick them: an MP4's tracks are all marked default, and an .SRT beside the clip is loaded with it
+mp.add_hook("on_preloaded", 50, function()
+    camera_subs = {}
+    local subs = sub_tracks()
+    if #subs > 0 then
+        local path = mp.get_property("path")
+        local ext = path and not path:find("://", 1, true) and (path:match("%.([^./\\]+)$") or ""):lower()
+        local embedded = nil
+        for _, tr in ipairs(subs) do
+            if not tr.external and not embedded and PROBED_EXTENSIONS[ext] then embedded = telemetry.text_samples(path, 3) or {} end
+            if telemetry.camera_text(first_text(tr, path, embedded)) then camera_subs[tr.id] = true end
+        end
+        local others = false
+        for _, tr in ipairs(subs) do others = others or not camera_subs[tr.id] end
+        if next(camera_subs) and not others and not camera_text_wanted and mp.get_property("sid") == "auto" then
+            mp.set_property("file-local-options/sid", "no")
+        end
+        if next(camera_subs) then mp.msg.verbose("the camera's data as subtitles: off until v") end
+    end
+    publish_subtitles()
+end)
+
+mp.register_event("file-loaded", function()
+    -- Real subtitles beside the camera's: the camera's off, should mpv have picked them
+    local cur = mp.get_property_native("current-tracks/sub")
+    if type(cur) == "table" and camera_subs[cur.id] and not camera_text_wanted then mp.set_property("sid", "no") end
+    publish_subtitles()
+end)
+mp.observe_property("current-tracks/sub", "native", publish_subtitles)
+mp.observe_property("sub-visibility", "native", publish_subtitles)
+
+mp.add_key_binding("v", "subtitles", function()
+    local subs = sub_tracks()
+    if #subs == 0 then
+        mp.osd_message("Subtitles: none in this file", 1.5)
+        return
+    end
+    local cur = mp.get_property_native("current-tracks/sub")
+    if type(cur) == "table" and mp.get_property_native("sub-visibility") then
+        mp.set_property("sid", "no")
+        if camera_subs[cur.id] then camera_text_wanted = false end
+        mp.osd_message("Subtitles: off", 1.5)
+    else
+        -- The track picked, else the first: a film's own before the camera's
+        local id = type(cur) == "table" and cur.id or nil
+        if not id then
+            for _, tr in ipairs(subs) do
+                if not id and not camera_subs[tr.id] then id = tr.id end
+            end
+            id = id or subs[1].id
+        end
+        mp.set_property_native("sub-visibility", true)
+        mp.set_property_native("sid", id)
+        if camera_subs[id] then camera_text_wanted = true end
+        mp.osd_message(camera_subs[id] and "Subtitles: on (the camera's data)" or "Subtitles: on", 1.5)
+    end
+    publish_subtitles()
+end)
 
 mp.add_key_binding("Ctrl+t", "toggle", function()
     if not track then

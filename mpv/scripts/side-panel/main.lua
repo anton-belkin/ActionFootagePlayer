@@ -239,7 +239,8 @@ local function passport(d, g, t, h)
         else table.insert(parts, "not log") end
     end
     if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or g.motion and "gyro" or "no motion data") end
-    if t and t.available then table.insert(parts, "telemetry") end
+    if t and t.available then table.insert(parts, "telemetry")
+    elseif t and type(t.subtitles) == "table" and t.subtitles.camera then table.insert(parts, "camera data as subtitles") end
     if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
     return table.concat(parts, " · ")
 end
@@ -813,6 +814,24 @@ end
 local export_choice = {}
 
 -- Output: how it's shown on this screen (Display: the looks, this computer's), and a file of what plays (Export)
+-- The clip's subtitles (the dji-telemetry plugin's v, docs: its main.lua): a switch, and what the track is when the
+-- camera wrote it. Nothing when the clip has none (and heading: with its heading)
+local function subtitles_block(u, x, w, y, heading)
+    local s = u.s
+    local t = state("dji_telemetry")
+    local subs = type(t) == "table" and t.subtitles
+    if type(subs) ~= "table" or (subs.count or 0) == 0 then return heading and y - 10 * s or y end
+    local key = keys["script-binding dji_telemetry/subtitles"]
+    if heading then y = u:heading(x, w, y, "Subtitles") end
+    y = u:switch(x, w, y, "subtitles", subs.camera and subs.count == 1 and "Show the camera's text" or "Show subtitles",
+                 subs.shown, "script-binding dji_telemetry/subtitles", key)
+    if subs.camera then
+        y = u:caption(x, w, y, "The camera wrote its data as subtitles: exposure, GPS, height. Off when a clip starts",
+                      { color = C.label })
+    end
+    return y
+end
+
 local function output_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
@@ -851,6 +870,8 @@ local function output_part(u, x, w, y)
         y = u:caption(x, w, y - 4 * s, curve .. from .. ": the source's, saved with it", { color = C.label })
         y = u:button(x, w, y, "to-source", "Change in Source", function() tab, open = "source", true end)
     end
+
+    y = subtitles_block(u, x, w, y + 10 * s, true)
 
     if g and local_file(path) then
         y = u:heading(x, w, y + 10 * s, "Export", keys["script-binding gyroflow/export"])
@@ -1165,7 +1186,13 @@ local function telemetry_part(u, x, w, y)
     local t = state("dji_telemetry")
     if not mp.get_property("path") then return u:caption(x, w, y, "Nothing plays") end
     if not t then return u:caption(x, w, y, "Needs the dji-telemetry plugin") end
-    if not t.available then return u:caption(x, w, y, "No telemetry in this clip") end
+    if not t.available then
+        if type(t.subtitles) == "table" and t.subtitles.camera then
+            y = u:caption(x, w, y, "This clip's camera data is in a subtitle track, as text: it shows in place of subtitles")
+            return subtitles_block(u, x, w, y + 4 * s, false)
+        end
+        return u:caption(x, w, y, "No telemetry in this clip")
+    end
     y = u:switch(x, w, y, "show", "Show over the video", t.visible, "script-binding dji_telemetry/toggle", keys["script-binding dji_telemetry/toggle"])
     y = u:heading(x, w, y + 8 * s, "Corner")
     for _, c in ipairs(CORNERS) do
