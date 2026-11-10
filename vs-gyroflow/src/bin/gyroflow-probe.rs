@@ -13,7 +13,9 @@
 //                                                       the lens alone, and "camera"
 // and in each, "color": "dlogm", "normal", "hlg", ... from the camera's metadata, or null when it isn't known (not a
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
-// the water, for the lens under water to follow it (water.rs), "rotation": how much a player turns the video to
+// the water, for the lens under water to follow it (water.rs), "stabilized_in_camera": how the camera stabilized the
+// picture itself ("HyperSmooth (HS EIS)", "EIS: RockSteady", "FlowState"), false when it recorded that it didn't, null
+// when it doesn't say (such a clip isn't stabilized again here, whatever motion data it has), "rotation": how much a player turns the video to
 // show it upright, clockwise, 0, 90, 180 or 270 (its display matrix, mp4meta.rs: a camera held vertical), which the
 // plugin's output already has, and "spherical": what a stitched 360° video says it is (its projection, stereo
 // layout, pose or initial view: probe::spherical), null for any other video. A 360 camera's own file (its lenses in
@@ -43,7 +45,7 @@
 // recording, for the view360 plugin to play while it shows the recording, "hold" false (not asked for), "applied" or
 // "needed" (to be measured: gyroflow-export --reframe recording --measure-hold); {"error": why} when there's none.
 
-use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, lens_info, spherical }, water };
+use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, camera_and_lens, lens_info, spherical }, water };
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
@@ -154,9 +156,15 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
     if let Some(v) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
         return v;
     }
-    let mut out = match probe(&path) {
+    let (answer, in_camera) = probe_with_camera_stabilization(&path);
+    let mut out = match answer {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
+    };
+    out["stabilized_in_camera"] = match in_camera {
+        Some(how) if how.is_empty() => false.into(),
+        Some(how) => how.into(),
+        None => serde_json::Value::Null,
     };
     // Nothing to stabilize with: whether the lens can be corrected on its own ("lens": the profile, "" for none)
     if out["mode"].is_null() {
