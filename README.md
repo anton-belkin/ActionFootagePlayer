@@ -424,6 +424,19 @@ and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFoota
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
 
+**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the HERO12 Black does).
+Otherwise it comes from Gyroflow's database, picked the way you would pick it in Gyroflow's list. It must be the same
+camera, the same lens mode the camera recorded (GoPro: Wide, Linear, SuperView...) and the same aspect ratio. Of those,
+the player takes the one made for exactly this resolution, frame rate and HyperSmooth setting, else the same HyperSmooth
+setting, then the nearest resolution and frame rate, then an official profile, then the one with the most stars from
+Gyroflow's users (a profile they mostly voted down only when there's nothing else). Gyroflow itself loads a profile
+only on that exact match, and then the first of several, however it was rated. Source → Lens shows which one it took
+("Nearest: …" when it isn't made for exactly this mode). Clips with motion data get stabilized with it too, and clips
+without motion data (the camera's stabilization on) get their lens corrected on its own. The stars are a snapshot
+taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online. The Osmo Action 4/5/6 records
+its lens mode, but Gyroflow's database has no profiles for these cameras: they carry their lens in the file only
+with EIS off.
+
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
 bends light and the lens then behaves like a longer one than EIS is tuned for. So under water you shoot with EIS
