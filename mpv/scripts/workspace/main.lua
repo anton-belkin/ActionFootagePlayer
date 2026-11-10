@@ -499,13 +499,19 @@ end
 
 -- What's known about the file at `path`, as published
 local told_others = {}
--- Where a project's made files are shown from (the menu's Moments folder): Generated/, or _Moments/ in a project of
--- before that has no Generated/ yet
+-- Where a project's made files are shown from (the menu's Moments folder): _Moments/ (its Generated/ in it), else the
+-- Generated/ at the top of a project of before
 local function moments_home(root)
-    local gen = ws.join(root, moments_lib.GENERATED)
-    if fs.is_dir(gen) then return gen end
-    local old = ws.join(root, moments_lib.FOLDER)
-    return fs.is_dir(old) and old or gen
+    local home = ws.join(root, moments_lib.FOLDER)
+    if fs.is_dir(home) then return home end
+    local old = ws.join(root, moments_lib.GENERATED)
+    return fs.is_dir(old) and old or home
+end
+-- Whether each run gets a folder of its own in Generated/ (the project's generated_runs: the Library's project
+-- settings; off by default)
+local function generated_runs(root)
+    local doc = root and fs.read_json(pf.path(root))
+    return type(doc) == "table" and doc.generated_runs == true
 end
 local function describe(path)
     if not path or path == "" then return {} end
@@ -1026,7 +1032,7 @@ local function save(name, update, typed, quiet, opts)
         file, final = update.file, update.name
     else
         -- Into Generated/<date> Moments/, a folder a day (docs/library-management.md §8)
-        local dir = ws.join(root, native(moments_lib.generated_rel("Moments", os.time(), true)))
+        local dir = ws.join(root, native(moments_lib.generated_rel("Moments", os.time(), true, generated_runs(root))))
         mkdir(dir)
         file, final = moments.unique_file(dir, safe)
     end
@@ -1375,7 +1381,7 @@ mp.register_script_message("export-name", function(json)
         local first = false
         local root = need_project("Exporting")
         if not root then return end
-        local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), true)))
+        local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), true, generated_runs(root))))
         mkdir(dir)
         local output, final = moments.unique_file(dir, safe, label .. ".mov")
         local info = utils.file_info(state.clip)
@@ -1636,11 +1642,16 @@ end
 -- Empty previews (Anton, 2026-11-10: every clip's preview there at once, to arrange the footage before any picture
 -- is made): one dark frame with the link inside, written by afp-cut 200 at a time (~6 ms each on the NAS);
 -- the "clips-finish" job queued after makes each one real in its place, the folder the Library shows first. Their
--- names as new_preview_path gives them, the run's folder being new: told apart by the ones taken in this run
+-- names as new_preview_path gives them: in Generated/ (no folder per run) a name another clip's preview has, in the
+-- catalog or written in this run, gets the clip's folder in parentheses, then a number; one that's there all the same
+-- (not in the catalog yet) is tried again under the next name
 write_empty = function(job)
-    local list, taken = {}, {}
+    local list, taken, of = {}, {}, {}
+    for _, it in ipairs(catalog.now({ "list", job.project, "--kind", "clip" }) or {}) do
+        if type(it.path) == "string" then taken[it.path] = true end
+    end
     local trips = clips_layout() == "trips"
-    for _, c in ipairs(job.queue) do
+    local function name_for(c)
         local rel = (trips and c.trip) and (c.trip .. "/" .. moments_lib.clip_preview_relative(c.relative, true)) or moments_lib.clip_preview_relative(c.relative, job.flat)
         local file = ws.join(job.dir, native(rel))
         if taken[file] then
@@ -1652,8 +1663,10 @@ write_empty = function(job)
             file = alt
         end
         taken[file] = true
+        of[file] = c
         list[#list + 1] = { out = file, link = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true }) }
     end
+    for _, c in ipairs(job.queue) do name_for(c) end
     -- 200 at a time, each 200 into the catalog as they're written: the progress moves, Footage fills as it goes
     local exe = plugin_tool("afp-cut")
     job.queue = {}
@@ -1663,7 +1676,11 @@ write_empty = function(job)
         local part = {}
         for i = at, math.min(at + 199, #list) do part[#part + 1] = list[i] end
         at = at + #part
-        local function took(written, failed)
+        local function took(written, failed, there)
+            -- Names taken all the same: again under the next one (at the end of the list; counted when written)
+            for _, f in ipairs(there or {}) do
+                if of[f] then taken[f] = true; job.total = job.total + 1; name_for(of[f]) end
+            end
             job.made = job.made + #written
             job.done = math.min(job.total, job.done + #part)
             catalog.note(job.project, written)
@@ -1685,7 +1702,7 @@ write_empty = function(job)
                 if job.stopping then return took({}, {}) end
                 return took({}, { { job.dir, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "afp-cut failed" } })
             end
-            took(v.written or {}, v.failed or {})
+            took(v.written or {}, v.failed or {}, v.exists)
         end)
     end
     chunk()
@@ -1696,7 +1713,7 @@ local function start_clips(root, queue, what)
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
     -- A folder of this run's own, from where they're moved anywhere (docs/library-management.md §8)
-    local dir = ws.join(root, native(moments_lib.generated_rel("Clip previews", os.time())))
+    local dir = ws.join(root, native(moments_lib.generated_rel("Clip previews", os.time(), false, generated_runs(root))))
     mkdir(dir)
     clips_job = { project = root, dir = dir, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
                   flat = clips_layout(root) == "flat", draft = clips_draft, notes = {} }
@@ -2682,7 +2699,7 @@ local function start_marks_job(kind, root)
         return mp.osd_message(why, 4)
     end
     -- This run's folder (docs/library-management.md §8)
-    local dir = ws.join(root, native(moments_lib.generated_rel(kind == "moments" and "Moments" or "Photos", os.time())))
+    local dir = ws.join(root, native(moments_lib.generated_rel(kind == "moments" and "Moments" or "Photos", os.time(), false, generated_runs(root))))
     marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, dir = dir,
                   alone = (batch and batch.alone ~= nil) and batch.alone or cache.moments_alone == true }
     mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
@@ -2894,7 +2911,7 @@ local function export_moments(root, sdr)
         return
     end
     -- This run's folder (docs/library-management.md §8)
-    local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time())))
+    local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), false, generated_runs(root))))
     mkdir(dir)
     local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
     export_job = { root = root, dir = dir, sdr = sdr, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,

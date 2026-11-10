@@ -25,7 +25,8 @@ samples, the stabilization's verdict, log curve, lens, the motion data); one tha
 
 --set-key writes a text key into an MP4's moov/meta, its other keys kept (the player relinks moments with it).
 --empty-previews writes an empty clip preview (one dark frame, its link inside) at each `out` that isn't there yet,
-its folders made, 16 at a time (a share round trips overlap); says what it wrote (written) and what not (failed).
+its folders made, 16 at a time (a share round trips overlap); says what it wrote (written), what was there already
+(exists) and what it couldn't (failed).
 
 Exit status: 0 cut and checked, 1 an error, 2 not cut (a file it can't cut), 3 cut but not the same: removed.
 A camera without an adapter here (only DJI has one) is cut only when the check passes; it's said in the outcome.";
@@ -215,6 +216,7 @@ fn empty_previews() -> ExitCode {
     let next = Mutex::new(0usize);
     let written = Mutex::new(Vec::new());
     let failed = Mutex::new(Vec::new());
+    let exists = Mutex::new(Vec::new());
     let one = |out: &Path, link: &str| -> Result<bool, String> {
         let bytes = vs_gyroflow::mp4meta::with_keys(vs_gyroflow::mp4meta::EMPTY_PREVIEW, &[(vs_gyroflow::mp4meta::LINK_KEY, link)])?;
         let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(out) {
@@ -232,12 +234,12 @@ fn empty_previews() -> ExitCode {
                 let Some((out, link)) = jobs.get(i) else { break };
                 match one(out, link) {
                     Ok(true) => written.lock().unwrap().push(out.display().to_string()),
-                    Ok(false) => {}
+                    Ok(false) => exists.lock().unwrap().push(out.display().to_string()),
                     Err(e) => failed.lock().unwrap().push(serde_json::json!([out.display().to_string(), e])),
                 }
             });
         }
     });
-    println!("{}", serde_json::json!({ "written": written.into_inner().unwrap(), "failed": failed.into_inner().unwrap() }));
+    println!("{}", serde_json::json!({ "written": written.into_inner().unwrap(), "failed": failed.into_inner().unwrap(), "exists": exists.into_inner().unwrap() }));
     ExitCode::SUCCESS
 }

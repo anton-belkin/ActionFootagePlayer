@@ -292,7 +292,7 @@ fn project_info(root: &Path) -> ProjectInfo {
         clips_failed: failed,
         clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
-        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 2) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
+        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
     }
 }
@@ -751,6 +751,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
                    "never_rename": locations::never_rename(&root),
+                   "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
 }
@@ -758,7 +759,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
 // The project's locations written: into Project.afproject (none: the project is next to its footage again), and its
 // .afplocation file into each of them (taken out of the ones removed)
 #[tauri::command]
-async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Option<Value>) -> Result<Vec<String>, String> {
+async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Option<Value>, generated_runs: Option<bool>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     tauri::async_runtime::spawn_blocking(move || {
         let mounts = locations::mounts();
@@ -773,6 +774,8 @@ async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Opti
         update_doc(&root, |d| {
             if clean.is_empty() { d.remove("locations"); } else { d.insert("locations".into(), json!(clean)); d.insert("version".into(), json!(2)); }
             if let Some(h) = &hosts { if h.as_object().is_some_and(|o| !o.is_empty()) { d.insert("hosts".into(), h.clone()); } else { d.remove("hosts"); } }
+            // A folder per run in Generated/ (the player reads it): written only when on
+            match generated_runs { Some(true) => { d.insert("generated_runs".into(), json!(true)); } Some(false) => { d.remove("generated_runs"); } None => {} }
         })?;
         let after: Vec<locations::Location> = locations::locations(&root, &mounts).into_iter().filter(|l| !l.local).collect();
         Ok(locations::write_pointers(&root, &after, &before, &mounts))

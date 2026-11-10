@@ -696,9 +696,15 @@ version kept in `photo_tags` are shown with the photo's own and go into it at it
   among its footage only `.afplink.mp4`. The Library's Moments, Photos and Exports show the project folder's own
   folders (paths from the project's folder: `_Moments/Reef`, `Generated/2026-11-10 14-32 Moments`), empty folders too;
   Footage shows clips as their previews are arranged, wherever. Rename, delete and New folder work there.
-- **Generated/**: every run (clip previews, moments and photos of marks, exports) writes into
-  `Generated/<date> <time> <what>/`; a moment, photo or export made by hand in the player into
-  `Generated/<date> Moments|Photos|Exports/`. Clip previews' layout and "stabilized on their own" are chosen in the
+- **Generated/**, in each kind's own folder (Anton, 2026-11-10): clip previews into `_Clips/Generated`, moments into
+  `_Moments/Generated`, photos into `_Stills/Generated`, exports into `_Exports/Generated`, made by a run or by hand,
+  all in it with no folder per run. The project's setting "A folder per run in Generated" (Project.afproject
+  `generated_runs`, off by default; Library, project settings, General) brings them back: `<date> <time>` for a run,
+  `<date>` for what's saved by hand. A name taken there gets another: a moment, photo or export a number ("Name 2"),
+  a clip preview the clip's folder in parentheses, then a number; a clip's own preview is replaced. Projects of
+  before keep their `Generated/` at the top as it is (nothing moved: renders sit at their moment's path, and a move
+  of thousands of previews over the NAS while a task runs is a risk for nothing); the Library shows it under Other
+  folders, from where it's moved like any folder. Clip previews' layout and "stabilized on their own" are chosen in the
   Library for each run (remembered on this computer); in the player, "on their own" is this computer's.
 - **Clip previews empty first** (Anton, 2026-11-10: "I want to start organizing, not wait for the pictures"): the
   Library's "Clip previews" writes every clip's preview at once as an empty one (a dark frame, 1.9 KB, the link inside
