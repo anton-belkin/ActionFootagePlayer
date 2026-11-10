@@ -453,7 +453,10 @@ struct Snapshot {
 }
 
 #[tauri::command]
-fn snapshot(shared: State<Shared>) -> Snapshot {
+async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Snapshot {
     let mut inner = shared.lock().unwrap();
     if inner.project.is_none() {
         if let Some(p) = inner.pending_open.pop_front() { inner.project = Some(p); }
@@ -483,17 +486,25 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
         quiet_ms,
         catalog,
     }
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn project(shared: State<Shared>) -> Option<ProjectInfo> {
+async fn project(shared: State<'_, Shared>) -> Result<Option<ProjectInfo>, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Option<ProjectInfo> {
     let root = shared.lock().unwrap().project.clone()?;
     Some(project_info(&root))
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn engine() -> Result<String, String> {
+async fn engine() -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     player().map(|p| p.display().to_string())
+}).await.map_err(|e| e.to_string())?
 }
 
 fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<String, String> {
@@ -506,8 +517,12 @@ fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<Str
 }
 
 #[tauri::command]
-fn open_project(app: tauri::AppHandle, shared: State<Shared>, path: String) -> Result<String, String> {
+async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     open_path(&app, &shared, Path::new(&path))
+}).await.map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -515,10 +530,13 @@ struct Recent { path: String, name: String, here: bool }
 
 // The projects this computer has opened, the last first: the ones still there
 #[tauri::command]
-fn recent(app: tauri::AppHandle) -> Vec<Recent> {
+async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
     recent_list(&app).into_iter().filter(|p| Path::new(p).join(PROJECT_FILE).is_file() || Path::new(p).join(LEGACY_DIR).is_dir())
         .map(|p| Recent { name: Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()), here: true, path: p })
         .collect()
+}).await.map_err(|e| e.to_string())
 }
 
 // ---------- browsing ----------
@@ -592,8 +610,12 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
 }
 
 #[tauri::command]
-fn probes_since(probes: State<index::SharedProbes>, since: u64) -> Value {
+async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Result<Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Value {
     probes.lock().unwrap().since(since)
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -717,7 +739,10 @@ fn choose_local(shared: State<Shared>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn save_local(shared: State<Shared>, list: Vec<Value>, never_rename: Option<bool>) -> Result<(), String> {
+async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: Option<bool>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let id = project_id(&root)?;
     let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
@@ -732,13 +757,17 @@ fn save_local(shared: State<Shared>, list: Vec<Value>, never_rename: Option<bool
     let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
     if never_rename { doc["never_rename"] = json!(true); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
+}).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
+async fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let (_, _, dir) = caches(&app).into_iter().find(|(k, _, _)| *k == key).ok_or("no such cache")?;
     if dir.is_dir() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
     Ok(())
+}).await.map_err(|e| e.to_string())?
 }
 
 // The project's own files moved to another folder (the SSD, say): Project.afproject and its _ folders. The clips and
@@ -866,11 +895,15 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
 // ---------- renders ----------
 
 #[tauri::command]
-fn delete_renders(shared: State<Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: delete renders when they're done".into()); }
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
     Ok(json!({ "deleted": n, "problems": problems }))
+}).await.map_err(|e| e.to_string())?
 }
 
 // ---------- tags ----------
@@ -931,7 +964,9 @@ async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) ->
 static QUICKLOOK: Mutex<Option<std::process::Child>> = Mutex::new(None);
 
 #[tauri::command]
-fn quick_look(paths: Vec<String>) -> Result<bool, String> {
+async fn quick_look(paths: Vec<String>) -> Result<bool, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
     let mut q = QUICKLOOK.lock().unwrap();
     if let Some(mut c) = q.take() {
         if c.try_wait().ok().flatten().is_none() { let _ = c.kill(); let _ = c.wait(); return Ok(false); }
@@ -946,6 +981,7 @@ fn quick_look(paths: Vec<String>) -> Result<bool, String> {
     }.map_err(|e| e.to_string())?;
     *q = Some(child);
     Ok(true)
+}).await.map_err(|e| e.to_string())?
 }
 
 // A name a file can have on every system
@@ -962,7 +998,10 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
     let name = good_name(&name)?;
@@ -1024,6 +1063,7 @@ fn rename_item(shared: State<Shared>, view: String, kind: String, path: String, 
             Ok(to.display().to_string())
         }
     }
+}).await.map_err(|e| e.to_string())?
 }
 
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
@@ -1066,7 +1106,10 @@ fn to_trash(file: &Path) -> Result<String, String> {
 // Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
 // footage is deleted in Finder), an export. What went where, and what couldn't
 #[tauri::command]
-fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
     let footage = index::footage_dirs(&root);
@@ -1107,6 +1150,7 @@ fn delete_items(shared: State<Shared>, items: Vec<serde_json::Value>) -> Result<
         }
     }
     Ok(serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems }))
+}).await.map_err(|e| e.to_string())?
 }
 
 // Everything the library keeps, written out in the open as one JSON file: the project's file and this computer's
@@ -1192,7 +1236,9 @@ async fn export_library(shared: State<'_, Shared>, probes: State<'_, index::Shar
 // A clip's or moment's Gyroflow project opened in Gyroflow (the system's app for .gyroflow): `paths`, the clip's
 // copies or the moment's file; its project beside one of them (<name>.gyroflow or <name.ext>.gyroflow)
 #[tauri::command]
-fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
+async fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     for p in &paths {
         let p = PathBuf::from(p);
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1206,12 +1252,16 @@ fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
         }
     }
     Err("It has no Gyroflow project".into())
+}).await.map_err(|e| e.to_string())?
 }
 
 // A new folder in a view's own folder (_Clips, _Moments, _Stills, _Exports), inside `parent` (its path there): its
 // path there, named "untitled folder" (" 2"… when taken), for renaming at once
 #[tauri::command]
-fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<String, String> {
+async fn new_folder(shared: State<'_, Shared>, view: String, parent: String) -> Result<String, String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
     if !matches!(view.as_str(), "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
@@ -1222,6 +1272,7 @@ fn new_folder(shared: State<Shared>, view: String, parent: String) -> Result<Str
     while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
     std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
     Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
+}).await.map_err(|e| e.to_string())?
 }
 
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them.
@@ -1322,7 +1373,10 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
 const KINDS: [&str; 6] = ["clips", "clips-again", "moments", "photos", "export", "render"];
 
 #[tauri::command]
-fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     if !KINDS.contains(&kind.as_str()) { return Err(format!("no such batch: {kind}")); }
     let mut inner = shared.lock().unwrap();
     let root = inner.project.clone().ok_or("Open a project first")?;
@@ -1373,10 +1427,14 @@ fn add_job(shared: State<Shared>, kind: String, options: Option<Value>, only: Op
     inner.jobs.push(job);
     tick(&mut inner);
     Ok(())
+}).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn cancel_job(shared: State<Shared>, id: u64) {
+async fn cancel_job(shared: State<'_, Shared>, id: u64) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     let mut inner = shared.lock().unwrap();
     if inner.running.as_ref().is_some_and(|r| r.id == id) {
         let run = inner.running.as_mut().unwrap();
@@ -1388,15 +1446,23 @@ fn cancel_job(shared: State<Shared>, id: u64) {
     } else {
         inner.jobs.retain(|j| !(j.id == id && j.state == JobState::Waiting));
     }
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn clear_finished(shared: State<Shared>) {
+async fn clear_finished(shared: State<'_, Shared>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     shared.lock().unwrap().jobs.retain(|j| !j.state.finished());
+}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), String> {
+async fn set_setting(shared: State<'_, Shared>, key: String, value: Value) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     match (key.as_str(), &value) {
         ("clips_flat" | "moments_alone", Value::Bool(_)) => update_doc(&root, |doc| { doc["settings"][&key] = value.clone(); }),
@@ -1405,10 +1471,14 @@ fn set_setting(shared: State<Shared>, key: String, value: Value) -> Result<(), S
             update_doc(&root, |doc| { doc["settings"]["clips_layout"] = value.clone(); doc["settings"]["clips_flat"] = json!(l == "flat"); }),
         _ => Err(format!("no such setting: {key} = {value}")),
     }
+}).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn reveal(shared: State<Shared>, what: Option<String>) {
+async fn reveal(shared: State<'_, Shared>, what: Option<String>) -> Result<(), String> {
+    // In the background: the window never waits on it (a share can take seconds)
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> () {
     let Some(root) = shared.lock().unwrap().project.clone() else { return };
     let path = match what.as_deref() {
         Some(sub @ ("_Clips" | "_Moments" | "_Stills" | "_Exports" | "Generated")) if root.join(sub).is_dir() => root.join(sub),
@@ -1417,6 +1487,7 @@ fn reveal(shared: State<Shared>, what: Option<String>) {
     let _ = if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
         else if cfg!(windows) { Command::new("explorer").arg(&path).spawn() }
         else { Command::new("xdg-open").arg(&path).spawn() };
+}).await.map_err(|e| e.to_string())
 }
 
 // The window's close, answered: stop the batches and quit, or keep them going (the window stays)
