@@ -3,13 +3,15 @@
 // Stabilizes clips optically: Gyroflow measures the camera's motion from the picture, and the project it writes goes
 // beside each clip, where the player plays with it (vs_gyroflow::optical says which clips, and how).
 //
-//   gyroflow-optical [--strength <%>] [--tracking klt|dis] <video>...   each in turn, how far on stderr
-//   gyroflow-optical --check <video>...                                 what would be done, one JSON line each:
-//                                                                       {"path", "stabilize": true, "lens"} or
-//                                                                       {"path", "stabilize": false, "why"}
+//   gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...   each in turn, how far on stderr
+//   gyroflow-optical --check [--redo] <video>...                        what would be done, one JSON line each:
+//                                                                       {"path", "stabilize": true, "lens", "replaces"}
+//                                                                       or {"path", "stabilize": false, "why"}
+// --redo: clips with a Gyroflow project made again (optical::decide): its settings kept, lens and motion anew
 //   gyroflow-optical --batch <request.json>                             Action Footage Library's "Stabilize optically"
 //
-// The batch's request: {"clips": [paths], "status": <file>, "stop": <file>, "strength": <%, 100>, "tracking": "klt"}.
+// The batch's request: {"clips": [paths], "redo": false, "status": <file>, "stop": <file>, "strength": <%, 100>,
+// "tracking": "klt"}.
 // It writes how far it is to "status" as the player's batches do (the Library's Tasks tab reads it): {"state":
 // "looking"|"running"|"done"|"stopped"|"failed", "done", "total" (the clips stabilized, not the ones left out),
 // "failed", "made", "fraction" (of the clip being analyzed), "current" (its name), "message", "failures": [[name,
@@ -37,7 +39,7 @@ impl Status {
     fn set(&mut self, key: &str, value: Value) { self.v[key] = value; }
 }
 
-fn run(clips: Vec<PathBuf>, settings: Settings, status_file: Option<PathBuf>, stop_file: Option<PathBuf>, work: PathBuf) -> i32 {
+fn run(clips: Vec<PathBuf>, redo: bool, settings: Settings, status_file: Option<PathBuf>, stop_file: Option<PathBuf>, work: PathBuf) -> i32 {
     // Absolute: Gyroflow runs in the work folder, and reads files by their URL
     let clips: Vec<PathBuf> = clips.into_iter().map(|c| std::path::absolute(&c).unwrap_or(c)).collect();
     let stopped = || stop_file.as_ref().is_some_and(|f| f.exists());
@@ -45,14 +47,14 @@ fn run(clips: Vec<PathBuf>, settings: Settings, status_file: Option<PathBuf>, st
                                                          "failures": [], "left_out": [] }) };
     st.write();
     // Which clips: each one's metadata read (a second or so from a share)
-    let mut todo: Vec<(PathBuf, Option<String>)> = Vec::new();
+    let mut todo: Vec<(PathBuf, Option<String>, Option<PathBuf>)> = Vec::new();
     let mut left_out: Vec<Value> = Vec::new();
     for c in &clips {
         if stopped() { st.set("state", json!("stopped")); st.write(); return 0; }
         st.set("current", json!(name_of(c)));
         st.write();
-        match optical::verdict(c) {
-            Verdict::Stabilize { lens, profile } => { eprintln!("{}: lens {lens}", c.display()); todo.push((c.clone(), profile)); }
+        match optical::verdict(c, redo) {
+            Verdict::Stabilize { lens, profile, replaces } => { eprintln!("{}: lens {lens}", c.display()); todo.push((c.clone(), profile, replaces)); }
             Verdict::LeaveOut(why) => { eprintln!("{}: left out, {why}", c.display()); left_out.push(json!([c.display().to_string(), why])); }
         }
     }
@@ -73,13 +75,13 @@ fn run(clips: Vec<PathBuf>, settings: Settings, status_file: Option<PathBuf>, st
     st.write();
     let mut failures: Vec<Value> = Vec::new();
     let (mut made, mut done) = (0, 0);
-    for (clip, profile) in &todo {
+    for (clip, profile, replaces) in &todo {
         st.set("current", json!(name_of(clip)));
         st.set("fraction", json!(0.0));
         st.write();
         let started = Instant::now();
         let mut last = Instant::now();
-        let result = optical::stabilize(&gyroflow, clip, profile.as_deref(), &settings, &work, &stopped, &mut |p| {
+        let result = optical::stabilize(&gyroflow, clip, profile.as_deref(), replaces.as_deref(), &settings, &work, &stopped, &mut |p| {
             st.set("fraction", json!(p));
             if last.elapsed().as_millis() >= 400 { st.write(); last = Instant::now(); }
             if st.file.is_none() { eprint!("\r{}: {:.0}%   ", name_of(clip), p * 100.0); }
@@ -118,17 +120,18 @@ fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check <video>...\n       gyroflow-optical --batch <request.json>");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --batch <request.json>");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
     let work_default = std::env::temp_dir().join(format!("gyroflow-optical-{}", std::process::id()));
     match args[0].as_str() {
         "--check" => {
-            for a in &args[1..] {
+            let redo = args.get(1).is_some_and(|a| a == "--redo");
+            for a in &args[if redo { 2 } else { 1 }..] {
                 let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
-                let line = match optical::verdict(&p) {
-                    Verdict::Stabilize { lens, .. } => json!({ "path": a, "stabilize": true, "lens": lens }),
+                let line = match optical::verdict(&p, redo) {
+                    Verdict::Stabilize { lens, replaces, .. } => json!({ "path": a, "stabilize": true, "lens": lens, "replaces": replaces }),
                     Verdict::LeaveOut(why) => json!({ "path": a, "stabilize": false, "why": why }),
                 };
                 println!("{line}");
@@ -147,12 +150,14 @@ fn main() {
             };
             let path = |k: &str| req[k].as_str().map(PathBuf::from);
             let work = path("status").and_then(|s| s.parent().map(|d| d.join("work"))).unwrap_or(work_default);
-            std::process::exit(run(clips, settings, path("status"), path("stop"), work));
+            std::process::exit(run(clips, req["redo"].as_bool().unwrap_or(false), settings, path("status"), path("stop"), work));
         }
         _ => {
             let mut settings = Settings::default();
+            let mut redo = false;
             while args.first().is_some_and(|a| a.starts_with("--")) {
                 let flag = args.remove(0);
+                if flag == "--redo" { redo = true; continue; }
                 let Some(v) = (!args.is_empty()).then(|| args.remove(0)) else { usage() };
                 match flag.as_str() {
                     "--strength" => settings.strength = v.parse::<f64>().unwrap_or_else(|_| usage()) / 100.0,
@@ -161,7 +166,7 @@ fn main() {
                 }
             }
             if args.is_empty() { usage(); }
-            std::process::exit(run(args.into_iter().map(PathBuf::from).collect(), settings, None, None, work_default));
+            std::process::exit(run(args.into_iter().map(PathBuf::from).collect(), redo, settings, None, None, work_default));
         }
     }
 }

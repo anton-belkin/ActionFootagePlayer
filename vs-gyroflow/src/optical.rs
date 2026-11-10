@@ -7,8 +7,10 @@
 // selected clips, one after another (bin/gyroflow-optical.rs).
 //
 // Which clips (`verdict`):
-// - one with a Gyroflow project beside it already is left out: it was made there, perhaps by hand, and is never
-//   overwritten (delete it to make it again);
+// - one with a Gyroflow project beside it already is left out: it was made there, perhaps by hand. Unless it's asked
+//   for again (`redo`: a lens chosen anew, a result to improve): then its project's settings are kept (smoothing, zoom,
+//   trims...: what was set in Gyroflow), the lens and the motion measured again, and the project replaced, only if it's
+//   still what it was when the run began;
 // - one with motion data the player stabilizes it with (the probe's "default": gyro, recorded with the camera's own
 //   stabilization off) is left out: the gyro is better than what the picture says;
 // - a 360° clip is left out (the 360 mode plays it);
@@ -37,7 +39,7 @@ use serde_json::{ json, Value };
 pub enum Verdict {
     /// Stabilized optically, with this lens: its label ("in the file", or the profile's name), and the profile itself
     /// to give Gyroflow when it wouldn't load it by itself (None: it does)
-    Stabilize { lens: String, profile: Option<String> },
+    Stabilize { lens: String, profile: Option<String>, replaces: Option<PathBuf> },
     /// Left out, and why (said to the user)
     LeaveOut(String),
 }
@@ -65,13 +67,13 @@ pub struct Facts {
     pub lens: Option<(String, Option<String>)>,
 }
 
-/// The decision, from what the clip is and whether it has a project already
-pub fn decide(has_project: bool, facts: &Facts) -> Verdict {
-    if has_project { return Verdict::LeaveOut("it has a Gyroflow project already (delete it to make a new one)".into()); }
+/// The decision, from what the clip is, the project it has already (made again when `redo`)
+pub fn decide(project: Option<&Path>, redo: bool, facts: &Facts) -> Verdict {
+    if project.is_some() && !redo { return Verdict::LeaveOut("it has a Gyroflow project already (Redo makes it again)".into()); }
     if facts.spherical { return Verdict::LeaveOut("a 360° clip: the player's 360 view plays it".into()); }
     if facts.own_motion { return Verdict::LeaveOut("it has motion data the player stabilizes it with".into()); }
     match &facts.lens {
-        Some((lens, profile)) => Verdict::Stabilize { lens: lens.clone(), profile: profile.clone() },
+        Some((lens, profile)) => Verdict::Stabilize { lens: lens.clone(), profile: profile.clone(), replaces: project.map(Path::to_path_buf) },
         None => Verdict::LeaveOut(format!("{}: its lens isn't known (no lens profile for this camera and mode)",
             if facts.camera.is_empty() { "unknown camera" } else { &facts.camera })),
     }
@@ -108,12 +110,12 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
 }
 
 /// The decision for a clip on the disk
-pub fn verdict(video: &Path) -> Verdict {
+pub fn verdict(video: &Path, redo: bool) -> Verdict {
     if !video.is_file() { return Verdict::LeaveOut("not found".into()); }
-    let has_project = own_project(video).is_some();
-    if has_project { return decide(true, &Facts::default()); }
+    let project = own_project(video);
+    if project.is_some() && !redo { return decide(project.as_deref(), false, &Facts::default()); }
     match facts(video) {
-        Ok(f) => decide(false, &f),
+        Ok(f) => decide(project.as_deref(), redo, &f),
         Err(e) => Verdict::LeaveOut(format!("couldn't be read: {e}")),
     }
 }
@@ -141,6 +143,37 @@ pub fn preset(s: &Settings) -> Value {
         "optical_correction_strength": s.strength.clamp(0.0, 1.0),
         "optical_tracking": s.tracking,
     } })
+}
+
+/// A clip's project made again: its settings as the preset (what was set in Gyroflow: smoothing, zoom, horizon,
+/// trims, keyframes...), without what's the video's or measured from it, nor the lens (chosen anew), the analysis'
+/// settings on top
+pub fn preset_from_project(project: &Value, s: &Settings) -> Value {
+    let mut p = project.clone();
+    if let Some(o) = p.as_object_mut() {
+        for k in ["videofile", "videofile_bookmark", "video_info", "date", "calibration_data", "output", "offsets", "title", "image_sequence_start", "image_sequence_fps"] { o.remove(k); }
+    }
+    if let Some(g) = p.get_mut("gyro_source").and_then(Value::as_object_mut) {
+        for k in ["filepath", "filepath_bookmark", "optical_correction", "file_metadata", "detected_source", "optical_removed_tracks", "raw_imu", "quaternions"] { g.remove(k); }
+    }
+    let sync = preset(s)["synchronization"].clone();
+    match p.get_mut("synchronization").and_then(Value::as_object_mut) {
+        Some(o) => { for (k, v) in sync.as_object().unwrap() { o.insert(k.clone(), v.clone()); } }
+        None => { p["synchronization"] = sync; }
+    }
+    p
+}
+
+/// What Gyroflow renders the project to, as it would set it itself (beside the clip, `<stem>_stabilized.mp4`): Gyroflow
+/// wrote this run's work folder there
+pub fn fix_output(project: &mut Value, video: &Path) {
+    let Some(o) = project.get_mut("output").and_then(Value::as_object_mut) else { return };
+    let dir = video.parent().map(|d| format!("{}/", filesystem::path_to_url(&d.to_string_lossy()).trim_end_matches('/'))).unwrap_or_default();
+    let stem = video.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    o.insert("output_folder".into(), json!(dir));
+    o.insert("output_filename".into(), json!(format!("{stem}_stabilized.mp4")));
+    o.remove("output_folder_bookmark");
+    o.remove("output_path");
 }
 
 /// Gyroflow's executable: AFP_GYROFLOW, else where it's installed (macOS: the app, by its place or its bundle id;
@@ -231,13 +264,21 @@ pub fn check_project(text: &str) -> Result<(), String> {
 }
 
 /// Puts the project Gyroflow made beside the video as `<stem>.gyroflow`: copied next to it under a temporary name,
-/// then renamed, never over one that's there (made meanwhile)
-pub fn place(made: &Path, video: &Path) -> Result<PathBuf, String> {
+/// then renamed, never over one that's there (made meanwhile). With `replaces` (the project made again, and what it was
+/// when the run began): over it, only if it's still that
+pub fn place(made: &Path, video: &Path, replaces: Option<(&Path, &[u8])>) -> Result<PathBuf, String> {
     let dir = video.parent().ok_or("the clip has no folder")?;
     let stem = video.file_stem().ok_or("the clip has no name")?.to_string_lossy().into_owned();
+    let part = dir.join(format!(".{stem}.gyroflow.part"));
+    if let Some((dest, was)) = replaces {
+        if std::fs::read(dest).ok().as_deref() != Some(was) { return Err("its Gyroflow project changed meanwhile: left as it is".into()); }
+        std::fs::copy(made, &part).map_err(|e| format!("couldn't write beside the clip ({}): {e}", dir.display()))?;
+        let r = std::fs::rename(&part, dest).map(|_| dest.to_path_buf()).map_err(|e| format!("couldn't write {}: {e}", dest.display()));
+        let _ = std::fs::remove_file(&part);
+        return r;
+    }
     let dest = dir.join(format!("{stem}.gyroflow"));
     if own_project(video).is_some() { return Err("a Gyroflow project appeared beside it meanwhile: left as it is".into()); }
-    let part = dir.join(format!(".{stem}.gyroflow.part"));
     std::fs::copy(made, &part).map_err(|e| format!("couldn't write beside the clip ({}): {e}", dir.display()))?;
     // A plain rename replaces; hard_link doesn't: where links aren't possible (some shares), checked just before
     let linked = std::fs::hard_link(&part, &dest);
@@ -253,13 +294,19 @@ pub fn place(made: &Path, video: &Path) -> Result<PathBuf, String> {
 
 /// Runs Gyroflow on one clip and puts its project beside it. `stop` is asked about twice a second (true: Gyroflow
 /// is ended, nothing written); `progress` hears how far the analysis is (0-1)
-pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, settings: &Settings, work: &Path,
+pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, replaces: Option<&Path>, settings: &Settings, work: &Path,
                  stop: &dyn Fn() -> bool, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String> {
     let _ = std::fs::remove_dir_all(work);
     std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
     let stem = video.file_stem().ok_or("the clip has no name")?.to_string_lossy().into_owned();
+    // Made again: the project as it is now, its settings the preset
+    let was = match replaces { Some(p) => Some(std::fs::read(p).map_err(|e| format!("couldn't read its Gyroflow project: {e}"))?), None => None };
+    let preset_json = match &was {
+        Some(bytes) => preset_from_project(&serde_json::from_slice(bytes).map_err(|e| format!("its Gyroflow project isn't JSON: {e}"))?, settings),
+        None => preset(settings),
+    };
     let preset_file = work.join("preset.gyroflow");
-    std::fs::write(&preset_file, preset(settings).to_string()).map_err(|e| e.to_string())?;
+    std::fs::write(&preset_file, preset_json.to_string()).map_err(|e| e.to_string())?;
     // Gyroflow's output options are JSON with ' for " (it swaps them): the work folder's path has neither
     let out = work.join(format!("{stem}.mp4"));
     let out_params = json!({ "output_path": out.to_string_lossy() }).to_string();
@@ -272,7 +319,8 @@ pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, settings:
     }
     let log_file = work.join("gyroflow.log");
     let log = std::fs::File::create(&log_file).map_err(|e| e.to_string())?;
-    cmd.arg("--preset").arg(&preset_file).args(["--export-project", "1", "--stdout-progress", "-p", &out_params])
+    // -f: Gyroflow asks (and waits) when its output is there; nothing's written there but the project
+    cmd.arg("--preset").arg(&preset_file).args(["--export-project", "1", "--stdout-progress", "-f", "-p", &out_params])
         .current_dir(work).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::from(log));
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
@@ -306,7 +354,10 @@ pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, settings:
         error_of(&log).unwrap_or_else(|| format!("Gyroflow wrote no project ({status})"))
     })?;
     check_project(&text)?;
-    place(&made, video)
+    let mut project: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    fix_output(&mut project, video);
+    std::fs::write(&made, serde_json::to_string_pretty(&project).unwrap_or(text)).map_err(|e| e.to_string())?;
+    place(&made, video, replaces.zip(was.as_deref()))
 }
 
 #[cfg(test)]
@@ -319,13 +370,16 @@ mod tests {
 
     #[test]
     fn decides() {
-        assert!(matches!(decide(true, &facts(false, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("project already")));
-        assert!(matches!(decide(false, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
-        assert!(matches!(decide(false, &facts(false, None)), Verdict::LeaveOut(r) if r.contains("GoPro HERO12 Black: its lens isn't known")));
-        assert_eq!(decide(false, &facts(false, Some("in the file"))), Verdict::Stabilize { lens: "in the file".into(), profile: None });
+        let proj = Path::new("/x/A.gyroflow");
+        assert!(matches!(decide(Some(proj), false, &facts(false, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("project already")));
+        assert!(matches!(decide(None, false, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
+        assert!(matches!(decide(Some(proj), true, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
+        assert!(matches!(decide(None, false, &facts(false, None)), Verdict::LeaveOut(r) if r.contains("GoPro HERO12 Black: its lens isn't known")));
+        assert_eq!(decide(None, false, &facts(false, Some("in the file"))), Verdict::Stabilize { lens: "in the file".into(), profile: None, replaces: None });
+        assert_eq!(decide(Some(proj), true, &facts(false, Some("in the file"))), Verdict::Stabilize { lens: "in the file".into(), profile: None, replaces: Some(proj.to_path_buf()) });
         let mut f = facts(false, Some("in the file"));
         f.spherical = true;
-        assert!(matches!(decide(false, &f), Verdict::LeaveOut(r) if r.contains("360")));
+        assert!(matches!(decide(None, false, &f), Verdict::LeaveOut(r) if r.contains("360")));
     }
 
     #[test]
@@ -340,6 +394,18 @@ mod tests {
         assert_eq!(executable_of_command(r#"C:\Gyroflow\gyroflow.exe "%1""#), Some(PathBuf::from(r"C:\Gyroflow\gyroflow.exe")));
         assert!(check_project(r#"{"gyro_source":{"optical_correction":"AAAA"}}"#).is_ok());
         assert!(check_project(r#"{"gyro_source":{"optical_correction_enabled":true}}"#).is_err());
+        let old = json!({ "videofile": "file:///a/A.MP4", "calibration_data": { "name": "old lens" }, "output": { "output_folder": "x" },
+                          "stabilization": { "fov": 1.2 }, "gyro_source": { "optical_correction": "AAA", "lpf": 2.0 },
+                          "synchronization": { "search_size": 5, "do_optical_correction": false } });
+        let p = preset_from_project(&old, &Settings::default());
+        assert_eq!(p["stabilization"]["fov"], json!(1.2));
+        assert_eq!(p["gyro_source"], json!({ "lpf": 2.0 }));
+        assert!(p.get("videofile").is_none() && p.get("calibration_data").is_none() && p.get("output").is_none());
+        assert_eq!(p["synchronization"]["search_size"], json!(5));
+        assert_eq!(p["synchronization"]["do_optical_correction"], json!(true));
+        let mut made = json!({ "output": { "output_folder": "file:///tmp/work/", "output_filename": "A.mp4", "output_folder_bookmark": "" } });
+        fix_output(&mut made, Path::new("/Volumes/photo/Trip/A.MP4"));
+        assert_eq!(made["output"], json!({ "output_folder": "file:///Volumes/photo/Trip/", "output_filename": "A_stabilized.mp4" }));
         let p = preset(&Settings::default());
         assert_eq!(p["synchronization"]["do_optical_correction"], json!(true));
         assert_eq!(p["synchronization"]["ignore_file_motion"], json!(true));
@@ -355,17 +421,23 @@ mod tests {
         let made = dir.join("work/GX010973.gyroflow");
         std::fs::write(&made, b"{\"a\":1}").unwrap();
         assert!(own_project(&video).is_none());
-        let placed = place(&made, &video).unwrap();
+        let placed = place(&made, &video, None).unwrap();
         assert_eq!(placed, dir.join("GX010973.gyroflow"));
         assert_eq!(std::fs::read(&placed).unwrap(), b"{\"a\":1}");
         assert_eq!(own_project(&video), Some(placed.clone()));
         // There already: left as it is
         std::fs::write(&made, b"{\"b\":2}").unwrap();
-        assert!(place(&made, &video).is_err());
+        assert!(place(&made, &video, None).is_err());
         assert_eq!(std::fs::read(&placed).unwrap(), b"{\"a\":1}");
         assert!(!dir.join(".GX010973.gyroflow.part").exists());
-        assert!(matches!(verdict(&video), Verdict::LeaveOut(r) if r.contains("project already")));
-        assert!(matches!(verdict(&dir.join("nope.MP4")), Verdict::LeaveOut(r) if r == "not found"));
+        // Made again: over it while it's what it was, not once it changed
+        assert!(place(&made, &video, Some((&placed, b"{\"x\":0}"))).is_err());
+        assert_eq!(std::fs::read(&placed).unwrap(), b"{\"a\":1}");
+        assert_eq!(place(&made, &video, Some((&placed, b"{\"a\":1}"))).unwrap(), placed);
+        assert_eq!(std::fs::read(&placed).unwrap(), b"{\"b\":2}");
+        assert!(!dir.join(".GX010973.gyroflow.part").exists());
+        assert!(matches!(verdict(&video, false), Verdict::LeaveOut(r) if r.contains("project already")));
+        assert!(matches!(verdict(&dir.join("nope.MP4"), false), Verdict::LeaveOut(r) if r == "not found"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
