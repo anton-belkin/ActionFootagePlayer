@@ -165,13 +165,23 @@ pub struct LensInfo {
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
+    // A file telemetry-parser can't read (a Mavic Pro's or Mavic Air 2's MOV): the drone's name alone, from the file
+    lens_read(path).or_else(|| crate::geotag::dji_model(std::path::Path::new(path)).map(|camera| LensInfo { camera, ..Default::default() }))
+}
+
+fn lens_read(path: &str) -> Option<LensInfo> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len() as usize;
     let video = util::get_video_metadata(&mut file, size, &url).ok()?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
-    let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
+    let mut camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
+    // A DJI drone telemetry-parser names only "DJI" (Mini 4 Pro) or not at all (Mavic Pro, Mavic 2): its name from the
+    // file (geotag.rs)
+    if camera.is_empty() || camera == "DJI" {
+        if let Some(m) = crate::geotag::dji_model(std::path::Path::new(path)) { camera = m; }
+    }
     let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
     let lens = match chosen_lens(path, &input, video.width, video.height, video.fps, in_file) {
         Some(p) => p.label(),

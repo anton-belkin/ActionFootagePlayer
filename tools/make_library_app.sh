@@ -5,6 +5,7 @@
 # it looks for the player first.
 #
 #   Contents/MacOS/ActionFootageLibrary   the app (cargo build --release in library/)
+#   Contents/MacOS/afp-photos             Apple Photos' times and places, read only, and Apple's place names (geo.rs)
 #   Contents/Resources/AppIcon.icns       its icon, and Project.afproject's
 #   Contents/Info.plist                   it opens Project.afproject: the type is declared here (an exported UTI,
 #                                         io.github.anton-belkin.action-footage-project), and this app is its owner
@@ -28,8 +29,13 @@ fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 install -m 755 "$bin" "$app/Contents/MacOS/ActionFootageLibrary"
+# Its cards' pictures, as Finder draws them (the system's thumbnail service; library/src/thumbs.rs)
+swiftc -O -target arm64-apple-macos12 macos/thumbs.swift -o "$app/Contents/MacOS/afp-thumbs"
 # Its Quick Look (the system's panel: qlmanage -p crashes on videos on macOS 27)
 swiftc -O -target arm64-apple-macos12 macos/quicklook.swift -o "$app/Contents/MacOS/afp-quicklook"
+# What it reads of Apple Photos (times and places, to suggest clips' locations) and Apple's place names: macOS asks
+# about Photos for this app, as NSPhotoLibraryUsageDescription says why (docs/geolocation.md)
+swiftc -O -target arm64-apple-macos12 macos/photos.swift -o "$app/Contents/MacOS/afp-photos"
 install -m 644 library/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
 # Tauri's own version is the crate's: the app shows the player's, which ships with it
 plist_version=$(echo "$version" | sed -E 's/^([0-9]+(\.[0-9]+)*).*/\1/')
@@ -50,6 +56,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>$version</string>
     <key>LSMinimumSystemVersion</key><string>12.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSPhotoLibraryUsageDescription</key><string>To suggest where your clips were recorded, Action Footage Library reads the time and place of the photos you took around them. It never changes your Photos library.</string>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
@@ -74,5 +81,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+codesign --force -s - "$app/Contents/MacOS/afp-thumbs"
 codesign --force -s - "$app/Contents/MacOS/afp-quicklook"
+codesign --force -s - "$app/Contents/MacOS/afp-photos"
 codesign --force -s - "$app" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }

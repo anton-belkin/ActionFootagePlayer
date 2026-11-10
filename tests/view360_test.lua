@@ -846,7 +846,13 @@ do
     local n = #f.commands
     f.bindings["record"].fn()
     expect("rec: back once it's stopped", f.props["file-local-options/keep-open"], "no")
-    expect("rec: no seek", #f.commands, n)
+    local seeks = 0
+    for i = n + 1, #f.commands do if f.commands[i][1] == "seek" then seeks = seeks + 1 end end
+    expect("rec: no seek", seeks, 0)
+    -- The recording kept in the clip's own file, told to the catalog (the workspace plugin's catalog-note)
+    local noted = false
+    for i = n + 1, #f.commands do if f.commands[i][1] == "script-message-to" and f.commands[i][3] == "catalog-note" then noted = true end end
+    expect("rec: its own file noted", noted, true)
     f.event("end-file")
     os.remove(file)
     os.execute("rmdir '" .. dir .. "'")
