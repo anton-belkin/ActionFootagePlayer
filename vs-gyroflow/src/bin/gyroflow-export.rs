@@ -2167,7 +2167,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         });
         let made = image();
         // No image: the motion is of no use either
-        if made.is_err() { STOP.store(libc::SIGTERM, Relaxed); }
+        // (said here: the stop makes the caller say only "cancelled")
+        if let Err(e) = &made { eprintln!("  no photo: {e}"); STOP.store(libc::SIGTERM, Relaxed); }
         let (sdr, hdr, label, cleaned) = made?;
         let live = match motion.map(|m| m.join()) {
             None => None,

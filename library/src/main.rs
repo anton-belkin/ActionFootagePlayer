@@ -96,6 +96,18 @@ struct Inner {
     close_asked: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
+    // The project's own files being moved (Move the project…): the page shows how far it is
+    moving: Option<Moving>,
+}
+
+// How far a move of the project's files is: bytes copied of all (a move on one disk is a rename: nothing to count),
+// the file being copied
+#[derive(Serialize, Clone, Default)]
+struct Moving {
+    to: String,
+    done: u64,
+    total: u64,
+    current: String,
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -394,6 +406,7 @@ struct Snapshot {
     jobs: Vec<Job>,
     close_asked: bool,
     macos: bool,
+    moving: Option<Moving>,
 }
 
 #[tauri::command]
@@ -407,6 +420,7 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
         macos: cfg!(target_os = "macos"),
+        moving: inner.moving.clone(),
     }
 }
 
@@ -657,7 +671,7 @@ fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
 // The project's own files moved from `root` to `dest`: Project.afproject and its _ folders. The clips and their own
 // files stay: the old folder becomes a location at the top unless the project had locations, whose paths relative to
 // the project are written again for its new place. Problems writing the pointers are returned
-fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
+fn move_to(root: &Path, dest: &Path, progress: &dyn Fn(Moving)) -> Result<Vec<String>, String> {
     if dest == root { return Ok(vec![]); }
     if dest.join(PROJECT_FILE).exists() { return Err(format!("{} has a project already", dest.display())); }
     if dest.starts_with(root) { return Err("Choose a folder outside the project's".into()); }
@@ -676,15 +690,23 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     project_id(root)?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();
-    for name in [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache"] {
+    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache"].into_iter().filter(|n| root.join(n).exists()).collect();
+    // On another disk they're copied: how much, for the page's bar (counted once a rename fails)
+    let mut state = Moving { to: dest.display().to_string(), ..Default::default() };
+    let mut counted = false;
+    progress(state.clone());
+    for name in &names {
         let from = root.join(name);
-        if !from.exists() { continue; }
         let to = dest.join(name);
         if std::fs::rename(&from, &to).is_err() {
+            if !counted {
+                state.total = names.iter().map(|n| tree_size(&root.join(n))).sum();
+                counted = true;
+            }
             // Another disk: copied, then the old one removed
-            let ok = Command::new(if cfg!(windows) { "xcopy" } else { "/bin/cp" }).args(if cfg!(windows) { vec!["/E", "/I", "/H", "/K"] } else { vec!["-Rp"] })
-                .arg(&from).arg(&to).status().map(|s| s.success()).unwrap_or(false);
-            if !ok { return Err(format!("couldn't move {} (moved so far: {})", from.display(), moved.join(", "))); }
+            if let Err(e) = copy_tree(&from, &to, &mut state, progress) {
+                return Err(format!("couldn't move {}: {e} (moved so far: {})", from.display(), if moved.is_empty() { "nothing".to_string() } else { moved.join(", ") }));
+            }
             let _ = if from.is_dir() { std::fs::remove_dir_all(&from) } else { std::fs::remove_file(&from) };
         }
         moved.push(name.to_string());
@@ -698,12 +720,72 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     Ok(locations::write_pointers(dest, &after, &[], &mounts))
 }
 
+// The bytes of the files under `p` (or of `p`)
+fn tree_size(p: &Path) -> u64 {
+    let Ok(m) = std::fs::symlink_metadata(p) else { return 0 };
+    if !m.is_dir() { return m.len(); }
+    std::fs::read_dir(p).map(|rd| rd.flatten().map(|e| tree_size(&e.path())).sum()).unwrap_or(0)
+}
+
+// `from` (a file or a folder) copied to `to`, the bytes counted into `state` as they're written (a render can be
+// gigabytes over the network: counted in pieces, not per file), each file's permissions and modification time kept
+fn copy_tree(from: &Path, to: &Path, state: &mut Moving, progress: &dyn Fn(Moving)) -> Result<(), String> {
+    use std::io::{ Read, Write };
+    let m = std::fs::symlink_metadata(from).map_err(|e| e.to_string())?;
+    if m.is_dir() {
+        std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
+        let mut entries: Vec<_> = std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))?.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for e in entries {
+            let Some(name) = e.file_name() else { continue };
+            copy_tree(&e, &to.join(name), state, progress)?;
+        }
+        return Ok(());
+    }
+    if m.file_type().is_symlink() {
+        #[cfg(unix)]
+        { let target = std::fs::read_link(from).map_err(|e| e.to_string())?; return std::os::unix::fs::symlink(target, to).map_err(|e| format!("{}: {e}", to.display())); }
+        #[cfg(not(unix))]
+        { return Ok(()); }
+    }
+    state.current = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    progress(state.clone());
+    let mut src = std::fs::File::open(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    let mut dst = std::fs::File::create(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut buf = vec![0u8; 4 << 20];
+    let mut last = Instant::now();
+    loop {
+        let n = src.read(&mut buf).map_err(|e| format!("{}: {e}", from.display()))?;
+        if n == 0 { break; }
+        dst.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", to.display()))?;
+        state.done += n as u64;
+        if last.elapsed() > Duration::from_millis(200) { progress(state.clone()); last = Instant::now(); }
+    }
+    dst.flush().map_err(|e| e.to_string())?;
+    let _ = dst.set_permissions(m.permissions());
+    if let Ok(t) = m.modified() { let _ = dst.set_modified(t); }
+    drop(dst);
+    progress(state.clone());
+    Ok(())
+}
+
+// Asked where, then moved in the background: the page polls snapshot's `moving` for its bar meanwhile
 #[tauri::command]
-fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<String>, String> {
+async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if busy(&shared) { return Err("Jobs are in the queue: move the project when they're done".into()); }
-    let Some(dest) = rfd::FileDialog::new().set_title("Move the project's own files to this folder").pick_folder() else { return Ok(None) };
-    let problems = move_to(&root, &dest)?;
+    if shared.lock().unwrap().moving.is_some() { return Err("The project is being moved already".into()); }
+    let Some(dest) = rfd::AsyncFileDialog::new().set_title("Move the project's own files to this folder").pick_folder().await else { return Ok(None) };
+    let dest = dest.path().to_path_buf();
+    let s = shared.inner().clone();
+    shared.lock().unwrap().moving = Some(Moving { to: dest.display().to_string(), ..Default::default() });
+    let (r, d) = (root.clone(), dest.clone());
+    let done = tauri::async_runtime::spawn_blocking(move || {
+        let report = |m: Moving| { s.lock().unwrap().moving = Some(m); };
+        move_to(&r, &d, &report)
+    }).await.map_err(|e| e.to_string());
+    shared.lock().unwrap().moving = None;
+    let problems = done??;
     shared.lock().unwrap().project = Some(dest.clone());
     remember(&app, &dest);
     Ok(Some(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) }))
@@ -1458,7 +1540,7 @@ mod tests {
         std::fs::write(trip.join("_Moments/M.afplink.mp4"), b"x").unwrap();
         std::fs::write(trip.join(PROJECT_FILE), br#"{"format":"actionfootage-project","version":1,"settings":{"clips_flat":true}}"#).unwrap();
         let dest = top.join("SSD/Projects/Trip");
-        assert!(move_to(&trip, &dest).unwrap().is_empty());
+        assert!(move_to(&trip, &dest, &|_| {}).unwrap().is_empty());
         // The project's own files moved, the clip and its own file stayed
         assert!(dest.join(PROJECT_FILE).is_file() && dest.join("_Moments/M.afplink.mp4").is_file());
         assert!(!trip.join(PROJECT_FILE).exists() && trip.join("Day 1/A.afp.json").is_file());
@@ -1473,9 +1555,30 @@ mod tests {
         assert_eq!(v["items"][0]["id"], json!("Day 1/A.MP4"));
         // Moved again: its locations follow
         let dest2 = top.join("SSD/Other/Trip");
-        move_to(&dest, &dest2).unwrap();
+        move_to(&dest, &dest2, &|_| {}).unwrap();
         assert_eq!(read_doc(&dest2)["locations"][0]["path"], json!("../../../HDD/Trip"));
-        assert!(move_to(&dest2, &dest2.join("x")).is_err());
+        assert!(move_to(&dest2, &dest2.join("x"), &|_| {}).is_err());
+    }
+
+    #[test]
+    fn copying_counts_the_bytes() {
+        let top = temp("copy");
+        let from = top.join("_Renders");
+        std::fs::create_dir_all(from.join("a/b")).unwrap();
+        std::fs::write(from.join("a/b/big.mov"), vec![7u8; 9 << 20]).unwrap();
+        std::fs::write(from.join("small.mov"), b"12345").unwrap();
+        let total = tree_size(&from);
+        assert_eq!(total, (9 << 20) + 5);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut state = Moving { total, ..Default::default() };
+        copy_tree(&from, &top.join("SSD/_Renders"), &mut state, &|m: Moving| seen.borrow_mut().push(m.done)).unwrap();
+        assert_eq!(state.done, total);
+        assert_eq!(std::fs::read(top.join("SSD/_Renders/a/b/big.mov")).unwrap().len(), 9 << 20);
+        assert_eq!(std::fs::read(top.join("SSD/_Renders/small.mov")).unwrap(), b"12345");
+        let seen = seen.into_inner();
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]) && *seen.last().unwrap() == total);
+        let t = |p: &Path| std::fs::metadata(p).unwrap().modified().unwrap();
+        assert_eq!(t(&from.join("small.mov")), t(&top.join("SSD/_Renders/small.mov")));
     }
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a

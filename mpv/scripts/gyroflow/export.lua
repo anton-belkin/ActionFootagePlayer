@@ -640,6 +640,11 @@ local HLG_LOOKS = { hdr = true, tonemap = true, dv = true, dvsdr = true }
 local function gpu_frame()
     local gpu = mp.get_property_native("user-data/gyroflow/gpu")
     if type(gpu) ~= "table" or mp.get_property_native("user-data/gyroflow/still") == true then return nil end
+    -- Not with Save frame's camera turned or zoomed: paused, mpv's screenshot can come from the denoise's ring of
+    -- frames warped before the camera moved (seen live: yaw, pitch and zoom missing). gyroflow-export renders that
+    -- camera as the warp does (gpu_table's tests)
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    if crop.active and crop.camera then return nil end
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
     if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end
@@ -762,8 +767,14 @@ mp.register_script_message("photo-at", function(json)
     local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
     if mode == "live" or mode == "motion" then table.insert(args, "--live") end
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
-    view_args(args, type(req.view) == "table" and req.view or {})
-    if mp.get_property_native("user-data/gyroflow/still") == false then table.insert(args, "--radius"); table.insert(args, "0") end
+    local view = type(req.view) == "table" and req.view or {}
+    view_args(args, view)
+    -- Cleaned up as that clip's transform says (else as the one playing is), where this computer does the denoise
+    local denoise = view.denoise
+    if type(denoise) ~= "boolean" then denoise = mp.get_property_native("user-data/gyroflow/still") ~= false end
+    if not denoise or mp.get_property_native("user-data/gyroflow/temporal_denoise") == "off" then
+        table.insert(args, "--radius"); table.insert(args, "0")
+    end
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
