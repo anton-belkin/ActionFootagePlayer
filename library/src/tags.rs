@@ -105,9 +105,62 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
     problems
 }
 
+/// The lens a clip was shot with, as chosen in the Library (Stabilize optically): `source.lens_type` in each clip's own
+/// file ("wide", "normal"... as vs-gyroflow's lens_pick names them; None: what the camera recorded, the key taken out),
+/// beside the clip as the player keeps it (clip_own), its other keys kept. What couldn't be done
+pub fn set_lens_type(root: &Path, trees: &[String], lens_type: Option<&str>) -> Vec<String> {
+    let mut problems = Vec::new();
+    for tree in trees {
+        let (own, clip) = match clip_own(root, tree) { Ok(x) => x, Err(e) => { problems.push(e); continue } };
+        let had = locations::read_json(&own);
+        if had.is_none() && lens_type.is_none() { continue; }
+        let mut doc = had.unwrap_or(json!({ "format": "actionfootageplayer-clip", "version": 1 }));
+        if doc.get("format").and_then(Value::as_str).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
+            problems.push(format!("{}: not the player's file, left alone", own.display())); continue;
+        }
+        doc["format"] = json!("actionfootageplayer-clip");
+        if doc.get("clip").is_none() {
+            let size = std::fs::metadata(&clip).map(|m| m.len()).unwrap_or(0);
+            doc["clip"] = json!({ "file": clip.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size });
+        }
+        if !doc.get("source").is_some_and(Value::is_object) { doc["source"] = json!({}); }
+        let src = doc["source"].as_object_mut().unwrap();
+        match lens_type { Some(t) => { src.insert("lens_type".into(), json!(t)); } None => { src.remove("lens_type"); } }
+        if src.is_empty() { doc.as_object_mut().unwrap().remove("source"); }
+        let empty = ["marks", "view", "source", "tags"].iter().all(|k| doc.get(*k).is_none());
+        let r = if empty { std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string()) } else { write_json(&own, &doc) };
+        if let Err(e) = r { problems.push(e); }
+    }
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lens_type_kept_with_the_clip() {
+        let top = std::env::temp_dir().join(format!("afl-lens-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let (p, a, w) = (top.join("P"), top.join("Archive"), top.join("Work"));
+        for d in [p.clone(), a.join("Day 1"), w.join("Day 1")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(p.join(locations::PROJECT_FILE), r#"{"locations":[{"at":"","path":"../Work","copies":true},{"at":"","path":"../Archive"}]}"#).unwrap();
+        for d in [&a, &w] { std::fs::write(d.join("Day 1/A.MP4"), b"x").unwrap(); std::fs::write(d.join("Day 1/B.MP4"), b"y").unwrap(); }
+        std::fs::write(a.join("Day 1/A.afp.json"), r#"{"format":"actionfootageplayer-clip","version":1,"marks":[1],"source":{"curve":"dlogm"}}"#).unwrap();
+        let trees = vec!["Day 1/A.MP4".to_string(), "Day 1/B.MP4".to_string()];
+        assert!(set_lens_type(&p, &trees, Some("normal")).is_empty());
+        // Beside the archive's copy (the working copy's location is copies only), the other keys kept
+        let a_doc = locations::read_json(&a.join("Day 1/A.afp.json")).unwrap();
+        assert_eq!(a_doc["source"], json!({ "curve": "dlogm", "lens_type": "normal" }));
+        assert_eq!(a_doc["marks"], json!([1]));
+        assert_eq!(locations::read_json(&a.join("Day 1/B.afp.json")).unwrap()["source"]["lens_type"], json!("normal"));
+        assert!(!w.join("Day 1/B.afp.json").exists());
+        // As the camera recorded: the key out, and a file left with nothing else gone
+        assert!(set_lens_type(&p, &trees, None).is_empty());
+        assert_eq!(locations::read_json(&a.join("Day 1/A.afp.json")).unwrap()["source"], json!({ "curve": "dlogm" }));
+        assert!(!a.join("Day 1/B.afp.json").exists());
+        let _ = std::fs::remove_dir_all(&top);
+    }
 
     #[test]
     fn tags_kept_with_each() {

@@ -89,7 +89,12 @@ const S = {
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
   hist: [], histAt: -1,
+  // Stabilize optically: the lens chosen for the selected clips ("keep": each as it is, "recorded": as the camera
+  // recorded, else a lens type), and whether clips with a Gyroflow project are made again
+  opticalLens: "keep", opticalRedo: false,
 };
+const LENS_TYPES = {};    // a camera ("DJI OsmoAction6") -> [[type, label]] from gyroflow-optical --lens-types
+const LENS_OF = {};       // a clip's path -> its --lens-types answer ({camera, types, type, recorded, mode}); null while asked
 let RAW_FOOTAGE = null; // the footage view as scanned: one item per clip, at its path in the tree
 const DATA = {};          // view -> { dirs: [path], items: [item] }
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
@@ -180,6 +185,9 @@ function deriveSource(it, probe) {
   it.colorGroup = col ? col[0] : null;
   it.color = col ? col[1] : null;
   it.motion = probe ? probe.mode != null : null;
+  // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
+  // "EIS: RockSteady", "FlowState"); null: off, or not said
+  it.camStab = probe && typeof probe.stabilized_in_camera === "string" ? probe.stabilized_in_camera : null;
   it.is360 = !!(probe && (probe.spherical || probe.rig360));
 }
 function deriveTransform(it, view) {
@@ -197,7 +205,7 @@ function deriveTransform(it, view) {
 }
 function tfText(it) {
   const p = [];
-  if (it.motion === false && !it.gyroflow) p.push("no motion data");
+  if (it.motion === false && !it.gyroflow) p.push(it.camStab ? "stabilized in the camera" : "no motion data");
   else if (it.gyroflow) p.push("Gyroflow project");
   else if (it.stab) p.push(it.stab === "Stabilized" ? "stabilized" : it.stab === "Wider" ? "wider" : "not stabilized");
   if (it.horizon && it.stab !== "Off") p.push(it.horizon === "Level" ? "level" : "horizon free");
@@ -332,7 +340,7 @@ function buildFacets() {
     sections.push({ id: "src", title: "Source", facets: [
       { id: "cam", title: "Camera", opts: camOpts },
       { id: "col", title: "Color", opts: colOpts },
-      { id: "mot", title: "Motion data", opts: [L("mot:y", "Gyro in the file", (it) => it.motion === true), L("mot:n", "None", (it) => it.motion === false)] },
+      { id: "mot", title: "Motion data", opts: [L("mot:y", "Gyro in the file", (it) => it.motion === true), L("mot:cam", "None, stabilized in the camera", (it) => it.motion === false && !!it.camStab), L("mot:n", "None", (it) => it.motion === false && !it.camStab)] },
       { id: "shp", title: "Shape", opts: [L("shp:flat", "Flat", (it) => it.probed && !it.is360), L("shp:360", "360°", (it) => it.is360)] },
     ] });
     const frames = distinct(items.filter((i) => i.frame && i.frame !== "As recorded"), (i) => i.frame);
@@ -567,7 +575,7 @@ function chips(it) {
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
     if (!it.preview) c.push(["chip", "No preview"]);
     if (it.gyroflow) c.push(["chip ok", "Gyroflow project"]);
-    if (it.motion === false) c.push(["chip", "No motion data"]);
+    if (it.motion === false) c.push(["chip", it.camStab ? "Stabilized in the camera" : "No motion data"]);
     if (it.is360) c.push(["chip fast", "360°"]);
   } else if (it.kind === "moment") {
     for (const p of ["HDR", "SDR"]) { const st = (it.renders || {})[p]; if (st) c.push(["chip " + (st === "current" ? "ok" : "stale"), p + (st === "current" ? "" : " stale")]); }
@@ -707,7 +715,7 @@ function queueHtml() {
   if (!live.length && !bg.length) h += '<p class="sub wrap">Nothing running. Commands on what you select land here, with what the Library does on its own.</p>';
   for (const j of live) {
     let pct = j.total > 0 ? Math.min(100, ((j.done + (j.fraction || 0)) / j.total) * 100) : 0;
-    const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? "looking through the project" : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
+    const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? (j.kind === "optical" ? "reading the clips" : "looking through the project") : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
     const other = j.project !== S.root ? " · " + j.project_name : "";
     h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div>' +
       (j.state === "waiting" ? "" : '<div class="bar2"><i style="width:' + pct.toFixed(1) + '%"></i></div>') +
@@ -722,7 +730,8 @@ function queueHtml() {
       if (j.message) parts.push(j.message);
       const other = j.project !== S.root ? " · " + j.project_name : "";
       h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div><span class="sub wrap' + (j.state === "failed" ? " err" : "") + '">' + esc(parts.join(" · ")) + '</span>' +
-        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
+        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
+        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
     }
   }
   h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
@@ -774,6 +783,7 @@ function renderSide() {
       (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
       '<span class="sub wrap">Of each mark without one anywhere in the project. They go into Generated in Moments’ or Photos’ own folder.</span>');
+    h += opticalSection(c);
   } else if (S.view === "moments") {
     const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
     const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
@@ -796,6 +806,85 @@ function renderSide() {
   }
   side.innerHTML = h;
   if (!c.any) side.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+
+// Stabilize optically (vs-gyroflow's optical.rs, run by gyroflow-optical): Gyroflow measures the camera's motion from
+// the picture for clips whose motion data the player can't use, and its project goes beside each clip. Which of the
+// selected clips, as far as what's known of them tells; the job reads each one again (its lens) and lists what it left out
+function opticalPlan(c) {
+  // A lens chosen makes the clips that have a project again: that's what choosing it is for
+  const redo = S.opticalRedo || S.opticalLens !== "keep";
+  const out = { go: [], paths: [], camOf: [], typeOf: [], all: [], allTypeOf: [], own: 0, project: 0, s360: 0, lens: 0, lensTyped: 0, redo: 0, cams: {} };
+  for (const it of c.selItems) {
+    if (it.kind !== "clip") continue;
+    const p = PROBES[it.path];
+    out.all.push(it.path);
+    out.allTypeOf.push(lensTypeOf(it));
+    const r = LENS_OF[it.path];
+    if (it.is360) { out.s360++; continue; }
+    if (p && p.mode === "default") { out.own++; continue; }
+    if (it.gyroflow && !redo) { out.project++; continue; }
+    // A lens type chosen may give a lens the camera's mode doesn't (vs-gyroflow's curated list)
+    const typed = r && (r.types || []).length && (r.type || r.recorded || lensTypeOf(it));
+    if (p && p.mode == null && p.lens === "" && (S.opticalLens === "keep" || S.opticalLens === "recorded") && !typed) { out.lens++; if (r && (r.types || []).length) out.lensTyped++; continue; }
+    if (it.gyroflow) out.redo++;
+    out.go.push(it.id);
+    out.paths.push(it.path);
+    out.camOf.push(it.cam || "");
+    if (it.cam && !out.cams[it.cam]) out.cams[it.cam] = it.path;
+    out.typeOf.push(lensTypeOf(it));
+  }
+  return out;
+}
+function lensTypeOf(it) { const src = (it.own || {}).source; return src && typeof src === "object" ? src.lens_type || "" : ""; }
+// Each selected clip's lens types, what its camera recorded and its mode number (gyroflow-optical --lens-types), asked
+// once per clip, 40 at a time (a clip's first metadata: about a second each from a share)
+let lensAsking = false;
+function askLensTypes(paths) {
+  if (lensAsking) return;
+  const want = paths.filter((p) => !(p in LENS_OF)).slice(0, 40);
+  if (!want.length) return;
+  lensAsking = true;
+  want.forEach((p) => { LENS_OF[p] = null; });
+  invoke("lens_types", { paths: want }).then((list) => {
+    want.forEach((p) => {
+      const r = (list || []).find((x) => x.path === p);
+      LENS_OF[p] = r || { types: [] };
+      if (r && r.camera && r.types && r.types.length) LENS_TYPES[r.camera] = r.types;
+    });
+  }).catch(() => { want.forEach((p) => { LENS_OF[p] = { types: [] }; }); })
+    .finally(() => { lensAsking = false; renderSide(); });
+}
+// What a clip's camera recorded, said as the player's panel says it: its type, or "unknown (mode 6)" where the curated
+// list doesn't name the camera's mode yet; "" for a camera without types
+function recordedText(r, label) {
+  if (!r || !(r.types || []).length) return "";
+  if (r.recorded) return label(r.recorded, r.types);
+  return r.mode != null ? "unknown (mode " + r.mode + ")" : "unknown";
+}
+function opticalSection(c) {
+  const op = opticalPlan(c);
+  askLensTypes(op.all);
+  const types = [];
+  op.all.forEach((p) => ((LENS_OF[p] || {}).types || []).forEach((t) => { if (!types.some((x) => x[0] === t[0])) types.push(t); }));
+  const asking = op.all.some((p) => !LENS_OF[p]);
+  const tl = (t, list) => ((list || types).find((x) => x[0] === t) || [t, t])[1];
+  // What the camera recorded, and what each clip has now (its own type, else as recorded), counted
+  const count = (f) => { const m = {}; op.all.forEach((p, i) => { const k = f(LENS_OF[p], i); if (k) m[k] = (m[k] || 0) + 1; }); return Object.keys(m).map((k) => m[k] + " " + k).join(", "); };
+  const rec = count((r) => recordedText(r, tl));
+  const own = count((r, i) => { if (!r || !(r.types || []).length) return ""; const t = r.type || op.allTypeOf[i]; return t ? tl(t, r.types) : "as recorded: " + recordedText(r, tl); });
+  if (S.opticalLens !== "keep" && S.opticalLens !== "recorded" && !types.some((t) => t[0] === S.opticalLens) && !asking) S.opticalLens = "keep";
+  const out = [[op.own, "have motion data the player stabilizes them with"], [op.project, "have a Gyroflow project already (Redo makes it again)"], [op.s360, "are 360°"], [op.lens, "have a lens that isn’t known" + (op.lensTyped ? " (choose its type in Lens)" : "")]].filter((x) => x[0]);
+  const n = op.go.length;
+  return sec("optical", "Stabilize optically", "clips without motion data",
+    (c.any ? '<p>' + esc(n + (n === 1 ? " clip" : " clips") + " to stabilize" + (op.redo ? " (" + op.redo + " made again)" : "") + (out.length ? "; left out: " + out.map((x) => x[0] + " " + x[1]).join(", ") : "")) + '.</p>' : "") +
+    '<div class="field"><label class="sub" for="optlens">Lens</label><select id="optlens" data-a="optlens">' +
+      [["keep", "Each clip’s own" + (own ? " (" + own + ")" : "")], ["recorded", "As the camera recorded" + (rec ? " (" + rec + ")" : "")]].concat(types).map((o) => '<option value="' + esc(o[0]) + '"' + (S.opticalLens === o[0] ? " selected" : "") + '>' + esc(o[1]) + '</option>').join("") +
+    '</select></div>' +
+    (asking ? '<span class="sub wrap">Asking which lenses these cameras have…</span>' : "") +
+    '<label class="switch"><input type="checkbox" id="optredo" data-a="optredo"' + (S.opticalRedo || S.opticalLens !== "keep" ? " checked" : "") + (S.opticalLens !== "keep" ? " disabled" : "") + '>Redo the ones with a Gyroflow project (its settings kept, lens and motion measured again)</label>' +
+    '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="optical"' + (c.any && !n ? " disabled" : "") + '>Stabilize ' + (c.any ? n + (n === 1 ? " clip" : " clips") : "") + ' optically</button></div>' +
+    '<span class="sub wrap">For clips whose motion the player can’t take from the camera: none recorded, or recorded with the camera’s own stabilization on (HyperSmooth, RockSteady). Gyroflow measures it from the picture, one clip at a time in the background (about as long as the clip plays), and its project goes beside each clip, where the player plays with it. A lens chosen here is kept with each clip (the player uses it too) and makes their projects again. A clip whose lens isn’t known is left out, and the task says which.</span>');
 }
 
 // Check and Find moved files, on the selection (library/src/checks.rs)
@@ -1342,7 +1431,7 @@ function itemInfo(it) {
     const probe = PROBES[it.path];
     h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
-      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? "None" : ""],
+      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
     h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
@@ -2008,9 +2097,28 @@ async function addJob(kind) {
   if (!c.any) return;
   const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : kind === "render" ? { profiles: ["HDR", "SDR"].filter((p) => S.profiles[p]) }
     : kind === "clips" || kind === "clips-again" ? { layout: S.clipsLayout } : kind === "moments" ? { alone: S.alone } : {};
+  let label = c.label;
+  if (kind === "optical") {
+    const op = opticalPlan(c);
+    if (!op.go.length) return showError("None of the selected clips needs it: they have motion data, a Gyroflow project (tick Redo), or a lens that isn’t known.");
+    // The lens chosen, kept with each clip first (its own file): the job, and the player, take it from there
+    if (S.opticalLens !== "keep") {
+      try {
+        // A type only where the clip's camera has it (a GoPro's lens is in its file: nothing to choose)
+        const has = (i) => { const r = LENS_OF[op.paths[i]]; const list = (r && r.types && r.types.length) ? r.types : (LENS_TYPES[op.camOf[i]] || []); return S.opticalLens === "recorded" || list.some((t) => t[0] === S.opticalLens); };
+        const clips = op.go.filter((_, i) => has(i));
+        const problems = clips.length ? await invoke("set_lens_type", { clips, lensType: S.opticalLens === "recorded" ? null : S.opticalLens }) : [];
+        op.paths.forEach((p, i) => { if (has(i)) delete LENS_OF[p]; });
+        if (problems.length) return showError("The lens couldn’t be kept with every clip: " + problems.join(" · "));
+      } catch (e) { return showError(String(e)); }
+    }
+    options.clips = op.go;
+    options.redo = S.opticalRedo || S.opticalLens !== "keep";
+    label = op.go.length + (op.go.length === 1 ? " clip" : " clips") + (S.opticalLens !== "keep" ? ", lens " + (S.opticalLens === "recorded" ? "as recorded" : S.opticalLens) : "");
+  }
   try {
-    await invoke("add_job", { kind, options, only: c.only, label: c.label });
-    toast("In the queue: " + c.label);
+    await invoke("add_job", { kind, options, only: c.only, label });
+    toast("In the queue: " + label);
     S.tab = "queue";
     renderSide();
   } catch (e) { showError(String(e)); }
@@ -2204,6 +2312,8 @@ document.addEventListener("change", (e) => {
   // Chosen for each run, remembered on this computer (docs/library-management.md §8), not in the project
   else if (a === "layout_set") { S.clipsLayout = el.value; remember("afl.layout", S.clipsLayout); return; }
   else if (a === "alone_set") { S.alone = el.checked; remember("afl.alone", S.alone ? "1" : ""); return; }
+  else if (a === "optlens") { S.opticalLens = el.value; renderSide(); return; }
+  else if (a === "optredo") { S.opticalRedo = el.checked; renderSide(); return; }
   else if (a === "setting") { call("set_setting", { key: v, value: el.checked }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
   else return;
   renderAll();

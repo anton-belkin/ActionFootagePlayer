@@ -216,3 +216,20 @@ pub fn movie(path: &str) -> Option<Movie> {
     }
     out.filter(|m| m.duration > 0.0)
 }
+
+/// The HERO4's lens mode as its file has it: moov/udta/SETT's 8th byte, its low 4 bits (0, 2 or 4 in Anton's 292
+/// HERO4 Black clips; 4K, which the HERO4 records only in Wide, always 0). Likely its FOV (Wide, Medium, Narrow, as the
+/// HERO4's Wi-Fi API numbers them) times two, but not confirmed, so it's shown as "Unknown (mode N)" until the curated
+/// list names it. None for any other file (FIRM not "HD4.")
+pub fn hero4_lens_mode(path: &str) -> Option<u64> {
+    let mut f = File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let (_, ma, mb) = boxes(&mut f, 0, size).into_iter().find(|(t, _, _)| t == b"moov")?;
+    let (_, ua, ub) = boxes(&mut f, ma, mb).into_iter().find(|(t, _, _)| t == b"udta")?;
+    let kids = boxes(&mut f, ua, ub);
+    let (_, fa, fb) = *kids.iter().find(|(t, _, _)| t == b"FIRM")?;
+    if fb - fa > 64 || !read_at(&mut f, fa, fb - fa).starts_with(b"HD4.") { return None; }
+    let (_, sa, sb) = *kids.iter().find(|(t, _, _)| t == b"SETT")?;
+    if sb - sa < 8 { return None; }
+    read_at(&mut f, sa, 8).get(7).map(|b| (b & 0x0f) as u64)
+}

@@ -22,8 +22,8 @@
 --
 --   local t = require('transform')
 --   t.KEYS, t.INPUT_KEYS          the bundle's keys, the input's, in order
---   t.PROJECT_KEYS                the bundle's keys a Gyroflow project owns (and the view: wider or off over it is
---                                 for viewing only)
+--   t.PROJECT_KEYS                the bundle's keys a Gyroflow project owns. Not the view: on, wider (the project's
+--                                 zoom left out) or off (the project kept but not used) is saved over it too
 --   t.NEUTRAL                     what a key that didn't exist yet played as: a bundle from before it is filled so
 --   t.complete(bundle, session)   -> the bundle with every key (a missing one: NEUTRAL, else the session's), and
 --                                    whether anything was added; horizon_lock "project" (the preset's) as
@@ -40,8 +40,9 @@ local M = {}
 
 M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
--- What a Gyroflow project owns of the bundle; a wider view or none over it is for viewing only, so the view too
-M.PROJECT_KEYS = { view = true, level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
+-- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not
+-- used) or Wider (its zoom left out) and saved so (Anton, 2026-11-10)
+M.PROJECT_KEYS = { level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
 M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear", denoise_strong = false }
 
 local VALID = {
