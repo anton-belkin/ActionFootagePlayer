@@ -292,7 +292,7 @@ pub fn local_shift(group: &[ClipIn], photos: &[Photo], zone_at: &mut dyn FnMut(&
 pub fn set_location(root: &Path, ids: &[String], loc: Option<&Value>) -> Vec<String> {
     let jobs: Vec<(String, Option<Value>)> = ids.iter().map(|i| (i.clone(), loc.cloned())).collect();
     let (written, problems) = write_many(root, &jobs);
-    note_to_catalog(&written);
+    crate::seen::note_now(&written);
     problems
 }
 
@@ -340,33 +340,6 @@ fn write_one(locs: &[crate::locations::Location], id: &str, loc: Option<&Value>)
         crate::tags::write_json(&own, &doc)?;
     }
     Ok(Some(own))
-}
-
-/// What was written, told to the project's catalog at once (as the player's `afp-catalog note` does): the views read
-/// a clip's own file from the catalog, which would otherwise see the change only when it next looks at that folder on
-/// the share (a minute or more), and show the clip as before meanwhile
-pub fn note_to_catalog(files: &[PathBuf]) {
-    use afp_catalog::{ DiskStore, File, Store };
-    if files.is_empty() { return; }
-    let Some(roots) = crate::seen::SEEN.read().ok().and_then(|g| g.as_ref().map(|s| s.roots.clone())) else { return };
-    // Read before the catalog is held: on a share each is a round trip
-    let mut entries = Vec::new();
-    let mut dirs = std::collections::BTreeSet::new();
-    for f in files {
-        let Some((root, rel)) = afp_catalog::project::locate(&roots, f) else { continue };
-        let now = match DiskStore.stat(f) {
-            Ok(Some(st)) => Some(File { dir: false, size: st.size, mtime: st.mtime, meta: afp_catalog::inspect::read(f).ok().flatten(), digest: None }),
-            Ok(None) => None,
-            Err(_) => continue,
-        };
-        entries.push((root, rel, now));
-        if let Some(d) = f.parent() { dirs.insert(d.to_path_buf()); }
-    }
-    let Ok(mut g) = crate::seen::SEEN.write() else { return };
-    let Some(s) = g.as_mut() else { return };
-    // Other computers relist these folders
-    for d in &dirs { let _ = s.cat.touch(d); }
-    let _ = s.cat.note(entries);
 }
 
 /// A location as written: what's given, with its source and when
@@ -526,7 +499,7 @@ mod tests {
         let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
         cat.load(&afp_catalog::Want::All).unwrap();
         cat.sweep(&roots, &ours, &Default::default()).unwrap();
-        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen { id: 0, root: root.clone(), roots, cat });
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen::of(&root, cat));
         let loc = location_value(27.9, 34.3, None, "photos", Some(&json!({ "country": "Egypt" })), Some(60.0), None);
         let ids = vec!["Day 1/A.MP4".to_string(), "Day 1/B.MP4".to_string()];
         assert!(set_location(&root, &ids, Some(&loc)).is_empty());
@@ -707,7 +680,7 @@ pub async fn set_locations(shared: State<'_, crate::Shared>, places: State<'_, S
         }
         let (written, more) = write_many(&root, &jobs);
         problems.extend(more);
-        note_to_catalog(&written);
+        crate::seen::note_now(&written);
         problems
     }).await.map_err(|e| e.to_string())
 }

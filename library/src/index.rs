@@ -640,16 +640,21 @@ fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
 /// Renders of these moments (paths in _Moments) removed: the stale ones only, or all of them
 pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usize, Vec<String>) {
     let (mut n, mut problems) = (0, Vec::new());
+    let mut gone: Vec<PathBuf> = Vec::new();
     for rel in moments {
-        let moment = root.join("_Moments").join(rel);
+        // Its path in the project (since 0.11 moments are anywhere in it: Generated/…); an older one's in _Moments
+        let moment = if crate::seen::is_file(&root.join(rel)) { root.join(rel) } else { root.join("_Moments").join(rel) };
         let link = link(&moment).unwrap_or(Value::Null);
         let status = renders_of(root, rel, &moment, &link);
         for p in RENDER_PROFILES {
             let Some(st) = status.get(p).and_then(Value::as_str) else { continue };
             if stale_only && st != "stale" { continue; }
-            match std::fs::remove_file(render_path(root, rel, p)) { Ok(_) => n += 1, Err(e) => problems.push(format!("{rel} {p}: {e}")) }
+            let f = render_path(root, rel, p);
+            match std::fs::remove_file(&f) { Ok(_) => { n += 1; gone.push(f); } Err(e) => problems.push(format!("{rel} {p}: {e}")) }
         }
     }
+    // The catalog told at once: the views read the renders from it
+    crate::seen::note_now(&gone);
     (n, problems)
 }
 
@@ -852,7 +857,7 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1007,7 +1012,7 @@ mod from_the_catalog {
         let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
         cat.load(&afp_catalog::Want::All).unwrap();
         cat.sweep(&roots, &ours, &Default::default()).unwrap();
-        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen { id: 0, root: root.clone(), roots, cat });
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen::of(&root, cat));
         // Read from it: the disks not asked (a file removed behind its back still shows: it's what was last seen)
         let from_catalog = views();
         for (a, b) in from_files.iter().zip(from_catalog.iter()) { assert_eq!(a, b); }

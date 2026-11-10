@@ -2150,7 +2150,9 @@ document.addEventListener("click", async (e) => {
     case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
     case "view":
       S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false; S.renaming = null;
-      if (!DATA[v]) { renderAll(); await loadView(v).catch(() => {}); }
+      // Read again each time (from the project's catalog: quick), what it had shown meanwhile: what changed while
+      // another tab was open (a task's photos, exports) shows
+      renderAll(); await loadView(v).catch(() => {});
       break;
     case "addsource": return addSource();
     case "filters": S.filtersOpen = !S.filtersOpen; break;

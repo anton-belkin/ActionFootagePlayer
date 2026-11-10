@@ -863,6 +863,27 @@ changes aren't told to it — which is what the NAS's watcher is for.
 - **Moved folders keep their times**: what's new is found by the folder it moved into (that one's time changed), then
   listed whole, whatever its own time.
 - **A file noted in a folder never listed** (the player's moment in a new folder) makes that folder one to list.
+  Until then the views take the folder as there (seen.rs's walk): the moment shows at once.
+
+### Who tells the catalog what they changed (audit, 2026-11-10)
+
+The views read the catalog, so whatever changes a file must say so at once; a look comes minutes later, and a file
+written in place (a link, a clip's own file) leaves its folder's time as it was, so a look doesn't even list it (only
+the daily deep look would). FSEvents tells a Mac only what that Mac changed, and on a share even that is no promise.
+
+- **The Library**, for everything it does: `seen::note_now(paths)` right after it writes, before the page reads the
+  view again. Files written, made or removed; folders made, removed, or renamed (both paths: what's in the new one
+  listed, what was in the old one gone). It reads them, notes them in this computer's journal through the views' own
+  catalog, touches their folders for the other computers, and counts a change for the page. Tags, lens type, location,
+  rename, delete, new folder, Mend / Find moved, Take in, renders deleted, links rewritten by a view, and Stabilize
+  optically's `.gyroflow` files (as the task's status names each clip done).
+- **The player**: `afp-catalog note` for what it writes (workspace plugin's `catalog.note`; other plugins send it
+  `catalog-note`). Marks, Save, moments (and their `.gyroflow`), moment rename and remove, anything it moves to the
+  Trash, Ctrl+x's parts, Ctrl+e's project, Shift+E and 360 exports, photos, and every batch's files as each lands (clip
+  previews, moments, photos, exports, renders). A batch quits only once its notes are written.
+- **Move the project…** takes `.afp` along; the new place's thread looks at the project's folder again before the views
+  read the catalog (its records of the folder it left are of the footage, now a location).
+- A setting written into `Project.afproject` doesn't make the Library read its catalog again: only its locations do.
 
 ### What it costs (simulated, 2026-11-10)
 

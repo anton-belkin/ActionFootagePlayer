@@ -12,9 +12,10 @@
 // It has two copies: one the views read (taken only briefly to read the journals' lines into it), one that looks and
 // folds (minutes on a first look at a big project, which the views mustn't wait for).
 
+use afp_catalog::inspect::Ours;
 use afp_catalog::state::File;
-use afp_catalog::{ project, Catalog, Error, Root, Sweep, Want };
-use std::collections::BTreeSet;
+use afp_catalog::{ project, Catalog, DiskStore, Error, Inspect, Root, Store, Sweep, Want };
+use std::collections::{ BTreeSet, HashSet };
 use std::path::{ Path, PathBuf };
 use std::sync::atomic::{ AtomicBool, AtomicU64, Ordering };
 use std::sync::mpsc::{ channel, Receiver, Sender };
@@ -26,7 +27,20 @@ pub struct Seen {
     pub id: u64,
     pub root: PathBuf,
     pub roots: Vec<Root>,
+    /// What's kept and read in them (the sweep's rules: note_now keeps to them too)
+    pub ours: Ours,
     pub cat: Catalog,
+    /// The page's count of changes, and when the last was: counted when the Library notes its own (note_now)
+    pub bump: Option<(Arc<AtomicU64>, Arc<Mutex<Instant>>)>,
+}
+
+impl Seen {
+    /// As a test has it: the project's roots and rules, no page to tell
+    #[cfg(test)]
+    pub fn of(root: &Path, cat: Catalog) -> Seen {
+        let (roots, ours) = project::roots(root);
+        Seen { id: 0, root: root.to_path_buf(), roots, ours, cat, bump: None }
+    }
 }
 
 pub static SEEN: RwLock<Option<Seen>> = RwLock::new(None);
@@ -48,6 +62,14 @@ fn started(root: &Path, on: bool) {
 /// Tests that set SEEN, one at a time (it's the process's)
 #[cfg(test)]
 pub static TESTS: Mutex<()> = Mutex::new(());
+
+/// As before the Library noted its own changes (2026-11-10 audit): the views as they were, for the audit's table
+#[cfg(test)]
+pub static OLD: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+fn old() -> bool { OLD.load(Ordering::Relaxed) }
+#[cfg(not(test))]
+fn old() -> bool { false }
 
 /// What the views can say from it: (root, path in it), when the catalog is read and has looked at that root
 fn locate<'a>(s: &'a Seen, path: &Path) -> Option<(String, String)> {
@@ -94,6 +116,18 @@ pub fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) ->
         let mine = if prefix.is_empty() { rel } else { &rel[prefix.len() + 1..] };
         kids.entry(afp_catalog::state::parent(mine)).or_default().push((mine, f));
     }
+    // A file noted in a folder that was never listed (the player's moment in a run's new folder of Generated/, a folder
+    // the Library made): the folder is there, as the catalog's own look takes it (State::children_index)
+    let implied = File { dir: true, size: 0, mtime: -1, meta: None, digest: None };
+    let mut dirs: HashSet<&str> = kids.values().flatten().filter(|(_, f)| f.dir).map(|(m, _)| *m).collect();
+    let parents: Vec<&str> = if old() { Vec::new() } else { kids.keys().copied().collect() };
+    for mut p in parents {
+        while !p.is_empty() && dirs.insert(p) {
+            let up = afp_catalog::state::parent(p);
+            kids.entry(up).or_default().push((p, &implied));
+            p = up;
+        }
+    }
     for v in kids.values_mut() { v.sort_by(|a, b| a.0.cmp(b.0)); }
     let mut out = Vec::new();
     let mut todo = std::collections::VecDeque::from([("", 0usize)]);
@@ -118,6 +152,111 @@ pub fn names_in(dir: &Path) -> Option<Vec<String>> {
     let s = g.as_ref()?;
     let (root, rel) = locate(s, dir)?;
     Some(s.cat.state.children(&root, &rel).into_iter().map(|(n, _)| n.to_string()).collect())
+}
+
+/// What the Library itself changed in the project's folder or its locations, told to the catalog at once (as the
+/// player's `afp-catalog note` does), for the views, which read it, to show it when the page reads them again right
+/// after: on a share the system's notice comes late or never, and a file written in place (a link, a clip's own file)
+/// leaves its folder's time as it was, so the catalog's next look wouldn't even list it. `paths`: files written, made or
+/// removed; folders made or removed; a folder renamed or moved by both its paths (what's in the new one listed, what was
+/// in the old one gone). Their folders are touched for the other computers (each lists them again). The page's count
+/// of changes goes up (it reads the views again, and the missing links are counted again)
+pub fn note_now(paths: &[PathBuf]) {
+    if paths.is_empty() || old() { return; }
+    let (roots, ours) = {
+        let Ok(g) = SEEN.read() else { return };
+        let Some(s) = g.as_ref() else { return };
+        (s.roots.clone(), Ours { footage_in_project: s.ours.footage_in_project.clone(), own_only: false })
+    };
+    // Read before the catalog is held (on a share each is a round trip or a few)
+    let mut files: Vec<(String, String, PathBuf, afp_catalog::store::Stat)> = Vec::new();
+    let mut entries: Vec<(String, String, Option<File>)> = Vec::new();
+    let mut gone: Vec<(String, String)> = Vec::new();
+    let mut touch: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut done: HashSet<(String, String)> = HashSet::new();
+    for p in paths {
+        let Some((root, rel)) = project::locate(&roots, p) else { continue };
+        if rel.is_empty() || !done.insert((root.clone(), rel.clone())) { continue; }
+        if let Some(d) = p.parent() { touch.insert(d.to_path_buf()); }
+        match DiskStore.stat(p) {
+            Ok(Some(st)) if kept(&ours, &root, &rel, st.dir) => {
+                if st.dir { list_into(&ours, &root, &rel, p, &st, &mut files, &mut entries, 0); } else { files.push((root, rel, p.clone(), st)); }
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => gone.push((root, rel)),
+            Err(_) => {}
+        }
+    }
+    // What's inside the files that counts (a link, a clip's own file), 8 at a time
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let read: Mutex<Vec<(String, String, Option<File>)>> = Mutex::new(Vec::new());
+    std::thread::scope(|sc| for _ in 0..8.min(files.len()) { sc.spawn(|| loop {
+        let i = next.fetch_add(1, Ordering::Relaxed);
+        let Some((root, rel, path, st)) = files.get(i) else { break };
+        let meta = if ours.wants(root, rel) { match ours.inspect(path, root, rel) { Ok(m) => m, Err(_) => continue } } else { None };
+        read.lock().unwrap().push((root.clone(), rel.clone(), Some(File { dir: false, size: st.size, mtime: st.mtime, meta, digest: None })));
+    }); });
+    entries.extend(read.into_inner().unwrap());
+    for d in &touch {
+        let mark = afp_catalog::store::temp_name(&d.join("touch"));
+        if DiskStore.put(&mark, b"").is_ok() { let _ = DiskStore.remove(&mark); }
+    }
+    let Ok(mut g) = SEEN.write() else { return };
+    let Some(s) = g.as_mut() else { return };
+    // Gone: what was in it too (a folder)
+    for (root, rel) in gone {
+        for (r, rec) in s.cat.state.under(&root, &rel) { if rec.f.is_some() { entries.push((root.clone(), r.to_string(), None)); } }
+        if s.cat.state.rec(&root, &rel).is_some() { entries.push((root, rel, None)); }
+    }
+    // The folders a new file is in, when the catalog has never seen them (made with it): to be listed at its next look
+    let mut have: HashSet<(String, String)> = entries.iter().filter(|e| e.2.as_ref().is_some_and(|f| f.dir)).map(|e| (e.0.clone(), e.1.clone())).collect();
+    let mut up: Vec<(String, String, Option<File>)> = Vec::new();
+    for (root, rel, f) in &entries {
+        if f.is_none() { continue; }
+        let mut d = afp_catalog::state::parent(rel);
+        while !d.is_empty() && !have.contains(&(root.clone(), d.to_string())) {
+            have.insert((root.clone(), d.to_string()));
+            if s.cat.state.get(root, d).is_some_and(|f| f.dir) { break; }
+            up.push((root.clone(), d.to_string(), Some(File { dir: true, size: 0, mtime: -1, meta: None, digest: None })));
+            d = afp_catalog::state::parent(d);
+        }
+    }
+    entries.extend(up);
+    if entries.is_empty() { return; }
+    let _ = s.cat.note(entries);
+    if let Some((changes, last)) = &s.bump { changed(changes, last); }
+}
+
+/// Whether the catalog keeps it: not hidden, nor in a folder it leaves out (its own rules, the sweep's)
+fn kept(ours: &Ours, root: &str, rel: &str, dir: bool) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    (0..parts.len()).all(|i| {
+        let sub = parts[..=i].join("/");
+        let name = parts[i];
+        !name.starts_with(".tmp-") && !ours.skip(root, &sub, name, i + 1 < parts.len() || dir)
+    })
+}
+
+/// A folder the Library made or moved, and what's in it: its files to read, its folders listed (each with what was in
+/// it when listed, as the catalog's own look records it: its next look needn't list them again)
+#[allow(clippy::too_many_arguments)]
+fn list_into(ours: &Ours, root: &str, rel: &str, path: &Path, st: &afp_catalog::store::Stat, files: &mut Vec<(String, String, PathBuf, afp_catalog::store::Stat)>,
+             entries: &mut Vec<(String, String, Option<File>)>, depth: usize) {
+    let Ok(items) = DiskStore.list(path) else { entries.push((root.into(), rel.into(), Some(File { dir: true, size: 0, mtime: -1, meta: None, digest: None }))); return };
+    let mut now: Vec<(String, File)> = Vec::new();
+    for it in items {
+        let sub = afp_catalog::state::join(rel, &it.name);
+        if !kept(ours, root, &sub, it.stat.dir) { continue; }
+        if it.stat.dir {
+            now.push((it.name.clone(), File { dir: true, size: 0, mtime: -1, meta: None, digest: None }));
+            if depth < 16 { list_into(ours, root, &sub, &path.join(&it.name), &it.stat, files, entries, depth + 1); }
+        } else {
+            now.push((it.name.clone(), File { dir: false, size: it.stat.size, mtime: it.stat.mtime, meta: None, digest: None }));
+            files.push((root.into(), sub, path.join(&it.name), it.stat));
+        }
+    }
+    let digest = afp_catalog::state::digest(now.iter().map(|(n, f)| (n.as_str(), f)));
+    entries.push((root.into(), rel.into(), Some(File { dir: true, size: 0, mtime: st.mtime, meta: None, digest: Some(digest) })));
 }
 
 /// The thread keeping the catalog up to date for one project; stopped when dropped
@@ -145,7 +284,9 @@ fn load(cat: &mut Catalog, want: &Want) -> Result<afp_catalog::Loaded, Error> {
 
 /// Started for a project: `changes` counted (and `last` set) each time what it knows changed, for the page to read it
 /// again
-pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) -> Runner {
+/// `moved`: the project's own files were just moved here with its catalog (Move the project…), whose records of its
+/// folder are of the old one: that folder looked at again before the views read it
+pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, moved: bool) -> Runner {
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new(String::new()));
@@ -156,7 +297,7 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) ->
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
-    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, missing, missing_list, rx, status, changes, last)).ok();
+    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, moved, stop, everything, missing, missing_list, rx, status, changes, last)).ok();
     r
 }
 
@@ -167,7 +308,8 @@ fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }
 
-fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, missing_list: Arc<Mutex<Vec<serde_json::Value>>>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+#[allow(clippy::too_many_arguments)]
+fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, missing_list: Arc<Mutex<Vec<serde_json::Value>>>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
     // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
@@ -199,9 +341,17 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
         set(&status, "The project's catalog can't be read now (the share?): trying again…");
         for _ in 0..40 { if stop.load(Ordering::Relaxed) { started(&root, false); return; } std::thread::sleep(Duration::from_millis(250)); }
     }
+    // Moved here: what it says of the project's folder is of the folder it was in (its footage, now a location): looked
+    // at again first, the views waiting meanwhile (its own folders only: seconds)
+    if moved {
+        set(&status, "Looking at the project's new folder…");
+        let here: Vec<Root> = roots.iter().filter(|r| r.id == "p").cloned().collect();
+        let _ = worker.sweep(&here, &ours, &Sweep::default());
+    }
     let mut reader = project::open(&root);
     if load(&mut reader, &Want::All).is_err() { reader = project::open(&root); }
-    *SEEN.write().unwrap() = Some(Seen { id, root: root.clone(), roots: roots.clone(), cat: reader });
+    let mine = Ours { footage_in_project: ours.footage_in_project.clone(), own_only: false };
+    *SEEN.write().unwrap() = Some(Seen { id, root: root.clone(), roots: roots.clone(), ours: mine, cat: reader, bump: Some((changes.clone(), last.clone())) });
     started(&root, false);
     set(&status, "");
     changed(&changes, &last);
@@ -342,7 +492,7 @@ mod real {
         let mut cat = project::open(&root);
         cat.load(&Want::All).unwrap();
         for r in &roots { println!("root {} at {} record {:?} exclude {:?}", r.id, r.dir.display(), cat.state.get(&r.id, "").map(|f| f.mtime), r.exclude); }
-        *SEEN.write().unwrap() = Some(Seen { id: 0, root: root.clone(), roots, cat });
+        *SEEN.write().unwrap() = Some(Seen::of(&root, cat));
         let t = Instant::now();
         let seen = crate::index::scan(&root, "footage", false);
         println!("from the catalog: {:?} in {:.2} s", count(&seen), t.elapsed().as_secs_f64());
@@ -359,10 +509,9 @@ mod real {
         let Some(root) = std::env::var_os("AFL_SEEN").map(PathBuf::from) else { return };
         use super::*;
         let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
-        let (roots, _) = project::roots(&root);
         let mut cat = project::open(&root);
         cat.load(&Want::All).unwrap();
-        *SEEN.write().unwrap() = Some(Seen { id: 0, root: root.clone(), roots, cat });
+        *SEEN.write().unwrap() = Some(Seen::of(&root, cat));
         let t = Instant::now();
         let m = crate::checks::missing(&root);
         println!("missing on its own (from the catalog): {:?} in {:.2} s", m.as_ref().map(|v| v.len()), t.elapsed().as_secs_f64());

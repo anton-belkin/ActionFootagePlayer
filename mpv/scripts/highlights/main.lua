@@ -168,6 +168,7 @@ local function read_doc(path, size)
     if type(doc.clip) == "table" and doc.clip.size and size and doc.clip.size ~= size then
         os.remove(file .. ".old")
         os.rename(file, file .. ".old")
+        mp.commandv("script-message-to", "workspace", "catalog-note", file)
         mp.osd_message("Marks of another clip with this name: kept as " .. (file:match("([^/\\]+)$") or file) .. ".old", 4)
         return nil
     end

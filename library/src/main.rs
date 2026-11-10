@@ -112,6 +112,8 @@ struct Inner {
     held: Option<String>,
     // The project's own files being moved (Move the project…): the page shows how far it is
     moving: Option<Moving>,
+    // Moved (its catalog with it): its next watch looks at its folder again before the views read the catalog
+    moved_to: Option<PathBuf>,
 }
 
 // How far a move of the project's files is: bytes copied of all (a move on one disk is a rename: nothing to count),
@@ -130,6 +132,9 @@ struct Moving {
 struct Watch {
     root: PathBuf,
     stamp: Option<std::time::SystemTime>,
+    /// Its locations as the project's file had them: watched again (and the catalog read again) only when they change,
+    /// not on every write of the file (a setting, the player's lists)
+    locs: String,
     _watcher: Option<notify::RecommendedWatcher>,
     changes: Arc<std::sync::atomic::AtomicU64>,
     last: Arc<Mutex<Instant>>,
@@ -138,12 +143,19 @@ struct Watch {
     runner: seen::Runner,
 }
 
-fn watch(root: &Path) -> Watch {
+/// What of the project's file says where its footage is: its locations (and the hosts they're on)
+fn locations_key(root: &Path) -> String {
+    let d = read_doc(root);
+    json!([d.get("locations"), d.get("hosts")]).to_string()
+}
+
+/// `moved`: its own files just moved here (Move the project…), its catalog with them
+fn watch(root: &Path, moved: bool) -> Watch {
     use notify::Watcher;
     let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (c, l) = (changes.clone(), last.clone());
-    let runner = seen::start(root, changes.clone(), last.clone());
+    let runner = seen::start(root, changes.clone(), last.clone(), moved);
     let (events, me) = (runner.events.clone(), root.to_path_buf());
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(e) = res else { return };
@@ -167,7 +179,7 @@ fn watch(root: &Path) -> Watch {
         any.then_some(w)
     });
     let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
-    Watch { root: root.to_path_buf(), stamp, _watcher: watcher, changes, last, runner }
+    Watch { root: root.to_path_buf(), stamp, locs: locations_key(root), _watcher: watcher, changes, last, runner }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -467,7 +479,14 @@ fn tick(inner: &mut Inner) {
         let job = inner.jobs.iter_mut().find(|j| j.id == id);
         let mut finished = false;
         if let Some(job) = job {
+            let had = job.made_paths.len();
             let has_status = read_status(job, &run.dir);
+            // Stabilize optically: each clip's Gyroflow project, told to the catalog as it lands (the views read it: the
+            // clip's motion data and badge change then; gyroflow-optical tells no one)
+            if job.made_paths.len() > had {
+                let made = job.made_paths[had..].to_vec();
+                std::thread::spawn(move || seen::note_now(&optical_projects(&made)));
+            }
             if let Some(status) = exited {
                 finished = true;
                 if !job.state.finished() {
@@ -519,6 +538,16 @@ fn tick(inner: &mut Inner) {
     if inner.running.is_none() { start_job(inner); }
 }
 
+/// The Gyroflow projects gyroflow-optical put beside these clips (<stem>.gyroflow, or <name.ext>.gyroflow when that's
+/// the one it replaced)
+fn optical_projects(clips: &[String]) -> Vec<PathBuf> {
+    clips.iter().flat_map(|c| {
+        let c = Path::new(c);
+        let name = c.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        [c.with_extension("gyroflow"), c.with_file_name(format!("{name}.gyroflow"))]
+    }).filter(|g| g.is_file()).collect()
+}
+
 fn stop_all(inner: &mut Inner) {
     inner.jobs.retain(|j| j.state != JobState::Waiting);
     if let Some(mut run) = inner.running.take() {
@@ -564,11 +593,19 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
     }
     // Watched: the project open, its locations as its file says now
     match inner.project.clone() {
+        // Its files being moved (its catalog with them): watched again once they're in their new place
+        Some(_) if inner.moving.is_some() => {}
         Some(root) => {
             let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
+            // The project's file written with its locations as they were (a setting, the player's lists): nothing to
+            // watch again
+            if let Some(w) = inner.watch.as_mut().filter(|w| w.root == root && w.stamp != stamp) {
+                if locations_key(&root) == w.locs { w.stamp = stamp; }
+            }
             if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp) {
                 let before = inner.watch.as_ref().filter(|w| w.root == root).map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed) + 1);
-                let w = watch(&root);
+                let moved = inner.moved_to.take().is_some_and(|m| m == root);
+                let w = watch(&root, moved);
                 // The same project watched again (its locations changed): counted on from where it was, and once more
                 if let Some(n) = before { w.changes.store(n, std::sync::atomic::Ordering::Relaxed); }
                 inner.watch = Some(w);
@@ -685,13 +722,16 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         // Moments whose clip was found away from the path their link names: the path written into the link
         // (docs/library-management.md §8), so the next look, from any computer, finds it at once
         let tool = link_tool();
+        let mut relinked = Vec::new();
         for it in out["items"].as_array_mut().into_iter().flatten() {
             let (Some(to), Some(file)) = (it["relink"].as_str().map(str::to_string), it["path"].as_str().map(PathBuf::from)) else { continue };
             let mut l = it["link"].clone();
             l["clip"] = json!(to);
-            if write_link(tool.as_ref(), &file, &l.to_string()).is_ok() { it["link"] = l; }
+            if write_link(tool.as_ref(), &file, &l.to_string()).is_ok() { it["link"] = l; relinked.push(file); }
             it.as_object_mut().unwrap().remove("relink");
         }
+        // …and noted: the catalog would otherwise give the old link on the next look, and it'd be written again
+        seen::note_now(&relinked);
         let mut want: Vec<String> = Vec::new();
         for it in out["items"].as_array().into_iter().flatten() {
             match it["kind"].as_str() {
@@ -904,7 +944,9 @@ fn move_to(root: &Path, dest: &Path, progress: &dyn Fn(Moving)) -> Result<Vec<St
     project_id(root)?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();
-    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED].into_iter().filter(|n| root.join(n).exists()).collect();
+    // Its catalog (.afp) too: read at once in the new place (its folder looked at again first), not made again from
+    // the disks (minutes on a share, the views reading the disks meanwhile)
+    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED, ".afp"].into_iter().filter(|n| root.join(n).exists()).collect();
     // On another disk they're copied: how much, for the page's bar (counted once a rename fails)
     let mut state = Moving { to: dest.display().to_string(), ..Default::default() };
     let mut counted = false;
@@ -1019,6 +1061,8 @@ async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Resul
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+        // Its catalog's thread stopped: its files move along
+        s.lock().unwrap().watch = None;
         let report = |m: Moving| { s.lock().unwrap().moving = Some(m); };
         let moved = move_to(&r, &d, &report);
         let mut inner = s.lock().unwrap();
@@ -1041,6 +1085,7 @@ async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Resul
                 }
             }
             inner.project = Some(d.clone());
+            inner.moved_to = Some(d.clone());
         }
         tick(&mut inner);
         moved
@@ -1284,8 +1329,14 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let name = good_name(&name)?;
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        rename_in(&root, &view, &kind, &path, &name)
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Result<String, String> {
+    let root = root.to_path_buf();
+    let name = good_name(name)?;
     let from = PathBuf::from(&path);
     // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
     // footage (a project next to it), only a link file (a moment or clip preview beside its clip)
@@ -1296,21 +1347,27 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
     }
     let dir = from.parent().ok_or("no folder")?.to_path_buf();
     let fname = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // What's renamed, both its paths, told to the catalog once done (the views read it; on a share the system's notice
+    // comes late or never)
+    let touched: std::cell::RefCell<Vec<PathBuf>> = std::cell::RefCell::new(Vec::new());
     let mv = |a: &Path, b: &Path| -> Result<(), String> {
         if b.exists() { return Err(format!("{} exists already", b.display())); }
-        std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))
+        std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))?;
+        touched.borrow_mut().extend([a.to_path_buf(), b.to_path_buf()]);
+        Ok(())
     };
+    let renamed = (|| -> Result<String, String> {
     if kind == "folder" {
         let to = dir.join(&name);
         mv(&from, &to)?;
         // The moments' renders follow their folder (_Renders/<its path>, a folder of _Moments by its path there)
         if let Ok(rel) = from.strip_prefix(root.join("_Moments")).or_else(|_| from.strip_prefix(&root)) {
             let r = root.join("_Renders").join(rel);
-            if r.is_dir() { let _ = std::fs::rename(&r, r.with_file_name(&name)); }
+            if r.is_dir() { let _ = mv(&r, &r.with_file_name(&name)); }
         }
         return Ok(to.display().to_string());
     }
-    match kind.as_str() {
+    match kind {
         "moment" => {
             let ext = if fname.to_lowercase().ends_with(index::LINK_EXT) { fname[fname.len() - index::LINK_EXT.len()..].to_string() }
                 else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
@@ -1318,12 +1375,12 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
             let to = dir.join(format!("{name}{ext}"));
             mv(&from, &to)?;
             let g = dir.join(format!("{old}.gyroflow"));
-            if g.is_file() { let _ = std::fs::rename(&g, dir.join(format!("{name}.gyroflow"))); }
+            if g.is_file() { let _ = mv(&g, &dir.join(format!("{name}.gyroflow"))); }
             if let Ok(rel) = from.strip_prefix(&root) {
                 let rel = rel.to_string_lossy().replace('\\', "/");
                 for p in index::RENDER_PROFILES {
                     let r = index::render_path(&root, &rel, p);
-                    if r.is_file() { let _ = std::fs::rename(&r, r.with_file_name(format!("{name}.{p}.mov"))); }
+                    if r.is_file() { let _ = mv(&r, &r.with_file_name(format!("{name}.{p}.mov"))); }
                 }
             }
             Ok(to.display().to_string())
@@ -1338,18 +1395,29 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
             if view == "stills" {
                 for e in [".mov", ".MOV"] {
                     let v = dir.join(format!("{stem}{e}"));
-                    if v.is_file() { let _ = std::fs::rename(&v, dir.join(format!("{name}{e}"))); }
+                    if v.is_file() { let _ = mv(&v, &dir.join(format!("{name}{e}"))); }
                 }
             }
             Ok(to.display().to_string())
         }
     }
-}).await.map_err(|e| e.to_string())?
+    })();
+    seen::note_now(&touched.borrow());
+    renamed
 }
+
+#[cfg(test)]
+static TRASH_REMOVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
 // UGREEN or Synology share keeps what's deleted there; Finder can't put a network file in the Trash). Ok: where it went
 fn to_trash(file: &Path) -> Result<String, String> {
+    // Tests on a local disk: removed (Finder's Trash isn't theirs to fill)
+    #[cfg(test)]
+    if TRASH_REMOVES.load(std::sync::atomic::Ordering::Relaxed) {
+        let r = if file.is_dir() { std::fs::remove_dir_all(file) } else { std::fs::remove_file(file) };
+        return r.map(|_| "removed (test)".to_string()).map_err(|e| e.to_string());
+    }
     if cfg!(target_os = "macos") {
         // The volume it's on and its kind, from mount: "//u@host/share on /Volumes/share (smbfs, ...)"
         let out = std::process::Command::new("/sbin/mount").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
@@ -1391,11 +1459,19 @@ async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) 
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        Ok(delete_in(&root, &items))
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn delete_in(root: &Path, items: &[Value]) -> Value {
+    let root = root.to_path_buf();
     let footage = index::footage_dirs(&root);
     let (mut done, mut problems) = (0usize, Vec::<String>::new());
     let mut went = std::collections::BTreeSet::new();
-    for it in &items {
+    // What went, told to the catalog at the end (the views read it: on a share the system's notice comes late or never)
+    let mut gone: Vec<PathBuf> = Vec::new();
+    for it in items {
         let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
         let kind = it["kind"].as_str().unwrap_or("");
         // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among
@@ -1424,13 +1500,14 @@ async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) 
             Ok(w) => {
                 done += 1;
                 went.insert(w);
-                for a in also.into_iter().filter(|a| a.exists()) { if let Err(e) = to_trash(&a) { problems.push(e); } }
+                gone.push(path.clone());
+                for a in also.into_iter().filter(|a| a.exists()) { match to_trash(&a) { Ok(_) => gone.push(a), Err(e) => problems.push(e) } }
             }
             Err(e) => problems.push(e),
         }
     }
-    Ok(serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems }))
-}).await.map_err(|e| e.to_string())?
+    seen::note_now(&gone);
+    serde_json::json!({ "done": done, "to": went.into_iter().collect::<Vec<_>>(), "problems": problems })
 }
 
 // Everything the library keeps, written out in the open as one JSON file: the project's file and this computer's
@@ -1542,17 +1619,24 @@ async fn new_folder(shared: State<'_, Shared>, view: String, parent: String) -> 
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        new_folder_in(&root, &view, &parent)
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String> {
+    let root = root.to_path_buf();
     // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
-    if !matches!(view.as_str(), "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
+    if !matches!(view, "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
     let mut dir = root.clone();
     for p in parent.split('/').filter(|p| !p.is_empty() && *p != "..") { dir.push(p); }
     let mut name = "untitled folder".to_string();
     let mut n = 1;
     while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
     std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
+    // In the catalog at once: the views list folders from it
+    seen::note_now(&[dir.join(&name)]);
     Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
-}).await.map_err(|e| e.to_string())?
 }
 
 // What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them.
@@ -1940,7 +2024,7 @@ mod tests {
         std::fs::write(root.join(PROJECT_FILE), "{}").unwrap();
         std::env::set_var("AFP_HOME", root.join(".home"));
         let root = root.canonicalize().unwrap();
-        let w = watch(&root);
+        let w = watch(&root, false);
         // The project's catalog made and read first (it counts a change when it is)
         let t = Instant::now();
         while !seen::is_on(&root) && t.elapsed() < Duration::from_secs(10) { std::thread::sleep(Duration::from_millis(50)); }
@@ -1959,6 +2043,60 @@ mod tests {
         // …and it's in the catalog the views read
         assert!(seen::file(&root.join("Generated/Turtle.afplink.mp4")).is_some_and(|f| f.is_some()));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // Move the project…: its catalog goes along and is read at once; its records of the folder it left (the footage,
+    // now a location) are looked at again before the views read it, so no clip shows as one of its own files
+    #[test]
+    fn moved_with_its_catalog() {
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let top = std::env::temp_dir().join(format!("afl-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let p = top.join("Trip");
+        for d in [p.join("Day 1"), p.join("_Moments"), top.join("SSD")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(p.join(PROJECT_FILE), r#"{"id":"move-test"}"#).unwrap();
+        std::fs::write(p.join("Day 1/A.MP4"), b"x").unwrap();
+        std::fs::write(p.join("Day 1/A.afplink.mp4"), crate::index::tests::tests_mp4_with_link(r#"{"v":1,"kind":"moment","clip":"Day 1/A.MP4"}"#)).unwrap();
+        std::fs::write(p.join("_Moments/T.afplink.mp4"), crate::index::tests::tests_mp4_with_link(r#"{"v":1,"kind":"moment","clip":"Day 1/A.MP4"}"#)).unwrap();
+        std::env::set_var("AFP_HOME", top.join(".home"));
+        let p = p.canonicalize().unwrap();
+        let dest = top.join("SSD").canonicalize().unwrap().join("Trip");
+        let wait = |root: &Path, w: &Watch| {
+            let t = Instant::now();
+            while !(seen::is_on(root) && seen::status(Some(&w.runner)).is_empty()) && t.elapsed() < Duration::from_secs(20) { std::thread::sleep(Duration::from_millis(50)); }
+            assert!(seen::is_on(root), "not read: {}", seen::status(Some(&w.runner)));
+        };
+        let w = watch(&p, false);
+        wait(&p, &w);
+        drop(w);
+        std::thread::sleep(Duration::from_millis(400));
+        move_to(&p, &dest, &|_| {}).unwrap();
+        assert!(dest.join(".afp/catalog").is_dir() && !p.join(".afp").exists());
+        let w = watch(&dest, true);
+        wait(&dest, &w);
+        // Its old folder's clip isn't one of its own files any more (the record of it under the project's folder gone)
+        assert_eq!(seen::file(&dest.join("Day 1/A.MP4")), Some(None));
+        let m = index::scan(&dest, "moments", false);
+        let ids: Vec<&str> = m["items"].as_array().unwrap().iter().filter_map(|i| i["id"].as_str()).collect();
+        assert!(ids.contains(&"_Moments/T.afplink.mp4"), "{ids:?}");
+        assert!(!ids.iter().any(|i| i.starts_with("Day 1/")), "{ids:?}");
+        let f = index::scan(&dest, "footage", false);
+        assert!(f["items"].as_array().unwrap().iter().any(|i| i["id"] == "Day 1/A.MP4"));
+        drop(w);
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    // A setting written into the project's file isn't a change of its locations: its catalog isn't read again
+    #[test]
+    fn locations_key_ignores_settings() {
+        let root = temp("lockey");
+        std::fs::write(root.join(PROJECT_FILE), r#"{"locations":[{"path":"../A"}],"settings":{}}"#).unwrap();
+        let k = locations_key(&root);
+        update_doc(&root, |d| { d["settings"]["clips_layout"] = json!("flat"); d.insert("clips_made".into(), json!(["x"])); }).unwrap();
+        assert_eq!(locations_key(&root), k);
+        update_doc(&root, |d| { d.insert("locations".into(), json!([{ "path": "../B" }])); }).unwrap();
+        assert_ne!(locations_key(&root), k);
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -2210,5 +2348,284 @@ mod trash_tests {
         assert_eq!(super::to_trash(&d.join("folder")).unwrap(), "the Trash");
         assert!(super::to_trash(&d.join("gone")).is_err());
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+// Every operation of the Library, on a test project, the views read right after each (as the page does), with no look of
+// the catalog's own in between: on a share the system's notices come late or never, so what a view shows then is what
+// the catalog was told. Run with seen::OLD (as before the 2026-11-10 audit: nothing noted) and without, for the table.
+// Local: `cargo test audit`. On the NAS: AFL_AUDIT_DIR=/Volumes/<share>/<scratch> cargo test -- --ignored audit_on_a_share --nocapture
+#[cfg(test)]
+mod audit {
+    use super::*;
+    use crate::index::tests::tests_mp4_with_link as mp4;
+    use std::sync::atomic::Ordering;
+
+    fn link(kind: &str, clip: &str, extra: &str) -> String { format!(r#"{{"v":1,"kind":"{kind}","clip":"{clip}","in":1,"out":2{extra}}}"#) }
+
+    fn photo(tags: &[&str]) -> String {
+        let li: String = tags.iter().map(|t| format!("<rdf:li>{t}</rdf:li>")).collect();
+        format!("\u{ff}\u{d8}<x:xmpmeta><afp:link>{{&quot;v&quot;:1,&quot;kind&quot;:&quot;photo&quot;,&quot;clip&quot;:&quot;Day 1/A.MP4&quot;,&quot;t&quot;:1.5}}</afp:link><dc:subject><rdf:Bag>{li}</rdf:Bag></dc:subject></x:xmpmeta>")
+    }
+
+    /// A test project in `base`: P (its own files), Footage (a location beside it, as the NAS's archive), Q (a project to
+    /// take in); its catalog made and read, as the Library's thread does
+    fn setup(base: &Path) -> PathBuf {
+        let _ = std::fs::remove_dir_all(base);
+        let (p, f, q) = (base.join("P"), base.join("Footage"), base.join("Q"));
+        for d in [p.join("_Moments/Reef"), p.join("_Renders/Reef"), p.join("_Exports"), p.join("_Stills"), f.join("Day 1"), q.join("_Moments")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(p.join(PROJECT_FILE), r#"{"format":"actionfootage-project","version":2,"id":"audit-test","locations":[{"name":"Archive","at":"","path":"../Footage"}]}"#).unwrap();
+        std::fs::write(f.join("Day 1/A.MP4"), b"clip a").unwrap();
+        std::fs::write(f.join("Day 1/B.MP4"), b"clip bb").unwrap();
+        std::fs::write(f.join("Day 1/A.afp.json"), br#"{"format":"actionfootageplayer-clip","version":1,"clip":{"file":"A.MP4","size":6},"marks":[{"t":1.5}]}"#).unwrap();
+        std::fs::write(p.join("_Moments/Reef/Turtle.afplink.mp4"), mp4(&link("moment", "Day 1/A.MP4", r#","size":6"#))).unwrap();
+        std::fs::write(p.join("_Renders/Reef/Turtle.HDR.mov"), mp4(&link("render", "Day 1/A.MP4", r#","recipe":{"v":0}"#))).unwrap();
+        std::fs::write(p.join("_Exports/E.mov"), mp4(&link("export", "Day 1/A.MP4", ""))).unwrap();
+        std::fs::write(p.join("_Stills/S.jpg"), photo(&[])).unwrap();
+        std::fs::write(q.join(PROJECT_FILE), r#"{"locations":[{"name":"Archive","at":"","path":"../Footage"}],"moment_names":["X"]}"#).unwrap();
+        std::fs::write(q.join("_Moments/X.afplink.mp4"), mp4(&link("moment", "Day 1/B.MP4", ""))).unwrap();
+        locations::write_pointers(&p, &locations::locations(&p, &locations::mounts()), &[], &locations::mounts());
+        let p = p.canonicalize().unwrap();
+        let (roots, ours) = afp_catalog::project::roots(&p);
+        let store: Arc<dyn afp_catalog::Store> = Arc::new(afp_catalog::DiskStore);
+        let mut cat = afp_catalog::Catalog::new(store.clone(), store, &p, &base.join(".cache"), "test");
+        cat.load(&afp_catalog::Want::All).unwrap();
+        cat.sweep(&roots, &ours, &Default::default()).unwrap();
+        *seen::SEEN.write().unwrap() = Some(seen::Seen::of(&p, cat));
+        p
+    }
+
+    fn item(p: &Path, view: &str, id: &str) -> Value {
+        index::scan(p, view, false)["items"].as_array().unwrap().iter().find(|i| i["id"] == id).cloned().unwrap_or(Value::Null)
+    }
+    fn ids(p: &Path, view: &str) -> Vec<String> {
+        let mut v: Vec<String> = index::scan(p, view, false)["items"].as_array().unwrap().iter().filter_map(|i| i["id"].as_str().map(str::to_string)).collect();
+        v.sort();
+        v
+    }
+    fn dirs(p: &Path, view: &str) -> Vec<String> {
+        index::scan(p, view, false)["dirs"].as_array().unwrap().iter().filter_map(|i| i.as_str().map(str::to_string)).collect()
+    }
+    fn relink(file: &Path, l: &str) -> Result<(), String> { std::fs::write(file, mp4(l)).map_err(|e| e.to_string()) }
+
+    /// Each operation: (what, what the view shows of it right after); `old`: as before the audit
+    fn run(base: &Path, old: bool) -> Vec<(String, String)> {
+        seen::OLD.store(old, Ordering::Relaxed);
+        let p = setup(base);
+        let f = base.join("Footage").canonicalize().unwrap();
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut row = |what: &str, shows: String| { println!("{:<44} {shows}", what); out.push((what.to_string(), shows)); };
+        let fp = |rel: &str| f.join(rel).display().to_string();
+        let pp = |rel: &str| p.join(rel).display().to_string();
+
+        // Tags on a clip, a moment, an export, a photo
+        let items = vec![json!({ "kind": "clip", "id": "Day 1/A.MP4", "path": fp("Day 1/A.MP4") }),
+                         json!({ "kind": "moment", "id": "_Moments/Reef/Turtle.afplink.mp4", "path": pp("_Moments/Reef/Turtle.afplink.mp4") }),
+                         json!({ "kind": "export", "id": "_Exports/E.mov", "path": pp("_Exports/E.mov") }),
+                         json!({ "kind": "still", "id": "_Stills/S.jpg", "path": pp("_Stills/S.jpg") })];
+        let photo_w = |file: &Path, t: &[String]| std::fs::write(file, photo(&t.iter().map(String::as_str).collect::<Vec<_>>())).map_err(|e| e.to_string());
+        assert!(tags::set(&p, &items, &["reef".into()], &[], &relink, &photo_w).is_empty());
+        row("Tags: clip", item(&p, "footage", "Day 1/A.MP4")["tags"].to_string());
+        row("Tags: moment", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["tags"].to_string());
+        row("Tags: export", item(&p, "exports", "_Exports/E.mov")["tags"].to_string());
+        row("Tags: photo", item(&p, "stills", "_Stills/S.jpg")["tags"].to_string());
+        // Lens type, location
+        assert!(tags::set_lens_type(&p, &["Day 1/B.MP4".into()], Some("normal")).is_empty());
+        row("Lens type", item(&p, "footage", "Day 1/B.MP4")["own"]["source"]["lens_type"].to_string());
+        let loc = geo::location_value(27.9, 34.3, None, "manual", Some(&json!({ "country": "Egypt" })), None, None);
+        assert!(geo::set_location(&p, &["Day 1/B.MP4".into()], Some(&loc)).is_empty());
+        row("Location", item(&p, "footage", "Day 1/B.MP4")["own"]["location"]["lat"].to_string());
+        // Stabilize optically: a Gyroflow project beside the clip, told as the task's status names the clip
+        std::fs::write(f.join("Day 1/B.gyroflow"), b"{}").unwrap();
+        seen::note_now(&optical_projects(&[fp("Day 1/B.MP4")]));
+        row("Stabilize optically (.gyroflow)", item(&p, "footage", "Day 1/B.MP4")["gyroflow"].to_string());
+        // Finder moves a clip (the catalog's own look sees it), then Mend: the moment's link follows
+        std::fs::create_dir_all(f.join("Day 2")).unwrap();
+        for n in ["A.MP4", "A.afp.json"] { std::fs::rename(f.join("Day 1").join(n), f.join("Day 2").join(n)).unwrap(); }
+        {
+            let mut g = seen::SEEN.write().unwrap();
+            let s = g.as_mut().unwrap();
+            let (roots, ours) = afp_catalog::project::roots(&p);
+            let only = vec![(roots[1].id.clone(), String::new()), (roots[1].id.clone(), "Day 1".into()), (roots[1].id.clone(), "Day 2".into())];
+            s.cat.sweep(&roots, &ours, &afp_catalog::Sweep { only, ..Default::default() }).unwrap();
+        }
+        let issues = checks::missing(&p).unwrap();
+        let found = checks::find_moved(&p, &issues);
+        assert!(checks::apply(&p, found.as_array().unwrap(), &relink).is_empty());
+        row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
+        // Renders deleted
+        let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
+        assert!(n == 1 && problems.is_empty(), "{problems:?}");
+        row("Delete renders", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["renders"].to_string());
+        // New folder, rename a moment, rename a folder
+        let made = new_folder_in(&p, "moments", "_Moments").unwrap();
+        row("New folder", dirs(&p, "moments").contains(&made).to_string());
+        rename_in(&p, "moments", "moment", &pp("_Moments/Reef/Turtle.afplink.mp4"), "Shark").unwrap();
+        row("Rename a moment", format!("{:?}", ids(&p, "moments")));
+        rename_in(&p, "moments", "folder", &pp("_Moments/Reef"), "Sea").unwrap();
+        row("Rename a folder", format!("{:?}", ids(&p, "moments")));
+        // A moment the player made, noted by afp-catalog (its own journal) in a run's new folder of Generated/
+        let run_dir = p.join("Generated/2026-11-10 12-00 Moments");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let made = run_dir.join("Y.afplink.mp4");
+        std::fs::write(&made, mp4(&link("moment", "Day 1/B.MP4", ""))).unwrap();
+        {
+            let store: Arc<dyn afp_catalog::Store> = Arc::new(afp_catalog::DiskStore);
+            let mut player = afp_catalog::Catalog::new(store.clone(), store, &p, &base.join(".cache-player"), "player");
+            let _ = player.load(&afp_catalog::Want::Keys(Vec::new()));
+            let st = std::fs::metadata(&made).unwrap();
+            let mtime = afp_catalog::store::nanos(st.modified());
+            player.note(vec![("p".into(), "Generated/2026-11-10 12-00 Moments/Y.afplink.mp4".into(),
+                              Some(afp_catalog::File { dir: false, size: st.len(), mtime, meta: afp_catalog::inspect::read(&made).unwrap(), digest: None }))]).unwrap();
+            let mut g = seen::SEEN.write().unwrap();
+            g.as_mut().unwrap().cat.refresh().unwrap();
+        }
+        row("Moment noted by the player, new folder", ids(&p, "moments").iter().any(|i| i.ends_with("/Y.afplink.mp4")).to_string());
+        // Take in another project
+        let q = base.join("Q").canonicalize().unwrap();
+        takein::take_in(&p, &q, "", &relink, false).unwrap();
+        row("Take in", ids(&p, "moments").iter().any(|i| i.ends_with("/X.afplink.mp4")).to_string());
+        // Delete to the Trash: a moment, a photo
+        TRASH_REMOVES.store(!pp("").starts_with("/Volumes/"), Ordering::Relaxed);
+        let r = delete_in(&p, &[json!({ "kind": "moment", "path": pp("_Moments/Sea/Shark.afplink.mp4") }), json!({ "kind": "still", "path": pp("_Stills/S.jpg") })]);
+        assert_eq!(r["done"], json!(2), "{r}");
+        row("Delete (moment, photo)", format!("{:?} {:?}", ids(&p, "moments"), ids(&p, "stills")));
+        *seen::SEEN.write().unwrap() = None;
+        seen::OLD.store(false, Ordering::Relaxed);
+        out
+    }
+
+    fn table(base: &Path) -> Vec<(String, String, String)> {
+        let before = run(&base.join("before"), true);
+        let after = run(&base.join("after"), false);
+        let rows: Vec<(String, String, String)> = before.into_iter().zip(after).map(|((w, b), (_, a))| (w, b, a)).collect();
+        println!("\n| Operation | Before (view right after) | After |\n|---|---|---|");
+        for (w, b, a) in &rows { println!("| {w} | `{b}` | `{a}` |"); }
+        rows
+    }
+
+    fn check(rows: &[(String, String, String)]) {
+        let want = ["[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
+                    "[\"_Moments/Reef/Shark.afplink.mp4\"]", "[\"_Moments/Sea/Shark.afplink.mp4\"]", "true", "true"];
+        for ((w, _, a), x) in rows.iter().zip(want) { assert!(a.contains(x), "{w}: {a}, wanted {x}"); }
+        let (_, _, del) = rows.last().unwrap();
+        assert!(!del.contains("Shark") && !del.contains("S.jpg"), "Delete: {del}");
+    }
+
+    #[test]
+    fn every_operation_shows_at_once() {
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("afl-audit-{}", std::process::id()));
+        let rows = table(&base);
+        check(&rows);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[ignore]
+    fn audit_on_a_share() {
+        let Some(dir) = std::env::var_os("AFL_AUDIT_DIR").map(PathBuf::from) else { return };
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = dir.join(format!("afl-audit-{}", std::process::id()));
+        let t = Instant::now();
+        let rows = table(&base);
+        println!("on {} in {:.1} s", base.display(), t.elapsed().as_secs_f64());
+        check(&rows);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+// The player's batches, run as the Tasks run them, on a test project (a copy of a real clip, two marks): what each
+// makes is in the views as it lands, read from the catalog with no look of its own (the runner started without the
+// system's notices: a share's, which come late or never). By hand:
+// AFL_E2E_DIR=/Volumes/ssd/<scratch> AFL_E2E_CLIP=<a camera clip> AFL_PLAYER=<ActionFootagePlayer.app> \
+//   cargo test -- --ignored batches_show_as_they_land --nocapture
+#[cfg(test)]
+mod e2e {
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    fn count(p: &Path, kind: &str) -> usize {
+        let items = |v: &str| index::scan(p, v, false)["items"].as_array().cloned().unwrap_or_default();
+        match kind {
+            "moments" => items("moments").len(),
+            "photos" => items("stills").len(),
+            "export" => items("exports").len(),
+            "render" => items("moments").iter().map(|m| m["renders"].as_object().map(|o| o.len()).unwrap_or(0)).sum(),
+            // Clip previews: the empty ones (drafts), then finished ones
+            "clips" => items("footage").iter().filter(|c| !c["preview"].is_null()).count(),
+            _ => items("footage").iter().filter(|c| !c["preview"].is_null() && c["draft"].is_null()).count(),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn batches_show_as_they_land() {
+        let (Some(dir), Some(clip)) = (std::env::var_os("AFL_E2E_DIR").map(PathBuf::from), std::env::var_os("AFL_E2E_CLIP").map(PathBuf::from)) else { return };
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = dir.join(format!("afl-e2e-{}", std::process::id()));
+        let (p, f) = (base.join("P"), base.join("Footage/Day 1"));
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(&f).unwrap();
+        std::env::set_var("AFP_HOME", base.join(".home"));
+        let name = clip.file_name().unwrap().to_string_lossy().into_owned();
+        let t = Instant::now();
+        std::fs::copy(&clip, f.join(&name)).unwrap();
+        println!("clip copied in {:.1} s", t.elapsed().as_secs_f64());
+        let size = std::fs::metadata(f.join(&name)).unwrap().len();
+        std::fs::write(f.join(format!("{}.afp.json", name.rsplit_once('.').unwrap().0)),
+                       json!({ "format": "actionfootageplayer-clip", "version": 1, "clip": { "file": name, "size": size }, "marks": [{ "t": 2.0 }, { "t": 5.0 }] }).to_string()).unwrap();
+        std::fs::write(p.join(PROJECT_FILE), r#"{"format":"actionfootage-project","version":2,"id":"e2e-test","locations":[{"name":"Archive","at":"","path":"../Footage"}],"settings":{}}"#).unwrap();
+        let mounts = locations::mounts();
+        locations::write_pointers(&p, &locations::locations(&p, &mounts), &[], &mounts);
+        let p = p.canonicalize().unwrap();
+        // The catalog's thread, without the system's notices: only what's noted (and its own looks, minutes apart)
+        let runner = seen::start(&p, Arc::new(AtomicU64::new(0)), Arc::new(Mutex::new(Instant::now())), false);
+        let t = Instant::now();
+        while !(seen::is_on(&p) && seen::status(Some(&runner)).is_empty()) && t.elapsed() < Duration::from_secs(120) { std::thread::sleep(Duration::from_millis(100)); }
+        assert!(seen::is_on(&p));
+        let mut rows = Vec::new();
+        for kind in ["moments", "photos", "export", "render", "clips", "clips-finish"] {
+            let mut request = json!({ "kind": kind, "project": p.display().to_string() });
+            match kind {
+                "moments" => request["alone"] = json!(false),
+                "photos" => request["photo"] = json!("no"),
+                "export" => request["sdr"] = json!(false),
+                "render" => request["profiles"] = json!(["HDR"]),
+                "clips" => { request["draft"] = json!(true); request["layout"] = json!("tree"); }
+                _ => {}
+            }
+            let before = count(&p, kind);
+            let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
+            inner.jobs.push(Job { id: 1, kind: kind.into(), title: kind.into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
+                                  made_paths: Vec::new(), request });
+            let t = Instant::now();
+            let (mut made_at, mut shown_at): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
+            let mut done_at = None;
+            loop {
+                tick(&mut inner);
+                let j = &inner.jobs[0];
+                let made = j.made.unwrap_or(j.done.saturating_sub(j.failed)) as usize;
+                while made_at.len() < made { made_at.push(t.elapsed().as_secs_f64()); }
+                let shown = count(&p, kind).saturating_sub(before);
+                while shown_at.len() < shown { shown_at.push(t.elapsed().as_secs_f64()); }
+                if j.state.finished() && done_at.is_none() { done_at = Some(Instant::now()); }
+                // Done: 5 s more for its last notes to be read (the catalog's journals every 3 s)
+                if done_at.is_some_and(|d| d.elapsed() > Duration::from_secs(5)) || t.elapsed() > Duration::from_secs(900) { break; }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            let j = &inner.jobs[0];
+            let lag: Vec<String> = made_at.iter().zip(&shown_at).map(|(m, s)| format!("{:.1}", s - m)).collect();
+            println!("{kind}: {:?} made {} failed {} {:?}; shown {} of them (lag s: {})", j.state, made_at.len(), j.failed, j.message, shown_at.len(), lag.join(" "));
+            for f in &j.failures { println!("  failed: {f:?}"); }
+            rows.push((kind, made_at.len(), shown_at.len().min(made_at.len().max(shown_at.len())), lag.join(" ")));
+        }
+        println!("\n| Batch | Made | In the view, no look | Lag after each landed (s) |\n|---|---|---|---|");
+        for (k, m, s, l) in &rows { println!("| {k} | {m} | {s} | {l} |"); }
+        drop(runner);
+        std::thread::sleep(Duration::from_millis(500));
+        *seen::SEEN.write().unwrap() = None;
+        if std::env::var_os("AFL_E2E_KEEP").is_none() { let _ = std::fs::remove_dir_all(&base); }
     }
 }

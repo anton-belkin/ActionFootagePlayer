@@ -1135,7 +1135,10 @@ mp.register_script_message("preview-done", function(id, json)
         end
     end
     if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
-    catalog.note(state.project or moments.project_of(p.file), { p.file })
+    -- Its own Gyroflow project too (written or edited beside it): the Library's badge and filters read it
+    local noted = { p.file }
+    if fs.is_file(own_project(p.file)) then noted[2] = own_project(p.file) end
+    catalog.note(state.project or moments.project_of(p.file), noted)
     refresh()
 end)
 
@@ -1254,7 +1257,12 @@ local function move_aside(file)
 end
 
 -- The file to the Trash; done(it went). Where there's none (has_recycle_bin), aside into trash_folder instead
-local function trash(file, done)
+local function trash(file, done_given)
+    -- What went, noted in the project's catalog (the Library's views read it; its folder's time on a share may not say)
+    local function done(ok)
+        if ok then catalog.note(nil, { file }) end
+        return done_given(ok)
+    end
     if not has_recycle_bin(file) then return done(move_aside(file)) end
     local args
     if macos then
@@ -1325,6 +1333,8 @@ mp.register_script_message("moment-rename", function(i)
         if not ok then return mp.osd_message("Couldn't rename " .. m.name .. ": " .. tostring(err), 4) end
         -- Its own Gyroflow project, renamed with it (Gyroflow finds the clip by its own path inside)
         if fs.is_file(own) then os.rename(own, own_project(target)) end
+        -- Both its paths (and its project's): the Library reads the catalog
+        catalog.note(state.project or moments.project_of(target), { m.file, target, own, own_project(target) })
         if state.moment and state.moment.file == m.file then
             state.moment.file, state.moment.name = target, safe
             mp.set_property("file-local-options/force-media-title", safe)
@@ -1618,7 +1628,9 @@ local function next_clip()
             end
         elseif r and r.status == 0 then
             job.made = job.made + 1
-            job.notes[#job.notes + 1] = out
+            -- Into the catalog as it comes (notes asked meanwhile go together): the Library shows each at once, and a
+            -- run stopped or ended halfway has what it made noted
+            catalog.note(job.project, { out })
         else
             -- Its half-made one, under its hidden name, goes (stopped too: it's made again next time)
             if c.draft_path then os.remove(out) end
@@ -2057,6 +2069,9 @@ local function cut_finish()
                 os.rename(p.out, final)
                 if p.lrf_out then os.rename(p.lrf_out, ws.join(c.dir, c.stem .. " (cut " .. i .. ").LRF")) end
             end
+            local noted = {}
+            for i in ipairs(c.parts) do noted[#noted + 1] = ws.join(c.dir, c.stem .. " (cut " .. i .. ")" .. c.ext) end
+            catalog.note(c.project, noted)
             cutting = nil
             state.cutting = nil
             restore_idle()
@@ -2121,6 +2136,16 @@ local function cut_finish()
             end
             trash_all(orphan_files, function(left2)
             for _, f in ipairs(left2) do left[#left + 1] = f end
+            -- The parts in its place, their own files, the moments relinked: into the project's catalog (what went to
+            -- the Trash is noted as it goes), so the Library shows them at once
+            local noted = {}
+            for _, p in ipairs(c.parts) do
+                noted[#noted + 1] = p.file
+                noted[#noted + 1] = sidecar.path(p.file)
+                if p.lrf_out then noted[#noted + 1] = ws.join(c.dir, split_name(p.name) .. ".LRF") end
+            end
+            for _, m in ipairs(c.moments) do noted[#noted + 1] = m.file end
+            catalog.note(c.project, noted)
             -- The part that has where it played, there
             local pos = c.pos or 0
             local at = c.parts[1]
@@ -2447,7 +2472,7 @@ mp.register_script_message("view-own", function()
     local g = mp.get_property_native("user-data/gyroflow") or {}
     local tool = project_tool()
     if tool and g.kind == "project" and (g.project or "") ~= "" and not fs.is_file(own) then
-        run_tool({ tool, "--copy", g.project, state.clip, own })
+        if run_tool({ tool, "--copy", g.project, state.clip, own }) then catalog.note(nil, { own }) end
     end
     if not rewrite_link(l.file, function(x) x.own, x.stab = 1, v end) then
         return mp.osd_message("Couldn't change " .. moments_lib.display_name(l.file), 4)
@@ -2844,7 +2869,7 @@ local function export_next()
                                               args = { tool, "--set-key", output, link.KEY, utils.format_json(l) } })
                 ok = r and r.status == 0
             end
-            if ok then j.made = j.made + 1 else
+            if ok then j.made = j.made + 1; catalog.note(j.root, { output }) else
                 j.failed = j.failed + 1
                 j.failures[#j.failures + 1] = { m.name, "couldn't copy its render" }
             end
@@ -2865,6 +2890,9 @@ mp.register_script_message("export-batch-done", function(id, json)
     if not j or tostring(j.id) ~= id then return end
     local r = utils.parse_json(json or "") or {}
     if r.ok then j.made = j.made + 1 end
+    -- A render made again failed: the stale one it replaced is gone (what's made is noted by the gyroflow plugin)
+    local m = j.queue[j.done + 1]
+    if not r.ok and m and m.render_out then catalog.note(j.root, { m.render_out }) end
     if not r.ok and not j.stopping then
         j.failed = j.failed + 1
         j.failures[#j.failures + 1] = { j.queue[j.done + 1].name, tostring(r.error or "failed") }
@@ -3028,7 +3056,8 @@ do
                 status.message = sum.nothing or sum.error
                 status.fraction, status.current = nil, nil
                 write_status()
-                mp.add_timeout(0.2, function() mp.commandv("quit") end)
+                -- Once what it made is noted in the project's catalog (a quit cuts the notes under way off)
+                catalog.after_notes(function() mp.add_timeout(0.2, function() mp.commandv("quit") end) end)
             end
             local function progress()
                 if not started or ended then return end
