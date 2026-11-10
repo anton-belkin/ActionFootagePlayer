@@ -19,7 +19,8 @@
 // It writes how far it is to "status" as the player's batches do (the Library's Tasks tab reads it): {"state":
 // "looking"|"running"|"done"|"stopped"|"failed", "done", "total" (the clips stabilized, not the ones left out),
 // "failed", "made", "fraction" (of the clip being analyzed), "current" (its name), "message", "failures": [[name,
-// why]], "left_out": [[name, why]]}, and stops once the "stop" file appears. Gyroflow: AFP_GYROFLOW, else where it's
+// why]], "left_out": [[name, why]], "made_paths": [the clips stabilized, for a run again to leave out]}, and stops
+// once the "stop" file appears. Gyroflow: AFP_GYROFLOW, else where it's
 // installed (optical::gyroflow_cli).
 
 use std::path::{ Path, PathBuf };
@@ -79,6 +80,7 @@ fn run(clips: Vec<PathBuf>, redo: bool, settings: Settings, status_file: Option<
     st.write();
     let mut failures: Vec<Value> = Vec::new();
     let (mut made, mut done) = (0, 0);
+    let mut made_paths: Vec<Value> = Vec::new();
     for (clip, profile, replaces) in &todo {
         st.set("current", json!(name_of(clip)));
         st.set("fraction", json!(0.0));
@@ -92,7 +94,12 @@ fn run(clips: Vec<PathBuf>, redo: bool, settings: Settings, status_file: Option<
         });
         let secs = started.elapsed().as_secs_f64();
         match result {
-            Ok(p) => { made += 1; eprintln!("\r{}: {} in {secs:.0} s", clip.display(), p.display()); }
+            Ok(p) => {
+                made += 1;
+                made_paths.push(json!(clip.display().to_string()));
+                st.set("made_paths", json!(made_paths));
+                eprintln!("\r{}: {} in {secs:.0} s", clip.display(), p.display());
+            }
             Err(e) if e == "stopped" => {
                 st.set("state", json!("stopped"));
                 st.set("message", json!(if made == 0 { "Stopped before one was stabilized".to_string() } else { format!("{made} stabilized before it stopped") }));

@@ -10,6 +10,7 @@ use vs_gyroflow::cut;
 
 const USAGE: &str = "usage: afp-cut <video> --from <time> [--to <time>] [--out <file>] [--lrf] [--json]
        afp-cut --set-key <mp4> <key> <value>
+       afp-cut --empty-previews < list (JSON: out, link of each)
 
 Keeps the video's part from --from (back to the keyframe at or before it) to --to (the frame at or after it is the
 first not kept; the end when left out), without re-encoding: every sample of every track as it is, the camera's clip
@@ -23,6 +24,8 @@ samples, the stabilization's verdict, log curve, lens, the motion data); one tha
   times         seconds, or m:ss
 
 --set-key writes a text key into an MP4's moov/meta, its other keys kept (the player relinks moments with it).
+--empty-previews writes an empty clip preview (one dark frame, its link inside) at each `out` that isn't there yet,
+its folders made, 16 at a time (a share round trips overlap); says what it wrote (written) and what not (failed).
 
 Exit status: 0 cut and checked, 1 an error, 2 not cut (a file it can't cut), 3 cut but not the same: removed.
 A camera without an adapter here (only DJI has one) is cut only when the check passes; it's said in the outcome.";
@@ -54,6 +57,9 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => { eprintln!("afp-cut: {file}: {e}"); ExitCode::from(1) }
         };
+    }
+    if args.first().map(|s| s.as_str()) == Some("--empty-previews") {
+        return empty_previews();
     }
     let (mut video, mut from, mut to, mut out, mut lrf, mut json) = (None, None, None, None, false, false);
     let mut i = 0;
@@ -186,3 +192,52 @@ fn copy_xattrs(src: &Path, dst: &Path) {
 
 #[cfg(not(target_os = "macos"))]
 fn copy_xattrs(_src: &Path, _dst: &Path) {}
+
+// Empty clip previews, the list on stdin: each made only where nothing is (created exclusively, 1.5 KB written at
+// once), its folder made once; AFP_EMPTY_THREADS overrides the threads (16: a share's round trips overlap)
+fn empty_previews() -> ExitCode {
+    use std::io::{ Read, Write };
+    use std::sync::Mutex;
+    let mut text = String::new();
+    if std::io::stdin().read_to_string(&mut text).is_err() { eprintln!("afp-cut: no list on stdin"); return ExitCode::from(1); }
+    let list: Vec<serde_json::Value> = match serde_json::from_str(&text) { Ok(l) => l, Err(e) => { eprintln!("afp-cut: the list: {e}"); return ExitCode::from(1); } };
+    let jobs: Vec<(PathBuf, String)> = list.iter().filter_map(|v| {
+        let out = PathBuf::from(v["out"].as_str()?);
+        let link = match &v["link"] { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => return None, l => l.to_string() };
+        Some((out, link))
+    }).collect();
+    // The folders first, each once
+    let mut dirs: Vec<&Path> = jobs.iter().filter_map(|(o, _)| o.parent()).collect();
+    dirs.sort();
+    dirs.dedup();
+    for d in dirs { let _ = std::fs::create_dir_all(d); }
+    let threads = std::env::var("AFP_EMPTY_THREADS").ok().and_then(|t| t.parse().ok()).unwrap_or(16usize);
+    let next = Mutex::new(0usize);
+    let written = Mutex::new(Vec::new());
+    let failed = Mutex::new(Vec::new());
+    let one = |out: &Path, link: &str| -> Result<bool, String> {
+        let bytes = vs_gyroflow::mp4meta::with_keys(vs_gyroflow::mp4meta::EMPTY_PREVIEW, &[(vs_gyroflow::mp4meta::LINK_KEY, link)])?;
+        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(out) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+            Err(e) => return Err(e.to_string()),
+        };
+        f.write_all(&bytes).map_err(|e| { let _ = std::fs::remove_file(out); e.to_string() })?;
+        Ok(true)
+    };
+    std::thread::scope(|sc| {
+        for _ in 0..threads.clamp(1, 64).min(jobs.len().max(1)) {
+            sc.spawn(|| loop {
+                let i = { let mut n = next.lock().unwrap(); let i = *n; *n += 1; i };
+                let Some((out, link)) = jobs.get(i) else { break };
+                match one(out, link) {
+                    Ok(true) => written.lock().unwrap().push(out.display().to_string()),
+                    Ok(false) => {}
+                    Err(e) => failed.lock().unwrap().push(serde_json::json!([out.display().to_string(), e])),
+                }
+            });
+        }
+    });
+    println!("{}", serde_json::json!({ "written": written.into_inner().unwrap(), "failed": failed.into_inner().unwrap() }));
+    ExitCode::SUCCESS
+}

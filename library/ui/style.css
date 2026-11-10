@@ -155,6 +155,7 @@ button.chip{cursor:pointer}
 .sheet .sb{padding:14px 18px;display:flex;flex-direction:column;gap:10px}
 .sheet footer{padding:12px 18px;border-top:1px solid var(--line2);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .sheet footer .sp{flex:1}
+.sheet.narrow{max-width:520px}
 .lrow{display:grid;grid-template-columns:28px minmax(90px,.8fr) minmax(90px,.8fr) minmax(0,2.4fr) auto 32px;gap:8px;align-items:center;padding:8px;border:1px solid var(--line2);border-radius:8px}
 .lrow input[type=text]{border:1px solid var(--line);border-radius:7px;padding:5px 8px;min-height:30px;background:var(--surface);min-width:0;width:100%}
 .lrow .mv{display:flex;flex-direction:column;gap:2px}

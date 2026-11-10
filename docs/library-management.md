@@ -700,6 +700,22 @@ version kept in `photo_tags` are shown with the photo's own and go into it at it
   `Generated/<date> <time> <what>/`; a moment, photo or export made by hand in the player into
   `Generated/<date> Moments|Photos|Exports/`. Clip previews' layout and "stabilized on their own" are chosen in the
   Library for each run (remembered on this computer); in the player, "on their own" is this computer's.
+- **Clip previews empty first** (Anton, 2026-11-10: "I want to start organizing, not wait for the pictures"): the
+  Library's "Clip previews" writes every clip's preview at once as an empty one (a dark frame, 1.9 KB, the link inside
+  with `"draft": true`), 200 at a time by `afp-cut --empty-previews` (16 files at once), each 200 noted to the catalog
+  as written (`afp-catalog note` reads 16 at a time: 200 in 0.9 s, 5.3 s before): 450 on the NAS in 6.6 s, the progress
+  moving. Footage shows them with the camera's own quick look (LRF/THM) until their picture is there, and reads the
+  catalog again every 4 s while a task runs. A second task ("their pictures") then makes each one real where it is now
+  (moved meanwhile: found again by its link), each noted as it's done, the folders the Library shows first
+  (`set_focus` → `focus.json`, read before each clip). Not at macOS's background priority: that throttles the NAS reads
+  too (a minute and more for one clip). The player quits only once its notes are through (a quit cut them off). It
+  steps aside for any other task (stopped after the one being made, queued again after it). Drafts of 2 s of video
+  were tried first: 0.3–0.75 s and 22 MB a clip, too slow to start organizing.
+- **Tasks never lock the Library** (Anton, 2026-11-10: "anything can happen anyway, in Finder too"): rename, delete,
+  mend, fix paths, take in and delete renders run while tasks are queued or running; a task copes as with Finder (a
+  preview moved meanwhile is found by its link, one deleted is skipped). Moving the project's own files is the one
+  that can't run beside its tasks: the running one stops after what it's making, they all wait, the files move, and
+  they go on from the new place.
 - **Nothing more in Project.afproject**: no `clips_made`, `stills_made`, `clips_failed`, `moment_names` or settings
   written (empty lists of before aren't written back either). Photos of marks made already are found by their links;
   name suggestions are the moments' names; failures are in the player's log and the batch's status. Renders stay in

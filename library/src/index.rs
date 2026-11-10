@@ -356,13 +356,17 @@ pub fn clip_preview_relative(relative: &str, flat: bool) -> String {
     out.join("/")
 }
 
-/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL… proxy of a GX…/GH… clip
+/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL<rest>.LRV of a GX<rest>/GH<rest>
+/// clip. An empty or cut-short one (the camera stopped before writing it) isn't one
 pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
     let dir = clip.parent()?;
     let stem = clip.file_stem()?.to_string_lossy().into_owned();
     let mut names: Vec<String> = ["LRF", "lrf", "THM", "thm"].iter().map(|e| format!("{stem}.{e}")).collect();
-    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) { names.push(format!("GL{}.LRF", &stem[2..])); }
-    names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::is_file(p))
+    if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) {
+        names.push(format!("GL{}.LRV", &stem[2..]));
+        names.push(format!("GL{}.lrv", &stem[2..]));
+    }
+    names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::size(p).is_some_and(|s| s >= 1024))
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -431,6 +435,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
             it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, root).or_else(|| (d == root).then(String::new)))
                 .map(Value::from).unwrap_or(Value::Null);
+            // An empty one (its picture still to be made): the camera's quick look shows instead
+            if preview.as_ref().and_then(|p| link(p)).is_some_and(|l| l.get("draft").and_then(Value::as_bool) == Some(true)) { it["draft"] = json!(true); }
             it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
             by_tree.insert(tree, items.len());
             items.push(it);
@@ -818,12 +824,11 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
                 .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
             if ok { bytes = std::fs::read(&out).ok(); }
         } else if lower.ends_with(".mov") || lower.ends_with(".mp4") {
-            let dir = cache.join(format!("{key}.ql"));
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = Command::new("/usr/bin/qlmanage").args(["-t", "-s", "360", "-o"]).arg(&dir).arg(path)
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            bytes = std::fs::read_dir(&dir).ok().and_then(|mut r| r.next()).and_then(|e| e.ok()).and_then(|e| std::fs::read(e.path()).ok());
-            let _ = std::fs::remove_dir_all(&dir);
+            // A video without a cover (a draft clip preview): a frame by the player's ffmpeg (Quick Look hangs on some)
+            let ffmpeg = crate::player_ffmpeg();
+            let ok = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg"))).args(["-v", "error", "-y", "-ss", "0.5", "-i"]).arg(path)
+                .args(["-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "4"]).arg(&out).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+            if ok { bytes = std::fs::read(&out).ok(); }
         }
         let _ = std::fs::remove_file(&out);
     }

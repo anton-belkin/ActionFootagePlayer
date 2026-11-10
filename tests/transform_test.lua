@@ -151,6 +151,11 @@ expect("strong: an old bundle plays without", b.denoise_strong, false)
 expect("strong: not a boolean", t.complete({ denoise_strong = "yes" }, {}).denoise_strong, false)
 expect("strong: a change is a change", t.status({ denoise_strong = false }, { denoise_strong = true }, false), "changed")
 expect("strong: not a project's", t.status({ denoise_strong = false }, { denoise_strong = true }, true), "changed")
+-- The temporal denoise on or off (denoise): a clip's own kept; a bundle from before it plays as the session does
+expect("denoise: its own kept", t.complete({ view = "wide", denoise = false }, { view = "normal", denoise = true }).denoise, false)
+expect("denoise: an old bundle plays as the session", t.complete({ view = "wide" }, { view = "normal", denoise = false }).denoise, false)
+expect("denoise: not a boolean", t.complete({ denoise = "no" }, { denoise = true }).denoise, true)
+expect("denoise: a change is a change", t.status({ denoise = true }, { denoise = false }, false), "changed")
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -234,8 +234,9 @@ function deriveItems(view) {
       const mv = probe && probe.movie;
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
-      // Its preview's picture, else what the camera made for its own quick look (LRF, THM)
-      it.thumbPath = it.preview || it.thumb || null;
+      // Its preview's picture, else what the camera made for its own quick look (LRF, THM); an empty preview (its
+      // picture still to come): the camera's, else its dark frame
+      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || null;
       it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
       it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
@@ -965,10 +966,30 @@ function renderEmpty() {
   $("bodyrow").hidden = !S.root;
   if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => '<button type="button" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="nm">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></button>').join("") + '</div>' : "";
 }
+// The folders shown now, on disk (Anton, 2026-11-10): the clip previews' pictures are made there first. Footage: the
+// folders of its empty previews under the folder open; Originals: the clips' own folders there
+let FOCUS_KEY = null;
+function sendFocus() {
+  if (S.view !== "footage" && S.view !== "sources") return;
+  const path = S.path.join("/");
+  const d = DATA[S.view];
+  const key = S.view + "|" + path + "|" + (d && d.items ? d.items.length : 0);
+  if (key === FOCUS_KEY) return;
+  FOCUS_KEY = key;
+  const dirs = new Set();
+  for (const it of under(path)) {
+    if (it.kind !== "clip") continue;
+    const p = S.view === "footage" ? (it.draft ? it.preview : null) : it.path;
+    if (p) dirs.add(p.replace(/[\\/][^\\/]*$/, ""));
+    if (dirs.size >= 50) break;
+  }
+  invoke("set_focus", { dirs: Array.from(dirs) }).catch(() => { /* not wanted: the order only */ });
+}
 function renderAll() {
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
   buildFacets();
   renderEmpty(); renderTop(); renderMain(); renderSide(); renderFilters(); renderSugg();
+  sendFocus();
   if (id) { const e = $(id); if (e) { e.focus(); try { if (pos != null) e.setSelectionRange(pos, pos); } catch (_) { /* */ } } }
 }
 function renderQueueOnly() {
@@ -1710,9 +1731,12 @@ async function poll() {
     if (S.root) await loadProject(); else renderAll();
   }
   // Files changed in the project's folder or its locations (the player saving marks, moments, photos; Finder): read
-  // again once they've settled, unless a batch is running (its end reads it again)
-  if (S.root && s.changes !== S.changes && s.quiet_ms > 800 && !S.refreshing && !s.jobs.some((j) => j.state === "running")) {
+  // again once they've settled; while a batch runs (changes all the time: clip previews coming one by one), every 4 s
+  const batchRuns = s.jobs.some((j) => j.state === "running");
+  const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
+  if (S.root && s.changes !== S.changes && due && !S.refreshing) {
     S.changes = s.changes;
+    S.lastRefresh = Date.now();
     S.refreshing = true;
     refresh().finally(() => { S.refreshing = false; });
   }
@@ -1725,6 +1749,20 @@ async function poll() {
   }
   renderQueueOnly();
   $("ask").hidden = !s.close_asked;
+  renderMoving(s.moving);
+}
+
+// Move the project…: how far the copy is (a move on one disk is a rename, done at once)
+function renderMoving(m) {
+  $("moving").hidden = !m;
+  if (!m) return;
+  $("movingTo").textContent = "To " + m.to;
+  const pct = m.total > 0 ? Math.min(100, (m.done / m.total) * 100) : 0;
+  $("movingBar").firstElementChild.style.width = pct.toFixed(1) + "%";
+  $("movingBar").setAttribute("aria-valuenow", Math.round(pct));
+  $("movingText").textContent = m.total > 0
+    ? (m.done > 0 ? sizeText(m.done) : "0 B") + " of " + sizeText(m.total) + " copied (" + Math.floor(pct) + " %)" + (m.current ? " · " + m.current : "") + ". Another disk: each folder is copied, then removed here."
+    : "Moving…";
 }
 
 // ---------- doing ----------
@@ -1902,7 +1940,11 @@ document.addEventListener("click", async (e) => {
     }
     case "moveproject": {
       S.menu = false; S.sheet = null; renderSheet(); renderTop();
+      // The page polls how far it is meanwhile, more often than usual
+      const fast = setInterval(poll, 250);
+      // Its tasks wait meanwhile, then go on from the new place
       try { const r = await invoke("move_project"); if (r) { toast("The project is now in " + r); return poll(); } } catch (er) { showError(String(er)); }
+      finally { clearInterval(fast); renderMoving(null); }
       return;
     }
     default: return;

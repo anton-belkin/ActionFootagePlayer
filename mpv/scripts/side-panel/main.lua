@@ -1064,13 +1064,17 @@ local function transform_part(u, x, w, y)
     y = u:caption(x, w, y - 2 * s, g.chromatic_skip and "Skipped on this screen (Performance & Quality): exports and photos have it"
         or "The water's color fringes, where the lens is under water")
 
-    -- The temporal denoise: on or off (Ctrl+p, this computer's); how much of it this computer does is Performance &
-    -- Quality's, where Off leaves the switch nothing to turn on
+    -- The temporal denoise: on or off (Ctrl+p, the clip's: kept with its transform, off where it harms, as on the
+    -- water's surface); how much of it this computer does is Performance & Quality's, where Off leaves it out
     y = u:heading(x, w, y + 8 * s, "Temporal denoise", keys["script-binding gyroflow/still"])
     local none = g.temporal_denoise == "off"
-    y = u:switch(x, w, y, "still", "Clean the noise", g.still, "script-binding gyroflow/still", nil, none)
+    local saved_denoise = nil
+    if saved and type(saved.denoise) == "boolean" then saved_denoise = saved.denoise end
+    local denoise_on = g.still
+    if type(g.denoise) == "boolean" then denoise_on = g.denoise end
+    y = u:switch(x, w, y, "still", "Clean the noise", not none and denoise_on, "script-binding gyroflow/still", nil, none, saved_denoise)
     local gpu = type(g.gpu) == "table"
-    y = u:caption(x, w, y - 2 * s, none and "Off on this computer (Performance & Quality)"
+    y = u:caption(x, w, y - 2 * s, none and ("Off on this computer (Performance & Quality)" .. (denoise_on and "" or "; off for this clip too"))
         or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows"
         or "The paused frame from the frames around it, moved onto it")
     -- Stronger: the clip's (its transform), on the GPU path

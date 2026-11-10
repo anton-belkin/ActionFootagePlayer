@@ -67,6 +67,14 @@ pub fn is_file(path: &Path) -> bool {
     match file(path) { Some(f) => f.is_some_and(|f| !f.dir), None => path.is_file() }
 }
 
+/// A file's size (None: no such file), from the catalog when it has the place
+pub fn size(path: &Path) -> Option<u64> {
+    match file(path) {
+        Some(f) => f.filter(|f| !f.dir).map(|f| f.size),
+        None => std::fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.len()),
+    }
+}
+
 /// What's inside a file (its link, a sidecar's marks and tags), as last read
 pub fn meta(path: &Path) -> Option<Option<serde_json::Value>> { file(path).map(|f| f.and_then(|f| f.meta)) }
 

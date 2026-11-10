@@ -75,6 +75,10 @@ struct Job {
     failures: Vec<(String, String)>,
     /// What the batch left out, and why (Stabilize optically: clips with their own motion data, a lens not known...)
     left_out: Vec<(String, String)>,
+    /// The clips Stabilize optically has made (its status' `made_paths`): left out of it when it runs again after
+    /// stepping aside (a move of the project)
+    #[serde(skip)]
+    made_paths: Vec<String>,
     #[serde(skip)]
     request: Value,
 }
@@ -87,6 +91,8 @@ struct Running {
     started: Instant,
     stop_asked: Option<Instant>,
     awake: Option<Child>,
+    // Stopped to let another job run first, to be queued again
+    yielding: bool,
 }
 
 #[derive(Default)]
@@ -101,6 +107,20 @@ struct Inner {
     pending_open: VecDeque<PathBuf>,
     // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
     watch: Option<Watch>,
+    // A project being moved: its tasks wait (start_job passes them over), then run from its new place
+    held: Option<String>,
+    // The project's own files being moved (Move the project…): the page shows how far it is
+    moving: Option<Moving>,
+}
+
+// How far a move of the project's files is: bytes copied of all (a move on one disk is a rename: nothing to count),
+// the file being copied
+#[derive(Serialize, Clone, Default)]
+struct Moving {
+    to: String,
+    done: u64,
+    total: u64,
+    current: String,
 }
 
 // The file system's own notices (FSEvents, ReadDirectoryChangesW, inotify) for the project's folder and its locations:
@@ -368,13 +388,19 @@ fn log_error(log: &Path) -> Option<String> {
 }
 
 fn start_job(inner: &mut Inner) {
-    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting) else { return };
+    let held = inner.held.clone();
+    let Some(job) = inner.jobs.iter_mut().find(|j| j.state == JobState::Waiting && Some(&j.project) != held.as_ref()) else { return };
     let dir = jobs_dir().join(job.id.to_string());
     let request = dir.join("request.json");
     let log = dir.join("log.txt");
     let mut req = job.request.clone();
     req["status"] = json!(dir.join("status.json"));
     req["stop"] = json!(dir.join("stop"));
+    // The folders the Library shows now, to make first (set_focus keeps them)
+    req["focus"] = json!(jobs_dir().join("focus.json"));
+    // A job run again (one that stepped aside): what its last run said isn't this one's
+    let _ = std::fs::remove_file(dir.join("status.json"));
+    let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
         .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log) });
@@ -385,7 +411,7 @@ fn start_job(inner: &mut Inner) {
                 Command::new("/usr/bin/caffeinate").args(["-i", "-w", &child.id().to_string()])
                     .stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
             } else { None };
-            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake });
+            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake, yielding: false });
         }
         Err(e) => {
             job.state = JobState::Failed;
@@ -411,6 +437,9 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
             Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
         }).collect();
     }
+    if let Some(f) = st.get("made_paths").and_then(Value::as_array) {
+        job.made_paths = f.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    }
     if let Some(f) = st.get("left_out").and_then(Value::as_array) {
         job.left_out = f.iter().filter_map(|p| {
             let p = p.as_array()?;
@@ -421,6 +450,16 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
 }
 
 fn tick(inner: &mut Inner) {
+    // Clip previews' pictures, made for as long as it takes, step aside for any other job: stopped after the one being
+    // made, then queued again after it (the ones left are found again by their links)
+    if let Some(run) = inner.running.as_mut() {
+        let finishing = inner.jobs.iter().any(|j| j.id == run.id && j.kind == "clips-finish");
+        if finishing && run.stop_asked.is_none() && inner.jobs.iter().any(|j| j.state == JobState::Waiting && j.kind != "clips-finish") {
+            let _ = std::fs::write(run.dir.join("stop"), b"");
+            run.stop_asked = Some(Instant::now());
+            run.yielding = true;
+        }
+    }
     if let Some(run) = inner.running.as_mut() {
         let id = run.id;
         let exited = run.child.try_wait().ok().flatten();
@@ -453,6 +492,21 @@ fn tick(inner: &mut Inner) {
             finished = exited.is_some();
         }
         if finished {
+            if run.yielding {
+                if let Some(i) = inner.jobs.iter().position(|j| j.id == id) {
+                    let mut job = inner.jobs.remove(i);
+                    job.state = JobState::Waiting;
+                    (job.done, job.total, job.failed, job.made, job.fraction, job.current, job.message) = (0, 0, 0, None, None, None, None);
+                    job.failures.clear();
+                    job.left_out.clear();
+                    // Stabilize optically again: the clips it made already aren't made again
+                    if job.kind == "optical" && !job.made_paths.is_empty() {
+                        let made = std::mem::take(&mut job.made_paths);
+                        if let Some(c) = job.request.get_mut("clips").and_then(Value::as_array_mut) { c.retain(|p| !p.as_str().is_some_and(|p| made.iter().any(|m| m == p))); }
+                    }
+                    inner.jobs.push(job);
+                }
+            }
             // What a batch made, and the clips it looked at, into the catalog: a look at everything
             seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
             if let Some(mut run) = inner.running.take() {
@@ -495,6 +549,7 @@ struct Snapshot {
     // Links whose original isn't where they say (moments, clip previews, exports, photos), counted from the catalog;
     // null: not known
     missing: Option<u64>,
+    moving: Option<Moving>,
 }
 
 #[tauri::command]
@@ -532,6 +587,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         quiet_ms,
         catalog,
         missing,
+        moving: inner.moving.clone(),
     }
 }).await.map_err(|e| e.to_string())
 }
@@ -825,7 +881,7 @@ async fn clear_cache(app: tauri::AppHandle, key: String) -> Result<(), String> {
 // The project's own files moved from `root` to `dest`: Project.afproject and its _ folders. The clips and their own
 // files stay: the old folder becomes a location at the top unless the project had locations, whose paths relative to
 // the project are written again for its new place. Problems writing the pointers are returned
-fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
+fn move_to(root: &Path, dest: &Path, progress: &dyn Fn(Moving)) -> Result<Vec<String>, String> {
     if dest == root { return Ok(vec![]); }
     if dest.join(PROJECT_FILE).exists() { return Err(format!("{} has a project already", dest.display())); }
     if dest.starts_with(root) { return Err("Choose a folder outside the project's".into()); }
@@ -844,15 +900,23 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     project_id(root)?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();
-    for name in [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED] {
+    let names: Vec<&str> = [PROJECT_FILE, "_Moments", "_Clips", "_Stills", "_Exports", "_Renders", "_Cache", index::GENERATED].into_iter().filter(|n| root.join(n).exists()).collect();
+    // On another disk they're copied: how much, for the page's bar (counted once a rename fails)
+    let mut state = Moving { to: dest.display().to_string(), ..Default::default() };
+    let mut counted = false;
+    progress(state.clone());
+    for name in &names {
         let from = root.join(name);
-        if !from.exists() { continue; }
         let to = dest.join(name);
         if std::fs::rename(&from, &to).is_err() {
+            if !counted {
+                state.total = names.iter().map(|n| tree_size(&root.join(n))).sum();
+                counted = true;
+            }
             // Another disk: copied, then the old one removed
-            let ok = Command::new(if cfg!(windows) { "xcopy" } else { "/bin/cp" }).args(if cfg!(windows) { vec!["/E", "/I", "/H", "/K"] } else { vec!["-Rp"] })
-                .arg(&from).arg(&to).status().map(|s| s.success()).unwrap_or(false);
-            if !ok { return Err(format!("couldn't move {} (moved so far: {})", from.display(), moved.join(", "))); }
+            if let Err(e) = copy_tree(&from, &to, &mut state, progress) {
+                return Err(format!("couldn't move {}: {e} (moved so far: {})", from.display(), if moved.is_empty() { "nothing".to_string() } else { moved.join(", ") }));
+            }
             let _ = if from.is_dir() { std::fs::remove_dir_all(&from) } else { std::fs::remove_file(&from) };
         }
         moved.push(name.to_string());
@@ -866,12 +930,119 @@ fn move_to(root: &Path, dest: &Path) -> Result<Vec<String>, String> {
     Ok(locations::write_pointers(dest, &after, &[], &mounts))
 }
 
+// The bytes of the files under `p` (or of `p`)
+fn tree_size(p: &Path) -> u64 {
+    let Ok(m) = std::fs::symlink_metadata(p) else { return 0 };
+    if !m.is_dir() { return m.len(); }
+    std::fs::read_dir(p).map(|rd| rd.flatten().map(|e| tree_size(&e.path())).sum()).unwrap_or(0)
+}
+
+// `from` (a file or a folder) copied to `to`, the bytes counted into `state` as they're written (a render can be
+// gigabytes over the network: counted in pieces, not per file), each file's permissions and modification time kept
+fn copy_tree(from: &Path, to: &Path, state: &mut Moving, progress: &dyn Fn(Moving)) -> Result<(), String> {
+    use std::io::{ Read, Write };
+    let m = std::fs::symlink_metadata(from).map_err(|e| e.to_string())?;
+    if m.is_dir() {
+        std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
+        let mut entries: Vec<_> = std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))?.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for e in entries {
+            let Some(name) = e.file_name() else { continue };
+            copy_tree(&e, &to.join(name), state, progress)?;
+        }
+        return Ok(());
+    }
+    if m.file_type().is_symlink() {
+        #[cfg(unix)]
+        { let target = std::fs::read_link(from).map_err(|e| e.to_string())?; return std::os::unix::fs::symlink(target, to).map_err(|e| format!("{}: {e}", to.display())); }
+        #[cfg(not(unix))]
+        { return Ok(()); }
+    }
+    state.current = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    progress(state.clone());
+    let mut src = std::fs::File::open(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    let mut dst = std::fs::File::create(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut buf = vec![0u8; 4 << 20];
+    let mut last = Instant::now();
+    loop {
+        let n = src.read(&mut buf).map_err(|e| format!("{}: {e}", from.display()))?;
+        if n == 0 { break; }
+        dst.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", to.display()))?;
+        state.done += n as u64;
+        if last.elapsed() > Duration::from_millis(200) { progress(state.clone()); last = Instant::now(); }
+    }
+    dst.flush().map_err(|e| e.to_string())?;
+    let _ = dst.set_permissions(m.permissions());
+    if let Ok(t) = m.modified() { let _ = dst.set_modified(t); }
+    drop(dst);
+    progress(state.clone());
+    Ok(())
+}
+
+// Asked where, then moved in the background: the page polls snapshot's `moving` for its bar meanwhile. Its tasks don't
+// stop it (Anton, 2026-11-10: nothing waits on the task list): the one running is stopped after what it's making and
+// they all wait, the files move, and they run again from the new place (the running one from the start: what it made
+// is found there)
 #[tauri::command]
-fn move_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option<String>, String> {
+async fn move_project(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: move the project when they're done".into()); }
-    let Some(dest) = rfd::FileDialog::new().set_title("Move the project's own files to this folder").pick_folder() else { return Ok(None) };
-    let problems = move_to(&root, &dest)?;
+    if shared.lock().unwrap().moving.is_some() { return Err("The project is being moved already".into()); }
+    let Some(dest) = rfd::AsyncFileDialog::new().set_title("Move the project's own files to this folder").pick_folder().await else { return Ok(None) };
+    let dest = dest.path().to_path_buf();
+    let s = shared.inner().clone();
+    shared.lock().unwrap().moving = Some(Moving { to: dest.display().to_string(), ..Default::default() });
+    let (r, d) = (root.clone(), dest.clone());
+    let old = root.display().to_string();
+    let done = tauri::async_runtime::spawn_blocking(move || {
+        {
+            let mut inner = s.lock().unwrap();
+            inner.held = Some(old.clone());
+            let stop = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+            if stop {
+                let run = inner.running.as_mut().unwrap();
+                let _ = std::fs::write(run.dir.join("stop"), b"");
+                run.stop_asked = Some(Instant::now());
+                run.yielding = true;
+            }
+        }
+        // Until it has ended (tick kills it after STOP_TIMEOUT)
+        loop {
+            {
+                let mut inner = s.lock().unwrap();
+                tick(&mut inner);
+                let ours = inner.running.as_ref().is_some_and(|r| inner.jobs.iter().any(|j| j.id == r.id && j.project == old));
+                if !ours { break; }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let report = |m: Moving| { s.lock().unwrap().moving = Some(m); };
+        let moved = move_to(&r, &d, &report);
+        let mut inner = s.lock().unwrap();
+        inner.held = None;
+        if moved.is_ok() {
+            let new = d.display().to_string();
+            for j in inner.jobs.iter_mut().filter(|j| j.project == old && !j.state.finished()) {
+                j.project = new.clone();
+                j.request["project"] = json!(new);
+                // Paths it was kept to, in the project's folder, move with it (Stabilize optically's clips: those of a
+                // location inside the project's folder)
+                for key in ["only", "clips"] {
+                    if let Some(only) = j.request.get_mut(key).and_then(Value::as_array_mut) {
+                        for o in only.iter_mut() {
+                            // Under the folder itself, not one whose name begins the same ("Trip" and "Trip 2")
+                            let rest = o.as_str().and_then(|x| x.strip_prefix(&old)).filter(|r| r.is_empty() || r.starts_with('/') || r.starts_with('\\'));
+                            if let Some(rest) = rest { *o = json!(format!("{new}{rest}")); }
+                        }
+                    }
+                }
+            }
+            inner.project = Some(d.clone());
+        }
+        tick(&mut inner);
+        moved
+    }).await.map_err(|e| e.to_string());
+    shared.lock().unwrap().moving = None;
+    let problems = done??;
     shared.lock().unwrap().project = Some(dest.clone());
     remember(&app, &dest);
     Ok(Some(if problems.is_empty() { dest.display().to_string() } else { format!("{} ({})", dest.display(), problems.join("; ")) }))
@@ -933,7 +1104,6 @@ async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Val
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
-    if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -952,7 +1122,6 @@ async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> 
 #[tauri::command]
 async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: mend when they're done".into()); }
     let tool = link_tool();
     let out = tauri::async_runtime::spawn_blocking(move || {
         let issues = checks::missing(&root).ok_or("A source of the project isn't reachable now: its clips would all look gone")?;
@@ -977,7 +1146,6 @@ async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_o
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete renders when they're done".into()); }
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
     Ok(json!({ "deleted": n, "problems": problems }))
 }).await.map_err(|e| e.to_string())?
@@ -1061,7 +1229,6 @@ async fn take_in_plan(shared: State<'_, Shared>, other: String, place: String) -
 async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
-    if busy(&shared) { return Err("Jobs are in the queue: take it in when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
@@ -1114,7 +1281,6 @@ async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: rename when they're done".into()); }
     let name = good_name(&name)?;
     let from = PathBuf::from(&path);
     // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
@@ -1222,7 +1388,6 @@ async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) 
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    if busy(&shared) { return Err("Jobs are in the queue: delete when they're done".into()); }
     let footage = index::footage_dirs(&root);
     let (mut done, mut problems) = (0usize, Vec::<String>::new());
     let mut went = std::collections::BTreeSet::new();
@@ -1481,7 +1646,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 7] = ["clips", "clips-again", "moments", "photos", "export", "render", "optical"];
+const KINDS: [&str; 8] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical"];
 
 #[tauri::command]
 async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
@@ -1495,7 +1660,8 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let photo = options.get("photo").and_then(Value::as_str).unwrap_or("no").to_string();
     let sdr = options.get("sdr").and_then(Value::as_bool).unwrap_or(false);
     let title = match kind.as_str() {
-        "clips" => "Clip previews".to_string(),
+        "clips" => "Clip previews (empty, to arrange now)".to_string(),
+        "clips-finish" => "Clip previews: their pictures".to_string(),
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
@@ -1519,6 +1685,10 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     if kind == "export" { request["sdr"] = json!(sdr); }
     // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
     // whether new moments are stabilized on their own
+    // Clip previews (Anton, 2026-11-10): empty ones at once (a dark frame with the link inside, all in a few seconds), to
+    // arrange in Footage right away; then a job making their pictures in their places, the folder in view first, out of
+    // the way of any other job
+    if kind == "clips" { request["draft"] = json!(true); }
     if kind == "clips" || kind == "clips-again" {
         let layout = options.get("layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).unwrap_or("tree");
         request["layout"] = json!(layout);
@@ -1543,12 +1713,32 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), left_out: Vec::new(), request,
+        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request,
     };
+    let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
+    if let Some((project, project_name)) = follow {
+        if !inner.jobs.iter().any(|j| !j.state.finished() && j.project == project && j.kind == "clips-finish") {
+            inner.next_id += 1;
+            let request = json!({ "kind": "clips-finish", "project": project });
+            let id = inner.next_id;
+            inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request });
+        }
+    }
     tick(&mut inner);
     Ok(())
 }).await.map_err(|e| e.to_string())?
+}
+
+// The folders the Library shows now (absolute, on disk): a clip previews' pictures job makes theirs first
+#[tauri::command]
+fn set_focus(dirs: Vec<String>) -> Result<(), String> {
+    let file = jobs_dir().join("focus.json");
+    let _ = std::fs::create_dir_all(jobs_dir());
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json!({ "dirs": dirs }).to_string()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1693,7 +1883,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
+        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -1811,7 +2001,7 @@ mod tests {
         std::fs::write(trip.join("_Moments/M.afplink.mp4"), b"x").unwrap();
         std::fs::write(trip.join(PROJECT_FILE), br#"{"format":"actionfootage-project","version":1,"settings":{"clips_flat":true}}"#).unwrap();
         let dest = top.join("SSD/Projects/Trip");
-        assert!(move_to(&trip, &dest).unwrap().is_empty());
+        assert!(move_to(&trip, &dest, &|_| {}).unwrap().is_empty());
         // The project's own files moved, the clip and its own file stayed
         assert!(dest.join(PROJECT_FILE).is_file() && dest.join("_Moments/M.afplink.mp4").is_file());
         assert!(!trip.join(PROJECT_FILE).exists() && trip.join("Day 1/A.afp.json").is_file());
@@ -1826,13 +2016,79 @@ mod tests {
         assert_eq!(v["items"][0]["id"], json!("Day 1/A.MP4"));
         // Moved again: its locations follow
         let dest2 = top.join("SSD/Other/Trip");
-        move_to(&dest, &dest2).unwrap();
+        move_to(&dest, &dest2, &|_| {}).unwrap();
         assert_eq!(read_doc(&dest2)["locations"][0]["path"], json!("../../../HDD/Trip"));
-        assert!(move_to(&dest2, &dest2.join("x")).is_err());
+        assert!(move_to(&dest2, &dest2.join("x"), &|_| {}).is_err());
+    }
+
+    #[test]
+    fn copying_counts_the_bytes() {
+        let top = temp("copy");
+        let from = top.join("_Renders");
+        std::fs::create_dir_all(from.join("a/b")).unwrap();
+        std::fs::write(from.join("a/b/big.mov"), vec![7u8; 9 << 20]).unwrap();
+        std::fs::write(from.join("small.mov"), b"12345").unwrap();
+        let total = tree_size(&from);
+        assert_eq!(total, (9 << 20) + 5);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut state = Moving { total, ..Default::default() };
+        copy_tree(&from, &top.join("SSD/_Renders"), &mut state, &|m: Moving| seen.borrow_mut().push(m.done)).unwrap();
+        assert_eq!(state.done, total);
+        assert_eq!(std::fs::read(top.join("SSD/_Renders/a/b/big.mov")).unwrap().len(), 9 << 20);
+        assert_eq!(std::fs::read(top.join("SSD/_Renders/small.mov")).unwrap(), b"12345");
+        let seen = seen.into_inner();
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]) && *seen.last().unwrap() == total);
+        let t = |p: &Path| std::fs::metadata(p).unwrap().modified().unwrap();
+        assert_eq!(t(&from.join("small.mov")), t(&top.join("SSD/_Renders/small.mov")));
     }
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a
     // trip with Project.afproject in it). Without them it's skipped
+    // Stabilize optically stepping aside (the project being moved): stopped, held, queued again without the clips it
+    // made already
+    #[cfg(unix)]
+    #[test]
+    fn an_optical_batch_steps_aside() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("afl-optical-aside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tool = dir.join("gyroflow-optical");
+        std::fs::write(&tool, "#!/bin/sh\n/usr/bin/python3 -I - \"$2\" <<'EOF'\n\
+import json, os, sys, time\n\
+req = json.load(open(sys.argv[1]))\n\
+st = {'state': 'running', 'done': 1, 'total': 2, 'made': 1, 'current': 'B.MP4', 'made_paths': [req['clips'][0]], 'left_out': [], 'failures': []}\n\
+open(req['status'], 'w').write(json.dumps(st))\n\
+while not os.path.exists(req['stop']): time.sleep(0.05)\n\
+st['state'] = 'stopped'; open(req['status'], 'w').write(json.dumps(st))\n\
+EOF\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _one = OPTICAL_TOOL.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AFL_OPTICAL", &tool);
+        let project = dir.to_string_lossy().into_owned();
+        let mut inner = Inner::default();
+        inner.jobs.push(Job {
+            id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: project.clone(), project_name: "trip".into(),
+            state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+        });
+        let t0 = Instant::now();
+        while inner.jobs[0].made_paths.is_empty() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
+        // As move_project asks it
+        inner.held = Some(project.clone());
+        let run = inner.running.as_mut().unwrap();
+        let _ = std::fs::write(run.dir.join("stop"), b"");
+        run.stop_asked = Some(Instant::now());
+        run.yielding = true;
+        while inner.running.is_some() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
+        std::env::remove_var("AFL_OPTICAL");
+        let job = &inner.jobs[0];
+        assert_eq!(job.state, JobState::Waiting);
+        assert!(inner.running.is_none(), "held while the project moves");
+        assert_eq!(job.request["clips"], json!(["/x/B.MP4"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn lens_types_once_each() {
         let text = "{\"path\":\"/a\",\"camera\":\"DJI OsmoAction6\",\"types\":[[\"wide\",\"Wide\"],[\"normal\",\"Normal\"]]}\nnoise\n{\"path\":\"/b\",\"types\":[[\"normal\",\"Normal\"],[\"linear\",\"Linear\"]]}\n";
@@ -1844,10 +2100,13 @@ mod tests {
 
     // Stabilize optically's job as the Library runs it: gyroflow-optical (here a stand-in that writes what the real one
     // does) started with the request, its status read as it goes, what it left out kept with the job
+    static OPTICAL_TOOL: Mutex<()> = Mutex::new(());
+
     #[cfg(unix)]
     #[test]
     fn an_optical_batch() {
         use std::os::unix::fs::PermissionsExt;
+        let _one = OPTICAL_TOOL.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("afl-optical-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1868,7 +2127,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
         });
         let t0 = Instant::now();
         let mut saw_running = false;
@@ -1897,7 +2156,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit
