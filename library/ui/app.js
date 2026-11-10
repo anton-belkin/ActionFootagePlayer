@@ -810,7 +810,7 @@ function renderSide() {
 function opticalPlan(c) {
   // A lens chosen makes the clips that have a project again: that's what choosing it is for
   const redo = S.opticalRedo || S.opticalLens !== "keep";
-  const out = { go: [], paths: [], camOf: [], typeOf: [], all: [], allTypeOf: [], own: 0, project: 0, s360: 0, lens: 0, redo: 0, cams: {} };
+  const out = { go: [], paths: [], camOf: [], typeOf: [], all: [], allTypeOf: [], own: 0, project: 0, s360: 0, lens: 0, lensTyped: 0, redo: 0, cams: {} };
   for (const it of c.selItems) {
     if (it.kind !== "clip") continue;
     const p = PROBES[it.path];
@@ -822,7 +822,7 @@ function opticalPlan(c) {
     if (it.gyroflow && !redo) { out.project++; continue; }
     // A lens type chosen may give a lens the camera's mode doesn't (vs-gyroflow's curated list)
     const typed = r && (r.types || []).length && (r.type || r.recorded || lensTypeOf(it));
-    if (p && p.mode == null && p.lens === "" && (S.opticalLens === "keep" || S.opticalLens === "recorded") && !typed) { out.lens++; continue; }
+    if (p && p.mode == null && p.lens === "" && (S.opticalLens === "keep" || S.opticalLens === "recorded") && !typed) { out.lens++; if (r && (r.types || []).length) out.lensTyped++; continue; }
     if (it.gyroflow) out.redo++;
     out.go.push(it.id);
     out.paths.push(it.path);
@@ -870,7 +870,7 @@ function opticalSection(c) {
   const rec = count((r) => recordedText(r, tl));
   const own = count((r, i) => { if (!r || !(r.types || []).length) return ""; const t = r.type || op.allTypeOf[i]; return t ? tl(t, r.types) : "as recorded: " + recordedText(r, tl); });
   if (S.opticalLens !== "keep" && S.opticalLens !== "recorded" && !types.some((t) => t[0] === S.opticalLens) && !asking) S.opticalLens = "keep";
-  const out = [[op.own, "have motion data the player stabilizes them with"], [op.project, "have a Gyroflow project already (Redo makes it again)"], [op.s360, "are 360°"], [op.lens, "have a lens that isn’t known"]].filter((x) => x[0]);
+  const out = [[op.own, "have motion data the player stabilizes them with"], [op.project, "have a Gyroflow project already (Redo makes it again)"], [op.s360, "are 360°"], [op.lens, "have a lens that isn’t known" + (op.lensTyped ? " (choose its type in Lens)" : "")]].filter((x) => x[0]);
   const n = op.go.length;
   return sec("optical", "Stabilize optically", "clips without motion data",
     (c.any ? '<p>' + esc(n + (n === 1 ? " clip" : " clips") + " to stabilize" + (op.redo ? " (" + op.redo + " made again)" : "") + (out.length ? "; left out: " + out.map((x) => x[0] + " " + x[1]).join(", ") : "")) + '.</p>' : "") +

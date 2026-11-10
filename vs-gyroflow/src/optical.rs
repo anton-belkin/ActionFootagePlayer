@@ -65,6 +65,8 @@ pub struct Facts {
     pub spherical: bool,
     /// The lens: (its label, the profile to give Gyroflow, None when Gyroflow loads it by itself); None: not known
     pub lens: Option<(String, Option<String>)>,
+    /// Its camera has lens types to choose from (lens_pick::lens_types): a lens not known can be given
+    pub has_types: bool,
 }
 
 /// The decision, from what the clip is, the project it has already (made again when `redo`)
@@ -74,6 +76,7 @@ pub fn decide(project: Option<&Path>, redo: bool, facts: &Facts) -> Verdict {
     if facts.own_motion { return Verdict::LeaveOut("it has motion data the player stabilizes it with".into()); }
     match &facts.lens {
         Some((lens, profile)) => Verdict::Stabilize { lens: lens.clone(), profile: profile.clone(), replaces: project.map(Path::to_path_buf) },
+        None if facts.has_types => Verdict::LeaveOut(format!("{}: its lens isn't known (a mode not named yet): choose its type in Lens", facts.camera)),
         None => Verdict::LeaveOut(format!("{}: its lens isn't known (no lens profile for this camera and mode)",
             if facts.camera.is_empty() { "unknown camera" } else { &facts.camera })),
     }
@@ -106,8 +109,8 @@ pub struct LensTypes {
     pub chosen: Option<String>,
     /// The type its camera recorded, where the curated list names that mode
     pub recorded: Option<String>,
-    /// The camera's own number for the mode it recorded (DJI's fov_type), for a camera with types: "Unknown (mode 6)"
-    /// where the list doesn't name it yet
+    /// The camera's own number for the lens mode it recorded (DJI's fov_type, a HERO4's setting), for a camera with
+    /// types: "Unknown (mode 6)" where the list doesn't name it yet
     pub mode: Option<u64>,
 }
 
@@ -127,7 +130,7 @@ pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     Ok(LensTypes {
         chosen: crate::lens_pick::chosen_type(&path),
         recorded: crate::lens_pick::recorded_type(&camera, &path),
-        mode: crate::probe::dji_fov_type(&path),
+        mode: crate::probe::recorded_lens_mode(&path),
         camera, types,
     })
 }
@@ -146,7 +149,8 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
     let lens = lens_of(&path, &input, meta.width, meta.height, meta.fps);
     let (own_motion, reason) = match crate::probe::probe(&path) { Ok(_) => (true, String::new()), Err(e) => (false, e) };
     let spherical = crate::probe::spherical(&path).is_some() || crate::rig::read(&path).is_some();
-    Ok(Facts { camera, own_motion, reason, spherical, lens })
+    let has_types = !crate::lens_pick::lens_types(&camera).is_empty();
+    Ok(Facts { camera, own_motion, reason, spherical, lens, has_types })
 }
 
 /// The decision for a clip on the disk
@@ -431,6 +435,8 @@ mod tests {
         assert!(matches!(decide(None, false, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
         assert!(matches!(decide(Some(proj), true, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
         assert!(matches!(decide(None, false, &facts(false, None)), Verdict::LeaveOut(r) if r.contains("GoPro HERO12 Black: its lens isn't known")));
+        let typed = Facts { has_types: true, ..facts(false, None) };
+        assert!(matches!(decide(None, false, &typed), Verdict::LeaveOut(r) if r.ends_with("choose its type in Lens")));
         assert_eq!(decide(None, false, &facts(false, Some("in the file"))), Verdict::Stabilize { lens: "in the file".into(), profile: None, replaces: None });
         assert_eq!(decide(Some(proj), true, &facts(false, Some("in the file"))), Verdict::Stabilize { lens: "in the file".into(), profile: None, replaces: Some(proj.to_path_buf()) });
         let mut f = facts(false, Some("in the file"));
