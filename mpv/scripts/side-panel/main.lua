@@ -53,7 +53,7 @@ local PROJECTIONS = { { "linear", "Linear", "straight lines" }, { "stereographic
                       { "equidistant", "Fisheye 2", "equidistant" }, { "equisolid", "Fisheye 3", "equisolid" },
                       { "orthographic", "Fisheye 4", "orthographic" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
-local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
+local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" }, { "height", "Height (drone)" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 

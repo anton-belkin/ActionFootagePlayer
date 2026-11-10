@@ -654,14 +654,15 @@ shows it bottom left. Each field shows when the clip has it:
 | `water` | *In water* / *Out of water*: the barometer's flag, or the camera's own underwater confidence, which comes from the picture and so also works in a dive housing. The lens's refraction follows it (Stabilization: Lens → Auto) |
 | `pressure` | hPa, ~100 more per meter of water |
 | `altitude` | the barometer's altitude out of water. It's relative and drifts by meters, so it's a rough guide |
+| `height` | a drone's height above where it took off |
 | `gps` | position, when the camera has a fix (DJI: a remote or Mimo connected) |
 | `speed` | ground speed from the GPS (Osmo 360 on an e-bike: the bike's) |
 | `temperature` | Osmo 360's image sensor, not the water |
 | `heartrate` | from a device paired with an Osmo 360 |
-| `exposure` | ISO, shutter, aperture, white balance |
+| `exposure` | ISO, shutter, aperture, EV (when it isn't 0), white balance |
 
 Without `fields=`, each clip shows what it has of `depth`, `water`, `gps` and `speed`, and `exposure` only when it
-has none of them: a DJI clip shows the depth and whether the camera is in the water, a GoPro one the position and
+has none of them (a drone's: `height`, `gps` and `speed`): a DJI clip shows the depth and whether the camera is in the water, a GoPro one the position and
 speed once the GPS has a fix (GoPro has no barometer), and a GoPro without GPS (HERO12 Black), or with it off, the
 exposure. Exposure isn't shown next to the others by default: it's a long line that changes all the time, so it's
 there for the asking (`fields=`, or the right-click menu). A `fields=` you set is shown as it is, in every clip, and
@@ -677,11 +678,13 @@ Models: the Osmo Action 6 (its schema isn't published; the layout was worked out
 sample clips (HERO5 to 8, MAX, Fusion), against what telemetry-parser reads from them. Clips from other cameras, and
 files that aren't from a camera at all (exports included), show nothing.
 
-**DJI's drones** (Mini, Air, Mavic) write each frame's camera data as text instead: ISO, shutter, EV, GPS, height, as a
-subtitle track in the video or an `.SRT` next to it, which mpv loads with the clip. mpv would show it as subtitles,
-in big letters over the picture; here a subtitle track that reads as a camera's data is off when a clip starts, and
-`v`, or Show the camera's text in the side panel (Output, and Telemetry), shows it. Other subtitles play as usual,
-and `v` turns them off and on too. That text isn't read into the fields above yet.
+**DJI's drones** (Mini, Air, Mavic) write each frame's camera data as text instead: ISO, shutter, aperture, EV, white
+balance, GPS, height, as an `.SRT` next to the clip (the Mini 4 Pro's) or a subtitle track in it. It's read into the
+fields above, the speed worked out from the GPS (over a second) where the line doesn't give it. mpv also loads that
+text as subtitles and would show it in big letters over the picture; here a subtitle track that reads as a camera's
+data is off when a clip starts, and `v`, or Show the camera's text in the side panel (Output), shows it as it is.
+Other subtitles play as usual, and `v` turns them off and on too. Checked on a Mini 4 Pro's clips; the
+comma-separated lines of the older drones (Mavic Air 2, Mavic 2) from their published format only.
 
 To look at what a clip recorded, or to work out another model's layout:
 

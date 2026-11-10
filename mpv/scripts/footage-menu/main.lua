@@ -51,7 +51,7 @@ local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", 
 -- How much temporal denoise (Ctrl+p) this computer does: gyroflow.conf's temporal_denoise
 local DENOISE_LEVELS = { { "full", "Full: 5 frames on each side" }, { "light", "Light: 3 frames, lighter on the GPU" }, { "off", "Off on this computer" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
-local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
+local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" }, { "height", "Height (drone)" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }

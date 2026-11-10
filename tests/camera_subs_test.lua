@@ -31,6 +31,50 @@ expect("words that name two", telemetry.camera_text("I said the ISO is fine, giv
 expect("nothing", telemetry.camera_text(nil), false)
 expect("empty", telemetry.camera_text(""), false)
 
+-- The text as telemetry: an .SRT of a Mini 4 Pro's lines (made-up values), the drone flying north at 10 m/s
+local srt = {}
+for i = 0, 59 do
+    local t = i / 30 * 2
+    srt[#srt + 1] = ("%d\n00:00:%02d,%03d --> 00:00:%02d,%03d\n<font size=\"28\">FrameCnt: %d, DiffTime: 66ms\n2025-01-01 12:00:00.000\n"
+        .. "[iso: %d] [shutter: 1/2000.0] [fnum: 1.7] [ev: %s] [color_md: hlg] [focal_len: 24.00] [latitude: %.6f] "
+        .. "[longitude: 20.000000] [rel_alt: %.3f abs_alt: 400.000] [ct: 5300] </font>\n")
+        :format(i + 1, math.floor(t), math.floor(t * 1000 + 0.5) % 1000, math.floor(t), math.floor(t * 1000 + 0.5) % 1000,
+                i + 1, i < 30 and 100 or 200, i < 30 and "0" or "-0.7", 10 + t * 10 / 111195, 40 + t)
+end
+local entries = telemetry.parse_srt(table.concat(srt, "\n"))
+expect("the .SRT's entries", #entries, 60)
+expect("…their times", entries[31] and math.floor(entries[31].t * 1000 + 0.5), 2000)
+local tel = telemetry.from_text(entries, "DJI Mini4 Pro")
+expect("telemetry from it", tel ~= nil, true)
+tel = tel or { values = {} }
+local function at(name, t) return telemetry.at(tel.values[name], t) end
+expect("the model", tel.model, "DJI Mini4 Pro")
+expect("a drone's fields", tel.defaults and table.concat(tel.defaults, ","), "height,gps,speed")
+expect("ISO", at("iso", 0.5), 100)
+expect("ISO later", at("iso", 3), 200)
+expect("shutter", at("exposure_time", 1)[2], 2000)
+expect("aperture", at("f_number", 1)[1], 170)
+expect("EV", at("ev", 3), -0.7)
+expect("white balance", at("white_balance_k", 1), 5300)
+expect("latitude", at("latitude_deg", 0), 10)
+expect("longitude", at("longitude_deg", 3), 20)
+expect("height", at("height_m", 2), 42)
+local v = at("speed_ms", 3)
+expect("speed from the GPS, ~10 m/s", v and math.abs(v - 10) < 0.3, true)
+expect("no speed in the first second", at("speed_ms", 0.5), nil)
+
+-- The other way DJI writes it (Mavic Air 2, Mavic 2): the line's own height and speed
+local air = telemetry.from_text({ { t = 0, text = EMBEDDED } })
+expect("a comma-separated line", air ~= nil, true)
+air = air or { values = {} }
+expect("…its shutter", telemetry.at(air.values.exposure_time, 0)[2], 1000.15)
+expect("…its aperture", telemetry.at(air.values.f_number, 0)[1], 280)
+expect("…its position, lon and lat", telemetry.at(air.values.latitude_deg, 0), 46.1983)
+expect("…its height", telemetry.at(air.values.height_m, 0), 5.6)
+expect("…its speed", telemetry.at(air.values.speed_ms, 0), 1.2)
+expect("…a model by default", air.model, "DJI drone")
+expect("a film's subtitles aren't telemetry", telemetry.from_text(telemetry.parse_srt("1\n00:00:00,000 --> 00:00:02,500\nHello there.\n")), nil)
+
 -- An MP4 with a video track and two text tracks: the camera's, then a film's
 local dir = os.tmpname()
 os.remove(dir)
@@ -56,6 +100,11 @@ if made == true or made == 0 then
     expect("the film's track", texts[2], "Hello there.")
     expect("…not the camera's", telemetry.camera_text(texts[2]), false)
     expect("no file", telemetry.text_samples(dir .. "/none.mp4", 3), nil)
+    local track = telemetry.text_track(mp4, 1) or {}
+    expect("the camera's track, all its samples", #track, 2)
+    expect("…with their times", track[2] and track[2].t, 0.5)
+    local from = telemetry.from_text(track)
+    expect("…as telemetry", from and telemetry.at(from.values.iso, 0.7), 100)
 else
     print("ffmpeg didn't make the MP4: its part skipped")
 end

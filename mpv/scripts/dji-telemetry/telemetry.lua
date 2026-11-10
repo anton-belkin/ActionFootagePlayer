@@ -684,6 +684,165 @@ function M.camera_text(text)
     return n >= 3
 end
 
+-- A camera's text as telemetry: DJI's drones write a line (or a few) per frame, the .SRT beside the clip or a text
+-- track in it, in one of two ways:
+--   key: value in brackets (Mini 2 and later, Air 2S, Air 3, Mavic 3): "[iso: 110] [shutter: 1/5000.0] [fnum: 1.7]
+--     [ev: 0] [ct: 5276] [latitude: 45.8] [longitude: 6.6] [rel_alt: 46.900 abs_alt: 1406.201]" (fnum in hundredths
+--     on the Mini 2: "[fnum : 280]"; and its "longtitude")
+--   comma-separated (Mavic Air 2, Mavic 2, Phantom 4): "F/2.8, SS 1000.15, ISO 100, EV 0, GPS (lon, lat, n), D 12m,
+--     H 5.6m, H.S 1.2m/s, V.S 0.0m/s", or "GPS(lon,lat,n) BAROMETER:1.9 ISO:100 Shutter:60 EV:0 Fnum:F2.2"
+-- The values, by the names the fields read: iso, exposure_time { num, den }, f_number { num, den }, ev,
+-- white_balance_k, latitude_deg, longitude_deg, height_m (above the take-off point), speed_ms (the line's, else from
+-- the positions a second apart)
+local function number(s) return s and tonumber(s) end
+
+local function parse_line(text)
+    local v = {}
+    local s = text:gsub("<[^>]*>", " ")
+    local kv = {}
+    for key, value in s:gmatch("([%a_]+)%s*:%s*([%-%+]?[%d%.]+[/%d%.]*)") do kv[key:lower()] = value end
+    local low = s:lower()
+    v.iso = number(kv.iso) or number(s:match("ISO%s+(%d+)"))
+    local shutter = kv.shutter or s:match("SS%s+([%d%.]+)")
+    if shutter then
+        -- "1/5000.0"; a number alone is the denominator ("SS 1000.15", a Phantom's "Shutter:60")
+        local a, b = shutter:match("^([%d%.]+)/([%d%.]+)$")
+        if a then v.exposure_time = { tonumber(a), tonumber(b) }
+        elseif tonumber(shutter) and tonumber(shutter) > 0 then v.exposure_time = { 1, tonumber(shutter) } end
+    end
+    local f = number(kv.fnum) or number(s:match("F/([%d%.]+)")) or number(s:match("Fnum:%s*F([%d%.]+)"))
+    if f then
+        if f >= 50 then f = f / 100 end
+        v.f_number = { math.floor(f * 100 + 0.5), 100 }
+    end
+    v.ev = number(kv.ev) or number(s:match("EV%s+([%-%+]?[%d%.]+)"))
+    v.white_balance_k = number(kv.ct)
+    local lat, lon = number(kv.latitude), number(kv.longitude or kv.longtitude)
+    if not lat then
+        local a, b = s:match("GPS%s*%(%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)")
+        lon, lat = number(a), number(b)
+    end
+    if lat and lon and not (lat == 0 and lon == 0) then v.latitude_deg, v.longitude_deg = lat, lon end
+    v.height_m = number(kv.rel_alt) or number(s:match("[%s,]H%s+([%-%d%.]+)m")) or number(kv.barometer)
+    v.speed_ms = number(s:match("H%.S%s+([%-%d%.]+)m/s"))
+    if v.speed_ms then v.speed_ms = math.abs(v.speed_ms) end
+    -- Nothing a camera writes: not a line of its data
+    local any = false
+    for _ in pairs(v) do any = true; break end
+    if not any or not M.camera_text(low) then return nil end
+    return v
+end
+
+-- Meters between two positions (degrees)
+local function distance(lat1, lon1, lat2, lon2)
+    local r, p1, p2 = 6371000, math.rad(lat1), math.rad(lat2)
+    local dp, dl = p2 - p1, math.rad(lon2 - lon1)
+    local a = math.sin(dp / 2) ^ 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ^ 2
+    return 2 * r * math.asin(math.min(1, math.sqrt(a)))
+end
+
+-- Telemetry from the lines of a camera's text, { { t = seconds, text = ... } } in time order: { model, values,
+-- defaults = the fields a drone's clip shows } as reader() gives, or nil when no line reads as a camera's data.
+-- pause, when given, is called every few hundred lines (a 10-minute clip's .SRT has 18,000: ~0.7 s)
+local PAUSE_EVERY = 500
+function M.from_text(entries, model, pause)
+    local out = { model = model or "DJI drone", values = {}, defaults = { "height", "gps", "speed" } }
+    local function push(name, t, value)
+        local series = out.values[name]
+        if not series then
+            series = { t = {}, v = {} }
+            out.values[name] = series
+        end
+        local n = #series.t
+        if n == 0 or not same(series.v[n], value) then series.t[n + 1], series.v[n + 1] = t, value end
+    end
+    local track, own_speed = {}, false
+    for i, e in ipairs(entries) do
+        if pause and i % PAUSE_EVERY == 0 then pause() end
+        local v = parse_line(e.text)
+        if v then
+            for name, value in pairs(v) do push(name, e.t, value) end
+            own_speed = own_speed or v.speed_ms ~= nil
+            if v.latitude_deg then track[#track + 1] = { t = e.t, lat = v.latitude_deg, lon = v.longitude_deg } end
+        end
+    end
+    if not next(out.values) then return nil end
+    -- Ground speed from the positions: over a second at least (DJI's are to a meter or so), in 0.1 m/s steps
+    if not own_speed and #track > 1 then
+        local j = 1
+        for i = 2, #track do
+            while j < i and track[i].t - track[j + 1].t >= 1 do j = j + 1 end
+            local dt = track[i].t - track[j].t
+            if dt >= 1 then
+                local ms = distance(track[j].lat, track[j].lon, track[i].lat, track[i].lon) / dt
+                push("speed_ms", track[i].t, math.floor(ms * 10 + 0.5) / 10)
+            end
+        end
+    end
+    return out
+end
+
+-- An .SRT's entries: { { t = its start in seconds, text } }
+function M.parse_srt(content)
+    local entries = {}
+    content = content:gsub("\r\n", "\n"):gsub("^\239\187\191", "")
+    for block in (content .. "\n\n"):gmatch("(.-)\n%s*\n") do
+        local h, m, sec, ms, rest = block:match("(%d+):(%d+):(%d+)[,%.](%d+)%s*%-%->[^\n]*\n?(.*)")
+        if h then entries[#entries + 1] = { t = h * 3600 + m * 60 + sec + ms / 1000, text = rest } end
+    end
+    return entries
+end
+
+-- All the samples of the file's text track at index (its ff-index), with their times: { { t, text } }
+function M.text_track(path, index)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    f:setvbuf("full", BUFFER)
+    local ok, out = pcall(function()
+        local moov, first = read_moov(f)
+        if not moov then return nil end
+        local k = -1
+        for typ, ta, tb in boxes(moov, first, #moov) do
+            if typ == "trak" then
+                k = k + 1
+                if k == index then
+                    local ma, mb = child(moov, ta, tb, "mdia")
+                    local da = ma and child(moov, ma, mb, "mdhd")
+                    local timescale = da and u32(moov, da + (moov:byte(da) == 1 and 20 or 12))
+                    local ia, ib
+                    if ma then ia, ib = child(moov, ma, mb, "minf") end
+                    local sa, sb
+                    if ia then sa, sb = child(moov, ia, ib, "stbl") end
+                    if not sa or not timescale or timescale == 0 then return nil end
+                    local chunks, times, sizes = sample_table(moov, sa, sb, timescale)
+                    local entries = {}
+                    for _, chunk in ipairs(chunks or {}) do
+                        local total = 0
+                        for n = chunk.first, chunk.first + chunk.count - 1 do total = total + sizes[n] end
+                        if total > MAX_CHUNK then return nil end
+                        f:seek("set", chunk.offset)
+                        local data = f:read(total) or ""
+                        local pos = 1
+                        for n = chunk.first, chunk.first + chunk.count - 1 do
+                            local size = sizes[n]
+                            if size >= 2 and pos + size - 1 <= #data then
+                                local len = data:byte(pos) * 256 + data:byte(pos + 1)
+                                if len > 0 and len + 2 <= size then entries[#entries + 1] = { t = times[n], text = data:sub(pos + 2, pos + 1 + len) } end
+                            end
+                            pos = pos + size
+                        end
+                    end
+                    return entries
+                end
+            end
+        end
+        return nil
+    end)
+    f:close()
+    if not ok then return nil end
+    return out
+end
+
 -- { model, values = { <name> = { t = { times }, v = { values } } } }: each series only where the value changes
 -- (false where it isn't recorded), for the names asked for that the model's layout has. Read in steps:
 -- reader(path, names) returns step(), which reads a part and returns false while there's more, else true, the result
