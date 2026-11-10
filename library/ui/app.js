@@ -805,7 +805,7 @@ function renderSide() {
 function opticalPlan(c) {
   // A lens chosen makes the clips that have a project again: that's what choosing it is for
   const redo = S.opticalRedo || S.opticalLens !== "keep";
-  const out = { go: [], paths: [], own: 0, project: 0, s360: 0, lens: 0, redo: 0, cams: {}, types: {} };
+  const out = { go: [], paths: [], camOf: [], own: 0, project: 0, s360: 0, lens: 0, redo: 0, cams: {}, types: {} };
   for (const it of c.selItems) {
     if (it.kind !== "clip") continue;
     const p = PROBES[it.path];
@@ -817,6 +817,7 @@ function opticalPlan(c) {
     if (it.gyroflow) out.redo++;
     out.go.push(it.id);
     out.paths.push(it.path);
+    out.camOf.push(it.cam || "");
     if (it.cam && !out.cams[it.cam]) out.cams[it.cam] = it.path;
     const t = lensTypeOf(it) || "";
     out.types[t] = (out.types[t] || 0) + 1;
@@ -830,9 +831,7 @@ function askLensTypes(cams) {
   if (!want.length) return;
   want.forEach((k) => { LENS_TYPES[k] = null; });
   invoke("lens_types", { paths: want.map((k) => cams[k]) }).then((list) => {
-    // One answer for the lot: each camera gets what was found (they're asked together; a type unknown to one camera
-    // is said so by the job, which leaves its clips out)
-    want.forEach((k) => { LENS_TYPES[k] = list || []; });
+    want.forEach((k) => { const r = (list || []).find((x) => x.path === cams[k]); LENS_TYPES[k] = r ? r.types : []; });
     renderSide();
   }).catch(() => { want.forEach((k) => { LENS_TYPES[k] = []; }); renderSide(); });
 }
@@ -1720,7 +1719,10 @@ async function addJob(kind) {
     // The lens chosen, kept with each clip first (its own file): the job, and the player, take it from there
     if (S.opticalLens !== "keep") {
       try {
-        const problems = await invoke("set_lens_type", { clips: op.go, lensType: S.opticalLens === "recorded" ? null : S.opticalLens });
+        // A type only where the clip's camera has it (a GoPro's lens is in its file: nothing to choose)
+        const has = (i) => S.opticalLens === "recorded" || (LENS_TYPES[op.camOf[i]] || []).some((t) => t[0] === S.opticalLens);
+        const clips = op.go.filter((_, i) => has(i));
+        const problems = clips.length ? await invoke("set_lens_type", { clips, lensType: S.opticalLens === "recorded" ? null : S.opticalLens }) : [];
         if (problems.length) return showError("The lens couldn’t be kept with every clip: " + problems.join(" · "));
       } catch (e) { return showError(String(e)); }
     }

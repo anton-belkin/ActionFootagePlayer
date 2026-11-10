@@ -79,17 +79,36 @@ pub fn decide(project: Option<&Path>, redo: bool, facts: &Facts) -> Verdict {
     }
 }
 
-/// The lens Gyroflow corrects the clip with: the one in the file (Gyroflow reads it itself), else the best profile of
-/// the camera and lens mode in Gyroflow's database (lens_pick.rs, as the player picks it), given to Gyroflow: it would
-/// load one only on an exact match of its identifier, and then the first of several
-fn lens_of(input: &Input, width: usize, height: usize, fps: f64) -> Option<(String, Option<String>)> {
+/// The lens Gyroflow corrects the clip with, as the player takes it (lens_pick::for_video): the profile for the clip's
+/// lens type (chosen in the Library, `source.lens_type` in its own file, else the one its camera recorded) where one is
+/// curated for it, else the lens in the file (Gyroflow reads it itself), else the best of the camera and lens mode in
+/// Gyroflow's database. A profile is given to Gyroflow: it would load one only on an exact match of its identifier
+fn lens_of(path: &str, input: &Input, width: usize, height: usize, fps: f64) -> Option<(String, Option<String>)> {
     let samples = input.samples.as_deref().unwrap_or_default();
     let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
         .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    if in_file { return Some(("in the file".into(), None)); }
-    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
-    let pick = crate::lens_pick::pick(&id)?;
-    Some((pick.label(), pick.profile.get_json().ok()))
+    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok();
+    if let Some(pick) = id.as_ref().and_then(|id| crate::lens_pick::for_video(path, id, in_file)) {
+        return Some((pick.label(), pick.profile.get_json().ok()));
+    }
+    in_file.then(|| ("in the file".into(), None))
+}
+
+/// The lens types a clip's camera has to choose from (lens_pick::lens_types: [id, label]), and the camera as Gyroflow
+/// names it; none for a camera with no curated types (GoPro: its lens is in the file)
+pub fn lens_types(video: &Path) -> Result<(String, Vec<(String, String)>), String> {
+    let path = video.to_string_lossy().into_owned();
+    let url = filesystem::path_to_url(&path);
+    let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
+    let options = InputOptions { probe_only: true, ..Default::default() };
+    let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
+        .map_err(|e| e.to_string())?;
+    let id = CameraIdentifier::from_telemetry_parser(&input, meta.width, meta.height, meta.fps).map_err(|e| format!("{e:?}"))?;
+    let camera = format!("{} {}", id.brand, id.model);
+    let types = crate::lens_pick::lens_types(&camera).into_iter().map(|t| (t.id, t.label)).collect();
+    Ok((camera, types))
 }
 
 /// What the clip is (`Facts`); Err: it can't be read
@@ -103,7 +122,7 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
         .map_err(|e| e.to_string())?;
     let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
-    let lens = lens_of(&input, meta.width, meta.height, meta.fps);
+    let lens = lens_of(&path, &input, meta.width, meta.height, meta.fps);
     let (own_motion, reason) = match crate::probe::probe(&path) { Ok(_) => (true, String::new()), Err(e) => (false, e) };
     let spherical = crate::probe::spherical(&path).is_some() || crate::rig::read(&path).is_some();
     Ok(Facts { camera, own_motion, reason, spherical, lens })

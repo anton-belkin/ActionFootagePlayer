@@ -8,6 +8,9 @@
 //                                                                       {"path", "stabilize": true, "lens", "replaces"}
 //                                                                       or {"path", "stabilize": false, "why"}
 // --redo: clips with a Gyroflow project made again (optical::decide): its settings kept, lens and motion anew
+//   gyroflow-optical --lens-types <video>...                            the lens types its camera has (lens_pick.rs), one
+//                                                                       JSON line each: {"path", "camera", "types":
+//                                                                       [[id, label]]}, for the Library's picker
 //   gyroflow-optical --batch <request.json>                             Action Footage Library's "Stabilize optically"
 //
 // The batch's request: {"clips": [paths], "redo": false, "status": <file>, "stop": <file>, "strength": <%, 100>,
@@ -120,7 +123,7 @@ fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --batch <request.json>");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
@@ -133,6 +136,16 @@ fn main() {
                 let line = match optical::verdict(&p, redo) {
                     Verdict::Stabilize { lens, replaces, .. } => json!({ "path": a, "stabilize": true, "lens": lens, "replaces": replaces }),
                     Verdict::LeaveOut(why) => json!({ "path": a, "stabilize": false, "why": why }),
+                };
+                println!("{line}");
+            }
+        }
+        "--lens-types" => {
+            for a in &args[1..] {
+                let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+                let line = match optical::lens_types(&p) {
+                    Ok((camera, types)) => json!({ "path": a, "camera": camera, "types": types }),
+                    Err(e) => json!({ "path": a, "error": e, "types": [] }),
                 };
                 println!("{line}");
             }

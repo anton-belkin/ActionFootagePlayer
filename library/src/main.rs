@@ -997,11 +997,11 @@ async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>
 
 // ---------- Stabilize optically: the lens ----------
 
-/// The lens types to choose from for these clips (gyroflow-optical --lens-types: vs-gyroflow's lens_pick, per camera),
-/// [[type, label]] once each, in the order the cameras give them
+/// The lens types to choose from for these clips (gyroflow-optical --lens-types: vs-gyroflow's lens_pick, per camera):
+/// for each path asked, its camera and [[type, label]]; none for a camera without (GoPro: its lens is in the file)
 #[tauri::command]
-async fn lens_types(paths: Vec<String>) -> Result<Vec<(String, String)>, String> {
-    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<(String, String)>, String> {
+async fn lens_types(paths: Vec<String>) -> Result<Vec<Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Value>, String> {
         let tool = optical_tool()?;
         let mut cmd = Command::new(&tool);
         cmd.arg("--lens-types").args(&paths).stdin(Stdio::null()).stderr(Stdio::null());
@@ -1012,16 +1012,11 @@ async fn lens_types(paths: Vec<String>) -> Result<Vec<(String, String)>, String>
     }).await.map_err(|e| e.to_string())?
 }
 
-/// gyroflow-optical --lens-types' lines ({"path", "camera", "types": [[type, label]...]}), the types once each
-fn lens_types_of(text: &str) -> Vec<(String, String)> {
-    let mut all: Vec<(String, String)> = Vec::new();
-    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
-        for t in v["types"].as_array().into_iter().flatten().filter_map(Value::as_array) {
-            let (Some(k), Some(l)) = (t.first().and_then(Value::as_str), t.get(1).and_then(Value::as_str)) else { continue };
-            if !all.iter().any(|(x, _)| x == k) { all.push((k.to_string(), l.to_string())); }
-        }
-    }
-    all
+/// gyroflow-optical --lens-types' lines: {"path", "camera", "types": [[type, label]...]}, those that are
+fn lens_types_of(text: &str) -> Vec<Value> {
+    text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["path"].is_string() && v["types"].is_array())
+        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"] })).collect()
 }
 
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
@@ -1841,7 +1836,10 @@ mod tests {
     #[test]
     fn lens_types_once_each() {
         let text = "{\"path\":\"/a\",\"camera\":\"DJI OsmoAction6\",\"types\":[[\"wide\",\"Wide\"],[\"normal\",\"Normal\"]]}\nnoise\n{\"path\":\"/b\",\"types\":[[\"normal\",\"Normal\"],[\"linear\",\"Linear\"]]}\n";
-        assert_eq!(lens_types_of(text), vec![("wide".into(), "Wide".into()), ("normal".into(), "Normal".into()), ("linear".into(), "Linear".into())]);
+        let got = lens_types_of(text);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0]["types"], json!([["wide", "Wide"], ["normal", "Normal"]]));
+        assert_eq!(got[1]["path"], json!("/b"));
     }
 
     // Stabilize optically's job as the Library runs it: gyroflow-optical (here a stand-in that writes what the real one

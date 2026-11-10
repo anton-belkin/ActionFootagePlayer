@@ -875,7 +875,10 @@ Project). Then, as buttons:
   measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
   with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
   listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
-  whose lens isn't known (no lens profile for that camera and mode). It needs a Gyroflow with the optical analysis
+  whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
+  clips where their camera has types (Osmo Action 6: Wide, Normal), kept with each clip (the player uses it too); a
+  lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
+  measured anew. It needs a Gyroflow with the optical analysis
   (built from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow): it isn't in Gyroflow's own releases
   yet), found where Gyroflow installs itself, or by `AFP_GYROFLOW`.
 
