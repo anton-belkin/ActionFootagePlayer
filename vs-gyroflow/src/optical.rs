@@ -310,26 +310,42 @@ pub fn place(made: &Path, video: &Path, replaces: Option<(&Path, &[u8])>) -> Res
     let dir = video.parent().ok_or("the clip has no folder")?;
     let stem = video.file_stem().ok_or("the clip has no name")?.to_string_lossy().into_owned();
     let part = dir.join(format!(".{stem}.gyroflow.part"));
+    let result = place_through(made, video, replaces, dir, &stem, &part);
+    let _ = std::fs::remove_file(&part);
+    result
+}
+
+/// The bytes alone into `part`: std::fs::copy on macOS copies the file's flags, extended attributes and ACL too
+/// (fcopyfile COPYFILE_ALL), which an SMB share (the NAS) refuses: "Operation not permitted", nothing written
+fn write_bytes(made: &Path, part: &Path) -> Result<(), String> {
+    use std::io::Write;
+    let dir = part.parent().map(|d| d.display().to_string()).unwrap_or_default();
+    let data = std::fs::read(made).map_err(|e| e.to_string())?;
+    let mut f = std::fs::File::create(part).map_err(|e| format!("couldn't write beside the clip ({dir}): {e}"))?;
+    f.write_all(&data).map_err(|e| format!("couldn't write beside the clip ({dir}): {e}"))?;
+    // To the disk before it's renamed into place, where the file system can (an SMB share can't: F_FULLFSYNC is
+    // "Operation not supported", and closing it sends it all anyway)
+    let _ = f.sync_all();
+    Ok(())
+}
+
+fn place_through(made: &Path, video: &Path, replaces: Option<(&Path, &[u8])>, dir: &Path, stem: &str, part: &Path) -> Result<PathBuf, String> {
     if let Some((dest, was)) = replaces {
         if std::fs::read(dest).ok().as_deref() != Some(was) { return Err("its Gyroflow project changed meanwhile: left as it is".into()); }
-        std::fs::copy(made, &part).map_err(|e| format!("couldn't write beside the clip ({}): {e}", dir.display()))?;
-        let r = std::fs::rename(&part, dest).map(|_| dest.to_path_buf()).map_err(|e| format!("couldn't write {}: {e}", dest.display()));
-        let _ = std::fs::remove_file(&part);
-        return r;
+        write_bytes(made, part)?;
+        return std::fs::rename(part, dest).map(|_| dest.to_path_buf()).map_err(|e| format!("couldn't write {}: {e}", dest.display()));
     }
     let dest = dir.join(format!("{stem}.gyroflow"));
     if own_project(video).is_some() { return Err("a Gyroflow project appeared beside it meanwhile: left as it is".into()); }
-    std::fs::copy(made, &part).map_err(|e| format!("couldn't write beside the clip ({}): {e}", dir.display()))?;
+    write_bytes(made, part)?;
     // A plain rename replaces; hard_link doesn't: where links aren't possible (some shares), checked just before
-    let linked = std::fs::hard_link(&part, &dest);
-    let result = match linked {
+    let linked = std::fs::hard_link(part, &dest);
+    match linked {
         Ok(()) => Ok(dest.clone()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err("a Gyroflow project appeared beside it meanwhile: left as it is".into()),
-        Err(_) if !dest.exists() => std::fs::rename(&part, &dest).map(|_| dest.clone()).map_err(|e| format!("couldn't write {}: {e}", dest.display())),
+        Err(_) if !dest.exists() => std::fs::rename(part, &dest).map(|_| dest.clone()).map_err(|e| format!("couldn't write {}: {e}", dest.display())),
         Err(_) => Err("a Gyroflow project appeared beside it meanwhile: left as it is".into()),
-    };
-    let _ = std::fs::remove_file(&part);
-    result
+    }
 }
 
 /// Runs Gyroflow on one clip and puts its project beside it. `stop` is asked about twice a second (true: Gyroflow
