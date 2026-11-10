@@ -640,6 +640,11 @@ local HLG_LOOKS = { hdr = true, tonemap = true, dv = true, dvsdr = true }
 local function gpu_frame()
     local gpu = mp.get_property_native("user-data/gyroflow/gpu")
     if type(gpu) ~= "table" or mp.get_property_native("user-data/gyroflow/still") == true then return nil end
+    -- Not with Save frame's camera turned or zoomed: paused, mpv's screenshot can come from the denoise's ring of
+    -- frames warped before the camera moved (seen live: yaw, pitch and zoom missing). gyroflow-export renders that
+    -- camera as the warp does (gpu_table's tests)
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    if crop.active and crop.camera then return nil end
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
     if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end
