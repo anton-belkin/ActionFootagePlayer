@@ -21,6 +21,19 @@ pub fn camera(path: &str) -> Option<(String, Option<String>)> {
 }
 
 pub fn probe(path: &str) -> Result<serde_json::Value, String> {
+    probe_with_camera_stabilization(path).0
+}
+
+/// [probe]'s answer, and whether the camera stabilized the picture itself (HyperSmooth, EIS, FlowState): its name
+/// for it, "" when it recorded that it didn't, None when it doesn't say (or the file can't be read). Said whatever
+/// motion data the clip has: a DJI with EIS on records none, a GoPro with HyperSmooth on records it all the same
+pub fn probe_with_camera_stabilization(path: &str) -> (Result<serde_json::Value, String>, Option<String>) {
+    let mut in_camera = None;
+    let answer = probe_inner(path, &mut in_camera);
+    (answer, in_camera)
+}
+
+fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json::Value, String> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
@@ -33,6 +46,7 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
     let samples = input.samples.as_deref().unwrap_or_default();
+    *in_camera = stabilized_in_camera(&camera, samples);
 
     let mut motion_samples = 0;
     for s in samples {
@@ -50,7 +64,15 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
             _ => format!("{camera}: no motion data"),
         });
     }
-    in_camera_stabilization_off(&camera, samples)?;
+    match in_camera.as_deref() {
+        Some("") => (),
+        Some(how) => return Err(match camera.as_str() {
+            "DJI" => format!("in-camera stabilization is on ({how})"),
+            _ => format!("{how} is on in the camera"),
+        }),
+        None if ["DJI", "GoPro", "Insta360"].contains(&camera.as_str()) => return Err(format!("{camera}: in-camera stabilization state unknown")),
+        None => return Err(format!("{camera}: only DJI, GoPro and Insta360 files are stabilized without a project")),
+    }
     // DJI clips are left as they were before this check (the Osmo Action 6 plays well; no clip at hand to check that
     // its lens comes through here)
     if camera != "DJI" && !has_lens_profile(path, &input, samples, video.width, video.height, video.fps) {
@@ -59,24 +81,28 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
 }
 
-// Ok when the camera recorded that it didn't stabilize the picture itself (EIS). Footage the camera already
-// stabilized gets worse stabilized again, so on, or not said, is an Err with the reason: such clips play as they are.
-// The signs are the ones Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
-fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(), String> {
+// Whether the camera stabilized the picture itself: its name for how ("HyperSmooth (HS EIS)", "EIS: RockSteady",
+// "FlowState"), "" when it recorded that it didn't, None when it doesn't say. Footage the camera already stabilized
+// gets worse stabilized again, so only "" is stabilized here; on, or not said, plays as it is. The signs are the ones
+// Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
+fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> {
     let default_tags = || samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Default));
     let metadata = || default_tags().filter_map(|m| match m.get(&TagId::Metadata).map(|t| &t.value) {
         Some(TagValue::Json(v)) => Some(v.get()),
         _ => None,
     });
     match camera {
-        // ClipMeta.eis_status (dvtm_library.proto): EIS_OFF is 0. With EIS on the cameras don't record motion data at
-        // all (Osmo Action 6), so this mostly confirms it. EIS_OFF_WITH_CROP (7) and the horizon modes count as on
-        // until a clip shows what they do
-        "DJI" => match metadata().find_map(|v| find_key(v, "eis_status").and_then(|x| x["status"].as_i64())) {
-            Some(0) => Ok(()),
-            Some(s) => Err(format!("in-camera stabilization is on (EIS status {s})")),
-            None => Err("in-camera stabilization state unknown".into()),
-        },
+        // ClipMeta.eis_status (dvtm_library.proto's EisStatusType), written with EIS on or off. With EIS on the
+        // cameras don't record motion data at all (Osmo Action 6). Named only where the enum's name is DJI's own mode;
+        // the Osmo Action 6 writes 4 (EIS_TRADEOFF) for a mode not matched to its menu yet. EIS_OFF_WITH_CROP (7)
+        // counts as on until a clip shows what it does
+        "DJI" => metadata().find_map(|v| find_key(v, "eis_status").and_then(|x| x["status"].as_i64())).map(|s| match s {
+            0 => String::new(),
+            1 => "EIS: RockSteady".into(),
+            2 => "EIS: HorizonSteady".into(),
+            5 => "EIS: HorizonBalancing".into(),
+            s => format!("EIS (status {s})"),
+        }),
         // GoPro records the gyro whatever HyperSmooth is, so only its settings tell: EISA (what was applied: "N", "Y",
         // "HS EIS", "HS HLevel", ...; "N/A" says nothing), else EISE (enabled: "Y"/"N"). For HERO5/6 telemetry-parser
         // reads EISA from the SETT box. Checked on GoPro's sample clips (gopro/gpmf-parser): HERO5/6 "N", HERO7/8 "HS EIS"
@@ -85,20 +111,16 @@ fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(
                 Some(TagValue::String(v)) => Some(v.get().trim().to_string()).filter(|v| v != "N/A"),
                 _ => None,
             });
-            match tag(b"EISA").or_else(|| tag(b"EISE")).as_deref() {
-                Some("N") => Ok(()),
-                Some(v) => Err(format!("HyperSmooth is on ({v})")),
-                None => Err("GoPro: HyperSmooth state unknown".into()),
-            }
+            tag(b"EISA").or_else(|| tag(b"EISE")).map(|v| match v.as_str() {
+                "N" => String::new(),
+                "Y" => "HyperSmooth".into(),
+                v => format!("HyperSmooth ({v})"),
+            })
         },
         // Insta360 records the gyro always, and is_flowstate_online when the camera applied FlowState itself. A camera
         // that predates the field reads as false too (protobuf's default), as it does in Gyroflow
-        "Insta360" => match metadata().find_map(|v| v.get("is_flowstate_online")?.as_bool()) {
-            Some(false) => Ok(()),
-            Some(true) => Err("FlowState is on in the camera".into()),
-            None => Err("Insta360: FlowState state unknown".into()),
-        },
-        _ => Err(format!("{camera}: only DJI, GoPro and Insta360 files are stabilized without a project")),
+        "Insta360" => metadata().find_map(|v| v.get("is_flowstate_online")?.as_bool()).map(|on| if on { "FlowState".into() } else { String::new() }),
+        _ => None,
     }
 }
 
