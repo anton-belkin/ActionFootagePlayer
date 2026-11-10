@@ -253,5 +253,21 @@ if bar_hit then
 end
 mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
 
+-- Subtitles: a switch when the clip has some, which runs the dji-telemetry plugin's v; the camera's text (a DJI
+-- drone's) is said to be the camera's data, also in Telemetry in place of "No telemetry"
+messages.tab("output")
+expect("no subtitles: no switch", find("subtitles"), nil)
+mp.set_property_native("user-data/dji_telemetry", { available = false, model = "", visible = true,
+                                                    subtitles = { count = 1, camera = true, shown = false, camera_shown = false } })
+expect("the camera's text: a switch in Output", find("subtitles") ~= nil, true)
+click("subtitles")
+expect("the switch runs the plugin's key", last_ran(), "script-binding dji_telemetry/subtitles")
+messages.tab("telemetry")
+expect("…and in Telemetry, with no telemetry", find("subtitles") ~= nil, true)
+mp.set_property_native("user-data/dji_telemetry", { available = false, model = "", visible = true,
+                                                    subtitles = { count = 0, camera = false, shown = false } })
+expect("no subtitles: none in Telemetry", find("subtitles"), nil)
+messages.tab("output")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
