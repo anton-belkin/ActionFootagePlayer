@@ -10,7 +10,8 @@
 // --redo: clips with a Gyroflow project made again (optical::decide): its settings kept, lens and motion anew
 //   gyroflow-optical --lens-types <video>...                            the lens types its camera has (lens_pick.rs), one
 //                                                                       JSON line each: {"path", "camera", "types":
-//                                                                       [[id, label]]}, for the Library's picker
+//                                                                       [[id, label]], "type" (chosen), "recorded",
+//                                                                       "mode" (the camera's number)}, for the picker
 //   gyroflow-optical --batch <request.json>                             Action Footage Library's "Stabilize optically"
 //
 // The batch's request: {"clips": [paths], "redo": false, "status": <file>, "stop": <file>, "strength": <%, 100>,
@@ -144,7 +145,7 @@ fn main() {
             for a in &args[1..] {
                 let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
                 let line = match optical::lens_types(&p) {
-                    Ok((camera, types)) => json!({ "path": a, "camera": camera, "types": types }),
+                    Ok(l) => json!({ "path": a, "camera": l.camera, "types": l.types, "type": l.chosen, "recorded": l.recorded, "mode": l.mode }),
                     Err(e) => json!({ "path": a, "error": e, "types": [] }),
                 };
                 println!("{line}");

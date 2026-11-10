@@ -94,9 +94,24 @@ fn lens_of(path: &str, input: &Input, width: usize, height: usize, fps: f64) -> 
     in_file.then(|| ("in the file".into(), None))
 }
 
-/// The lens types a clip's camera has to choose from (lens_pick::lens_types: [id, label]), and the camera as Gyroflow
-/// names it; none for a camera with no curated types (GoPro: its lens is in the file)
-pub fn lens_types(video: &Path) -> Result<(String, Vec<(String, String)>), String> {
+/// A clip's lens types, as the Library's picker shows them (lens_pick.rs)
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LensTypes {
+    /// The camera as Gyroflow names it ("DJI OsmoAction6")
+    pub camera: String,
+    /// What its camera has to choose from: [id, label]; none for a camera with no curated types (GoPro: its lens is
+    /// in the file)
+    pub types: Vec<(String, String)>,
+    /// The type chosen for the clip by hand (source.lens_type in its own file)
+    pub chosen: Option<String>,
+    /// The type its camera recorded, where the curated list names that mode
+    pub recorded: Option<String>,
+    /// The camera's own number for the mode it recorded (DJI's fov_type), for a camera with types: "Unknown (mode 6)"
+    /// where the list doesn't name it yet
+    pub mode: Option<u64>,
+}
+
+pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
@@ -107,8 +122,14 @@ pub fn lens_types(video: &Path) -> Result<(String, Vec<(String, String)>), Strin
         .map_err(|e| e.to_string())?;
     let id = CameraIdentifier::from_telemetry_parser(&input, meta.width, meta.height, meta.fps).map_err(|e| format!("{e:?}"))?;
     let camera = format!("{} {}", id.brand, id.model);
-    let types = crate::lens_pick::lens_types(&camera).into_iter().map(|t| (t.id, t.label)).collect();
-    Ok((camera, types))
+    let types: Vec<(String, String)> = crate::lens_pick::lens_types(&camera).into_iter().map(|t| (t.id, t.label)).collect();
+    if types.is_empty() { return Ok(LensTypes { camera, ..Default::default() }); }
+    Ok(LensTypes {
+        chosen: crate::lens_pick::chosen_type(&path),
+        recorded: crate::lens_pick::recorded_type(&camera, &path),
+        mode: crate::probe::dji_fov_type(&path),
+        camera, types,
+    })
 }
 
 /// What the clip is (`Facts`); Err: it can't be read
