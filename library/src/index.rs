@@ -85,7 +85,7 @@ fn rel_join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_strin
 
 /// Every file and folder under `base` (not hidden), as (path in the tree, is a folder, size, modified), folders kept
 /// out by `skip` (path in the tree, lower case name)
-fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool) -> Vec<(String, bool, u64, i64)> {
+pub(crate) fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool) -> Vec<(String, bool, u64, i64)> {
     // As the project's catalog last saw it (seen.rs): no question to the disk for each file
     if let Some(v) = crate::seen::walk(base, skip, MAX_DEPTH) { return v; }
     let mut out = Vec::new();

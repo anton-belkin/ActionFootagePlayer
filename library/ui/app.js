@@ -496,6 +496,8 @@ function renderMain() {
   }
   const scanView = S.view === "sources" ? "footage" : S.view;
   if (S.scanning[scanView] && S.cachedViews[scanView]) h += '<div class="indexing"><span class="spin" aria-hidden="true"></span> Looking at the disk again: what was there last time shows meanwhile</div>';
+  if (S.missing > 0 || S.mending) h += '<div class="indexing">' + (S.mending ? '<span class="spin" aria-hidden="true"></span>Looking for the moved originals and mending the links…'
+    : S.missing + (S.missing === 1 ? " moment, clip preview, export or photo points" : " moments, clip previews, exports and photos point") + ' at an original that isn’t where it was. <button type="button" class="btn sm pri" data-a="mend">Find and mend</button>') + '</div>';
   if (probesPending && (S.view === "footage" || S.view === "sources" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
@@ -781,8 +783,9 @@ function issueText(i) {
   return JSON.stringify(i);
 }
 function checksSection(c) {
-  let body = '<p>Over ' + esc(c.any ? c.label : "what you select") + '. Kept to the selection: a whole big project takes long.</p>' +
-    '<div class="btns"><button type="button" class="btn sm' + (S.checked ? " on" : "") + '" data-a="runcheck">' + (S.checking ? "Checking…" : "Check") + '</button>' +
+  let body = '<p>' + (c.any ? "Over " + esc(c.selName) + (S.view === "footage" && c.selFolders.length ? " (" + esc(c.label) + ", and the clip previews in them)" : "") + "." : "Select what to check: clips or folders (" + (S.macos ? "⌘A" : "Ctrl+A") + ": all of them).") +
+    (S.checking ? ' <span class="sub" style="display:inline">Checking: a big selection on a share takes a while.</span>' : "") + '</p>' +
+    '<div class="btns"><button type="button" class="btn sm' + (S.checked ? " on" : "") + '" data-a="runcheck"' + (c.any && !S.checking ? "" : " disabled") + '>' + (S.checking ? '<span class="spin" aria-hidden="true"></span> Checking…' : "Check") + '</button>' +
     '<button type="button" class="btn sm" data-a="findmoved"' + (S.checked && S.checked.issues.some((i) => i.kind === "missing" || i.kind === "orphan") ? "" : " disabled") + '>' + (S.finding ? "Looking…" : "Find moved files") + '</button></div>';
   if (S.checked) {
     const list = S.checked.issues;
@@ -825,10 +828,13 @@ async function setTags(add, remove) {
 
 async function runCheck() {
   const c = ctx();
-  if (!c.any) return;
+  // Only what's selected (Anton, 2026-11-10: never the whole project on its own; ⌘A selects all)
+  if (!c.any) { toast("Select what to check: clips or folders (" + (S.macos ? "⌘A" : "Ctrl+A") + ": all of them)"); return; }
   S.checking = true; S.found = null; renderSide();
+  // Footage's folders are its previews': the previews in them checked too (their clips may be at 0: moved)
+  const previewDirs = S.view === "footage" ? c.selFolders.filter((f) => f !== NOPREV && !f.startsWith(NOPREV + "/")).flatMap((f) => f === OTHER ? otherExpanded([f]) : [f]).map((f) => diskRel(f)) : [];
   try {
-    S.checked = await invoke("run_check", S.view === "moments" ? { sel: [], links: c.only } : { sel: c.only, links: [] });
+    S.checked = await invoke("run_check", S.view === "moments" ? { sel: [], links: c.only } : { sel: c.only, links: previewDirs });
   } catch (e) { showError(String(e)); }
   S.checking = false; renderSide();
 }
@@ -1582,6 +1588,8 @@ async function poll() {
   try { s = await invoke("snapshot"); } catch (e) { return; }
   S.macos = s.macos;
   // What the project's catalog is doing (made the first time, read again, folded): said once as it changes
+  // Links whose original isn't where they say: the strip on top, at once
+  if ((s.missing ?? null) !== (S.missing ?? null)) { S.missing = s.missing ?? null; renderMain(); }
   if ((s.catalog || "") !== (S.catalogStatus || "")) { S.catalogStatus = s.catalog || ""; if (S.catalogStatus) toast(S.catalogStatus); }
   if (s.project !== S.root) {
     S.changes = s.changes;
@@ -1692,6 +1700,16 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "mend": {
+      S.mending = true; renderMain();
+      try {
+        const r = await invoke("mend");
+        toast("Mended " + r.mended + " of " + r.missing + (r.left.length ? ": " + r.left.length + " to choose or not found, in Checks" : "") + (r.problems.length ? "; " + r.problems.length + " couldn’t be written" : ""));
+        if (r.left.length) { S.found = r.left; S.checked = { issues: r.left.map((f) => f.issue) }; S.tab = "commands"; }
+        refresh();
+      } catch (er) { showError(String(er)); }
+      S.mending = false; renderAll(); return;
+    }
     case "back": return goHistory(-1);
     case "fwd": return goHistory(1);
     case "up": return goUp();

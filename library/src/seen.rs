@@ -120,6 +120,9 @@ pub struct Runner {
     pub events: Sender<Vec<PathBuf>>,
     /// What it's doing, for the page ("" when nothing)
     pub status: Arc<Mutex<String>>,
+    /// Links whose original isn't where they say (checks.rs's missing, from the catalog), counted on its own as the
+    /// project changes; u64::MAX: not known
+    pub missing: Arc<AtomicU64>,
 }
 
 impl Drop for Runner {
@@ -137,11 +140,12 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) ->
     let stop = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new(String::new()));
     let everything = Arc::new(AtomicBool::new(false));
-    let r = Runner { stop: stop.clone(), everything: everything.clone(), events: tx, status: status.clone() };
+    let missing = Arc::new(AtomicU64::new(u64::MAX));
+    let r = Runner { stop: stop.clone(), everything: everything.clone(), missing: missing.clone(), events: tx, status: status.clone() };
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
-    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, rx, status, changes, last)).ok();
+    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, missing, rx, status, changes, last)).ok();
     r
 }
 
@@ -152,7 +156,7 @@ fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }
 
-fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
     // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
@@ -207,6 +211,14 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
         }
         set(&status, "");
     }
+    // Links whose original isn't there: counted now, and again a few seconds after what the catalog knows changed
+    let count_missing = |missing: &AtomicU64| {
+        let n = crate::checks::missing(&root).map(|v| v.len() as u64).unwrap_or(u64::MAX);
+        missing.store(n, Ordering::Relaxed);
+    };
+    count_missing(&missing);
+    let mut counted_at = changes.load(Ordering::Relaxed);
+    let mut counted_when = Instant::now();
     let deep_file = worker.cache.join("deep.json");
     let mut last_read = Instant::now();
     let mut last_look = Instant::now() - Duration::from_secs(10_000);
@@ -235,6 +247,11 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
             last_event = Instant::now();
         }
         if last_read.elapsed() >= Duration::from_secs(3) { refresh(&changes, &last); last_read = Instant::now(); }
+        if changes.load(Ordering::Relaxed) != counted_at && counted_when.elapsed() >= Duration::from_secs(5) {
+            counted_at = changes.load(Ordering::Relaxed);
+            counted_when = Instant::now();
+            count_missing(&missing);
+        }
         // What this computer changed: its folders looked at once it settles
         if !pending.is_empty() && last_event.elapsed() >= Duration::from_secs(1) {
             let only: Vec<(String, String)> = std::mem::take(&mut pending).into_iter().collect();
@@ -279,6 +296,12 @@ pub fn look_at_everything(r: Option<&Runner>) { if let Some(r) = r { r.everythin
 /// What the page shows of it
 pub fn status(r: Option<&Runner>) -> String { r.map(|r| r.status.lock().unwrap().clone()).unwrap_or_default() }
 
+/// How many links' originals aren't where they say (u64::MAX: not known yet)
+pub fn missing(r: Option<&Runner>) -> u64 { r.map(|r| r.missing.load(Ordering::Relaxed)).unwrap_or(u64::MAX) }
+
+/// Counted again soon (after mending)
+pub fn recount(r: Option<&Runner>) { if let Some(r) = r { r.missing.store(u64::MAX, Ordering::Relaxed); } }
+
 pub fn is_on(root: &Path) -> bool { SEEN.read().ok().is_some_and(|g| g.as_ref().is_some_and(|s| s.root == root)) }
 
 // The footage view of a real project, from its catalog and from the disks, compared (by hand:
@@ -308,6 +331,34 @@ mod real {
         let (a, b) = (ids(&files), ids(&seen));
         for x in a.difference(&b).take(5) { println!("only from the disks: {x:?}"); }
         for x in b.difference(&a).take(5) { println!("only from the catalog: {x:?}"); }
+        *SEEN.write().unwrap() = None;
+    }
+
+    #[test]
+    #[ignore]
+    fn check_from_catalog() {
+        let Some(root) = std::env::var_os("AFL_SEEN").map(PathBuf::from) else { return };
+        use super::*;
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (roots, _) = project::roots(&root);
+        let mut cat = project::open(&root);
+        cat.load(&Want::All).unwrap();
+        *SEEN.write().unwrap() = Some(Seen { id: 0, root: root.clone(), roots, cat });
+        let t = Instant::now();
+        let m = crate::checks::missing(&root);
+        println!("missing on its own (from the catalog): {:?} in {:.2} s", m.as_ref().map(|v| v.len()), t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        let all: Vec<String> = crate::checks::footage(&crate::locations::locations(&root, &crate::locations::mounts())).0.iter().map(|c| c.tree.clone()).collect();
+        let r = crate::checks::check(&root, &all, &[]);
+        let issues = r["issues"].as_array().cloned().unwrap_or_default();
+        let mut kinds = std::collections::BTreeMap::new();
+        for i in &issues { *kinds.entry(i["kind"].as_str().unwrap_or("").to_string()).or_insert(0) += 1; }
+        println!("check, whole project: {} clips, issues {kinds:?} in {:.1} s", r["clips"], t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        let missing: Vec<serde_json::Value> = issues.into_iter().filter(|i| i["kind"] == "missing").take(20).collect();
+        let f = crate::checks::find_moved(&root, &missing);
+        let found = f.as_array().map(|a| a.iter().filter(|x| !x["found"].is_null()).count()).unwrap_or(0);
+        println!("find moved, 20 of them: {found} found in {:.1} s; e.g. {}", t.elapsed().as_secs_f64(), f[0]["found"]["tree"]);
         *SEEN.write().unwrap() = None;
     }
 }

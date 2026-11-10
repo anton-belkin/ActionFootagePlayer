@@ -146,28 +146,22 @@ fn is_video(name: &str) -> bool {
 const OWN: [&str; 12] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
                          "_actionfootageplayer", "generated"];
 
-/// Every clip of the project, at its tree path (all copies), and every own file found on the way
+/// Every clip of the project, at its tree path (all copies), and every own file found on the way: from the project's
+/// catalog when it has them (seen.rs: no question to the share for each file), else from the disks
 pub fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
     let mut clips = Vec::new();
     let mut owns = Vec::new();
     for l in locs {
         let Some(dir) = &l.dir else { continue };
-        let mut todo = vec![(dir.clone(), String::new(), 0)];
-        while let Some((d, rel, depth)) = todo.pop() {
-            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') || name.starts_with('#') { continue; }
-                let Ok(m) = e.metadata() else { continue };
-                let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
-                let tree = if l.at.is_empty() { r.clone() } else { format!("{}/{r}", l.at) };
-                if m.is_dir() {
-                    if depth == 0 && OWN.contains(&name.to_lowercase().as_str()) { continue; }
-                    if depth < 8 { todo.push((e.path(), r, depth + 1)); }
-                } else if is_video(&name) {
-                    clips.push(Clip { tree, path: e.path(), size: m.len(), local: l.local });
-                } else if name.to_lowercase().ends_with(".afp.json") || name.to_lowercase().ends_with(".marks.json") {
-                    owns.push((tree, e.path()));
-                }
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN.contains(&lower);
+        for (r, is_dir, size, _) in crate::index::walk(dir, &skip) {
+            if is_dir { continue; }
+            let name = r.rsplit('/').next().unwrap_or(&r).to_string();
+            let tree = if l.at.is_empty() { r.clone() } else { format!("{}/{r}", l.at) };
+            if is_video(&name) {
+                clips.push(Clip { tree, path: dir.join(&r), size, local: l.local });
+            } else if name.to_lowercase().ends_with(".afp.json") || name.to_lowercase().ends_with(".marks.json") {
+                owns.push((tree, dir.join(&r)));
             }
         }
     }
@@ -178,23 +172,20 @@ fn under(tree: &str, sel: &[String]) -> bool {
     sel.is_empty() || sel.iter().any(|s| tree == s || tree.starts_with(&format!("{s}/")))
 }
 
-/// The project's link files (moments, clip previews, exports, renders, photos), wherever they are in its folder
+/// The project's link files (moments, clip previews, exports, renders, photos), wherever they are in its folder: from
+/// the catalog when it has them (their links as it read them), else from the disks
 fn links(root: &Path) -> Vec<(PathBuf, Value)> {
     let footage = crate::index::footage_dirs(root);
     let mut out = Vec::new();
-    let mut todo = vec![(root.to_path_buf(), 0)];
-    while let Some((d, depth)) = todo.pop() {
-        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            if name.starts_with('.') || name.starts_with('#') { continue; }
-            let p = e.path();
-            if p.is_dir() { if depth < 8 { todo.push((p, depth + 1)); } continue; }
-            let video = name.ends_with(".mp4") || name.ends_with(".mov");
-            let photo = [".heic", ".jpg", ".jpeg"].iter().any(|x| name.ends_with(x));
-            // Among the footage only link files by name (not every clip read)
-            if !(video || photo) || (!crate::index::own_area(root, &p, &footage) && !name.ends_with(crate::index::LINK_EXT)) { continue; }
-            if let Some(l) = crate::index::link(&p) { if l.get("clip").and_then(Value::as_str).is_some() { out.push((p, l)); } }
-        }
+    for (r, is_dir, _, _) in crate::index::walk(root, &|_, _| false) {
+        if is_dir { continue; }
+        let name = r.to_lowercase();
+        let p = root.join(&r);
+        let video = name.ends_with(".mp4") || name.ends_with(".mov");
+        let photo = [".heic", ".jpg", ".jpeg"].iter().any(|x| name.ends_with(x));
+        // Among the footage only link files by name (not every clip read)
+        if !(video || photo) || (!crate::index::own_area(root, &p, &footage) && !name.ends_with(crate::index::LINK_EXT)) { continue; }
+        if let Some(l) = crate::index::link(&p) { if l.get("clip").and_then(Value::as_str).is_some() { out.push((p, l)); } }
     }
     out
 }
@@ -206,6 +197,8 @@ fn found_at(tree: &str, size: Option<u64>, by_tree: &HashMap<String, Vec<&Clip>>
 /// Check over the selection: `sel` paths of the footage tree (empty: everything), `links_sel` link files chosen
 /// (moments, exports: their originals checked whatever `sel` is)
 pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
+    // Only what's selected: nothing selected, nothing checked (never the whole project on its own)
+    if sel.is_empty() && links_sel.is_empty() { return json!({ "issues": [], "clips": 0 }); }
     let mounts = locations::mounts();
     let locs = locations::locations(root, &mounts);
     let (clips, owns) = footage(&locs);
@@ -221,17 +214,17 @@ pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
     for (stem, files) in &owns_of {
         let clip = by_tree.keys().find(|t| t.rsplit_once('.').map(|(s, _)| s) == Some(stem.as_str())).cloned();
         let tree = clip.clone().unwrap_or_else(|| stem.clone());
-        if !under(&tree, sel) { continue; }
+        if sel.is_empty() || !under(&tree, sel) { continue; }
         // Their clip: beside each own file, in the same location (a clip copied elsewhere doesn't count for it)
         for f in files {
-            let beside = ["MP4", "mp4", "MOV", "mov"].iter().any(|e| { let b = f.to_string_lossy(); let s = b.trim_end_matches(".afp.json").trim_end_matches(".marks.json"); Path::new(&format!("{s}.{e}")).is_file() });
+            let beside = ["MP4", "mp4", "MOV", "mov"].iter().any(|e| { let b = f.to_string_lossy(); let s = b.trim_end_matches(".afp.json").trim_end_matches(".marks.json"); crate::seen::is_file(Path::new(&format!("{s}.{e}"))) });
             if !beside {
                 let doc = locations::read_json(f).unwrap_or(Value::Null);
                 issues.push(json!({ "kind": "orphan", "file": f.display().to_string(), "tree": tree,
                                     "size": doc["clip"]["size"], "hash": doc["clip"]["hash"], "created": doc["clip"]["created"] }));
             }
         }
-        let with_clip: Vec<&&PathBuf> = files.iter().filter(|f| { let b = f.to_string_lossy(); let s = b.trim_end_matches(".afp.json").trim_end_matches(".marks.json").to_string(); ["MP4", "mp4", "MOV", "mov"].iter().any(|e| Path::new(&format!("{s}.{e}")).is_file()) }).collect();
+        let with_clip: Vec<&&PathBuf> = files.iter().filter(|f| { let b = f.to_string_lossy(); let s = b.trim_end_matches(".afp.json").trim_end_matches(".marks.json").to_string(); ["MP4", "mp4", "MOV", "mov"].iter().any(|e| crate::seen::is_file(Path::new(&format!("{s}.{e}")))) }).collect();
         if with_clip.len() > 1 && clip.is_some() {
             issues.push(json!({ "kind": "own2", "tree": tree, "files": with_clip.iter().map(|f| f.display().to_string()).collect::<Vec<_>>() }));
         }
@@ -245,7 +238,7 @@ pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
     for group in by_size.values().filter(|g| g.len() > 1) {
         for (i, a) in group.iter().enumerate() {
             for b in &group[i + 1..] {
-                if a.tree == b.tree || !(under(&a.tree, sel) || under(&b.tree, sel)) { continue; }
+                if a.tree == b.tree || sel.is_empty() || !(under(&a.tree, sel) || under(&b.tree, sel)) { continue; }
                 let key = if a.tree < b.tree { (a.tree.clone(), b.tree.clone()) } else { (b.tree.clone(), a.tree.clone()) };
                 if seen_pairs.contains(&key) { continue; }
                 if fp(&a.path).is_some() && fp(&a.path) == fp(&b.path) {
@@ -259,12 +252,32 @@ pub fn check(root: &Path, sel: &[String], links_sel: &[String]) -> Value {
     for (file, l) in links(root) {
         let rel = locations::relative(&file, root).unwrap_or_default();
         let tree = l["clip"].as_str().unwrap_or("");
-        if !(links_sel.iter().any(|s| rel == *s || rel.starts_with(&format!("{s}/"))) || (!sel.is_empty() && under(tree, sel)) || (sel.is_empty() && links_sel.is_empty())) { continue; }
+        if !(links_sel.iter().any(|s| rel == *s || rel.starts_with(&format!("{s}/"))) || (!sel.is_empty() && under(tree, sel))) { continue; }
         if !found_at(tree, l["size"].as_u64(), &by_tree) {
             issues.push(json!({ "kind": "missing", "file": file.display().to_string(), "link": l, "tree": tree }));
         }
     }
     json!({ "issues": issues, "clips": clips.len() })
+}
+
+/// The links whose original isn't at the path they name, as the project's catalog has the files (no file opened: done
+/// on its own as the project changes, Anton 2026-11-10). None when a library location isn't reachable (its clips would
+/// all look gone)
+pub fn missing(root: &Path) -> Option<Vec<Value>> {
+    let mounts = locations::mounts();
+    let locs = locations::locations(root, &mounts);
+    if locs.iter().any(|l| !l.local && l.dir.is_none()) { return None; }
+    let (clips, _) = footage(&locs);
+    let mut by_tree: HashMap<String, Vec<&Clip>> = HashMap::new();
+    for c in &clips { by_tree.entry(c.tree.clone()).or_default().push(c); }
+    let mut out = Vec::new();
+    for (file, l) in links(root) {
+        let tree = l["clip"].as_str().unwrap_or("").to_string();
+        if !found_at(&tree, l["size"].as_u64(), &by_tree) {
+            out.push(json!({ "kind": "missing", "file": file.display().to_string(), "link": l, "tree": tree }));
+        }
+    }
+    Some(out)
 }
 
 /// Find moved files: for each missing original and orphan own file of `issues`, the clip it's now (find_clip, its
@@ -409,7 +422,10 @@ mod tests {
         // Two own files of one clip at one tree path (Archive and Inbox both have "Action 6/C.MP4")
         std::fs::create_dir_all(a.join("Action 6")).unwrap();
         for d in [a.join("Action 6"), inbox.clone()] { std::fs::write(d.join("C.MP4"), b"c").unwrap(); std::fs::write(d.join("C.afp.json"), b"{}").unwrap(); }
-        let r = check(&p, &[], &[]);
+        // Nothing selected, nothing checked
+        assert_eq!(check(&p, &[], &[])["issues"], json!([]));
+        let all: Vec<String> = ["Egypt", "Action 6", "A", "B2.MP4", "C.MP4"].iter().map(|x| x.to_string()).collect();
+        let r = check(&p, &all, &[]);
         let kinds: Vec<&str> = r["issues"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap()).collect();
         assert!(kinds.contains(&"orphan") && kinds.contains(&"twice") && kinds.contains(&"own2"), "{kinds:?}");
         // A moment whose original moved: its link's path no longer has it

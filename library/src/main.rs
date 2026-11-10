@@ -450,6 +450,9 @@ struct Snapshot {
     quiet_ms: u64,
     // What the project's catalog is doing ("": nothing to say)
     catalog: String,
+    // Links whose original isn't where they say (moments, clip previews, exports, photos), counted from the catalog;
+    // null: not known
+    missing: Option<u64>,
 }
 
 #[tauri::command]
@@ -476,6 +479,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         None => inner.watch = None,
     }
     let catalog = seen::status(inner.watch.as_ref().map(|w| &w.runner));
+    let missing = Some(seen::missing(inner.watch.as_ref().map(|w| &w.runner))).filter(|n| *n != u64::MAX);
     let (changes, quiet_ms) = inner.watch.as_ref().map(|w| (w.changes.load(std::sync::atomic::Ordering::Relaxed), w.last.lock().unwrap().elapsed().as_millis() as u64)).unwrap_or((0, 0));
     Snapshot {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
@@ -485,6 +489,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         changes,
         quiet_ms,
         catalog,
+        missing,
     }
 }).await.map_err(|e| e.to_string())
 }
@@ -892,6 +897,28 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
         checks::apply(&root, &found, &relink)
     }).await.map_err(|e| e.to_string())
+}
+
+// Mending on one click (Anton, 2026-11-10): every link whose original isn't where it says, looked for by what it is
+// (its fingerprint…), the ones found surely written again; the ones with several to choose from given back
+#[tauri::command]
+async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if busy(&shared) { return Err("Jobs are in the queue: mend when they're done".into()); }
+    let tool = link_tool();
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        let issues = checks::missing(&root).ok_or("A source of the project isn't reachable now: its clips would all look gone")?;
+        let found = checks::find_moved(&root, &issues);
+        let all = found.as_array().cloned().unwrap_or_default();
+        let (sure, left): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|f| !f["found"].is_null());
+        let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
+        let problems = checks::apply(&root, &sure, &relink);
+        Ok::<Value, String>(json!({ "missing": issues.len(), "mended": sure.len() - problems.len(), "problems": problems, "left": left }))
+    }).await.map_err(|e| e.to_string())??;
+    let g = shared.lock().unwrap();
+    seen::recount(g.watch.as_ref().map(|w| &w.runner));
+    seen::look_at_everything(g.watch.as_ref().map(|w| &w.runner));
+    Ok(out)
 }
 
 // ---------- renders ----------
@@ -1578,7 +1605,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
