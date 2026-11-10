@@ -224,7 +224,7 @@ pub fn lens_types(camera: &str) -> Vec<LensType> {
 /// list doesn't know the mode
 pub fn recorded_type(camera: &str, path: &str) -> Option<String> {
     let c = curated().get(&camera_key(camera))?;
-    let fov = crate::probe::dji_fov_type(path)?;
+    let fov = crate::probe::recorded_lens_mode(path)?;
     c.recorded.get(&fov.to_string()).cloned()
 }
 
@@ -309,6 +309,7 @@ mod tests {
         let types = lens_types("DJI Osmo Action 6");
         assert_eq!(types.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wide", "normal"]);
         assert!(lens_types("GoPro HERO7 Black").is_empty());
+        assert_eq!(lens_types("GoPro HERO4 Black").iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wide"]);
     }
 
     fn camera(model: &str, lens: &str, w: usize, h: usize, fps: usize, eis: &str) -> CameraIdentifier {

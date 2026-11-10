@@ -159,7 +159,7 @@ pub struct LensInfo {
     #[serde(rename = "type")]
     pub chosen: Option<String>,
     pub recorded: Option<String>,
-    /// The lens mode the camera wrote, as its number (DJI's fov_type), for a camera with lens types: shown as
+    /// The lens mode the camera wrote, as its number (DJI's fov_type, the HERO4's SETT), for a camera with lens types: shown as
     /// "Unknown (mode 6)" while the curated list doesn't name it
     pub mode: Option<u64>,
 }
@@ -180,7 +180,7 @@ pub fn lens_info(path: &str) -> Option<LensInfo> {
     };
     let types = lens_pick::lens_types(&camera);
     let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path) };
-    let mode = if types.is_empty() { None } else { dji_fov_type(path) };
+    let mode = if types.is_empty() { None } else { recorded_lens_mode(path) };
     Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens })
 }
 
@@ -240,6 +240,12 @@ pub fn color_profile(path: &str) -> Option<&'static str> {
 /// metadata track. The Osmo Action 6 writes it in every clip, with EIS on or off and with or without motion data,
 /// while its lens's own calibration only comes with EIS off in its usual mode. The enum's names aren't the camera's:
 /// what each is on the Action 6 is in resources/curated_lenses.json (lens_pick.rs). None for other cameras
+/// The lens mode the camera wrote, as its own number: DJI's fov_type, the HERO4's SETT (markers::hero4_lens_mode).
+/// What curated_lenses.json's "recorded" names
+pub fn recorded_lens_mode(path: &str) -> Option<u64> {
+    dji_fov_type(path).or_else(|| crate::markers::hero4_lens_mode(path))
+}
+
 pub fn dji_fov_type(path: &str) -> Option<u64> {
     // Where each model's schema puts FOVType in StreamMeta (checked against the .proto, and on Action 6 clips)
     const STREAM_FOV_FIELD: &[(&str, u64)] = &[
