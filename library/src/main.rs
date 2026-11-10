@@ -995,6 +995,45 @@ async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>
         .await.map_err(|e| e.to_string())
 }
 
+// ---------- Stabilize optically: the lens ----------
+
+/// The lens types to choose from for these clips (gyroflow-optical --lens-types: vs-gyroflow's lens_pick, per camera),
+/// [[type, label]] once each, in the order the cameras give them
+#[tauri::command]
+async fn lens_types(paths: Vec<String>) -> Result<Vec<(String, String)>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<(String, String)>, String> {
+        let tool = optical_tool()?;
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--lens-types").args(&paths).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        Ok(lens_types_of(&String::from_utf8_lossy(&out.stdout)))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// gyroflow-optical --lens-types' lines ({"path", "camera", "types": [[type, label]...]}), the types once each
+fn lens_types_of(text: &str) -> Vec<(String, String)> {
+    let mut all: Vec<(String, String)> = Vec::new();
+    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        for t in v["types"].as_array().into_iter().flatten().filter_map(Value::as_array) {
+            let (Some(k), Some(l)) = (t.first().and_then(Value::as_str), t.get(1).and_then(Value::as_str)) else { continue };
+            if !all.iter().any(|(x, _)| x == k) { all.push((k.to_string(), l.to_string())); }
+        }
+    }
+    all
+}
+
+/// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
+#[tauri::command]
+async fn set_lens_type(shared: State<'_, Shared>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if lens_type.as_deref().is_some_and(|t| t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
+        return Err("no such lens type".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || tags::set_lens_type(&root, &clips, lens_type.as_deref())).await.map_err(|e| e.to_string())
+}
+
 // ---------- Take in another project ----------
 
 #[tauri::command]
@@ -1490,11 +1529,14 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         request["layout"] = json!(layout);
     }
     if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
-    // The clips themselves, by the file each one's project goes beside (the page picks the copy: its own file's)
+    // The clips, by their paths in the project's tree: each one's file is the copy its own files are beside (the main
+    // one, tags::clip_own), where its Gyroflow project goes. Redo: those with a project made again
     if kind == "optical" {
-        let clips: Vec<String> = options.get("clips").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        let trees: Vec<&str> = options.get("clips").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+        let clips: Vec<String> = trees.iter().filter_map(|t| tags::clip_own(&root, t).ok()).map(|(_, clip)| clip.display().to_string()).collect();
         if clips.is_empty() { return Err("Select clips to stabilize".into()); }
         request["clips"] = json!(clips);
+        request["redo"] = json!(options.get("redo").and_then(Value::as_bool).unwrap_or(false));
     }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
@@ -1660,7 +1702,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, delete_renders, delete_items, export_library, mend, missing_links])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items, export_library, mend, missing_links])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1796,6 +1838,12 @@ mod tests {
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a
     // trip with Project.afproject in it). Without them it's skipped
+    #[test]
+    fn lens_types_once_each() {
+        let text = "{\"path\":\"/a\",\"camera\":\"DJI OsmoAction6\",\"types\":[[\"wide\",\"Wide\"],[\"normal\",\"Normal\"]]}\nnoise\n{\"path\":\"/b\",\"types\":[[\"normal\",\"Normal\"],[\"linear\",\"Linear\"]]}\n";
+        assert_eq!(lens_types_of(text), vec![("wide".into(), "Wide".into()), ("normal".into(), "Normal".into()), ("linear".into(), "Linear".into())]);
+    }
+
     // Stabilize optically's job as the Library runs it: gyroflow-optical (here a stand-in that writes what the real one
     // does) started with the request, its status read as it goes, what it left out kept with the job
     #[cfg(unix)]
