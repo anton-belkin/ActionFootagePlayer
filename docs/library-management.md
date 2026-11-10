@@ -773,14 +773,16 @@ read them in.
 - **Looking** (the Library only, while open): every few minutes it looks at the time of each folder of the project and
   its locations — one question a folder — and lists again only the ones whose time, or whose files on record, aren't
   what was written when they were last listed; what changed is written to its journal. Its own computer's changes it
-  hears of from the system (FSEvents) and looks at those folders at once. A folder listed because it changed is listed
-  once more 90 s later (the Mac keeps a share's listings up to a minute). Once a day a deep look lists every folder
+  hears of from the system (FSEvents) and looks at those folders at once. A folder listed because it changed is marked
+  so and listed once more by the next regular look, by whichever computer makes it (a listing can be older than the
+  folder's time it came with: the Mac keeps a share's listings ~30 s). Once a day a deep look lists every folder
   (in the background, slowly): it finds a file changed in place by something not ours.
 - **Folding** (the Library only): when the journals have grown past 2000 lines or 2 MB, a new snapshot; only parts
   that changed are written. Two Libraries folding at once both make good snapshots.
 - **Cleaning** (the Library only): snapshots older than the newest three, parts none of those has, temporary files
-  left, this computer's segments those have read — each only when it was seen to be so at the clean-up before (a
-  computer folding meanwhile isn't robbed of the parts it has just written).
+  left, this computer's segments those have read — each only once this computer has seen it so for 10 minutes (its
+  own clock against itself). Found on the real NAS: with "seen so at two clean-ups", a Mac whose listing of the
+  snapshots was 30 s behind removed the parts of another computer's newest snapshots, and none read whole.
 
 ### What a look won't do
 

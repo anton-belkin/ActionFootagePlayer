@@ -78,6 +78,9 @@ pub struct Catalog {
     pub tail_bytes: u64,
     pub partial: bool,
     offsets: HashMap<PathBuf, u64>,
+    /// Records read from the journals that change what there is (a file, its insides, a folder there or gone), not
+    /// only what's known of a folder's listing: for the Library to read its views again only then
+    pub seen_changes: u64,
     /// How long a file must have been not needed before a clean-up removes it (10 minutes)
     pub grace: std::time::Duration,
     /// Seconds added to this computer's clock (tests: time passing)
@@ -90,7 +93,7 @@ impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
-                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0 }
+                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0 }
     }
 
     fn reset(&mut self) {
@@ -186,6 +189,18 @@ impl Catalog {
     /// The journals' lines not read yet: how many
     pub fn refresh(&mut self) -> Result<usize, Error> { self.read_tails() }
 
+    /// A record read from a journal into what's known, counted when it changes what there is
+    fn take(&mut self, root: &str, rel: &str, l: u64, by: &crate::state::Id, f: Option<File>) {
+        let k = key(root, rel);
+        let before = self.state.recs.get(&k).map(|r| r.f.as_ref().map(|f| (f.dir, f.size, f.mtime, f.meta.clone())));
+        let visible = |x: &Option<File>| x.as_ref().map(|f| if f.dir { (true, 0, 0, None) } else { (false, f.size, f.mtime, f.meta.clone()) });
+        let now = visible(&f);
+        if self.state.apply(k, Rec { v: Version { l, by: by.clone() }, f }) {
+            let was = before.map(|b| b.map(|(d, s, m, x)| if d { (true, 0, 0, None) } else { (d, s, m, x) })).flatten();
+            if was != now { self.seen_changes += 1; }
+        }
+    }
+
     fn read_tails(&mut self) -> Result<usize, Error> {
         let jdir = self.dir.join("journal");
         let computers: Vec<String> = match self.shared.list(&jdir) {
@@ -221,10 +236,7 @@ impl Catalog {
                 for line in p.lines {
                     let last = self.applied.get(&c).copied().unwrap_or(0);
                     if line.seq <= last { continue; }
-                    for (root, rel, f) in line.entries {
-                        let root_id = root;
-                        self.state.apply(key(&root_id, &rel), Rec { v: Version { l: line.l, by: by.clone() }, f });
-                    }
+                    for (root, rel, f) in line.entries { self.take(&root, &rel, line.l, &by, f); }
                     self.applied.insert(c.clone(), line.seq);
                     let ml = self.lamports.entry(c.clone()).or_insert(0);
                     *ml = (*ml).max(line.l);
@@ -248,7 +260,7 @@ impl Catalog {
                 for line in p.lines {
                     let last = self.applied.get(&c).copied().unwrap_or(0);
                     if line.seq <= last { continue; }
-                    for (root, rel, f) in line.entries { self.state.apply(key(&root, &rel), Rec { v: Version { l: line.l, by: by.clone() }, f }); }
+                    for (root, rel, f) in line.entries { self.take(&root, &rel, line.l, &by, f); }
                     self.applied.insert(c.clone(), line.seq);
                     let ml = self.lamports.entry(c.clone()).or_insert(0);
                     *ml = (*ml).max(line.l);

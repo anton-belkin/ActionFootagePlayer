@@ -172,9 +172,11 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
     let refresh = |changes: &AtomicU64, last: &Mutex<Instant>| {
         let mut g = SEEN.write().unwrap();
         let Some(s) = g.as_mut().filter(|s| s.id == id) else { return };
+        // The views read again only when what there is changed (not a folder's listing noted again)
+        let before = s.cat.seen_changes;
         match s.cat.refresh() {
-            Ok(0) | Err(Error::Io(_)) => {}
-            Ok(_) => changed(changes, last),
+            Ok(_) if s.cat.seen_changes != before => changed(changes, last),
+            Ok(_) | Err(Error::Io(_)) => {}
             Err(_) => { let mut c = project::open(&root); if load(&mut c, &Want::All).is_ok() { s.cat = c; changed(changes, last); } }
         }
     };
