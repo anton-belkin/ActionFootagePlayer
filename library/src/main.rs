@@ -811,6 +811,13 @@ fn link_tool() -> Option<PathBuf> {
 
 // A moment's, clip preview's or export's link written again (its original moved, tags changed)
 fn write_link(tool: Option<&PathBuf>, file: &Path, link: &str) -> Result<(), String> {
+    // A photo's link is in its XMP: afp-meta writes it (afp-cut writes an MP4's key)
+    let lower = file.to_string_lossy().to_lowercase();
+    if [".heic", ".heif", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e)) {
+        let meta = meta_tool().ok_or("ActionFootagePlayer's afp-meta isn't there to write a photo's link")?;
+        let o = Command::new(meta).arg(file).arg("--link").arg(link).output().map_err(|e| e.to_string())?;
+        return if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) };
+    }
     let tool = tool.ok_or("ActionFootagePlayer's afp-cut isn't there to write the links")?;
     let o = Command::new(tool).arg("--set-key").arg(file).arg("ch.actionfootageplayer.link").arg(link).output().map_err(|e| e.to_string())?;
     if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
