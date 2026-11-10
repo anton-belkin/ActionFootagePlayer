@@ -239,9 +239,10 @@ function deriveItems(view) {
       const mv = probe && probe.movie;
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
-      // Its preview's picture, else what the camera made for its own quick look (LRF, THM); an empty preview (its
-      // picture still to come): the camera's, else its dark frame
-      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || null;
+      // Its preview's picture, else what the camera made for its own quick look (LRF, THM), else the clip's own, as
+      // Finder draws it (a log clip looks flat, as there); an empty preview (its picture still to come): the camera's,
+      // else its dark frame
+      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || it.path || null;
       it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
       it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
@@ -592,26 +593,40 @@ function chips(it) {
   return c.map((x) => '<span class="' + x[0] + '">' + esc(x[1]) + '</span>').join("");
 }
 
-// The pictures: from the app, a few at a time, each set where it shows once it's there
+// The pictures: from the app, a few at a time, each set where it shows once it's there; what's on screen first
 let thumbsBusy = 0;
 const thumbsWanted = [];
+const thumbsAsked = new Set(); // asked, answer still to come
 function fillThumbs() {
   for (const el of document.querySelectorAll("img[data-thumb]")) {
     const p = el.getAttribute("data-thumb");
     if (THUMBS.has(p)) continue;
-    if (thumbsWanted.indexOf(p) < 0) thumbsWanted.push(p);
+    if (!thumbsAsked.has(p) && thumbsWanted.indexOf(p) < 0) thumbsWanted.push(p);
   }
   pumpThumbs();
 }
+// The next to ask: the first wanted one on screen (or just below or above it), else the first wanted
+function nextThumb() {
+  const want = new Set(thumbsWanted);
+  const h = window.innerHeight;
+  for (const el of document.querySelectorAll("img[data-thumb]")) {
+    const p = el.getAttribute("data-thumb");
+    if (!want.has(p)) continue;
+    const r = (el.hidden ? el.parentElement : el).getBoundingClientRect();
+    if (r.bottom > -300 && r.top < h + 300 && (r.width || r.height)) { thumbsWanted.splice(thumbsWanted.indexOf(p), 1); return p; }
+  }
+  return thumbsWanted.shift();
+}
 function pumpThumbs() {
   while (thumbsBusy < 6 && thumbsWanted.length) {
-    const p = thumbsWanted.shift();
-    if (THUMBS.has(p)) continue;
+    const p = nextThumb();
+    if (THUMBS.has(p) || thumbsAsked.has(p)) continue;
     thumbsBusy++;
+    thumbsAsked.add(p);
     invoke("thumb", { path: p }).then((u) => u || null, () => null).then((u) => {
       THUMBS.set(p, u);
       for (const el of document.querySelectorAll('img[data-thumb="' + CSS.escape(p) + '"]')) { if (u) { el.src = u; el.hidden = false; } else el.hidden = true; }
-    }).finally(() => { thumbsBusy--; pumpThumbs(); });
+    }).finally(() => { thumbsBusy--; thumbsAsked.delete(p); pumpThumbs(); });
   }
 }
 

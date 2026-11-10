@@ -29,6 +29,8 @@ fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 install -m 755 "$bin" "$app/Contents/MacOS/ActionFootageLibrary"
+# Its cards' pictures, as Finder draws them (the system's thumbnail service; library/src/thumbs.rs)
+swiftc -O -target arm64-apple-macos12 macos/thumbs.swift -o "$app/Contents/MacOS/afp-thumbs"
 # Its Quick Look (the system's panel: qlmanage -p crashes on videos on macOS 27)
 swiftc -O -target arm64-apple-macos12 macos/quicklook.swift -o "$app/Contents/MacOS/afp-quicklook"
 # What it reads of Apple Photos (times and places, to suggest clips' locations) and Apple's place names: macOS asks
@@ -79,6 +81,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+codesign --force -s - "$app/Contents/MacOS/afp-thumbs"
 codesign --force -s - "$app/Contents/MacOS/afp-quicklook"
 codesign --force -s - "$app/Contents/MacOS/afp-photos"
 codesign --force -s - "$app" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }

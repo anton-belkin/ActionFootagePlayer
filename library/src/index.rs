@@ -809,8 +809,8 @@ fn data_url(bytes: &[u8]) -> String {
     format!("data:{mime};base64,{}", base64(bytes))
 }
 
-/// A small picture of a file, as a data: URL: an MP4's cover (a moment's, a clip preview's), else (macOS) one made
-/// by the system (sips for photos, Quick Look for videos), kept in `cache`. None: none to show
+/// A small picture of a file, as a data: URL: an MP4's cover (a moment's, a clip preview's), else one made by the
+/// system (sips for photos on macOS; videos: thumbs.rs), kept in `cache`. None: none to show
 pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     let (size, mtime) = stamp(&path.to_string_lossy())?;
     let key = fnv(&format!("{}|{size}|{mtime}", path.display()));
@@ -837,18 +837,15 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     if lower.ends_with(".mp4") || lower.ends_with(".mov") {
         bytes = keys_and_cover(path).1;
     }
-    if bytes.is_none() && cfg!(target_os = "macos") {
+    if bytes.is_none() {
         let out = cache.join(format!("{key}.jpg"));
-        if [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) {
+        if cfg!(target_os = "macos") && [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) {
             let ok = Command::new("/usr/bin/sips").args(["-s", "format", "jpeg", "-Z", "360"]).arg(path).arg("--out").arg(&out)
                 .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
             if ok { bytes = std::fs::read(&out).ok(); }
         } else if lower.ends_with(".mov") || lower.ends_with(".mp4") {
-            // A video without a cover (a draft clip preview): a frame by the player's ffmpeg (Quick Look hangs on some)
-            let ffmpeg = crate::player_ffmpeg();
-            let ok = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg"))).args(["-v", "error", "-y", "-ss", "0.5", "-i"]).arg(path)
-                .args(["-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "4"]).arg(&out).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-            if ok { bytes = std::fs::read(&out).ok(); }
+            // A video without a cover (an original clip, a draft clip preview): as Finder draws it (thumbs.rs)
+            if crate::thumbs::video_frame(path, &out) { bytes = std::fs::read(&out).ok(); }
         }
         let _ = std::fs::remove_file(&out);
     }
