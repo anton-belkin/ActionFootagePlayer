@@ -136,8 +136,13 @@ expect("anywhere: a plain video among the footage isn't read", names["renamed"],
 expect("anywhere: Generated's folder watched", anywhere.dirs["/T/Egypt/Generated/2026-11-10 14-32 Moments"], 7)
 expect("anywhere: a folder with none not watched", anywhere.dirs["/T/Egypt/Day 2"], nil)
 expect("anywhere: kept to a folder", #m.scan("/T/Egypt", {}, "Generated").list, 1)
-expect("generated", moments_lib.generated_rel("Moments", os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 })), "Generated/2026-11-10 14-32 Moments")
-expect("generated a day", moments_lib.generated_rel("Moments", os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 }), true), "Generated/2026-11-10 Moments")
+local t1432 = os.time({ year = 2026, month = 11, day = 10, hour = 14, min = 32 })
+expect("generated", moments_lib.generated_rel("Moments", t1432), "_Moments/Generated")
+expect("generated, clip previews", moments_lib.generated_rel("Clip previews", t1432), "_Clips/Generated")
+expect("generated, photos", moments_lib.generated_rel("Photos", t1432, true), "_Stills/Generated")
+expect("generated, exports", moments_lib.generated_rel("Exports", t1432), "_Exports/Generated")
+expect("generated, a folder per run", moments_lib.generated_rel("Moments", t1432, false, true), "_Moments/Generated/2026-11-10 14-32")
+expect("generated, a folder a day", moments_lib.generated_rel("Moments", t1432, true, true), "_Moments/Generated/2026-11-10")
 for _, f in ipairs({ "/T/Egypt/Generated/2026-11-10 14-32 Moments/Gen.mp4", "/T/Egypt/Day 1/Beside.afplink.mp4", "/T/Egypt/Day 2/renamed.mp4" }) do files[f] = nil end
 local before = reads
 m.scan("/T/Egypt", cache)

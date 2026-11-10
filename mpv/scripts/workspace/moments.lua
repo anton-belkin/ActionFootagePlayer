@@ -24,9 +24,12 @@ M.EXT = ".afplink.mp4"
 M.EXPORTS = "_Exports"
 -- Clip previews: _Clips/<the clip's path>.afplink.mp4 (made before 0.11)
 M.CLIPS = "_Clips"
--- Where what's made goes since 0.11 (docs/library-management.md §8): Generated/<date> <time> <what>/, a folder per run,
--- from where it's moved anywhere in the project folder; it's found there by the link inside
+-- Where what's made goes (docs/library-management.md §8): Generated/ inside its kind's own folder (Anton, 2026-11-10:
+-- _Clips/Generated, _Moments/Generated, _Stills/Generated, _Exports/Generated), from where it's moved anywhere in the
+-- project folder; it's found there by the link inside. The project's "generated_runs" (Project.afproject) gives each
+-- run a folder of its own in it. Projects of before have Generated/ at the top: left there, found the same way
 M.GENERATED = "Generated"
+M.KIND_FOLDER = { ["Clip previews"] = "_Clips", Moments = "_Moments", Photos = "_Stills", Exports = "_Exports" }
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
 -- (and the photos' folder, whose Live Photos' .mov files aren't footage either)
@@ -34,11 +37,13 @@ local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills =
                       clips = true, exports = true, stabilized = true, generated = true }
 M.OWN_FOLDERS = OWN_FOLDERS
 
--- A new folder for what a run makes: <project>/Generated/<date> <time> <what> (`day`: <date> <what>, one a day), by
--- this computer's clock. `t` os.time()
-function M.generated_rel(what, t, day)
-    local stamp = os.date(day and "%Y-%m-%d" or "%Y-%m-%d %H-%M", t)
-    return M.GENERATED .. "/" .. stamp .. " " .. what
+-- The folder for what a run makes, in the project: <kind's folder>/Generated (what: "Clip previews", "Moments",
+-- "Photos", "Exports"); with `runs` (the project's generated_runs), a folder of the run's own in it: <date> <time>
+-- (`day`: <date>, one a day, for what's saved by hand), by this computer's clock. `t` os.time()
+function M.generated_rel(what, t, day, runs)
+    local base = (M.KIND_FOLDER[what] or ("_" .. what)) .. "/" .. M.GENERATED
+    if not runs then return base end
+    return base .. "/" .. os.date(day and "%Y-%m-%d" or "%Y-%m-%d %H-%M", t)
 end
 
 -- A clip preview's path in _Clips/, from the clip's in the project ("Day 1/A.MP4" -> "Day 1/A.afplink.mp4"), without
