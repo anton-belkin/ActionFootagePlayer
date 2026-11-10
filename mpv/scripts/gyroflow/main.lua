@@ -1103,6 +1103,9 @@ end
 -- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
 local trans_rev = 0
 
+-- The shader applied (further down): the whole clip's table, once it's there, in place of its first seconds'
+local gpu_apply
+
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
     -- A clip without a project: its motion data from the NAS took seconds (20 s for a 1.5 GB clip, cold), so the
@@ -1215,7 +1218,7 @@ local function gpu_render_scale()
     mp.set_property_native("glsl-shader-opts", opts)
 end
 
-local function gpu_apply(reply)
+gpu_apply = function(reply)
     -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
     local shown = dn_sync.shown()
     gpu_set_shader(gpu and gpu.shader, reply.shader, GRID_MB + (reply.denoise and DENOISE_MB or 0))
