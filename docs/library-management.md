@@ -814,9 +814,16 @@ docker run -d --name afp-catalog-trip --restart unless-stopped --hostname nas --
 ```
 
 `--share` says where a share the project's locations name (`//DISKSTATIONDXP/video/…`) is inside the container. It's
-a computer of its own in the journals (its name kept in `/data`). Tried on a Mac (FSEvents): a moment copied in,
-removed, put back, its folder renamed — each seen by the player's next question within 1–3 s, the player looking at
-nothing. Not yet built or run on the NAS.
+a computer of its own in the journals (its name kept in `/data`, a folder the `--user` can write: a Docker volume
+is root's). Built and run on the NAS (2026-11-10, Rust 1.91 on Debian bookworm, 88 MB): a test project whose
+footage is a location `//DISKSTATIONDXP/ssd/…`; a moment copied in, moved, removed and put back over SMB from a Mac
+reached that Mac's player in ~1.3 s each (the watcher waits 1 s for a change to settle), the player looking at
+nothing. Once, the first reading of the watcher's journal after a change came from the Mac's cache for some seconds
+(the NAS writes it itself, so Samba doesn't tell the Mac it changed): journals' tails are read past the Mac's cache
+(F_NOCACHE), and the player asks again every 10 s anyway.
+
+On a Mac a share's notices (FSEvents) are only of what this Mac changes there: another computer's or the NAS's own
+changes aren't told to it — which is what the NAS's watcher is for.
 
 ### What a look won't do
 

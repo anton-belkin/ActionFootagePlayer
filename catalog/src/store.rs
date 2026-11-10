@@ -184,6 +184,10 @@ impl Store for DiskStore {
     fn read_from(&self, p: &Path, offset: u64) -> io::Result<Vec<u8>> {
         use std::io::{ Read, Seek, SeekFrom };
         let mut f = std::fs::File::open(p)?;
+        // A journal's tail as it is on the disk, not as this Mac's cache last had it (a share's file written by the
+        // NAS itself, its watcher, isn't known to Samba to have changed: seen once on the NAS, a few seconds late)
+        #[cfg(target_os = "macos")]
+        unsafe { use std::os::fd::AsRawFd; libc::fcntl(f.as_raw_fd(), libc::F_NOCACHE, 1); }
         f.seek(SeekFrom::Start(offset))?;
         let mut out = Vec::new();
         f.read_to_end(&mut out)?;

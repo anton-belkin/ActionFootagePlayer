@@ -4,7 +4,8 @@
 #   docker run -d --name afp-catalog-trip --restart unless-stopped --hostname nas --user 1000:10 \
 #     -v /volume1/ssd/Projects/Trip:/project -v /volume1/video:/shares/video -v afp-catalog-data:/data \
 #     afp-catalog watch /project --share video=/shares/video
-FROM rust:1.89-slim AS build
+# 1.91: notify-types wants it (File::try_lock, used here, came in 1.89)
+FROM rust:1.91-slim-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
