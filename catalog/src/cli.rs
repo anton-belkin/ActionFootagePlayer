@@ -260,20 +260,52 @@ pub fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "note" => {
+            // Each file read 16 at a time (a share's opens take 10-20 ms: a batch's thousands of new ones in seconds,
+            // not a minute), its folder touched once, in parallel too
+            let files: Vec<(PathBuf, String, String)> = a[2..].iter().filter_map(|f| {
+                let path = std::path::absolute(f).unwrap_or_else(|_| PathBuf::from(f));
+                match project::locate(&roots, &path) {
+                    Some((root, rel)) => Some((path, root, rel)),
+                    None => { eprintln!("afp-catalog: {f}: not in the project's folder or its locations"); None }
+                }
+            }).collect();
+            let next = std::sync::Mutex::new(0usize);
+            let seen = std::sync::Mutex::new(Vec::new());
+            std::thread::scope(|sc| {
+                for _ in 0..16.min(files.len()) {
+                    sc.spawn(|| loop {
+                        let i = { let mut n = next.lock().unwrap(); *n += 1; *n - 1 };
+                        let Some((path, root, rel)) = files.get(i) else { break };
+                        let r = observe(&ours, root, rel, path);
+                        seen.lock().unwrap().push((i, r));
+                    });
+                }
+            });
+            let mut seen = seen.into_inner().unwrap();
+            seen.sort_by_key(|(i, _)| *i);
             let mut entries = Vec::new();
             let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
-            for f in &a[2..] {
-                let path = std::path::absolute(f).unwrap_or_else(|_| PathBuf::from(f));
-                let Some((root, rel)) = project::locate(&roots, &path) else { eprintln!("afp-catalog: {f}: not in the project's folder or its locations"); continue };
-                match observe(&ours, &root, &rel, &path) {
+            for (i, r) in seen {
+                let (path, root, rel) = &files[i];
+                match r {
                     Ok(now) => {
                         if let Some(d) = path.parent() { dirs.insert(d.to_path_buf()); }
-                        entries.push((root, rel, now));
+                        entries.push((root.clone(), rel.clone(), now));
                     }
-                    Err(e) => eprintln!("afp-catalog: {f}: {e}"),
+                    Err(e) => eprintln!("afp-catalog: {}: {e}", path.display()),
                 }
             }
-            for d in &dirs { let _ = cat.touch(d); }
+            let dirs: Vec<PathBuf> = dirs.into_iter().collect();
+            let next = std::sync::Mutex::new(0usize);
+            std::thread::scope(|sc| {
+                for _ in 0..16.min(dirs.len()) {
+                    sc.spawn(|| loop {
+                        let i = { let mut n = next.lock().unwrap(); *n += 1; *n - 1 };
+                        let Some(d) = dirs.get(i) else { break };
+                        let _ = cat.touch(d);
+                    });
+                }
+            });
             if let Err(e) = load(&mut cat, &Want::Keys(Vec::new())) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } }
             match cat.note(entries) { Ok(()) => ExitCode::SUCCESS, Err(e) => fail(e.to_string()) }
         }

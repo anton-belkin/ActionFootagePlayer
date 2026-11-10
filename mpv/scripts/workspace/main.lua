@@ -261,14 +261,49 @@ function catalog.tool()
 end
 -- Files written or removed: noted in the background (their folders touched, a line in this computer's journal).
 -- project nil: found from the files (their location's .afplocation)
+-- One note at a time (this computer's journal has one writer): what's asked meanwhile waits, a project's files put
+-- together, and goes next
+catalog.pending = 0
+local note_queue, noting = {}, false
+local function note_next()
+    if noting or #note_queue == 0 then return end
+    local exe = catalog.tool()
+    local first = table.remove(note_queue, 1)
+    local files = first.files
+    for i = #note_queue, 1, -1 do
+        if note_queue[i].project == first.project then
+            for _, f in ipairs(table.remove(note_queue, i).files) do files[#files + 1] = f end
+            first.merged = first.merged + 1
+        end
+    end
+    local args = { exe, "note", first.project or "-" }
+    for _, f in ipairs(files) do args[#args + 1] = f end
+    noting = true
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true, args = args }, function(ok, r)
+        noting = false
+        catalog.pending = catalog.pending - 1 - first.merged
+        if not (ok and r and r.status == 0) then mp.msg.verbose("afp-catalog note: " .. tostring(r and r.stderr)) end
+        note_next()
+    end)
+end
 function catalog.note(project, files)
     local exe = catalog.tool()
     if not exe or #files == 0 then return end
-    local args = { exe, "note", project or "-" }
-    for _, f in ipairs(files) do args[#args + 1] = f end
-    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true, args = args }, function(ok, r)
-        if not (ok and r and r.status == 0) then mp.msg.verbose("afp-catalog note: " .. tostring(r and r.stderr)) end
-    end)
+    local list = {}
+    for i, f in ipairs(files) do list[i] = f end
+    catalog.pending = catalog.pending + 1
+    note_queue[#note_queue + 1] = { project = project, files = list, merged = 0 }
+    note_next()
+end
+-- cb once the notes under way are through (a batch quits only then: a quit cuts them off), a minute at most
+function catalog.after_notes(cb)
+    local waited = 0
+    local function check()
+        if catalog.pending <= 0 or waited >= 60 then return cb() end
+        waited = waited + 0.2
+        mp.add_timeout(0.2, check)
+    end
+    check()
 end
 -- The project's own files with a link of a kind ("moment", "clip", "export", "photo"; nil: all), in the background:
 -- cb(list as moments.scan's: { file, name, link, kind }), cb(nil) when the project has no catalog (or no afp-catalog)
@@ -1530,7 +1565,9 @@ local function next_clip()
             for _, f in ipairs(job.failures) do mp.msg.warn("clip preview of " .. tostring(f[1]) .. " not made: " .. tostring(f[2])) end
         end
         recount()
-        if batch then return batch.finished({ made = job.made, failed = job.failed, failures = job.failures, stopped = job.stopping }) end
+        if batch then
+            return catalog.after_notes(function() batch.finished({ made = job.made, failed = job.failed, failures = job.failures, stopped = job.stopping }) end)
+        end
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
         mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " couldn't be made: "
             .. job.failures[1][2]) or ""), job.failed > 0 and 6 or 4)
@@ -1541,9 +1578,9 @@ local function next_clip()
     -- its link when it was moved meanwhile)
     local out = c.draft_path and (c.draft_path:gsub("([^/\\]+)$", ".tmp-finish-%1")) or new_preview_path(job.dir, c, job.flat)
     local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
-    -- At background priority while a video plays
-    -- (and always when finishing empty ones: that runs while the footage is worked on)
-    if c.draft_path or (not mp.get_property_native("pause") and not mp.get_property_native("idle-active")) then table.insert(args, "--background") end
+    -- At background priority while a video plays (not in a batch: macOS's background priority all but stops it, reads
+    -- from the NAS too: a minute and more for a clip)
+    if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
     local times = marks_of(c.file)
     if times then
         local list = {}
@@ -1597,7 +1634,7 @@ local function next_clip()
 end
 
 -- Empty previews (Anton, 2026-11-10: every clip's preview there at once, to arrange the footage before any picture
--- is made): one dark frame with the link inside, written by afp-cut for all of them in one go (~6 ms each on the NAS);
+-- is made): one dark frame with the link inside, written by afp-cut 200 at a time (~6 ms each on the NAS);
 -- the "clips-finish" job queued after makes each one real in its place, the folder the Library shows first. Their
 -- names as new_preview_path gives them, the run's folder being new: told apart by the ones taken in this run
 write_empty = function(job)
@@ -1617,25 +1654,41 @@ write_empty = function(job)
         taken[file] = true
         list[#list + 1] = { out = file, link = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true }) }
     end
-    local function done(written, failed)
-        job.queue = {}
-        job.made, job.done = #written, job.total
-        for _, f in ipairs(written) do job.notes[#job.notes + 1] = f end
-        for _, x in ipairs(failed) do
-            job.failed = job.failed + 1
-            table.insert(job.failures, { type(x) == "table" and x[1] or "?", type(x) == "table" and x[2] or tostring(x) })
-        end
-        next_clip()
-    end
+    -- 200 at a time, each 200 into the catalog as they're written: the progress moves, Footage fills as it goes
     local exe = plugin_tool("afp-cut")
-    if not exe then return done({}, { { job.dir, "afp-cut isn't installed (the gyroflow plugin's)" } }) end
-    job.id = mp.command_native_async({ name = "subprocess", args = { exe, "--empty-previews" }, stdin_data = utils.format_json(list),
-                                       playback_only = false, capture_stdout = true, capture_stderr = true }, function(_, r)
-        job.id = nil
-        local v = r and r.status == 0 and utils.parse_json(r.stdout or "")
-        if type(v) ~= "table" then return done({}, { { job.dir, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "afp-cut failed" } }) end
-        done(v.written or {}, v.failed or {})
-    end)
+    job.queue = {}
+    local at = 1
+    local function chunk()
+        if job.stopping or at > #list then return next_clip() end
+        local part = {}
+        for i = at, math.min(at + 199, #list) do part[#part + 1] = list[i] end
+        at = at + #part
+        local function took(written, failed)
+            job.made = job.made + #written
+            job.done = math.min(job.total, job.done + #part)
+            catalog.note(job.project, written)
+            for _, x in ipairs(failed) do
+                job.failed = job.failed + 1
+                table.insert(job.failures, { type(x) == "table" and x[1] or "?", type(x) == "table" and x[2] or tostring(x) })
+            end
+            state.clips = { done = job.done, total = job.total }
+            publish()
+            chunk()
+        end
+        if not exe then return took({}, { { job.dir, "afp-cut isn't installed (the gyroflow plugin's)" } }) end
+        job.id = mp.command_native_async({ name = "subprocess", args = { exe, "--empty-previews" }, stdin_data = utils.format_json(part),
+                                           playback_only = false, capture_stdout = true, capture_stderr = true }, function(_, r)
+            job.id = nil
+            local v = r and r.status == 0 and utils.parse_json(r.stdout or "")
+            if type(v) ~= "table" then
+                -- Stopped: what it had written is found by the next look; not a failure
+                if job.stopping then return took({}, {}) end
+                return took({}, { { job.dir, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "afp-cut failed" } })
+            end
+            took(v.written or {}, v.failed or {})
+        end)
+    end
+    chunk()
 end
 
 local function start_clips(root, queue, what)

@@ -1645,9 +1645,12 @@ async function poll() {
     if (S.root) await loadProject(); else renderAll();
   }
   // Files changed in the project's folder or its locations (the player saving marks, moments, photos; Finder): read
-  // again once they've settled, unless a batch is running (its end reads it again)
-  if (S.root && s.changes !== S.changes && s.quiet_ms > 800 && !S.refreshing && !s.jobs.some((j) => j.state === "running")) {
+  // again once they've settled; while a batch runs (changes all the time: clip previews coming one by one), every 4 s
+  const batchRuns = s.jobs.some((j) => j.state === "running");
+  const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
+  if (S.root && s.changes !== S.changes && due && !S.refreshing) {
     S.changes = s.changes;
+    S.lastRefresh = Date.now();
     S.refreshing = true;
     refresh().finally(() => { S.refreshing = false; });
   }
