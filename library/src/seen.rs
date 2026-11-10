@@ -70,6 +70,13 @@ pub static OLD: AtomicBool = AtomicBool::new(false);
 fn old() -> bool { OLD.load(Ordering::Relaxed) }
 #[cfg(not(test))]
 fn old() -> bool { false }
+/// A test that has a player of its own to tell (e2e)
+#[cfg(test)]
+pub static TELL_PLAYERS: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+fn tell_players_on() -> bool { TELL_PLAYERS.load(Ordering::Relaxed) }
+#[cfg(not(test))]
+fn tell_players_on() -> bool { true }
 
 /// What the views can say from it: (root, path in it), when the catalog is read and has looked at that root
 fn locate<'a>(s: &'a Seen, path: &Path) -> Option<(String, String)> {
@@ -225,6 +232,12 @@ pub fn note_now(paths: &[PathBuf]) {
     if entries.is_empty() { return; }
     let _ = s.cat.note(entries);
     if let Some((changes, last)) = &s.bump { changed(changes, last); }
+    let root = s.root.clone();
+    drop(g);
+    // The player windows open here told at once (their clip's moments, its own file): live.rs
+    let files: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+    // (not from tests unless they ask: the player windows open on this computer aren't theirs)
+    if tell_players_on() { afp_catalog::live::tell_players(&serde_json::json!({ "project": root.display().to_string(), "files": files })); }
 }
 
 /// Whether the catalog keeps it: not hidden, nor in a folder it leaves out (its own rules, the sweep's)
@@ -301,9 +314,24 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
     r
 }
 
+/// Told each time what the catalog knows changed, with the count (main.rs: the page hears it at once, an event)
+pub static ON_CHANGE: std::sync::OnceLock<Box<dyn Fn(u64) + Send + Sync>> = std::sync::OnceLock::new();
+
 fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
-    changes.fetch_add(1, Ordering::Relaxed);
+    let n = changes.fetch_add(1, Ordering::Relaxed) + 1;
     *last.lock().unwrap() = Instant::now() - Duration::from_secs(1);
+    if let Some(f) = ON_CHANGE.get() { f(n); }
+}
+
+/// Another program here noted what it wrote (the player, through afp-catalog: live.rs): the journals read now, not
+/// at the thread's next turn (3 s)
+pub fn read_now() {
+    let Ok(mut g) = SEEN.write() else { return };
+    let Some(s) = g.as_mut() else { return };
+    let before = s.cat.seen_changes;
+    if s.cat.refresh().is_ok() && s.cat.seen_changes != before {
+        if let Some((changes, last)) = &s.bump { changed(changes, last); }
+    }
 }
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }

@@ -2057,14 +2057,10 @@ async function poll() {
   }
   // Files changed in the project's folder or its locations (the player saving marks, moments, photos; Finder): read
   // again once they've settled; while a batch runs (changes all the time: clip previews coming one by one), every 4 s
+  // (what the project's catalog was told comes at once, as an event: refreshSoon below)
   const batchRuns = s.jobs.some((j) => j.state === "running");
   const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
-  if (S.root && s.changes !== S.changes && due && !S.refreshing) {
-    S.changes = s.changes;
-    S.lastRefresh = Date.now();
-    S.refreshing = true;
-    refresh().finally(() => { S.refreshing = false; });
-  }
+  if (S.root && s.changes !== S.changes && due) refreshSoon(s.changes);
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
   if (finished !== S.finished) {
@@ -2076,6 +2072,21 @@ async function poll() {
   $("ask").hidden = !s.close_asked;
   renderMoving(s.moving);
 }
+
+// What the project's catalog knows changed (the Library's own commands, the player's notes, a task's files as they
+// land): the view read again at once. One read at a time; another asked meanwhile follows it
+function refreshSoon(n) {
+  if (!S.root) return;
+  if (n !== undefined) { if (n === S.changes) return; S.changes = n; }
+  if (S.refreshing) { S.refreshAgain = true; return; }
+  S.refreshing = true;
+  S.lastRefresh = Date.now();
+  refresh().finally(() => {
+    S.refreshing = false;
+    if (S.refreshAgain) { S.refreshAgain = false; refreshSoon(); }
+  });
+}
+if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => refreshSoon(e.payload));
 
 // Move the project…: how far the copy is (a move on one disk is a rename, done at once)
 function renderMoving(m) {

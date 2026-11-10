@@ -885,6 +885,21 @@ the daily deep look would). FSEvents tells a Mac only what that Mac changed, and
   read the catalog (its records of the folder it left are of the footage, now a location).
 - A setting written into `Project.afproject` doesn't make the Library read its catalog again: only its locations do.
 
+**On one computer, at once, both ways** (catalog/src/live.rs, in `<cache>/live/`). The journals are on the share and
+read every 3 s; the programs running here tell each other instead:
+
+- player → Library: `afp-catalog note`, once its line is in the journal, sends each Library running here (its
+  `library-<pid>.json`: a port on 127.0.0.1) the project and files. The Library reads the journal at once, and its page
+  hears a `catalog-changed` event and reads the view again (no more polling, no waiting for quiet).
+- Library → player: `note_now` appends a line to each player window's inbox, `player-<pid>.in` (a window has one, a
+  batch doesn't). The window looks at its size four times a second (a local stat), then asks for its clip's moments
+  again and counts the project again; a lens type given to the clip playing plays at once (the clip loaded again where
+  it was).
+
+Measured on the NAS (`live_e2e::both_ways_at_once`): a moment a batch makes in the Library's view 0.09 s after it's
+made; the Library's rename in the player's list 1.0 s (its catalog asked over the share); a lens type 0.13 s; a mark
+(M) in the Library's view 0.55 s (afp-catalog reading and writing on the share).
+
 ### What it costs (simulated, 2026-11-10)
 
 Counted on a simulated NAS (the round trips and bytes each thing takes), priced at a local SSD (0.05 ms, 2 GB/s), a
