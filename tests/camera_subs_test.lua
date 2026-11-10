@@ -21,6 +21,10 @@ local SIDECAR = '1\n00:00:00,000 --> 00:00:00,033\n<font size="28">FrameCnt: 1, 
     .. "[latitude: 46.198300] [longitude: 6.142800] [rel_alt: 5.600 abs_alt: 420.100] </font>\n"
 expect("a drone's embedded line", telemetry.camera_text(EMBEDDED), true)
 expect("a drone's .SRT", telemetry.camera_text(SIDECAR), true)
+-- A DJI Mini 4 Pro's .SRT line, in its format (the values made up)
+expect("a Mini 4 Pro's .SRT", telemetry.camera_text('1\n00:00:00,000 --> 00:00:00,033\n<font size="28">FrameCnt: 1, DiffTime: 33ms\n'
+    .. "2025-01-01 12:00:00.000\n[iso: 110] [shutter: 1/5000.0] [fnum: 1.7] [ev: 0] [color_md: hlg] [focal_len: 24.00] "
+    .. "[latitude: 10.000000] [longitude: 20.000000] [rel_alt: 40.000 abs_alt: 400.000] [ct: 5300] </font>\n"), true)
 expect("an older drone's line", telemetry.camera_text("HOME(6.1428,46.1983) 2019.11.03 09:49:32\nGPS(6.1430,46.1990,19) BAROMETER:12.3\nISO:100 Shutter:500 EV:0 Fnum:F2.8"), true)
 expect("words", telemetry.camera_text("1\n00:00:00,000 --> 00:00:02,500\nHello, this is a real subtitle.\n"), false)
 expect("words that name two", telemetry.camera_text("I said the ISO is fine, give me the GPS"), false)
