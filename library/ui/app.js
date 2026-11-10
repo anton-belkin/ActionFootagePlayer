@@ -870,6 +870,25 @@ function askLensTypes(paths) {
   }).catch(() => { want.forEach((p) => { LENS_OF[p] = { types: [] }; }); })
     .finally(() => { lensAsking = false; renderSide(); });
 }
+// A clip's lens profile as the player's Source → Lens → Profile says it (gyroflow-probe --lens), asked once per clip
+// when its Info shows: the profile's name, "From the file", or "Unknown (<type>, mode N)" / "Unknown (mode N)" where
+// nothing fits, with the camera's own number for its mode
+const LENS_INFO = {};
+function lensInfoText(path) {
+  if (!(path in LENS_INFO)) {
+    LENS_INFO[path] = null;
+    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = r || {}; }, () => { LENS_INFO[path] = {}; }).finally(() => { if (S.tab === "info") renderSide(); });
+  }
+  const r = LENS_INFO[path];
+  if (r === null) return "Reading…";
+  if (r.lens === "in the file") return "From the file";
+  if (r.lens) return String(r.lens).replace(/_/g, " ");
+  const t = r.type || r.recorded;
+  const lb = t ? (((r.types || []).find((x) => x.id === t) || {}).label || t) : "";
+  const mode = r.mode != null ? "mode " + r.mode : "";
+  const inside = [lb, mode].filter(Boolean).join(", ");
+  return r.camera || inside ? "Unknown" + (inside ? " (" + inside + ")" : "") : "";
+}
 // What a clip's camera recorded, said as the player's panel says it: its type, or "unknown (mode 6)" where the curated
 // list doesn't name the camera's mode yet; "" for a camera without types
 function recordedText(r, label) {
@@ -1444,7 +1463,7 @@ function itemInfo(it) {
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
-    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")],
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path)],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
       ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));

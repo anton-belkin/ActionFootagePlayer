@@ -1230,11 +1230,27 @@ async fn lens_types(paths: Vec<String>) -> Result<Vec<Value>, String> {
     }).await.map_err(|e| e.to_string())?
 }
 
-/// gyroflow-optical --lens-types' lines: {"path", "camera", "types": [[type, label]...]}, those that are
+/// gyroflow-optical --lens-types' lines: {"path", "camera", "types": [[type, label]...], "type" (chosen), "recorded", "mode"
+/// (the camera's own number for it)}, those that are
 fn lens_types_of(text: &str) -> Vec<Value> {
     text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| v["path"].is_string() && v["types"].is_array())
-        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"] })).collect()
+        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"], "type": v["type"], "recorded": v["recorded"], "mode": v["mode"] })).collect()
+}
+
+/// A clip's camera and the lens profile the player takes for it (gyroflow-probe --lens, as the player's Source → Lens
+/// shows it): {"camera", "lens" (a profile's label, "in the file", or "" for none), "types", "type", "recorded", "mode"}
+#[tauri::command]
+async fn lens_info(path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there")?;
+        let mut cmd = Command::new(&probe);
+        cmd.arg("--lens").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
@@ -1988,8 +2004,9 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items, export_library, mend, missing_links,
-                                                 geo::photos_access, geo::suggest_locations, geo::set_locations, geo::parse_location, geo::places_of, geo::open_map, geo::mini_map])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items,
+                                                 export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
