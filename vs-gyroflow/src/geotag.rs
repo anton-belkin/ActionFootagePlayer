@@ -45,7 +45,15 @@ pub struct Fix {
 }
 
 /// Before this a camera's clock wasn't set (cameras start at 2000, 2015 or 2016)
-const SET_SINCE: f64 = 1_483_228_800.0; // 2017-01-01
+const SET_SINCE: f64 = 1_483_228_800.0; // 2017-01-01 (a GPS time before it isn't trusted)
+
+/// A clock never set: before 2005 (cameras start at 1904, 1970, 2000), or on the first day of a year a camera starts
+/// its clock at (GoPro: 2015-01-01, 2016-01-01; HERO7's clips at 2016-01-01 00:24). Not "before 2017": Anton's HERO4
+/// recorded the USA in May 2016 with its clock right (its photos' EXIF agree)
+pub fn clock_unset(t: f64) -> bool {
+    const DEFAULT_DAYS: [f64; 4] = [946_684_800.0, 1_262_304_000.0, 1_420_070_400.0, 1_451_606_400.0]; // 2000, 2010, 2015, 2016 Jan 1
+    t < 1_104_537_600.0 || DEFAULT_DAYS.iter().any(|d| (*d..*d + 86_400.0).contains(&t))
+}
 
 fn be16(s: &[u8], i: usize) -> Option<u16> { s.get(i..i + 2).map(|b| u16::from_be_bytes([b[0], b[1]])) }
 fn be32(s: &[u8], i: usize) -> Option<u32> { s.get(i..i + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]])) }
@@ -482,7 +490,7 @@ pub fn read(path: &Path, camera: &str, created: Option<i64>) -> (Clock, Option<F
     } else {
         match mvhd {
             None => Clock { utc: None, basis: "unset", zone_min, why: "no recording time in the file".into() },
-            Some(c) if c < SET_SINCE => Clock { utc: None, basis: "unset", zone_min, why: "the camera's clock wasn't set".into() },
+            Some(c) if clock_unset(c) => Clock { utc: None, basis: "unset", zone_min, why: "the camera's clock wasn't set".into() },
             Some(c) if is_gopro && zone_min.is_some() => {
                 let z = zone_min.unwrap();
                 Clock { utc: Some(c), basis: "utc", zone_min, why: format!("GoPro writes UTC (its own zone UTC{})", zone_text(z)) }
@@ -573,6 +581,14 @@ mod tests {
         let f = iso6709("-08.6500+115.2167+012.500/").unwrap();
         assert!((f.lat + 8.65).abs() < 1e-9 && f.alt == Some(12.5));
         assert!(iso6709("+00.0000+000.0000/").is_none() && iso6709("garbage").is_none());
+    }
+
+    #[test]
+    fn clocks_never_set() {
+        assert!(clock_unset(1_451_607_876.0)); // HERO7: 2016-01-01 00:24
+        assert!(clock_unset(14.0)); // Mavic Pro: 1970-01-01 00:00:14
+        assert!(!clock_unset(1_462_303_666.0)); // HERO4 in the USA: 2016-05-03
+        assert!(!clock_unset(1_760_864_846.0));
     }
 
     #[test]

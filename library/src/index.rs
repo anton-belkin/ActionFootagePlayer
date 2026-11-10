@@ -656,7 +656,7 @@ pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usi
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 2;
+pub const GEOTAG: u64 = 3;
 
 #[derive(Default)]
 pub struct Probes {

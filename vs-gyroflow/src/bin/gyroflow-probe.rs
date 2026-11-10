@@ -140,8 +140,8 @@ fn main() {
         let (clock, gps) = vs_gyroflow::geotag::read(std::path::Path::new(&path), out["camera"].as_str().unwrap_or(""), created);
         out["clock"] = serde_json::to_value(clock).unwrap_or_default();
         out["gps"] = serde_json::to_value(gps).unwrap_or_default();
-        // What this answer knows: 2 = drones' names and places too (the Library asks again for older answers)
-        out["geotag"] = 2.into();
+        // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed (the Library asks again for older answers)
+        out["geotag"] = 3.into();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
         println!("{out}");

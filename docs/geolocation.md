@@ -58,7 +58,9 @@ The probe reports it as `clock`: `{ utc, basis: gps | utc | local | unset | assu
 - **local**: the start is taken as the place's local time. The zone is the one at the photos near it (Apple's
   geocoder gives each place's time zone, summer time included): two rounds, the nearest photo to the naive time,
   then to the time it gives.
-- **unset** (before 2017): not suggested; set by hand.
+- **unset** (before 2005, or on the first day of a year cameras start their clock at: 2000, 2010, 2015, 2016-01-01):
+  not suggested; set by hand. (It was "before 2017" first, which left out Anton's HERO4 clips from the USA in May 2016:
+  their clock was right, their photos' EXIF agree; with it, all 21 found their photos, San Francisco to Niagara Falls.)
 - A camera whose clock was simply wrong (set an hour off) shows as a larger gap; the slider takes it in. (A per-group
   clock shift was tried in the first version and dropped for the compact sheet; the Library still takes `shifts`.)
 
