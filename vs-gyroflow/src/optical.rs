@@ -14,7 +14,7 @@
 // - a 360° clip is left out (the 360 mode plays it);
 // - one whose lens isn't known is left out: without a lens profile Gyroflow can't turn the picture's motion into the
 //   camera's. Known: the lens the file has (DJI, newer GoPros), else the profile Gyroflow's database has for the camera,
-//   lens mode, resolution and frame rate (what Gyroflow itself loads for it);
+//   lens mode in Gyroflow's database (lens_pick.rs: as the player picks it);
 // - the rest are stabilized: no motion data (DJI with EIS on, older cameras), or motion data the camera already
 //   stabilized the picture with (GoPro's HyperSmooth, DJI's RockSteady): that motion data is set aside
 //   (ignore_file_motion), since the picture no longer moves as the camera did.
@@ -27,9 +27,8 @@
 use std::io::{ BufRead, BufReader };
 use std::path::{ Path, PathBuf };
 use std::process::{ Command, Stdio };
-use std::sync::OnceLock;
 use std::time::Duration;
-use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier, lens_profile_database::LensProfileDatabase };
+use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier };
 use gyroflow_core::telemetry_parser::{ Input, InputOptions, tags_impl::* };
 use serde_json::{ json, Value };
 
@@ -78,21 +77,17 @@ pub fn decide(has_project: bool, facts: &Facts) -> Verdict {
     }
 }
 
-/// Gyroflow's lens database, read once
-fn lens_db() -> &'static LensProfileDatabase {
-    static DB: OnceLock<LensProfileDatabase> = OnceLock::new();
-    DB.get_or_init(|| { let mut db = LensProfileDatabase::default(); db.load_all(); db })
-}
-
-/// The lens Gyroflow corrects the clip with: the one in the file, else the one its database has for the camera's
-/// identifier (Gyroflow loads it by itself on opening the clip, as it does here)
+/// The lens Gyroflow corrects the clip with: the one in the file (Gyroflow reads it itself), else the best profile of
+/// the camera and lens mode in Gyroflow's database (lens_pick.rs, as the player picks it), given to Gyroflow: it would
+/// load one only on an exact match of its identifier, and then the first of several
 fn lens_of(input: &Input, width: usize, height: usize, fps: f64) -> Option<(String, Option<String>)> {
     let samples = input.samples.as_deref().unwrap_or_default();
     let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
         .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
     if in_file { return Some(("in the file".into(), None)); }
-    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?.get_identifier_for_autoload();
-    (!id.is_empty() && lens_db().contains_id(&id)).then_some((id, None))
+    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
+    let pick = crate::lens_pick::pick(&id)?;
+    Some((pick.label(), pick.profile.get_json().ok()))
 }
 
 /// What the clip is (`Facts`); Err: it can't be read
