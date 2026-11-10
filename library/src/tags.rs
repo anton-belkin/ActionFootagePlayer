@@ -49,6 +49,8 @@ pub fn clip_own_in(locs: &[locations::Location], tree: &str) -> Result<(PathBuf,
 pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], relink: &dyn Fn(&Path, &str) -> Result<(), String>,
            photo: &dyn Fn(&Path, &[String]) -> Result<(), String>) -> Vec<String> {
     let mut problems = Vec::new();
+    // What's written, noted to the catalog at the end (the views read it: on a share it'd see them only later)
+    let mut written: Vec<PathBuf> = Vec::new();
     let mut moved_in: Vec<String> = Vec::new();
     let old = locations::read_json(&root.join(locations::PROJECT_FILE)).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({}));
     for it in items {
@@ -70,6 +72,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
                     if tags.is_empty() { doc.as_object_mut().unwrap().remove("tags"); } else { doc["tags"] = json!(tags); }
                     let r = if holds_nothing(&doc) { std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string()) } else { write_json(&own, &doc) };
                     if let Err(e) = r { problems.push(e); }
+                    written.push(own);
                 }
                 Err(e) => problems.push(e),
             },
@@ -78,6 +81,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
                 let tags = changed(&l["tags"], add, remove);
                 if tags.is_empty() { l.as_object_mut().map(|o| o.remove("tags")); } else { l["tags"] = json!(tags); }
                 if let Err(e) = relink(&path, &l.to_string()) { problems.push(format!("{}: {e}", path.display())); }
+                written.push(path);
             }
             Some("still") => {
                 let mut now = crate::index::photo_tags(&path);
@@ -89,6 +93,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
                     Ok(()) => if old.get(id).is_some() { moved_in.push(id.to_string()); },
                     Err(e) => problems.push(format!("{}: {e}", path.display())),
                 }
+                written.push(path);
             }
             _ => {}
         }
@@ -102,6 +107,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
             if let Err(e) = write_json(&file, &doc) { problems.push(e); }
         }
     }
+    crate::seen::note_now(&written);
     problems
 }
 
@@ -110,6 +116,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
 /// beside the clip as the player keeps it (clip_own), its other keys kept. What couldn't be done
 pub fn set_lens_type(root: &Path, trees: &[String], lens_type: Option<&str>) -> Vec<String> {
     let mut problems = Vec::new();
+    let mut written: Vec<PathBuf> = Vec::new();
     for tree in trees {
         let (own, clip) = match clip_own(root, tree) { Ok(x) => x, Err(e) => { problems.push(e); continue } };
         let had = locations::read_json(&own);
@@ -127,10 +134,12 @@ pub fn set_lens_type(root: &Path, trees: &[String], lens_type: Option<&str>) -> 
         let src = doc["source"].as_object_mut().unwrap();
         match lens_type { Some(t) => { src.insert("lens_type".into(), json!(t)); } None => { src.remove("lens_type"); } }
         if src.is_empty() { doc.as_object_mut().unwrap().remove("source"); }
-        let empty = ["marks", "view", "source", "tags"].iter().all(|k| doc.get(*k).is_none());
+        let empty = holds_nothing(&doc);
         let r = if empty { std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string()) } else { write_json(&own, &doc) };
         if let Err(e) = r { problems.push(e); }
+        written.push(own);
     }
+    crate::seen::note_now(&written);
     problems
 }
 

@@ -863,6 +863,42 @@ changes aren't told to it — which is what the NAS's watcher is for.
 - **Moved folders keep their times**: what's new is found by the folder it moved into (that one's time changed), then
   listed whole, whatever its own time.
 - **A file noted in a folder never listed** (the player's moment in a new folder) makes that folder one to list.
+  Until then the views take the folder as there (seen.rs's walk): the moment shows at once.
+
+### Who tells the catalog what they changed (audit, 2026-11-10)
+
+The views read the catalog, so whatever changes a file must say so at once; a look comes minutes later, and a file
+written in place (a link, a clip's own file) leaves its folder's time as it was, so a look doesn't even list it (only
+the daily deep look would). FSEvents tells a Mac only what that Mac changed, and on a share even that is no promise.
+
+- **The Library**, for everything it does: `seen::note_now(paths)` right after it writes, before the page reads the
+  view again. Files written, made or removed; folders made, removed, or renamed (both paths: what's in the new one
+  listed, what was in the old one gone). It reads them, notes them in this computer's journal through the views' own
+  catalog, touches their folders for the other computers, and counts a change for the page. Tags, lens type, location,
+  rename, delete, new folder, Mend / Find moved, Take in, renders deleted, links rewritten by a view, and Stabilize
+  optically's `.gyroflow` files (as the task's status names each clip done).
+- **The player**: `afp-catalog note` for what it writes (workspace plugin's `catalog.note`; other plugins send it
+  `catalog-note`). Marks, Save, moments (and their `.gyroflow`), moment rename and remove, anything it moves to the
+  Trash, Ctrl+x's parts, Ctrl+e's project, Shift+E and 360 exports, photos, and every batch's files as each lands (clip
+  previews, moments, photos, exports, renders). A batch quits only once its notes are written.
+- **Move the project…** takes `.afp` along; the new place's thread looks at the project's folder again before the views
+  read the catalog (its records of the folder it left are of the footage, now a location).
+- A setting written into `Project.afproject` doesn't make the Library read its catalog again: only its locations do.
+
+**On one computer, at once, both ways** (catalog/src/live.rs, in `<cache>/live/`). The journals are on the share and
+read every 3 s; the programs running here tell each other instead:
+
+- player → Library: `afp-catalog note`, once its line is in the journal, sends each Library running here (its
+  `library-<pid>.json`: a port on 127.0.0.1) the project and files. The Library reads the journal at once, and its page
+  hears a `catalog-changed` event and reads the view again (no more polling, no waiting for quiet).
+- Library → player: `note_now` appends a line to each player window's inbox, `player-<pid>.in` (a window has one, a
+  batch doesn't). The window looks at its size four times a second (a local stat), then asks for its clip's moments
+  again and counts the project again; a lens type given to the clip playing plays at once (the clip loaded again where
+  it was).
+
+Measured on the NAS (`live_e2e::both_ways_at_once`): a moment a batch makes in the Library's view 0.09 s after it's
+made; the Library's rename in the player's list 1.0 s (its catalog asked over the share); a lens type 0.13 s; a mark
+(M) in the Library's view 0.55 s (afp-catalog reading and writing on the share).
 
 ### What it costs (simulated, 2026-11-10)
 

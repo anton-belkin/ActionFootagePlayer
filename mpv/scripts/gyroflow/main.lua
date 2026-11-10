@@ -2381,6 +2381,8 @@ local function check_project()
     elseif v ~= watch.pending then
         watch.pending = v
     elseif not watch.project then
+        -- Saved from Gyroflow beside the clip: into the project's catalog (the Library's motion data and badge)
+        mp.commandv("script-message-to", "workspace", "catalog-note", project)
         mp.msg.info("found " .. project .. ", loading the video again with it")
         mp.osd_message("Gyroflow: project saved, stabilizing", 3)
         stop_watching()
@@ -2481,6 +2483,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             mp.msg.info("wrote " .. project)
+            mp.commandv("script-message-to", "workspace", "catalog-note", project)
             edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")

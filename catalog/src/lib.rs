@@ -15,6 +15,7 @@ pub mod inspect;
 pub mod locations;
 pub mod project;
 pub mod journal;
+pub mod live;
 pub mod sim;
 pub mod snapshot;
 pub mod state;

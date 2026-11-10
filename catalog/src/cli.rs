@@ -307,7 +307,15 @@ pub fn main() -> ExitCode {
                 }
             });
             if let Err(e) = load(&mut cat, &Want::Keys(Vec::new())) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } }
-            match cat.note(entries) { Ok(()) => ExitCode::SUCCESS, Err(e) => fail(e.to_string()) }
+            let noted: Vec<String> = entries.iter().filter_map(|(r, rel, _)| roots.iter().find(|x| x.id == *r).map(|x| x.dir.join(rel).display().to_string())).collect();
+            match cat.note(entries) {
+                Ok(()) => {
+                    // The Library running here told at once (it'd read the journal within seconds anyway)
+                    crate::live::tell_libraries(&json!({ "project": proj.display().to_string(), "files": noted }));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e.to_string()),
+            }
         }
         "footage" => {
             // The project's clips, location by location in its order (a path the first one has wins), from the catalog

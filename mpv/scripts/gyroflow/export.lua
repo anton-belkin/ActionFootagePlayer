@@ -120,6 +120,24 @@ local function temp_name(kind)
 end
 
 -- The last line gyroflow-export printed for this video: "...: skipped, <why>" or "...: failed, <why>"
+-- Files made, told to the project's catalog (the workspace plugin's catalog-note: afp-catalog note), so the Library's
+-- views show them at once: on a share the system's notice comes late or never. A photo's Live Photo video with it
+local function tell_catalog(...)
+    for _, f in ipairs({ ... }) do
+        if type(f) == "string" and f ~= "" then
+            local info = utils.file_info(f)
+            if info and info.is_file then mp.commandv("script-message-to", "workspace", "catalog-note", f) end
+            local stem = f:match("^(.*)%.[^./\\]+$")
+            if stem and not f:lower():match("%.mov$") and not f:lower():match("%.mp4$") then
+                for _, e in ipairs({ ".mov", ".MOV" }) do
+                    local v = utils.file_info(stem .. e)
+                    if v and v.is_file then mp.commandv("script-message-to", "workspace", "catalog-note", stem .. e); break end
+                end
+            end
+        end
+    end
+end
+
 local function last_line(text)
     local last = nil
     for line in (text or ""):gsub("\r", "\n"):gmatch("[^\n]+") do
@@ -387,6 +405,7 @@ function run_export(path, args, range, progress, control)
             notify("Export cancelled", name .. range)
         elseif r and r.status == 0 and out then
             last_export = out
+            tell_catalog(out)
             publish()
             mp.osd_message("Exported " .. name .. range .. "\n" .. out, 5)
             notify("Exported " .. name, out)
@@ -558,7 +577,11 @@ mp.register_script_message("preview", function(json)
     mp.msg.info("preview: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         local err = r and r.stderr or ""
-        if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then return reply(true) end
+        if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then
+            -- The moment and its own Gyroflow project (a batch's moments: k's notes them itself, again is harmless)
+            tell_catalog(req.output, type(req.project) == "string" and req.project or nil)
+            return reply(true)
+        end
         mp.msg.warn("preview: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
@@ -601,7 +624,7 @@ mp.register_script_message("export-batch", function(json)
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if job.cancelling then return reply(false, "cancelled") end
-        if r and r.status == 0 and out then return reply(true, nil, out) end
+        if r and r.status == 0 and out then tell_catalog(out); return reply(true, nil, out) end
         mp.msg.warn("export (batch): " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
@@ -754,6 +777,7 @@ local function photo()
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if r and r.status == 0 and out then
             last_export = out
+            tell_catalog(out)
             publish()
             local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
             mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
@@ -802,7 +826,7 @@ mp.register_script_message("photo-at", function(json)
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
-        if r and r.status == 0 and out then return reply(true, nil, out) end
+        if r and r.status == 0 and out then tell_catalog(out); return reply(true, nil, out) end
         mp.msg.warn("photo: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
