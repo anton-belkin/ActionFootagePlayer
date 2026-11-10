@@ -445,6 +445,11 @@ camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off),
 number for it (DJI's fov_type), so a lens tried on such clips can be given that mode once it fits; a named type
 without a profile (Wide with EIS on) as "Unknown (Wide)".
 
+The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode and picks nothing,
+but its file's settings box (`udta/SETT`) has a number that looks like the mode: 0, 2 or 4, probably Wide, Medium and
+Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its one type, Wide, has the best-voted HERO4
+Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
+
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
 bends light and the lens then behaves like a longer one than EIS is tuned for. So under water you shoot with EIS
