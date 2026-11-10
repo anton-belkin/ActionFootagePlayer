@@ -283,10 +283,25 @@ function catalog.ask(args_after, cb)
         local list = {}
         for _, it in ipairs(v.items or {}) do
             if type(it.link) == "table" and type(it.path) == "string" then
-                list[#list + 1] = { file = it.path, name = moments_lib.display_name(it.path), link = it.link, kind = it.kind, tags = it.tags }
+                list[#list + 1] = { file = it.path, name = moments_lib.display_name(it.path), link = it.link, kind = it.kind, tags = it.tags, missing = it.missing }
             end
         end
         cb(list)
+    end)
+end
+-- The project's own folders looked at (afp-catalog look --own, at low priority): what Finder changed there noted;
+-- the clip's moments asked again when something changed. Not sooner than `every` s after the last look on this
+-- computer (by anyone); one at a time
+local looking = false
+function catalog.look(project, every)
+    local exe = catalog.tool()
+    if not exe or looking then return end
+    looking = true
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true,
+                              args = { exe, "look", project, "--own", "--every", tostring(every or 20) } }, function(ok, r)
+        looking = false
+        local v = ok and r and r.status == 0 and utils.parse_json(r.stdout or "")
+        if type(v) == "table" and (v.changes or 0) > 0 and state.project == project and catalog.changed then catalog.changed() end
     end)
 end
 function catalog.derived(project, hash, clip, cb)
@@ -417,13 +432,13 @@ end
 -- A link's clip (moments.lua's original); found away from the path the link names, the path is written into the
 -- link (docs/library-management.md §8), so that the next look finds it at once, from any computer. Not for a clip
 -- found in this computer's own copy, nor where the file can't be written (it's remembered here then)
+-- A moment's (clip preview's, export's) original: where its link says. Originals move only when the library is
+-- mended after (the Library's Restore, which finds them by what they are and rewrites the links: docs §9)
 local function original_of(l, project, file)
-    local original, tree, loc, how = moments.original(l, project)
-    if original and tree and file and (how == "search" or how == "cache") and loc and not loc.here and tree ~= l.clip then
-        if rewrite_link(file, function(x) x.clip = tree end) then
-            mp.msg.info("found " .. tostring(l.clip) .. " at " .. tree .. ": written into " .. file)
-            l.clip = tree
-        end
+    local original = moments.original(l, project, { hint_only = true })
+    if not original and type(l) == "table" and l.clip then
+        mp.msg.warn("the original " .. tostring(l.clip) .. " isn't where the link of " .. tostring(file) .. " says")
+        mp.osd_message("Its original (" .. tostring(l.clip) .. ") isn't where it was: the Library's Restore finds moved originals", 6)
     end
     return original
 end
@@ -545,14 +560,19 @@ local function refresh()
         publish()
     end
     last_asked = mp.get_time()
-    -- The project's catalog first (docs/library-management.md §9): this clip's moments only, in the background
-    catalog.derived(project, state.hash, state.relative, function(list)
+    -- The project's catalog first (docs/library-management.md §9): this clip's moments only, by its path, in the
+    -- background; then a look at the project's own folders (what Finder changed), and again when it found something
+    catalog.derived(project, nil, state.relative, function(list)
         if state.clip ~= clip or state.project ~= project then return end
         if list then
             local ms = {}
             for _, m in ipairs(list) do if m.link.v == 1 and m.link.kind == "moment" then ms[#ms + 1] = m end end
             found, scanned_project, from_catalog = { list = ms, dirs = {} }, project, true
             show(ms)
+            -- A moment not where it was (moved or removed in Finder) stays shown until the look says which
+            local missing = false
+            for _, m in ipairs(list) do if m.missing then missing = true end end
+            catalog.look(project, missing and 0 or 20)
             -- The project's moments' names and count, once (what the name dialog suggests from)
             if not project_moments or project_moments.project ~= project then
                 project_moments = { project = project, names = {}, total = nil }
@@ -575,6 +595,8 @@ local function refresh()
     end)
 end
 
+catalog.changed = refresh
+
 -- A folder with moments in it changed (a file added, removed or renamed in it), or the project's top or one of its own
 -- folders did (a folder of moments moved in): moments.scan's dirs
 local function watch()
@@ -582,6 +604,7 @@ local function watch()
     -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal)
     if from_catalog then
         if mp.get_time() - last_asked >= 10 then refresh() end
+        catalog.look(state.project, 60)
         return
     end
     for dir, mtime in pairs(found.dirs) do
@@ -1751,7 +1774,7 @@ mp.register_event("file-loaded", function()
             state.hash = h
             publish()
             -- Its moments asked for again by what it is (links name their original by its fingerprint)
-            if from_catalog or not scanned_project then refresh() end
+            if not from_catalog and not scanned_project then refresh() end
         end
     end)
 end)

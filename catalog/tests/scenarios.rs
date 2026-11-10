@@ -391,3 +391,37 @@ fn a_journal_file_that_cant_be_read_holds_back_only_its_computers_lines() {
     assert!(c.cat.state.get("p", "Generated/x1.mp4").is_some(), "read once it can be");
     assert!(c.cat.unreadable.is_empty());
 }
+
+#[test]
+fn a_look_at_the_projects_own_files_leaves_the_footage_as_on_record() {
+    // Originals move only when the library is mended after (docs §9): the player's and the Library's regular looks
+    // are at the project's own files; a footage folder changed meanwhile is left as it was on record
+    let fs = Fs::new();
+    project(&fs, 3, 4, 1);
+    let mut a = built(&fs);
+    fs.lock().unwrap().remove(&Path::new(FOOTAGE).join("Day001"));
+    fs.lock().unwrap().write(&Path::new(PROJECT).join("Generated/new.mp4"), &moment_bytes("hz", "Day000/C0000.mp4", 1));
+    let own: Vec<_> = roots().into_iter().filter(|r| r.id == "p").collect();
+    let insp = a.insp();
+    a.cat.sweep(&own, &insp, &Default::default()).unwrap();
+    assert!(a.cat.state.get("p", "Generated/new.mp4").is_some());
+    assert!(a.cat.state.get("f", "Day001/C0000.mp4").is_some(), "the footage left as on record");
+    // Mended: the whole look
+    a.sweep().unwrap();
+    assert!(a.cat.state.get("f", "Day001/C0000.mp4").is_none());
+    assert!(diff(&truth(&fs), &view(&a.cat)).is_empty());
+}
+
+#[test]
+fn a_clips_moments_are_found_by_its_path() {
+    let fs = Fs::new();
+    project(&fs, 30, 100, 2);
+    let a = built(&fs);
+    let mut c = Computer::new(&fs, "c", 3);
+    // Asked by the clip's path alone, before its fingerprint is read
+    let info = c.cat.load(&Want::Keys(Catalog::keys_for(None, Some("Day012/C0040.mp4")))).unwrap();
+    assert!(info.parts_read <= 1, "{info:?}");
+    let d = c.cat.derived(None, Some("Day012/C0040.mp4"));
+    assert_eq!(d.len(), 1);
+    drop(a);
+}

@@ -478,7 +478,8 @@ impl Catalog {
                 // A file another computer has open can't go now (SMB: busy): next time
                 Some(&since) if since <= t && t - since >= grace => match shared.remove(&path) {
                     Ok(()) => removed += 1,
-                    Err(e) if e.kind() == io::ErrorKind::ResourceBusy || e.raw_os_error() == Some(16) => { now.insert(k, since); }
+                    // …or one this computer may not remove (the NAS's watcher's, written as another user): left
+                    Err(e) if e.kind() == io::ErrorKind::ResourceBusy || e.raw_os_error() == Some(16) || e.kind() == io::ErrorKind::PermissionDenied => { now.insert(k, since); }
                     Err(e) => return Err(e),
                 },
                 Some(&since) => { now.insert(k, since.min(t)); }
@@ -534,11 +535,10 @@ impl Catalog {
         let mut out = Vec::new();
         for (root, rel, f) in self.state.live() {
             let Some(link) = f.meta.as_ref().and_then(|m| m.get("link")) else { continue };
+            // By the original's path (originals don't move unless the library is mended after, which rewrites the
+            // links), or its fingerprint when asked
             let lh = link.get("hash").and_then(Value::as_str).filter(|h| !h.is_empty());
-            let hit = match (hash, lh) {
-                (Some(h), Some(x)) => h == x,
-                _ => clip.is_some() && link.get("clip").and_then(Value::as_str) == clip,
-            };
+            let hit = (clip.is_some() && link.get("clip").and_then(Value::as_str) == clip) || (hash.is_some() && lh == hash);
             if hit { out.push((root.to_string(), rel.to_string(), f.clone())); }
         }
         out
@@ -627,7 +627,9 @@ impl Catalog {
                 let mut gone_dirs: Vec<String> = Vec::new();
                 // What's inside the new and changed files, read several at once (each a few round trips on a share)
                 let to_read: Vec<&Item> = items.iter().filter(|it| !it.stat.dir && insp.wants(&rid, &join(&d, &it.name))
+                    && !insp.leave(&rid, &join(&d, &it.name), false)
                     && !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime)).collect();
+
                 let read: HashMap<&str, io::Result<Option<Value>>> = {
                     let threads = to_read.len().clamp(1, 8);
                     let chunks: Vec<Vec<&Item>> = (0..threads).map(|t| to_read.iter().skip(t).step_by(threads).copied().collect()).collect();
@@ -642,6 +644,11 @@ impl Catalog {
                 for it in &items {
                     let rel = join(&d, &it.name);
                     let old = known_map.get(it.name.as_str()).copied();
+                    // Not looked at this time: as on record
+                    if insp.leave(&rid, &rel, it.stat.dir) {
+                        if let Some(k) = old { now.push((it.name.clone(), k.clone())); }
+                        continue;
+                    }
                     if it.stat.dir {
                         let f = match old {
                             Some(k) if k.dir => k.clone(),
@@ -675,6 +682,7 @@ impl Catalog {
                 for (n, k) in &known {
                     if listed.contains(n.as_str()) { continue; }
                     let rel = join(&d, n);
+                    if insp.leave(&rid, &rel, k.dir) { now.push((n.clone(), k.clone())); continue; }
                     out.push((rid.clone(), rel.clone(), None));
                     if k.dir { gone_dirs.push(rel); }
                 }
@@ -727,6 +735,9 @@ pub trait Inspect: Sync {
     /// Whether what's inside it counts
     fn wants(&self, root: &str, rel: &str) -> bool;
     fn inspect(&self, path: &Path, root: &str, rel: &str) -> io::Result<Option<Value>>;
+    /// Not looked at this time, its record kept as it is, whatever the listing says (the footage, when only the
+    /// project's own files are looked at)
+    fn leave(&self, _root: &str, _rel: &str, _dir: bool) -> bool { false }
 }
 
 #[derive(Default, Clone)]

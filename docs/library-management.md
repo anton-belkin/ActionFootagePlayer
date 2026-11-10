@@ -740,6 +740,23 @@ version (a Lamport clock: above every version its writer had read; the computer'
 another only with a higher version, so every computer that has read the same lines knows the same, whatever order it
 read them in.
 
+### Three layers, each only faster (Anton, 2026-11-10)
+
+Originals move only when the library is mended after (the Library's Restore: it finds them by what they are and
+rewrites the links); new clips come in by Take in, or by a command over a folder (clip previews), which notes what it
+meets. So links name their original by its path, and only the project's own files (moments, clip previews, exports,
+photos) are watched for what Finder does to them. Then:
+
+| | Who | Finder's changes reach the catalog |
+|---|---|---|
+| 1 | The player alone | As a clip opens (not more often than every 20 s) and every minute while it plays: `afp-catalog look --own` in the background, at low priority, looks at the time of each of the project's own folders and lists the ones that changed (~0.01–0.1 s on a small project); it folds the journals when they've grown |
+| 2 | + the Library | This Mac's changes at once (FSEvents), the rest at its regular look; the footage only when mended, on Take in, after a batch |
+| 3 | + the NAS's watcher | At once, for every computer: `afp-catalog watch` in Docker on the NAS, told by inotify what changes on its own disks, every folder's time looked at as it starts and when the system says it lost count |
+
+The player's moments of a clip come from the catalog by the clip's path at once; a moment not where it was is kept
+on the seek bar until the look says moved or removed. A moment put back from the trash isn't in any journal: the look
+finds it by its folder's time.
+
 ### On the share
 
 ```
@@ -784,6 +801,22 @@ read them in.
   left, this computer's segments those have read — each only once this computer has seen it so for 10 minutes (its
   own clock against itself). Found on the real NAS: with "seen so at two clean-ups", a Mac whose listing of the
   snapshots was 30 s behind removed the parts of another computer's newest snapshots, and none read whole.
+
+### The NAS's watcher
+
+`catalog/Dockerfile` builds `afp-catalog` alone; run as the project's watcher:
+
+```
+docker build -t afp-catalog catalog/
+docker run -d --name afp-catalog-trip --restart unless-stopped --hostname nas --user 1000:10 \
+  -v /volume1/ssd/Projects/Trip:/project -v /volume1/video:/shares/video -v afp-catalog-data:/data \
+  afp-catalog watch /project --share video=/shares/video
+```
+
+`--share` says where a share the project's locations name (`//DISKSTATIONDXP/video/…`) is inside the container. It's
+a computer of its own in the journals (its name kept in `/data`). Tried on a Mac (FSEvents): a moment copied in,
+removed, put back, its folder renamed — each seen by the player's next question within 1–3 s, the player looking at
+nothing. Not yet built or run on the NAS.
 
 ### What a look won't do
 

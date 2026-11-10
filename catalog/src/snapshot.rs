@@ -8,8 +8,8 @@
 // their content's SHA-256: two computers writing the same name wrote the same bytes, and a file read is checked
 // against its name (a cut-off or damaged one isn't used).
 //
-// Records go into buckets by what a reader looks for: a moment, clip preview, export or photo by its original (the
-// fingerprint in its link, else the original's path), anything else by its folder. The player, opening a clip, reads
+// Records go into buckets by what a reader looks for: a moment, clip preview, export or photo by its original (its
+// path in the link, else its fingerprint), anything else by its folder. The player, opening a clip, reads
 // the one or two parts its clip's moments are in, not the whole catalog.
 
 use crate::state::{ entry_from, entry_json, hex, parent, split, File, Rec, State, Version };
@@ -80,8 +80,8 @@ pub fn name_parts(name: &str) -> Option<(u64, String)> {
 /// What a record is looked for by: its original (link), or its folder
 pub fn bucket_key(root: &str, rel: &str, f: Option<&File>) -> String {
     if let Some(link) = f.and_then(|f| f.meta.as_ref()).and_then(|m| m.get("link")) {
-        if let Some(h) = link.get("hash").and_then(Value::as_str).filter(|h| !h.is_empty()) { return format!("h:{h}"); }
         if let Some(c) = link.get("clip").and_then(Value::as_str) { return format!("c:{c}"); }
+        if let Some(h) = link.get("hash").and_then(Value::as_str).filter(|h| !h.is_empty()) { return format!("h:{h}"); }
     }
     format!("d:{root}/{}", parent(rel))
 }

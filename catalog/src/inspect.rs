@@ -163,6 +163,9 @@ pub fn read(path: &Path) -> io::Result<Option<Value>> {
 pub struct Ours {
     /// Folders of footage inside the project's folder (a project next to its footage), paths in it
     pub footage_in_project: Vec<String>,
+    /// Only the project's own files looked at: the footage's folders inside it left as on record (originals move
+    /// only when the library is mended after; docs §9)
+    pub own_only: bool,
 }
 
 impl Ours {
@@ -190,4 +193,8 @@ impl Inspect for Ours {
         root == "p" && (is_video(&lower) || is_photo(&lower)) && (lower.ends_with(LINK_EXT) || self.own_area(rel))
     }
     fn inspect(&self, path: &Path, _root: &str, _rel: &str) -> io::Result<Option<Value>> { read(path) }
+    fn leave(&self, root: &str, rel: &str, _dir: bool) -> bool {
+        // A project that is its footage's folder (no folder of footage of its own) is looked at whole
+        self.own_only && (root != "p" || self.footage_in_project.iter().any(|d| !d.is_empty() && (rel == d || rel.starts_with(&format!("{d}/")))))
+    }
 }

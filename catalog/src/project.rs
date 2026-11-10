@@ -55,9 +55,21 @@ pub fn project_id(project: &Path) -> String {
 }
 
 /// The roots to look at, and what's read in them
-pub fn roots(project: &Path) -> (Vec<Root>, Ours) {
-    let mounts = locations::mounts();
-    let locs = locations::locations(project, &mounts);
+pub fn roots(project: &Path) -> (Vec<Root>, Ours) { roots_from(project, &locations::mounts()) }
+
+/// As roots, where the shares the locations name are folders here (the NAS: `video` is /volume1/video)
+pub fn roots_with(project: &Path, shares: &[(String, PathBuf)]) -> (Vec<Root>, Ours) {
+    let mut mounts = locations::mounts();
+    let doc = locations::read_json(&project.join(locations::PROJECT_FILE)).unwrap_or(serde_json::Value::Null);
+    for l in doc.get("locations").and_then(|v| v.as_array()).into_iter().flatten() {
+        let Some((host, share, _)) = l.get("path").and_then(|p| p.as_str()).and_then(locations::network) else { continue };
+        if let Some((_, dir)) = shares.iter().find(|(n, _)| n.eq_ignore_ascii_case(&share)) { mounts.push((format!("//{host}/{share}"), dir.clone())); }
+    }
+    roots_from(project, &mounts)
+}
+
+fn roots_from(project: &Path, mounts: &[(String, PathBuf)]) -> (Vec<Root>, Ours) {
+    let locs = locations::locations(project, mounts);
     let mut roots = vec![Root { id: "p".into(), dir: project.to_path_buf(), marker: Some(locations::PROJECT_FILE.into()), exclude: Vec::new() }];
     let mut footage = Vec::new();
     let marker = locations::pointer_name(project);
@@ -73,7 +85,15 @@ pub fn roots(project: &Path) -> (Vec<Root>, Ours) {
             .into_iter().collect();
         roots.push(Root { id: format!("l:{}", l.path), dir: dir.clone(), marker: Some(marker.clone()), exclude });
     }
-    (roots, Ours { footage_in_project: footage })
+    (roots, Ours { footage_in_project: footage, own_only: false })
+}
+
+/// The roots and rules for a look at the project's own files only (moments, clip previews, exports, photos): its
+/// folder, the footage in it left as on record
+pub fn own_roots(project: &Path) -> (Vec<Root>, Ours) {
+    let (roots, mut ours) = roots(project);
+    ours.own_only = true;
+    (roots.into_iter().filter(|r| r.id == "p").collect(), ours)
 }
 
 /// A file's root and path in it (the longest root that has it, not where it's left out)
@@ -90,4 +110,25 @@ pub fn locate(roots: &[Root], path: &Path) -> Option<(String, String)> {
 pub fn open(project: &Path) -> Catalog {
     let cache = base_dirs().1.join("catalog").join(project_id(project));
     Catalog::new(Arc::new(DiskStore), Arc::new(DiskStore), project, &cache, &me())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_share_named_by_the_locations_is_found_where_it_is_on_the_nas() {
+        let d = std::env::temp_dir().join(format!("afp-cat-roots-{}", std::process::id()));
+        let (p, v) = (d.join("ssd/Trip"), d.join("video"));
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(v.join("Footage/2026")).unwrap();
+        std::fs::write(p.join(locations::PROJECT_FILE), r#"{"locations":[{"name":"Archive","at":"","path":"//DISKSTATIONDXP/video/Footage/2026"}]}"#).unwrap();
+        let (roots, _) = roots_with(&p, &[("video".into(), v.clone())]);
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[1].id, "l://DISKSTATIONDXP/video/Footage/2026");
+        assert_eq!(roots[1].dir, v.join("Footage/2026"));
+        let (own, ours) = own_roots(&p);
+        assert_eq!(own.len(), 1);
+        assert!(ours.own_only);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

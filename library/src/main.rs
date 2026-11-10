@@ -411,6 +411,8 @@ fn tick(inner: &mut Inner) {
             finished = exited.is_some();
         }
         if finished {
+            // What a batch made, and the clips it looked at, into the catalog: a look at everything
+            seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
             if let Some(mut run) = inner.running.take() {
                 if let Some(mut a) = run.awake.take() { let _ = a.kill(); let _ = a.wait(); }
                 let _ = run.child.wait();
@@ -837,12 +839,15 @@ async fn run_check(shared: State<'_, Shared>, sel: Vec<String>, links: Vec<Strin
 #[tauri::command]
 async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    // The library being mended: the catalog looks at the footage too
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     tauri::async_runtime::spawn_blocking(move || checks::find_moved(&root, &issues)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     if busy(&shared) { return Err("Jobs are in the queue: fix the paths when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
@@ -904,6 +909,7 @@ async fn take_in_plan(shared: State<'_, Shared>, other: String, place: String) -
 #[tauri::command]
 async fn take_in_run(shared: State<'_, Shared>, other: String, place: String) -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     if busy(&shared) { return Err("Jobs are in the queue: take it in when they're done".into()); }
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {

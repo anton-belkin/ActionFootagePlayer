@@ -101,6 +101,8 @@ pub fn names_in(dir: &Path) -> Option<Vec<String>> {
 /// The thread keeping the catalog up to date for one project; stopped when dropped
 pub struct Runner {
     stop: Arc<AtomicBool>,
+    /// A look at everything asked for, the footage too (the library mended, clips taken in, a batch done)
+    pub everything: Arc<AtomicBool>,
     pub events: Sender<Vec<PathBuf>>,
     /// What it's doing, for the page ("" when nothing)
     pub status: Arc<Mutex<String>>,
@@ -120,11 +122,12 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) ->
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new(String::new()));
-    let r = Runner { stop: stop.clone(), events: tx, status: status.clone() };
+    let everything = Arc::new(AtomicBool::new(false));
+    let r = Runner { stop: stop.clone(), everything: everything.clone(), events: tx, status: status.clone() };
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
-    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, rx, status, changes, last)).ok();
+    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, stop, everything, rx, status, changes, last)).ok();
     r
 }
 
@@ -135,8 +138,11 @@ fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }
 
-fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+    // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
+    // files: originals move only when the library is mended after (docs §9)
     let (roots, ours) = project::roots(&root);
+    let (own_roots, own) = project::own_roots(&root);
     let mut worker = project::open(&root);
     // Read; nothing there yet: built (the first look at every folder, every file of ours read)
     loop {
@@ -202,8 +208,13 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
         if !due.is_empty() && last_look.elapsed() < Duration::from_secs(300) {
             if worker.sweep(&roots, &ours, &Sweep { only: due, ..Default::default() }).is_ok() { refresh(&changes, &last); }
         }
-        if last_look.elapsed() >= Duration::from_secs(300) {
+        if everything.swap(false, Ordering::Relaxed) {
+            set(&status, "Looking at the project's footage…");
             if worker.sweep(&roots, &ours, &Sweep::default()).is_ok() { refresh(&changes, &last); }
+            set(&status, "");
+        }
+        if last_look.elapsed() >= Duration::from_secs(300) {
+            if worker.sweep(&own_roots, &own, &Sweep::default()).is_ok() { refresh(&changes, &last); }
             last_look = Instant::now();
         }
         if worker.should_compact() {
@@ -215,7 +226,7 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let before = std::fs::read_to_string(&deep_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
         if now.saturating_sub(before) > 86_400 && last_look.elapsed() < Duration::from_secs(290) {
-            if worker.sweep(&roots, &ours, &Sweep { deep: true, pause: Some(Duration::from_millis(20)), ..Default::default() }).is_ok() {
+            if worker.sweep(&own_roots, &own, &Sweep { deep: true, pause: Some(Duration::from_millis(20)), ..Default::default() }).is_ok() {
                 let _ = std::fs::write(&deep_file, now.to_string());
                 refresh(&changes, &last);
             }
@@ -224,6 +235,9 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, rx: Receiver<Vec<PathBuf>>
     let mut g = SEEN.write().unwrap();
     if g.as_ref().is_some_and(|s| s.id == id) { *g = None; }
 }
+
+/// A look at everything, the footage too, asked of the project's thread
+pub fn look_at_everything(r: Option<&Runner>) { if let Some(r) = r { r.everything.store(true, Ordering::Relaxed); } }
 
 /// What the page shows of it
 pub fn status(r: Option<&Runner>) -> String { r.map(|r| r.status.lock().unwrap().clone()).unwrap_or_default() }

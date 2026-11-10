@@ -10,6 +10,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 flate2 = "1"
+# afp-catalog watch: the system's notices of what changes in the folders (inotify on the NAS)
+notify = "8"
 
 [target.'cfg(unix)'.dependencies]
 # A share's listing with each file's size and time in it (macOS getattrlistbulk: a stat a file over SMB costs ~5 ms);

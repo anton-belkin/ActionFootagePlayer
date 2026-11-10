@@ -22,7 +22,11 @@ const USAGE: &str = "usage: afp-catalog derived <project> [--hash <fingerprint>]
        afp-catalog note <project> <file>...  files written or removed: their folders touched, noted in this computer's journal
                                           (project -: found from where each file is)
        afp-catalog status <project>       the catalog: its snapshot, journals, size
-       afp-catalog look <project> [--deep]  look at the folders and note what changed (what the Library does)
+       afp-catalog look <project> [--own] [--every <s>] [--deep]
+                                          look at the folders and note what changed (--own: the project's own files,
+                                          what the player asks for; folds the journals when they've grown)
+       afp-catalog watch <project> [--share <name>=<path>]... [--every <s>]
+                                          keep the catalog, on the NAS (Docker): told by the system what changes
        afp-catalog fold <project>         a new snapshot from the journals, and clearing up (what the Library does)";
 
 fn load(cat: &mut Catalog, want: &Want) -> Result<crate::Loaded, Error> {
@@ -81,6 +85,92 @@ pub fn project_for(file: &Path) -> Option<PathBuf> {
     None
 }
 
+/// At low priority (a look in the background mustn't slow what's playing): nice, and on a Mac its disk and network
+/// throttled as a background task
+fn background() {
+    #[cfg(unix)]
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+        #[cfg(target_os = "macos")]
+        libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
+    }
+}
+
+/// afp-catalog watch: told by the system, looking only where it said
+fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, every: u64) -> ExitCode {
+    use notify::Watcher;
+    use std::time::{ Duration, Instant };
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher = notify::recommended_watcher(move |e| { let _ = tx.send(e); }).ok();
+    let mut told = false;
+    if let Some(w) = watcher.as_mut() {
+        for r in roots { match w.watch(&r.dir, notify::RecursiveMode::Recursive) {
+            Ok(()) => told = true,
+            Err(e) => eprintln!("afp-catalog: {} not watched ({e}): looked at every {every} s", r.dir.display()),
+        } }
+    }
+    if !told { eprintln!("afp-catalog: no notices from the system: every folder's time looked at every {every} s"); }
+    let mut loaded = false;
+    let mut everything = true;
+    let mut last_all = Instant::now();
+    let mut pending: std::collections::BTreeSet<(String, String)> = Default::default();
+    let mut last_event = Instant::now();
+    loop {
+        if !loaded {
+            match load(&mut cat, &Want::All) {
+                Ok(_) => loaded = true,
+                Err(Error::Damaged(_)) => { cat = project::open(proj); loaded = true; }
+                Err(e) => { eprintln!("afp-catalog: {e}"); std::thread::sleep(Duration::from_secs(10)); continue }
+            }
+        }
+        // What the system said: the folders it named (ours, in .afp, aside)
+        while let Ok(e) = rx.try_recv() {
+            match e {
+                Ok(e) => {
+                    if e.need_rescan() { everything = true; }
+                    if matches!(e.kind, notify::EventKind::Access(_)) { continue; }
+                    for p in e.paths {
+                        if p.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) { continue; }
+                        if let Some((r, rel)) = project::locate(roots, &p) {
+                            pending.insert((r.clone(), crate::state::parent(&rel).to_string()));
+                            pending.insert((r, rel));
+                        }
+                    }
+                    last_event = Instant::now();
+                }
+                Err(_) => everything = true,
+            }
+        }
+        if !told && last_all.elapsed() >= Duration::from_secs(every.min(30)) { everything = true; }
+        if last_all.elapsed() >= Duration::from_secs(every) { everything = true; }
+        let r = if everything {
+            everything = false;
+            last_all = Instant::now();
+            pending.clear();
+            Some(cat.sweep(roots, ours, &Sweep::default()))
+        } else if !pending.is_empty() && last_event.elapsed() >= Duration::from_secs(1) {
+            let only: Vec<(String, String)> = std::mem::take(&mut pending).into_iter().collect();
+            Some(cat.sweep(roots, ours, &Sweep { only, ..Default::default() }))
+        } else {
+            // Folders that changed, listed once more a minute later
+            let due = cat.due_rechecks();
+            (!due.is_empty()).then(|| cat.sweep(roots, ours, &Sweep { only: due, ..Default::default() }))
+        };
+        match r {
+            Some(Ok(rep)) => {
+                if rep.changes > 0 { eprintln!("afp-catalog: {} changes ({} folders listed, {} read)", rep.changes, rep.listed, rep.inspected); }
+                if cat.should_compact() || cat.manifest.is_none() {
+                    match cat.compact() { Ok(n) => { let removed = cat.clean().unwrap_or(0); eprintln!("afp-catalog: folded into {n}, {removed} removed"); } Err(e) => eprintln!("afp-catalog: fold: {e}") }
+                }
+            }
+            Some(Err(Error::Gap(_))) => loaded = false,
+            Some(Err(e)) => eprintln!("afp-catalog: {e}"),
+            None => {}
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 pub fn main() -> ExitCode {
     let a: Vec<String> = std::env::args().skip(1).collect();
     if a.len() < 2 || a.iter().any(|x| x == "-h" || x == "--help") { println!("{USAGE}"); return if a.len() < 2 { ExitCode::from(1) } else { ExitCode::SUCCESS }; }
@@ -126,13 +216,13 @@ pub fn main() -> ExitCode {
                 // Each one looked at: what's there now is what's said (and noted when it isn't what was on record)
                 match observe(&ours, &root, &rel, &path) {
                     Ok(Some(now)) if now.size == f.size && now.mtime == f.mtime => { if let Some(v) = item(&roots, &root, &rel, &f) { out.push(v); } }
-                    Ok(now) => {
-                        if let Some(n) = &now {
-                            let lh = n.meta.as_ref().and_then(|m| m["link"]["hash"].as_str()).map(str::to_string);
-                            let lc = n.meta.as_ref().and_then(|m| m["link"]["clip"].as_str()).map(str::to_string);
-                            if (hash.is_some() && lh == hash) || (lh.is_none() && clip.is_some() && lc == clip) { if let Some(v) = item(&roots, &root, &rel, n) { out.push(v); } }
-                        }
-                        notes.push((root, rel, now));
+                    // Not there: kept, said missing (moved in Finder, or removed: the look the player asks for next tells)
+                    Ok(None) => { if let Some(mut v) = item(&roots, &root, &rel, &f) { v["missing"] = json!(true); out.push(v); } }
+                    Ok(Some(n)) => {
+                        let lh = n.meta.as_ref().and_then(|m| m["link"]["hash"].as_str()).map(str::to_string);
+                        let lc = n.meta.as_ref().and_then(|m| m["link"]["clip"].as_str()).map(str::to_string);
+                        if (clip.is_some() && lc == clip) || (hash.is_some() && lh == hash) { if let Some(v) = item(&roots, &root, &rel, &n) { out.push(v); } }
+                        notes.push((root, rel, Some(n)));
                     }
                     Err(_) => { if let Some(v) = item(&roots, &root, &rel, &f) { out.push(v); } }
                 }
@@ -178,13 +268,43 @@ pub fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "look" => {
-            if let Err(e) = load(&mut cat, &Want::All) { return fail(e.to_string()); }
+            // --own: the project's own files only (what the player asks for); --every <s>: not again sooner on this
+            // computer (another look here meanwhile, by anyone, counts); one at a time on this computer
+            background();
+            let own = a.iter().any(|x| x == "--own");
+            let every: u64 = opt("--every").and_then(|x| x.parse().ok()).unwrap_or(0);
+            let (roots, ours) = if own { project::own_roots(&proj) } else { (roots, ours) };
+            let _ = std::fs::create_dir_all(&cat.cache);
+            let Ok(lockf) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(cat.cache.join("look.lock")) else { return fail("no lock".into()) };
+            if lockf.try_lock().is_err() { println!("{}", json!({ "busy": true })); return ExitCode::SUCCESS; }
+            let stamp = cat.cache.join(if own { "look-own.json" } else { "look.json" });
+            let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let last = std::fs::read_to_string(&stamp).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
+            if every > 0 && now_s.saturating_sub(last) < every { println!("{}", json!({ "skipped": true, "seconds_ago": now_s.saturating_sub(last) })); return ExitCode::SUCCESS; }
+            if let Err(e) = load(&mut cat, &Want::All) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } cat = project::open(&proj); }
             let t = std::time::Instant::now();
             match cat.sweep(&roots, &ours, &Sweep { deep: a.iter().any(|x| x == "--deep"), ..Default::default() }) {
-                Ok(r) => { println!("{}", json!({ "seconds": t.elapsed().as_secs_f64(), "folders": r.dirs, "listed": r.listed, "read": r.inspected, "changes": r.changes,
-                                                  "errors": r.errors, "roots_not_there": r.skipped_roots })); ExitCode::SUCCESS }
+                Ok(r) => {
+                    let _ = std::fs::write(&stamp, now_s.to_string());
+                    // The journals folded when they've grown (in the background, at low priority)
+                    let folded = if cat.should_compact() || cat.manifest.is_none() { cat.compact().ok().map(|n| { let _ = cat.clean(); n }) } else { None };
+                    println!("{}", json!({ "seconds": t.elapsed().as_secs_f64(), "folders": r.dirs, "listed": r.listed, "read": r.inspected, "changes": r.changes,
+                                           "errors": r.errors, "roots_not_there": r.skipped_roots, "folded": folded }));
+                    ExitCode::SUCCESS
+                }
                 Err(e) => fail(e.to_string()),
             }
+        }
+        "watch" => {
+            // The NAS's own watcher (docs §9): at the start every folder's time looked at; then the system says what
+            // changes (inotify, as Jellyfin is told), and those folders are looked at a second after it settles; a
+            // look at every folder's time again when the system says it lost count, and every --every s (1800) for
+            // safety. --share <name>=<path>: where a share the locations name is here
+            let every: u64 = opt("--every").and_then(|x| x.parse().ok()).unwrap_or(1800);
+            let shares: Vec<(String, PathBuf)> = a.windows(2).filter(|w| w[0] == "--share").filter_map(|w| w[1].split_once('=').map(|(n, p)| (n.to_string(), PathBuf::from(p)))).collect();
+            let (roots, ours) = project::roots_with(&proj, &shares);
+            eprintln!("afp-catalog: watching {} as {} ({} roots: {})", proj.display(), cat.me, roots.len(), roots.iter().map(|r| r.dir.display().to_string()).collect::<Vec<_>>().join(", "));
+            watch(&proj, cat, &roots, &ours, every)
         }
         "fold" => {
             if let Err(e) = load(&mut cat, &Want::All) { return fail(e.to_string()); }

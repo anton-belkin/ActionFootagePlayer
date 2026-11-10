@@ -181,6 +181,8 @@ file("/T/Moved/New/E.MP4", 500); created["/T/Moved/New/E.MP4"] = T0 + 9
 file("/T/Moved/New/G.MP4", 600); created["/T/Moved/New/G.MP4"] = T0 + 1
 file("/T/Moved/_Moments/Y.MP4", 300); hashes["/T/Moved/_Moments/Y.MP4"] = "h1"
 local function find(json) return m.original(fs.parse_json(json), "/T/Moved") end
+-- The player looks only where the link says (originals move only when the library is mended after): not found
+expect("moved: where the link says only", m.original(fs.parse_json('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h1"}'), "/T/Moved", { hint_only = true }), nil)
 local o, tree, _, how = find('{"v":1,"clip":"Day 1/Y.MP4","size":300,"hash":"h1"}')
 expect("moved: by fingerprint", o, "/T/Moved/Trip/X.MP4")
 expect("moved: its new path", tree, "Trip/X.MP4")

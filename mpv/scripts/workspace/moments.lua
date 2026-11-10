@@ -489,8 +489,11 @@ function M.new(ws, fs)
     --      name and creation time first), else by its name: never by size alone, which would be a guess;
     --   4. a moment copied out of its project: its path under each of the roots it was made with.
     -- -> the file, its path in the tree now, its location, and how it was found ("hint", "cache", "search", "roots")
-    function self.original(link, project)
+    -- opts.hint_only: only where the link says (originals move only when the library is mended after, which rewrites
+    -- the links: docs/library-management.md §9); the looking further is the Library's repair
+    function self.original(link, project, opts)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
+        local hint_only = opts and opts.hint_only
         local locs = project and ws.files_at and (fs.locations_of and fs.locations_of(project) or ws.locations(project)) or nil
         local function sized(file)
             local info = fs.info(file)
@@ -500,6 +503,7 @@ function M.new(ws, fs)
             for _, c in ipairs(ws.files_at(link.clip, locs)) do
                 if sized(c.file) then return c.file, link.clip, c.location, "hint" end
             end
+            if hint_only then return nil end
             local key = identity(link)
             local seen = fs.found_get and fs.found_get(project, key)
             if seen and seen ~= link.clip then
