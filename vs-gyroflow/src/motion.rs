@@ -127,11 +127,17 @@ thread_local! { static GENTLE: std::cell::Cell<bool> = const { std::cell::Cell::
 /// `f` with what it reads of a clip's motion data read gently (GENTLE_THREADS at once): the GPU warp's server reading
 /// the rest of a clip that plays
 pub fn gently<R>(f: impl FnOnce() -> R) -> R {
-    GENTLE.with(|g| g.set(true));
+    let was = GENTLE.with(|g| g.replace(true));
+    // A utility thread on macOS: the player's own threads go first
+    #[cfg(target_os = "macos")]
+    unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0); }
     let r = f();
-    GENTLE.with(|g| g.set(false));
+    GENTLE.with(|g| g.set(was));
     r
 }
+
+/// Whether this thread works gently (`gently`): gpu_table.rs builds a table on 2 threads then
+pub fn is_gentle() -> bool { GENTLE.with(|g| g.get()) }
 
 /// The clip's motion data as it comes in, shared by an engine (what it plays) and the thread that reads it for it
 pub struct Motion {

@@ -101,11 +101,12 @@ pub struct PlayerClip {
 }
 
 /// The motion data read for the first table, before where it starts playing (the smoothing's start: motion.rs's
-/// WARM_UP_S, with room) and after (HEAD_S: the rest comes while those play; a moment's part: AFTER_S past its end,
-/// the player's look-ahead of 4 s with room). From a NAS a second of 4K60 is ~15 MB to read through (prefetch.rs):
-/// a 3.4 GB clip's first 26 s took 4.9 s, cold
+/// WARM_UP_S, with room) and after (HEAD_S: the rest comes while those play, read gently, 2.5 GB from the NAS in
+/// ~17 s; past HEAD_S until then the frames hold its last correction; a moment's part: AFTER_S past its end, the
+/// player's look-ahead of 4 s with room). From a NAS a second of 4K60 is ~12 MB to read through (prefetch.rs): a
+/// clip's first 12 s took 0.6 s, cold
 pub const BEFORE_S: f64 = 4.0;
-pub const HEAD_S: f64 = 12.0;
+pub const HEAD_S: f64 = 20.0;
 pub const AFTER_S: f64 = 6.0;
 
 /// The stretch of a clip without a project whose motion data the player's JSON asks for first: a moment's part
@@ -355,7 +356,8 @@ impl Table {
             texels
         };
         let list: Vec<usize> = (first..=last.min(frames - 1)).collect();
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
+        // Gently (the whole clip's table while it plays, motion::gently): 2, the player's decoding and rendering first
+        let threads = if crate::motion::is_gentle() { 2 } else { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8) };
         let chunk = list.len().div_ceil(threads).max(1);
         let blocks: Vec<(usize, Vec<[f32; 4]>)> = std::thread::scope(|scope| {
             let handles: Vec<_> = list.chunks(chunk).map(|part| scope.spawn(|| part.iter().map(|&f| (f, block_of(f))).collect::<Vec<_>>())).collect();

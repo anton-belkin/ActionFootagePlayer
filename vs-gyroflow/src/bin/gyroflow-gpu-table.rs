@@ -283,6 +283,8 @@ fn serve(sock: &str) {
                                 let mut whole = j.clone();
                                 whole["full"] = true.into();
                                 std::thread::spawn(move || {
+                                    // After the clip's first seconds are read ahead by mpv: its start has the share alone
+                                    std::thread::sleep(std::time::Duration::from_secs(2));
                                     let t = Instant::now();
                                     match vs_gyroflow::motion::gently(|| gpu_table::PlayerClip::load(&whole)) {
                                         Ok(c) => { put(&cache, &key, Arc::new(c)); log::info!("gyroflow-gpu-table server: the whole clip in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0); }
@@ -293,7 +295,12 @@ fn serve(sock: &str) {
                                     done.notify_all();
                                 });
                             }
-                            player_shader(&c, &j, &out, t)
+                            // The whole clip's after its first seconds: built gently, as it plays
+                            if gpu_table::motion_range(&j).0.is_none() && j.get("full").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                vs_gyroflow::motion::gently(|| player_shader(&c, &j, &out, t))
+                            } else {
+                                player_shader(&c, &j, &out, t)
+                            }
                         }
                         Err(e) => serde_json::json!({ "error": e }),
                     }
