@@ -451,7 +451,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
             if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
-                                    "source": own.get("source").cloned().unwrap_or(Value::Null) });
+                                    "source": own.get("source").cloned().unwrap_or(Value::Null),
+                                    "location": own.get("location").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
         }
@@ -654,6 +655,9 @@ pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usi
 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
+/// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
+pub const GEOTAG: u64 = 3;
+
 #[derive(Default)]
 pub struct Probes {
     known: HashMap<String, (u64, i64, Value)>,
@@ -681,6 +685,8 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
+            // An answer from before the probe knew drones' names and places (geotag.rs): asked again
+            if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
             self.known.insert(k.clone(), (s, m, e["v"].clone()));
         }
     }
@@ -705,6 +711,20 @@ impl Probes {
             if !out.contains_key(p) { if let Some((_, _, val)) = self.known.get(p) { out.insert(p.clone(), val.clone()); } }
         }
         json!({ "version": self.version, "items": out, "pending": self.queue.len() + usize::from(self.busy) })
+    }
+    /// One clip's answer, if known and its file unchanged since
+    pub fn get(&self, path: &str) -> Option<Value> {
+        let (s, m, v) = self.known.get(path)?;
+        (stamp(path) == Some((*s, *m))).then(|| v.clone())
+    }
+    /// An answer worked out elsewhere (geo.rs asks the tool itself when it needs one now)
+    pub fn put(&mut self, path: &str, answer: Value) {
+        if let Some((s, m)) = stamp(path) {
+            self.version += 1;
+            let v = self.version;
+            self.known.insert(path.to_string(), (s, m, answer));
+            self.log.push((v, path.to_string()));
+        }
     }
     pub fn known(&self, paths: &[String]) -> Value {
         let mut out = serde_json::Map::new();

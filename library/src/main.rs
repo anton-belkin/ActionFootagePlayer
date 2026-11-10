@@ -14,6 +14,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod checks;
+mod geo;
 mod index;
 mod locations;
 mod seen;
@@ -1884,13 +1885,21 @@ fn main() {
                 probes_for_setup.lock().unwrap().load(&f);
                 *keep_probes.lock().unwrap() = Some(f);
             }
+            // Place names looked up on this computer (geo.rs), each once
+            let places = app.path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("ActionFootageLibrary")).join("places.json");
+            let places: geo::SharedPlaces = Arc::new(Mutex::new(geo::Places::load(places)));
+            if let Some(out) = std::env::var_os("AFL_GEO_DUMP") {
+                geo::dump_for_test(app.state::<Shared>().inner().clone(), probes_for_setup.clone(), places.clone(), PathBuf::from(out));
+            }
+            app.manage(places);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items, export_library, mend, missing_links])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items, export_library, mend, missing_links,
+                                                 geo::photos_access, geo::suggest_locations, geo::set_locations, geo::parse_location, geo::places_of, geo::open_map, geo::mini_map])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
