@@ -356,12 +356,15 @@ local function source_part(u, x, w, y)
         local known = g.available == true
         local rows = { { "Camera", (l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or (g.lens and "unknown" or "…") },
                        { "Profile", project and "From the project" or (not g.lens and "…") or l.lens == "in the file" and "From the file"
-                           or (l.lens or "") ~= "" and (l.lens:gsub("_", " ")) or "Unknown" },
+                           or (l.lens or "") ~= "" and (l.lens:gsub("_", " "))
+                           -- No profile: the lens type it was recorded in (or given) when it's named, else the camera's
+                           -- own number for the mode, for trying lenses on it
+                           or l.type_label and ("Unknown (" .. l.type_label .. ")") or l.mode and ("Unknown (mode " .. l.mode .. ")") or "Unknown" },
                        { "Motion data", project and "Gyroflow project" or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
         for _, r in ipairs(rows) do
             u:text(x, y + 9 * s, r[1], { size = 13 })
-            u:text(x + w, y + 9 * s, r[2], { align = 6, size = 12, color = (r[2] == "Unknown") and C.saved or C.dim })
+            u:text(x + w, y + 9 * s, r[2], { align = 6, size = 12, color = r[2]:find("^Unknown") and C.saved or C.dim })
             y = y + 22 * s
         end
         if not known and g.lens then
