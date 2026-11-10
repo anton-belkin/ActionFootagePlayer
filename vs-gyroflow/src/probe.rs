@@ -53,7 +53,7 @@ pub fn probe(path: &str) -> Result<serde_json::Value, String> {
     in_camera_stabilization_off(&camera, samples)?;
     // DJI clips are left as they were before this check (the Osmo Action 6 plays well; no clip at hand to check that
     // its lens comes through here)
-    if camera != "DJI" && !has_lens_profile(&input, samples, video.width, video.height, video.fps) {
+    if camera != "DJI" && !has_lens_profile(path, &input, samples, video.width, video.height, video.fps) {
         return Err(format!("{camera}: no lens profile for this camera and mode in Gyroflow's database"));
     }
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
@@ -103,23 +103,43 @@ fn in_camera_stabilization_off(camera: &str, samples: &[SampleInfo]) -> Result<(
 }
 
 // Without a lens profile the stabilization is worse than none. Newer GoPros and some Insta360s record their lens in
-// the file; for the rest the best profile of the camera and lens mode in Gyroflow's database is taken (lens_pick.rs)
-fn has_lens_profile(input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
-    let builtin = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
-        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    builtin || lens_from_database(input, width, height, fps).is_some()
+// the file; for the rest a curated profile of the clip's lens type, or the best profile of the camera and lens mode
+// in Gyroflow's database (lens_pick.rs)
+fn has_lens_profile(path: &str, input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
+    let builtin = lens_in_file(samples);
+    builtin || chosen_lens(path, input, width, height, fps, builtin).is_some()
 }
 
-/// The profile the player takes from Gyroflow's database for the video, as `lens_pick::apply` loads it when it plays
-fn lens_from_database(input: &Input, width: usize, height: usize, fps: f64) -> Option<lens_pick::Pick> {
+// Whether the file has its own lens (DJI with EIS off, newer GoPros)
+fn lens_in_file(samples: &[SampleInfo]) -> bool {
+    samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
+        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name))
+}
+
+/// The profile the player loads for the video, as `lens_pick::apply` does when it plays: the curated one of its lens
+/// type, else (unless the lens is in the file) the database's pick
+fn chosen_lens(path: &str, input: &Input, width: usize, height: usize, fps: f64, in_file: bool) -> Option<lens_pick::Pick> {
     let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
-    lens_pick::pick(&id)
+    lens_pick::for_video(path, &id, in_file)
 }
 
-/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video: "in the
-/// file", the label of the one picked from Gyroflow's database (lens_pick.rs: its name, stars, "Nearest: " when it isn't
-/// made for exactly this mode), or "" when none: what the side panel shows, and what a cut must still read as (cut.rs)
-pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
+/// The camera and its lens as the player takes them, for the side panel's Source tab and the Library
+#[derive(Debug, Default, serde::Serialize)]
+pub struct LensInfo {
+    /// As Gyroflow tells it: "DJI OsmoAction6"
+    pub camera: String,
+    /// "in the file", the label of the profile loaded (lens_pick.rs: the database's pick with its stars, "Nearest: "
+    /// when it isn't made for exactly this mode, or "<Type>, from the curated list: <name>"), or "" when none
+    pub lens: String,
+    /// The lens types the curated list has for the camera ({id, label, profile}), empty for most cameras
+    pub types: Vec<lens_pick::LensType>,
+    /// The type given to the clip by hand (source.lens_type in its .afp.json), and the one the camera recorded
+    #[serde(rename = "type")]
+    pub chosen: Option<String>,
+    pub recorded: Option<String>,
+}
+
+pub fn lens_info(path: &str) -> Option<LensInfo> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len() as usize;
@@ -127,14 +147,21 @@ pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
     let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
-    let samples = input.samples.as_deref().unwrap_or_default();
-    // The lens the file itself has (DJI, newer GoPros), else the one Gyroflow's database has for it
-    let in_file = samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
-        .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
-    let lens = if in_file { "in the file".to_string() } else {
-        lens_from_database(&input, video.width, video.height, video.fps).map(|p| p.label()).unwrap_or_default()
+    let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
+    let lens = match chosen_lens(path, &input, video.width, video.height, video.fps, in_file) {
+        Some(p) => p.label(),
+        None if in_file => "in the file".to_string(),
+        None => String::new(),
     };
-    Some((camera, lens))
+    let types = lens_pick::lens_types(&camera);
+    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path) };
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, types, camera, lens })
+}
+
+/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video
+/// (`LensInfo::lens`): what the side panel shows, and what a cut must still read as (cut.rs)
+pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
+    lens_info(path).map(|l| (l.camera, l.lens))
 }
 
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
@@ -180,6 +207,33 @@ pub fn color_profile(path: &str) -> Option<&'static str> {
         22 => "dlog2",
         _ => "other",
     })
+}
+
+/// The lens mode (FOV) a DJI camera recorded the video in: StreamMeta.fov_type (dvtm_library.proto's FOVType: 0
+/// default, 1 normal, 2 narrow, 3 wide, 4 snarrow, 5 natural wide, 6 extreme wide, 7 flat) in the first sample of its
+/// metadata track. The Osmo Action 6 writes it in every clip, with EIS on or off and with or without motion data,
+/// while its lens's own calibration only comes with EIS off in its usual mode. The enum's names aren't the camera's:
+/// what each is on the Action 6 is in resources/curated_lenses.json (lens_pick.rs). None for other cameras
+pub fn dji_fov_type(path: &str) -> Option<u64> {
+    // Where each model's schema puts FOVType in StreamMeta (checked against the .proto, and on Action 6 clips)
+    const STREAM_FOV_FIELD: &[(&str, u64)] = &[
+        ("dvtm_ac206.proto", 5), // Osmo Action 6
+        ("dvtm_oq101.proto", 5), // Osmo 360
+    ];
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len() as usize;
+    let mut fov = None;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel2 = cancel.clone();
+    let _ = telemetry_parser::util::get_metadata_track_samples(&mut file, size, true, |_info, data: &[u8], _pos, _md| {
+        if cancel2.load(Ordering::Relaxed) { return; }
+        cancel2.store(true, Ordering::Relaxed);
+        let Some(proto) = dji_schema(data) else { return };
+        let Some(&(_, field)) = STREAM_FOV_FIELD.iter().find(|(p, _)| *p == proto) else { return };
+        // A FOVType message without its field is the default (0) in proto3
+        fov = pb_bytes(data, 2).and_then(|s| pb_bytes(s, field)).map(|c| pb_varint(c, 1).unwrap_or(0));
+    }, cancel);
+    fov
 }
 
 // GP-Log as gplog_hlg.cube is made for: by the firmware where GoPro's own LUTs put 18 % grey where it does. Earlier

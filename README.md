@@ -433,9 +433,15 @@ Gyroflow's users (a profile they mostly voted down only when there's nothing els
 only on that exact match, and then the first of several, however it was rated. Source → Lens shows which one it took
 ("Nearest: …" when it isn't made for exactly this mode). Clips with motion data get stabilized with it too, and clips
 without motion data (the camera's stabilization on) get their lens corrected on its own. The stars are a snapshot
-taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online. The Osmo Action 4/5/6 records
-its lens mode, but Gyroflow's database has no profiles for these cameras: they carry their lens in the file only
-with EIS off.
+taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online.
+
+**Lens types, for cameras the database has nothing for.** Gyroflow's database has no Osmo Action 4/5/6 profiles; the
+Action 6 carries its lens in the file only in Wide with EIS off. Another Action camera's profile fits it, so a curated
+list (`vs-gyroflow/resources/curated_lenses.json`) gives the Action 6's lens types a profile chosen by hand. Today
+Normal has the original Osmo Action's standard lens, and Wide uses the lens in the file. The type is the one the
+camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off), unless one was chosen for the clip
+(`source.lens_type` in its `.afp.json`; the Library sets it for the clips selected). Source → Lens shows
+"Normal, from the curated list: …".
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water

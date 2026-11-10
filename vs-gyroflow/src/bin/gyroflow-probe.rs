@@ -24,10 +24,13 @@
 // "north": {...}, "world": {"held_by"}, "seconds": [[travel, north confidence], ...]} (sphere360::Motion's report).
 // A .gyroflow next to the video is the Lua script's own check, before this one.
 //
-// `gyroflow-probe --lens <video>`: the camera and the lens profile Gyroflow takes for it, for the side panel's Source
-// tab, read once the clip plays: {"camera":"DJI OsmoAction6","lens":"in the file"}, "lens" the label of the profile
-// picked from Gyroflow's database (its name, stars, "Nearest: " when it isn't made for exactly this mode: lens_pick.rs),
-// or "" when it has none (Unknown: pick one in Gyroflow).
+// `gyroflow-probe --lens <video>`: the camera and the lens profile the player takes for it, for the side panel's Source
+// tab, read once the clip plays, and the Library's lens type choice: {"camera":"DJI OsmoAction6","lens":"in the file",
+// "types":[{"id":"wide","label":"Wide","profile":null},...],"type":null,"recorded":"wide"}. "lens": the label of the
+// profile loaded (the database's pick with its name and stars, "Nearest: " when it isn't made for exactly this mode, or
+// "<Type>, from the curated list: <name>": lens_pick.rs), or "" when it has none (Unknown: pick one in Gyroflow);
+// "types": the lens types the curated list has for the camera (resources/curated_lenses.json, empty for most);
+// "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote.
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights
@@ -38,7 +41,7 @@
 // recording, for the view360 plugin to play while it shows the recording, "hold" false (not asked for), "applied" or
 // "needed" (to be measured: gyroflow-export --reframe recording --measure-hold); {"error": why} when there's none.
 
-use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, spherical }, water };
+use vs_gyroflow::{ probe::{ probe, color_profile, camera_and_lens, lens_info, spherical }, water };
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
@@ -87,8 +90,7 @@ fn main() {
     if lens {
         // Gyroflow's readers take paths as URLs: a relative one reads nothing
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
-        let (camera, lens) = camera_and_lens(&path).unwrap_or_default();
-        println!("{}", serde_json::json!({ "camera": camera, "lens": lens }));
+        println!("{}", serde_json::to_value(lens_info(&path).unwrap_or_default()).unwrap_or_default());
         return;
     }
     if headings {
@@ -114,6 +116,8 @@ fn main() {
     // Kept per file (and per build of this tool): opening a clip waits for this answer, and reading the file for it
     // takes ~0.4 s cold (from a NAS more)
     let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
+    // The lens type given to the clip by hand decides its lens profile: an answer kept for another isn't this one
+    let build = format!("{build}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default());
     if library {
         let cache = vs_gyroflow::file_cache("library", &path, &build);
         if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {

@@ -36,12 +36,15 @@ pub struct Pick {
     pub votes: (u32, u32),
     /// Gyroflow's identifier is the clip's, exactly: Gyroflow would load a profile by that name too
     pub exact: bool,
+    /// Taken from the curated list for this lens type (its label, "Normal"), not picked from the database
+    pub curated: Option<String>,
 }
 
 impl Pick {
     /// What the player says it is: its name, then official or its stars, and "nearest" when it isn't made for exactly
-    /// this resolution, frame rate and stabilization
+    /// this resolution, frame rate and stabilization; a curated one: its type and name
     pub fn label(&self) -> String {
+        if let Some(t) = &self.curated { return format!("{t}, from the curated list: {}", self.name); }
         let (good, bad) = self.votes;
         let how = if self.official { "official".to_string() }
                   else if good + bad == 0 { "no votes".to_string() }
@@ -163,7 +166,7 @@ fn pick_in(db: &LensProfileDatabase, votes: &HashMap<String, (u32, u32)>, id: &C
             };
             if best.as_ref().is_none_or(|(r, _)| rank > *r) {
                 let exact = rank.exact;
-                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact }));
+                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact, curated: None }));
             }
         }
     }
@@ -177,13 +180,87 @@ pub fn lens_in_file(stab: &StabilizationManager) -> bool {
     md.lens_profile.as_ref().is_some_and(|l| l.is_object())
 }
 
-/// Loads the picked profile into a manager that has the video loaded (`load_video_file`), in place of the one Gyroflow
-/// took by its identifier, if any (the same identifier, and the best voted of them). The lens in the file stays.
-/// The frame readout time comes with it as Gyroflow's autoload takes it. Returns what was loaded
-pub fn apply(stab: &StabilizationManager) -> Option<Pick> {
-    if lens_in_file(stab) { return None; }
+// ---- Lens types: a curated list for cameras the database has nothing for ----
+//
+// The Osmo Action 6 has no profile in Gyroflow's database, but another Action camera's fits it (Anton). Which one
+// for which of its lens types is kept by hand in resources/curated_lenses.json. The type is the one the clip was given
+// (source.lens_type in its .afp.json: the Library sets it for the clips selected, a whole dive at once), else the one
+// the camera recorded (DJI's fov_type, through the list's "recorded"). A type whose profile is null takes what it
+// would without the list: the lens in the file, else the database's pick.
+
+#[derive(serde::Deserialize)]
+struct Curated { cameras: HashMap<String, CuratedCamera> }
+#[derive(serde::Deserialize)]
+struct CuratedCamera { #[serde(default)] recorded: HashMap<String, String>, types: Vec<LensType> }
+
+/// A lens type of a camera in the curated list
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct LensType {
+    pub id: String,
+    pub label: String,
+    /// A key of Gyroflow's database; None: the lens in the file, else the database's pick
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub note: String,
+}
+
+fn curated() -> &'static HashMap<String, CuratedCamera> {
+    static CURATED: OnceLock<HashMap<String, CuratedCamera>> = OnceLock::new();
+    CURATED.get_or_init(|| serde_json::from_str::<Curated>(include_str!("../resources/curated_lenses.json"))
+        .map(|c| c.cameras.into_iter().map(|(k, v)| (camera_key(&k), v)).collect())
+        .unwrap_or_else(|e| { log::error!("curated_lenses.json: {e}"); HashMap::new() }))
+}
+
+// A camera as the list and Gyroflow name it, compared without case and spaces ("DJI OsmoAction6", "DJI Osmo Action 6")
+fn camera_key(camera: &str) -> String { camera.to_lowercase().replace(' ', "") }
+
+/// The lens types the curated list has for a camera ("DJI OsmoAction6"), in its order: what the Library offers for
+/// the clips selected. Empty for a camera it hasn't
+pub fn lens_types(camera: &str) -> Vec<LensType> {
+    curated().get(&camera_key(camera)).map(|c| c.types.clone()).unwrap_or_default()
+}
+
+/// The type the camera recorded the clip in, as the curated list names it ("wide"), None when it doesn't say or the
+/// list doesn't know the mode
+pub fn recorded_type(camera: &str, path: &str) -> Option<String> {
+    let c = curated().get(&camera_key(camera))?;
+    let fov = crate::probe::dji_fov_type(path)?;
+    c.recorded.get(&fov.to_string()).cloned()
+}
+
+/// The type the clip was given by hand: source.lens_type in its .afp.json
+pub fn chosen_type(path: &str) -> Option<String> {
+    let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    doc.pointer("/source/lens_type")?.as_str().filter(|s| !s.is_empty()).map(String::from)
+}
+
+/// The profile for a video as the player takes it: its type's curated profile (the one given by hand, else the one
+/// recorded), else, unless the lens is in the file, the database's pick. None: the lens in the file, or nothing.
+/// `id` is Gyroflow's camera identifier, `in_file` whether the file has its own lens
+pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pick> {
+    let camera = format!("{} {}", id.brand, id.model);
+    let chosen = chosen_type(path);
+    let typ = chosen.clone().or_else(|| recorded_type(&camera, path));
+    if let Some(t) = typ.and_then(|t| lens_types(&camera).into_iter().find(|x| x.id == t)) {
+        if let Some(key) = &t.profile {
+            match db().get_by_id(key) {
+                Some(p) => return Some(Pick { profile: p.clone(), name: p.get_display_name(), official: p.official, votes: (0, 0), exact: false, curated: Some(t.label) }),
+                None => log::error!("curated_lenses.json: {key} isn't in Gyroflow's database"),
+            }
+        }
+    }
+    if in_file { return None; }
+    pick(id)
+}
+
+/// Loads the profile the player takes for the video at `video` (`for_video`) into a manager that has it loaded
+/// (`load_video_file`, which doesn't keep the path), in place of the one Gyroflow took by its identifier, if any. The
+/// lens in the file stays unless the clip's lens type says otherwise. The frame readout time comes with it as
+/// Gyroflow's autoload takes it. Returns what was loaded
+pub fn apply(stab: &StabilizationManager, video: &str) -> Option<Pick> {
     let id = stab.camera_id.read().clone()?;
-    let pick = pick(&id)?;
+    let pick = for_video(video, &id, lens_in_file(stab))?;
     let json = pick.profile.get_json().ok()?;
     if let Err(e) = stab.load_lens_profile(&json) {
         log::warn!("Lens profile {}: {e:?}", pick.name);
@@ -217,6 +294,21 @@ mod tests {
         let v = parse_votes("# x\n0000abcd 3 1\nbad line\n");
         assert_eq!(v.get("0000abcd"), Some(&(3, 1)));
         assert_eq!(v.len(), 1);
+    }
+
+    // Every profile the curated list names is in the database built in, and every recorded mode names a type it has
+    #[test]
+    fn curated_list() {
+        assert!(!curated().is_empty(), "curated_lenses.json reads");
+        for (camera, c) in curated() {
+            for t in &c.types {
+                if let Some(key) = &t.profile { assert!(db().get_by_id(key).is_some(), "{camera} {}: {key} not in the database", t.id); }
+            }
+            for (mode, t) in &c.recorded { assert!(c.types.iter().any(|x| &x.id == t), "{camera}: mode {mode} -> {t}, no such type"); }
+        }
+        let types = lens_types("DJI Osmo Action 6");
+        assert_eq!(types.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wide", "normal"]);
+        assert!(lens_types("GoPro HERO7 Black").is_empty());
     }
 
     fn camera(model: &str, lens: &str, w: usize, h: usize, fps: usize, eis: &str) -> CameraIdentifier {

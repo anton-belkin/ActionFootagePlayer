@@ -1,0 +1,14 @@
+{
+  "about": "Lens profiles chosen by hand for cameras Gyroflow's database has none for, by lens type (lens_pick.rs). A camera's key is its brand and model as Gyroflow reads them (gyroflow-probe --lens: camera). recorded: the lens mode the camera writes (DJI: StreamMeta.fov_type) -> the type it is. types: in the order the Library offers them; profile: a key of Gyroflow's database (its file path under camera_presets), or null when the camera's own lens in the file is what it takes. A clip's own choice is source.lens_type in its .afp.json",
+  "cameras": {
+    "DJI OsmoAction6": {
+      "recorded": { "1": "wide", "2": "normal" },
+      "types": [
+        { "id": "wide", "label": "Wide", "profile": null,
+          "note": "Recorded as fov_type 1. With EIS off the camera writes its own lens and motion data in the file; with EIS on nothing yet" },
+        { "id": "normal", "label": "Normal", "profile": "DJI/DJI_Osmo Action_standard_,_4k_16by9_3840x2160-59.94fps.json",
+          "note": "Recorded as fov_type 2. The original Osmo Action's standard lens (145°, f/2.8, by Silver): Anton's projects of the 2026-10-20 dive (0122-0135, EIS off, no motion data) use it and it works" }
+      ]
+    }
+  }
+}
