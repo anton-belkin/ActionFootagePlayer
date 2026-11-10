@@ -700,6 +700,14 @@ version kept in `photo_tags` are shown with the photo's own and go into it at it
   `Generated/<date> <time> <what>/`; a moment, photo or export made by hand in the player into
   `Generated/<date> Moments|Photos|Exports/`. Clip previews' layout and "stabilized on their own" are chosen in the
   Library for each run (remembered on this computer); in the player, "on their own" is this computer's.
+- **Clip previews empty first** (Anton, 2026-11-10: "I want to start organizing, not wait for the pictures"): the
+  Library's "Clip previews" writes every clip's preview at once as an empty one (a dark frame, 1.9 KB, the link inside
+  with `"draft": true`), all of them by one `afp-cut --empty-previews` (16 at a time: 400 on the NAS in ~2.5 s). Footage
+  shows them with the camera's own quick look (LRF/THM) until their picture is there. A second task ("their pictures")
+  then makes each one real where it is now (moved meanwhile: found again by its link), at background priority, each
+  noted to the catalog as it's done, the folders the Library shows first (`set_focus` → `focus.json`, read before each
+  clip). It steps aside for any other task (stopped after the one being made, queued again after it). Drafts of 2 s of
+  video were tried first: 0.3–0.75 s and 22 MB a clip, too slow to start organizing.
 - **Nothing more in Project.afproject**: no `clips_made`, `stills_made`, `clips_failed`, `moment_names` or settings
   written (empty lists of before aren't written back either). Photos of marks made already are found by their links;
   name suggestions are the moments' names; failures are in the player's log and the batch's status. Renders stay in

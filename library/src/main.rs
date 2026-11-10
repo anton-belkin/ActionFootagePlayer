@@ -85,6 +85,8 @@ struct Running {
     started: Instant,
     stop_asked: Option<Instant>,
     awake: Option<Child>,
+    // Stopped to let another job run first, to be queued again
+    yielding: bool,
 }
 
 #[derive(Default)]
@@ -351,6 +353,11 @@ fn start_job(inner: &mut Inner) {
     let mut req = job.request.clone();
     req["status"] = json!(dir.join("status.json"));
     req["stop"] = json!(dir.join("stop"));
+    // The folders the Library shows now, to make first (set_focus keeps them)
+    req["focus"] = json!(jobs_dir().join("focus.json"));
+    // A job run again (one that stepped aside): what its last run said isn't this one's
+    let _ = std::fs::remove_file(dir.join("status.json"));
+    let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
         .and_then(|_| start_player(&request, &log));
@@ -361,7 +368,7 @@ fn start_job(inner: &mut Inner) {
                 Command::new("/usr/bin/caffeinate").args(["-i", "-w", &child.id().to_string()])
                     .stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
             } else { None };
-            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake });
+            inner.running = Some(Running { id: job.id, child, dir, started: Instant::now(), stop_asked: None, awake, yielding: false });
         }
         Err(e) => {
             job.state = JobState::Failed;
@@ -391,6 +398,16 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
 }
 
 fn tick(inner: &mut Inner) {
+    // Clip previews' pictures, made for as long as it takes, step aside for any other job: stopped after the one being
+    // made, then queued again after it (the ones left are found again by their links)
+    if let Some(run) = inner.running.as_mut() {
+        let finishing = inner.jobs.iter().any(|j| j.id == run.id && j.kind == "clips-finish");
+        if finishing && run.stop_asked.is_none() && inner.jobs.iter().any(|j| j.state == JobState::Waiting && j.kind != "clips-finish") {
+            let _ = std::fs::write(run.dir.join("stop"), b"");
+            run.stop_asked = Some(Instant::now());
+            run.yielding = true;
+        }
+    }
     if let Some(run) = inner.running.as_mut() {
         let id = run.id;
         let exited = run.child.try_wait().ok().flatten();
@@ -418,6 +435,15 @@ fn tick(inner: &mut Inner) {
             finished = exited.is_some();
         }
         if finished {
+            if run.yielding {
+                if let Some(i) = inner.jobs.iter().position(|j| j.id == id) {
+                    let mut job = inner.jobs.remove(i);
+                    job.state = JobState::Waiting;
+                    (job.done, job.total, job.failed, job.made, job.fraction, job.current, job.message) = (0, 0, 0, None, None, None, None);
+                    job.failures.clear();
+                    inner.jobs.push(job);
+                }
+            }
             // What a batch made, and the clips it looked at, into the catalog: a look at everything
             seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
             if let Some(mut run) = inner.running.take() {
@@ -1426,8 +1452,8 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let photo = options.get("photo").and_then(Value::as_str).unwrap_or("no").to_string();
     let sdr = options.get("sdr").and_then(Value::as_bool).unwrap_or(false);
     let title = match kind.as_str() {
-        "clips" => "Clip previews (drafts)".to_string(),
-        "clips-finish" => "Clip previews: the drafts finished".to_string(),
+        "clips" => "Clip previews (empty, to arrange now)".to_string(),
+        "clips-finish" => "Clip previews: their pictures".to_string(),
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
@@ -1450,8 +1476,9 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     if kind == "export" { request["sdr"] = json!(sdr); }
     // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
     // whether new moments are stabilized on their own
-    // Clip previews (Anton, 2026-11-10): drafts at once (the first seconds of the camera's own proxy, copied), to arrange
-    // in Footage right away; then a job finishing them in their places
+    // Clip previews (Anton, 2026-11-10): empty ones at once (a dark frame with the link inside, all in a few seconds), to
+    // arrange in Footage right away; then a job making their pictures in their places, the folder in view first, out of
+    // the way of any other job
     if kind == "clips" { request["draft"] = json!(true); }
     if kind == "clips" || kind == "clips-again" {
         let layout = options.get("layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).unwrap_or("tree");
@@ -1477,13 +1504,23 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
             inner.next_id += 1;
             let request = json!({ "kind": "clips-finish", "project": project });
             let id = inner.next_id;
-            inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: the drafts finished".into(), project_name, project, state: JobState::Waiting,
+            inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
                                   done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), request });
         }
     }
     tick(&mut inner);
     Ok(())
 }).await.map_err(|e| e.to_string())?
+}
+
+// The folders the Library shows now (absolute, on disk): a clip previews' pictures job makes theirs first
+#[tauri::command]
+fn set_focus(dirs: Vec<String>) -> Result<(), String> {
+    let file = jobs_dir().join("focus.json");
+    let _ = std::fs::create_dir_all(jobs_dir());
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json!({ "dirs": dirs }).to_string()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1628,7 +1665,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job,
+        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,

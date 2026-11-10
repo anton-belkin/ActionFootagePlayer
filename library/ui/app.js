@@ -229,8 +229,9 @@ function deriveItems(view) {
       const mv = probe && probe.movie;
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
-      // Its preview's picture, else what the camera made for its own quick look (LRF, THM)
-      it.thumbPath = it.preview || it.thumb || null;
+      // Its preview's picture, else what the camera made for its own quick look (LRF, THM); an empty preview (its
+      // picture still to come): the camera's, else its dark frame
+      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || null;
       it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
       it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
@@ -879,10 +880,30 @@ function renderEmpty() {
   $("bodyrow").hidden = !S.root;
   if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => '<button type="button" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="nm">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></button>').join("") + '</div>' : "";
 }
+// The folders shown now, on disk (Anton, 2026-11-10): the clip previews' pictures are made there first. Footage: the
+// folders of its empty previews under the folder open; Originals: the clips' own folders there
+let FOCUS_KEY = null;
+function sendFocus() {
+  if (S.view !== "footage" && S.view !== "sources") return;
+  const path = S.path.join("/");
+  const d = DATA[S.view];
+  const key = S.view + "|" + path + "|" + (d && d.items ? d.items.length : 0);
+  if (key === FOCUS_KEY) return;
+  FOCUS_KEY = key;
+  const dirs = new Set();
+  for (const it of under(path)) {
+    if (it.kind !== "clip") continue;
+    const p = S.view === "footage" ? (it.draft ? it.preview : null) : it.path;
+    if (p) dirs.add(p.replace(/[\\/][^\\/]*$/, ""));
+    if (dirs.size >= 50) break;
+  }
+  invoke("set_focus", { dirs: Array.from(dirs) }).catch(() => { /* not wanted: the order only */ });
+}
 function renderAll() {
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
   buildFacets();
   renderEmpty(); renderTop(); renderMain(); renderSide(); renderFilters(); renderSugg();
+  sendFocus();
   if (id) { const e = $(id); if (e) { e.focus(); try { if (pos != null) e.setSelectionRange(pos, pos); } catch (_) { /* */ } } }
 }
 function renderQueueOnly() {

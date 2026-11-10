@@ -435,6 +435,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
             it["pdir"] = preview.as_ref().and_then(|p| p.parent()).and_then(|d| crate::locations::relative(d, root).or_else(|| (d == root).then(String::new)))
                 .map(Value::from).unwrap_or(Value::Null);
+            // An empty one (its picture still to be made): the camera's quick look shows instead
+            if preview.as_ref().and_then(|p| link(p)).is_some_and(|l| l.get("draft").and_then(Value::as_bool) == Some(true)) { it["draft"] = json!(true); }
             it["preview"] = preview.map(|p| json!(p.display().to_string())).unwrap_or(Value::Null);
             by_tree.insert(tree, items.len());
             items.push(it);

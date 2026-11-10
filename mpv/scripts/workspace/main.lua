@@ -371,7 +371,7 @@ end
 -- The project's counts and this clip's preview, for the side panel (set further down, with the clip previews)
 local extras = nil
 -- The project's settings (further down)
-local clips_layout, fingerprint
+local clips_layout, fingerprint, write_empty, plugin_tool
 fs.fingerprint = function(file) return fingerprint and fingerprint(file) or nil end
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
@@ -1491,26 +1491,25 @@ local function draw_progress()
     overlay:update()
 end
 
--- The app's ffmpeg (ActionFootagePlayer.app/Contents/Helpers/ffmpeg), else the system's
-local function ffmpeg_tool()
-    local dir = mp.get_script_directory() or ""
-    local contents = dir:match("^(.*)[/\\]Resources[/\\]plugins[/\\]")
-    local exe = contents and utils.join_path(utils.join_path(contents, "Helpers"), "ffmpeg") or nil
-    if exe and fs.is_file(exe) then return exe end
-    return windows and "ffmpeg.exe" or "ffmpeg"
-end
-
--- What the camera wrote beside a clip for its own quick look, as a video: <stem>.LRF (DJI; GoPro: GL<rest>.LRV for
--- GX<rest>/GH<rest>). An empty or cut-short one (the camera stopped before writing it: seen, 0 bytes) isn't one
-local function camera_proxy(file)
-    local dir, name = file:match("^(.*)[/\\]([^/\\]+)$")
-    if not dir then return nil end
-    local stem = name:gsub("%.[^.]+$", "")
-    local names = { stem .. ".LRF", stem .. ".lrf" }
-    if stem:match("^G[XH]") then names[#names + 1] = "GL" .. stem:sub(3) .. ".LRV"; names[#names + 1] = "GL" .. stem:sub(3) .. ".lrv" end
-    for _, n in ipairs(names) do
-        local info = utils.file_info(ws.join(dir, n))
-        if info and info.is_file and info.size >= 1024 then return ws.join(dir, n) end
+-- Which of the queue's clips comes next: the first in a folder the Library shows now (batch.focus: a file it rewrites
+-- as its folder changes, { dirs = [absolute folders] }; a clip's preview or the clip itself in one), else nil (the
+-- first one). Read for each clip: the Library's own file, tiny
+local function focus_first(queue)
+    local file = batch and batch.focus
+    if not file or #queue < 2 then return nil end
+    local f = io.open(file, "r")
+    local v = f and utils.parse_json(f:read("*a") or "")
+    if f then f:close() end
+    local dirs = type(v) == "table" and v.dirs
+    if type(dirs) ~= "table" or #dirs == 0 then return nil end
+    local function norm(p) return (p:gsub("\\", "/"):gsub("/+$", "")) end
+    for i, c in ipairs(queue) do
+        for _, d in ipairs(dirs) do
+            if type(d) == "string" and d ~= "" then
+                local pre = norm(d) .. "/"
+                if (c.draft_path and norm(c.draft_path):sub(1, #pre) == pre) or (c.file and norm(c.file):sub(1, #pre) == pre) then return i end
+            end
+        end
     end
     return nil
 end
@@ -1518,7 +1517,7 @@ end
 local function next_clip()
     local job = clips_job
     if not job then return end
-    local c = not job.stopping and table.remove(job.queue, 1)
+    local c = not job.stopping and table.remove(job.queue, focus_first(job.queue) or 1)
     if not c then
         clips_job = nil
         state.clips = nil
@@ -1538,42 +1537,13 @@ local function next_clip()
         return
     end
     local exporter = mp.get_property_native("user-data/gyroflow/exporter")
-    -- A draft (Anton, 2026-11-10: previews to arrange at once, finished in the background): the first seconds of what
-    -- the camera wrote for its quick look (3 s of its .LRF, ~0.2 s), else of the clip itself (2 s, ~1 s), copied as they
-    -- are with the link inside; the next job makes it a real preview in its place, wherever it was moved
-    if job.draft then
-        c.place = nil
-        local out = new_preview_path(job.dir, c, job.flat)
-        mkdir(out:match("^(.*)[/\\][^/\\]+$"))
-        local proxy = not c.no_proxy and camera_proxy(c.file) or nil
-        local link_json = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true })
-        local args = { ffmpeg_tool(), "-v", "error", "-y", "-t", proxy and "3" or "2", "-i", proxy or c.file, "-map", "0:v:0", "-c", "copy",
-                       "-movflags", "+faststart+use_metadata_tags", "-metadata", "ch.actionfootageplayer.link=" .. link_json, out }
-        job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
-            if r and r.status == 0 then job.made = job.made + 1; job.notes[#job.notes + 1] = out
-            elseif proxy and not job.stopping then
-                -- The camera's copy didn't read: from the clip itself, then
-                os.remove(out)
-                c.no_proxy = true
-                table.insert(job.queue, 1, c)
-                return next_clip()
-            elseif not job.stopping then
-                job.failed = job.failed + 1
-                table.insert(job.failures, { c.relative, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "ffmpeg failed" })
-            end
-            job.done = job.done + 1
-            state.clips = { done = job.done, total = job.total }
-            publish(); draw_progress()
-            next_clip()
-        end)
-        return
-    end
     -- Finishing a draft: made beside it under a hidden name, then put in its place (where it is now: found again by
     -- its link when it was moved meanwhile)
     local out = c.draft_path and (c.draft_path:gsub("([^/\\]+)$", ".tmp-finish-%1")) or new_preview_path(job.dir, c, job.flat)
     local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
     -- At background priority while a video plays
-    if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
+    -- (and always when finishing empty ones: that runs while the footage is worked on)
+    if c.draft_path or (not mp.get_property_native("pause") and not mp.get_property_native("idle-active")) then table.insert(args, "--background") end
     local times = marks_of(c.file)
     if times then
         local list = {}
@@ -1597,7 +1567,8 @@ local function next_clip()
             if dest then
                 os.remove(dest)
                 local ok = os.rename(out, dest)
-                if ok then job.made = job.made + 1; job.notes[#job.notes + 1] = dest else os.remove(out); job.failed = job.failed + 1 end
+                -- Into the catalog at once: the Library shows its picture as it comes
+                if ok then job.made = job.made + 1; catalog.note(job.project, { dest }) else os.remove(out); job.failed = job.failed + 1 end
             else
                 -- The draft is gone (removed meanwhile): its finished preview isn't wanted either
                 os.remove(out)
@@ -1605,20 +1576,65 @@ local function next_clip()
         elseif r and r.status == 0 then
             job.made = job.made + 1
             job.notes[#job.notes + 1] = out
-        elseif not job.stopping then
+        else
+            -- Its half-made one, under its hidden name, goes (stopped too: it's made again next time)
             if c.draft_path then os.remove(out) end
-            job.failed = job.failed + 1
-            local err = r and r.stderr or ""
-            local last
-            for line in err:gmatch("[^\r\n]+") do if line:match("%S") then last = line:gsub("^%s+", "") end end
-            table.insert(job.failures, { c.relative, last or (r and r.error_string) or "gyroflow-export failed" })
-            mp.msg.warn("clip preview of " .. c.relative .. ": " .. err)
+            if not job.stopping then
+                job.failed = job.failed + 1
+                local err = r and r.stderr or ""
+                local last
+                for line in err:gmatch("[^\r\n]+") do if line:match("%S") then last = line:gsub("^%s+", "") end end
+                table.insert(job.failures, { c.relative, last or (r and r.error_string) or "gyroflow-export failed" })
+                mp.msg.warn("clip preview of " .. c.relative .. ": " .. err)
+            end
         end
         job.done = job.done + 1
         state.clips = { done = job.done, total = job.total }
         publish()
         draw_progress()
         next_clip()
+    end)
+end
+
+-- Empty previews (Anton, 2026-11-10: every clip's preview there at once, to arrange the footage before any picture
+-- is made): one dark frame with the link inside, written by afp-cut for all of them in one go (~6 ms each on the NAS);
+-- the "clips-finish" job queued after makes each one real in its place, the folder the Library shows first. Their
+-- names as new_preview_path gives them, the run's folder being new: told apart by the ones taken in this run
+write_empty = function(job)
+    local list, taken = {}, {}
+    local trips = clips_layout() == "trips"
+    for _, c in ipairs(job.queue) do
+        local rel = (trips and c.trip) and (c.trip .. "/" .. moments_lib.clip_preview_relative(c.relative, true)) or moments_lib.clip_preview_relative(c.relative, job.flat)
+        local file = ws.join(job.dir, native(rel))
+        if taken[file] then
+            local dir, stem = ws.parent(file), moments_lib.display_name(file)
+            local folder = c.relative:match("([^/]+)/[^/]+$")
+            local alt = folder and ws.join(dir, stem .. " (" .. folder .. ")" .. moments_lib.EXT)
+            local n = 2
+            while not alt or taken[alt] do alt = ws.join(dir, stem .. " " .. n .. moments_lib.EXT); n = n + 1 end
+            file = alt
+        end
+        taken[file] = true
+        list[#list + 1] = { out = file, link = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true }) }
+    end
+    local function done(written, failed)
+        job.queue = {}
+        job.made, job.done = #written, job.total
+        for _, f in ipairs(written) do job.notes[#job.notes + 1] = f end
+        for _, x in ipairs(failed) do
+            job.failed = job.failed + 1
+            table.insert(job.failures, { type(x) == "table" and x[1] or "?", type(x) == "table" and x[2] or tostring(x) })
+        end
+        next_clip()
+    end
+    local exe = plugin_tool("afp-cut")
+    if not exe then return done({}, { { job.dir, "afp-cut isn't installed (the gyroflow plugin's)" } }) end
+    job.id = mp.command_native_async({ name = "subprocess", args = { exe, "--empty-previews" }, stdin_data = utils.format_json(list),
+                                       playback_only = false, capture_stdout = true, capture_stderr = true }, function(_, r)
+        job.id = nil
+        local v = r and r.status == 0 and utils.parse_json(r.stdout or "")
+        if type(v) ~= "table" then return done({}, { { job.dir, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "afp-cut failed" } }) end
+        done(v.written or {}, v.failed or {})
     end)
 end
 
@@ -1635,6 +1651,7 @@ local function start_clips(root, queue, what)
     publish()
     draw_progress()
     mp.osd_message(what, 3)
+    if clips_job.draft then return write_empty(clips_job) end
     next_clip()
 end
 
@@ -1864,7 +1881,7 @@ local cut_lib = require 'cut'
 local cutting = nil
 
 -- A tool of the gyroflow plugin beside this one (the app has both)
-local function plugin_tool(name)
+plugin_tool = function(name)
     local dir = mp.get_script_directory()
     local plugins = dir and dir:match("^(.*)[/\\][^/\\]+[/\\]?$")
     if not plugins then return nil end
@@ -2919,7 +2936,9 @@ do
             local started, stop_sent, ended = false, false, false
             -- Chosen for this run in the Library's dialog: how clip previews are laid out (tree, flat, trips), and
             -- whether new moments are stabilized on their own
-            batch = { layout = req.layout, alone = type(req.alone) == "boolean" and req.alone or nil }
+            -- and the folders the Library shows now, to make first (`focus`: the file it keeps them in)
+            batch = { layout = req.layout, alone = type(req.alone) == "boolean" and req.alone or nil,
+                      focus = type(req.focus) == "string" and req.focus or nil }
             function batch.looking()
                 status.state = "looking"
                 write_status()

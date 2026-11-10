@@ -176,6 +176,25 @@ pub fn merged_meta(old: Option<&[u8]>, keys: &[(&str, &str)]) -> Result<Vec<u8>,
     Ok(make_box(b"meta", &body))
 }
 
+/// An empty clip preview (Anton, 2026-11-10: every clip's preview there at once, to arrange the footage; its picture
+/// made later): one dark frame, 1.5 KB, its moov last with no meta in it
+pub const EMPTY_PREVIEW: &[u8] = include_bytes!("empty-preview.mp4");
+
+/// A small MP4 whose moov is its last box, with these keys: the moov grown by a new `meta` at its end, nothing before
+/// it moved (no chunk offset changes). For EMPTY_PREVIEW, built in memory, written once
+pub fn with_keys(template: &[u8], keys: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+    let top = boxes(template, 0, template.len())?;
+    let moov = top.last().filter(|b| &b.kind == b"moov" && b.header == 8).ok_or("the template's moov isn't its last box")?;
+    let meta = merged_meta(None, keys)?;
+    let mut out = Vec::with_capacity(template.len() + meta.len());
+    out.extend_from_slice(&template[..moov.at]);
+    out.extend_from_slice(&((moov.size + meta.len()) as u32).to_be_bytes());
+    out.extend_from_slice(b"moov");
+    out.extend_from_slice(&template[moov.body()]);
+    out.extend_from_slice(&meta);
+    Ok(out)
+}
+
 /// The value of a key in an mdta `meta` box (the box, header included), when it's text
 pub fn key_in_meta(meta: &[u8], key: &str) -> Option<String> {
     let m = *boxes(meta, 0, meta.len()).ok()?.first()?;
