@@ -51,7 +51,7 @@ local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", 
 -- How much temporal denoise (Ctrl+p) this computer does: gyroflow.conf's temporal_denoise
 local DENOISE_LEVELS = { { "full", "Full: 5 frames on each side" }, { "light", "Light: 3 frames, lighter on the GPU" }, { "off", "Off on this computer" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
-local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" },
+local FIELDS = { { "depth", "Depth" }, { "water", "In or out of water" }, { "pressure", "Pressure" }, { "altitude", "Altitude" }, { "height", "Height (drone)" },
                  { "gps", "GPS" }, { "speed", "Speed" }, { "temperature", "Sensor temperature" }, { "heartrate", "Heart rate" },
                  { "exposure", "Exposure" } }
 local SPEEDS = { 0.25, 0.5, 1, 1.5, 2, 4 }
@@ -79,6 +79,7 @@ local KEY_LABELS = {
     { "script-binding gyroflow/crop", "Save frame: a frame for a photo, the picture panned and zoomed under it" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
+    { "script-binding dji_telemetry/subtitles", "Subtitles on / off (a drone's camera data written as subtitles is off at first)" },
     { "playlist-prev", "Previous clip in the folder" },
     { "playlist-next", "Next clip in the folder" },
     { "script-binding agent/report", "A note for the agent: areas of the frame and a comment" },
