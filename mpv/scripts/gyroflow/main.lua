@@ -716,6 +716,15 @@ local function time_offset()
     return nil
 end
 
+-- A moment's end in its clip, nil: not a moment. The GPU path reads its part's motion data alone (gpu_table)
+local function moment_end()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and ws.moment and type(ws.offset) == "number" and type(ws.length) == "number" then
+        return ws.offset + ws.length
+    end
+    return nil
+end
+
 -- What the filter does with the lens and the motion (vs-gyroflow's LensMode, further down), nil: no filter
 local filter_lens
 
@@ -1094,8 +1103,15 @@ end
 -- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
 local trans_rev = 0
 
+-- The shader applied (further down): the whole clip's table, once it's there, in place of its first seconds'
+local gpu_apply
+
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
+    -- A clip without a project: its motion data from the NAS took seconds (20 s for a 1.5 GB clip, cold), so the
+    -- table starts from a stretch of it, as the filter's path does (motion.rs): a moment's part (all it plays), or the
+    -- seconds it starts playing at, the reply "partial", the whole clip's table asked for after (below)
+    if not has_project(source) then ud.moment_end = moment_end() end
     -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
     -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
@@ -1114,20 +1130,52 @@ local function gpu_table(source, done)
         mp.add_timeout(0, function() done(reply) end)
         return
     end
-    gpu_count = gpu_count + 1
-    local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
-    local t = mp.get_time()
-    local args = { GPU_TABLE, "--player", utils.format_json(ud), out }
-    if gpu_server_running then
-        table.insert(args, "--server")
-        table.insert(args, GPU_SERVER)
+    local function ask(req, then_)
+        gpu_count = gpu_count + 1
+        local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
+        local t = mp.get_time()
+        local args = { GPU_TABLE, "--player", utils.format_json(req), out }
+        if gpu_server_running then
+            table.insert(args, "--server")
+            table.insert(args, GPU_SERVER)
+        end
+        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
+            local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
+            if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
+            reply.ms = math.floor((mp.get_time() - t) * 1000)
+            reply.denoise = ud.gpu_denoise
+            reply.translation = reply.translation == true
+            then_(reply)
+        end)
     end
-    mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
-        local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
-        if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
-        reply.ms = math.floor((mp.get_time() - t) * 1000)
-        reply.denoise = ud.gpu_denoise
-        reply.translation = reply.translation == true
+    -- From where it plays now (0 as it opens), not kept by it: the whole clip's table is the same
+    if not has_project(source) and not ud.moment_end then
+        local req = {}
+        for k, v in pairs(ud) do req[k] = v end
+        req.start = (mp.get_property_number("time-pos") or 0) + (ud.time_offset or 0)
+        return ask(req, function(reply)
+            if not reply.partial then
+                if reply.shader then gpu_remember(key, reply) end
+                return done(reply)
+            end
+            done(reply)
+            -- The whole clip's, once its motion data is all read (the table server reads it meanwhile), in place of
+            -- the stretch's: unless something else took its place
+            local first = reply.shader
+            local whole = {}
+            for k, v in pairs(ud) do whole[k] = v end
+            whole.full = true
+            ask(whole, function(full)
+                if not full.shader then return mp.msg.info("the whole clip's motion data: " .. tostring(full.error or full.unsupported)) end
+                gpu_remember(key, full)
+                if gpu and gpu.shader == first and current_source == source then
+                    gpu_apply(full)
+                    mp.msg.info(string.format("the whole clip's motion data in %d ms", full.ms or 0))
+                end
+            end)
+        end)
+    end
+    ask(ud, function(reply)
         if reply.shader then gpu_remember(key, reply) end
         done(reply)
     end)
@@ -1170,7 +1218,7 @@ local function gpu_render_scale()
     mp.set_property_native("glsl-shader-opts", opts)
 end
 
-local function gpu_apply(reply)
+gpu_apply = function(reply)
     -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
     local shown = dn_sync.shown()
     gpu_set_shader(gpu and gpu.shader, reply.shader, GRID_MB + (reply.denoise and DENOISE_MB or 0))
