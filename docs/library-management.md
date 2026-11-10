@@ -708,8 +708,14 @@ version kept in `photo_tags` are shown with the photo's own and go into it at it
   catalog again every 4 s while a task runs. A second task ("their pictures") then makes each one real where it is now
   (moved meanwhile: found again by its link), each noted as it's done, the folders the Library shows first
   (`set_focus` → `focus.json`, read before each clip). Not at macOS's background priority: that throttles the NAS reads
-  too (a minute and more for one clip). The player quits only once its notes are through (a quit cut them off). It steps aside for any other task (stopped after the one being made, queued again after it). Drafts of 2 s of
-  video were tried first: 0.3–0.75 s and 22 MB a clip, too slow to start organizing.
+  too (a minute and more for one clip). The player quits only once its notes are through (a quit cut them off). It
+  steps aside for any other task (stopped after the one being made, queued again after it). Drafts of 2 s of video
+  were tried first: 0.3–0.75 s and 22 MB a clip, too slow to start organizing.
+- **Tasks never lock the Library** (Anton, 2026-11-10: "anything can happen anyway, in Finder too"): rename, delete,
+  mend, fix paths, take in and delete renders run while tasks are queued or running; a task copes as with Finder (a
+  preview moved meanwhile is found by its link, one deleted is skipped). Moving the project's own files is the one
+  that can't run beside its tasks: the running one stops after what it's making, they all wait, the files move, and
+  they go on from the new place.
 - **Nothing more in Project.afproject**: no `clips_made`, `stills_made`, `clips_failed`, `moment_names` or settings
   written (empty lists of before aren't written back either). Photos of marks made already are found by their links;
   name suggestions are the moments' names; failures are in the player's log and the batch's status. Renders stay in
