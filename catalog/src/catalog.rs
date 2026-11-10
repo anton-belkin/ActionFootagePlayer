@@ -573,6 +573,11 @@ impl Catalog {
             };
             // Listed because they changed a while ago: listed again now
             let t = self.clock();
+            // What's left out of this root changed (a source inside it taken out of the project): looked at whole, so
+            // that what was left out comes in (its folders' times say nothing of it)
+            let excl = json!(root.exclude);
+            let excl_was = self.state.get(&root.id, "").and_then(|f| f.meta.as_ref()).and_then(|m| m.get("exclude").cloned()).unwrap_or(json!([]));
+            let whole = excl_was != excl && self.state.get(&root.id, "").is_some();
             let due: HashSet<String> = self.rechecks().into_iter().filter(|(r, _, d)| *r == root.id && *d <= t).map(|(_, d, _)| d).collect();
             if starts.is_empty() { continue; }
             let available = matches!(self.shared.stat(&root.dir), Ok(Some(s)) if s.dir)
@@ -594,7 +599,7 @@ impl Catalog {
                 let known: Vec<(String, File)> = idx.get(&d).cloned().unwrap_or_default();
                 let rec = self.state.get(&rid, &d).cloned();
                 let dg = digest(known.iter().map(|(n, f)| (n.as_str(), f)));
-                let differs = force || opts.deep || match &rec {
+                let differs = force || opts.deep || whole || match &rec {
                     Some(f) if f.dir => f.mtime != st.mtime || f.digest.as_deref() != Some(dg.as_str()),
                     _ => true,
                 };
@@ -696,7 +701,8 @@ impl Catalog {
                 // nor a folder never listed before, as on a first look: nothing of it was seen to change)
                 if differs && !is_due && rec.is_some() && !opts.deep { recheck_new.push((rid.clone(), d.clone(), t + self.recheck_after.as_secs())); }
                 if is_due { recheck_done.push((rid.clone(), d.clone())); }
-                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime }, meta: None,
+                let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime },
+                                     meta: (d.is_empty() && !root.exclude.is_empty()).then(|| json!({ "exclude": root.exclude })),
                                      digest: Some(digest(now.iter().map(|(n, f)| (n.as_str(), f)))) };
                 if rec.as_ref() != Some(&dir_rec) { out.push((rid.clone(), d.clone(), Some(dir_rec))); }
                 rep.changes += out.len();

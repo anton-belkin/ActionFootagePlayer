@@ -172,7 +172,11 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
     changed(&changes, &last);
     // A source the catalog has never looked at (just added): looked at now (until then the views ask the disk for each
     // of its files, which on a share takes minutes); the others' views read from the catalog meanwhile
-    let new: Vec<afp_catalog::Root> = roots.iter().filter(|r| worker.state.get(&r.id, "").is_none()).cloned().collect();
+    // (or one whose sources inside it changed: one taken out of the project comes in under it)
+    let new: Vec<afp_catalog::Root> = roots.iter().filter(|r| match worker.state.get(&r.id, "") {
+        None => true,
+        Some(f) => f.meta.as_ref().and_then(|m| m.get("exclude").cloned()).unwrap_or(serde_json::json!([])) != serde_json::json!(r.exclude),
+    }).cloned().collect();
     if !new.is_empty() {
         set(&status, "Looking at the new source…");
         if worker.sweep(&new, &ours, &Sweep::default()).is_ok() {

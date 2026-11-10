@@ -425,3 +425,20 @@ fn a_clips_moments_are_found_by_its_path() {
     assert_eq!(d.len(), 1);
     drop(a);
 }
+
+#[test]
+fn a_source_taken_out_from_inside_another_comes_in_under_the_outer_one() {
+    // Anton, 2026-11-10: a camera's folder kept as a source inside a whole share's, then taken out of the project: the
+    // outer source must then have its files (their folders' times say nothing of it)
+    let fs = Fs::new();
+    project(&fs, 3, 4, 1);
+    let mut a = built(&fs);
+    let mut r = roots();
+    r[1].exclude = vec!["Day001".into()];
+    let insp = a.insp();
+    a.cat.sweep(&r, &insp, &Default::default()).unwrap();
+    assert!(a.cat.state.get("f", "Day001/C0000.mp4").is_none(), "left out while the inner source is there");
+    a.sweep().unwrap();
+    assert!(a.cat.state.get("f", "Day001/C0000.mp4").is_some(), "in again once it isn't");
+    assert!(diff(&truth(&fs), &view(&a.cat)).is_empty());
+}

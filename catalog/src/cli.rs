@@ -113,6 +113,11 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
     let mut loaded = false;
     let mut everything = true;
     let mut last_all = Instant::now();
+    // The project's sources changed (Project.afproject written): started again with its new roots (Docker's
+    // --restart brings it back)
+    let pf = proj.join(crate::locations::PROJECT_FILE);
+    let stamp = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let pf_at = stamp(&pf);
     let mut pending: std::collections::BTreeSet<(String, String)> = Default::default();
     let mut last_event = Instant::now();
     loop {
@@ -167,8 +172,19 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
             Some(Err(e)) => eprintln!("afp-catalog: {e}"),
             None => {}
         }
+        if stamp(&pf) != pf_at {
+            let (now, _) = project::roots_with(proj, &shares_of());
+            let ids = |r: &[crate::Root]| r.iter().map(|x| (x.id.clone(), x.dir.clone(), x.exclude.clone())).collect::<Vec<_>>();
+            if ids(&now) != ids(roots) { eprintln!("afp-catalog: the project's sources changed: starting again"); std::process::exit(3); }
+        }
         std::thread::sleep(Duration::from_millis(250));
     }
+}
+
+/// The --share arguments (for watch's look at the project's sources again)
+fn shares_of() -> Vec<(String, PathBuf)> {
+    let a: Vec<String> = std::env::args().collect();
+    a.windows(2).filter(|w| w[0] == "--share").filter_map(|w| w[1].split_once('=').map(|(n, p)| (n.to_string(), PathBuf::from(p)))).collect()
 }
 
 pub fn main() -> ExitCode {
