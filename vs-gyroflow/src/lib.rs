@@ -458,7 +458,7 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
         // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
         // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
-        lens_pick::apply(&stab);
+        lens_pick::apply(&stab, project);
         if lens_only && stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
             return Err(format!("{project}: no lens profile to correct the lens with"));
         }
