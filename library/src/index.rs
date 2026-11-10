@@ -649,7 +649,10 @@ pub struct Probes {
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
 
+/// A file's size and time: as the project's catalog has it (no question to the share for each clip: thousands of
+/// clips took minutes, looking as though they were read again), else from the disk
 fn stamp(path: &str) -> Option<(u64, i64)> {
+    if let Some(r) = crate::seen::file(Path::new(path)) { return r.filter(|f| !f.dir).map(|f| (f.size, crate::seen::seconds(f.mtime))); }
     let m = std::fs::metadata(path).ok()?;
     Some((m.len(), unix(m.modified())))
 }
