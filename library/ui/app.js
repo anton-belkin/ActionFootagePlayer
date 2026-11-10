@@ -85,6 +85,7 @@ const S = {
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
+  geoHand: "", geoSite: "", geo: null, geoBusy: false, geoState: {}, geoShift: {}, geoOpenG: {}, geoSiteFor: {}, geoClips: [], geoStatus: "",
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
   hist: [], histAt: -1,
@@ -219,6 +220,7 @@ function deriveItems(view) {
     if (it.kind === "clip") {
       const probe = PROBES[it.path];
       deriveSource(it, probe);
+      deriveGeo(it, probe);
       const own = it.own || {};
       deriveTransform(it, own.view);
       const src = own.source && typeof own.source === "object" ? own.source : {};
@@ -358,6 +360,7 @@ function buildFacets() {
     wh.push({ id: "where2", title: "Copies", opts: [L("cp:2", "In two locations or more", (it) => (it.locs || []).length > 1)] });
     wh.push({ id: "iss", title: "Issues", opts: [L("iss:own", "Two own files", (it) => it.conflict)] });
     sections.push({ id: "wh", title: "Where", facets: wh });
+    geoFacets(items, sections);
   }
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
@@ -757,6 +760,7 @@ function renderSide() {
   const info = S.info || {};
   if (S.view === "footage" || S.view === "sources" || S.view === "moments") h += checksSection(c);
   h += tagsSection(c);
+  if (S.view === "footage" || S.view === "sources") h += locationSection(c);
   if (S.view === "footage" || S.view === "sources") {
     h += sec("moments", "Moments & previews", "from the clips",
       '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
@@ -984,6 +988,9 @@ async function runTakeIn() {
 function renderSheet() {
   const el = $("sheet");
   if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
+  if (S.sheet === "geo") { const sb = el.querySelector(".sb"); const top = sb ? sb.scrollTop : 0; el.innerHTML = renderGeo(); const nb = el.querySelector(".sb"); if (nb) nb.scrollTop = top; return; }
+  if (S.sheet === "geoask") { el.innerHTML = renderGeoAsk(); return; }
+  if (S.sheet === "geodenied") { el.innerHTML = renderGeoDenied(); return; }
   if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
   const st = S.settings;
   const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
@@ -1334,6 +1341,7 @@ function itemInfo(it) {
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
       ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? "None" : ""],
       ["Tags", tags, false, true]]));
+    h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
     const tf = stabText(it.own && it.own.view);
     h += infoSec("Transform", tf ? kv(tf.concat([["Turned", it.turned ? "Yes" : ""]])) : '<p class="sub wrap">' + (it.gyroflow ? "Its Gyroflow project" : TF_DEFAULT) + (it.turned ? ", turned" : "") + '</p>');
@@ -1377,7 +1385,8 @@ function manyInfo(c) {
   let h = '<div class="ihead"><b class="wrap">' + esc(c.selName) + '</b><span class="sub">' + esc(plural(its.length) + (c.selFolders.length ? ", everything inside included" : "")) + '</span></div>';
   h += infoSec("All of it", kv([["Length", dur ? clock(dur) : ""], ["Size", sizeText(size)], ["Recorded", whens.length ? dateText(whens[0]) + (whens.length > 1 ? " – " + dateText(whens[whens.length - 1]) : "") : ""],
     ["Cameras", count((it) => it.cam)], ["Color", count((it) => it.color)], ["Marks", its.reduce((n, it) => n + (it.marks || 0), 0) || ""], ["Moments", its.reduce((n, it) => n + (it.moments || 0), 0) || ""],
-    ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")]]));
+    ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")],
+    ["Places", its.some((it) => it.kind === "clip") ? count((it) => it.kind !== "clip" ? "" : it.geo ? (it.locality !== "—" ? it.locality : it.country) : "No location") : ""]]));
   if (one && FOLDER_VIEWS[S.view] && c.selFolders[0] !== NOPREV) h += infoSec("Files", kv([["Folder", pathsHtml([folderOnDisk(c.selFolders[0])]), false, true]]));
   return h;
 }
@@ -1391,6 +1400,256 @@ function infoHtml(c) {
   }
   if (c.direct.length === 1 && !c.selFolders.length) { const b = clipButton(c); return itemInfo(c.direct[0]) + (b ? '<div class="isec"><div class="btns">' + b + '</div></div>' : ""); }
   return manyInfo(c);
+}
+
+// ---------- locations (library/src/geo.rs, docs/geolocation.md) ----------
+// A clip's location is the original's: set from Apple Photos (the photos nearest in time) or by hand, kept in its own
+// file; else the camera's own GPS, read from the clip. Place names are looked up once on this computer.
+
+const PLACES = {};          // "lat,lon" (0.01°) -> place, or null while it's being looked up / found nothing
+let placesWanted = [], placesBusy = false;
+function gkey(lat, lon) { return lat.toFixed(2) + "," + lon.toFixed(2); }
+function wantPlace(lat, lon) {
+  const k = gkey(lat, lon);
+  if (k in PLACES) return;
+  PLACES[k] = null;
+  placesWanted.push([lat, lon]);
+  if (!placesBusy) setTimeout(lookPlaces, 300);
+}
+async function lookPlaces() {
+  if (placesBusy || !placesWanted.length) return;
+  placesBusy = true;
+  const pts = placesWanted.splice(0, 20);
+  try {
+    const got = await invoke("places_of", { points: pts, lookup: true });
+    pts.forEach((p, i) => { if (got[i]) PLACES[gkey(p[0], p[1])] = got[i]; });
+    derive(S.view === "sources" ? "footage" : S.view); renderAll();
+  } catch (e) { /* offline: shown as coordinates */ }
+  placesBusy = false;
+  if (placesWanted.length) setTimeout(lookPlaces, 300);
+}
+function deriveGeo(it, probe) {
+  const own = it.own && it.own.location;
+  let g = null;
+  if (own && typeof own.lat === "number" && typeof own.lon === "number") {
+    g = { lat: own.lat, lon: own.lon, alt: own.alt, source: own.source || "manual", place: own.place || null, gap: own.photo_gap_s };
+  } else if (probe && probe.gps && typeof probe.gps.lat === "number") {
+    const k = gkey(probe.gps.lat, probe.gps.lon);
+    g = { lat: probe.gps.lat, lon: probe.gps.lon, alt: probe.gps.alt, source: "camera", place: PLACES[k] || null };
+    if (!(k in PLACES)) wantPlace(probe.gps.lat, probe.gps.lon);
+  }
+  it.geo = g;
+  const p = (g && g.place) || {};
+  it.country = g ? (p.country || (p.water ? "At sea" : "Not named yet")) : null;
+  it.region = g ? (p.region || p.water || "—") : null;
+  it.locality = g ? (p.site || p.locality || p.water || "—") : null;
+}
+function placeText(p) {
+  if (!p) return "";
+  const parts = [];
+  for (const k of ["site", "locality", "region", "country"]) if (p[k] && parts.indexOf(p[k]) < 0) parts.push(p[k]);
+  if (!parts.length && p.water) parts.push(p.water);
+  return parts.join(", ");
+}
+function coordText(lat, lon) {
+  return Math.abs(lat).toFixed(5) + "° " + (lat < 0 ? "S" : "N") + ", " + Math.abs(lon).toFixed(5) + "° " + (lon < 0 ? "W" : "E");
+}
+function gapText(s) {
+  if (s == null) return "";
+  const a = Math.abs(s);
+  const t = a < 60 ? "under a minute" : a < 3600 ? Math.round(a / 60) + " min" : a < 86400 ? (Math.round(a / 360) / 10) + " h" : (Math.round(a / 8640) / 10) + " days";
+  if (a < 1) return "taken during the clip";
+  return t + (s < 0 ? " before" : " after");
+}
+const GEO_SOURCE = { photos: "From Apple Photos", manual: "Set by hand", camera: "The camera’s GPS" };
+function geoFacets(items, sections) {
+  const clips = items.filter((i) => i.kind === "clip");
+  if (!clips.length) return;
+  const geo = clips.filter((i) => i.geo);
+  const ctry = distinct(geo, (i) => i.country).map((c) => L("gc:" + c, c, (it) => it.country === c));
+  ctry.push(L("gc:none", "No location", (it) => it.kind === "clip" && !it.geo));
+  const regs = distinct(geo, (i) => i.country).map((c) => P("gr:" + c, c, distinct(geo.filter((i) => i.country === c), (i) => i.region)
+    .map((r) => L("gr:" + c + "|" + r, r, (it) => it.country === c && it.region === r))));
+  const pairs = distinct(geo, (i) => i.country + "|" + i.region);
+  const locs = pairs.map((cr) => { const [c, r] = cr.split("|"); return P("gl:" + cr, r === "—" ? c : r, distinct(geo.filter((i) => i.country === c && i.region === r), (i) => i.locality)
+    .map((l) => L("gl:" + cr + "|" + l, l, (it) => it.country === c && it.region === r && it.locality === l))); });
+  const facets = [{ id: "gc", title: "Country", opts: ctry }];
+  if (geo.length) {
+    facets.push({ id: "gr", title: "Region", opts: regs }, { id: "gl", title: "Place", opts: locs },
+      { id: "gs", title: "From", opts: Object.keys(GEO_SOURCE).map((k) => L("gs:" + k, GEO_SOURCE[k], (it) => !!it.geo && it.geo.source === k)) });
+  }
+  sections.push({ id: "geo", title: "Location", facets });
+}
+function locationInfo(it) {
+  const g = it.geo;
+  if (!g) return infoSec("Location", '<p class="sub wrap">None. Select it (or its folder) and use Location in Commands: from Apple Photos' + (S.macos ? "" : " (on a Mac)") + ' or by hand.</p>');
+  const p = g.place;
+  const name = placeText(p) || (g.source === "camera" && !p ? "Looking up the place…" : "");
+  return infoSec("Location", kv([["Place", name], ["Point", coordText(g.lat, g.lon) + (g.alt != null ? " · " + Math.round(g.alt) + " m" : ""), true],
+    ["From", GEO_SOURCE[g.source] + (g.source === "photos" && g.gap != null ? ": the nearest photo " + gapText(g.gap) : "")]]) +
+    '<div class="btns"><button type="button" class="btn sm" data-a="geomap" data-v="' + g.lat + "," + g.lon + '">Show on a map</button>' +
+    (g.source !== "camera" ? '<button type="button" class="btn sm" data-a="georemove">Remove</button>' : "") + '</div>');
+}
+function locationSection(c) {
+  const clips = c.selItems.filter((it) => it.kind === "clip");
+  const own = clips.filter((it) => it.geo && it.geo.source !== "camera").length, cam = clips.filter((it) => it.geo && it.geo.source === "camera").length;
+  let body = '<p>' + (c.any ? esc(clips.length + " clip" + (clips.length === 1 ? "" : "s") + ": " + own + " with a location, " + cam + " with the camera’s GPS, " + (clips.length - own - cam) + " without.") : "Select clips or folders.") + '</p>';
+  if (S.macos) {
+    body += '<div class="btns"><button type="button" class="btn sm pri" data-a="geosuggest"' + (clips.length && !S.geoBusy ? "" : " disabled") + '>' + (S.geoBusy ? '<span class="spin" aria-hidden="true"></span> Looking in Photos…' : "Suggest from Apple Photos") + '</button></div>' +
+      '<span class="sub wrap">From the photos with a place you took nearest in time (your iPhone on the same trip). Photos is only read, never changed.</span>';
+  } else {
+    body += '<span class="sub wrap">Suggestions from Apple Photos are on a Mac. Here, set it by hand.</span>';
+  }
+  body += '<div class="lab" style="margin-top:10px">By hand</div><div class="tagin"><input id="geohand" type="text" value="' + esc(S.geoHand) + '" placeholder="27.7333, 34.25" aria-label="Latitude, longitude">' +
+    '<button type="button" class="btn sm" data-a="geohand"' + (clips.length ? "" : " disabled") + '>Set</button></div>' +
+    '<div class="tagin"><input id="geosite" type="text" value="' + esc(S.geoSite) + '" placeholder="Dive site (optional)" aria-label="Dive site"></div>' +
+    '<span class="sub wrap">Latitude, longitude as a map copies them. Written into each original’s own file, beside it.</span>';
+  if (own) body += '<div class="btns"><button type="button" class="btn sm" data-a="georemove">Remove ' + own + ' location' + (own === 1 ? "" : "s") + '</button></div>';
+  return sec("geo", "Location", c.any ? own + cam + " of " + clips.length + " placed" : "where it was recorded", body);
+}
+
+// The sheet: Photos' suggestions by group
+function geoClips() {
+  return ctx().selItems.filter((it) => it.kind === "clip").map((it) => ({ id: it.id, path: (it.copies && it.copies[0] && it.copies[0].path) || it.path, folder: it.dir || "" }));
+}
+async function geoSuggest(shifts) {
+  const status = await invoke("photos_access", { ask: false }).catch(() => "none");
+  if (status === "notDetermined") { S.sheet = "geoask"; renderSheet(); return; }
+  if (status !== "authorized" && status !== "limited") { S.sheet = "geodenied"; S.geoStatus = status; renderSheet(); return; }
+  const clips = shifts ? S.geoClips : geoClips();
+  if (!shifts) { S.geoClips = clips; S.geoState = {}; S.geoShift = {}; S.geoOpenG = {}; S.geoSiteFor = {}; }
+  S.geoBusy = true; renderSide(); if (S.sheet === "geo") renderSheet();
+  try {
+    S.geo = await invoke("suggest_locations", { clips, shifts: shifts || {} });
+    S.sheet = S.geo.status === "authorized" || S.geo.status === "limited" ? "geo" : "geodenied"; S.geoStatus = S.geo.status;
+  } catch (e) { showError(String(e)); }
+  S.geoBusy = false; renderSide(); renderSheet();
+}
+function localClock(t, off) {
+  const d = new Date((t + (off || 0)) * 1000);
+  return d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + " " + String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+}
+function zoneText(off) {
+  if (off == null) return "UTC";
+  const m = Math.round(off / 60), a = Math.abs(m);
+  return "UTC" + (m < 0 ? "−" : "+") + Math.floor(a / 60) + (a % 60 ? ":" + String(a % 60).padStart(2, "0") : "");
+}
+function renderGeoAsk() {
+  return '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Read your Apple Photos?</h2>' +
+    '<span class="sub">To suggest where clips were recorded</span></header><div class="sb"><p class="wrap">The Library reads the time and place of the photos you took around these clips (your iPhone on the same trip), and nothing else: not the pictures, and it never changes your library.</p>' +
+    '<p class="wrap">macOS now asks once whether Action Footage Library may access Photos. Its prompt says “access”: macOS has no read-only choice for apps. You can take it back in System Settings › Privacy &amp; Security › Photos.</p></div>' +
+    '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Not now</button><button type="button" class="btn pri" data-a="geoallow">Continue</button></footer></div></div>';
+}
+function renderGeoDenied() {
+  const why = S.geoStatus === "none" ? "Apple Photos isn’t on this computer." : S.geoStatus === "restricted" ? "Access to Photos is restricted on this Mac." :
+    "Action Footage Library isn’t allowed to read Photos. Allow it in System Settings › Privacy & Security › Photos, then try again.";
+  return '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Photos can’t be read</h2></header>' +
+    '<div class="sb"><p class="wrap">' + esc(why) + '</p></div><footer><span class="sp"></span><button type="button" class="btn pri" data-a="closesheet">OK</button></footer></div></div>';
+}
+function renderGeo() {
+  const r = S.geo || {};
+  const groups = r.groups || [];
+  let h = '<div class="scrim" data-a="scrim"><div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Locations from Apple Photos</h2>' +
+    '<span class="sub">' + esc((r.photos || 0) + " photos with a place around these clips. Each group: the place of the photo nearest in time.") + '</span></header><div class="sb">';
+  if (!groups.length && !(r.own_gps || []).length) h += '<p class="wrap">No clips with a recording time in the selection.</p>';
+  for (const g of groups) {
+    const st = S.geoState[g.key];
+    const n = (g.clips || []).length;
+    const off = g.place && g.place.tz_offset_s;
+    const first = g.clips[0], last = g.clips[n - 1];
+    const when = localClock(first.start, off) + (n > 1 ? " – " + localClock(last.start + last.dur, off).split(" ").pop() : "") + " " + zoneText(off);
+    h += '<div class="geog' + (st ? " done" : "") + '"><div class="geoh"><b class="wrap">' + esc((g.folder || "Top") + " · " + n + " clip" + (n === 1 ? "" : "s")) + '</b><span class="sub">' + esc(when) + '</span>' +
+      (st ? '<span class="chip ' + (st === "set" ? "ok" : "stale") + '">' + (st === "set" ? "set" : "dismissed") + '</span>' : "") + '</div>';
+    if (st) { h += '</div>'; continue; }
+    if (g.none) {
+      h += '<p class="sub wrap">No photo with a place within a day of these clips.</p>';
+    } else {
+      const far = Math.abs(g.photo.gap_s) > 3 * 3600;
+      h += '<div class="geos"><span class="pin" aria-hidden="true">⌖</span><span class="wrap"><b>' + esc(g.place_text || coordText(g.lat, g.lon)) + '</b><br><span class="mono sub">' + esc(coordText(g.lat, g.lon)) + '</span></span>' +
+        '<button type="button" class="btn sm" data-a="geomap" data-v="' + g.lat + "," + g.lon + '">Map</button></div>' +
+        '<div class="sub wrap">Nearest photo: ' + esc((g.photo.name || "a photo") + ", " + gapText(g.photo.gap_s) + (n > 1 ? " its clip" : " the clip")) +
+        (n > 1 ? esc("; the clip farthest from its own nearest photo: " + gapText(g.worst_gap_s).replace(/ (before|after)$/, "")) : "") + '.</div>' +
+        (far ? '<div><span class="chip warn">far in time</span> <span class="sub">check it: the photo is hours away</span></div>' : "") +
+        (g.spread_km > 1 ? '<div><span class="chip warn">' + esc(Math.round(g.spread_km * 10) / 10 + " km apart") + '</span> <span class="sub">the clips’ nearest photos are in different places: look per clip</span></div>' : "");
+    }
+    // The clock: what was assumed, and a shift if the camera's clock was off
+    const shiftH = Math.round((g.shift || 0) / 360) / 10;
+    h += '<div class="sub wrap">Time: ' + esc(g.why || "") + (g.local ? esc(", taken as the place’s time (" + zoneText(-g.default_shift) + ")") : "") + '.</div>' +
+      '<div class="field"><label class="sub" for="gshift-' + esc(g.key) + '">Camera clock off by</label><select id="gshift-' + esc(g.key) + '" data-a="geoshift" data-v="' + esc(g.key) + '">' +
+      [-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3].concat([shiftH]).filter((x, i, a) => a.indexOf(x) === i).sort((a, b) => a - b).map((x) => '<option value="' + x + '"' + (x === shiftH ? " selected" : "") + '>' + (x === 0 ? "0 (as recorded)" : (x > 0 ? "+" : "") + x + " h") + '</option>').join("") + '</select></div>';
+    if (!g.none) {
+      h += '<div class="tagin"><input type="text" data-geosite="' + esc(g.key) + '" value="' + esc(S.geoSiteFor[g.key] != null ? S.geoSiteFor[g.key] : (g.place && g.place.site) || "") + '" placeholder="Dive site (optional)" aria-label="Dive site"></div>' +
+        '<div class="btns"><button type="button" class="btn sm pri" data-a="geoaccept" data-v="' + esc(g.key) + '">Set for ' + n + ' clip' + (n === 1 ? "" : "s") + '</button>' +
+        '<button type="button" class="btn sm" data-a="geodismiss" data-v="' + esc(g.key) + '">Dismiss</button>' +
+        (n > 1 ? '<button type="button" class="btn sm" data-a="geoper" data-v="' + esc(g.key) + '" aria-expanded="' + !!S.geoOpenG[g.key] + '">Per clip</button>' : "") + '</div>';
+      if (S.geoOpenG[g.key] || n === 1) {
+        h += '<div class="result">' + g.clips.map((cl, i) => {
+          const cs = S.geoState[g.key + "#" + i];
+          const name = cl.id.split("/").pop();
+          return '<div class="it"><span class="wrap"><b>' + esc(name) + '</b> <span class="sub" style="display:inline">' + esc(localClock(cl.start, off).split(" ").pop()) + '</span><br>' +
+            (cl.photo ? '<span class="sub" style="display:inline">' + esc((cl.photo.name || "photo") + ", " + gapText(cl.photo.gap_s) + (cl.photo.km > 0.5 ? ", " + Math.round(cl.photo.km * 10) / 10 + " km from the group’s" : "")) + '</span>' : '<span class="sub" style="display:inline">no photo near it</span>') + '</span>' +
+            (cs ? '<span class="chip ' + (cs === "set" ? "ok" : "stale") + '">' + cs + '</span>' : n > 1 && cl.photo ? '<button type="button" class="btn sm" data-a="geoclip" data-v="' + esc(g.key) + "#" + i + '">Set its own</button><button type="button" class="btn sm" data-a="geoclipno" data-v="' + esc(g.key) + "#" + i + '">Skip</button>' : "") + '</div>';
+        }).join("") + '</div>';
+      }
+    }
+    h += '</div>';
+  }
+  if ((r.own_gps || []).length) h += '<p class="sub wrap">' + esc(r.own_gps.length + " clip" + (r.own_gps.length === 1 ? " has" : "s have") + " the camera’s own GPS: their location comes from it.") + '</p>';
+  if ((r.unset || []).length) h += '<p class="sub wrap">' + esc(r.unset.length + " without a usable recording time (" + Array.from(new Set(r.unset.map((u) => u.why))).join("; ") + "): set them by hand.") + '</p>';
+  h += '</div><footer>' + (S.geoBusy ? '<span class="sub"><span class="spin" aria-hidden="true"></span> Looking again…</span>' : "") + '<span class="sp"></span><button type="button" class="btn" data-a="closesheet">Done</button></footer></div></div>';
+  return h;
+}
+async function geoWrite(entries, done) {
+  try {
+    const problems = await invoke("set_locations", { entries });
+    if (problems.length) showError(problems.join(" · ")); else done();
+  } catch (e) { showError(String(e)); }
+  renderSheet();
+  await refresh();
+}
+async function geoAct(a, v, el) {
+  const groups = (S.geo && S.geo.groups) || [];
+  const gOf = (k) => groups.find((g) => g.key === k);
+  switch (a) {
+    case "geosuggest": return geoSuggest(null);
+    case "geoallow": {
+      S.sheet = null; renderSheet();
+      const st = await invoke("photos_access", { ask: true }).catch(() => "none");
+      if (st === "authorized" || st === "limited") return geoSuggest(null);
+      S.geoStatus = st; S.sheet = "geodenied"; renderSheet(); return;
+    }
+    case "geomap": { const [lat, lon] = v.split(",").map(Number); call("open_map", { lat, lon }).catch(() => {}); return; }
+    case "geoper": S.geoOpenG[v] = !S.geoOpenG[v]; renderSheet(); return;
+    case "geodismiss": S.geoState[v] = "dismissed"; renderSheet(); return;
+    case "geoclipno": S.geoState[v] = "skipped"; renderSheet(); return;
+    case "geoaccept": {
+      const g = gOf(v); if (!g) return;
+      const ids = g.clips.filter((cl, i) => !S.geoState[v + "#" + i]).map((cl) => cl.id);
+      const site = S.geoSiteFor[v] != null ? S.geoSiteFor[v] : (g.place && g.place.site) || "";
+      return geoWrite([{ ids, lat: g.lat, lon: g.lon, alt: g.alt, source: "photos", place: g.place, photo_gap_s: g.photo.gap_s, site }], () => { S.geoState[v] = "set"; });
+    }
+    case "geoclip": {
+      const [k, i] = [v.slice(0, v.lastIndexOf("#")), +v.slice(v.lastIndexOf("#") + 1)];
+      const g = gOf(k); const cl = g && g.clips[i]; if (!cl || !cl.photo) return;
+      const near = cl.photo.km <= 0.5;
+      return geoWrite([{ ids: [cl.id], lat: cl.photo.lat, lon: cl.photo.lon, source: "photos", place: near ? g.place : null, photo_gap_s: cl.photo.gap_s, site: near ? (S.geoSiteFor[k] || "") : "" }], () => { S.geoState[v] = "set"; });
+    }
+    case "geohand": {
+      const ids = ctx().selItems.filter((it) => it.kind === "clip").map((it) => it.id);
+      if (!ids.length) return;
+      try {
+        const p = await invoke("parse_location", { text: S.geoHand });
+        await geoWrite([{ ids, lat: p.lat, lon: p.lon, source: "manual", place: p.place, site: S.geoSite }], () => {});
+        toast((p.place_text || coordText(p.lat, p.lon)) + ": set for " + ids.length + " clip" + (ids.length === 1 ? "" : "s"));
+      } catch (e) { showError(String(e)); }
+      return;
+    }
+    case "georemove": {
+      const ids = ctx().selItems.filter((it) => it.kind === "clip" && it.geo && it.geo.source !== "camera").map((it) => it.id);
+      if (ids.length) await geoWrite([{ ids, remove: true }], () => {});
+      return;
+    }
+  }
 }
 
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
@@ -1711,6 +1970,7 @@ document.addEventListener("click", async (e) => {
   }
   const a = el.dataset.a, v = el.dataset.v;
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
+  if (a.startsWith("geo")) return geoAct(a, v, el);
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;
@@ -1862,12 +2122,17 @@ document.addEventListener("input", (e) => {
   else if (t.id === "hosts") { S.hostsText = t.value; }
   else if (t.id === "takeplace") { S.takePlace = t.value; }
   else if (t.id === "tagdraft") { S.tagDraft = t.value; }
+  else if (t.id === "geohand") { S.geoHand = t.value; }
+  else if (t.id === "geosite") { S.geoSite = t.value; }
+  else if (t.dataset.geosite) { S.geoSiteFor[t.dataset.geosite] = t.value; }
 });
 document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
   if (a === "neverrename") { S.neverRename = el.checked; return; }
+  // A group's camera clock taken as off by so much: its suggestion again
+  if (a === "geoshift") { S.geoShift[v] = Math.round(parseFloat(el.value) * 3600); geoSuggest(Object.assign({}, S.geoShift)); return; }
   if (a === "prof") { S.profiles[v] = el.checked; renderSide(); return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;

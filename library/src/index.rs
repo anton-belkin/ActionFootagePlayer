@@ -451,7 +451,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
             if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
-                                    "source": own.get("source").cloned().unwrap_or(Value::Null) });
+                                    "source": own.get("source").cloned().unwrap_or(Value::Null),
+                                    "location": own.get("location").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
         }
@@ -705,6 +706,20 @@ impl Probes {
             if !out.contains_key(p) { if let Some((_, _, val)) = self.known.get(p) { out.insert(p.clone(), val.clone()); } }
         }
         json!({ "version": self.version, "items": out, "pending": self.queue.len() + usize::from(self.busy) })
+    }
+    /// One clip's answer, if known and its file unchanged since
+    pub fn get(&self, path: &str) -> Option<Value> {
+        let (s, m, v) = self.known.get(path)?;
+        (stamp(path) == Some((*s, *m))).then(|| v.clone())
+    }
+    /// An answer worked out elsewhere (geo.rs asks the tool itself when it needs one now)
+    pub fn put(&mut self, path: &str, answer: Value) {
+        if let Some((s, m)) = stamp(path) {
+            self.version += 1;
+            let v = self.version;
+            self.known.insert(path.to_string(), (s, m, answer));
+            self.log.push((v, path.to_string()));
+        }
     }
     pub fn known(&self, paths: &[String]) -> Value {
         let mut out = serde_json::Map::new();

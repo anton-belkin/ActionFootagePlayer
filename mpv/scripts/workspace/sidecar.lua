@@ -96,7 +96,7 @@ function M.new(env)
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
     -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water), no
-    -- 360 recording and no tags: the file removed
+    -- 360 recording, no location (the Library's, docs/geolocation.md) and no tags: the file removed
     function s.update(clip, fn)
         local p, list = own(clip)
         if not p then
@@ -108,7 +108,7 @@ function M.new(env)
         if fn(doc) == false then return true end
         doc.format = M.FORMAT
         local file = p
-        if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil
+        if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil and doc.location == nil
             and (type(doc.tags) ~= "table" or next(doc.tags) == nil) then
             if from then os.remove(from); if env.note then env.note(from) end end
             return true

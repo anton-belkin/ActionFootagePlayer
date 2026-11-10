@@ -17,9 +17,14 @@ fn changed(old: &Value, add: &[String], remove: &[String]) -> Vec<String> {
     list
 }
 
-fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
+pub(crate) fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
     let tmp = PathBuf::from(format!("{}.tmp", file.display()));
     std::fs::write(&tmp, serde_json::to_vec(doc).unwrap()).and_then(|_| std::fs::rename(&tmp, file)).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// A clip's own file with nothing of the clip's left in it (as the player's sidecar.lua has it): removed rather than written
+pub(crate) fn holds_nothing(doc: &Value) -> bool {
+    ["marks", "view", "source", "view360", "location", "tags"].iter().all(|k| doc.get(*k).is_none())
 }
 
 /// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
@@ -59,8 +64,7 @@ pub fn set(root: &Path, items: &[Value], add: &[String], remove: &[String], reli
                         doc["clip"] = json!({ "file": clip.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size });
                     }
                     if tags.is_empty() { doc.as_object_mut().unwrap().remove("tags"); } else { doc["tags"] = json!(tags); }
-                    let empty = ["marks", "view", "source", "tags"].iter().all(|k| doc.get(*k).is_none());
-                    let r = if empty { std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string()) } else { write_json(&own, &doc) };
+                    let r = if holds_nothing(&doc) { std::fs::remove_file(&own).or_else(|e| if own.exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string()) } else { write_json(&own, &doc) };
                     if let Err(e) = r { problems.push(e); }
                 }
                 Err(e) => problems.push(e),
