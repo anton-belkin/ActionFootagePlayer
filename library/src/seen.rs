@@ -170,6 +170,19 @@ fn run(id: u64, root: PathBuf, stop: Arc<AtomicBool>, everything: Arc<AtomicBool
     *SEEN.write().unwrap() = Some(Seen { id, root: root.clone(), roots: roots.clone(), cat: reader });
     set(&status, "");
     changed(&changes, &last);
+    // A source the catalog has never looked at (just added): looked at now (until then the views ask the disk for each
+    // of its files, which on a share takes minutes); the others' views read from the catalog meanwhile
+    let new: Vec<afp_catalog::Root> = roots.iter().filter(|r| worker.state.get(&r.id, "").is_none()).cloned().collect();
+    if !new.is_empty() {
+        set(&status, "Looking at the new source…");
+        if worker.sweep(&new, &ours, &Sweep::default()).is_ok() {
+            let mut g = SEEN.write().unwrap();
+            if let Some(s) = g.as_mut().filter(|s| s.id == id) { let _ = s.cat.refresh(); }
+            drop(g);
+            changed(&changes, &last);
+        }
+        set(&status, "");
+    }
     let deep_file = worker.cache.join("deep.json");
     let mut last_read = Instant::now();
     let mut last_look = Instant::now() - Duration::from_secs(10_000);
