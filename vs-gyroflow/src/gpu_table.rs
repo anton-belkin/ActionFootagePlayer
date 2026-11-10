@@ -174,7 +174,19 @@ impl PlayerClip {
         let key = (view, opts.chromatic, opts.knots);
         if opts.range.is_some() { return Table::build(clip, opts).map(std::sync::Arc::new); }
         if let Some(t) = self.tables.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()) { return Ok(t); }
-        let t = std::sync::Arc::new(Table::build(clip, opts)?);
+        // A stretch's motion data: its frames' blocks alone (~0.06 ms a frame, the whole of a 7-minute clip 1.5 s), the
+        // frames before and after it as its first and last (as gyroflow-core holds the nearest correction it has)
+        let t = std::sync::Arc::new(match self.covers {
+            Some((a, b)) => {
+                let last = clip.frame_count.max(1) - 1;
+                let first = ((a * clip.fps).floor().max(0.0) as usize).min(last);
+                let range = (first, ((b * clip.fps).ceil().max(0.0) as usize).clamp(first, last));
+                let mut t = Table::build(clip, &Options { range: Some(range), ..*opts })?;
+                t.hold_outside(range, clip.frame_count.max(1));
+                t
+            }
+            None => Table::build(clip, opts)?,
+        });
         let mut tables = self.tables.lock().unwrap();
         tables.push((key, t.clone()));
         if tables.len() > 4 { tables.remove(0); }
@@ -356,6 +368,20 @@ impl Table {
         // Frame 0's block says how many frames there are, whatever the range
         data[9 * 4 + 3] = frames as f32;
         Ok(Table { width, height, data, block, cols, per_frame })
+    }
+
+    /// The frames before `range` as its first, after it as its last (their blocks copied)
+    pub fn hold_outside(&mut self, range: (usize, usize), frames: usize) {
+        let at = |frame: usize| ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        let len = self.block * 4;
+        let (first, last) = (at(range.0), at(range.1));
+        for frame in (0..range.0).chain(range.1 + 1..frames) {
+            let from = if frame < range.0 { first } else { last };
+            let to = at(frame);
+            self.data.copy_within(from..from + len, to);
+        }
+        // Frame 0's block says how many frames there are
+        self.data[9 * 4 + 3] = frames as f32;
     }
 
     pub fn hex(&self) -> String {
@@ -718,6 +744,23 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn frames_outside_a_stretch_hold_its_ends() {
+        // 7 frames, 2 a row, blocks of 10 texels (PARAM_TEXELS + 0 knots past the first): frames 2-4 built
+        let (cols, block) = (2usize, 10usize);
+        let width = cols * block;
+        let mut t = super::Table { width, height: 4, data: vec![0f32; width * 4 * 4], block, cols, per_frame: 0 };
+        let at = |f: usize| ((f / cols) * width + (f % cols) * block) * 4;
+        for f in 2..=4 { let a = at(f); t.data[a..a + block * 4].fill(f as f32 + 1.0); }
+        t.hold_outside((2, 4), 7);
+        for f in 0..7 {
+            let want = if f < 2 { 3.0 } else if f > 4 { 5.0 } else { f as f32 + 1.0 };
+            let a = at(f);
+            assert!(t.data[a..a + block * 4].iter().enumerate().all(|(i, v)| *v == want || (f == 0 && i == 9 * 4 + 3)), "frame {f}");
+        }
+        assert_eq!(t.data[9 * 4 + 3], 7.0);
+    }
+
     // warp.glsl against gyroflow-core's CPU kernel: the shader's passes (through naga's GLSL front end, on this
     // machine's GPU, no window) write each output pixel's source coordinate, compared with
     // Stabilization::undistort_coord at every pixel. On a real clip: AFP_GPU_CLIP=<project.gyroflow> cargo test
