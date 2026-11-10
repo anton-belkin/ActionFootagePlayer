@@ -675,11 +675,25 @@ function renderSugg() {
   el.innerHTML = h;
 }
 
+// What the Library does in the background besides the batches (Anton, 2026-11-10: every task in one place)
+function backgroundTasks() {
+  const t = [];
+  if (S.catalogStatus) t.push(["The project’s catalog", S.catalogStatus]);
+  const reading = Object.keys(S.scanning || {}).filter((v) => S.scanning[v]);
+  if (reading.length) t.push(["Reading the project", reading.map((v) => ({ footage: "footage", moments: "moments", stills: "photos", exports: "exports" })[v] || v).join(", ")]);
+  if (probesPending) t.push(["Reading what the clips are", probesPending + " to go"]);
+  if (S.checking) t.push(["Checking", "what you selected"]);
+  if (S.finding) t.push(["Finding moved files", "by their names, sizes, fingerprints"]);
+  if (S.mending) t.push(["Mending links", "finding the moved originals, writing the links"]);
+  return t;
+}
 function queueHtml() {
   const fin = (j) => ["done", "stopped", "failed"].includes(j.state);
   const live = S.jobs.filter((j) => !fin(j)), done = S.jobs.filter(fin).slice().reverse();
+  const bg = backgroundTasks();
   let h = '<div class="q">';
-  if (!live.length) h += '<p class="sub wrap">Nothing running. Commands on what you select land here.</p>';
+  for (const [title, what] of bg) h += '<div class="job"><div class="t"><b><span class="spin" aria-hidden="true"></span>' + esc(title) + '</b></div><span class="sub wrap">' + esc(what) + '</span></div>';
+  if (!live.length && !bg.length) h += '<p class="sub wrap">Nothing running. Commands on what you select land here, with what the Library does on its own.</p>';
   for (const j of live) {
     let pct = j.total > 0 ? Math.min(100, ((j.done + (j.fraction || 0)) / j.total) * 100) : 0;
     const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? "looking through the project" : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
@@ -703,7 +717,7 @@ function queueHtml() {
   h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
   return h;
 }
-function activeCount() { return S.jobs.filter((j) => !["done", "stopped", "failed"].includes(j.state)).length; }
+function activeCount() { return S.jobs.filter((j) => !["done", "stopped", "failed"].includes(j.state)).length + backgroundTasks().length; }
 
 function sec(key, title, hint, body) {
   const open = !!S.open[key];
@@ -723,7 +737,7 @@ function renderSide() {
   side.hidden = !S.root;
   if (!S.root) return;
   const c = ctx();
-  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Queue<span class="count">' + activeCount() + '</span></button><button type="button" role="tab" class="' + (S.tab === "info" ? "on" : "") + '" data-a="tab" data-v="info">Info</button></div>';
+  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Tasks<span class="count">' + activeCount() + '</span></button><button type="button" role="tab" class="' + (S.tab === "info" ? "on" : "") + '" data-a="tab" data-v="info">Info</button></div>';
   if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
   if (S.tab === "info") { side.innerHTML = h + '<div class="itab">' + infoHtml(c) + '</div>'; fillThumbs(); return; }
   h += '<div class="summary">' + (c.any

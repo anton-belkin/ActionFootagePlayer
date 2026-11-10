@@ -294,7 +294,14 @@ pub fn find_moved(root: &Path, issues: &[Value]) -> Value {
     for i in issues.iter().filter(|i| matches!(i["kind"].as_str(), Some("missing" | "orphan"))) {
         let link = if i["kind"] == "missing" { i["link"].clone() }
             else { json!({ "clip": i["tree"], "size": i["size"], "hash": i["hash"], "created": i["created"] }) };
-        let (found, by, choose) = find_clip(&link, &clips, true, false, &mut fp, &mut made);
+        // One clip of its name and size there: it (originals don't change: nothing read); else by what it is
+        let name = link["clip"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_lowercase();
+        let same: Vec<&Clip> = match link["size"].as_u64() {
+            Some(size) if !name.is_empty() => clips.iter().filter(|c| c.size == size && c.tree.rsplit('/').next().unwrap_or("").to_lowercase() == name).collect(),
+            _ => Vec::new(),
+        };
+        let (found, by, choose) = if let [one] = same.as_slice() { (Some(*one), "name and size", Vec::new()) }
+            else { find_clip(&link, &clips, true, false, &mut fp, &mut made) };
         let place = |c: &Clip| json!({ "tree": c.tree, "path": c.path.display().to_string() });
         out.push(json!({ "issue": i, "found": found.map(place), "by": by, "candidates": choose.into_iter().map(place).collect::<Vec<_>>() }));
     }
@@ -303,21 +310,40 @@ pub fn find_moved(root: &Path, issues: &[Value]) -> Value {
 
 /// The fixes for what Find moved files found: links written again (with `relink`: the tool that writes them), own
 /// files moved beside their clip, Project.afproject's lines that named the old path. Returns what couldn't be done
-pub fn apply(root: &Path, found: &[Value], relink: &dyn Fn(&Path, &str) -> Result<(), String>) -> Vec<String> {
+pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Result<(), String> + Sync)) -> Vec<String> {
     let mut problems = Vec::new();
     let mut renames: Vec<(String, String)> = Vec::new();
+    // The links written first, 8 at once (each a tool started and a file rewritten on the share)
+    let writes: Vec<(PathBuf, String, String, String)> = found.iter().filter_map(|f| {
+        let to = f["found"]["tree"].as_str()?;
+        let issue = &f["issue"];
+        (issue["kind"] == "missing").then(|| {
+            let mut l = issue["link"].clone();
+            let from = l["clip"].as_str().unwrap_or("").to_string();
+            l["clip"] = json!(to);
+            (PathBuf::from(issue["file"].as_str().unwrap_or("")), l.to_string(), from, to.to_string())
+        })
+    }).collect();
+    let results: Vec<Result<(), String>> = {
+        let threads = writes.len().clamp(1, 8);
+        std::thread::scope(|sc| {
+            let hs: Vec<_> = (0..threads).map(|t| {
+                let w = &writes;
+                sc.spawn(move || w.iter().enumerate().skip(t).step_by(threads).map(|(i, (file, link, _, _))| (i, relink(file, link))).collect::<Vec<_>>())
+            }).collect();
+            let mut all: Vec<(usize, Result<(), String>)> = hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect();
+            all.sort_by_key(|(i, _)| *i);
+            all.into_iter().map(|(_, r)| r).collect()
+        })
+    };
+    for ((file, _, from, to), r) in writes.iter().zip(results) {
+        match r { Ok(()) => renames.push((from.clone(), to.clone())), Err(e) => problems.push(format!("{}: {e}", file.display())) }
+    }
     for f in found {
-        let Some(to) = f["found"]["tree"].as_str() else { continue };
+        if f["found"]["tree"].as_str().is_none() { continue; }
         let issue = &f["issue"];
         match issue["kind"].as_str() {
-            Some("missing") => {
-                let file = PathBuf::from(issue["file"].as_str().unwrap_or(""));
-                let mut l = issue["link"].clone();
-                let from = l["clip"].as_str().unwrap_or("").to_string();
-                l["clip"] = json!(to);
-                if let Err(e) = relink(&file, &l.to_string()) { problems.push(format!("{}: {e}", file.display())); continue; }
-                renames.push((from, to.to_string()));
-            }
+            Some("missing") => {}
             Some("orphan") => {
                 let own = PathBuf::from(issue["file"].as_str().unwrap_or(""));
                 let clip = PathBuf::from(f["found"]["path"].as_str().unwrap_or(""));
@@ -435,10 +461,10 @@ mod tests {
         let f = find_moved(&p, &issues);
         assert_eq!(f[0]["found"]["tree"], json!("Egypt/A.MP4"));
         assert_eq!(f[1]["found"]["tree"], json!("Egypt/A.MP4"));
-        let written = std::cell::RefCell::new(Vec::new());
-        let problems = apply(&p, f.as_array().unwrap(), &|file, link| { written.borrow_mut().push((file.to_path_buf(), link.to_string())); Ok(()) });
+        let written = std::sync::Mutex::new(Vec::new());
+        let problems = apply(&p, f.as_array().unwrap(), &|file, link| { written.lock().unwrap().push((file.to_path_buf(), link.to_string())); Ok(()) });
         assert!(problems.is_empty(), "{problems:?}");
-        assert!(written.borrow()[0].1.contains("\"clip\":\"Egypt/A.MP4\""));
+        assert!(written.lock().unwrap()[0].1.contains("\"clip\":\"Egypt/A.MP4\""));
         assert!(a.join("Egypt/A.afp.json").is_file() && !inbox.join("A.afp.json").exists());
         assert_eq!(locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap()["clips_made"][0], json!("Egypt/A.MP4\t9"));
         let _ = std::fs::remove_dir_all(&top);
