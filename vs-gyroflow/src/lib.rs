@@ -47,6 +47,7 @@ pub mod export360;
 pub mod reframe;
 pub mod gpu_table;
 pub mod translation;
+pub mod optical;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };

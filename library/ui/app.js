@@ -703,7 +703,7 @@ function queueHtml() {
   if (!live.length && !bg.length) h += '<p class="sub wrap">Nothing running. Commands on what you select land here, with what the Library does on its own.</p>';
   for (const j of live) {
     let pct = j.total > 0 ? Math.min(100, ((j.done + (j.fraction || 0)) / j.total) * 100) : 0;
-    const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? "looking through the project" : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
+    const what = j.state === "waiting" ? "waiting" : j.state === "starting" ? "starting the player" : j.state === "looking" ? (j.kind === "optical" ? "reading the clips" : "looking through the project") : j.state === "stopping" ? "stopping" : (j.total > 0 ? j.done + " of " + j.total : "");
     const other = j.project !== S.root ? " · " + j.project_name : "";
     h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div>' +
       (j.state === "waiting" ? "" : '<div class="bar2"><i style="width:' + pct.toFixed(1) + '%"></i></div>') +
@@ -718,7 +718,8 @@ function queueHtml() {
       if (j.message) parts.push(j.message);
       const other = j.project !== S.root ? " · " + j.project_name : "";
       h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div><span class="sub wrap' + (j.state === "failed" ? " err" : "") + '">' + esc(parts.join(" · ")) + '</span>' +
-        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
+        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
+        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
     }
   }
   h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
@@ -769,6 +770,7 @@ function renderSide() {
       (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
       '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
       '<span class="sub wrap">Of each mark without one anywhere in the project. Each run’s go into Generated/&lt;date&gt; &lt;time&gt; Moments or Photos.</span>');
+    h += opticalSection(c);
   } else if (S.view === "moments") {
     const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
     const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
@@ -791,6 +793,39 @@ function renderSide() {
   }
   side.innerHTML = h;
   if (!c.any) side.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+
+// Stabilize optically (vs-gyroflow's optical.rs, run by gyroflow-optical): Gyroflow measures the camera's motion from
+// the picture for clips whose motion data the player can't use, and its project goes beside each clip. Which of the
+// selected clips, as far as what's known of them tells; the job reads each one again (its lens) and lists what it left out
+function opticalPlan(c) {
+  const out = { go: [], own: 0, project: 0, s360: 0, lens: 0 };
+  for (const it of c.selItems) {
+    if (it.kind !== "clip") continue;
+    const p = PROBES[it.path];
+    if (it.gyroflow) out.project++;
+    else if (it.is360) out.s360++;
+    else if (p && p.mode === "default") out.own++;
+    else if (p && p.mode == null && p.lens === "") out.lens++;
+    else out.go.push(opticalPath(it));
+  }
+  return out;
+}
+// The copy whose own file is written: the first in the project's order that isn't in a copies-only or this computer's
+// own location (docs/library-management.md, "The clip's own file")
+function opticalPath(it) {
+  const cs = it.copies || [];
+  const main = cs.find((x) => { const l = S.locations[x.li]; return l && !l.copies && !l.local; });
+  return (main || cs[0] || it).path;
+}
+function opticalSection(c) {
+  const op = opticalPlan(c);
+  const out = [[op.own, "have motion data the player stabilizes them with"], [op.project, "have a Gyroflow project already"], [op.s360, "are 360°"], [op.lens, "have a lens that isn’t known"]].filter((x) => x[0]);
+  const n = op.go.length;
+  return sec("optical", "Stabilize optically", "clips without motion data",
+    (c.any ? '<p>' + esc(n + (n === 1 ? " clip" : " clips") + " to stabilize" + (out.length ? "; left out: " + out.map((x) => x[0] + " " + x[1]).join(", ") : "")) + '.</p>' : "") +
+    '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="optical"' + (c.any && !n ? " disabled" : "") + '>Stabilize ' + (c.any ? n + (n === 1 ? " clip" : " clips") : "") + ' optically</button></div>' +
+    '<span class="sub wrap">For clips whose motion the player can’t take from the camera: none recorded, or recorded with the camera’s own stabilization on (HyperSmooth, RockSteady). Gyroflow measures it from the picture, one clip at a time in the background (about as long as the clip plays), and its project goes beside each clip, where the player plays with it. A clip whose lens isn’t known is left out, and the task says which.</span>');
 }
 
 // Check and Find moved files, on the selection (library/src/checks.rs)
@@ -1648,9 +1683,16 @@ async function addJob(kind) {
   if (!c.any) return;
   const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : kind === "render" ? { profiles: ["HDR", "SDR"].filter((p) => S.profiles[p]) }
     : kind === "clips" || kind === "clips-again" ? { layout: S.clipsLayout } : kind === "moments" ? { alone: S.alone } : {};
+  let label = c.label;
+  if (kind === "optical") {
+    const op = opticalPlan(c);
+    if (!op.go.length) return showError("None of the selected clips needs it: they have motion data, a Gyroflow project, or a lens that isn’t known.");
+    options.clips = op.go;
+    label = op.go.length + (op.go.length === 1 ? " clip" : " clips");
+  }
   try {
-    await invoke("add_job", { kind, options, only: c.only, label: c.label });
-    toast("In the queue: " + c.label);
+    await invoke("add_job", { kind, options, only: c.only, label });
+    toast("In the queue: " + label);
     S.tab = "queue";
     renderSide();
   } catch (e) { showError(String(e)); }

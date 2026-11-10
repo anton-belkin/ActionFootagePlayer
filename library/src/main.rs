@@ -73,6 +73,8 @@ struct Job {
     current: Option<String>,
     message: Option<String>,
     failures: Vec<(String, String)>,
+    /// What the batch left out, and why (Stabilize optically: clips with their own motion data, a lens not known...)
+    left_out: Vec<(String, String)>,
     #[serde(skip)]
     request: Value,
 }
@@ -332,6 +334,28 @@ fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
     cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", player.display()))
 }
 
+/// gyroflow-optical (vs-gyroflow's: Stabilize optically), beside the player's gyroflow-probe; AFL_OPTICAL first
+fn optical_tool() -> Result<PathBuf, String> {
+    if let Some(p) = std::env::var_os("AFL_OPTICAL").filter(|p| !p.is_empty()) { return Ok(PathBuf::from(p)); }
+    let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there: install ActionFootagePlayer again")?;
+    let tool = probe.with_file_name(if cfg!(windows) { "gyroflow-optical.exe" } else { "gyroflow-optical" });
+    if tool.is_file() { Ok(tool) } else { Err("This ActionFootagePlayer has no gyroflow-optical: update it".into()) }
+}
+
+// Stabilize optically: vs-gyroflow's gyroflow-optical, the request as the player's batches have it, its stderr the log
+fn start_optical(request: &Path, log: &Path) -> Result<Child, String> {
+    let tool = optical_tool()?;
+    let log = std::fs::File::create(log).map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(&tool);
+    cmd.arg("--batch").arg(request).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(log));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", tool.display()))
+}
+
 fn jobs_dir() -> PathBuf {
     std::env::temp_dir().join(format!("ActionFootageLibrary-{}", std::process::id()))
 }
@@ -353,7 +377,7 @@ fn start_job(inner: &mut Inner) {
     req["stop"] = json!(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
-        .and_then(|_| start_player(&request, &log));
+        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log) });
     match started {
         Ok(child) => {
             job.state = JobState::Starting;
@@ -387,6 +411,12 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
             Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
         }).collect();
     }
+    if let Some(f) = st.get("left_out").and_then(Value::as_array) {
+        job.left_out = f.iter().filter_map(|p| {
+            let p = p.as_array()?;
+            Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
+        }).collect();
+    }
     true
 }
 
@@ -403,14 +433,19 @@ fn tick(inner: &mut Inner) {
                 if !job.state.finished() {
                     job.state = if run.stop_asked.is_some() { JobState::Stopped } else { JobState::Failed };
                     if job.state == JobState::Failed {
-                        job.message = Some(log_error(&run.dir.join("log.txt"))
-                            .unwrap_or_else(|| format!("ActionFootagePlayer stopped ({status})")));
+                        let log = run.dir.join("log.txt");
+                        job.message = Some(if job.kind == "optical" {
+                            std::fs::read_to_string(&log).ok().and_then(|t| t.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string))
+                                .unwrap_or_else(|| format!("gyroflow-optical stopped ({status})"))
+                        } else {
+                            log_error(&log).unwrap_or_else(|| format!("ActionFootagePlayer stopped ({status})"))
+                        });
                     }
                 }
             } else if !has_status && run.started.elapsed() > START_TIMEOUT {
                 let _ = run.child.kill();
                 job.state = JobState::Failed;
-                job.message = Some("ActionFootagePlayer didn't start the batch".into());
+                job.message = Some(if job.kind == "optical" { "gyroflow-optical didn't start".into() } else { "ActionFootagePlayer didn't start the batch".into() });
             } else if run.stop_asked.is_some_and(|t| t.elapsed() > STOP_TIMEOUT) {
                 let _ = run.child.kill();
             }
@@ -1412,7 +1447,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 6] = ["clips", "clips-again", "moments", "photos", "export", "render"];
+const KINDS: [&str; 7] = ["clips", "clips-again", "moments", "photos", "export", "render", "optical"];
 
 #[tauri::command]
 async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
@@ -1430,6 +1465,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
+        "optical" => "Stabilize optically".to_string(),
         "render" => format!("Render ({})", options.get("profiles").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_else(|| "HDR".into())),
         _ => format!("Export all moments ({})", if sdr { "SDR" } else { "HDR" }),
     };
@@ -1454,6 +1490,12 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         request["layout"] = json!(layout);
     }
     if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
+    // The clips themselves, by the file each one's project goes beside (the page picks the copy: its own file's)
+    if kind == "optical" {
+        let clips: Vec<String> = options.get("clips").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        if clips.is_empty() { return Err("Select clips to stabilize".into()); }
+        request["clips"] = json!(clips);
+    }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
             .filter(|p| index::RENDER_PROFILES.contains(p)).map(str::to_string).collect();
@@ -1464,7 +1506,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), request,
+        failures: Vec::new(), left_out: Vec::new(), request,
     };
     inner.jobs.push(job);
     tick(&mut inner);
@@ -1754,6 +1796,51 @@ mod tests {
 
     // The whole way, with the player itself: AFL_PLAYER (an ActionFootagePlayer.app) and AFL_TEST_TRIP (a copy of a
     // trip with Project.afproject in it). Without them it's skipped
+    // Stabilize optically's job as the Library runs it: gyroflow-optical (here a stand-in that writes what the real one
+    // does) started with the request, its status read as it goes, what it left out kept with the job
+    #[cfg(unix)]
+    #[test]
+    fn an_optical_batch() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("afl-optical-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tool = dir.join("gyroflow-optical");
+        std::fs::write(&tool, "#!/bin/sh\n[ \"$1\" = --batch ] || exit 2\n/usr/bin/python3 -I - \"$2\" <<'EOF'\n\
+import json, sys, time\n\
+req = json.load(open(sys.argv[1]))\n\
+st = {'state': 'running', 'done': 0, 'total': 1, 'failed': 0, 'made': 0, 'fraction': 0.5, 'current': 'A.MP4',\n\
+      'failures': [], 'left_out': [[req['clips'][1], 'it has motion data the player stabilizes it with']]}\n\
+open(req['status'], 'w').write(json.dumps(st)); time.sleep(0.5)\n\
+st.update(state='done', done=1, made=1, fraction=None, current=None, message='1 stabilized · 1 left out')\n\
+open(req['status'], 'w').write(json.dumps(st))\n\
+EOF\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AFL_OPTICAL", &tool);
+        let mut inner = Inner::default();
+        inner.next_id = 1;
+        inner.jobs.push(Job {
+            id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
+            state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
+            failures: vec![], left_out: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+        });
+        let t0 = Instant::now();
+        let mut saw_running = false;
+        while !(inner.jobs[0].state.finished() && inner.running.is_none()) && t0.elapsed() < Duration::from_secs(20) {
+            tick(&mut inner);
+            saw_running |= inner.jobs[0].state == JobState::Running;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::env::remove_var("AFL_OPTICAL");
+        let job = &inner.jobs[0];
+        assert!(saw_running);
+        assert_eq!(job.state, JobState::Done, "{:?}", job.message);
+        assert_eq!((job.done, job.total, job.made), (1, 1, Some(1)));
+        assert_eq!(job.left_out, vec![("/x/B.MP4".to_string(), "it has motion data the player stabilizes it with".to_string())]);
+        assert_eq!(job.message.as_deref(), Some("1 stabilized · 1 left out"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_batch_with_the_player() {
         let (Some(_), Some(trip)) = (std::env::var_os("AFL_PLAYER"), std::env::var_os("AFL_TEST_TRIP")) else { return };
@@ -1764,7 +1851,7 @@ mod tests {
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
+            failures: vec![], left_out: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit
