@@ -137,6 +137,9 @@ pub struct LensInfo {
     #[serde(rename = "type")]
     pub chosen: Option<String>,
     pub recorded: Option<String>,
+    /// The lens mode the camera wrote, as its number (DJI's fov_type), for a camera with lens types: shown as
+    /// "Unknown (mode 6)" while the curated list doesn't name it
+    pub mode: Option<u64>,
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
@@ -155,7 +158,8 @@ pub fn lens_info(path: &str) -> Option<LensInfo> {
     };
     let types = lens_pick::lens_types(&camera);
     let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path) };
-    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, types, camera, lens })
+    let mode = if types.is_empty() { None } else { dji_fov_type(path) };
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens })
 }
 
 /// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video

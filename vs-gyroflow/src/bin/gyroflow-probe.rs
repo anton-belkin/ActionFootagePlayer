@@ -30,7 +30,9 @@
 // profile loaded (the database's pick with its name and stars, "Nearest: " when it isn't made for exactly this mode, or
 // "<Type>, from the curated list: <name>": lens_pick.rs), or "" when it has none (Unknown: pick one in Gyroflow);
 // "types": the lens types the curated list has for the camera (resources/curated_lenses.json, empty for most);
-// "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote.
+// "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote,
+// "mode": the camera's own number for it (DJI's fov_type; null for cameras without lens types), which the side panel
+// shows while the list doesn't name it: "Unknown (mode 6)".
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights

@@ -441,7 +441,9 @@ list (`vs-gyroflow/resources/curated_lenses.json`) gives the Action 6's lens typ
 Normal has the original Osmo Action's standard lens, and Wide uses the lens in the file. The type is the one the
 camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off), unless one was chosen for the clip
 (`source.lens_type` in its `.afp.json`; the Library sets it for the clips selected). Source → Lens shows
-"Normal, from the curated list: …".
+"Normal, from the curated list: …". A mode the list doesn't name yet shows as "Unknown (mode 6)": the camera's own
+number for it (DJI's fov_type), so a lens tried on such clips can be given that mode once it fits; a named type
+without a profile (Wide with EIS on) as "Unknown (Wide)".
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water

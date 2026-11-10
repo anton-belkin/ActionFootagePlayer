@@ -1624,7 +1624,15 @@ mp.register_event("file-loaded", function()
         mp.command_native_async({ name = "subprocess", args = { PROBE, "--lens", lens_for }, capture_stdout = true, playback_only = true }, function(_, r)
             local info = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
             if type(info) == "table" and clip_path() == lens_for then
-                current_lens = { camera = info.camera or "", lens = info.lens or "" }
+                -- With lens types (the curated list): the type given by hand, the one recorded, and the camera's own
+                -- number for its mode, for "Unknown (mode 6)" while the list doesn't name it
+                local label_of = {}
+                for _, t in ipairs(type(info.types) == "table" and info.types or {}) do
+                    if type(t) == "table" and t.id then label_of[t.id] = t.label or t.id end
+                end
+                local typ = type(info.type) == "string" and info.type or type(info.recorded) == "string" and info.recorded or nil
+                current_lens = { camera = info.camera or "", lens = info.lens or "", mode = tonumber(info.mode),
+                                 type_label = typ and (label_of[typ] or typ) or nil }
                 publish()
             end
         end)
