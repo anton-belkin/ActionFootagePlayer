@@ -260,3 +260,34 @@ pub fn look_at_everything(r: Option<&Runner>) { if let Some(r) = r { r.everythin
 pub fn status(r: Option<&Runner>) -> String { r.map(|r| r.status.lock().unwrap().clone()).unwrap_or_default() }
 
 pub fn is_on(root: &Path) -> bool { SEEN.read().ok().is_some_and(|g| g.as_ref().is_some_and(|s| s.root == root)) }
+
+// The footage view of a real project, from its catalog and from the disks, compared (by hand:
+// AFL_SEEN=<project> cargo test --release -- --ignored footage_from_catalog --nocapture)
+#[cfg(test)]
+mod real {
+    #[test]
+    #[ignore]
+    fn footage_from_catalog() {
+        let Some(root) = std::env::var_os("AFL_SEEN").map(PathBuf::from) else { return };
+        use super::*;
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let count = |v: &serde_json::Value| (v["items"].as_array().map(|a| a.len()).unwrap_or(0), v["dirs"].as_array().map(|a| a.len()).unwrap_or(0),
+                                             v["clips_dirs"].as_array().map(|a| a.len()).unwrap_or(0));
+        let t = Instant::now();
+        let files = crate::index::scan(&root, "footage", false);
+        println!("from the disks: {:?} items/dirs/clips_dirs in {:.1} s", count(&files), t.elapsed().as_secs_f64());
+        let (roots, _) = project::roots(&root);
+        let mut cat = project::open(&root);
+        cat.load(&Want::All).unwrap();
+        for r in &roots { println!("root {} at {} record {:?} exclude {:?}", r.id, r.dir.display(), cat.state.get(&r.id, "").map(|f| f.mtime), r.exclude); }
+        *SEEN.write().unwrap() = Some(Seen { id: 0, root: root.clone(), roots, cat });
+        let t = Instant::now();
+        let seen = crate::index::scan(&root, "footage", false);
+        println!("from the catalog: {:?} in {:.2} s", count(&seen), t.elapsed().as_secs_f64());
+        let ids = |v: &serde_json::Value| v["items"].as_array().into_iter().flatten().map(|i| (i["id"].as_str().unwrap_or("").to_string(), i["pdir"].to_string(), i["path"].as_str().unwrap_or("").to_string())).collect::<std::collections::BTreeSet<_>>();
+        let (a, b) = (ids(&files), ids(&seen));
+        for x in a.difference(&b).take(5) { println!("only from the disks: {x:?}"); }
+        for x in b.difference(&a).take(5) { println!("only from the catalog: {x:?}"); }
+        *SEEN.write().unwrap() = None;
+    }
+}
