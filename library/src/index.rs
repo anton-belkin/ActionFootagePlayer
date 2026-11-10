@@ -818,12 +818,11 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
                 .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
             if ok { bytes = std::fs::read(&out).ok(); }
         } else if lower.ends_with(".mov") || lower.ends_with(".mp4") {
-            let dir = cache.join(format!("{key}.ql"));
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = Command::new("/usr/bin/qlmanage").args(["-t", "-s", "360", "-o"]).arg(&dir).arg(path)
-                .stdout(Stdio::null()).stderr(Stdio::null()).status();
-            bytes = std::fs::read_dir(&dir).ok().and_then(|mut r| r.next()).and_then(|e| e.ok()).and_then(|e| std::fs::read(e.path()).ok());
-            let _ = std::fs::remove_dir_all(&dir);
+            // A video without a cover (a draft clip preview): a frame by the player's ffmpeg (Quick Look hangs on some)
+            let ffmpeg = crate::player_ffmpeg();
+            let ok = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg"))).args(["-v", "error", "-y", "-ss", "0.5", "-i"]).arg(path)
+                .args(["-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "4"]).arg(&out).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+            if ok { bytes = std::fs::read(&out).ok(); }
         }
         let _ = std::fs::remove_file(&out);
     }

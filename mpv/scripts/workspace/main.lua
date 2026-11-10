@@ -1383,6 +1383,8 @@ end)
 
 -- Clip previews (_Clips/): one at a time, in the background, from the menu or X
 local clips_job = nil
+-- The next run of clip previews makes drafts (the Library's batch asks)
+local clips_draft = false
 -- Batch mode (Action Footage Library runs the player without a window to make them): { finished(summary), ... }
 local batch = nil
 -- What a batch is kept to (Action Footage Library's selection): paths in the project ("Day 1/A.MP4", a folder
@@ -1489,6 +1491,29 @@ local function draw_progress()
     overlay:update()
 end
 
+-- The app's ffmpeg (ActionFootagePlayer.app/Contents/Helpers/ffmpeg), else the system's
+local function ffmpeg_tool()
+    local dir = mp.get_script_directory() or ""
+    local contents = dir:match("^(.*)[/\\]Resources[/\\]plugins[/\\]")
+    local exe = contents and utils.join_path(utils.join_path(contents, "Helpers"), "ffmpeg") or nil
+    if exe and fs.is_file(exe) then return exe end
+    return windows and "ffmpeg.exe" or "ffmpeg"
+end
+
+-- What the camera wrote beside a clip for its own quick look, as a video: <stem>.LRF (DJI, GoPro: GL… for GX…/GH…)
+local function camera_proxy(file)
+    local dir, name = file:match("^(.*)[/\\]([^/\\]+)$")
+    if not dir then return nil end
+    local stem = name:gsub("%.[^.]+$", "")
+    local names = { stem .. ".LRF", stem .. ".lrf" }
+    if stem:match("^G[XH]") then names[#names + 1] = "GL" .. stem:sub(3) .. ".LRF" end
+    for _, n in ipairs(names) do
+        local f = ws.join(dir, n)
+        if fs.is_file(f) then return f end
+    end
+    return nil
+end
+
 local function next_clip()
     local job = clips_job
     if not job then return end
@@ -1496,6 +1521,8 @@ local function next_clip()
     if not c then
         clips_job = nil
         state.clips = nil
+        -- What was written, into the project's catalog (the Library and the other computers see it at once)
+        if #job.notes > 0 then catalog.note(job.project, job.notes) end
         publish()
         draw_progress()
         -- Why the ones that failed did: in the player's log (and the batch's status, which the Library shows)
@@ -1510,7 +1537,33 @@ local function next_clip()
         return
     end
     local exporter = mp.get_property_native("user-data/gyroflow/exporter")
-    local out = new_preview_path(job.dir, c, job.flat)
+    -- A draft (Anton, 2026-11-10: previews to arrange at once, finished in the background): the first seconds of what
+    -- the camera wrote for its quick look (3 s of its .LRF, ~0.2 s), else of the clip itself (2 s, ~1 s), copied as they
+    -- are with the link inside; the next job makes it a real preview in its place, wherever it was moved
+    if job.draft then
+        c.place = nil
+        local out = new_preview_path(job.dir, c, job.flat)
+        mkdir(out:match("^(.*)[/\\][^/\\]+$"))
+        local proxy = camera_proxy(c.file)
+        local link_json = utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project }, draft = true })
+        local args = { ffmpeg_tool(), "-v", "error", "-y", "-t", proxy and "3" or "2", "-i", proxy or c.file, "-map", "0:v:0", "-c", "copy",
+                       "-movflags", "+faststart+use_metadata_tags", "-metadata", "ch.actionfootageplayer.link=" .. link_json, out }
+        job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+            if r and r.status == 0 then job.made = job.made + 1; job.notes[#job.notes + 1] = out
+            elseif not job.stopping then
+                job.failed = job.failed + 1
+                table.insert(job.failures, { c.relative, (r and r.stderr or ""):match("([^\r\n]+)%s*$") or "ffmpeg failed" })
+            end
+            job.done = job.done + 1
+            state.clips = { done = job.done, total = job.total }
+            publish(); draw_progress()
+            next_clip()
+        end)
+        return
+    end
+    -- Finishing a draft: made beside it under a hidden name, then put in its place (where it is now: found again by
+    -- its link when it was moved meanwhile)
+    local out = c.draft_path and (c.draft_path:gsub("([^/\\]+)$", ".tmp-finish-%1")) or new_preview_path(job.dir, c, job.flat)
     local args = { exporter, "--preview", "flipbook", "--force", "--output", out }
     -- At background priority while a video plays
     if not mp.get_property_native("pause") and not mp.get_property_native("idle-active") then table.insert(args, "--background") end
@@ -1526,9 +1579,27 @@ local function next_clip()
     table.insert(args, c.file)
     mp.msg.verbose("clip preview: " .. table.concat(args, " "))
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
-        if r and r.status == 0 then
+        if r and r.status == 0 and c.draft_path then
+            local dest = c.draft_path
+            if not fs.is_file(dest) then
+                dest = nil
+                for _, it in ipairs(catalog.now({ "list", job.project, "--kind", "clip" }) or {}) do
+                    if type(it.link) == "table" and it.link.clip == c.relative and it.link.draft then dest = it.path; break end
+                end
+            end
+            if dest then
+                os.remove(dest)
+                local ok = os.rename(out, dest)
+                if ok then job.made = job.made + 1; job.notes[#job.notes + 1] = dest else os.remove(out); job.failed = job.failed + 1 end
+            else
+                -- The draft is gone (removed meanwhile): its finished preview isn't wanted either
+                os.remove(out)
+            end
+        elseif r and r.status == 0 then
             job.made = job.made + 1
+            job.notes[#job.notes + 1] = out
         elseif not job.stopping then
+            if c.draft_path then os.remove(out) end
             job.failed = job.failed + 1
             local err = r and r.stderr or ""
             local last
@@ -1552,7 +1623,7 @@ local function start_clips(root, queue, what)
     local dir = ws.join(root, native(moments_lib.generated_rel("Clip previews", os.time())))
     mkdir(dir)
     clips_job = { project = root, dir = dir, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
-                  flat = clips_layout(root) == "flat" }
+                  flat = clips_layout(root) == "flat", draft = clips_draft, notes = {} }
     state.clips = { done = 0, total = #queue }
     publish()
     draw_progress()
@@ -1615,6 +1686,30 @@ end
 -- The project's clips without a preview (anywhere in the project's folder). Nothing remembers the ones made and
 -- deleted: made again when asked (docs/library-management.md §8). `root`: the project's folder, in batch mode
 -- (no clip plays)
+-- The project's draft clip previews made real (the batch "clips-finish"): every draft, wherever it is now
+local function finish_drafts(root)
+    local drafts = {}
+    local items = catalog.now({ "list", root, "--kind", "clip" })
+    if not items then
+        items = {}
+        for _, p in ipairs(moments.scan(root, tracked_cache, nil, "clip").list) do items[#items + 1] = { path = p.file, link = p.link } end
+    end
+    local footage = {}
+    for _, c in ipairs(catalog.now({ "footage", root }) or moments.footage(root)) do footage[c.relative] = c end
+    local queue = {}
+    for _, it in ipairs(items) do
+        local l = it.link
+        local c = type(l) == "table" and l.draft and footage[l.clip]
+        if c then queue[#queue + 1] = { file = c.file, relative = c.relative, size = c.size, draft_path = it.path } end
+    end
+    if #queue == 0 then
+        if batch then return batch.finished({ made = 0, failed = 0, nothing = "No draft clip previews to finish" }) end
+        return mp.osd_message("No draft clip previews to finish", 3)
+    end
+    clips_draft = false
+    start_clips(root, queue, "Finishing " .. #queue .. " draft clip previews, in their places, in the background")
+end
+
 local function make_clips(again, root)
     if clips_job then return mp.osd_message("Clip previews are being made", 2) end
     if not root then
@@ -2882,7 +2977,10 @@ do
                 write_status()
                 local kind = req.kind
                 if kind == "clips" or kind == "clips-again" then
+                    clips_draft = req.draft == true
                     make_clips(kind == "clips-again", root)
+                elseif kind == "clips-finish" then
+                    finish_drafts(root)
                 elseif kind == "moments" then
                     start_marks_job("moments", root)
                 elseif kind == "photos" then

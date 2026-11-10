@@ -1412,7 +1412,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 6] = ["clips", "clips-again", "moments", "photos", "export", "render"];
+const KINDS: [&str; 7] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render"];
 
 #[tauri::command]
 async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
@@ -1426,7 +1426,8 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let photo = options.get("photo").and_then(Value::as_str).unwrap_or("no").to_string();
     let sdr = options.get("sdr").and_then(Value::as_bool).unwrap_or(false);
     let title = match kind.as_str() {
-        "clips" => "Clip previews".to_string(),
+        "clips" => "Clip previews (drafts)".to_string(),
+        "clips-finish" => "Clip previews: the drafts finished".to_string(),
         "clips-again" => "Clip previews of the removed clips".to_string(),
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
@@ -1449,6 +1450,9 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     if kind == "export" { request["sdr"] = json!(sdr); }
     // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
     // whether new moments are stabilized on their own
+    // Clip previews (Anton, 2026-11-10): drafts at once (the first seconds of the camera's own proxy, copied), to arrange
+    // in Footage right away; then a job finishing them in their places
+    if kind == "clips" { request["draft"] = json!(true); }
     if kind == "clips" || kind == "clips-again" {
         let layout = options.get("layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).unwrap_or("tree");
         request["layout"] = json!(layout);
@@ -1466,7 +1470,17 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
         failures: Vec::new(), request,
     };
+    let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
+    if let Some((project, project_name)) = follow {
+        if !inner.jobs.iter().any(|j| !j.state.finished() && j.project == project && j.kind == "clips-finish") {
+            inner.next_id += 1;
+            let request = json!({ "kind": "clips-finish", "project": project });
+            let id = inner.next_id;
+            inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: the drafts finished".into(), project_name, project, state: JobState::Waiting,
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), request });
+        }
+    }
     tick(&mut inner);
     Ok(())
 }).await.map_err(|e| e.to_string())?
