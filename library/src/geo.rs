@@ -586,7 +586,7 @@ use tauri::State;
 /// A clip's probe with its clock: what the Library knows, else the tool asked now (an answer from before geotag.rs
 /// has no "clock")
 fn probe_now(probes: &SharedProbes, path: &str) -> Option<Value> {
-    if let Some(v) = probes.lock().unwrap().get(path).filter(|v| v.get("clock").is_some()) { return Some(v); }
+    if let Some(v) = probes.lock().unwrap().get(path).filter(|v| v["geotag"].as_u64().unwrap_or(0) >= crate::index::GEOTAG) { return Some(v); }
     let tool = probes.lock().unwrap().tool.clone()?;
     let out = quiet(Command::new(tool)).arg("--library").arg(path).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
     let v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())?;

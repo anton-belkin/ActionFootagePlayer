@@ -36,7 +36,22 @@ To match photos, a clip's start must be a moment in UTC. What each camera writes
 | GoPro that writes `TZON` (HERO12…) | UTC; `CDAT` is its local clock, `TZON` its zone | Egypt HERO12: mvhd 09:07:26, CDAT 11:07:25, TZON +120 (left on Swiss time; its UTC is right) |
 | GoPro without `TZON` (HERO7, older) | the camera's local time, no zone | HERO7 often never set: 2016-01-01 |
 | GoPro with a GPS lock | GPSU / GPS9 time: the real UTC, whatever the clock | |
+| DJI Mavic Pro (camera FC220), 2017-18 .MOV | its **local** time (its photos' EXIF, its card's file times and its videos agree) | DCIM MAVIC May: mvhd 19:10:59 + 153 s = the file's 19:13:42 local |
+| DJI Mavic Air 2 (FC3170), 2020-23 (only "Lavf56.15.102" inside) | not known: UTC assumed, and said so | |
 | anything else | UTC assumed, as MP4 has it, and said so | |
+
+**Drones** (Anton, 2026-11-10: "you don't read the Mavic's location, nor its model"), what each writes:
+
+| Drone | Its name | Its place |
+|---|---|---|
+| Mavic Pro (FC220), 2017-18 .MOV | `moov/udta/©mdl` "FC220-Se" (plain text) → "DJI Mavic Pro" | `©xyz` "+47.116829+9.255399+14.600" (ISO 6709): one point a clip |
+| Mavic Air 2 (FC3170), 2020-23 | nothing in the video: its own photos beside it (DJI_*.JPG, EXIF Model) say FC3170 → "DJI Mavic Air 2"; none: "DJI drone" | none in the video, no .SRT |
+| Mini 4 Pro (FC8482), 2024-26 .MP4 | its djmd track's header (1.1.10) "DJI Mini4 Pro" → "DJI Mini 4 Pro" | each frame's drone block 3.3.4 = GpsBasic, radians (not in telemetry-parser: read here); its .SRT when the app made one |
+
+The first DJI metadata samples are read straight from the MP4's sample table (a few KB), not by telemetry-parser's open
+(15 MB at each end of the file: 7 s a clip from the NAS, now ~1 s). The drone's name is what `gyroflow-probe --lens`
+says, so the player's side panel shows it too. Any other camera's QuickTime location (`©xyz`,
+`com.apple.quicktime.location.ISO6709`: phones) is read as its place.
 
 The probe reports it as `clock`: `{ utc, basis: gps | utc | local | unset | assumed, zone_min, why }`.
 
