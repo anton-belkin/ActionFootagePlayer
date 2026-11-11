@@ -56,6 +56,7 @@
           <li><a href="organizing.html">Организация</a></li>
           <li><a href="photos.html">Фото</a></li>
           <li><a href="360.html">360-видео</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
           <li><a href="features.html" class="nm-all" aria-current="page">Все функции</a></li>
         </ul>
       </details>
@@ -79,6 +80,7 @@
         <li><a href="organizing.html">Организация</a></li>
         <li><a href="photos.html">Фото</a></li>
         <li><a href="360.html">360-видео</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
         <li><a href="features.html" aria-current="page">Все функции</a></li>
         <li class="sm-dl"><a href="download.html">Скачать</a></li>
       </ul>
@@ -148,6 +150,7 @@
             </ol>
           </li>
           <li><a href="#v360">360-видео</a></li>
+          <li><a href="#nas">NAS Helper</a></li>
           <li><a href="#telemetry">Телеметрия</a></li>
           <li><a href="#highlights">Хайлайты и фрагменты</a></li>
           <li><a href="#moments">Моменты, метки и проекты</a></li>
@@ -573,6 +576,35 @@
           </div>
           <div class="btns">
             <a class="btn" href="360.html">360-видео</a>
+          </div>
+        </section>
+
+        <section class="group" id="nas">
+          <h2>NAS Helper</h2>
+          <p class="group-lede">Docker-контейнер на вашем NAS: каталог проекта в синхроне для всех компьютеров, каждый клип и момент в стриме стабилизированным и в HDR, ссылки для Jellyfin.</p>
+          <p class="note"><a class="text-link" href="nas.html">NAS Helper подробно →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Страж библиотеки</h3><p class="feat-keys"><code>AFP_GUARDIAN</code></p></div>
+              <div class="feat-text"><p>Над одной поездкой могут работать несколько компьютеров сразу. NAS сразу знает, что меняется на его собственных дисках, страж записывает это в каталог проекта, и каждый плеер и каждая Library видят новый момент, перенесённую папку или удалённый клип примерно через секунду — не обходя заново всю сетевую папку. Кроме каталога, он ничего не пишет.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>Стрим</h3><p class="feat-keys"><code>AFP_STREAM</code></p></div>
+              <div class="feat-text"><p>Каждый клип, момент и превью клипа становится видеопотоком — таким, как его показывает плеер: стабилизированным движком Gyroflow на графике NAS, D-Log M в HDR, каждый файл со своими сохранёнными настройками. Рендерится, пока вы смотрите, и остаётся на следующий раз, а кадр ни разу не покидает графический чип.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>Ссылки для Jellyfin</h3><p class="feat-keys"><code>AFP_JELLYFIN</code> · <code>AFP_JELLYFIN_SCOPE</code></p></div>
+              <div class="feat-text"><p>Если включить, ваши моменты (или клипы, или и то и другое — это его <b>scope</b>) появляются в библиотеке Jellyfin, разложенные по поездкам, с названиями, датами и обложками. Приложения Jellyfin на телевизоре и телефоне играют потоки как есть, ничего не перекодируя.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Проверено</span> Jellyfin</span>
+                  <span><span class="pill exp">Должно работать</span> Emby, Kodi</span>
+                  <span><span class="pill part">Пока нет</span> Plex</span>
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="nas.html">NAS Helper</a>
           </div>
         </section>
 

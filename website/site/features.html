@@ -56,6 +56,7 @@
           <li><a href="organizing.html">Organizing</a></li>
           <li><a href="photos.html">Photos</a></li>
           <li><a href="360.html">360 video</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
           <li><a href="features.html" class="nm-all" aria-current="page">All features</a></li>
         </ul>
       </details>
@@ -79,6 +80,7 @@
         <li><a href="organizing.html">Organizing</a></li>
         <li><a href="photos.html">Photos</a></li>
         <li><a href="360.html">360 video</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
         <li><a href="features.html" aria-current="page">All features</a></li>
         <li class="sm-dl"><a href="download.html">Download</a></li>
       </ul>
@@ -145,6 +147,7 @@
             </ol>
           </li>
           <li><a href="#v360">360 video</a></li>
+          <li><a href="#nas">NAS Helper</a></li>
           <li><a href="#telemetry">Telemetry</a></li>
           <li><a href="#highlights">Highlights &amp; parts</a></li>
           <li><a href="#moments">Moments, marks &amp; projects</a></li>
@@ -570,6 +573,35 @@
           </div>
           <div class="btns">
             <a class="btn" href="360.html">360 video</a>
+          </div>
+        </section>
+
+        <section class="group" id="nas">
+          <h2>NAS Helper</h2>
+          <p class="group-lede">A Docker container on your NAS: the project's catalog in sync for every computer, every clip and moment streamed stabilized and in HDR, and links for Jellyfin.</p>
+          <p class="note"><a class="text-link" href="nas.html">The NAS Helper, explained →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>The library guardian</h3><p class="feat-keys"><code>AFP_GUARDIAN</code></p></div>
+              <div class="feat-text"><p>Several computers can work on one trip at once. The NAS knows straight away what changes on its own disks, so the guardian writes it into the project's catalog, and every player and Library sees a new moment, a moved folder or a deleted clip about a second later, without going through the whole share again. It writes nothing but the catalog.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>The stream</h3><p class="feat-keys"><code>AFP_STREAM</code></p></div>
+              <div class="feat-text"><p>Every clip, moment and clip preview of the project becomes a video stream, the way the player shows it: stabilized with Gyroflow's engine on the NAS's graphics, D-Log M in HDR, each file with its own saved settings. It's rendered as you watch and kept for next time, and the frame never leaves the graphics chip.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>Links for Jellyfin</h3><p class="feat-keys"><code>AFP_JELLYFIN</code> · <code>AFP_JELLYFIN_SCOPE</code></p></div>
+              <div class="feat-text"><p>If you turn it on, your moments (or your clips, or both: its <b>scope</b>) appear in a Jellyfin library, sorted into trips, with their titles, dates and covers. Jellyfin's apps on the TV and the phone then play the streams as they are, without converting them again.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Tried</span> Jellyfin</span>
+                  <span><span class="pill exp">Should work</span> Emby, Kodi</span>
+                  <span><span class="pill part">Not yet</span> Plex</span>
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="nas.html">NAS Helper</a>
           </div>
         </section>
 
