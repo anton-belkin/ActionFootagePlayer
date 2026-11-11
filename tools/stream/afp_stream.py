@@ -754,7 +754,9 @@ class Handler(BaseHTTPRequestHandler):
             folder, what = (q.get("folder") or [""])[0], (q.get("what") or ["opening"])[0]
             look = (q.get("look") or [""])[0]
             look = TV_LOOK if look == "tv" else look
-            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0] == "1"
+            # links=moments: only the moments (what Jellyfin shows with the scope moments)
+            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0]
+            links = {"1": ("moment", "preview"), "moments": ("moment",), "clips": ("preview",)}.get(links)
             if what not in ("opening", "whole"):
                 return self.send(400, "what: opening or whole", "text/plain")
             if look and not LOOK.match(look):
@@ -764,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
                 for c in clips():
                     f = folder_of(c)
                     inside = f == folder or (recursive and (folder in ("", ".") or f.startswith(folder.rstrip("/") + "/")))
-                    if not inside or (links and c["kind"] == "clip"):
+                    if not inside or (links and c["kind"] not in links):
                         continue
                     c = with_look(c, look)
                     if not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
