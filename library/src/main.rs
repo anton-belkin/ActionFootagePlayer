@@ -444,8 +444,6 @@ struct ProjectInfo {
     // How clip previews are laid out in _Clips: tree, flat or trips (the player's workspace plugin, clips_layout)
     clips_layout: String,
     moments_alone: bool,
-    clips_made: u64,
-    clips_failed: Vec<(String, String)>,
     clip_previews: u64,
     moments: u64,
     stills: u64,
@@ -456,10 +454,6 @@ fn project_info(root: &Path) -> ProjectInfo {
     let doc = read_doc(root);
     let settings = doc.get("settings").cloned().unwrap_or(json!({}));
     let flag = |k: &str| settings.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let failed = doc.get("clips_failed").and_then(Value::as_array).map(|a| a.iter().filter_map(|p| {
-        let p = p.as_array()?;
-        Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
-    }).collect()).unwrap_or_default();
     ProjectInfo {
         path: root.display().to_string(),
         name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string()),
@@ -468,8 +462,6 @@ fn project_info(root: &Path) -> ProjectInfo {
         clips_layout: settings.get("clips_layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).map(str::to_string)
             .unwrap_or_else(|| if flag("clips_flat") { "flat".into() } else { "tree".into() }),
         moments_alone: flag("moments_alone"),
-        clips_made: doc.get("clips_made").and_then(Value::as_array).map_or(0, |a| a.len() as u64),
-        clips_failed: failed,
         clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
         stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
@@ -1385,12 +1377,12 @@ async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Val
 
 #[tauri::command]
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if shared.lock().unwrap().project.is_none() { return Err("Open a project first".into()); }
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
-        checks::apply(&root, &found, &relink)
+        checks::apply(&found, &relink)
     }).await.map_err(|e| e.to_string())
 }
 
@@ -1412,7 +1404,7 @@ async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
         let all = found.as_array().cloned().unwrap_or_default();
         let (sure, left): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|f| !f["found"].is_null());
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
-        let problems = checks::apply(&root, &sure, &relink);
+        let problems = checks::apply(&sure, &relink);
         Ok::<Value, String>(json!({ "missing": issues.len(), "mended": sure.len() - problems.len(), "problems": problems, "left": left }))
     }).await.map_err(|e| e.to_string())??;
     let g = shared.lock().unwrap();
@@ -2510,7 +2502,6 @@ mod tests {
         assert_eq!(doc["mine"], json!(2));
         let info = project_info(&root);
         assert!(info.clips_flat && !info.moments_alone && !info.legacy);
-        assert_eq!(info.clips_made, 1);
         // Someone else's file of that name is left alone
         std::fs::write(root.join(PROJECT_FILE), br#"{"format":"other"}"#).unwrap();
         assert!(update_doc(&root, |_| {}).is_err());
@@ -2827,7 +2818,7 @@ mod audit {
         }
         let issues = checks::missing(&p).unwrap();
         let found = checks::find_moved(&p, &issues);
-        assert!(checks::apply(&p, found.as_array().unwrap(), &relink).is_empty());
+        assert!(checks::apply(found.as_array().unwrap(), &relink).is_empty());
         row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
         // Renders deleted
         let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);

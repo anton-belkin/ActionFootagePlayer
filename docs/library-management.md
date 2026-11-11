@@ -227,7 +227,7 @@ Names starting with `_` at the project's root are the project's own (`_Moments`,
     { "name": "Inbox", "at": "Action 6", "path": "//DISKSTATIONDXP/DJI_Inbox/DJI Device/OsmoAction6-4E8C" }
   ],
   "hosts": { "DISKSTATIONDXP": ["web.nas", "192.168.50.186"] },
-  "...": "settings, clips_made, stills_made, moment_names as now"
+  "settings": { "clips_flat": true }
 }
 ```
 
@@ -550,7 +550,8 @@ read again and forgotten when it doesn't match.
 }
 ```
 
-Nothing else. What was there goes:
+Nothing else. What was there goes (0.10's lists are no longer read or carried anywhere since 2026-11-11, and were
+taken out of Anton's project by hand once; a file that still has them keeps them as anything else it doesn't know):
 
 | Was | Becomes |
 |---|---|

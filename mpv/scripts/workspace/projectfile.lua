@@ -2,25 +2,22 @@
 -- project, and what the player and Action Footage Library keep for it. A double click on it opens the project in Action
 -- Footage Library. JSON:
 --
---   format        "actionfootage-project"; version 1
+--   format        "actionfootage-project"; version (M.VERSION)
+--   id, locations, hosts   where the project's footage is (the Library's)
 --   settings      the project's settings: clips_flat (clip previews all in _Clips/ itself), moments_alone (new
 --                 moments of the marks stabilized on their own)
---   clips_made    a line per clip a clip preview was made for (moments.lua's made_line: its path and size), so that
---                 one deleted (not interesting) isn't made again
---   clips_failed  the last clip previews that couldn't be made: { <the clip's path>, <why> }
---   stills_made   a line per mark a photo was made of (its clip's path, size and time), so that one deleted isn't
---                 made again
---   moment_names  the names typed for moments, the last one last (the name dialog suggests the next)
 --
--- Since 0.11 (docs/library-management.md §8, "The project is its files") the player writes none of these lists: what
--- was made is found by the link inside each file, settings are chosen per run or kept on this computer, names are the
--- moments'. Older files are read as they are; empty lists aren't written.
+-- Up to 0.10 it also had lists (clips_made, clips_failed, stills_made, moment_names). Since 0.11
+-- (docs/library-management.md §8, "The project is its files") nothing reads or writes them: what was made is found by
+-- the link inside each file, names are the moments'. A file that still has them keeps them as anything else it
+-- doesn't know (taken out once by hand, 2026-11-11).
 --
 -- Each change reads the file again, changes it and writes it whole through a temporary file renamed over it, keeping
 -- what this doesn't know: the player and Action Footage Library write it both.
 --
 -- Up to 0.8 it was a folder, `_ActionFootagePlayer/`, with a file for each (clips-made.txt, clips-failed.txt,
--- stills-made.txt, settings.json, moment-names.txt): read when there's no file, and moved into it by migrate().
+-- stills-made.txt, settings.json, moment-names.txt): its settings read when there's no file, and moved into it by
+-- migrate(); its lists dropped.
 --
 -- Plain Lua, no mpv (tests/projectfile_test.lua):
 --   local pf = require('projectfile').new({ parse_json, format_json, join, is_dir, is_file, rmdir })
@@ -37,14 +34,9 @@ M.FORMAT = "actionfootage-project"
 -- this player, whose writes would lose what it doesn't know; an older one is raised to it
 M.VERSION = 3
 M.LEGACY_DIR = "_ActionFootagePlayer"
--- The old folder's files, and what each became
-local LEGACY = {
-    { file = "clips-made.txt", key = "clips_made", kind = "lines" },
-    { file = "clips-failed.txt", key = "clips_failed", kind = "pairs" },
-    { file = "stills-made.txt", key = "stills_made", kind = "lines" },
-    { file = "moment-names.txt", key = "moment_names", kind = "lines" },
-    { file = "settings.json", key = "settings", kind = "json" },
-}
+-- The old folder's files: its settings, and its lists (dropped when it's moved into the file)
+local LEGACY_SETTINGS = "settings.json"
+local LEGACY = { "clips-made.txt", "clips-failed.txt", "stills-made.txt", "moment-names.txt", LEGACY_SETTINGS }
 
 function M.new(env)
     local p = {}
@@ -61,20 +53,11 @@ function M.new(env)
         return text
     end
 
-    local function lines(text)
-        local out = {}
-        for line in (text or ""):gmatch("[^\r\n]+") do
-            if line:match("%S") then out[#out + 1] = line end
-        end
-        return out
-    end
-
     local function blank()
-        return { format = M.FORMAT, version = 1, settings = {}, clips_made = {}, clips_failed = {}, stills_made = {},
-                 moment_names = {} }
+        return { format = M.FORMAT, version = 1, settings = {} }
     end
 
-    -- Every list and the settings present (a file written by hand, or by an older version, may lack some)
+    -- The settings present (a file written by hand, or by an older version, may lack them)
     local function complete(doc)
         local b = blank()
         for k, v in pairs(b) do
@@ -85,27 +68,13 @@ function M.new(env)
         return doc
     end
 
-    -- The old folder's files as a doc, nil when there's no old folder
+    -- The old folder's settings as a doc, nil when there's no old folder
     function p.read_legacy(root)
         local dir = p.legacy_dir(root)
         if not env.is_dir(dir) then return nil end
         local doc = blank()
-        for _, l in ipairs(LEGACY) do
-            local text = read_text(join(dir, l.file))
-            if text then
-                if l.kind == "lines" then
-                    doc[l.key] = lines(text)
-                elseif l.kind == "pairs" then
-                    for _, line in ipairs(lines(text)) do
-                        local rel, why = line:match("^([^\t]*)\t(.*)$")
-                        doc[l.key][#doc[l.key] + 1] = { rel or line, why or "" }
-                    end
-                else
-                    local t = env.parse_json(text)
-                    if type(t) == "table" then doc[l.key] = t end
-                end
-            end
-        end
+        local t = env.parse_json(read_text(join(dir, LEGACY_SETTINGS)) or "")
+        if type(t) == "table" then doc.settings = t end
         return doc
     end
 
@@ -176,18 +145,13 @@ function M.new(env)
         local doc = read_file(root)
         local old = p.read_legacy(root)
         if doc then
-            for _, key in ipairs({ "clips_made", "stills_made", "moment_names" }) do
-                local seen = {}
-                for _, v in ipairs(doc[key]) do seen[v] = true end
-                for _, v in ipairs(old[key]) do if not seen[v] then doc[key][#doc[key] + 1] = v end end
-            end
             for k, v in pairs(old.settings) do if doc.settings[k] == nil then doc.settings[k] = v end end
         else
             doc = old
         end
         if not write(root, doc) or not read_file(root) then return false end
-        -- Only the files moved over are removed: anything else keeps the folder
-        for _, l in ipairs(LEGACY) do os.remove(join(dir, l.file)) end
+        -- Only its own files are removed: anything else keeps the folder
+        for _, f in ipairs(LEGACY) do os.remove(join(dir, f)) end
         if env.rmdir then env.rmdir(dir) end
         return true
     end
