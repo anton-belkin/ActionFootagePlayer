@@ -524,4 +524,27 @@ mod tests {
         eprintln!("{project}: {} orientations, the camera turned {travel:.1}° along the way, {removed:.2}° rms taken out by smoothing", q.len());
         assert!(travel > 0.1 && removed > 0.01);
     }
+
+    // #130: a project's optical correction applies on this machine as on the one that measured it. Projects separated
+    // by ':' (';' on Windows): AFP_OPTICAL_APPLIES=<a.gyroflow>:<b.gyroflow> cargo test --release --lib optical_applies -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn optical_applies() {
+        let Some(projects) = std::env::var_os("AFP_OPTICAL_APPLIES") else { return };
+        let mut stale = Vec::new();
+        for project in std::env::split_paths(&projects) {
+            let project = project.to_string_lossy().into_owned();
+            let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false, None).unwrap();
+            stab.refresh_optical_correction();
+            let g = stab.gyro.read();
+            let Some(c) = g.optical_correction.as_ref() else { eprintln!("{project}: no optical correction"); continue };
+            // Computed here as there, or only up to the last bits (gyroflow-core's Fingerprint::matches)
+            let (quats, context) = (g.optical_uncorrected.checksum(), g.optical_context.checksum());
+            eprintln!("{project}: enabled {}, applied {} | quats {:016x} measured, {quats:016x} here | context {:016x} measured, {context:016x} here{}",
+                      c.enabled, g.optical_correction_applied, c.quats_checksum, c.context_checksum,
+                      if quats == c.quats_checksum && context == c.context_checksum { "" } else { " (not exactly)" });
+            if c.enabled && !g.optical_correction_applied { stale.push(project); }
+        }
+        assert!(stale.is_empty(), "not applied: {stale:?}");
+    }
 }
