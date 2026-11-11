@@ -86,7 +86,7 @@ const S = {
   // Source settings changed in the Source Settings tab, not written yet (key -> value), and for which clips
   srcDraft: {}, srcFor: null,
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
-  locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
+  locations: [], connecting: {}, via: null, sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
   geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
@@ -128,6 +128,15 @@ function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; cl
 let opening = 0;
 async function openItems(paths) {
   if (!paths.length) return;
+  // Clips whose location is offline: their share connected instead (opened again once they show)
+  const off = (RAW_FOOTAGE.items || []).filter((it) => it.offline && paths.includes(it.path));
+  if (off.length) {
+    const locs = S.locations.filter((l) => l.offline && off.some((it) => it.loc === l.name));
+    const can = locs.filter((l) => l.connect);
+    if (!can.length) { toast((off.length > 1 ? off.length + " clips are" : off[0].name + " is") + " offline: connect " + (locs.map((l) => l.path).join(", ") || "its location") + " first"); return; }
+    for (const l of can) connectLocation(l.path);
+    return;
+  }
   const id = ++opening;
   const name = (paths[0].split(/[\\/]/).pop() || "").replace(/\.afplink\.mp4$/i, "");
   const busy = setTimeout(() => {
@@ -452,7 +461,7 @@ function renderTop() {
     '<div class="menuwrap"><button class="proj" type="button" data-a="menu" aria-haspopup="menu" aria-expanded="' + S.menu + '">' + ICON.folder + '<span class="ttl"><span>' + esc(S.root ? S.name : "Action Footage Library") + '</span></span>' + ICON.down + '</button>' +
     (S.menu ? '<div class="menu" role="menu">' +
       (S.root ? '<button type="button" role="menuitem" class="cur" data-a="closemenu"><span class="ck">' + ICON.check + '</span><span style="min-width:0"><span style="display:block">' + esc(S.name) + '</span><span class="sub">' + esc(S.root) + '</span></span></button>' : '') +
-      recent.map((r) => '<button type="button" role="menuitem" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="ck"></span><span style="min-width:0"><span style="display:block">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></span></button>').join("") +
+      recent.map((r) => recentRow(r, true)).join("") +
       '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
       (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
         '<button type="button" role="menuitem" data-a="takein"><span class="ck"></span>Take in another project…</button>' +
@@ -521,6 +530,14 @@ function renderMain() {
   if (S.missing > 0 || S.mending) h += '<div class="indexing">' + (S.mending ? '<span class="spin" aria-hidden="true"></span>Looking for the moved originals and mending the links…'
     : S.missing + (S.missing === 1 ? " moment, clip preview, export or photo points" : " moments, clip previews, exports and photos point") + ' at an original that isn’t where it was. <button type="button" class="btn sm" data-a="showbroken">Show</button> <button type="button" class="btn sm pri" data-a="mend">Find and mend</button>' +
       (S.showBrokenList ? '<div class="sub wrap" style="margin-top:6px">' + (S.missingList || []).map((x) => '<div><code>' + esc(x.file.replace(S.root + "/", "")) + '</code> → ' + esc(x.tree || "?") + ' <button type="button" class="btn sm" data-a="revealpath" data-v="' + esc(x.file) + '">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button></div>').join("") + '</div>' : "")) + '</div>';
+  // Locations not reachable now: their clips as last seen, marked offline; a share connected from here (the Mac)
+  if (S.view === "footage" || S.view === "sources") {
+    for (const l of S.locations.filter((x) => x.offline)) {
+      const busy = S.connecting[l.path];
+      h += '<div class="indexing">' + (busy ? '<span class="spin" aria-hidden="true"></span>' : '') + '<b>' + esc(l.name || l.path) + '</b> (' + esc(l.path) + ') is offline: its clips show as they were last seen, and play once it’s connected.' +
+        (l.connect ? ' ' + connectButton("connectloc", l.path, busy, l.names) : "") + '</div>';
+    }
+  }
   if (probesPending && (S.view === "footage" || S.view === "sources" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
@@ -538,7 +555,7 @@ function renderMain() {
     h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (clipsV ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div><div class="list">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
-      h += '<button type="button" class="row' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         '<span style="min-width:0">' + (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
@@ -549,7 +566,7 @@ function renderMain() {
     h += '<div class="grid">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key];
-      h += '<button type="button" class="card' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     }
     h += '</div>';
@@ -576,6 +593,7 @@ function chips(it) {
     // Footage's folders are its previews' already: the count says something only in Originals
     if (S.view === "sources" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
   } else if (it.kind === "clip") {
+    if (it.offline) c.push(["chip warn", "Offline"]);
     if (it.conflict) c.push(["chip warn", it.own_conflict.length + " own files"]);
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
     if (!it.preview) c.push(["chip", "No preview"]);
@@ -1180,7 +1198,32 @@ async function applyMoved() {
 function renderEmpty() {
   $("empty").hidden = !!S.root;
   $("bodyrow").hidden = !S.root;
-  if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => '<button type="button" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="nm">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></button>').join("") + '</div>' : "";
+  if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => recentRow(r, false)).join("") + '</div>' : "";
+}
+// A project opened before: opened with a click; offline (its share not mounted, its disk not plugged in) marked so, with
+// Connect when its share is known; taken off the list with ×
+function recentRow(r, menu) {
+  const busy = S.connecting["p:" + r.path];
+  const where = r.here ? r.path : r.path + (r.share ? " · on " + r.share : "");
+  return '<div class="rrow' + (r.here ? "" : " off") + '"><button type="button"' + (menu ? ' role="menuitem"' : "") + ' class="rmain" data-a="openrecent" data-v="' + esc(r.path) + '">' + (menu ? '<span class="ck"></span>' : "") +
+    '<span style="min-width:0"><span class="nm" style="display:block">' + esc(r.name) + (r.here ? "" : ' <span class="chip warn">Offline</span>') + '</span><span class="sub">' + esc(where) + '</span></span></button>' +
+    (!r.here && r.connect ? connectButton("connectrecent", r.path, busy, r.names) : "") +
+    '<button type="button" class="rx" data-a="forgetrecent" data-v="' + esc(r.path) + '" title="Remove from the list" aria-label="Remove ' + esc(r.name) + ' from the list">' + ICON.x + '</button></div>';
+}
+// An offline project's share connected (connect_project), then the project opened from where it is now
+async function connectRecent(path, host) {
+  const key = "p:" + path;
+  if (S.connecting[key]) return;
+  S.connecting[key] = true; renderAll();
+  try {
+    const here = await invoke("connect_project", { path, host: host || null });
+    S.menu = false;
+    await call("open_project", { path: here }).catch(() => {});
+  } catch (e) { showError(String(e)); }
+  delete S.connecting[key];
+  S.recent = await invoke("recent").catch(() => S.recent);
+  renderAll();
+  return poll();
 }
 // The folders shown now, on disk (Anton, 2026-11-10): the clip previews' pictures are made there first. Footage: the
 // folders of its empty previews under the folder open; Originals: the clips' own folders there
@@ -2016,6 +2059,30 @@ async function geoAct(a, v, el) {
   }
 }
 
+// Connect, and when the NAS has other names (Project settings: The NAS's other names), ▾ with a list of them: Connect
+// tries each in turn, a name from the list only that one
+function connectButton(a, v, busy, names) {
+  const key = a + "|" + v;
+  let h = '<span class="split"><button type="button" class="btn sm" data-a="' + a + '" data-v="' + esc(v) + '"' + (busy ? " disabled" : "") + '>' + (busy ? "Connecting…" : "Connect") + '</button>';
+  if ((names || []).length > 1 && !busy) {
+    h += '<button type="button" class="btn sm caret" data-a="connectvia" data-v="' + esc(key) + '" aria-haspopup="menu" aria-expanded="' + (S.via === key) + '" aria-label="Connect by another name">' + ICON.down + '</button>';
+    if (S.via === key) h += '<span class="cvia" role="menu"><span class="sub">Connect by</span>' + names.map((n) => '<button type="button" role="menuitem" data-a="' + a + '" data-v="' + esc(v) + '" data-h="' + esc(n) + '">' + esc(n) + '</button>').join("") + '</span>';
+  }
+  return h + '</span>';
+}
+
+// An offline location's share connected (library/src/main.rs connect_location): its clips show once it's there
+async function connectLocation(path, host) {
+  if (S.connecting[path]) return;
+  S.connecting[path] = true;
+  toast("Connecting " + path + (host ? " by " + host : "") + "…");
+  renderAll();
+  try { await invoke("connect_location", { path, host: host || null }); toast("Connected " + path + ": its clips show in a moment"); }
+  catch (e) { showError(String(e)); }
+  delete S.connecting[path];
+  renderAll();
+}
+
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
 
 // A source's line: where it is, its place in the tree, copies only, not here
@@ -2356,6 +2423,8 @@ document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-a]");
   if (CMENU) { const inMenu = el && el.closest(".cmenu"); closeMenu(); if (!inMenu) return; if (el.disabled) return; }
   if (el && el.tagName === "INPUT" && el.dataset.a === "loccopies") return;
+  // Connect's list of names: closed by a click anywhere else
+  if (S.via && !(el && el.closest(".split"))) { S.via = null; renderAll(); if (!el) return; }
   if (S.menu && !(el && el.closest(".menu")) && !(el && el.dataset.a === "menu")) { S.menu = false; if (!el) { renderTop(); renderSugg(); return; } }
   if (S.suggOpen && !e.target.closest(".searchwrap")) { S.suggOpen = false; renderSugg(); }
   if (!el) {
@@ -2369,7 +2438,14 @@ document.addEventListener("click", async (e) => {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;
     case "choose": S.menu = false; await call("choose_project").catch(() => {}); return poll();
-    case "openrecent": S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+    case "openrecent": {
+      const r = S.recent.find((x) => x.path === v);
+      if (r && !r.here) { if (r.connect) return connectRecent(v); showError(r.name + " isn’t reachable: connect " + (r.share || "its disk") + " first"); return; }
+      S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+    }
+    case "connectrecent": S.via = null; return connectRecent(v, el.dataset.h);
+    case "connectvia": S.via = S.via === v ? null : v; renderAll(); return;
+    case "forgetrecent": await invoke("forget_recent", { path: v }).catch(() => {}); S.recent = await invoke("recent").catch(() => S.recent); renderAll(); return;
     case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
     case "view":
       S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false; S.renaming = null;
@@ -2411,6 +2487,7 @@ document.addEventListener("click", async (e) => {
     case "srcapply": return applySource();
     case "srcclear": S.srcDraft = {}; renderSide(); return;
     case "job": return addJob(v);
+    case "connectloc": S.via = null; connectLocation(v, el.dataset.h); return;
     case "openit": { const p = selectedPaths(); openItems(p); return; }
     case "revealit": { const c = ctx(); const first = c.selFolders.length ? (S.view === "sources" ? treeOnDisk(c.selFolders[0]) : folderOnDisk(c.selFolders[0])) : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();

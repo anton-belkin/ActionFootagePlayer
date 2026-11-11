@@ -96,8 +96,22 @@ Project "Footage", its folder //DISKSTATIONDXP/ssd/Projects/Footage
 - **Copies only**: a location marked so (Working) holds copies of clips that are somewhere else in the project. Nothing
   is ever written into it ([The clip's own file](#the-clips-own-file)).
 - Locations may overlap (Working and Archive both at the root) or not.
-- **A location that isn't reachable** is skipped. Moments still show (their previews are in the project folder), and
-  say "the original isn't reachable" when played.
+- **A location that isn't reachable** (a share not mounted, a disk not plugged in) shows its clips as the project's
+  catalog last saw them, marked **Offline**, with a strip above the list that says so. Their marks, tags, camera and
+  previews are known from before; opening one connects its share instead. Moments still show (their previews are in
+  the project folder), and say "the original isn't reachable" when played.
+- **On a Mac the Library connects the shares itself:** once a run, on opening the project, each location's share not
+  mounted is mounted as Finder does (`mount volume "smb://host/share"`, the password from the Keychain); the strip's
+  **Connect** does it again on demand. A share mounted or taken away while the Library is open is noticed within 5 s,
+  and the project is read again as when it's opened. An ejected share isn't mounted again until the next run.
+- **A project on a share** (the Library's own folder on the NAS): the projects opened before are kept with the share
+  each is on (recent.json: its path, the share as mount names it, and where in it), so one whose share isn't mounted
+  still shows in the list, marked Offline, with **Connect** (mounts the share, then opens the project: from where the
+  share is mounted now, /Volumes/ssd-1 too). × takes a project off the list (a test one, one moved away).
+- **A NAS with several names** (Project settings → The NAS's other names: `DISKSTATIONDXP = web.nas,
+  192.168.50.186`): Connect tries each in turn, the one the share is written with (or was mounted by) first, keeping
+  the user it was mounted as; its ▾ lists them to connect by one. A project on the share keeps its NAS's names in the
+  list of projects opened before (its file can't be read while the share is offline).
 
 ### Where a location is
 
@@ -213,7 +227,7 @@ Names starting with `_` at the project's root are the project's own (`_Moments`,
     { "name": "Inbox", "at": "Action 6", "path": "//DISKSTATIONDXP/DJI_Inbox/DJI Device/OsmoAction6-4E8C" }
   ],
   "hosts": { "DISKSTATIONDXP": ["web.nas", "192.168.50.186"] },
-  "...": "settings, clips_made, stills_made, moment_names as now"
+  "settings": { "clips_flat": true }
 }
 ```
 
@@ -536,7 +550,8 @@ read again and forgotten when it doesn't match.
 }
 ```
 
-Nothing else. What was there goes:
+Nothing else. What was there goes (0.10's lists are no longer read or carried anywhere since 2026-11-11, and were
+taken out of Anton's project by hand once; a file that still has them keeps them as anything else it doesn't know):
 
 | Was | Becomes |
 |---|---|

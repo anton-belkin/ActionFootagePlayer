@@ -309,19 +309,17 @@ pub fn find_moved(root: &Path, issues: &[Value]) -> Value {
 }
 
 /// The fixes for what Find moved files found: links written again (with `relink`: the tool that writes them), own
-/// files moved beside their clip, Project.afproject's lines that named the old path. Returns what couldn't be done
-pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Result<(), String> + Sync)) -> Vec<String> {
+/// files moved beside their clip. Returns what couldn't be done
+pub fn apply(found: &[Value], relink: &(dyn Fn(&Path, &str) -> Result<(), String> + Sync)) -> Vec<String> {
     let mut problems = Vec::new();
-    let mut renames: Vec<(String, String)> = Vec::new();
     // The links written first, 8 at once (each a tool started and a file rewritten on the share)
-    let writes: Vec<(PathBuf, String, String, String)> = found.iter().filter_map(|f| {
+    let writes: Vec<(PathBuf, String)> = found.iter().filter_map(|f| {
         let to = f["found"]["tree"].as_str()?;
         let issue = &f["issue"];
         (issue["kind"] == "missing").then(|| {
             let mut l = issue["link"].clone();
-            let from = l["clip"].as_str().unwrap_or("").to_string();
             l["clip"] = json!(to);
-            (PathBuf::from(issue["file"].as_str().unwrap_or("")), l.to_string(), from, to.to_string())
+            (PathBuf::from(issue["file"].as_str().unwrap_or("")), l.to_string())
         })
     }).collect();
     let results: Vec<Result<(), String>> = {
@@ -329,7 +327,7 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
         std::thread::scope(|sc| {
             let hs: Vec<_> = (0..threads).map(|t| {
                 let w = &writes;
-                sc.spawn(move || w.iter().enumerate().skip(t).step_by(threads).map(|(i, (file, link, _, _))| (i, relink(file, link))).collect::<Vec<_>>())
+                sc.spawn(move || w.iter().enumerate().skip(t).step_by(threads).map(|(i, (file, link))| (i, relink(file, link))).collect::<Vec<_>>())
             }).collect();
             let mut all: Vec<(usize, Result<(), String>)> = hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect();
             all.sort_by_key(|(i, _)| *i);
@@ -339,8 +337,8 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
     // What changed, noted to the catalog at the end (a link written in place leaves its folder's time as it was: its
     // next look wouldn't see it)
     let mut written: Vec<PathBuf> = Vec::new();
-    for ((file, _, from, to), r) in writes.iter().zip(results) {
-        match r { Ok(()) => { renames.push((from.clone(), to.clone())); written.push(file.clone()); } Err(e) => problems.push(format!("{}: {e}", file.display())) }
+    for ((file, _), r) in writes.iter().zip(results) {
+        match r { Ok(()) => written.push(file.clone()), Err(e) => problems.push(format!("{}: {e}", file.display())) }
     }
     for f in found {
         if f["found"]["tree"].as_str().is_none() { continue; }
@@ -365,27 +363,6 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
                 }
             }
             _ => {}
-        }
-    }
-    // Project.afproject's lists that name clips by their path ("path\tsize…")
-    if !renames.is_empty() {
-        let file = root.join(locations::PROJECT_FILE);
-        if let Some(mut doc) = locations::read_json(&file) {
-            let mut changed = false;
-            for key in ["clips_made", "stills_made"] {
-                if let Some(list) = doc.get_mut(key).and_then(Value::as_array_mut) {
-                    for line in list.iter_mut() {
-                        let Some(s) = line.as_str() else { continue };
-                        for (from, to) in &renames {
-                            if let Some(rest) = s.strip_prefix(&format!("{from}\t")) { *line = json!(format!("{to}\t{rest}")); changed = true; break; }
-                        }
-                    }
-                }
-            }
-            if changed {
-                let tmp = file.with_extension("afproject.tmp");
-                if std::fs::write(&tmp, serde_json::to_vec(&doc).unwrap()).and_then(|_| std::fs::rename(&tmp, &file)).is_err() { problems.push(format!("{}: not updated", file.display())); }
-            }
         }
     }
     crate::seen::note_now(&written);
@@ -468,11 +445,12 @@ mod tests {
         assert_eq!(f[0]["found"]["tree"], json!("Egypt/A.MP4"));
         assert_eq!(f[1]["found"]["tree"], json!("Egypt/A.MP4"));
         let written = std::sync::Mutex::new(Vec::new());
-        let problems = apply(&p, f.as_array().unwrap(), &|file, link| { written.lock().unwrap().push((file.to_path_buf(), link.to_string())); Ok(()) });
+        let problems = apply(f.as_array().unwrap(), &|file, link| { written.lock().unwrap().push((file.to_path_buf(), link.to_string())); Ok(()) });
         assert!(problems.is_empty(), "{problems:?}");
         assert!(written.lock().unwrap()[0].1.contains("\"clip\":\"Egypt/A.MP4\""));
         assert!(a.join("Egypt/A.afp.json").is_file() && !inbox.join("A.afp.json").exists());
-        assert_eq!(locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap()["clips_made"][0], json!("Egypt/A.MP4\t9"));
+        // The project's file isn't rewritten (an old list in it left as it is)
+        assert_eq!(locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap()["clips_made"][0], json!("Action 6/A.MP4\t9"));
         let _ = std::fs::remove_dir_all(&top);
     }
 }

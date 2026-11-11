@@ -104,20 +104,6 @@ function M.trips(clips, gap)
     end
 end
 
--- The project file's clips_made: a line per clip a preview was made for, its path in the project and its size
-function M.parse_made(text)
-    local made = {}
-    for line in (text or ""):gmatch("[^\r\n]+") do
-        local rel, size = line:match("^(.-)\t(%d+)$")
-        if rel then made[rel .. "\t" .. size] = true end
-    end
-    return made
-end
-
-function M.made_line(relative, size)
-    return relative .. "\t" .. tostring(size)
-end
-
 -- Characters a file name can't have on Windows or macOS, and Windows' reserved names
 local RESERVED = { CON = true, PRN = true, AUX = true, NUL = true }
 for i = 1, 9 do RESERVED["COM" .. i] = true; RESERVED["LPT" .. i] = true end

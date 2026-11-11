@@ -115,10 +115,27 @@ pub fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) ->
     let g = SEEN.read().ok()?;
     let s = g.as_ref()?;
     let (root, prefix) = locate(s, base)?;
-    if !prefix.is_empty() && !s.cat.state.get(&root, &prefix).is_some_and(|f| f.dir) { return Some(Vec::new()); }
+    Some(walk_in(s, &root, &prefix, skip, max_depth))
+}
+
+/// As walk, for a location by its root's id ("l:" and its path), reachable or not: what the catalog last saw of it (a
+/// share not mounted now shows as it was, offline). None: the catalog isn't read, or has never looked at it
+pub fn walk_root(root: &str, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) -> Option<Vec<(String, bool, u64, i64)>> {
+    let g = SEEN.read().ok()?;
+    let s = g.as_ref()?;
+    s.cat.state.get(root, "").is_some_and(|f| f.dir).then(|| walk_in(s, root, "", skip, max_depth))
+}
+
+/// A file as the catalog last saw it, by its root's id and path in it (a location offline). None: not known
+pub fn file_in(root: &str, rel: &str) -> Option<File> {
+    SEEN.read().ok()?.as_ref()?.cat.state.get(root, rel).cloned()
+}
+
+fn walk_in(s: &Seen, root: &str, prefix: &str, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) -> Vec<(String, bool, u64, i64)> {
+    if !prefix.is_empty() && !s.cat.state.get(root, prefix).is_some_and(|f| f.dir) { return Vec::new(); }
     // As the disk's walk gives them: a folder's entries by name, folder after folder as they were found
     let mut kids: std::collections::HashMap<&str, Vec<(&str, &File)>> = std::collections::HashMap::new();
-    for (rel, r) in s.cat.state.under(&root, &prefix) {
+    for (rel, r) in s.cat.state.under(root, prefix) {
         let Some(f) = &r.f else { continue };
         let mine = if prefix.is_empty() { rel } else { &rel[prefix.len() + 1..] };
         kids.entry(afp_catalog::state::parent(mine)).or_default().push((mine, f));
@@ -150,7 +167,7 @@ pub fn walk(base: &Path, skip: &dyn Fn(&str, &str) -> bool, max_depth: usize) ->
             }
         }
     }
-    Some(out)
+    out
 }
 
 /// The names in a folder

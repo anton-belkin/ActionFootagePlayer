@@ -165,25 +165,10 @@ pub fn take_in(root: &Path, other: &Path, chosen: &str, relink: &dyn Fn(&Path, &
         while let Some(d) = todo.pop() { for e in std::fs::read_dir(&d).into_iter().flatten().flatten() { if e.path().is_dir() { todo.push(e.path()); } } dirs.push(d); }
         for d in dirs.iter().rev() { let _ = std::fs::remove_file(d.join(".DS_Store")); if std::fs::remove_dir(d).is_ok() { written.push(d.clone()); } }
     }
-    // Its lists, mapped, added to this project's
-    let theirs = locations::read_json(&other.join(locations::PROJECT_FILE)).unwrap_or(Value::Null);
+    // Its locations outside this one's, added after this project's (what was made is found by the link inside each
+    // file, docs §8: no lists carried over)
     let file = root.join(locations::PROJECT_FILE);
     let mut doc = locations::read_json(&file).unwrap_or(json!({}));
-    for key in ["clips_made", "stills_made"] {
-        let add: Vec<Value> = theirs.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str()).map(|line| {
-            let (path, rest) = line.split_once('\t').unwrap_or((line, ""));
-            json!(format!("{}\t{rest}", map_tree(path, &landings)))
-        }).collect();
-        if add.is_empty() { continue; }
-        let list = doc.as_object_mut().unwrap().entry(key).or_insert(json!([]));
-        if !list.is_array() { *list = json!([]); }
-        for a in add { if !list.as_array().unwrap().contains(&a) { list.as_array_mut().unwrap().push(a); } }
-    }
-    if let Some(names) = theirs.get("moment_names").and_then(Value::as_array) {
-        let list = doc.as_object_mut().unwrap().entry("moment_names").or_insert(json!([]));
-        if list.is_array() { for n in names { if !list.as_array().unwrap().contains(n) { list.as_array_mut().unwrap().push(n.clone()); } } }
-    }
-    // Its locations outside this one's, added after this project's
     let had: Vec<Value> = doc.get("locations").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut list = had.clone();
     let added: Vec<Value> = landings.iter().filter(|l| !l.inside && l.dir.is_some()).map(|l| json!({ "name": l.name, "at": l.at_here, "path": l.path_here, "copies": false })).collect();
@@ -241,8 +226,9 @@ mod tests {
         assert!(trip.join("Day 1/A.MP4").is_file() && trip.join("Day 1/A.afp.json").is_file());
         assert!(!trip.join("_Moments").exists());
         let doc = locations::read_json(&p.join(locations::PROJECT_FILE)).unwrap();
-        assert_eq!(doc["clips_made"], json!(["x\t1", "Action 6/2026-10 Egypt/Day 1/A.MP4\t8"]));
-        assert_eq!(doc["moment_names"], json!(["Turtle"]));
+        // Its old lists aren't carried over; this project's file keeps what it had
+        assert_eq!(doc["clips_made"], json!(["x\t1"]));
+        assert!(doc.get("moment_names").is_none());
         assert_eq!(doc["locations"].as_array().unwrap().len(), 1);
         // Outside: added at the chosen place
         let ext = top.join("Card/Trip2");

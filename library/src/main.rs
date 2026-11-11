@@ -22,7 +22,7 @@ mod tags;
 mod takein;
 mod thumbs;
 
-use serde::Serialize;
+use serde::{ Deserialize, Serialize };
 use serde_json::{ json, Value };
 use std::collections::VecDeque;
 use std::path::{ Path, PathBuf };
@@ -142,6 +142,9 @@ struct Watch {
     /// The project's catalog kept up to date (seen.rs): what's changed here is sent to it, and it counts the changes
     /// once it has them
     runner: seen::Runner,
+    /// Set when a location became reachable or stopped being (a share mounted after the Library opened, or taken
+    /// away): watched again, and the catalog started again with it, as on opening the project then
+    reach_changed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// What of the project's file says where its footage is: its locations (and the hosts they're on)
@@ -150,9 +153,100 @@ fn locations_key(root: &Path) -> String {
     json!([d.get("locations"), d.get("hosts")]).to_string()
 }
 
+/// Which of the project's locations are reachable here now, and where
+fn reach_key(root: &Path) -> String {
+    locations::locations(root, &locations::mounts()).iter()
+        .map(|l| format!("{}={}\n", l.path, l.dir.as_ref().filter(|d| d.is_dir()).map(|d| d.display().to_string()).unwrap_or_default()))
+        .collect()
+}
+
+/// Every few seconds, whether reach_key changed since `before`: `changed` set then, and the thread done. It ends too
+/// when the watch it's for is dropped (the project closed, or watched again)
+fn poll_reach(root: &Path, before: String, changed: &Arc<std::sync::atomic::AtomicBool>) {
+    let (root, changed) = (root.to_path_buf(), Arc::downgrade(changed));
+    std::thread::Builder::new().name("locations".into()).spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let Some(flag) = changed.upgrade() else { return };
+        drop(flag);
+        // Outside any lock: a share that hangs holds up only this thread
+        if reach_key(&root) != before {
+            if let Some(flag) = changed.upgrade() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
+            return;
+        }
+    }).ok();
+}
+
+/// A NAS's names: the one given, then the others the project's hosts list for it ("DISKSTATIONDXP = web.nas,
+/// 192.168.50.186" in Project settings), each once
+pub(crate) fn host_names(host: &str, hosts: Option<&Value>) -> Vec<String> {
+    let host = host.rsplit_once('@').map(|x| x.1).unwrap_or(host).trim_end_matches('.');
+    let mut out = vec![host.to_string()];
+    for (k, list) in hosts.and_then(Value::as_object).into_iter().flatten() {
+        let mut all = vec![k.clone()];
+        all.extend(list.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)));
+        if !all.iter().any(|x| locations::host_key(x) == locations::host_key(host)) { continue; }
+        // Each once as spelled (a Bonjour name and the plain one are two ways to reach it: both kept)
+        for x in all { if !out.iter().any(|o| o.eq_ignore_ascii_case(&x)) { out.push(x); } }
+    }
+    out
+}
+
+/// One share mounted by one name, as Finder does: with the password the Keychain has for it (none: the Mac asks for
+/// one). `who`: the host, or "user@host" as mount names it (the user kept: the Keychain's password is that user's)
+fn mount_url(who: &str, share: &str) -> Result<(), String> {
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let w = match who.rsplit_once('@') { Some((u, h)) => format!("{}@{}", enc(u), enc(h.trim_end_matches('.'))), None => enc(who.trim_end_matches('.')) };
+    let url = format!("smb://{w}/{}", enc(share));
+    let out = std::process::Command::new("/usr/bin/osascript").arg("-e").arg(format!("mount volume \"{url}\"")).output().map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else { Err(format!("//{}/{share}: {}", who.rsplit_once('@').map(|x| x.1).unwrap_or(who), String::from_utf8_lossy(&out.stderr).trim())) }
+}
+
+/// A share mounted: `path` names it ("//[user@]host/share/…"), tried by each of `names` in turn (the NAS's names, the
+/// one it's written with first) until one connects. Only the Mac; elsewhere the share is connected in the system and
+/// then shows. Ok: the name that worked. Err: none did (a NAS not on this network: a dozen seconds a name)
+fn mount_share(path: &str, names: &[String]) -> Result<String, String> {
+    let (host, share, _) = locations::network(path).ok_or_else(|| format!("{path} isn't on a share"))?;
+    if !cfg!(target_os = "macos") { return Err(format!("Connect //{host}/{share} in the system: it shows then")); }
+    let user = host.rsplit_once('@').map(|x| x.0.to_string());
+    let mut errors = Vec::new();
+    for n in names {
+        let who = user.as_ref().map(|u| format!("{u}@{n}")).unwrap_or_else(|| n.clone());
+        match mount_url(&who, &share) { Ok(()) => return Ok(n.clone()), Err(e) => errors.push(e) }
+    }
+    Err(format!("{share} couldn't be connected: {}", errors.join("; ")))
+}
+
+/// The projects whose shares were mounted on opening them, once a run: one taken away afterwards (ejected) stays away
+static MOUNTED_ON_OPEN: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// On opening a project (the first time this run), its locations' shares not mounted: mounted, in the background (the
+/// look every 5 s then sees them)
+fn mount_on_open(root: &Path) {
+    // (not from tests: the shares are this Mac's)
+    if !cfg!(target_os = "macos") || cfg!(test) { return; }
+    { let mut m = MOUNTED_ON_OPEN.lock().unwrap(); if m.iter().any(|r| r == root) { return; } m.push(root.to_path_buf()); }
+    let root = root.to_path_buf();
+    std::thread::Builder::new().name("mount".into()).spawn(move || {
+        let mut shares: Vec<(String, String)> = Vec::new();
+        for l in locations::locations(&root, &locations::mounts()) {
+            if l.local || l.dir.is_some() { continue; }
+            let Some((host, share, _)) = locations::network(&l.path) else { continue };
+            let key = (locations::host_key(&host), share.to_lowercase());
+            if shares.contains(&key) { continue; }
+            shares.push(key);
+            let _ = mount_share(&l.path, &host_names(&host, read_doc(&root).get("hosts")));
+        }
+    }).ok();
+}
+
 /// `moved`: its own files just moved here (Move the project…), its catalog with them
 fn watch(root: &Path, moved: bool) -> Watch {
     use notify::Watcher;
+    // Before the catalog's thread reads them: a share mounted meanwhile is seen as a change
+    let reach = reach_key(root);
+    let reach_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    poll_reach(root, reach, &reach_changed);
+    mount_on_open(root);
     let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (c, l) = (changes.clone(), last.clone());
@@ -180,7 +274,7 @@ fn watch(root: &Path, moved: bool) -> Watch {
         any.then_some(w)
     });
     let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
-    Watch { root: root.to_path_buf(), stamp, locs: locations_key(root), _watcher: watcher, changes, last, runner }
+    Watch { root: root.to_path_buf(), stamp, locs: locations_key(root), _watcher: watcher, changes, last, runner, reach_changed }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -191,19 +285,85 @@ fn recent_file(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|d| d.join("recent.json"))
 }
 
-fn recent_list(app: &tauri::AppHandle) -> Vec<String> {
-    recent_file(app).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()).unwrap_or_default()
+/// A project opened before: its folder, and the share it's on (as mount names it: "//user@host/share", and where in
+/// it), for connecting it when it isn't mounted
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+struct RecentEntry {
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    share: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    rel: String,
+    /// The NAS's other names, from the project's hosts when it was last reachable (its file is on the share: not read
+    /// while it's offline)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hosts: Vec<String>,
+}
+
+/// The list as kept: entries, or (before 0.13) the paths alone
+fn parse_recent(text: &str) -> Vec<RecentEntry> {
+    let Ok(Value::Array(a)) = serde_json::from_str::<Value>(text) else { return Vec::new() };
+    a.into_iter().filter_map(|v| match v {
+        Value::String(path) => Some(RecentEntry { path, ..Default::default() }),
+        v => serde_json::from_value::<RecentEntry>(v).ok(),
+    }).collect()
+}
+
+fn recent_list(app: &tauri::AppHandle) -> Vec<RecentEntry> {
+    recent_file(app).and_then(|f| std::fs::read_to_string(f).ok()).map(|t| parse_recent(&t)).unwrap_or_default()
+}
+
+fn write_recent(app: &tauri::AppHandle, list: &[RecentEntry]) {
+    let Some(file) = recent_file(app) else { return };
+    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(file, serde_json::to_vec(list).unwrap_or_default());
+}
+
+/// The share a folder is on, as mounted now (its source, and the folder's path in it)
+fn share_of(path: &Path, mounts: &[(String, PathBuf)]) -> Option<(String, String)> {
+    mounts.iter().filter(|(_, dir)| path.starts_with(dir)).max_by_key(|(_, dir)| dir.components().count())
+        .map(|(src, dir)| (src.clone(), path.strip_prefix(dir).map(|r| r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")).unwrap_or_default()))
+}
+
+/// Where a share is mounted now (the same host, by any of its names, and share), if it is
+fn mounted_at(share: &str, mounts: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let (host, name, _) = locations::network(share)?;
+    mounts.iter().find(|(src, _)| locations::network(src).is_some_and(|(h, n, _)| locations::host_key(&h) == locations::host_key(&host) && n.eq_ignore_ascii_case(&name)))
+        .map(|(_, d)| d.clone())
+}
+
+/// Where an entry's project is now: its folder, or the same place on its share mounted elsewhere (/Volumes/ssd-1)
+fn recent_here(e: &RecentEntry, mounts: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let p = PathBuf::from(&e.path);
+    if is_project(&p) { return Some(p); }
+    let mut d = mounted_at(e.share.as_deref()?, mounts)?;
+    for part in e.rel.split('/').filter(|x| !x.is_empty()) { d.push(part); }
+    is_project(&d).then_some(d)
+}
+
+/// The other names of the NAS a project is on, as its file lists them
+fn other_names(root: &Path, share: Option<&str>) -> Vec<String> {
+    let Some((host, _, _)) = share.and_then(locations::network) else { return Vec::new() };
+    host_names(&host, read_doc(root).get("hosts")).into_iter().skip(1).collect()
+}
+
+/// An offline project's share by all its names: as mounted when it was last seen first, then its other names
+fn recent_names(e: &RecentEntry) -> Vec<String> {
+    let Some((host, _, _)) = e.share.as_deref().and_then(locations::network) else { return Vec::new() };
+    let mut out = host_names(&host, None);
+    for h in &e.hosts { if !out.iter().any(|o| o.eq_ignore_ascii_case(h)) { out.push(h.clone()); } }
+    out
 }
 
 fn remember(app: &tauri::AppHandle, root: &Path) {
-    let Some(file) = recent_file(app) else { return };
     let p = root.display().to_string();
     let mut list = recent_list(app);
-    list.retain(|x| x != &p);
-    list.insert(0, p);
+    list.retain(|x| x.path != p);
+    let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
+    let hosts = other_names(root, share.as_deref());
+    list.insert(0, RecentEntry { path: p, share, rel, hosts });
     list.truncate(10);
-    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
-    let _ = std::fs::write(file, serde_json::to_vec(&list).unwrap_or_default());
+    write_recent(app, &list);
 }
 
 // ---------- the project ----------
@@ -284,8 +444,6 @@ struct ProjectInfo {
     // How clip previews are laid out in _Clips: tree, flat or trips (the player's workspace plugin, clips_layout)
     clips_layout: String,
     moments_alone: bool,
-    clips_made: u64,
-    clips_failed: Vec<(String, String)>,
     clip_previews: u64,
     moments: u64,
     stills: u64,
@@ -296,10 +454,6 @@ fn project_info(root: &Path) -> ProjectInfo {
     let doc = read_doc(root);
     let settings = doc.get("settings").cloned().unwrap_or(json!({}));
     let flag = |k: &str| settings.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let failed = doc.get("clips_failed").and_then(Value::as_array).map(|a| a.iter().filter_map(|p| {
-        let p = p.as_array()?;
-        Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
-    }).collect()).unwrap_or_default();
     ProjectInfo {
         path: root.display().to_string(),
         name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string()),
@@ -308,8 +462,6 @@ fn project_info(root: &Path) -> ProjectInfo {
         clips_layout: settings.get("clips_layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).map(str::to_string)
             .unwrap_or_else(|| if flag("clips_flat") { "flat".into() } else { "tree".into() }),
         moments_alone: flag("moments_alone"),
-        clips_made: doc.get("clips_made").and_then(Value::as_array).map_or(0, |a| a.len() as u64),
-        clips_failed: failed,
         clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
         stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
@@ -604,7 +756,8 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
             if let Some(w) = inner.watch.as_mut().filter(|w| w.root == root && w.stamp != stamp) {
                 if locations_key(&root) == w.locs { w.stamp = stamp; }
             }
-            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp) {
+            // …or a location became reachable, or stopped being (a share mounted after the Library opened)
+            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp || w.reach_changed.load(std::sync::atomic::Ordering::Relaxed)) {
                 let before = inner.watch.as_ref().filter(|w| w.root == root).map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed) + 1);
                 let moved = inner.moved_to.take().is_some_and(|m| m == root);
                 let w = watch(&root, moved);
@@ -670,17 +823,67 @@ async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: St
 }
 
 #[derive(Serialize)]
-struct Recent { path: String, name: String, here: bool }
+struct Recent {
+    path: String,
+    name: String,
+    /// Reachable now (else offline: its share not mounted, its disk not plugged in)
+    here: bool,
+    /// Its share, for saying where it is ("//DISKSTATIONDXP/ssd")
+    share: Option<String>,
+    /// Can be connected from here (the Mac, its share known)
+    connect: bool,
+    /// The names it can be connected by (the NAS's), for Connect's list
+    names: Vec<String>,
+}
 
-// The projects this computer has opened, the last first: the ones still there
+// The projects this computer has opened, the last first: every one, those not reachable now too (offline)
 #[tauri::command]
 async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
     // In the background: the window never waits on it (a share can take seconds)
     tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
-    recent_list(&app).into_iter().filter(|p| Path::new(p).join(PROJECT_FILE).is_file() || Path::new(p).join(LEGACY_DIR).is_dir())
-        .map(|p| Recent { name: Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()), here: true, path: p })
-        .collect()
+    let mounts = locations::mounts();
+    let mut list = recent_list(&app);
+    let mut changed = false;
+    let out = list.iter_mut().map(|e| {
+        let here = recent_here(e, &mounts);
+        // One kept before its share was (or mounted elsewhere now): its share noted, its path the one now
+        if let Some(h) = &here {
+            if let Some((s, r)) = share_of(h, &mounts) { if e.share.as_deref() != Some(s.as_str()) || e.rel != r { e.share = Some(s); e.rel = r; changed = true; } }
+            let names = other_names(h, e.share.as_deref());
+            if e.hosts != names { e.hosts = names; changed = true; }
+            let hp = h.display().to_string();
+            if e.path != hp { e.path = hp; changed = true; }
+        }
+        let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
+        Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
+                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
+                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
+    }).collect();
+    if changed { write_recent(&app, &list); }
+    out
 }).await.map_err(|e| e.to_string())
+}
+
+/// A project taken off the list of those opened before (a test one, one moved away)
+#[tauri::command]
+async fn forget_recent(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut list = recent_list(&app);
+    list.retain(|e| e.path != path);
+    write_recent(&app, &list);
+    Ok(())
+}
+
+/// An offline project's share connected: where the project is then
+#[tauri::command]
+async fn connect_project(app: tauri::AppHandle, path: String, host: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let e = recent_list(&app).into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        let share = e.share.clone().ok_or("Its share isn't known: connect it in Finder, then open it")?;
+        // By the name chosen, else each of the NAS's names in turn
+        mount_share(&share, &host.map(|h| vec![h]).unwrap_or_else(|| recent_names(&e)))?;
+        recent_here(&e, &locations::mounts()).map(|p| p.display().to_string())
+            .ok_or_else(|| format!("{share} is connected, but {} isn't on it", e.path))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- browsing ----------
@@ -744,7 +947,11 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
                 _ => {}
             }
         }
-        let known = { let mut p = probes.lock().unwrap(); p.want(&want); p.known(&want) };
+        // An offline clip's answer as known from before; not asked for (its file isn't there to read)
+        let off: std::collections::HashSet<&str> = out["items"].as_array().into_iter().flatten()
+            .filter(|it| it["offline"].as_bool() == Some(true)).filter_map(|it| it["path"].as_str()).collect();
+        let ask: Vec<String> = want.iter().filter(|p| !off.contains(p.as_str())).cloned().collect();
+        let known = { let mut p = probes.lock().unwrap(); p.want(&ask); p.known(&want) };
         let mut v = out.clone();
         v["root"] = json!(root.display().to_string());
         v["view"] = json!(view);
@@ -756,6 +963,22 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         v["probes"] = known;
         v
     }).await.map_err(|e| e.to_string())
+}
+
+/// An offline location's share connected (the Sources banner's Connect): its clips show as soon as it's there
+#[tauri::command]
+async fn connect_location(shared: State<'_, Shared>, path: String, host: Option<String>) -> Result<(), String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        // By the name chosen, else each of the NAS's names in turn
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let (h, _, _) = locations::network(&path).ok_or("Not on a share")?;
+        let names = match host { Some(n) => vec![n], None => host_names(&h, read_doc(&root).get("hosts")) };
+        mount_share(&path, &names)?;
+        // Seen now, not at the next look
+        if let Some(w) = shared.lock().unwrap().watch.as_ref() { w.reach_changed.store(true, std::sync::atomic::Ordering::Relaxed); }
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1154,12 +1377,12 @@ async fn find_moved(shared: State<'_, Shared>, issues: Vec<Value>) -> Result<Val
 
 #[tauri::command]
 async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec<String>, String> {
-    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    if shared.lock().unwrap().project.is_none() { return Err("Open a project first".into()); }
     seen::look_at_everything(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner));
     let tool = link_tool();
     tauri::async_runtime::spawn_blocking(move || {
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
-        checks::apply(&root, &found, &relink)
+        checks::apply(&found, &relink)
     }).await.map_err(|e| e.to_string())
 }
 
@@ -1181,7 +1404,7 @@ async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
         let all = found.as_array().cloned().unwrap_or_default();
         let (sure, left): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|f| !f["found"].is_null());
         let relink = |file: &Path, link: &str| write_link(tool.as_ref(), file, link);
-        let problems = checks::apply(&root, &sure, &relink);
+        let problems = checks::apply(&sure, &relink);
         Ok::<Value, String>(json!({ "missing": issues.len(), "mended": sure.len() - problems.len(), "problems": problems, "left": left }))
     }).await.map_err(|e| e.to_string())??;
     let g = shared.lock().unwrap();
@@ -2028,7 +2251,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -2182,6 +2405,68 @@ mod tests {
         assert_ne!(locations_key(&root), k);
     }
 
+    // A location that wasn't reachable when the project was opened (the share mounted later) is noticed, and so is one
+    // that goes: the project is then watched again, as if opened now
+    #[test]
+    fn a_location_reached_later_is_noticed() {
+        let base = temp("reach");
+        let root = base.join("P");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(PROJECT_FILE), r#"{"locations":[{"name":"A","path":"../A"}]}"#).unwrap();
+        let before = reach_key(&root);
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        poll_reach(&root, before.clone(), &flag);
+        std::thread::sleep(Duration::from_millis(5500));
+        assert!(!flag.load(std::sync::atomic::Ordering::Relaxed), "nothing changed yet");
+        std::fs::create_dir_all(base.join("A")).unwrap();
+        assert_ne!(reach_key(&root), before);
+        let t = Instant::now();
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < Duration::from_secs(8) { std::thread::sleep(Duration::from_millis(100)); }
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed), "the location reached wasn't noticed");
+        // …and going away again
+        let back = reach_key(&root);
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        poll_reach(&root, back, &flag);
+        std::fs::remove_dir_all(base.join("A")).unwrap();
+        let t = Instant::now();
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < Duration::from_secs(8) { std::thread::sleep(Duration::from_millis(100)); }
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed), "the location gone wasn't noticed");
+    }
+
+    // The projects opened before: kept with their share, found where it's mounted now, read from the old list of paths
+    #[test]
+    fn recent_projects_keep_their_share() {
+        let old = parse_recent(r#"["/Volumes/ssd/Action Footage Library", {"path":"/Volumes/ssd/T","share":"//u@NAS._smb._tcp.local/ssd","rel":"T"}, 3]"#);
+        assert_eq!(old.len(), 2);
+        assert_eq!((old[0].path.as_str(), old[0].share.as_deref()), ("/Volumes/ssd/Action Footage Library", None));
+        assert_eq!(old[1].share.as_deref(), Some("//u@NAS._smb._tcp.local/ssd"));
+        let base = temp("recent");
+        let (a, b) = (base.join("ssd"), base.join("ssd-1"));
+        let mounts = vec![("//u@NAS._smb._tcp.local/ssd".to_string(), a.clone()), ("//u@NAS._smb._tcp.local/photo".to_string(), base.join("photo"))];
+        assert_eq!(share_of(&a.join("Trips/P"), &mounts), Some(("//u@NAS._smb._tcp.local/ssd".to_string(), "Trips/P".to_string())));
+        assert_eq!(share_of(Path::new("/elsewhere/P"), &mounts), None);
+        // The same share mounted elsewhere now (another name for the NAS too): the project found there
+        std::fs::create_dir_all(b.join("Trips/P")).unwrap();
+        std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new() };
+        assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
+        // Not mounted: offline
+        assert_eq!(recent_here(&e, &[]), None);
+        // The NAS's names: as written first, then the project's others for it, each once as spelled
+        let hosts = json!({ "DISKSTATIONDXP": ["web.nas", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"], "OTHER": ["x"] });
+        assert_eq!(host_names("antonadmin@DISKSTATIONDXP._smb._tcp.local.", Some(&hosts)), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        assert_eq!(host_names("web.nas", Some(&hosts)), ["web.nas", "DISKSTATIONDXP", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"]);
+        assert_eq!(host_names("diskstationdxp", Some(&hosts)), ["diskstationdxp", "web.nas", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"]);
+        assert_eq!(host_names("nas2", Some(&hosts)), ["nas2"]);
+        // …kept with a project on it, for when it's offline (its file, on the share, can't be read then)
+        std::fs::write(b.join("Trips/P").join(PROJECT_FILE), json!({ "hosts": hosts }).to_string()).unwrap();
+        let names = other_names(&b.join("Trips/P"), Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd"));
+        assert_eq!(names, ["DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        let e = RecentEntry { share: Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd".into()), hosts: names, ..e };
+        assert_eq!(recent_names(&e), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("afl-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -2217,7 +2502,6 @@ mod tests {
         assert_eq!(doc["mine"], json!(2));
         let info = project_info(&root);
         assert!(info.clips_flat && !info.moments_alone && !info.legacy);
-        assert_eq!(info.clips_made, 1);
         // Someone else's file of that name is left alone
         std::fs::write(root.join(PROJECT_FILE), br#"{"format":"other"}"#).unwrap();
         assert!(update_doc(&root, |_| {}).is_err());
@@ -2534,7 +2818,7 @@ mod audit {
         }
         let issues = checks::missing(&p).unwrap();
         let found = checks::find_moved(&p, &issues);
-        assert!(checks::apply(&p, found.as_array().unwrap(), &relink).is_empty());
+        assert!(checks::apply(found.as_array().unwrap(), &relink).is_empty());
         row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
         // Renders deleted
         let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
