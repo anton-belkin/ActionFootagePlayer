@@ -226,7 +226,8 @@ pub fn gyroflow_cli() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os("AFP_GYROFLOW").filter(|p| !p.is_empty()) {
         let p = PathBuf::from(p);
         let p = if p.extension().is_some_and(|e| e == "app") { p.join("Contents/MacOS/gyroflow") } else { p };
-        return if p.is_file() { Ok(p) } else { Err(format!("AFP_GYROFLOW: {} isn't there", p.display())) };
+        return if !p.is_file() { Err(format!("AFP_GYROFLOW: {} isn't there", p.display())) }
+               else if app_store_copy(&p) { Err(APP_STORE.into()) } else { Ok(p) };
     }
     let mut places: Vec<PathBuf> = Vec::new();
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
@@ -252,8 +253,17 @@ pub fn gyroflow_cli() -> Result<PathBuf, String> {
         places.push(PathBuf::from("/opt/Gyroflow/gyroflow"));
         if let Some(h) = &home { places.push(h.join(".local/bin/gyroflow")); }
     }
-    places.into_iter().find(|p| p.is_file())
-        .ok_or_else(|| "Gyroflow isn't installed (it's what measures the motion): install it, or set AFP_GYROFLOW to its executable".into())
+    let found: Vec<PathBuf> = places.into_iter().filter(|p| p.is_file()).collect();
+    if let Some(p) = found.iter().find(|p| !app_store_copy(p)) { return Ok(p.clone()); }
+    Err(if found.is_empty() { "Gyroflow isn't installed (it's what measures the motion): install it, or set AFP_GYROFLOW to its executable" } else { APP_STORE }.into())
+}
+
+const APP_STORE: &str = "The Gyroflow installed is the Mac App Store's: it's sandboxed, so it can't read clips another app hands it. \
+    Install Gyroflow 1.7.0 or newer from github.com/gyroflow/gyroflow/releases as well (in ~/Applications, say), or set AFP_GYROFLOW to it";
+
+/// The Mac App Store's copy (its receipt in the bundle): sandboxed, it may read only files chosen in its own windows
+fn app_store_copy(exe: &Path) -> bool {
+    cfg!(target_os = "macos") && exe.parent().and_then(Path::parent).is_some_and(|c| c.join("_MASReceipt").exists())
 }
 
 fn in_path(exe: &str) -> Vec<PathBuf> {
@@ -291,7 +301,15 @@ pub fn progress_of(line: &str) -> Option<f64> {
 
 /// The last error Gyroflow logged, said plainly ("Optical analysis failed: Not enough of the image could be tracked")
 pub fn error_of(log: &str) -> Option<String> {
-    let line = log.lines().rev().find(|l| l.contains("[ERROR]") && !l.contains("bookmark"))?;
+    let lines: Vec<&str> = log.lines().collect();
+    let at = lines.iter().rposition(|l| l.contains("[ERROR]") && !l.contains("bookmark"))?;
+    let line = lines[at];
+    // A panic: what went wrong is on the next line ("Reading preset file: Os { .. "Operation not permitted" }")
+    if line.contains("panicked at") {
+        let why = lines.get(at + 1).map(|l| l.trim()).unwrap_or_default();
+        if why.contains("Operation not permitted") { return Some(format!("Gyroflow wasn't allowed to read its files (a sandboxed copy?): {why}")); }
+        return Some(if why.is_empty() { line.trim().to_string() } else { format!("Gyroflow failed: {why}") });
+    }
     let msg = line.split("Error: ").last().unwrap_or(line).trim();
     let msg = msg.strip_prefix("An error occurred: ").unwrap_or(msg);
     Some(msg.split("] ").last().unwrap_or(msg).trim().to_string())
@@ -452,6 +470,20 @@ mod tests {
                    14:37:24 [ERROR] [69a8ba86] Error: An error occurred: Optical analysis failed: Not enough of the image could be tracked\n\
                    14:37:24 [ERROR] Failed to create bookmark: x\n";
         assert_eq!(error_of(log).as_deref(), Some("Optical analysis failed: Not enough of the image could be tracked"));
+        let panic = "17:04:00 [ERROR] panicked at src/cli.rs:288:112:\n\
+                     Reading preset file: Os { code: 1, kind: PermissionDenied, message: \"Operation not permitted\" }\n\
+                     0.40.1 (git a68cfbb) - Multimedia Development Kit.\n";
+        assert!(error_of(panic).is_some_and(|e| e.starts_with("Gyroflow wasn't allowed to read its files") && e.contains("Reading preset file")), "{:?}", error_of(panic));
+        if cfg!(target_os = "macos") {
+            let app = std::env::temp_dir().join(format!("afp-mas-{}/Gyroflow.app", std::process::id()));
+            std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+            let exe = app.join("Contents/MacOS/gyroflow");
+            std::fs::write(&exe, b"").unwrap();
+            assert!(!app_store_copy(&exe));
+            std::fs::create_dir_all(app.join("Contents/_MASReceipt")).unwrap();
+            assert!(app_store_copy(&exe));
+            let _ = std::fs::remove_dir_all(app.parent().unwrap());
+        }
         assert_eq!(executable_of_command(r#""C:\Program Files\Gyroflow\gyroflow.exe" "%1""#), Some(PathBuf::from(r"C:\Program Files\Gyroflow\gyroflow.exe")));
         assert_eq!(executable_of_command(r#"C:\Gyroflow\gyroflow.exe "%1""#), Some(PathBuf::from(r"C:\Gyroflow\gyroflow.exe")));
         assert!(check_project(r#"{"gyro_source":{"optical_correction":"AAAA"}}"#).is_ok());

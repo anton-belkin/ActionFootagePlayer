@@ -950,7 +950,9 @@ Project). Then, as buttons:
   lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
   measured anew. It needs [Gyroflow](https://gyroflow.xyz) 1.7.0 or newer, which has the optical analysis
   ([its releases](https://github.com/gyroflow/gyroflow/releases)), found where Gyroflow installs itself, or by
-  `AFP_GYROFLOW`.
+  `AFP_GYROFLOW`. Not the Mac App Store's copy: it's sandboxed and can't read clips another app hands it, so it's
+  passed over (the release's copy can sit beside it, in `~/Applications` say). Lens types of your own: *Your own
+  lens list*.
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
