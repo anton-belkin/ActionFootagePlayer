@@ -165,8 +165,10 @@ pub struct LensInfo {
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
-    // A file telemetry-parser can't read (a Mavic Pro's or Mavic Air 2's MOV): the drone's name alone, from the file
-    lens_read(path).or_else(|| crate::geotag::dji_model(std::path::Path::new(path)).map(|camera| LensInfo { camera, ..Default::default() }))
+    // A file telemetry-parser can't read (a Mavic Pro's or Mavic Air 2's MOV, a HERO3's MP4): the camera's name alone,
+    // from the file
+    let p = std::path::Path::new(path);
+    lens_read(path).or_else(|| crate::geotag::dji_model(p).or_else(|| crate::geotag::gopro_model(p)).map(|camera| LensInfo { camera, ..Default::default() }))
 }
 
 fn lens_read(path: &str) -> Option<LensInfo> {
