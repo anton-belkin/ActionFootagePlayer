@@ -68,7 +68,7 @@ pub fn smooth_into(stab: &StabilizationManager, gyro: &mut GyroSource, geometry:
     let mut params = ComputeParams::from_manager(stab);
     params.calculate_camera_fovs();
     let horizon_lock = stab.smoothing.read().horizon_lock.clone();
-    let (mut quats, max_angles) = gyro.recompute_smoothness(&geometry.smoothing(level), horizon_lock, &params);
+    let (mut quats, max_angles) = gyro.recompute_smoothness(&geometry.smoothing(level), horizon_lock, &mut params);
     let end_us = (stab.params.read().get_scaled_duration_ms() * 1000.0) as i64;
     if let Some(from) = fade_in {
         for (t, q) in quats.range_mut(from..from + FADE_IN_US) {
@@ -76,7 +76,7 @@ pub fn smooth_into(stab: &StabilizationManager, gyro: &mut GyroSource, geometry:
         }
     }
     unstabilized_where_unknown(&mut quats, end_us);
-    gyro.smoothed_quaternions = quats;
+    gyro.smoothed_quaternions = Arc::new(quats);
     gyro.max_angles = max_angles;
 }
 
@@ -110,7 +110,7 @@ pub fn restabilize(stab: &StabilizationManager, geometry: &Geometry, level: Leve
 struct ClipFile {
     key: String,
     file: Mutex<Prefetched>,
-    len: usize,
+    len: u64,
     /// The latest frame any engine of the clip was asked for, µs into the clip, and when
     playhead: AtomicI64,
     asked: Mutex<Instant>,
@@ -118,6 +118,26 @@ struct ClipFile {
 
 static FILES: Mutex<Vec<Arc<ClipFile>>> = Mutex::new(Vec::new());
 const MAX_FILES: usize = 2;
+
+/// Reads at once from a share for the rest of a clip's motion data while it plays (gently): its video is read from
+/// the same share
+const GENTLE_THREADS: usize = 2;
+thread_local! { static GENTLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// `f` with what it reads of a clip's motion data read gently (GENTLE_THREADS at once): the GPU warp's server reading
+/// the rest of a clip that plays
+pub fn gently<R>(f: impl FnOnce() -> R) -> R {
+    let was = GENTLE.with(|g| g.replace(true));
+    // A utility thread on macOS: the player's own threads go first
+    #[cfg(target_os = "macos")]
+    unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0); }
+    let r = f();
+    GENTLE.with(|g| g.set(was));
+    r
+}
+
+/// Whether this thread works gently (`gently`): gpu_table.rs builds a table on 2 threads then
+pub fn is_gentle() -> bool { GENTLE.with(|g| g.get()) }
 
 /// The clip's motion data as it comes in, shared by an engine (what it plays) and the thread that reads it for it
 pub struct Motion {
@@ -136,7 +156,15 @@ pub struct Motion {
 impl Motion {
     /// The clip's file with the motion data of its first `lookahead` + START_S seconds read, for load_video_file; or as
     /// much as an engine before this one read of it. A `lookahead` of 0: all of it
-    pub fn open(path: &str, url: &str, lookahead: f64) -> std::io::Result<(Arc<Motion>, usize)> {
+    pub fn open(path: &str, url: &str, lookahead: f64) -> std::io::Result<(Arc<Motion>, u64)> {
+        Self::open_range(path, url, lookahead, None)
+    }
+
+    /// The same with a `range` (s into the clip, with a `lookahead` of 0): that stretch's motion data alone, and as
+    /// much as was read of it before (the GPU warp's first table, gpu_table.rs: a moment's part, or the seconds the clip
+    /// starts playing at)
+    pub fn open_range(path: &str, url: &str, lookahead: f64, range: Option<(f64, f64)>) -> std::io::Result<(Arc<Motion>, u64)> {
+        let range = range.filter(|_| lookahead <= 0.0);
         let meta = std::fs::metadata(path)?;
         let key = format!("{path}|{}|{:?}", meta.len(), meta.modified().ok());
         let mut files = FILES.lock();
@@ -144,11 +172,14 @@ impl Motion {
             Some(i) => files.remove(i),
             None => {
                 let until = (lookahead > 0.0).then_some(lookahead + START_S);
-                let (file, len) = Prefetched::open_until(path, until)?;
+                let t = Instant::now();
+                let (file, len) = match range { Some(r) => Prefetched::open_range(path, Some(r))?, None => Prefetched::open_until(path, until)? };
                 let read = (0..file.samples().len()).filter(|&i| file.is_read(i)).count();
-                match until {
-                    Some(until) => log::info!("{path}: motion data of the first {until:.0} s read ({read} of {} samples), the rest as it plays", file.samples().len()),
-                    None => log::info!("{path}: motion data read ({read} samples)"),
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                match (until, range) {
+                    (Some(until), _) => log::info!("{path}: motion data of the first {until:.0} s read ({read} of {} samples) in {ms:.0} ms, the rest as it plays", file.samples().len()),
+                    (None, Some((a, b))) => log::info!("{path}: motion data of {a:.1}-{b:.1} s read ({read} of {} samples) in {ms:.0} ms", file.samples().len()),
+                    (None, None) => log::info!("{path}: motion data read ({read} samples) in {ms:.0} ms"),
                 }
                 Arc::new(ClipFile { key, file: Mutex::new(file), len, playhead: AtomicI64::new(0), asked: Mutex::new(Instant::now()) })
             }
@@ -157,10 +188,14 @@ impl Motion {
         while files.len() > MAX_FILES { files.remove(0); }
         drop(files);
         if lookahead <= 0.0 {
-            // All of it: what an engine that plays it as it comes in hasn't read yet
+            // All of it (or of the range): what an engine that plays it as it comes in hasn't read yet
             let mut file = clip.file.lock();
-            let unread: Vec<usize> = (0..file.samples().len()).filter(|&i| !file.is_read(i)).collect();
-            if !unread.is_empty() { file.fetch(&unread); }
+            let unread: Vec<usize> = file.within(range).into_iter().filter(|&i| !file.is_read(i)).collect();
+            if !unread.is_empty() {
+                let t = Instant::now();
+                if GENTLE.with(|g| g.get()) { file.fetch_gently(&unread, GENTLE_THREADS) } else { file.fetch(&unread) }
+                log::info!("{path}: motion data of {} more samples read in {:.0} ms", unread.len(), t.elapsed().as_secs_f64() * 1000.0);
+            }
         }
         let len = clip.len;
         Ok((Arc::new(Motion { clip, url: url.to_string(), lookahead, asked: Mutex::new(Instant::now()), stop: AtomicBool::new(false), underwater: Mutex::new(None) }), len))

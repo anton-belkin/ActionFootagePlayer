@@ -16,14 +16,15 @@
 -- `stab`, with "settings of its own"); with none, the session's plays (the gyroflow plugin's, from the app's defaults
 -- and changed only by hand). The topmost bundle there is plays, and bundles never mix.
 --
--- A Gyroflow project owns what it has: the smoothing (level), the horizon, the frame, the projection, the lens, and of
--- the input the turn and the lens under water. They're shown as the project's, and kept in a bundle beside it only to come
--- back if the project goes.
+-- A Gyroflow project owns what it has: the smoothing (level), the horizon, the frame, and of the input the turn and the
+-- lens under water. They're shown as the project's, and kept in a bundle beside it only to come back if the project goes.
+-- Not the output's lens (#196): as recorded, or corrected in a projection, "project" for the project's own, picked and
+-- saved over a project as for any clip.
 --
 --   local t = require('transform')
 --   t.KEYS, t.INPUT_KEYS          the bundle's keys, the input's, in order
 --   t.PROJECT_KEYS                the bundle's keys a Gyroflow project owns. Not the view: on, wider (the project's
---                                 zoom left out) or off (the project kept but not used) is saved over it too
+--                                 zoom left out) or off (the project kept but not used) is saved over it too, and the lens
 --   t.NEUTRAL                     what a key that didn't exist yet played as: a bundle from before it is filled so
 --   t.complete(bundle, session)   -> the bundle with every key (a missing one: NEUTRAL, else the session's), and
 --                                    whether anything was added; horizon_lock "project" (the preset's) as
@@ -41,8 +42,9 @@ local M = {}
 M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not
--- used) or Wider (its zoom left out) and saved so (Anton, 2026-11-10)
-M.PROJECT_KEYS = { level = true, horizon_lock = true, aspect = true, orientation = true, projection = true, lens = true }
+-- used) or Wider (its zoom left out) and saved so (Anton, 2026-11-10). Nor the lens and its projection: the player's
+-- choice over the project's, for viewing and exports (Anton, 2026-11-11, #196)
+M.PROJECT_KEYS = { level = true, horizon_lock = true, aspect = true, orientation = true }
 M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear", denoise_strong = false }
 
 local VALID = {
@@ -52,7 +54,8 @@ local VALID = {
     chromatic = { [true] = true, [false] = true },
     aspect = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true },
     orientation = { ["as-is"] = true, landscape = true, portrait = true },
-    projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true },
+    -- project: a Gyroflow project's own (linear without one)
+    projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true, project = true },
     lens = { corrected = true, ["as-recorded"] = true },
     denoise = { [true] = true, [false] = true },
     denoise_strong = { [true] = true, [false] = true },

@@ -1,6 +1,7 @@
 # The release: built on macOS (Apple Silicon) by tools/make_release.sh, the gyroflow plugin for Linux and Windows
-# by tools/make_plugin_zip.sh, the Windows app's installer by tools/make_windows_app.sh, and all the plugins in one zip
-# per system by tools/make_plugin_bundles.py. A pushed v* tag publishes it as a GitHub release, with the tag's message as the
+# by tools/make_plugin_zip.sh, the Windows app's installer by tools/make_windows_app.sh, all the plugins in one zip
+# per system by tools/make_plugin_bundles.py, and the NAS Helper's Docker image by tools/nas-helper/Dockerfile. A
+# pushed v* tag publishes it as a GitHub release, with the tag's message as the
 # release notes:
 #
 #   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
@@ -62,7 +63,7 @@ jobs:
       # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
       # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
       # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
-      # for mpv; LuaJIT is one of mpv's dependencies
+      # for mpv, its drop-downs, and the gyroflow plugin's lens over a Gyroflow project; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
@@ -77,7 +78,10 @@ jobs:
           luajit tests/timeline_test.lua
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
+          luajit tests/gyroflow_lens_test.lua
           luajit tests/camera_subs_test.lua
+          luajit tests/agent_test.lua
+          luajit tests/export_args_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
 
       - name: Build
@@ -212,6 +216,57 @@ jobs:
           if-no-files-found: error
 
   # All the plugins in one zip per system, mpv-plugins-<version>-<os>-<arch>.zip, from the zips the builds made
+  # The NAS Helper (tools/nas-helper): collaboration, the stream and the links for Jellyfin as one Docker image for an
+  # x86-64 NAS, saved as ActionFootageNASHelper-<version>-linux-x86_64.tar.gz (`docker load -i` it) with its example
+  # compose.yaml. Its own artifact: the plugins job doesn't need it
+  nas-helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The layers kept between runs (libplacebo and mpv, the Rust dependencies take most of the time)
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/nas-helper/Dockerfile
+          build-args: VERSION=${{ env.VERSION }}
+          tags: actionfootage-nas-helper:${{ env.VERSION }},actionfootage-nas-helper:latest
+          load: true
+          cache-from: type=gha,scope=nas-helper
+          cache-to: type=gha,scope=nas-helper,mode=max
+
+      # It starts and says what it would run, with a project and a share as a NAS would bind them in
+      - name: Smoke test
+        run: |
+          mkdir -p t/Trip t/video t/data t/config
+          echo '{"locations":[{"path":"//NAS/video/DCIM"}]}' > t/Trip/Project.afproject
+          docker run --rm actionfootage-nas-helper:latest --help | head -5
+          docker run --rm -v "$PWD/t/Trip:/projects/Trip" -v "$PWD/t/Trip:/library/Trip:ro" -v "$PWD/t/video:/shares/video:ro" \
+            -v "$PWD/t/data:/data" -v "$PWD/t/config:/config" actionfootage-nas-helper:latest --check
+          docker run --rm --entrypoint mpv actionfootage-nas-helper:latest --version | head -1
+
+      - name: Save
+        run: |
+          mkdir -p dist
+          name=ActionFootageNASHelper-$VERSION-linux-x86_64
+          docker save actionfootage-nas-helper:$VERSION actionfootage-nas-helper:latest | gzip -6 > dist/$name.tar.gz
+          sed "s/\${AFP_VERSION:-latest}/$VERSION/" tools/nas-helper/compose.yaml > dist/ActionFootageNASHelper-$VERSION-compose.yaml
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nas-helper
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+
   plugins:
     needs: [macos, plugin]
     runs-on: ubuntu-latest
@@ -237,7 +292,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, plugin, plugins]
+    needs: [macos, plugin, plugins, nas-helper]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -248,17 +303,22 @@ jobs:
           path: dist/
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: nas-helper
+          path: dist/
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # One SHA256SUMS for all of it (the macOS build's has only its own files)
-          (cd dist && sha256sum *.dmg *.zip *.tar.gz *.exe > SHA256SUMS && cat SHA256SUMS)
+          (cd dist && sha256sum *.dmg *.zip *.tar.gz *.exe *.yaml > SHA256SUMS && cat SHA256SUMS)
           # actions/checkout leaves the tag as a lightweight one on the commit, and --notes-from-tag would then take
           # the commit's message: the tag itself, with its message
           git fetch --depth=1 --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag ] || { echo "$GITHUB_REF_NAME isn't an annotated tag" >&2; exit 1; }
-          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.tar.gz dist/*.zip dist/*.exe dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.tar.gz dist/*.zip dist/*.exe dist/*.yaml dist/SHA256SUMS \
             --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-from-tag
 
   # The website deployed again, from the website branch, so its download page has this release (website.yml writes

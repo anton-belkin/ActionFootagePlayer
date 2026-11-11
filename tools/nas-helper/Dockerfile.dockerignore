@@ -1,0 +1,12 @@
+# The build needs only these (tools/nas-helper/Dockerfile)
+*
+!catalog
+!shaders
+!mpv/scripts
+!vs-gyroflow
+!luts
+!tools/cube_to_glsl.py
+!tools/stream
+!tools/nas-helper
+**/target
+**/__pycache__

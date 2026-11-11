@@ -61,6 +61,9 @@
 --   lens-mode corrected|as-recorded|toggle  the lens corrected (Gyroflow's lens correction and the projection) or as
 --                           recorded, apart from the stabilization: off with the lens corrected is the lens alone, nothing
 --                           smoothed; a clip with a lens profile and no motion data (kind "lens") plays that way
+--   projection <p>          the output's projection: linear, stereographic, equidistant, equisolid, orthographic, or
+--                           project (a Gyroflow project's own); over a project too, saved with the clip
+--   lens <kind>             as-recorded, or the lens corrected in projection <kind>: lens-mode and projection at once
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   denoise-strong yes|no|toggle  the temporal denoise's Stronger, for a very noisy clip (part of the transform)
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
@@ -90,8 +93,8 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
---   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) on macOS, where it has been tried;
---                yes: on Windows and Linux too (mpv 0.42, vo=gpu-next); no: always through VapourSynth
+--   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) wherever mpv can (mpv 0.42 or the
+--                app's, vo=gpu-next): macOS, Windows and Linux (tried on all three); no: always through VapourSynth
 --   gpu_flush=auto  an mpv without the app's patch 0015 keeps every shader the GPU path has had until its window
 --                closes (each with its textures: ~450 MB with Ctrl+p's denoise): once those it no longer uses pass
 --                1.5 GB, the window is made again as the next clip opens (at 4 GB, at once). auto: unless mpv is the
@@ -628,7 +631,8 @@ local function take(b)
     horizon = h == "yes"
     if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
     frame.aspect, frame.orientation = split_aspect(b.aspect, b.orientation)
-    frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
+    -- "project": a Gyroflow project's own (over one; linear without)
+    frame.projection = (PROJECTIONS[b.projection] or b.projection == "project") and b.projection or "linear"
     -- A bundle from before the lens was a key of its own: off showed the lens as recorded too
     if b.lens == "corrected" or b.lens == "as-recorded" then lens_mode = b.lens
     elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
@@ -644,6 +648,14 @@ end
 -- A change by hand to what plays: the session's too when the session's plays (nothing saved for the file, no project)
 local function sticks(k, v)
     if not fixed() then session[k] = v end
+end
+
+-- The output's lens over a Gyroflow project (#196): the bundle's (saved for the clip, or reverted to), as recorded or
+-- corrected in a projection of its own; with none, the project's own ("project"), corrected
+local function over_project(b)
+    b = type(b) == "table" and b or {}
+    lens_mode = b.lens == "as-recorded" and "as-recorded" or "corrected"
+    frame.projection = (PROJECTIONS[b.projection] or b.projection == "project") and b.projection or "project"
 end
 
 -- The input's turn and lens a clip starts with, and the horizon: a project's own, or the source's
@@ -716,8 +728,27 @@ local function time_offset()
     return nil
 end
 
+-- A moment's end in its clip, nil: not a moment. The GPU path reads its part's motion data alone (gpu_table)
+local function moment_end()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and ws.moment and type(ws.offset) == "number" and type(ws.length) == "number" then
+        return ws.offset + ws.length
+    end
+    return nil
+end
+
 -- What the filter does with the lens and the motion (vs-gyroflow's LensMode, further down), nil: no filter
 local filter_lens
+
+-- The output projection the filter is given (vs-gyroflow's Frame: 0-4), nil for none of its own: over a Gyroflow
+-- project, the one picked whatever it is (linear too: in place of a fisheye project's), "project" its own; without one,
+-- linear is the preset's
+local function lens_projection(source)
+    local p = PROJECTIONS[frame.projection]
+    if not p then return nil end
+    if has_project(source) then return p end
+    return frame.projection ~= "linear" and p or nil
+end
 
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
@@ -739,7 +770,7 @@ local function gyroflow_filter(source, enabled)
                                                 alone = project_alone,
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
                                                 aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
-                                                projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil,
+                                                projection = lens_projection(source),
                                                 lens = filter_lens(source) or "stabilized" }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -911,8 +942,9 @@ local function mpv_has_pts()
     return commits ~= nil and commits >= 499
 end
 
--- gpu=auto: on macOS (where it has been tried), yes: anywhere mpv can, no: never
-local function gpu_wanted() return o.gpu == "yes" or (o.gpu == "auto" and platform.macos) end
+-- gpu=auto and yes: wherever mpv can (macOS, Windows and Linux: tried on each, Windows on Anton's PC, Linux on the
+-- NAS, 2026-11), no: never. An mpv without the PTS (a distribution's 0.41) keeps VapourSynth (mpv_has_pts)
+local function gpu_wanted() return o.gpu ~= "no" end
 
 local function gpu_eligible(source)
     if not gpu_wanted() or not file_exists(GPU_TABLE) or not mpv_has_pts() then return false end
@@ -1094,8 +1126,15 @@ end
 -- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
 local trans_rev = 0
 
+-- The shader applied (further down): the whole clip's table, once it's there, in place of its first seconds'
+local gpu_apply
+
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
+    -- A clip without a project: its motion data from the NAS took seconds (20 s for a 1.5 GB clip, cold), so the
+    -- table starts from a stretch of it, as the filter's path does (motion.rs): a moment's part (all it plays), or the
+    -- seconds it starts playing at, the reply "partial", the whole clip's table asked for after (below)
+    if not has_project(source) then ud.moment_end = moment_end() end
     -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
     -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
     ud.gpu_denoise = still.enabled()
@@ -1114,20 +1153,52 @@ local function gpu_table(source, done)
         mp.add_timeout(0, function() done(reply) end)
         return
     end
-    gpu_count = gpu_count + 1
-    local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
-    local t = mp.get_time()
-    local args = { GPU_TABLE, "--player", utils.format_json(ud), out }
-    if gpu_server_running then
-        table.insert(args, "--server")
-        table.insert(args, GPU_SERVER)
+    local function ask(req, then_)
+        gpu_count = gpu_count + 1
+        local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
+        local t = mp.get_time()
+        local args = { GPU_TABLE, "--player", utils.format_json(req), out }
+        if gpu_server_running then
+            table.insert(args, "--server")
+            table.insert(args, GPU_SERVER)
+        end
+        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
+            local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
+            if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
+            reply.ms = math.floor((mp.get_time() - t) * 1000)
+            reply.denoise = ud.gpu_denoise
+            reply.translation = reply.translation == true
+            then_(reply)
+        end)
     end
-    mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
-        local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
-        if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
-        reply.ms = math.floor((mp.get_time() - t) * 1000)
-        reply.denoise = ud.gpu_denoise
-        reply.translation = reply.translation == true
+    -- From where it plays now (0 as it opens), not kept by it: the whole clip's table is the same
+    if not has_project(source) and not ud.moment_end then
+        local req = {}
+        for k, v in pairs(ud) do req[k] = v end
+        req.start = (mp.get_property_number("time-pos") or 0) + (ud.time_offset or 0)
+        return ask(req, function(reply)
+            if not reply.partial then
+                if reply.shader then gpu_remember(key, reply) end
+                return done(reply)
+            end
+            done(reply)
+            -- The whole clip's, once its motion data is all read (the table server reads it meanwhile), in place of
+            -- the stretch's: unless something else took its place
+            local first = reply.shader
+            local whole = {}
+            for k, v in pairs(ud) do whole[k] = v end
+            whole.full = true
+            ask(whole, function(full)
+                if not full.shader then return mp.msg.info("the whole clip's motion data: " .. tostring(full.error or full.unsupported)) end
+                gpu_remember(key, full)
+                if gpu and gpu.shader == first and current_source == source then
+                    gpu_apply(full)
+                    mp.msg.info(string.format("the whole clip's motion data in %d ms", full.ms or 0))
+                end
+            end)
+        end)
+    end
+    ask(ud, function(reply)
         if reply.shader then gpu_remember(key, reply) end
         done(reply)
     end)
@@ -1170,7 +1241,7 @@ local function gpu_render_scale()
     mp.set_property_native("glsl-shader-opts", opts)
 end
 
-local function gpu_apply(reply)
+gpu_apply = function(reply)
     -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
     local shown = dn_sync.shown()
     gpu_set_shader(gpu and gpu.shader, reply.shader, GRID_MB + (reply.denoise and DENOISE_MB or 0))
@@ -1307,21 +1378,26 @@ local function add_filter(source, done)
         window_resize = nil
     end
     -- The bundle saved for it, else the session's; then the input's turn and lens. With a Gyroflow project, what it
-    -- has is its own: the horizon, frame and projection. Not the view: saved for the clip it plays so (on, wider: the
-    -- project's zoom left out, off: the project not used), with none saved the project as it is
+    -- has is its own: the horizon and frame. Not the view: saved for the clip it plays so (on, wider: the project's
+    -- zoom left out, off: the project not used), with none saved the project as it is; nor the output's lens (as
+    -- recorded, or a projection in place of the project's), with none saved the project's
     local saved = fixed()
     local off = take(saved)
     clip_settings(source)
     if has_project(source) then
         if type(saved) ~= "table" or not saved.view then view, off = "normal", false end
-        horizon, lens_mode = nil, "corrected"
-        frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
+        horizon = nil
+        over_project(saved)
+        frame.aspect, frame.orientation, frame.rotation = "original", "as-is", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
         local st, out = type(j.stabilization) == "table" and j.stabilization or {}, type(j.output) == "table" and j.output or {}
         source.info = { horizon = tonumber(st.horizon_lock_amount) or 0, width = tonumber(out.output_width), height = tonumber(out.output_height),
                         projection = type(st.output_projection) == "string" and st.output_projection or nil }
     end
+    -- Nothing stabilizes it (no motion data: its lens alone could be corrected): as recorded unless saved for it so
+    -- (Anton, 2026-11-11: such a clip is the camera's own picture, a stabilized one's often; a corrected lens is a choice)
+    if source.kind == "lens" and not (type(saved) == "table" and saved.lens == "corrected") then lens_mode = "as-recorded" end
     stab_off = off
     write_edge_control()
 
@@ -1862,8 +1938,8 @@ local function show(v)
     mp.osd_message("Gyroflow: " .. view_label(v) .. (filter_lens() == "only" and ", the lens corrected" or ""), 1.5)
 end
 
--- The lens corrected or as recorded (the transform's, apart from the stabilization); over a Gyroflow project, for
--- viewing only
+-- The lens corrected or as recorded (the transform's, apart from the stabilization); over a Gyroflow project too, saved
+-- with the clip, and not the session's then
 local function set_lens(v)
     if v == "toggle" then v = lens_mode == "corrected" and "as-recorded" or "corrected" end
     if v ~= "corrected" and v ~= "as-recorded" then return end
@@ -1916,7 +1992,7 @@ local ROTATION_LABELS = { [0] = "not turned", [90] = "turned 90° right", [180] 
 
 -- The frame turned and cut to an aspect, for this clip: set up again where it's stabilized (its output size changes)
 local PROJECTION_LABELS = { linear = "linear lens", stereographic = "stereographic fisheye", equidistant = "equidistant fisheye",
-                            equisolid = "equisolid fisheye", orthographic = "orthographic fisheye" }
+                            equisolid = "equisolid fisheye", orthographic = "orthographic fisheye", project = "the project's lens" }
 local ORIENTATION_LABELS = { ["as-is"] = "as the source is", landscape = "landscape", portrait = "portrait" }
 local function set_frame(aspect, rotation, projection, orientation)
     projection = projection or frame.projection
@@ -1943,10 +2019,32 @@ local function project_owns(what)
     return true
 end
 
-mp.register_script_message("projection", function(p)
-    if not PROJECTIONS[p] or project_owns("the projection") then return end
+-- The output's projection; over a Gyroflow project too, for viewing and saved with the clip ("project": the project's
+-- own), and not the session's then
+local function set_projection(p)
+    local project = has_project(current_source)
+    if not (PROJECTIONS[p] or (p == "project" and project)) then return end
     set_frame(frame.aspect, frame.rotation, p)
-    sticks("projection", p)
+    if not project then sticks("projection", p) end
+    publish()
+end
+mp.register_script_message("projection", set_projection)
+
+-- The Lens drop-down's pick (the side panel's): as-recorded, or corrected in a projection (linear, stereographic,
+-- equidistant, equisolid, orthographic; "project": a Gyroflow project's own), both changed at once
+mp.register_script_message("lens", function(k)
+    if k == "as-recorded" or k == "corrected" then return set_lens(k) end
+    local project = has_project(current_source)
+    if not (PROJECTIONS[k] or (k == "project" and project)) then return end
+    if lens_mode == "corrected" or not current_source then
+        if lens_mode ~= "corrected" then set_lens("corrected") end
+        return set_projection(k)
+    end
+    -- From as recorded: the filter set up once, for both
+    lens_mode, frame.projection = "corrected", k
+    if not project then sticks("lens", "corrected"); sticks("projection", k) end
+    with_pause("Gyroflow: the lens corrected, " .. PROJECTION_LABELS[k] .. "…", function() place_filters(filtering()) end)
+    mpv_frame()
     publish()
 end)
 
@@ -2050,8 +2148,9 @@ mp.register_script_message("underwater", function(value)
     if UNDERWATER_LABELS[value] then set_underwater(value) end
 end)
 
--- Above water <-> what it was (under water, as the camera says, or as the project says)
-mp.add_key_binding("Ctrl+u", "lens", function()
+-- Above water <-> what it was (under water, as the camera says, or as the project says). Not named "lens": a key
+-- binding's name is a script message too (mpv's defaults.lua), and it took the Lens drop-down's message over
+mp.add_key_binding("Ctrl+u", "above-water", function()
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
@@ -2301,10 +2400,11 @@ mp.register_script_message("apply-view", function(json)
     local off = take(b)
     frame.rotation = turn
     if has_project(current_source) then
-        -- The bundle's view stays (on, wider, off over the project); the rest is the project's
+        -- The bundle's view (on, wider, off over the project) and the output's lens stay; the rest is the project's
         if not b.view then view, off = "normal", false end
-        horizon, lens_mode = nil, "corrected"
-        frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
+        horizon = nil
+        over_project(b)
+        frame.aspect, frame.orientation = "original", "as-is"
     end
     stab_off = off
     write_edge_control()
@@ -2381,6 +2481,8 @@ local function check_project()
     elseif v ~= watch.pending then
         watch.pending = v
     elseif not watch.project then
+        -- Saved from Gyroflow beside the clip: into the project's catalog (the Library's motion data and badge)
+        mp.commandv("script-message-to", "workspace", "catalog-note", project)
         mp.msg.info("found " .. project .. ", loading the video again with it")
         mp.osd_message("Gyroflow: project saved, stabilizing", 3)
         stop_watching()
@@ -2469,7 +2571,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     -- The frame as it plays: the project has it from then on (its output size, rotation and projection)
     if frame.rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(frame.rotation)) end
     if shown_aspect() ~= "original" then table.insert(args, "--aspect"); table.insert(args, shown_aspect()) end
-    if frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
+    if PROJECTIONS[frame.projection] and frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
     -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
     local ws = workspace_of(path)
     if ws and ws.moment and ws.moment["in"] and ws.snap then
@@ -2481,6 +2583,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             mp.msg.info("wrote " .. project)
+            mp.commandv("script-message-to", "workspace", "catalog-note", project)
             edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")

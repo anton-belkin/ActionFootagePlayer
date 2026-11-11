@@ -94,6 +94,32 @@ pub struct PlayerClip {
     pub fps: f64,
     pub frame_count: usize,
     pub frame_offset_us: i64,
+    /// The stretch of the clip whose motion data it has (s into the clip), None: all of it. A clip without a project
+    /// opens with the seconds it starts playing at, or a moment's part (motion_range): from a NAS its whole motion
+    /// data took 20 s for a 1.5 GB clip, the stretch ~1-2 s
+    pub covers: Option<(f64, f64)>,
+}
+
+/// The motion data read for the first table, before where it starts playing (the smoothing's start: motion.rs's
+/// WARM_UP_S, with room) and after (HEAD_S: the rest comes while those play, read gently, 2.5 GB from the NAS in
+/// ~17 s; past HEAD_S until then the frames hold its last correction; a moment's part: AFTER_S past its end, the
+/// player's look-ahead of 4 s with room). From a NAS a second of 4K60 is ~12 MB to read through (prefetch.rs): a
+/// clip's first 12 s took 0.6 s, cold
+pub const BEFORE_S: f64 = 4.0;
+pub const HEAD_S: f64 = 20.0;
+pub const AFTER_S: f64 = 6.0;
+
+/// The stretch of a clip without a project whose motion data the player's JSON asks for first: a moment's part
+/// (`time_offset` to `moment_end`), or the seconds from `start` (a clip that streams: the rest read after, "full");
+/// None: all of it (`full`, or neither). And whether that's all it will want (a moment's)
+pub fn motion_range(j: &serde_json::Value) -> (Option<(f64, f64)>, bool) {
+    let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
+    if j.get("full").and_then(|v| v.as_bool()).unwrap_or(false) { return (None, true); }
+    if let (Some(a), Some(b)) = (f("time_offset"), f("moment_end")) {
+        if b > a { return (Some(((a - BEFORE_S).max(0.0), b + AFTER_S)), true); }
+    }
+    if let Some(start) = f("start") { return (Some(((start - BEFORE_S).max(0.0), start.max(0.0) + HEAD_S)), false); }
+    (None, true)
 }
 
 /// The JSON's keys that change what PlayerClip::load computes; the rest (the view, the edges, the color fringes, the
@@ -116,11 +142,16 @@ impl PlayerClip {
         let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
         let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
         let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
-        // All of a clip's own motion data before it plays (lookahead 0): the table is written once
-        let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens)?;
+        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch it starts with
+        // (motion_range); a project has its own
+        let range = if crate::is_project_file(project) { None } else { motion_range(j).0 };
+        let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens, range)?;
         let sp = p.stab.params.read();
         let video = if crate::is_project_file(project) { gyroflow_core::filesystem::url_to_path(&p.stab.input_file.read().url) } else { project.to_string() };
-        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us })
+        // All of the clip after all: a stretch past both its ends
+        let duration = sp.frame_count as f64 / sp.fps.max(1.0);
+        let covers = range.filter(|(a, b)| *a > 0.0 || *b < duration);
+        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers })
     }
 
     /// The index of the view the JSON asks for (wide, level) in `views`
@@ -144,7 +175,19 @@ impl PlayerClip {
         let key = (view, opts.chromatic, opts.knots);
         if opts.range.is_some() { return Table::build(clip, opts).map(std::sync::Arc::new); }
         if let Some(t) = self.tables.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()) { return Ok(t); }
-        let t = std::sync::Arc::new(Table::build(clip, opts)?);
+        // A stretch's motion data: its frames' blocks alone (~0.06 ms a frame, the whole of a 7-minute clip 1.5 s), the
+        // frames before and after it as its first and last (as gyroflow-core holds the nearest correction it has)
+        let t = std::sync::Arc::new(match self.covers {
+            Some((a, b)) => {
+                let last = clip.frame_count.max(1) - 1;
+                let first = ((a * clip.fps).floor().max(0.0) as usize).min(last);
+                let range = (first, ((b * clip.fps).ceil().max(0.0) as usize).clamp(first, last));
+                let mut t = Table::build(clip, &Options { range: Some(range), ..*opts })?;
+                t.hold_outside(range, clip.frame_count.max(1));
+                t
+            }
+            None => Table::build(clip, opts)?,
+        });
         let mut tables = self.tables.lock().unwrap();
         tables.push((key, t.clone()));
         if tables.len() > 4 { tables.remove(0); }
@@ -155,6 +198,15 @@ impl PlayerClip {
     /// shift over the output's focal length
     pub fn translation(&self) -> Option<Vec<[f32; 2]>> {
         crate::translation::cached(&self.video).filter(|v| v.len() == self.frame_count)
+    }
+
+    /// Whether it has the motion data the JSON asks for (motion_range): all of it, or the stretch
+    pub fn has(&self, j: &serde_json::Value) -> bool {
+        match (self.covers, motion_range(j).0) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some((a, b)), Some((c, d))) => a <= c.max(0.0) && b >= d.min(self.frame_count as f64 / self.fps.max(1.0)),
+        }
     }
 
     /// The clip in the view the JSON asks for (wide, level)
@@ -169,7 +221,7 @@ impl Clip {
     /// the plugin does for a clip with a project, edges off. `readout_ms`: the rolling shutter's readout time instead
     /// of the project's
     pub fn load(project: &str, readout_ms: Option<f64>) -> Result<Clip, String> {
-        let (stab, _, _) = crate::load_manager(project, None, None, Underwater::Project, 0.0, false)?;
+        let (stab, _, _) = crate::load_manager(project, None, None, Underwater::Project, 0.0, false, None)?;
         if let Some(ms) = readout_ms { stab.params.write().frame_readout_time = ms; }
         stab.invalidate_smoothing();
         stab.recompute_blocking();
@@ -304,7 +356,8 @@ impl Table {
             texels
         };
         let list: Vec<usize> = (first..=last.min(frames - 1)).collect();
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
+        // Gently (the whole clip's table while it plays, motion::gently): 2, the player's decoding and rendering first
+        let threads = if crate::motion::is_gentle() { 2 } else { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8) };
         let chunk = list.len().div_ceil(threads).max(1);
         let blocks: Vec<(usize, Vec<[f32; 4]>)> = std::thread::scope(|scope| {
             let handles: Vec<_> = list.chunks(chunk).map(|part| scope.spawn(|| part.iter().map(|&f| (f, block_of(f))).collect::<Vec<_>>())).collect();
@@ -317,6 +370,20 @@ impl Table {
         // Frame 0's block says how many frames there are, whatever the range
         data[9 * 4 + 3] = frames as f32;
         Ok(Table { width, height, data, block, cols, per_frame })
+    }
+
+    /// The frames before `range` as its first, after it as its last (their blocks copied)
+    pub fn hold_outside(&mut self, range: (usize, usize), frames: usize) {
+        let at = |frame: usize| ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        let len = self.block * 4;
+        let (first, last) = (at(range.0), at(range.1));
+        for frame in (0..range.0).chain(range.1 + 1..frames) {
+            let from = if frame < range.0 { first } else { last };
+            let to = at(frame);
+            self.data.copy_within(from..from + len, to);
+        }
+        // Frame 0's block says how many frames there are
+        self.data[9 * 4 + 3] = frames as f32;
     }
 
     pub fn hex(&self) -> String {
@@ -333,10 +400,10 @@ impl Table {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET {:.6}\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32, opts.time_offset,
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
         (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
@@ -345,7 +412,9 @@ pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
 /// Windows runners) writes it with \r\n, and the section markers below are found by their \n
 fn template() -> &'static str {
     static LF: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    LF.get_or_init(|| TEMPLATE.replace("\r\n", "\n"))
+    // AFP_WARP_TEMPLATE: another warp.glsl in place of the built-in one, for work on the shader without a rebuild
+    LF.get_or_init(|| std::env::var_os("AFP_WARP_TEMPLATE").and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_else(|| TEMPLATE.to_string()).replace("\r\n", "\n"))
 }
 
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
@@ -478,21 +547,34 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
     };
     let warp = format!("{trans_head}{warp}");
     if !opts.denoise { return warp; }
+    format!("{warp}\n{}", denoise_passes(clip, opts, &defs, &[rb_bind, sphere_bind], DN_SLOT))
+}
+
+/// The denoise's ring slot in the player: the largest output it denoises (4K)
+const DN_SLOT: (usize, usize) = (3840, 2160);
+
+/// The temporal denoise's passes (after the warp, at MAIN), with the warp's defines and what its passes bind beside the
+/// table (the grid's textures); `slot`, the size of each frame's place in the ring: the largest output it denoises
+fn denoise_passes(clip: &Clip, opts: &Options, defs: &str, binds: &[&str], slot: (usize, usize)) -> String {
     // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
-    let common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }, rb_bind, sphere_bind];
-    let with = |mut v: Vec<&str>| { let at = 2.min(v.len()); for (k, c) in common.iter().enumerate() { v.insert(at + k, c); } d(&v) };
-    // The shown frame and DN_RADIUS frames on each side of it: a ring of 2 x DN_RADIUS + 1 slots, two across (a
-    // texture's height is at most 16384), each the size of the largest output it takes
+    let mut common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }];
+    common.extend_from_slice(binds);
+    let with = |v: Vec<&str>| -> Vec<String> {
+        let mut v: Vec<String> = v.into_iter().map(String::from).collect();
+        let at = 2.min(v.len());
+        for (k, c) in common.iter().enumerate() { v.insert(at + k, c.to_string()); }
+        v.into_iter().filter(|s| !s.is_empty()).collect()
+    };
+    // The shown frame and DN_RADIUS frames on each side of it: a ring of 2 x DN_RADIUS + 1 slots, two across for 4K
+    // (a texture's height is at most 16384), each the size of the largest output it takes
     const RADIUS: usize = 5;
     const RING: usize = 2 * RADIUS + 1;
-    const COLS: usize = 2;
-    const SLOT: (usize, usize) = (3840, 2160);
-    let rows = RING.div_ceil(COLS);
-    let dn_defs = format!("{defs}\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {COLS}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
+    let (cols, rows) = dn_layout(slot, MAX_TEX).unwrap_or((2, RING.div_ceil(2)));
+    let dn_defs = format!("{defs}\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {cols}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", slot.0, slot.1);
     let dn = |extra: &str, name: &str| format!("{extra}\n{}", pass_body("dn_common")) + pass_body(name);
     let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[8192]\n//!VAR float gdn_sigma[32]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR vec4 gdn_cam[{RING}]\n//!VAR float gdn_zoom[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR vec2 gdn_size\n//!VAR int gdn_head\n//!VAR int gdn_epoch\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
     let texture = |name: &str, w: usize, h: usize, fmt: &str| format!("//!TEXTURE {name}\n//!SIZE {w} {h}\n//!FORMAT {fmt}\n//!STORAGE\n\n");
-    let nb = (SLOT.0.div_ceil(32) + 1, SLOT.1.div_ceil(32) + 1);
+    let nb = (slot.0.div_ceil(32) + 1, slot.1.div_ceil(32) + 1);
     let ring = ["//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN"];
     let pass = |head: &[&str], tail: &[&str]| with(head.iter().chain(ring.iter()).chain(tail.iter()).copied().collect());
     // After the frames' average: the guided filter's quarter-size statistics, its a and b, their means, and the filter
@@ -513,8 +595,8 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
         hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_GF_MY", "//!BIND GDN_GF_MC"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise filter and specks"]),
             &dn_defs, "", &dn("#define DN_GF_APPLY", "dn_clean")),
     ].join("\n");
-    format!("{warp}\n{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{clean}",
-        texture("GDN_FRAMES", SLOT.0 * COLS, SLOT.1 * rows, FRAME_FORMAT), texture("GDN_QUART", SLOT.0 / 4 * COLS, SLOT.1 / 4 * rows, "rgba16f"),
+    format!("{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{clean}",
+        texture("GDN_FRAMES", slot.0 * cols, slot.1 * rows, FRAME_FORMAT), texture("GDN_QUART", slot.0 / 4 * cols, slot.1 / 4 * rows, "rgba16f"),
         texture("GDN_VEC", nb.0, nb.1 * RING, "rgba32f"),
         hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!SAVE GDN_CUR4", "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise luma"]), &dn_defs, "", pass_body("dn_luma")),
@@ -530,7 +612,26 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
             &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
         hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED"], &["//!SAVE GDN_STATE_DONE", "//!WIDTH 16", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
             "//!COMPUTE 16 1", "//!DESC gyroflow denoise state"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STATE", "dn_state")))
+}
 
+/// The temporal denoise alone, as a shader file of its own for a frame the warp didn't render (gyroflow-export: the
+/// plugin's engine stabilizes it, user_shader.rs runs this on it): the file's head (the parameters, the table) and the
+/// denoise's passes at MAIN, its ring made for `size`. The table's data is left out (`@TABLE_HEX@` empty): the caller
+/// hands it over as it is (Table::data). The frame's size is the shader's RT, which the caller defines. None where the
+/// ring of that size doesn't fit a texture
+pub fn denoise_shader(clip: &Clip, opts: &Options, table: &Table, size: (usize, usize)) -> Option<String> {
+    let slot = (size.0.div_ceil(4) * 4, size.1.div_ceil(4) * 4);
+    dn_layout(slot, MAX_TEX)?;
+    let opts = Options { mode: Mode::Exact, denoise: true, ..*opts };
+    let passes = denoise_passes(clip, &opts, &defines(clip, &opts, table), &[], slot);
+    Some(fill_head(table, "", &passes, opts.time_offset))
+}
+
+/// How the ring's slots of `slot` pixels go into one texture of at most `max` a side: (across, down), the fewest
+/// across that fit (two for 4K, as the player has it); None: it doesn't fit
+pub fn dn_layout(slot: (usize, usize), max: usize) -> Option<(usize, usize)> {
+    const RING: usize = 11;
+    (2..=RING).chain(std::iter::once(1)).map(|c| (c, RING.div_ceil(c))).find(|&(c, r)| c * slot.0 <= max && r * slot.1 <= max)
 }
 
 impl Options {
@@ -542,9 +643,15 @@ pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String { shader_wit
 
 /// The same with the translation compensation kept for the clip (translation.rs)
 pub fn shader_with(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 2]]>) -> String {
+    fill_head(table, &table.hex(), &passes(clip, opts, table, trans), opts.time_offset)
+}
+
+/// warp.glsl's head with the table's size and data, the passes and the moment's start (`time_offset`, a parameter:
+/// the code stays the same from one moment to the next, for mpv's pipeline cache)
+fn fill_head(table: &Table, hex: &str, passes: &str, time_offset: f64) -> String {
     let (head, _, _) = sections();
     head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table, trans))
+        .replace("@TIME_OFFSET@", &format!("{time_offset:.6}")).replace("@TABLE_HEX@", hex).replace("@PASSES@", passes)
 }
 
 /// The GPU path's 360 mode: a 360 camera's sphere shader (warp.glsl's sphere360 and stamp360 passes) for its lens
@@ -606,10 +713,7 @@ pub fn sphere_shader(prep: &crate::sphere360::Prepared360, time_offset: f64) -> 
     let passes = format!("//!TEXTURE GYROFLOW_WEIGHTS\n//!SIZE {ww} {wh}\n//!FORMAT rgba8\n//!FILTER LINEAR\n{hex}\n\n{}",
         hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_WEIGHTS", &format!("//!WIDTH {sw}"), &format!("//!HEIGHT {sh}"),
                             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)\n#define RT target_size", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
-    let (head, _, _) = sections();
-    let text = head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes);
-    Ok((text, (sw, sh)))
+    Ok((fill_head(&table, &table.hex(), &passes, time_offset), (sw, sh)))
 }
 
 /// Each row's 3x3 (row-major, `M·d`) as a quaternion (x, y, z, w), signs kept continuous along the rows
@@ -679,6 +783,23 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn frames_outside_a_stretch_hold_its_ends() {
+        // 7 frames, 2 a row, blocks of 10 texels (PARAM_TEXELS + 0 knots past the first): frames 2-4 built
+        let (cols, block) = (2usize, 10usize);
+        let width = cols * block;
+        let mut t = super::Table { width, height: 4, data: vec![0f32; width * 4 * 4], block, cols, per_frame: 0 };
+        let at = |f: usize| ((f / cols) * width + (f % cols) * block) * 4;
+        for f in 2..=4 { let a = at(f); t.data[a..a + block * 4].fill(f as f32 + 1.0); }
+        t.hold_outside((2, 4), 7);
+        for f in 0..7 {
+            let want = if f < 2 { 3.0 } else if f > 4 { 5.0 } else { f as f32 + 1.0 };
+            let a = at(f);
+            assert!(t.data[a..a + block * 4].iter().enumerate().all(|(i, v)| *v == want || (f == 0 && i == 9 * 4 + 3)), "frame {f}");
+        }
+        assert_eq!(t.data[9 * 4 + 3], 7.0);
+    }
+
     // warp.glsl against gyroflow-core's CPU kernel: the shader's passes (through naga's GLSL front end, on this
     // machine's GPU, no window) write each output pixel's source coordinate, compared with
     // Stabilization::undistort_coord at every pixel. On a real clip: AFP_GPU_CLIP=<project.gyroflow> cargo test
@@ -867,6 +988,20 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let (head2, common2, passes2) = split_sections(&normalized);
         assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
         assert!(!pass_body(passes[0].0).is_empty());
+    }
+
+    #[test]
+    fn moments_differ_only_in_a_parameter() {
+        // Two moments of one clip: the same code (mpv's pipeline cache hits), only the parameter's value differs
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let (a, b) = (fill_head(&t, "", "PASSES", 2.909), fill_head(&t, "", "PASSES", 38.887));
+        let diff: Vec<(&str, &str)> = a.lines().zip(b.lines()).filter(|(x, y)| x != y).collect();
+        assert_eq!(diff, vec![("2.909000", "38.887000")]);
+        assert!(a.contains("//!PARAM gyroflow_time_offset\n//!TYPE DYNAMIC float\n2.909000\n"));
+        for mark in ["@TABLE_W@", "@TABLE_H@", "@TABLE_HEX@", "@TIME_OFFSET@", "@PASSES@"] { assert!(!a.contains(mark), "{mark} left"); }
+        // Every block's data as libplacebo reads it (a comment between blocks broke a PARAM's value once)
+        let params = crate::user_shader::param_values(&a).expect("the head parses");
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 2.909)), "{params:?}");
     }
 
     #[test]

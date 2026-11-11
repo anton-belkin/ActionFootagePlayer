@@ -119,6 +119,9 @@ pub fn take_in(root: &Path, other: &Path, chosen: &str, relink: &dyn Fn(&Path, &
     let place = p["place"].as_str().unwrap_or("").to_string();
     let mut problems = Vec::new();
     let mut moved = 0;
+    // Every file and folder it changes, told to the catalog at the end: the views read it, and on a share the
+    // system's notice comes late or never
+    let mut written: Vec<PathBuf> = Vec::new();
     // Its own folders' files, into this project's under its place, links rewritten
     for sub in OWN {
         let from_top = other.join(sub);
@@ -139,6 +142,8 @@ pub fn take_in(root: &Path, other: &Path, chosen: &str, relink: &dyn Fn(&Path, &
                     if let Err(e) = std::fs::copy(&path, &dest).and_then(|_| std::fs::remove_file(&path)) { problems.push(format!("{}: {e}", path.display())); continue; }
                 }
                 moved += 1;
+                written.push(path.clone());
+                written.push(dest.clone());
                 let lower = dest.to_string_lossy().to_lowercase();
                 if lower.ends_with(".mp4") || lower.ends_with(".mov") {
                     if let Some(mut l) = crate::index::link(&dest) {
@@ -158,7 +163,7 @@ pub fn take_in(root: &Path, other: &Path, chosen: &str, relink: &dyn Fn(&Path, &
         let mut dirs = Vec::new();
         let mut todo = vec![from_top.clone()];
         while let Some(d) = todo.pop() { for e in std::fs::read_dir(&d).into_iter().flatten().flatten() { if e.path().is_dir() { todo.push(e.path()); } } dirs.push(d); }
-        for d in dirs.iter().rev() { let _ = std::fs::remove_file(d.join(".DS_Store")); let _ = std::fs::remove_dir(d); }
+        for d in dirs.iter().rev() { let _ = std::fs::remove_file(d.join(".DS_Store")); if std::fs::remove_dir(d).is_ok() { written.push(d.clone()); } }
     }
     // Its lists, mapped, added to this project's
     let theirs = locations::read_json(&other.join(locations::PROJECT_FILE)).unwrap_or(Value::Null);
@@ -196,8 +201,12 @@ pub fn take_in(root: &Path, other: &Path, chosen: &str, relink: &dyn Fn(&Path, &
     problems.extend(locations::write_pointers(root, &after, &[], &mounts));
     // Its pointer files out, its project file to the Trash
     let their_pointer = locations::pointer_name(other);
-    for l in &landings { if let Some(d) = &l.dir { let _ = std::fs::remove_file(Path::new(d).join(&their_pointer)); } }
+    for l in &landings { if let Some(d) = &l.dir { let f = Path::new(d).join(&their_pointer); if std::fs::remove_file(&f).is_ok() { written.push(f); } } }
     let gone = if trash { to_trash(&other.join(locations::PROJECT_FILE)) } else { "kept".into() };
+    written.push(other.join(locations::PROJECT_FILE));
+    written.push(file.clone());
+    for l in &after { if let Some(d) = &l.dir { written.push(d.join(locations::pointer_name(root))); } }
+    crate::seen::note_now(&written);
     Ok(json!({ "moved": moved, "place": place, "added": added.len(), "project_file": gone, "problems": problems }))
 }
 

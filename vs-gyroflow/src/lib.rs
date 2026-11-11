@@ -20,6 +20,7 @@ pub mod probe;
 pub mod lens_pick;
 pub mod project;
 pub mod gpu_lut;
+pub mod youtube;
 pub mod edges;
 pub mod sphere;
 pub mod smooth;
@@ -40,13 +41,16 @@ pub mod photo;
 pub mod xmp;
 pub mod stamp;
 pub mod rig;
+pub mod rig_masks;
 pub mod nav;
+pub mod geotag;
 pub mod heading;
 pub mod sphere360;
 pub mod view360;
 pub mod export360;
 pub mod reframe;
 pub mod gpu_table;
+pub mod user_shader;
 pub mod translation;
 pub mod optical;
 pub use levels::Level;
@@ -434,7 +438,7 @@ pub struct Engine {
 /// seconds (motion.rs); 0 reads all of it. The motion data as it comes in is returned with it
 /// `lens_only`: the lens alone (LensMode::Only): a video with no motion data is loaded too when it has a lens profile,
 /// and its motion data isn't streamed (nothing is smoothed)
-pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64, lens_only: bool) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
+pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64, lens_only: bool, range: Option<(f64, f64)>) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
     let stab = StabilizationManager::default();
     let url = filesystem::path_to_url(project);
     let mut motion = None;
@@ -453,8 +457,9 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         if let Some(v) = json.pointer_mut("/stabilization/max_zoom_iterations") { *v = iterations.into(); }
         Some(json)
     } else {
-        // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays
-        let (m, size) = motion::Motion::open(project, &url, lookahead).map_err(|e| format!("Can't open {project}: {e}"))?;
+        // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays; or a
+        // stretch of it (`range`, the GPU warp's first table)
+        let (m, size) = motion::Motion::open_range(project, &url, lookahead, range).map_err(|e| format!("Can't open {project}: {e}"))?;
         m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
         // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
         // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
@@ -512,11 +517,11 @@ pub struct Prepared {
     pub wide_fov: Option<f64>,
 }
 
-pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), output_override: Option<(usize, usize)>, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Prepared, String> {
+pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), output_override: Option<(usize, usize)>, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode, range: Option<(f64, f64)>) -> Result<Prepared, String> {
         let t = std::time::Instant::now();
         let lens_only = lens == LensMode::Only;
         let horizon_lock = if lens_only { Some(0.0) } else { horizon_lock };
-        let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead, lens_only)?;
+        let (stab, project_json, motion) = load_manager(project, preset, horizon_lock, underwater, lookahead, lens_only, range)?;
         log::debug!("prepare: loaded in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         match lens {
             LensMode::Only => {
@@ -664,7 +669,7 @@ impl Engine {
     pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov } =
-            prepare(project, preset, fov, horizon_lock, underwater, level, lookahead, input_size, output_override, trim, alone, frame, lens)?;
+            prepare(project, preset, fov, horizon_lock, underwater, level, lookahead, input_size, output_override, trim, alone, frame, lens, None)?;
         // Each frame is uploaded, rendered and read back in blocking calls, so a few workers keep the GPU
         // busy: one uploads while another renders. Each has its own GPU context.
         let plane_size = |(w, h): (usize, usize), p: usize| if p == 0 { (w, h) } else { (w >> subsampling.0, h >> subsampling.1) };

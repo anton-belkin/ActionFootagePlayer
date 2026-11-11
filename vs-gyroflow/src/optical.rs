@@ -21,7 +21,7 @@
 //   stabilized the picture with (GoPro's HyperSmooth, DJI's RockSteady): that motion data is set aside
 //   (ignore_file_motion), since the picture no longer moves as the camera did.
 //
-// The engine is Gyroflow's own command line (the fork's, which has the optical analysis): `gyroflow <clip> --preset
+// The engine is Gyroflow's own command line (1.7.0 or newer, which has the optical analysis): `gyroflow <clip> --preset
 // <p> --export-project 1`, the analysis asked for in the preset's synchronization (a preset's synchronization replaces
 // the command line's, so --optical-correction alone is lost), the project written into a work folder first and moved
 // beside the clip once it's whole.
@@ -118,7 +118,7 @@ pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
@@ -140,7 +140,7 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| format!("not a video Gyroflow reads: {e}"))?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
@@ -297,13 +297,13 @@ pub fn error_of(log: &str) -> Option<String> {
     Some(msg.split("] ").last().unwrap_or(msg).trim().to_string())
 }
 
-/// A project Gyroflow wrote with the analysis in it (the fork's gyro_source.optical_correction); Gyroflow without it
-/// writes the project with nothing measured
+/// A project Gyroflow wrote with the analysis in it (gyro_source.optical_correction); a Gyroflow without it (before
+/// 1.7.0) writes the project with nothing measured
 pub fn check_project(text: &str) -> Result<(), String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("Gyroflow wrote a project that isn't JSON: {e}"))?;
     let measured = v.pointer("/gyro_source/optical_correction").is_some_and(|o| !o.is_null() && o != &json!("") && o != &json!({}));
     if measured { Ok(()) } else {
-        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs the build from github.com/anton-belkin/gyroflow)".into())
+        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs Gyroflow 1.7.0 or newer: github.com/gyroflow/gyroflow/releases)".into())
     }
 }
 
@@ -510,7 +510,7 @@ mod tests {
     fn plays_with_the_project() {
         let Some(project) = std::env::var_os("AFP_OPTICAL_PROJECT") else { return };
         let project = project.to_string_lossy().into_owned();
-        let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false).unwrap();
+        let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false, None).unwrap();
         stab.recompute_blocking();
         let g = stab.gyro.read();
         assert!(g.optical_correction.is_some(), "the measured motion isn't in the player's engine");
@@ -523,5 +523,28 @@ mod tests {
         let removed = (q.iter().zip(&sm).map(|(a, b)| a.angle_to(b).powi(2)).sum::<f64>() / q.len() as f64).sqrt().to_degrees();
         eprintln!("{project}: {} orientations, the camera turned {travel:.1}° along the way, {removed:.2}° rms taken out by smoothing", q.len());
         assert!(travel > 0.1 && removed > 0.01);
+    }
+
+    // #130: a project's optical correction applies on this machine as on the one that measured it. Projects separated
+    // by ':' (';' on Windows): AFP_OPTICAL_APPLIES=<a.gyroflow>:<b.gyroflow> cargo test --release --lib optical_applies -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn optical_applies() {
+        let Some(projects) = std::env::var_os("AFP_OPTICAL_APPLIES") else { return };
+        let mut stale = Vec::new();
+        for project in std::env::split_paths(&projects) {
+            let project = project.to_string_lossy().into_owned();
+            let (stab, _, _) = crate::load_manager(&project, None, None, crate::water::Underwater::Project, 0.0, false, None).unwrap();
+            stab.refresh_optical_correction();
+            let g = stab.gyro.read();
+            let Some(c) = g.optical_correction.as_ref() else { eprintln!("{project}: no optical correction"); continue };
+            // Computed here as there, or only up to the last bits (gyroflow-core's Fingerprint::matches)
+            let (quats, context) = (g.optical_uncorrected.checksum(), g.optical_context.checksum());
+            eprintln!("{project}: enabled {}, applied {} | quats {:016x} measured, {quats:016x} here | context {:016x} measured, {context:016x} here{}",
+                      c.enabled, g.optical_correction_applied, c.quats_checksum, c.context_checksum,
+                      if quats == c.quats_checksum && context == c.context_checksum { "" } else { " (not exactly)" });
+            if c.enabled && !g.optical_correction_applied { stale.push(project); }
+        }
+        assert!(stale.is_empty(), "not applied: {stale:?}");
     }
 }

@@ -91,6 +91,14 @@ expect("recording alone: follows", s.read(clip).view360.recording.follows, "trav
 s.update(clip, function(d) d.view360 = nil end)
 expect("recording gone: removed", exists(s.path(clip)), false)
 
+-- A location the Library set (docs/geolocation.md): the last mark going keeps the file, and the location in it
+s.update(clip, function(d) d.location = { lat = 27.73, lon = 34.25, source = "photos" }; d.marks = { { t = 4 } } end)
+s.update(clip, function(d) d.marks = nil end)
+expect("location alone: kept", exists(s.path(clip)), true)
+expect("location kept", (s.read(clip)).location.lon, 34.25)
+s.update(clip, function(d) d.location = nil end)
+expect("location gone: removed", exists(s.path(clip)), false)
+
 -- Someone else's file of that name: left alone
 write(s.path(clip), serialize({ format = "something-else" }))
 local d2, f2, problem = s.read(clip)

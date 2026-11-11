@@ -31,6 +31,12 @@
 --
 -- Options (~~/script-opts/agent.conf):
 --   socket=   the IPC socket (or pipe) when mpv has none; empty: as above
+--
+-- Action Footage Library's tasks run the player with no window (AFP_BATCH, the workspace plugin's batch mode): there
+-- the plugin does nothing. Its socket and session.json would take those of a player window that's open, and on quit
+-- remove them
+
+if (os.getenv("AFP_BATCH") or "") ~= "" then return end
 
 local mp = require 'mp'
 local options = require 'mp.options'

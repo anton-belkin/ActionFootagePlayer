@@ -27,13 +27,15 @@ pub enum Error {
     Gap(String),
     /// No snapshot could be read whole
     Damaged(String),
+    /// The project is of a newer version than this program knows (project::VERSION): nothing read or written
+    TooNew(String),
 }
 
 impl From<io::Error> for Error { fn from(e: io::Error) -> Self { Error::Io(e) } }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self { Error::Io(e) => write!(f, "{e}"), Error::Gap(s) => write!(f, "gap: {s}"), Error::Damaged(s) => write!(f, "damaged: {s}") }
+        match self { Error::Io(e) => write!(f, "{e}"), Error::Gap(s) => write!(f, "gap: {s}"), Error::Damaged(s) => write!(f, "damaged: {s}"), Error::TooNew(s) => write!(f, "{s}") }
     }
 }
 
@@ -96,6 +98,15 @@ pub struct Catalog {
 fn not_found(e: &io::Error) -> bool { e.kind() == io::ErrorKind::NotFound }
 
 impl Catalog {
+    /// Err when the project is of a newer version (project::VERSION): an older program would write records its way,
+    /// without what it doesn't know, over the newer ones'
+    fn usable(&self) -> Result<(), Error> {
+        let project = self.dir.parent().and_then(Path::parent).unwrap_or(&self.dir);
+        match crate::project::too_new(project) { Some(e) => Err(Error::TooNew(e)), None => Ok(()) }
+    }
+}
+
+impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
@@ -145,6 +156,7 @@ impl Catalog {
 
     /// Read: the newest snapshot that reads whole (its parts that are wanted), then the journals after it
     pub fn load(&mut self, want: &Want) -> Result<Loaded, Error> {
+        self.usable()?;
         let mut info = Loaded::default();
         let names = self.snapshots()?;
         for name in &names {
@@ -329,6 +341,7 @@ impl Catalog {
     /// Records appended to this computer's journal as one line, then into what's known here. Err: not written
     /// (perhaps written: the next line won't be in the same segment, and a line read twice counts once)
     pub fn note(&mut self, entries: Vec<(String, String, Option<File>)>) -> Result<(), Error> {
+        self.usable()?;
         if entries.is_empty() { return Ok(()); }
         // One record a key in a line, the last said (a line's records all have its version)
         let mut seen = HashSet::new();
@@ -408,6 +421,7 @@ impl Catalog {
 
     /// A new snapshot of everything read (the whole catalog must have been loaded)
     pub fn compact(&mut self) -> Result<String, Error> {
+        self.usable()?;
         if self.partial { return Err(Error::Damaged("only part of the catalog is loaded".into())); }
         self.refresh()?;
         // Gone records every computer has written past can't be outdone by a line still to come: left out
@@ -462,6 +476,7 @@ impl Catalog {
     /// computer's segments those have read. Each only once seen at the clean-up before (a computer folding a snapshot
     /// meanwhile has its parts written before its list, and a reader on an older list is told to read again)
     pub fn clean(&mut self) -> Result<usize, Error> {
+        self.usable()?;
         // What's to go, and since when this computer has seen it so (its own clock, against itself only): it goes once
         // it has been so for `grace` — longer than another computer's listing can be behind (macOS: ~30 s), longer
         // than a snapshot takes to write its parts and then its list

@@ -38,8 +38,10 @@
 // one (lens_pick::user_file), when there is one, and "curated_error" when it couldn't be read (it's left out then).
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
-// (as --lens), "movie" {duration, created (unix s), width, height, turn} and "marks" {camera, times}: the highlights
-// the camera marked (markers.rs, as the highlights plugin reads them), or null. Kept per file as the plain answer is.
+// (as --lens), "movie" {duration, created (unix s), width, height, turn}, "marks" {camera, times}: the highlights
+// the camera marked (markers.rs, as the highlights plugin reads them), or null, "clock" {utc, basis, zone_min, why}:
+// the start in UTC as far as the camera says, and "gps" {lat, lon, alt, t}: the camera's own first fix, or null
+// (geotag.rs). Kept per file as the plain answer is.
 //
 // `gyroflow-probe --reframe <video>`: the view recorded in the player as you looked around (the clip's .afp.json,
 // view360.recording), tidied as its "tidy" says (reframe.rs): {"follows", "parts", "tidy", "hold"} as the player keeps a
@@ -50,7 +52,7 @@ use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, came
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let m = gyroflow_core::util::get_video_metadata(&mut file, size, &gyroflow_core::filesystem::path_to_url(path)).ok()?;
     Some((m.width, m.height, m.fps))
 }
@@ -135,6 +137,13 @@ fn main() {
             out["camera"] = camera_and_lens(&path).map(|(c, _)| c).unwrap_or_default().into();
         }
         out["movie"] = serde_json::to_value(vs_gyroflow::markers::movie(&path)).unwrap_or_default();
+        // When it was recorded, in UTC as far as the camera says, and where, if the camera knew (geotag.rs)
+        let created = out["movie"]["created"].as_i64();
+        let (clock, gps) = vs_gyroflow::geotag::read(std::path::Path::new(&path), out["camera"].as_str().unwrap_or(""), created);
+        out["clock"] = serde_json::to_value(clock).unwrap_or_default();
+        out["gps"] = serde_json::to_value(gps).unwrap_or_default();
+        // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed (the Library asks again for older answers)
+        out["geotag"] = 3.into();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
         println!("{out}");
@@ -176,6 +185,11 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
             if let Some((w, h, fps)) = video_size(&path) {
                 out["width"] = w.into(); out["height"] = h.into(); out["fps"] = fps.into();
             }
+        }
+        // A file telemetry-parser couldn't read, of a camera told from the file (a HERO3, an old DJI drone): it
+        // recorded no motion data, which says more than the parser's "Unsupported file format"
+        if out["reason"].as_str() == Some("Unsupported file format") && !camera.is_empty() {
+            out["reason"] = format!("{camera}: no motion data").into();
         }
         out["camera"] = camera.into();
         out["lens"] = lens.into();

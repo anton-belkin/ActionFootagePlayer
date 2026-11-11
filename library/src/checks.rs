@@ -336,8 +336,11 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
             all.into_iter().map(|(_, r)| r).collect()
         })
     };
+    // What changed, noted to the catalog at the end (a link written in place leaves its folder's time as it was: its
+    // next look wouldn't see it)
+    let mut written: Vec<PathBuf> = Vec::new();
     for ((file, _, from, to), r) in writes.iter().zip(results) {
-        match r { Ok(()) => renames.push((from.clone(), to.clone())), Err(e) => problems.push(format!("{}: {e}", file.display())) }
+        match r { Ok(()) => { renames.push((from.clone(), to.clone())); written.push(file.clone()); } Err(e) => problems.push(format!("{}: {e}", file.display())) }
     }
     for f in found {
         if f["found"]["tree"].as_str().is_none() { continue; }
@@ -352,11 +355,13 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
                 if std::fs::rename(&own, &dest).is_err() {
                     if let Err(e) = std::fs::copy(&own, &dest).and_then(|_| std::fs::remove_file(&own)) { problems.push(format!("{}: {e}", own.display())); continue; }
                 }
+                written.push(own.clone());
+                written.push(dest.clone());
                 // Its Gyroflow project beside it goes along
                 for g in [own.to_string_lossy().trim_end_matches(".afp.json").trim_end_matches(".marks.json").to_string() + ".gyroflow"] {
                     let g = PathBuf::from(g);
                     let gd = clip.with_extension("gyroflow");
-                    if g.is_file() && !gd.exists() { let _ = std::fs::rename(&g, &gd); }
+                    if g.is_file() && !gd.exists() && std::fs::rename(&g, &gd).is_ok() { written.push(g); written.push(gd); }
                 }
             }
             _ => {}
@@ -383,6 +388,7 @@ pub fn apply(root: &Path, found: &[Value], relink: &(dyn Fn(&Path, &str) -> Resu
             }
         }
     }
+    crate::seen::note_now(&written);
     problems
 }
 

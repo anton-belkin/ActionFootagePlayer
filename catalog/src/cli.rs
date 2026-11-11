@@ -126,6 +126,8 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
             match load(&mut cat, &Want::All) {
                 Ok(_) => loaded = true,
                 Err(Error::Damaged(_)) => { cat = project::open(proj); loaded = true; }
+                // A newer program's project: this one stops (Docker's restart brings it back, to stop again)
+                Err(Error::TooNew(e)) => { eprintln!("afp-catalog: {e}"); std::process::exit(3) }
                 Err(e) => { eprintln!("afp-catalog: {e}"); std::thread::sleep(Duration::from_secs(10)); continue }
             }
         }
@@ -171,6 +173,7 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
                 }
             }
             Some(Err(Error::Gap(_))) => loaded = false,
+            Some(Err(Error::TooNew(e))) => { eprintln!("afp-catalog: {e}"); std::process::exit(3) }
             Some(Err(e)) => eprintln!("afp-catalog: {e}"),
             None => {}
         }
@@ -212,6 +215,10 @@ pub fn main() -> ExitCode {
     let opt = |name: &str| a.iter().position(|x| x == name).and_then(|i| a.get(i + 1)).cloned();
     let fail = |e: String| { eprintln!("afp-catalog: {e}"); ExitCode::from(1) };
     if !proj.join(crate::locations::PROJECT_FILE).is_file() { return fail(format!("{} isn't a project's folder", proj.display())); }
+    // One of a newer version left alone (its catalog would be written without what this doesn't know); an older one
+    // raised to this one's (a read-only one, as afp-stream's, stays as it is)
+    if let Some(e) = project::too_new(&proj) { return fail(e); }
+    let _ = project::raise(&proj);
     // AFP_CATALOG_TIMES=1: how long each step took, on stderr
     let t0 = std::time::Instant::now();
     let times = std::env::var_os("AFP_CATALOG_TIMES").is_some();
@@ -307,7 +314,15 @@ pub fn main() -> ExitCode {
                 }
             });
             if let Err(e) = load(&mut cat, &Want::Keys(Vec::new())) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } }
-            match cat.note(entries) { Ok(()) => ExitCode::SUCCESS, Err(e) => fail(e.to_string()) }
+            let noted: Vec<String> = entries.iter().filter_map(|(r, rel, _)| roots.iter().find(|x| x.id == *r).map(|x| x.dir.join(rel).display().to_string())).collect();
+            match cat.note(entries) {
+                Ok(()) => {
+                    // The Library running here told at once (it'd read the journal within seconds anyway)
+                    crate::live::tell_libraries(&json!({ "project": proj.display().to_string(), "files": noted }));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e.to_string()),
+            }
         }
         "footage" => {
             // The project's clips, location by location in its order (a path the first one has wins), from the catalog

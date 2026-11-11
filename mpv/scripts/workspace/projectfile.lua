@@ -33,6 +33,9 @@ local M = {}
 
 M.FILE = "Project.afproject"
 M.FORMAT = "actionfootage-project"
+-- The project's version (afp-catalog's project::VERSION, which says what each means): a newer one isn't written by
+-- this player, whose writes would lose what it doesn't know; an older one is raised to it
+M.VERSION = 3
 M.LEGACY_DIR = "_ActionFootagePlayer"
 -- The old folder's files, and what each became
 local LEGACY = {
@@ -77,7 +80,7 @@ function M.new(env)
         for k, v in pairs(b) do
             if type(doc[k]) ~= type(v) then doc[k] = v end
         end
-        -- A newer one's version kept (2: with locations): only raised, never lowered
+        -- Never lowered (raised to this player's when written)
         doc.format, doc.version = M.FORMAT, math.max(tonumber(doc.version) or 1, 1)
         return doc
     end
@@ -152,9 +155,17 @@ function M.new(env)
     function p.update(root, fn)
         -- A file of that name that isn't ours is left alone
         if env.is_file(p.path(root)) and not read_file(root) then return false, M.FILE .. " isn't Action Footage's" end
+        -- One of a newer version left as it is: update the player to work with it
+        local text = read_text(p.path(root))
+        local now = text and env.parse_json(text)
+        if type(now) == "table" and (tonumber(now.version) or 1) > M.VERSION then
+            return false, M.FILE .. " is of a newer version (" .. tostring(now.version) .. ") than this player knows (" .. M.VERSION .. "): update it"
+        end
         local doc = p.read(root)
         fn(doc)
-        return write(root, complete(doc))
+        doc = complete(doc)
+        doc.version = math.max(doc.version, M.VERSION)
+        return write(root, doc)
     end
 
     function p.migrate(root)

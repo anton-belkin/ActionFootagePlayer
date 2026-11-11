@@ -451,7 +451,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
             let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
             if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
-                                    "source": own.get("source").cloned().unwrap_or(Value::Null) });
+                                    "source": own.get("source").cloned().unwrap_or(Value::Null),
+                                    "location": own.get("location").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
             }
         }
@@ -639,20 +640,28 @@ fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
 /// Renders of these moments (paths in _Moments) removed: the stale ones only, or all of them
 pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usize, Vec<String>) {
     let (mut n, mut problems) = (0, Vec::new());
+    let mut gone: Vec<PathBuf> = Vec::new();
     for rel in moments {
-        let moment = root.join("_Moments").join(rel);
+        // Its path in the project (since 0.11 moments are anywhere in it: Generated/…); an older one's in _Moments
+        let moment = if crate::seen::is_file(&root.join(rel)) { root.join(rel) } else { root.join("_Moments").join(rel) };
         let link = link(&moment).unwrap_or(Value::Null);
         let status = renders_of(root, rel, &moment, &link);
         for p in RENDER_PROFILES {
             let Some(st) = status.get(p).and_then(Value::as_str) else { continue };
             if stale_only && st != "stale" { continue; }
-            match std::fs::remove_file(render_path(root, rel, p)) { Ok(_) => n += 1, Err(e) => problems.push(format!("{rel} {p}: {e}")) }
+            let f = render_path(root, rel, p);
+            match std::fs::remove_file(&f) { Ok(_) => { n += 1; gone.push(f); } Err(e) => problems.push(format!("{rel} {p}: {e}")) }
         }
     }
+    // The catalog told at once: the views read the renders from it
+    crate::seen::note_now(&gone);
     (n, problems)
 }
 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
+
+/// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
+pub const GEOTAG: u64 = 3;
 
 #[derive(Default)]
 pub struct Probes {
@@ -697,6 +706,8 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
+            // An answer from before the probe knew drones' names and places (geotag.rs): asked again
+            if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
             self.known.insert(k.clone(), (s, m, e["l"].as_str().unwrap_or_default().to_string(), e["v"].clone()));
         }
     }
@@ -727,6 +738,20 @@ impl Probes {
             if !out.contains_key(p) { if let Some((_, _, _, val)) = self.known.get(p) { out.insert(p.clone(), val.clone()); } }
         }
         json!({ "version": self.version, "items": out, "pending": self.queue.len() + usize::from(self.busy) })
+    }
+    /// One clip's answer, if known and its file unchanged since
+    pub fn get(&self, path: &str) -> Option<Value> {
+        let (s, m, _, v) = self.known.get(path)?;
+        (stamp(path) == Some((*s, *m))).then(|| v.clone())
+    }
+    /// An answer worked out elsewhere (geo.rs asks the tool itself when it needs one now)
+    pub fn put(&mut self, path: &str, answer: Value) {
+        if let Some((s, m)) = stamp(path) {
+            self.version += 1;
+            let v = self.version;
+            self.known.insert(path.to_string(), (s, m, lens_list_stamp(), answer));
+            self.log.push((v, path.to_string()));
+        }
     }
     pub fn known(&self, paths: &[String]) -> Value {
         let mut out = serde_json::Map::new();
@@ -812,8 +837,8 @@ fn data_url(bytes: &[u8]) -> String {
     format!("data:{mime};base64,{}", base64(bytes))
 }
 
-/// A small picture of a file, as a data: URL: an MP4's cover (a moment's, a clip preview's), else (macOS) one made
-/// by the system (sips for photos, Quick Look for videos), kept in `cache`. None: none to show
+/// A small picture of a file, as a data: URL: an MP4's cover (a moment's, a clip preview's), else one made by the
+/// system (sips for photos on macOS; videos: thumbs.rs), kept in `cache`. None: none to show
 pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     let (size, mtime) = stamp(&path.to_string_lossy())?;
     let key = fnv(&format!("{}|{size}|{mtime}", path.display()));
@@ -840,18 +865,15 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
     if lower.ends_with(".mp4") || lower.ends_with(".mov") {
         bytes = keys_and_cover(path).1;
     }
-    if bytes.is_none() && cfg!(target_os = "macos") {
+    if bytes.is_none() {
         let out = cache.join(format!("{key}.jpg"));
-        if [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) {
+        if cfg!(target_os = "macos") && [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) {
             let ok = Command::new("/usr/bin/sips").args(["-s", "format", "jpeg", "-Z", "360"]).arg(path).arg("--out").arg(&out)
                 .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
             if ok { bytes = std::fs::read(&out).ok(); }
         } else if lower.ends_with(".mov") || lower.ends_with(".mp4") {
-            // A video without a cover (a draft clip preview): a frame by the player's ffmpeg (Quick Look hangs on some)
-            let ffmpeg = crate::player_ffmpeg();
-            let ok = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg"))).args(["-v", "error", "-y", "-ss", "0.5", "-i"]).arg(path)
-                .args(["-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "4"]).arg(&out).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-            if ok { bytes = std::fs::read(&out).ok(); }
+            // A video without a cover (an original clip, a draft clip preview): as Finder draws it (thumbs.rs)
+            if crate::thumbs::video_frame(path, &out) { bytes = std::fs::read(&out).ok(); }
         }
         let _ = std::fs::remove_file(&out);
     }
@@ -860,7 +882,7 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1041,7 +1063,7 @@ mod from_the_catalog {
         let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
         cat.load(&afp_catalog::Want::All).unwrap();
         cat.sweep(&roots, &ours, &Default::default()).unwrap();
-        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen { id: 0, root: root.clone(), roots, cat });
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen::of(&root, cat));
         // Read from it: the disks not asked (a file removed behind its back still shows: it's what was last seen)
         let from_catalog = views();
         for (a, b) in from_files.iter().zip(from_catalog.iter()) { assert_eq!(a, b); }

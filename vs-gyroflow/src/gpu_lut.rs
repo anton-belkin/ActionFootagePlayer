@@ -13,7 +13,9 @@
 // With `measure` (an HLG output, for a Dolby Vision export's L1), the same pass measures the frame it writes as the
 // player's mpv (tools/mpv-patches/0007) measures what it shows: each pixel back to RGB from its written 10-bit luma
 // and its block's chroma, HLG to display light for 1000 nits by BT.2100's OOTF, max(R,G,B) in 12-bit PQ; each
-// workgroup writes the sum, count, lowest and highest of its pixels, which the CPU adds up.
+// workgroup writes the sum, count, lowest and highest of its pixels, which the CPU adds up. Measure::PqNits, for a PQ
+// output (an export for YouTube): each pixel's max(R,G,B) in nits, PQ decoded, for MaxCLL (the highest) and MaxFALL
+// (the frame's average) of CTA-861.3.
 
 use std::sync::{ Arc, mpsc };
 
@@ -22,7 +24,7 @@ struct Params {
     width: u32,           // luma
     height: u32,
     lut_size: u32,
-    measure: u32,         // 1: measure the written frame for L1
+    measure: u32,         // 1: measure the written frame for L1 (HLG); 2: max(R,G,B) in nits (PQ)
     in_y_offset: f32,     // normalized Y' = (Y - in_y_offset) / in_y_scale, C = (C - 512) / in_c_scale
     in_y_scale: f32,
     in_c_scale: f32,
@@ -55,12 +57,19 @@ fn pq(nits: f32) -> f32 {
 
 // A written pixel's max(R,G,B) in 12-bit PQ: its limited-range 10-bit luma and chroma back to HLG RGB in the
 // output's matrix, to display light for a 1000-nit display
+fn pq_nits(e: f32) -> f32 {
+    let q = pow(clamp(e, 0.0, 1.0), 1.0 / 78.84375);
+    return 10000.0 * pow(max(q - 0.8359375, 0.0) / (18.8515625 - 18.6875 * q), 1.0 / 0.1593017578125);
+}
+
 fn measured(y10: f32, cb10: f32, cr10: f32) -> f32 {
     let yn = (y10 - 64.0) / 876.0;
     let r = yn + 2.0 * (1.0 - p.out_kr) * (cr10 - 512.0) / 896.0;
     let b = yn + 2.0 * (1.0 - p.out_kb) * (cb10 - 512.0) / 896.0;
     let g = (yn - p.out_kr * r - p.out_kb * b) / (1.0 - p.out_kr - p.out_kb);
     let e = clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0));
+    // A PQ output: the brightest of the three, in nits
+    if (p.measure == 2u) { return pq_nits(max(e.r, max(e.g, e.b))); }
     let sc = vec3<f32>(hlg_scene(e.r), hlg_scene(e.g), hlg_scene(e.b));
     let ys = dot(sc, vec3<f32>(0.2627, 0.6780, 0.0593));
     var nits = 0.0;
@@ -116,7 +125,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
     let inside = bx * 4u < p.width && by * 2u < p.height;
     var m_sum = 0.0;
     var m_count = 0.0;
-    var m_lo = 4096.0;
+    var m_lo = 100000.0;
     var m_hi = 0.0;
 
     if (inside) {
@@ -179,7 +188,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
         wg_hi[li] = m_hi;
         workgroupBarrier();
         if (li == 0u) {
-            var r = vec4<f32>(0.0, 0.0, 4096.0, 0.0);
+            var r = vec4<f32>(0.0, 0.0, 100000.0, 0.0);
             for (var i = 0u; i < 64u; i++) {
                 r = vec4<f32>(r.x + wg_sum[i], r.y + wg_count[i], min(r.z, wg_lo[i]), max(r.w, wg_hi[i]));
             }
@@ -195,6 +204,16 @@ struct Params {
     width: u32, height: u32, lut_size: u32, measure: u32,
     in_y_offset: f32, in_y_scale: f32, in_c_scale: f32, _pad2: f32,
     in_kr: f32, in_kb: f32, out_kr: f32, out_kb: f32,
+}
+
+/// What GpuLut measures of each frame it writes
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Measure {
+    None,
+    /// An HLG output's Dolby Vision L1: the lowest, average and highest max(R,G,B) in 12-bit PQ (1000-nit display)
+    HlgL1,
+    /// A PQ output's max(R,G,B) in nits: the lowest, average and highest of the frame (MaxFALL and MaxCLL's)
+    PqNits,
 }
 
 /// Kr and Kb of a YUV matrix, by ffmpeg's name for it
@@ -303,9 +322,9 @@ pub(crate) fn tetrahedral(n: usize, lut: &[f32], rgb: [f32; 3]) -> [f32; 3] {
 }
 
 impl GpuLut {
-    /// `in_full_range`: the decoded frames' range; the output is always limited range. `measure`: each frame's L1
-    /// too (an HLG output), from apply
-    pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32), measure: bool) -> Result<Arc<GpuLut>, String> {
+    /// `in_full_range`: the decoded frames' range; the output is always limited range. `measure`: what apply measures
+    /// of each frame too
+    pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32), measure: Measure) -> Result<Arc<GpuLut>, String> {
         if width % 4 != 0 || height % 2 != 0 {
             return Err(format!("{width}x{height}: the GPU LUT needs a width divisible by 4"));
         }
@@ -355,7 +374,8 @@ impl GpuLut {
 
         let (in_y_offset, in_y_scale, in_c_scale) = if in_full_range { (0.0, 1023.0, 1023.0) } else { (64.0, 876.0, 896.0) };
         let params = Params {
-            width: width as u32, height: height as u32, lut_size, measure: measure as u32,
+            width: width as u32, height: height as u32, lut_size,
+            measure: match measure { Measure::None => 0, Measure::HlgL1 => 1, Measure::PqNits => 2 },
             in_y_offset, in_y_scale, in_c_scale, _pad2: 0.0,
             in_kr: in_matrix.0, in_kb: in_matrix.1, out_kr: out_matrix.0, out_kb: out_matrix.1,
         };
@@ -386,8 +406,8 @@ impl GpuLut {
 }
 
 impl GpuLutWorker {
-    /// Converts `frame` (planar 4:2:0, 16-bit samples) in place; measuring, also returns its L1: the lowest, average
-    /// and highest max(R,G,B) in 12-bit PQ
+    /// Converts `frame` (planar 4:2:0, 16-bit samples) in place; measuring, also returns the lowest, average and
+    /// highest max(R,G,B) of the frame written (Measure says in what)
     pub fn apply(&mut self, frame: &mut [u8]) -> Result<Option<[f64; 3]>, String> {
         let g = &*self.lut;
         if frame.len() as u64 != g.frame_size {
@@ -423,7 +443,7 @@ impl GpuLutWorker {
         self.staging.unmap();
         if !measure { return Ok(None); }
 
-        let (mut sum, mut count, mut lo, mut hi) = (0.0f64, 0.0f64, 4096.0f64, 0.0f64);
+        let (mut sum, mut count, mut lo, mut hi) = (0.0f64, 0.0f64, f64::MAX, 0.0f64);
         {
             let data = parts_slice.get_mapped_range().map_err(|e| format!("GPU readback: {e:?}"))?;
             for part in bytemuck::cast_slice::<u8, [f32; 4]>(&data) {

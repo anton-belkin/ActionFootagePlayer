@@ -81,8 +81,8 @@
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
 -- project-folder, clips-folder (show them), init-project <folder>. cut-before, cut-after (all before or after where it
 -- plays cut out; Ctrl+x: the A-B part). open-original: an export's original, at its part. For the
--- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
--- link }).
+-- gyroflow plugin: export-name <json> asks the export's name (ext: .mkv for YouTube's, else .mov) and answers
+-- export-start <json> ({ clip, sdr, youtube, output, link }).
 --
 -- workspace.lua is the lookup itself (plain Lua; tests/workspace_test.lua), and gyroflow-export has its twin
 -- (vs-gyroflow/src/workspace.rs) for the Finder quick action and the command line. moments.lua is the moments'
@@ -170,6 +170,9 @@ fs.files = function(p)
 end
 fs.mounts = function()
     local out = {}
+    -- Shares reached otherwise than mounted from the network (a container on the NAS itself, where they're its own
+    -- folders, bound in): AFP_SHARES="//NAS/photo=/shares/photo;//NAS/DJI_Inbox=/shares/DJI_Inbox" (afp-stream)
+    for src, dir in (os.getenv("AFP_SHARES") or ""):gmatch("(//[^=;]+)=([^;]+)") do out[#out + 1] = { source = src, dir = dir } end
     if windows then return out end
     local text
     if macos then
@@ -1135,7 +1138,10 @@ mp.register_script_message("preview-done", function(id, json)
         end
     end
     if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
-    catalog.note(state.project or moments.project_of(p.file), { p.file })
+    -- Its own Gyroflow project too (written or edited beside it): the Library's badge and filters read it
+    local noted = { p.file }
+    if fs.is_file(own_project(p.file)) then noted[2] = own_project(p.file) end
+    catalog.note(state.project or moments.project_of(p.file), noted)
     refresh()
 end)
 
@@ -1254,7 +1260,12 @@ local function move_aside(file)
 end
 
 -- The file to the Trash; done(it went). Where there's none (has_recycle_bin), aside into trash_folder instead
-local function trash(file, done)
+local function trash(file, done_given)
+    -- What went, noted in the project's catalog (the Library's views read it; its folder's time on a share may not say)
+    local function done(ok)
+        if ok then catalog.note(nil, { file }) end
+        return done_given(ok)
+    end
     if not has_recycle_bin(file) then return done(move_aside(file)) end
     local args
     if macos then
@@ -1325,6 +1336,8 @@ mp.register_script_message("moment-rename", function(i)
         if not ok then return mp.osd_message("Couldn't rename " .. m.name .. ": " .. tostring(err), 4) end
         -- Its own Gyroflow project, renamed with it (Gyroflow finds the clip by its own path inside)
         if fs.is_file(own) then os.rename(own, own_project(target)) end
+        -- Both its paths (and its project's): the Library reads the catalog
+        catalog.note(state.project or moments.project_of(target), { m.file, target, own, own_project(target) })
         if state.moment and state.moment.file == m.file then
             state.moment.file, state.moment.name = target, safe
             mp.set_property("file-local-options/force-media-title", safe)
@@ -1383,7 +1396,8 @@ mp.register_script_message("export-name", function(json)
         if not root then return end
         local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), true, generated_runs(root))))
         mkdir(dir)
-        local output, final = moments.unique_file(dir, safe, label .. ".mov")
+        -- An export for YouTube is an MKV (gyroflow-export --youtube)
+        local output, final = moments.unique_file(dir, safe, label .. (req.ext == ".mkv" and ".mkv" or ".mov"))
         local info = utils.file_info(state.clip)
         local l = {
             v = 1, kind = "export", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
@@ -1391,7 +1405,7 @@ mp.register_script_message("export-name", function(json)
             look = req.look, stabilized = req.stabilized == true, roots = { root },
         }
         mp.commandv("script-message-to", req.reply, "export-start", utils.format_json({
-            clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
+            clip = state.clip, sdr = req.sdr == true, youtube = req.youtube == true, output = output, link = utils.format_json(l),
             from = a, to = b,
             -- A moment stabilized on its own, without a project: its part (or the part of it) on its own
             alone = state.snap == true and state.alone or nil,
@@ -1618,7 +1632,9 @@ local function next_clip()
             end
         elseif r and r.status == 0 then
             job.made = job.made + 1
-            job.notes[#job.notes + 1] = out
+            -- Into the catalog as it comes (notes asked meanwhile go together): the Library shows each at once, and a
+            -- run stopped or ended halfway has what it made noted
+            catalog.note(job.project, { out })
         else
             -- Its half-made one, under its hidden name, goes (stopped too: it's made again next time)
             if c.draft_path then os.remove(out) end
@@ -2057,6 +2073,9 @@ local function cut_finish()
                 os.rename(p.out, final)
                 if p.lrf_out then os.rename(p.lrf_out, ws.join(c.dir, c.stem .. " (cut " .. i .. ").LRF")) end
             end
+            local noted = {}
+            for i in ipairs(c.parts) do noted[#noted + 1] = ws.join(c.dir, c.stem .. " (cut " .. i .. ")" .. c.ext) end
+            catalog.note(c.project, noted)
             cutting = nil
             state.cutting = nil
             restore_idle()
@@ -2121,6 +2140,16 @@ local function cut_finish()
             end
             trash_all(orphan_files, function(left2)
             for _, f in ipairs(left2) do left[#left + 1] = f end
+            -- The parts in its place, their own files, the moments relinked: into the project's catalog (what went to
+            -- the Trash is noted as it goes), so the Library shows them at once
+            local noted = {}
+            for _, p in ipairs(c.parts) do
+                noted[#noted + 1] = p.file
+                noted[#noted + 1] = sidecar.path(p.file)
+                if p.lrf_out then noted[#noted + 1] = ws.join(c.dir, split_name(p.name) .. ".LRF") end
+            end
+            for _, m in ipairs(c.moments) do noted[#noted + 1] = m.file end
+            catalog.note(c.project, noted)
             -- The part that has where it played, there
             local pos = c.pos or 0
             local at = c.parts[1]
@@ -2377,7 +2406,12 @@ end)
 mp.register_script_message("input-save", function()
     if not input_place() then return mp.osd_message("Not saved: this file isn't a source", 2) end
     local pack = input_pack(state.input_now or state.input)
-    local ok, err = sidecar.update(state.clip, function(d) d.source = pack; stamp(d) end)
+    -- The input's keys written over the source's; its others kept (the lens type the Library sets there)
+    local ok, err = sidecar.update(state.clip, function(d)
+        d.source = type(d.source) == "table" and d.source or {}
+        for k, v in pairs(pack) do d.source[k] = v end
+        stamp(d)
+    end)
     if not ok then return mp.osd_message("Couldn't save the input in the source's file: " .. tostring(err), 4) end
     state.input, state.input_now = pack, nil
     state.input_status = input_status()
@@ -2447,7 +2481,7 @@ mp.register_script_message("view-own", function()
     local g = mp.get_property_native("user-data/gyroflow") or {}
     local tool = project_tool()
     if tool and g.kind == "project" and (g.project or "") ~= "" and not fs.is_file(own) then
-        run_tool({ tool, "--copy", g.project, state.clip, own })
+        if run_tool({ tool, "--copy", g.project, state.clip, own }) then catalog.note(nil, { own }) end
     end
     if not rewrite_link(l.file, function(x) x.own, x.stab = 1, v end) then
         return mp.osd_message("Couldn't change " .. moments_lib.display_name(l.file), 4)
@@ -2844,7 +2878,7 @@ local function export_next()
                                               args = { tool, "--set-key", output, link.KEY, utils.format_json(l) } })
                 ok = r and r.status == 0
             end
-            if ok then j.made = j.made + 1 else
+            if ok then j.made = j.made + 1; catalog.note(j.root, { output }) else
                 j.failed = j.failed + 1
                 j.failures[#j.failures + 1] = { m.name, "couldn't copy its render" }
             end
@@ -2865,6 +2899,9 @@ mp.register_script_message("export-batch-done", function(id, json)
     if not j or tostring(j.id) ~= id then return end
     local r = utils.parse_json(json or "") or {}
     if r.ok then j.made = j.made + 1 end
+    -- A render made again failed: the stale one it replaced is gone (what's made is noted by the gyroflow plugin)
+    local m = j.queue[j.done + 1]
+    if not r.ok and m and m.render_out then catalog.note(j.root, { m.render_out }) end
     if not r.ok and not j.stopping then
         j.failed = j.failed + 1
         j.failures[#j.failures + 1] = { j.queue[j.done + 1].name, tostring(r.error or "failed") }
@@ -2971,6 +3008,91 @@ local function render_moments(root, profiles)
     export_next()
 end
 
+-- What Action Footage Library changes, heard at once when it runs on this computer (afp-catalog's live.rs): a window
+-- has an inbox, <cache>/live/player-<pid>.in, the Library appends a line { project, files } to for each change of its
+-- (a moment renamed or removed, a tag, a lens type, a Take in...), and this looks at its size four times a second.
+-- Then the clip's moments are asked again, the project counted again, and a lens type changed for the clip playing
+-- plays at once (its own file says how it's stabilized). A batch (no window) has none
+local function live_dir()
+    local home = os.getenv("AFP_HOME")
+    if home and home ~= "" then return utils.join_path(utils.join_path(home, "cache"), "live") end
+    local base
+    if windows then
+        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA")
+    elseif macos then
+        base = os.getenv("HOME") and utils.join_path(os.getenv("HOME"), "Library/Caches")
+    else
+        base = os.getenv("XDG_CACHE_HOME") or (os.getenv("HOME") and utils.join_path(os.getenv("HOME"), ".cache"))
+    end
+    return base and utils.join_path(utils.join_path(base, "ActionFootage"), "live")
+end
+local function same_path(a, b)
+    local function norm(p) p = tostring(p or ""):gsub("\\", "/"):gsub("/+$", ""); return windows and p:lower() or p end
+    return norm(a) == norm(b)
+end
+local function lens_type_of(clip)
+    local doc = clip and sidecar.read(clip)
+    return type(doc) == "table" and type(doc.source) == "table" and doc.source.lens_type or nil
+end
+local inbox, inbox_at, lens_loaded = nil, 0, nil
+mp.register_event("file-loaded", function() lens_loaded = lens_type_of(state.clip) end)
+local function heard(msg)
+    if type(msg) ~= "table" or not state.project then return end
+    local files = type(msg.files) == "table" and msg.files or {}
+    if not same_path(msg.project, state.project) then
+        local ours = false
+        for _, f in ipairs(files) do if ws.relative(f, state.project) then ours = true end end
+        if not ours then return end
+    end
+    mp.msg.info("the Library changed " .. #files .. " file(s) of the project: read again")
+    refresh()
+    if recount then recount() end
+    -- The clip's own file: a lens type chosen in the Library is how it plays, from now (the clip loaded again where it
+    -- is; a moment playing shows it the next time it's opened)
+    local own = state.sidecar_file
+    for _, f in ipairs(files) do
+        if own and same_path(f, own) then
+            local now = lens_type_of(state.clip)
+            if now ~= lens_loaded then
+                lens_loaded = now
+                if not state.moment and not state.offset and state.clip then
+                    mp.osd_message("Lens type changed in the Library: playing with it", 3)
+                    mp.msg.info("lens type " .. tostring(now) .. " from the Library: the clip loaded again")
+                    wanted = { file = state.clip, ["in"] = mp.get_property_number("time-pos") }
+                    mp.commandv("loadfile", state.clip, "replace")
+                else
+                    mp.osd_message("Lens type changed in the Library: the clip plays with it when opened again", 4)
+                end
+            end
+        end
+    end
+end
+if not os.getenv("AFP_BATCH") or os.getenv("AFP_BATCH") == "" then
+    local dir = live_dir()
+    if dir and (fs.is_dir(dir) or mkdir(dir)) then
+        inbox = utils.join_path(dir, "player-" .. tostring(utils.getpid()) .. ".in")
+        local f = io.open(inbox, "ab")
+        if f then f:close() else inbox = nil end
+    end
+    if inbox then
+        mp.add_periodic_timer(0.25, function()
+            local info = utils.file_info(inbox)
+            if not info or info.size <= inbox_at then return end
+            local f = io.open(inbox, "rb")
+            if not f then return end
+            f:seek("set", inbox_at)
+            local text = f:read("*a") or ""
+            f:close()
+            -- Whole lines only: one being written is read next time
+            local upto = text:match("^.*()\n")
+            if not upto then return end
+            inbox_at = inbox_at + upto
+            for line in text:sub(1, upto):gmatch("[^\r\n]+") do heard(utils.parse_json(line)) end
+        end)
+        mp.register_event("shutdown", function() os.remove(inbox) end)
+    end
+end
+
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
 -- { kind, project, status, stop, photo, sdr, only, layout, alone }: kind clips or clips-again (previews of the clips
 -- without one; layout: tree, flat or trips), moments (moments of all marks; alone: stabilized on their own), photos
@@ -3028,7 +3150,8 @@ do
                 status.message = sum.nothing or sum.error
                 status.fraction, status.current = nil, nil
                 write_status()
-                mp.add_timeout(0.2, function() mp.commandv("quit") end)
+                -- Once what it made is noted in the project's catalog (a quit cuts the notes under way off)
+                catalog.after_notes(function() mp.add_timeout(0.2, function() mp.commandv("quit") end) end)
             end
             local function progress()
                 if not started or ended then return end

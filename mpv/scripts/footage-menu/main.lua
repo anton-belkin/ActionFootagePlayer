@@ -206,7 +206,7 @@ local function look_menu(d, key)
 end
 
 local function stabilization_menu(g, key)
-    local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"], key["script-binding gyroflow/level"]
+    local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/above-water"], key["script-binding gyroflow/level"]
     -- The lens, apart from the stabilization: corrected or as recorded (with a lens profile)
     local lens_items = submenu("Lens", {
         item(g.kind == "project" and "As in the project" or "Corrected", "script-message-to gyroflow lens-mode corrected", { checked = g.lens_mode == "corrected" }),
@@ -332,6 +332,10 @@ local function export_menu(d, g)
     return {
         item("Export in SDR (" .. (SDR_NAMES[d and d.sdr_look or ""] or "Rec.709") .. ")", "script-message-to gyroflow export sdr",
              { disabled = g.exporting or not (d and d.log and (d.sdr_look or "") ~= "") }),
+        -- HDR10 with the SDR look's LUT inside, for YouTube's SDR version (gyroflow-export --youtube): log or HDR clips
+        item("Export for YouTube (HDR, its SDR by " .. ((d and d.sdr_look == "maker" and d.curve == "dlogm") and "DJI's LUT" or "NBCU") .. "; untested)",
+             "script-message-to gyroflow export youtube",
+             { disabled = g.exporting or not (d and (d.log or d.hdr == "hlg" or d.hdr == "pq")) }),
         SEPARATOR,
         item(reveal, "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" }),
     }

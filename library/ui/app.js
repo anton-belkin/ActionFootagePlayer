@@ -1,7 +1,8 @@
 "use strict";
 // The Library's window (docs/library-management.md, the mockup it was settled on): a project's footage, moments,
 // photos and exports browsed as folders; filters that narrow the folder you're in, or a search that lists every match;
-// the commands on what's selected, in one side panel; the queue as its tab. What it shows comes from the app
+// what's selected and the commands on it in one side panel, its parts chosen with a column of icons at its edge (the
+// queue one of them). What it shows comes from the app
 // (src/main.rs, src/index.rs): the project's files, and what each clip is (gyroflow-probe --library).
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
@@ -80,11 +81,15 @@ const S = {
   root: null, name: "", info: null, macos: true,
   view: "footage", path: [], sel: {}, anchor: null, layout: "list", q: "", flat: false, scope: "here",
   filters: {}, filtersOpen: false, fsec: { src: true, tf: true }, fexp: {}, suggOpen: false, sugg: -1,
-  tab: "commands", open: { moments: true, export: true }, menu: false, recent: [],
+  // The side panel: the part shown (its column of icons: renderSide), and whether the panel is open beside the column
+  tab: remembered("afl.tab", "info"), sideOpen: remembered("afl.side", "1") === "1", menu: false, recent: [],
+  // Source settings changed in the Source Settings tab, not written yet (key -> value), and for which clips
+  srcDraft: {}, srcFor: null,
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
+  geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
   hist: [], histAt: -1,
@@ -227,6 +232,7 @@ function deriveItems(view) {
     if (it.kind === "clip") {
       const probe = PROBES[it.path];
       deriveSource(it, probe);
+      deriveGeo(it, probe);
       const own = it.own || {};
       deriveTransform(it, own.view);
       const src = own.source && typeof own.source === "object" ? own.source : {};
@@ -237,9 +243,10 @@ function deriveItems(view) {
       const mv = probe && probe.movie;
       it.durS = mv ? mv.duration : null;
       it.when = recorded(it.name, mv && mv.created);
-      // Its preview's picture, else what the camera made for its own quick look (LRF, THM); an empty preview (its
-      // picture still to come): the camera's, else its dark frame
-      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || null;
+      // Its preview's picture, else what the camera made for its own quick look (LRF, THM), else the clip's own, as
+      // Finder draws it (a log clip looks flat, as there); an empty preview (its picture still to come): the camera's,
+      // else its dark frame
+      it.thumbPath = (it.draft ? it.thumb : null) || it.preview || it.thumb || it.path || null;
       it.conflict = Array.isArray(it.own_conflict) && it.own_conflict.length > 1;
       it.locs = (it.copies || []).map((c) => c.loc);
       it.sub = [it.cam || (probe ? "Unknown camera" : "Reading…"), it.color, tfText(it)].filter(Boolean).join(" · ");
@@ -366,6 +373,7 @@ function buildFacets() {
     wh.push({ id: "where2", title: "Copies", opts: [L("cp:2", "In two locations or more", (it) => (it.locs || []).length > 1)] });
     wh.push({ id: "iss", title: "Issues", opts: [L("iss:own", "Two own files", (it) => it.conflict)] });
     sections.push({ id: "wh", title: "Where", facets: wh });
+    geoFacets(items, sections);
   }
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
@@ -589,26 +597,40 @@ function chips(it) {
   return c.map((x) => '<span class="' + x[0] + '">' + esc(x[1]) + '</span>').join("");
 }
 
-// The pictures: from the app, a few at a time, each set where it shows once it's there
+// The pictures: from the app, a few at a time, each set where it shows once it's there; what's on screen first
 let thumbsBusy = 0;
 const thumbsWanted = [];
+const thumbsAsked = new Set(); // asked, answer still to come
 function fillThumbs() {
   for (const el of document.querySelectorAll("img[data-thumb]")) {
     const p = el.getAttribute("data-thumb");
     if (THUMBS.has(p)) continue;
-    if (thumbsWanted.indexOf(p) < 0) thumbsWanted.push(p);
+    if (!thumbsAsked.has(p) && thumbsWanted.indexOf(p) < 0) thumbsWanted.push(p);
   }
   pumpThumbs();
 }
+// The next to ask: the first wanted one on screen (or just below or above it), else the first wanted
+function nextThumb() {
+  const want = new Set(thumbsWanted);
+  const h = window.innerHeight;
+  for (const el of document.querySelectorAll("img[data-thumb]")) {
+    const p = el.getAttribute("data-thumb");
+    if (!want.has(p)) continue;
+    const r = (el.hidden ? el.parentElement : el).getBoundingClientRect();
+    if (r.bottom > -300 && r.top < h + 300 && (r.width || r.height)) { thumbsWanted.splice(thumbsWanted.indexOf(p), 1); return p; }
+  }
+  return thumbsWanted.shift();
+}
 function pumpThumbs() {
   while (thumbsBusy < 6 && thumbsWanted.length) {
-    const p = thumbsWanted.shift();
-    if (THUMBS.has(p)) continue;
+    const p = nextThumb();
+    if (THUMBS.has(p) || thumbsAsked.has(p)) continue;
     thumbsBusy++;
+    thumbsAsked.add(p);
     invoke("thumb", { path: p }).then((u) => u || null, () => null).then((u) => {
       THUMBS.set(p, u);
       for (const el of document.querySelectorAll('img[data-thumb="' + CSS.escape(p) + '"]')) { if (u) { el.src = u; el.hidden = false; } else el.hidden = true; }
-    }).finally(() => { thumbsBusy--; pumpThumbs(); });
+    }).finally(() => { thumbsBusy--; thumbsAsked.delete(p); pumpThumbs(); });
   }
 }
 
@@ -736,10 +758,14 @@ function queueHtml() {
 }
 function activeCount() { return S.jobs.filter((j) => !["done", "stopped", "failed"].includes(j.state)).length + backgroundTasks().length; }
 
-function sec(key, title, hint, body) {
-  const open = !!S.open[key];
-  return '<div class="sec"><button type="button" class="sech" data-a="sec" data-v="' + key + '" aria-expanded="' + open + '">' + ICON.chev + esc(title) + '<span class="hint">' + esc(hint) + '</span></button>' + (open ? '<div class="secb">' + body + '</div>' : "") + '</div>';
+// One part of the side panel: its title, and what it acts on
+function partHead(title, c, acts) {
+  const what = !acts ? "" : c.any ? "On " + c.selName + (c.selFolders.length ? " (" + plural(c.selItems.length) + ", everything inside included)" : "")
+    : "Nothing selected: select " + NOUN[S.view][1] + " or whole folders. Settings can be set beforehand.";
+  return '<div class="ph"><h2>' + esc(title) + '</h2>' + (what ? '<span class="sub wrap">' + esc(what) + '</span>' : "") + '</div>';
 }
+function part(body) { return '<div class="secb">' + body + '</div>'; }
+function note(text) { return '<div class="secb"><p class="sub wrap">' + esc(text) + '</p></div>'; }
 // One clip: its moments and photos; one moment, photo or export: its clip in Footage
 function clipButton(c) {
   if (c.direct.length !== 1 || c.selFolders.length) return "";
@@ -749,59 +775,226 @@ function clipButton(c) {
   const id = clipOf(it);
   return id ? '<button type="button" class="btn sm" data-a="gofootage" data-v="' + esc(id) + '">Go to the footage</button>' : "";
 }
+
+// The side panel's parts, chosen with the column of icons at its right edge, as the player's side panel has them (its
+// rail): what's selected and the commands on it at the top, the Library's own work at the bottom. Clicking the part
+// shown again leaves the column alone (Anton, 2026-11-11). Opening, selecting and showing in Finder are in the list's
+// own menu (a right-click), not here
+const ICON_TAB = {
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.1"/>',
+  source: '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M10 9l5 3-5 3z"/>',
+  tags: '<path d="M3.5 12.2V4.5h7.7l9 9-7.7 7.7z"/><circle cx="8" cy="9" r="1.3"/>',
+  geo: '<path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0 1 13 0c0 4.8-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
+  moments: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M7.5 4.5v15M16.5 4.5v15M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/>',
+  stabilize: '<circle cx="12" cy="12" r="6"/><path d="M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.2"/>',
+  export: '<path d="M12 15V3.5M7.5 8L12 3.5 16.5 8M5 12.5V20h14v-7.5"/>',
+  queue: '<path d="M9 6.5h11M9 12h11M9 17.5h11M4 5l2.5 1.5L4 8M4 10.5l2.5 1.5L4 13.5M4 16l2.5 1.5L4 19"/>',
+  checks: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+};
+const TABS_TOP = [["info", "Info"], ["source", "Source Settings"], ["tags", "Tags"], ["geo", "Location"], ["moments", "Moments & Previews"], ["stabilize", "Stabilize"], ["export", "Export"]];
+const TABS_LOW = [["queue", "Tasks"], ["checks", "Checks"]];
+const TAB_IDS = TABS_TOP.concat(TABS_LOW).map((t) => t[0]);
+// Whether a part has anything for the view (its icon dimmed where it hasn't: the part then says where that is)
+function tabFits(id) {
+  const clips = S.view === "footage" || S.view === "sources";
+  if (id === "source" || id === "geo" || id === "moments" || id === "stabilize") return clips;
+  if (id === "export") return S.view === "moments";
+  if (id === "checks") return clips || S.view === "moments";
+  return true;
+}
+function railButton(t) {
+  const on = S.sideOpen && S.tab === t[0];
+  const n = t[0] === "queue" ? activeCount() : 0;
+  return '<button type="button" role="tab" class="rb' + (on ? " on" : "") + (tabFits(t[0]) ? "" : " na") + '" data-a="tab" data-v="' + t[0] + '" aria-selected="' + on + '" aria-label="' + esc(t[1]) + '" title="' + esc(t[1]) + '">' +
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_TAB[t[0]] + '</svg>' +
+    (t[0] === "queue" ? '<span class="count"' + (n ? "" : " hidden") + '>' + n + '</span>' : "") + '</button>';
+}
+// A part shown (the panel opened if only the column was), remembered on this computer
+function showTab(id) {
+  S.tab = id; S.sideOpen = true;
+  remember("afl.tab", id); remember("afl.side", "1");
+}
+function sideBody(c) {
+  const clipsView = S.view === "footage" || S.view === "sources";
+  const title = TABS_TOP.concat(TABS_LOW).find((t) => t[0] === S.tab)[1];
+  switch (S.tab) {
+    case "info": return partHead(title, c, false) + '<div class="itab">' + infoHtml(c) + '</div>';
+    case "queue": return partHead(title, c, false) + '<div id="qtab">' + queueHtml() + '</div>';
+    case "source": return partHead(title, c, true) + (clipsView ? part(sourceBody(c)) : note("Source settings are the originals’: how each is read (its log curve, its turn, its lens). Select clips in Footage or Originals."));
+    case "tags": return partHead(title, c, true) + part(tagsBody(c));
+    case "geo": return partHead(title, c, true) + (clipsView ? part(locationBody(c)) : note("A location is the original’s: select clips in Footage or Originals."));
+    case "moments":
+      if (!clipsView) return partHead(title, c, true) + note(S.view === "clip" ? "Moments and photos of this clip’s marks are made on the clip in Footage." : "Moments, photos and clip previews are made from the clips: select them in Footage or Originals.");
+      return partHead(title, c, true) + part(momentsBody(c));
+    case "stabilize": return partHead(title, c, true) + (clipsView ? part(opticalBody(c)) : note("Stabilize optically is for clips without motion data: select them in Footage or Originals."));
+    case "export":
+      if (S.view === "moments") return partHead(title, c, true) + exportBody(c);
+      return partHead(title, c, true) + note(S.view === "clip" ? "Rendering and exporting are in Moments." : clipsView ? "Exports are made of moments: select them in Moments (Moments & Previews makes them of the marks)."
+        : "Syncing folders of " + NOUN[S.view][1] + " with Apple Photos comes in a later version of the Library.");
+    case "checks":
+      return partHead(title, c, true) + (clipsView || S.view === "moments" ? part(checksBody(c)) : note("Checks look at clips and moments: in Footage, Originals or Moments."));
+  }
+  return "";
+}
 function renderSide() {
   const side = $("side");
   side.hidden = !S.root;
   if (!S.root) return;
   const c = ctx();
-  let h = '<div class="tabs" role="tablist"><button type="button" role="tab" class="' + (S.tab === "commands" ? "on" : "") + '" data-a="tab" data-v="commands">Commands</button><button type="button" role="tab" class="' + (S.tab === "queue" ? "on" : "") + '" data-a="tab" data-v="queue">Tasks<span class="count">' + activeCount() + '</span></button><button type="button" role="tab" class="' + (S.tab === "info" ? "on" : "") + '" data-a="tab" data-v="info">Info</button></div>';
-  if (S.tab === "queue") { side.innerHTML = h + '<div id="qtab">' + queueHtml() + '</div>'; return; }
-  if (S.tab === "info") { side.innerHTML = h + '<div class="itab">' + infoHtml(c) + '</div>'; fillThumbs(); return; }
-  h += '<div class="summary">' + (c.any
-    ? '<b>' + esc(c.selName) + '</b><span class="sub wrap" style="margin-top:2px">' + esc("Commands below act on " + plural(c.selItems.length) + (c.selFolders.length ? ", everything inside the selected folders included." : ".")) + '</span>' +
-      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="openit">' + (c.selItems.length && c.selItems.every((x) => x.kind === "still") ? "Open" : "Open in the player") + '</button>' +
-      (c.selItems.length === 1 && c.selItems[0].gyroflow ? '<button type="button" class="btn sm" data-a="opengf">Open in Gyroflow</button>' : "") + clipButton(c) + '<button type="button" class="btn sm" data-a="revealit">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button><button type="button" class="btn sm" data-a="desel">Select none</button></div>'
-    : '<b>Nothing selected</b><span class="sub wrap" style="margin-top:2px">Commands act on what you select: ' + NOUN[S.view][1] + ' or whole folders. Their settings can be set beforehand.</span>' +
-      '<div class="btns" style="margin-top:8px"><button type="button" class="btn sm" data-a="selall"' + (VISIBLE.length ? "" : " disabled") + '>Select all' + (VISIBLE.length ? " (" + VISIBLE.length + ")" : "") + '</button></div>') + '</div>';
-  const info = S.info || {};
-  if (S.view === "footage" || S.view === "sources" || S.view === "moments") h += checksSection(c);
-  h += tagsSection(c);
-  if (S.view === "footage" || S.view === "sources") {
-    h += sec("moments", "Moments & previews", "from the clips",
-      '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
-      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
-      '<span class="sub wrap">The ones without a preview, anywhere in the project. They go into Generated in Footage’s own folder (a folder per run when the project’s settings say so), from where you move them as you like; a clip identical to another (the same file twice) gets its preview in its Duplicates.</span>' +
-      '<div class="field"><label class="sub" for="clips_layout">Laid out</label><select id="clips_layout" data-a="layout_set">' +
-      [["tree", "As the footage’s folders"], ["trips", "By trips: clips at most 2 days apart"], ["flat", "All in one folder"]].map((o) => '<option value="' + o[0] + '"' + (S.clipsLayout === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select></div>' +
-      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="moments">Moments of the marks</button></div>' +
-      '<label class="switch"><input type="checkbox" id="moments_alone" data-a="alone_set"' + (S.alone ? " checked" : "") + '>Stabilized on their own, not as part of the clip</label>' +
-      '<div class="field"><label class="sub" for="pkind">Photos as</label><select id="pkind" data-a="pkind"><option value="no"' + (S.photoKind === "no" ? " selected" : "") + '>Stills</option>' +
-      (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
-      '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
-      '<span class="sub wrap">Of each mark without one anywhere in the project. They go into Generated in Moments’ or Photos’ own folder.</span>');
-    h += opticalSection(c);
-  } else if (S.view === "moments") {
-    const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
-    const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
-    const toMake = stats.reduce((n, x) => n + x[2] + x[3], 0);
-    h += sec("render", "Render", on.join(", ") || "no profile",
-      '<div class="lab">Profiles</div><div class="checks">' +
+  if (TAB_IDS.indexOf(S.tab) < 0) S.tab = "info";
+  side.classList.toggle("closed", !S.sideOpen);
+  const rail = '<nav class="rail" role="tablist" aria-orientation="vertical" aria-label="Side panel">' + TABS_TOP.map(railButton).join("") + '<span class="sp"></span>' + TABS_LOW.map(railButton).join("") + '</nav>';
+  const old = side.querySelector(".pane");
+  const keep = old && old.dataset.tab === S.tab ? old.scrollTop : 0;
+  side.innerHTML = (S.sideOpen ? '<div class="pane" role="tabpanel" data-tab="' + S.tab + '">' + sideBody(c) + '</div>' : "") + rail;
+  const pane = side.querySelector(".pane");
+  if (!pane) return;
+  pane.scrollTop = keep;
+  if (S.tab === "info") { fillThumbs(); fillMaps(); return; }
+  // Commands act only on what's selected: greyed out with nothing (their settings can still be set)
+  if (!c.any && S.tab !== "queue") pane.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+function momentsBody(c) {
+  return '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
+    '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="clips">Make clip previews</button></div>' +
+    '<span class="sub wrap">The ones without a preview, anywhere in the project. They go into Generated in Footage’s own folder (a folder per run when the project’s settings say so), from where you move them as you like; a clip identical to another (the same file twice) gets its preview in its Duplicates.</span>' +
+    '<div class="field"><label class="sub" for="clips_layout">Laid out</label><select id="clips_layout" data-a="layout_set">' +
+    [["tree", "As the footage’s folders"], ["trips", "By trips: clips at most 2 days apart"], ["flat", "All in one folder"]].map((o) => '<option value="' + o[0] + '"' + (S.clipsLayout === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select></div>' +
+    '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="moments">Moments of the marks</button></div>' +
+    '<label class="switch"><input type="checkbox" id="moments_alone" data-a="alone_set"' + (S.alone ? " checked" : "") + '>Stabilized on their own, not as part of the clip</label>' +
+    '<div class="field"><label class="sub" for="pkind">Photos as</label><select id="pkind" data-a="pkind"><option value="no"' + (S.photoKind === "no" ? " selected" : "") + '>Stills</option>' +
+    (S.macos ? '<option value="live"' + (S.photoKind === "live" ? " selected" : "") + '>Live Photos</option>' : "") + '<option value="motion"' + (S.photoKind === "motion" ? " selected" : "") + '>Motion Photos</option></select></div>' +
+    '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="photos">Photos of the marks</button></div>' +
+    '<span class="sub wrap">Of each mark without one anywhere in the project. They go into Generated in Moments’ or Photos’ own folder.</span>';
+}
+// What the Library exports: moments, rendered and exported as the player's Shift+E does (the clips' photos are made in
+// Moments & Previews)
+function exportBody(c) {
+  const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
+  const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
+  const toMake = stats.reduce((n, x) => n + x[2] + x[3], 0);
+  return part('<div class="lab">Render · ' + esc(on.join(", ") || "no profile") + '</div><div class="checks">' +
       [["HDR", "HLG, as Shift+E exports HDR"], ["SDR", "as Shift+E exports SDR"]].map((p) => '<label title="' + esc(p[1]) + '"><input type="checkbox" id="prof-' + p[0] + '" data-a="prof" data-v="' + p[0] + '"' + (S.profiles[p[0]] ? " checked" : "") + '>' + p[0] + '</label>').join("") + '</div>' +
       (c.any && stats.length ? '<div class="result">' + stats.map((x) => '<div class="it"><b style="width:36px">' + x[0] + '</b><span>' + x[1] + ' current · ' + x[2] + ' stale · ' + x[3] + ' missing</span></div>').join("") + '</div>' : "") +
       '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="render"' + (c.any && on.length && !toMake ? " disabled" : "") + '>' + (c.any ? (toMake ? "Render " + toMake + " (missing and stale)" : "All current") : "Render") + '</button>' +
       '<button type="button" class="btn sm" data-a="delrenders" data-v="stale">Delete stale</button><button type="button" class="btn sm" data-a="delrenders" data-v="all">Delete renders</button></div>' +
-      '<span class="sub wrap">Kept in _Renders/ of the project. An export with the same look copies a current render instead of rendering again. Deleting renders breaks nothing.</span>');
-    h += sec("export", "Export", "to Exports’ Generated",
+      '<span class="sub wrap">Kept in _Renders/ of the project. An export with the same look copies a current render instead of rendering again. Deleting renders breaks nothing.</span>') +
+    part('<div class="lab">Export · to Exports’ Generated</div>' +
       '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
       '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
       '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="export">Export ' + esc(c.any ? c.label : "") + '</button></div>');
-  } else if (S.view === "clip") {
-    h += '<div class="summary"><span class="sub wrap">Rendering and exporting are in Moments; making more moments and photos, on the clip in Footage.</span></div>';
-  } else {
-    h += '<div class="summary"><span class="sub wrap">Syncing folders of ' + NOUN[S.view][1] + ' with Apple Photos comes in a later version of the Library.</span></div>';
-  }
-  side.innerHTML = h;
-  if (!c.any) side.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+}
+
+// ---------- Source settings (Batch set Source settings) ----------
+// How each original is read, kept in its own file's `source` beside it (the player's Source tab: the workspace
+// plugin's input, docs/moments-and-workspaces.md "Source and transform"): the log curve, the turn it was recorded with,
+// the lens under water, and the lens type (Stabilize optically's, lens_pick.rs). For one clip or many at once: each
+// field starts at Leave as is, and only the ones changed are written (src/tags.rs set_source), into each clip's own
+// file, its other keys kept
+const SRC_CURVES = [["auto", "From the clip"], ["dlogm", "D-Log M"], ["dlog", "D-Log"], ["gplog", "GP-Log"], ["gplog2", "GP-Log2"], ["ilog", "I-Log (10-bit)"]];
+const SRC_TURNS = [["0", "As is"], ["90", "90° ↻"], ["180", "180°"], ["270", "90° ↺"]];
+const SRC_WATER = [["auto", "Auto: as the camera says"], ["yes", "Yes (a flat port)"], ["no", "No"]];
+function srcClips(c) { return c.selItems.filter((it) => it.kind === "clip"); }
+function srcOf(it) { const s = (it.own || {}).source; return s && typeof s === "object" ? s : {}; }
+// Whether the clip's camera records when it's in the water (gyroflow-probe's "water", vs-gyroflow's water.rs): only
+// then can the lens under water follow it (Auto); null: not read yet
+function recordsWater(it) { const p = PROBES[it.path]; return p ? p.water === true : null; }
+function srcDraftSet(k, v) { if (v) S.srcDraft[k] = v; else delete S.srcDraft[k]; renderSide(); }
+// What the selected clips have now, counted: "D-Log M", "2 from the clip, 1 D-Log M"
+function srcNow(clips, f) {
+  const m = {}, order = [];
+  clips.forEach((it) => { const v = f(it); if (v == null) return; if (!(v in m)) { m[v] = 0; order.push(v); } m[v]++; });
+  if (!order.length) return "";
+  if (order.length === 1) return (clips.length > 1 ? "all " : "") + order[0];
+  return order.map((v) => m[v] + " " + v).join(", ");
+}
+function srcField(id, label, choices, now, extra) {
+  const cur = S.srcDraft[id] || "";
+  extra = extra || {};
+  return '<div class="field"><label class="sub" for="src-' + id + '">' + esc(label) + '</label><select id="src-' + id + '" data-a="srcset" data-v="' + id + '"' + (cur ? ' class="chg"' : "") + (extra.off ? " disabled" : "") + '>' +
+    '<option value="">Leave as is</option>' + choices.map((o) => '<option value="' + esc(o[0]) + '"' + (cur === o[0] ? " selected" : "") + (o[2] ? " disabled" : "") + '>' + esc(o[1]) + '</option>').join("") + '</select></div>' +
+    (now ? '<span class="sub wrap now">Now: ' + esc(now) + '</span>' : "") + (extra.note ? '<span class="sub wrap now' + (extra.warn ? " warn" : "") + '">' + esc(extra.note) + '</span>' : "");
+}
+function sourceBody(c) {
+  const clips = srcClips(c);
+  const key = clips.map((it) => it.id).join("\n");
+  if (S.srcFor !== key) { S.srcFor = key; S.srcDraft = {}; }
+  if (!clips.length) return '<p>' + (c.any ? "No clips in the selection: source settings are the originals’." : "Select clips (or folders of them) to set how they’re read: one, or many at once.") + '</p>' + srcFoot();
+  askLensTypes(clips.map((it) => it.path));
+  const d = S.srcDraft, n = clips.length;
+  const curveName = (v) => (SRC_CURVES.find((x) => x[0] === v) || [v, v])[1];
+  let h = "";
+  // The log curve: the clip's own (as the camera wrote it), or another, as the player's Source → Color → Log curve
+  h += srcField("curve", "Log curve", SRC_CURVES.map((x) => x[0] === "auto" && n === 1 ? [x[0], "From the clip" + (clips[0].color ? ": " + clips[0].color : "")] : x),
+    srcNow(clips, (it) => { const v = srcOf(it).curve; return !v || v === "auto" ? "from the clip" + (n === 1 && it.color ? " (" + it.color + ")" : "") : curveName(v); }));
+  h += srcField("rotation", "Recorded turned", SRC_TURNS,
+    srcNow(clips, (it) => { const r = Number(srcOf(it).rotation) || 0; return (SRC_TURNS.find((x) => +x[0] === r) || ["", r + "°"])[1].toLowerCase(); }));
+  // Under water: Auto only where the camera records it (Anton, 2026-11-11); a camera that doesn't gets No
+  const rec = clips.filter((it) => recordsWater(it) === true).length;
+  const others = clips.filter((it) => recordsWater(it) !== true);
+  const unread = others.filter((it) => recordsWater(it) === null).length;
+  const cams = Array.from(new Set(others.map((it) => it.cam || "not read yet")));
+  const autoLabel = !rec ? "Auto: not for " + (unread === n ? "cameras not read yet" : n === 1 ? "this camera" : "these cameras")
+    : rec < n ? "Auto (" + rec + " of " + n + "; others No)" : SRC_WATER[0][1];
+  if (d.underwater === "auto" && !rec) delete d.underwater;
+  const waterNote = d.underwater === "auto" && others.length ? others.length + (others.length === 1 ? " clip’s camera doesn’t" : " clips’ cameras don’t") + " record when it’s in the water (" + cams.join(", ") + "): " + (others.length === 1 ? "it gets" : "they get") + " No."
+    : !rec ? (n === 1 ? "Its camera doesn’t" : "These cameras don’t") + " record when " + (n === 1 ? "it’s" : "they’re") + " in the water: no Auto. Yes for a flat port under water, No above water or behind a dome port."
+    : "Auto follows the camera’s In water / Out of water. Yes for a flat port under water, No above water or behind a dome port.";
+  h += srcField("underwater", "Lens under water", [["auto", autoLabel, !rec]].concat(SRC_WATER.slice(1)),
+    srcNow(clips, (it) => { const v = srcOf(it).underwater; return v === "yes" || v === "no" || v === "auto" ? v : "not set" + (recordsWater(it) === true ? " (auto)" : ""); }),
+    { note: waterNote, warn: d.underwater === "auto" && others.length > 0 });
+  // The lens type: only where the camera has types (vs-gyroflow's curated list: the Action 6's Wide, Normal…)
+  const asking = clips.some((it) => !LENS_OF[it.path]);
+  const types = [];
+  clips.forEach((it) => ((LENS_OF[it.path] || {}).types || []).forEach((t) => { if (!types.some((x) => x[0] === t[0])) types.push(t); }));
+  const typed = clips.filter((it) => ((LENS_OF[it.path] || {}).types || []).length);
+  const tl = (t) => (types.find((x) => x[0] === t) || [t, t])[1];
+  if (!asking && d.lens_type && d.lens_type !== "recorded" && !types.some((t) => t[0] === d.lens_type)) delete d.lens_type;
+  const without = d.lens_type && d.lens_type !== "recorded" ? n - typed.filter((it) => (LENS_OF[it.path].types || []).some((t) => t[0] === d.lens_type)).length : 0;
+  h += srcField("lens_type", "Lens type", types.length ? [["recorded", "As the camera recorded"]].concat(types) : [],
+    typed.length ? srcNow(typed, (it) => { const t = srcOf(it).lens_type; const r = LENS_OF[it.path] || {}; return t ? tl(t) : "as recorded" + (r.recorded ? " (" + tl(r.recorded) + ")" : ""); }) + (typed.length < n ? " (of the " + typed.length + " with lens types)" : "") : "",
+    { off: !types.length, note: asking ? "Asking which lens types these cameras have…" : !types.length ? (n === 1 ? "Its camera has" : "These cameras have") + " no lens types to choose: the lens is in the file, or Gyroflow’s database has it."
+      : without ? "Only where the camera has it: " + without + (without === 1 ? " clip" : " clips") + " left as " + (without === 1 ? "it is" : "they are") + "." : "" });
+  const gf = clips.filter((it) => it.gyroflow).length;
+  if (gf) h += '<span class="sub wrap">' + esc(gf + (gf === 1 ? " has" : " have") + " a Gyroflow project: the project’s turn and lens under water play, these are kept for when it goes.") + '</span>';
+  const changed = Object.keys(d).length;
+  h += '<div class="btns"><button type="button" class="btn sm pri" data-a="srcapply"' + (changed ? "" : " disabled") + '>' + (changed ? "Set for " + (n === 1 ? "the clip" : n + " clips") : "Nothing changed yet") + '</button>' +
+    '<button type="button" class="btn sm" data-a="srcclear"' + (changed ? "" : " disabled") + '>Undo changes</button></div>';
+  return h + srcFoot();
+}
+function srcFoot() {
+  return '<span class="sub wrap">Kept in each original’s own file beside it, for all its moments and clip previews; the player’s Source tab shows and changes the same. Only what’s changed here is written.</span>';
+}
+async function applySource() {
+  const clips = srcClips(ctx());
+  const d = S.srcDraft;
+  if (!clips.length || !Object.keys(d).length) return;
+  let toNo = 0;
+  const lens = [];
+  const entries = clips.map((it) => {
+    const s = {};
+    if (d.curve) s.curve = d.curve;
+    if (d.rotation) s.rotation = +d.rotation;
+    if (d.underwater) {
+      // Auto where the camera doesn't record the water: No (Anton, 2026-11-11), as the tab says
+      if (d.underwater === "auto" && recordsWater(it) !== true) { s.underwater = "no"; toNo++; } else s.underwater = d.underwater;
+    }
+    if (d.lens_type) {
+      const types = (LENS_OF[it.path] || {}).types || [];
+      if (d.lens_type === "recorded") { if (lensTypeOf(it)) s.lens_type = null; }
+      else if (types.some((t) => t[0] === d.lens_type)) s.lens_type = d.lens_type;
+      if ("lens_type" in s) lens.push(it.path);
+    }
+    return { clip: it.id, source: s };
+  }).filter((e) => Object.keys(e.source).length);
+  try {
+    const problems = entries.length ? await invoke("set_source", { entries }) : [];
+    lens.forEach((p) => { delete LENS_OF[p]; delete LENS_INFO[p]; });
+    S.srcDraft = {};
+    if (problems.length) showError(problems.join(" · "));
+    toast("Source settings set for " + entries.length + (entries.length === 1 ? " clip" : " clips") + (toNo ? "; lens under water No for " + toNo + (toNo === 1 ? " (its camera doesn’t" : " (their cameras don’t") + " record it)" : ""));
+    await refresh();
+  } catch (e) { showError(String(e)); }
 }
 
 // Stabilize optically (vs-gyroflow's optical.rs, run by gyroflow-optical): Gyroflow measures the camera's motion from
@@ -851,6 +1044,25 @@ function askLensTypes(paths) {
   }).catch(() => { want.forEach((p) => { LENS_OF[p] = { types: [] }; }); })
     .finally(() => { lensAsking = false; renderSide(); });
 }
+// A clip's lens profile as the player's Source → Lens → Profile says it (gyroflow-probe --lens), asked once per clip
+// when its Info shows: the profile's name, "From the file", or "Unknown (<type>, mode N)" / "Unknown (mode N)" where
+// nothing fits, with the camera's own number for its mode
+const LENS_INFO = {};
+function lensInfoText(path) {
+  if (!(path in LENS_INFO)) {
+    LENS_INFO[path] = null;
+    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = r || {}; }, () => { LENS_INFO[path] = {}; }).finally(() => { if (S.tab === "info") renderSide(); });
+  }
+  const r = LENS_INFO[path];
+  if (r === null) return "Reading…";
+  if (r.lens === "in the file") return "From the file";
+  if (r.lens) return String(r.lens).replace(/_/g, " ");
+  const t = r.type || r.recorded;
+  const lb = t ? (((r.types || []).find((x) => x.id === t) || {}).label || t) : "";
+  const mode = r.mode != null ? "mode " + r.mode : "";
+  const inside = [lb, mode].filter(Boolean).join(", ");
+  return r.camera || inside ? "Unknown" + (inside ? " (" + inside + ")" : "") : "";
+}
 // What a clip's camera recorded, said as the player's panel says it: its type, or "unknown (mode 6)" where the curated
 // list doesn't name the camera's mode yet; "" for a camera without types
 function recordedText(r, label) {
@@ -858,7 +1070,7 @@ function recordedText(r, label) {
   if (r.recorded) return label(r.recorded, r.types);
   return r.mode != null ? "unknown (mode " + r.mode + ")" : "unknown";
 }
-function opticalSection(c) {
+function opticalBody(c) {
   const op = opticalPlan(c);
   askLensTypes(op.all);
   const types = [];
@@ -872,7 +1084,7 @@ function opticalSection(c) {
   if (S.opticalLens !== "keep" && S.opticalLens !== "recorded" && !types.some((t) => t[0] === S.opticalLens) && !asking) S.opticalLens = "keep";
   const out = [[op.own, "have motion data the player stabilizes them with"], [op.project, "have a Gyroflow project already (Redo makes it again)"], [op.s360, "are 360°"], [op.lens, "have a lens that isn’t known" + (op.lensTyped ? " (choose its type in Lens)" : "")]].filter((x) => x[0]);
   const n = op.go.length;
-  return sec("optical", "Stabilize optically", "clips without motion data",
+  return '<div class="lab">Stabilize optically · clips without motion data</div>' +
     (c.any ? '<p>' + esc(n + (n === 1 ? " clip" : " clips") + " to stabilize" + (op.redo ? " (" + op.redo + " made again)" : "") + (out.length ? "; left out: " + out.map((x) => x[0] + " " + x[1]).join(", ") : "")) + '.</p>' : "") +
     '<div class="field"><label class="sub" for="optlens">Lens</label><select id="optlens" data-a="optlens">' +
       [["keep", "Each clip’s own" + (own ? " (" + own + ")" : "")], ["recorded", "As the camera recorded" + (rec ? " (" + rec + ")" : "")]].concat(types).map((o) => '<option value="' + esc(o[0]) + '"' + (S.opticalLens === o[0] ? " selected" : "") + '>' + esc(o[1]) + '</option>').join("") +
@@ -880,7 +1092,7 @@ function opticalSection(c) {
     (asking ? '<span class="sub wrap">Asking which lenses these cameras have…</span>' : "") +
     '<label class="switch"><input type="checkbox" id="optredo" data-a="optredo"' + (S.opticalRedo || S.opticalLens !== "keep" ? " checked" : "") + (S.opticalLens !== "keep" ? " disabled" : "") + '>Redo the ones with a Gyroflow project (its settings kept, lens and motion measured again)</label>' +
     '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="optical"' + (c.any && !n ? " disabled" : "") + '>Stabilize ' + (c.any ? n + (n === 1 ? " clip" : " clips") : "") + ' optically</button></div>' +
-    '<span class="sub wrap">For clips whose motion the player can’t take from the camera: none recorded, or recorded with the camera’s own stabilization on (HyperSmooth, RockSteady). Gyroflow measures it from the picture, one clip at a time in the background (about as long as the clip plays), and its project goes beside each clip, where the player plays with it. A lens chosen here is kept with each clip (the player uses it too) and makes their projects again. A clip whose lens isn’t known is left out, and the task says which.</span>');
+    '<span class="sub wrap">For clips whose motion the player can’t take from the camera: none recorded, or recorded with the camera’s own stabilization on (HyperSmooth, RockSteady). Gyroflow measures it from the picture, one clip at a time in the background (about as long as the clip plays), and its project goes beside each clip, where the player plays with it. A lens chosen here is kept with each clip (the player uses it too) and makes their projects again. A clip whose lens isn’t known is left out, and the task says which.</span>';
 }
 
 // Check and Find moved files, on the selection (library/src/checks.rs)
@@ -893,7 +1105,7 @@ function issueText(i) {
   if (i.kind === "missing") return short(i.file) + ": its original isn’t at " + i.tree + ".";
   return JSON.stringify(i);
 }
-function checksSection(c) {
+function checksBody(c) {
   let body = '<p>' + (c.any ? "Over " + esc(c.selName) + (S.view === "footage" && c.selFolders.length ? " (" + esc(c.label) + ", and the clip previews in them)" : "") + "." : "Select what to check: clips or folders (" + (S.macos ? "⌘A" : "Ctrl+A") + ": all of them).") +
     (S.checking ? ' <span class="sub" style="display:inline">Checking: a big selection on a share takes a while.</span>' : "") + '</p>' +
     '<div class="btns"><button type="button" class="btn sm' + (S.checked ? " on" : "") + '" data-a="runcheck"' + (c.any && !S.checking ? "" : " disabled") + '>' + (S.checking ? '<span class="spin" aria-hidden="true"></span> Checking…' : "Check") + '</button>' +
@@ -914,10 +1126,10 @@ function checksSection(c) {
           : '<br>not found') + '</span></div>').join("") +
       (ok.length ? '<div class="btns"><button type="button" class="btn sm pri" data-a="applymoved">Update ' + ok.length + '</button></div>' : "") + '</div>';
   }
-  return sec("checks", "Checks", "issues, moved files", body);
+  return body;
 }
 // Tags on the selection (library/src/tags.rs): kept with each item, in the library
-function tagsSection(c) {
+function tagsBody(c) {
   const on = [];
   for (const it of c.selItems) for (const t of it.tags || []) if (on.indexOf(t) < 0) on.push(t);
   const body = c.any
@@ -925,7 +1137,7 @@ function tagsSection(c) {
       '<div class="tagin"><input id="tagdraft" type="text" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
       '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in its own metadata (XMP keywords).</span>'
     : '<p>Select items or folders to tag them.</p>';
-  return sec("tags", "Tags", c.any ? on.length + " on the selection" : "select to tag", body);
+  return body;
 }
 async function setTags(add, remove) {
   const c = ctx();
@@ -997,7 +1209,8 @@ function renderAll() {
 }
 function renderQueueOnly() {
   if (S.tab === "queue") { const b = $("qtab"); if (b) b.innerHTML = queueHtml(); }
-  document.querySelectorAll(".count").forEach((e) => { e.textContent = activeCount(); });
+  const n = activeCount();
+  document.querySelectorAll(".count").forEach((e) => { e.textContent = n; e.hidden = !n; });
 }
 
 // ---------- the project's settings ----------
@@ -1073,6 +1286,9 @@ async function runTakeIn() {
 function renderSheet() {
   const el = $("sheet");
   if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
+  if (S.sheet === "geo") { el.innerHTML = renderGeo(); return; }
+  if (S.sheet === "geoask") { el.innerHTML = renderGeoAsk(); return; }
+  if (S.sheet === "geodenied") { el.innerHTML = renderGeoDenied(); return; }
   if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
   const st = S.settings;
   const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
@@ -1341,6 +1557,8 @@ function openMenu(x, y) {
     const marksOnly = c.direct.length && !c.selFolders.length && c.direct.every((x) => x.kind === "mark");
     if (S.view !== "sources" && !marksOnly) e.push(b("trash", deleteLabel(c, del), k("⌘⌫", "Delete"), !del.length));
     if (e.length) parts.push(e.join(""));
+    const clips = (S.view === "footage" || S.view === "sources") ? c.selItems.filter((x) => x.kind === "clip").length : 0;
+    if (clips) parts.push(b("srcsettings", clips > 1 ? "Batch set Source settings…" : "Source settings…"));
     parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
   } else {
     const g = [];
@@ -1422,10 +1640,11 @@ function itemInfo(it) {
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
-    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")],
-      ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path)],
+      ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
       ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
+    h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
     const tf = stabText(it.own && it.own.view);
     h += infoSec("Transform", tf ? kv(tf.concat([["Turned", it.turned ? "Yes" : ""]])) : '<p class="sub wrap">' + (it.gyroflow ? "Its Gyroflow project" : TF_DEFAULT) + (it.turned ? ", turned" : "") + '</p>');
@@ -1469,7 +1688,18 @@ function manyInfo(c) {
   let h = '<div class="ihead"><b class="wrap">' + esc(c.selName) + '</b><span class="sub">' + esc(plural(its.length) + (c.selFolders.length ? ", everything inside included" : "")) + '</span></div>';
   h += infoSec("All of it", kv([["Length", dur ? clock(dur) : ""], ["Size", sizeText(size)], ["Recorded", whens.length ? dateText(whens[0]) + (whens.length > 1 ? " – " + dateText(whens[whens.length - 1]) : "") : ""],
     ["Cameras", count((it) => it.cam)], ["Color", count((it) => it.color)], ["Marks", its.reduce((n, it) => n + (it.marks || 0), 0) || ""], ["Moments", its.reduce((n, it) => n + (it.moments || 0), 0) || ""],
-    ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")]]));
+    ["Kinds", count((it) => it.kind === "still" ? it.form : "")], ["Tags", Array.from(new Set(its.flatMap((it) => it.tags || []))).join(", ")],
+  ]));
+  // Where its clips were recorded: a small map with each place's dot, and the places by name
+  const clips = its.filter((it) => it.kind === "clip");
+  if (clips.length) {
+    const placed = clips.filter((it) => it.geo);
+    const m = {};
+    placed.forEach((it) => { const n = placeText(it.geo.place) || coordText(it.geo.lat, it.geo.lon); m[n] = (m[n] || 0) + 1; });
+    const names = Object.keys(m).sort((a, b) => m[b] - m[a]).map((n) => '<span class="blk">' + esc(n) + ' <span class="sub" style="display:inline">' + m[n] + '</span></span>').join("");
+    h += infoSec("Location", placed.length ? mapHtml(placed.map((it) => [it.geo.lat, it.geo.lon])) + kv([["Places", names, false, true], ["No location", clips.length - placed.length || ""]])
+      : '<p class="sub wrap">None of these clips has a location yet.</p>');
+  }
   if (one && FOLDER_VIEWS[S.view] && c.selFolders[0] !== NOPREV) h += infoSec("Files", kv([["Folder", pathsHtml([folderOnDisk(c.selFolders[0])]), false, true]]));
   return h;
 }
@@ -1483,6 +1713,306 @@ function infoHtml(c) {
   }
   if (c.direct.length === 1 && !c.selFolders.length) { const b = clipButton(c); return itemInfo(c.direct[0]) + (b ? '<div class="isec"><div class="btns">' + b + '</div></div>' : ""); }
   return manyInfo(c);
+}
+
+// ---------- locations (library/src/geo.rs, docs/geolocation.md) ----------
+// A clip's location is the original's: set from Apple Photos (the photos nearest in time) or by hand, kept in its own
+// file; else the camera's own GPS, read from the clip. Place names are looked up once on this computer.
+
+const PLACES = {};          // "lat,lon" (0.01°) -> place, or null while it's being looked up / found nothing
+let placesWanted = [], placesBusy = false;
+function gkey(lat, lon) { return lat.toFixed(2) + "," + lon.toFixed(2); }
+function wantPlace(lat, lon) {
+  const k = gkey(lat, lon);
+  if (k in PLACES) return;
+  PLACES[k] = null;
+  placesWanted.push([lat, lon]);
+  if (!placesBusy) setTimeout(lookPlaces, 300);
+}
+async function lookPlaces() {
+  if (placesBusy || !placesWanted.length) return;
+  placesBusy = true;
+  const pts = placesWanted.splice(0, 20);
+  try {
+    const got = await invoke("places_of", { points: pts, lookup: true });
+    pts.forEach((p, i) => { if (got[i]) PLACES[gkey(p[0], p[1])] = got[i]; });
+    derive(S.view === "sources" ? "footage" : S.view); renderAll();
+  } catch (e) { /* offline: shown as coordinates */ }
+  placesBusy = false;
+  if (placesWanted.length) setTimeout(lookPlaces, 300);
+}
+function deriveGeo(it, probe) {
+  const own = it.own && it.own.location;
+  let g = null;
+  if (own && typeof own.lat === "number" && typeof own.lon === "number") {
+    g = { lat: own.lat, lon: own.lon, alt: own.alt, source: own.source || "manual", place: own.place || null, gap: own.photo_gap_s };
+  } else if (probe && probe.gps && typeof probe.gps.lat === "number") {
+    const k = gkey(probe.gps.lat, probe.gps.lon);
+    g = { lat: probe.gps.lat, lon: probe.gps.lon, alt: probe.gps.alt, source: "camera", place: PLACES[k] || null };
+    if (!(k in PLACES)) wantPlace(probe.gps.lat, probe.gps.lon);
+  }
+  it.geo = g;
+  const p = (g && g.place) || {};
+  it.country = g ? (p.country || (p.water ? "At sea" : "Not named yet")) : null;
+  it.region = g ? (p.region || p.water || "—") : null;
+  it.locality = g ? (p.site || p.locality || p.water || "—") : null;
+}
+function placeText(p) {
+  if (!p) return "";
+  const parts = [];
+  for (const k of ["site", "locality", "region", "country"]) if (p[k] && parts.indexOf(p[k]) < 0) parts.push(p[k]);
+  if (!parts.length && p.water) parts.push(p.water);
+  return parts.join(", ");
+}
+// A small map of points (Apple Maps, drawn by the app on a Mac and kept), filled in after the Info is drawn
+const MAPS = new Map(); // its points' key -> data URL, or null: none
+function mapHtml(points) {
+  if (!S.macos || !points.length) return "";
+  const key = Array.from(new Set(points.map((p) => p[0].toFixed(4) + "," + p[1].toFixed(4)))).sort().join(";");
+  const u = MAPS.get(key);
+  if (u === null) return "";
+  return '<div class="minimap"><img data-map="' + esc(key) + '" alt="Map: where ' + (points.length === 1 ? "it was" : "they were") + ' recorded"' + (u ? ' src="' + u + '"' : " hidden") + '></div>';
+}
+function fillMaps() {
+  for (const el of document.querySelectorAll("img[data-map]")) {
+    const key = el.getAttribute("data-map");
+    if (MAPS.has(key)) continue;
+    MAPS.set(key, undefined);
+    const points = key.split(";").map((x) => x.split(",").map(Number));
+    const dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    invoke("mini_map", { points, w: 300, h: 170, dark }).then((u) => u || null, () => null).then((u) => {
+      MAPS.set(key, u);
+      for (const im of document.querySelectorAll('img[data-map="' + CSS.escape(key) + '"]')) { if (u) { im.src = u; im.hidden = false; } else im.parentNode.remove(); }
+    });
+  }
+}
+function coordText(lat, lon) {
+  return Math.abs(lat).toFixed(5) + "° " + (lat < 0 ? "S" : "N") + ", " + Math.abs(lon).toFixed(5) + "° " + (lon < 0 ? "W" : "E");
+}
+function gapText(s) {
+  if (s == null) return "";
+  const a = Math.abs(s);
+  const t = a < 60 ? "under a minute" : a < 3600 ? Math.round(a / 60) + " min" : a < 86400 ? (Math.round(a / 360) / 10) + " h" : (Math.round(a / 8640) / 10) + " days";
+  if (a < 1) return "taken during the clip";
+  return t + (s < 0 ? " before" : " after");
+}
+const GEO_SOURCE = { photos: "From Apple Photos", manual: "Set by hand", camera: "The camera’s GPS" };
+function geoFacets(items, sections) {
+  const clips = items.filter((i) => i.kind === "clip");
+  if (!clips.length) return;
+  const geo = clips.filter((i) => i.geo);
+  const ctry = distinct(geo, (i) => i.country).map((c) => L("gc:" + c, c, (it) => it.country === c));
+  ctry.push(L("gc:none", "No location", (it) => it.kind === "clip" && !it.geo));
+  const regs = distinct(geo, (i) => i.country).map((c) => P("gr:" + c, c, distinct(geo.filter((i) => i.country === c), (i) => i.region)
+    .map((r) => L("gr:" + c + "|" + r, r, (it) => it.country === c && it.region === r))));
+  const pairs = distinct(geo, (i) => i.country + "|" + i.region);
+  const locs = pairs.map((cr) => { const [c, r] = cr.split("|"); return P("gl:" + cr, r === "—" ? c : r, distinct(geo.filter((i) => i.country === c && i.region === r), (i) => i.locality)
+    .map((l) => L("gl:" + cr + "|" + l, l, (it) => it.country === c && it.region === r && it.locality === l))); });
+  const facets = [{ id: "gc", title: "Country", opts: ctry }];
+  if (geo.length) {
+    facets.push({ id: "gr", title: "Region", opts: regs }, { id: "gl", title: "Place", opts: locs },
+      { id: "gs", title: "From", opts: Object.keys(GEO_SOURCE).map((k) => L("gs:" + k, GEO_SOURCE[k], (it) => !!it.geo && it.geo.source === k)) });
+  }
+  sections.push({ id: "geo", title: "Location", facets });
+}
+function locationInfo(it) {
+  const g = it.geo;
+  if (!g) return infoSec("Location", '<p class="sub wrap">None. Select it (or its folder) and use the Location tab: from Apple Photos' + (S.macos ? "" : " (on a Mac)") + ' or by hand.</p>');
+  const p = g.place;
+  const name = placeText(p) || (g.source === "camera" && !p ? "Looking up the place…" : "");
+  return infoSec("Location", mapHtml([[g.lat, g.lon]]) + kv([["Place", name], ["Point", coordText(g.lat, g.lon) + (g.alt != null ? " · " + Math.round(g.alt) + " m" : ""), true],
+    ["From", GEO_SOURCE[g.source] + (g.source === "photos" && g.gap != null ? ": the nearest photo " + gapText(g.gap) : "")]]) +
+    '<div class="btns"><button type="button" class="btn sm" data-a="geomap" data-v="' + g.lat + "," + g.lon + '">Show on a map</button>' +
+    (g.source !== "camera" ? '<button type="button" class="btn sm" data-a="georemove">Remove</button>' : "") + '</div>');
+}
+function locationBody(c) {
+  const clips = c.selItems.filter((it) => it.kind === "clip");
+  const own = clips.filter((it) => it.geo && it.geo.source !== "camera").length, cam = clips.filter((it) => it.geo && it.geo.source === "camera").length;
+  let body = '<p>' + (c.any ? esc(clips.length + " clip" + (clips.length === 1 ? "" : "s") + ": " + own + " with a location, " + cam + " with the camera’s GPS, " + (clips.length - own - cam) + " without.") : "Select clips or folders.") + '</p>';
+  if (S.macos) {
+    body += '<div class="btns"><button type="button" class="btn sm pri" data-a="geosuggest"' + (clips.length && !S.geoBusy ? "" : " disabled") + '>' + (S.geoBusy ? '<span class="spin" aria-hidden="true"></span> Looking in Photos…' : "Suggest from Apple Photos") + '</button></div>' +
+      '<span class="sub wrap">From the photos with a place you took nearest in time (your iPhone on the same trip). Photos is only read, never changed.</span>';
+  } else {
+    body += '<span class="sub wrap">Suggestions from Apple Photos are on a Mac. Here, set it by hand.</span>';
+  }
+  body += '<div class="lab" style="margin-top:10px">By hand</div><div class="tagin"><input id="geohand" type="text" value="' + esc(S.geoHand) + '" placeholder="27.7333, 34.25" aria-label="Latitude, longitude">' +
+    '<button type="button" class="btn sm" data-a="geohand"' + (clips.length ? "" : " disabled") + '>Set</button></div>' +
+    '<div class="tagin"><input id="geosite" type="text" value="' + esc(S.geoSite) + '" placeholder="Dive site (optional)" aria-label="Dive site"></div>' +
+    '<span class="sub wrap">Latitude, longitude as a map copies them. Written into each original’s own file, beside it.</span>';
+  if (own) body += '<div class="btns"><button type="button" class="btn sm" data-a="georemove">Remove ' + own + ' location' + (own === 1 ? "" : "s") + '</button></div>';
+  return body;
+}
+
+// The sheet: Photos' suggestions by group
+function geoClips() {
+  return ctx().selItems.filter((it) => it.kind === "clip").map((it) => ({ id: it.id, path: (it.copies && it.copies[0] && it.copies[0].path) || it.path, folder: it.dir || "" }));
+}
+async function geoSuggest() {
+  const status = await invoke("photos_access", { ask: false }).catch(() => "none");
+  if (status === "notDetermined") { S.sheet = "geoask"; renderSheet(); return; }
+  if (status !== "authorized" && status !== "limited") { S.sheet = "geodenied"; S.geoStatus = status; renderSheet(); return; }
+  const sel = ctx().selItems.filter((it) => it.kind === "clip");
+  S.geoClips = geoClips();
+  S.geoHad = sel.filter((it) => it.geo && it.geo.source !== "camera").map((it) => it.id);
+  S.geoKeep = true; S.geoPick = null;
+  S.geoBusy = true; renderSide();
+  try {
+    S.geo = await invoke("suggest_locations", { clips: S.geoClips, shifts: {} });
+    S.sheet = S.geo.status === "authorized" || S.geo.status === "limited" ? "geo" : "geodenied"; S.geoStatus = S.geo.status;
+  } catch (e) { showError(String(e)); }
+  S.geoBusy = false; renderSide(); renderSheet();
+}
+function zoneText(off) {
+  if (off == null) return "UTC";
+  const m = Math.round(off / 60), a = Math.abs(m);
+  return "UTC" + (m < 0 ? "−" : "+") + Math.floor(a / 60) + (a % 60 ? ":" + String(a % 60).padStart(2, "0") : "");
+}
+function renderGeoAsk() {
+  return '<div class="scrim" data-a="scrim"><div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Read your Apple Photos?</h2>' +
+    '<span class="sub">To suggest where clips were recorded</span></header><div class="sb"><p class="wrap">The Library reads the time and place of the photos you took around these clips (your iPhone on the same trip), and nothing else: not the pictures, and it never changes your library.</p>' +
+    '<p class="wrap">macOS now asks once whether Action Footage Library may access Photos. Its prompt says “access”: macOS has no read-only choice for apps. You can take it back in System Settings › Privacy &amp; Security › Photos.</p></div>' +
+    '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Not now</button><button type="button" class="btn pri" data-a="geoallow">Continue</button></footer></div></div>';
+}
+function renderGeoDenied() {
+  const why = S.geoStatus === "none" ? "Apple Photos isn’t on this computer." : S.geoStatus === "restricted" ? "Access to Photos is restricted on this Mac." :
+    "Action Footage Library isn’t allowed to read Photos. Allow it in System Settings › Privacy & Security › Photos, then try again.";
+  return '<div class="scrim" data-a="scrim"><div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Photos can’t be read</h2></header>' +
+    '<div class="sb"><p class="wrap">' + esc(why) + '</p></div><footer><span class="sp"></span><button type="button" class="btn pri" data-a="closesheet">OK</button></footer></div></div>';
+}
+// The slider's stops, hours: 3 h to 5 days (Anton)
+const GEO_STOPS = [3, 6, 9, 12, 18, 24, 36, 48, 72, 96, 120];
+function hoursText(h) { return h < 1 ? Math.max(1, Math.round(h * 60)) + " min" : h < 48 ? (Math.round(h * 10) / 10) + " h" : (Math.round(h / 2.4) / 10) + " days"; }
+// What the sheet shows for the slider's limit: the places of the nearest photos, by name; the clips too far
+function geoPlan() {
+  const r = S.geo || {};
+  const places = r.places || {};
+  const limit = GEO_STOPS[S.geoMax] * 3600;
+  const keep = new Set(S.geoKeep ? S.geoHad : []);
+  const names = {}, far = [];
+  const nameOf = (k) => (places[k] && places[k].text) || (places[k] ? coordText(places[k].lat, places[k].lon) : k);
+  for (const g of r.groups || []) for (const c of g.clips || []) {
+    if (keep.has(c.id)) continue;
+    const p = c.photo;
+    if (p && p.place) {
+      const n = nameOf(p.place);
+      const e = names[n] || (names[n] = { name: n, near: [], points: {}, all: 0 });
+      e.all++;
+      if (Math.abs(p.gap_s) <= limit) { e.near.push(c); e.points[p.place] = (e.points[p.place] || 0) + 1; continue; }
+    }
+    far.push({ id: c.id, why: p ? hoursText(Math.abs(p.gap_s) / 3600) + " from a photo" : "no photo within 5 days" });
+  }
+  for (const u of r.unset || []) if (!keep.has(u.id)) far.push({ id: u.id, why: u.why });
+  const list = Object.values(names).sort((a, b) => b.near.length - a.near.length || b.all - a.all);
+  for (const e of list) {
+    const gaps = e.near.map((c) => Math.abs(c.photo.gap_s) / 3600);
+    e.min = gaps.length ? Math.min(...gaps) : null; e.max = gaps.length ? Math.max(...gaps) : null;
+    // Where a clip given this place by choice goes: the point most of its clips got (else its first)
+    const best = Object.keys(e.points).sort((a, b) => e.points[b] - e.points[a])[0] || Object.keys(places).find((k) => nameOf(k) === e.name);
+    e.key = best;
+  }
+  const pick = S.geoPick != null && (S.geoPick === "" || list.some((e) => e.name === S.geoPick)) ? S.geoPick : (list[0] ? list[0].name : "");
+  return { list, far, pick, places, keep: keep.size };
+}
+function geoApplyText(plan) {
+  const n = plan.list.reduce((k, e) => k + e.near.length, 0) + (plan.pick ? plan.far.length : 0);
+  return [n, S.geoBusy ? "Writing…" : "Apply to " + n + " clip" + (n === 1 ? "" : "s")];
+}
+function renderGeo() {
+  const r = S.geo || {};
+  const plan = geoPlan();
+  let h = '<div class="scrim" data-a="scrim"><div class="sheet geosheet" role="dialog" aria-modal="true" aria-labelledby="geoTitle"><header><h2 id="geoTitle">Locations from Apple Photos</h2>' +
+    '<span class="sub">' + esc(S.geoClips.length + " clips · " + (r.photos || 0) + " photos with a place around them") + '</span></header><div class="sb">';
+  h += '<div class="geomax"><label for="geomax">Nearest photo at most</label><input type="range" id="geomax" min="0" max="' + (GEO_STOPS.length - 1) + '" step="1" value="' + S.geoMax + '">' +
+    '<b id="geomaxv">' + esc(hoursText(GEO_STOPS[S.geoMax])) + '</b><span class="sub">from the clip</span></div><div id="geobody">' + geoBody(plan) + '</div>';
+  const [n, label] = geoApplyText(plan);
+  h += '</div><footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button>' +
+    '<button type="button" class="btn pri" id="geoapply" data-a="geoapply"' + (n && !S.geoBusy ? "" : " disabled") + '>' + esc(label) + '</button></footer></div></div>';
+  return h;
+}
+// The slider moved: what's under it, and the button (the slider itself stays, so dragging goes on)
+function geoSlid() {
+  const plan = geoPlan();
+  $("geomaxv").textContent = hoursText(GEO_STOPS[S.geoMax]);
+  $("geobody").innerHTML = geoBody(plan);
+  const [n, label] = geoApplyText(plan);
+  const b = $("geoapply"); b.textContent = label; b.disabled = !n || S.geoBusy;
+}
+function geoBody(plan) {
+  const r = S.geo || {};
+  const nearN = plan.list.reduce((n, e) => n + e.near.length, 0);
+  const whys = Array.from(new Set((r.groups || []).map((g) => g.why + (g.local ? " (taken as the place’s " + zoneText(-g.default_shift) + ")" : ""))));
+  let h = '<div class="lab">Places found · ' + nearN + ' clip' + (nearN === 1 ? "" : "s") + ' get their nearest photo’s</div><div class="geolist" role="radiogroup" aria-label="Place for the clips too far">';
+  for (const e of plan.list) {
+    const range = e.near.length ? (e.min === e.max ? hoursText(e.min) : hoursText(e.min) + "–" + hoursText(e.max)) + " from their photos" : "none within " + hoursText(GEO_STOPS[S.geoMax]);
+    const pt = plan.places[e.key] || {};
+    h += '<label class="geoname"><input type="radio" name="geopick" data-a="geopick" value="' + esc(e.name) + '"' + (plan.pick === e.name ? " checked" : "") + '>' +
+      '<span class="wrap"><b>' + esc(e.name) + '</b><br><span class="sub" style="display:inline">' + esc(e.near.length + " clip" + (e.near.length === 1 ? "" : "s") + " · " + range +
+      (Object.keys(e.points).length > 1 ? " · " + Object.keys(e.points).length + " spots" : "")) + '</span></span>' +
+      (pt.lat != null ? '<button type="button" class="btn sm" data-a="geomap" data-v="' + pt.lat + "," + pt.lon + '">Map</button>' : "") + '</label>';
+  }
+  h += '<label class="geoname"><input type="radio" name="geopick" data-a="geopick" value=""' + (plan.pick === "" ? " checked" : "") + '><span class="wrap">None: leave them without a location</span></label></div>';
+  h += '<div class="lab">Too far · ' + plan.far.length + ' clip' + (plan.far.length === 1 ? "" : "s") + (plan.far.length ? ' get the place ticked above' : "") + '</div>';
+  if (plan.far.length) h += '<div class="geofar">' + plan.far.map((f) => '<div><span class="mono">' + esc(f.id.split("/").pop()) + '</span> <span class="sub" style="display:inline">' + esc(f.why) + '</span></div>').join("") + '</div>';
+  if (S.geoHad.length) h += '<label class="switch"><input type="checkbox" data-a="geokeep"' + (S.geoKeep ? " checked" : "") + '>Keep the ' + S.geoHad.length + ' location' + (S.geoHad.length === 1 ? "" : "s") + ' already set</label>';
+  const notes = [];
+  if ((r.own_gps || []).length) notes.push(r.own_gps.length + " with the camera’s own GPS left as they are");
+  if (whys.length) notes.push("Clip times: " + whys.join("; "));
+  if (notes.length) h += '<p class="sub wrap">' + esc(notes.join(". ") + ".") + '</p>';
+  return h;
+}
+async function geoWrite(entries) {
+  try {
+    const problems = await invoke("set_locations", { entries });
+    if (problems.length) { showError(problems.join(" · ")); return false; }
+    return true;
+  } catch (e) { showError(String(e)); return false; }
+}
+async function geoApply() {
+  const plan = geoPlan();
+  const entries = [];
+  for (const e of plan.list) for (const c of e.near) {
+    const p = c.photo, pl = plan.places[p.place] || {};
+    entries.push({ ids: [c.id], lat: p.lat, lon: p.lon, source: "photos", place: pl.place || null, photo_gap_s: p.gap_s });
+  }
+  const chosen = plan.pick ? plan.list.find((e) => e.name === plan.pick) : null;
+  const pt = chosen && plan.places[chosen.key];
+  if (pt && plan.far.length) entries.push({ ids: plan.far.map((f) => f.id), lat: pt.lat, lon: pt.lon, source: "manual", place: pt.place || null });
+  if (!entries.length) return;
+  S.geoBusy = true; renderSheet();
+  const ok = await geoWrite(entries);
+  S.geoBusy = false;
+  if (ok) { S.sheet = null; toast(entries.reduce((n, x) => n + x.ids.length, 0) + " clips placed"); }
+  renderSheet();
+  await refresh();
+}
+async function geoAct(a, v, el) {
+  switch (a) {
+    case "geosuggest": return geoSuggest();
+    case "geoallow": {
+      S.sheet = null; renderSheet();
+      const st = await invoke("photos_access", { ask: true }).catch(() => "none");
+      if (st === "authorized" || st === "limited") return geoSuggest();
+      S.geoStatus = st; S.sheet = "geodenied"; renderSheet(); return;
+    }
+    case "geomap": { const [lat, lon] = v.split(",").map(Number); call("open_map", { lat, lon }).catch(() => {}); return; }
+    case "geoapply": return geoApply();
+    case "geohand": {
+      const ids = ctx().selItems.filter((it) => it.kind === "clip").map((it) => it.id);
+      if (!ids.length) return;
+      try {
+        const p = await invoke("parse_location", { text: S.geoHand });
+        if (await geoWrite([{ ids, lat: p.lat, lon: p.lon, source: "manual", place: p.place, site: S.geoSite }]))
+          toast((p.place_text || coordText(p.lat, p.lon)) + ": set for " + ids.length + " clip" + (ids.length === 1 ? "" : "s"));
+        await refresh();
+      } catch (e) { showError(String(e)); }
+      return;
+    }
+    case "georemove": {
+      const ids = ctx().selItems.filter((it) => it.kind === "clip" && it.geo && it.geo.source !== "camera").map((it) => it.id);
+      if (ids.length) { await geoWrite([{ ids, remove: true }]); await refresh(); }
+      return;
+    }
+  }
 }
 
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
@@ -1738,14 +2268,10 @@ async function poll() {
   }
   // Files changed in the project's folder or its locations (the player saving marks, moments, photos; Finder): read
   // again once they've settled; while a batch runs (changes all the time: clip previews coming one by one), every 4 s
+  // (what the project's catalog was told comes at once, as an event: refreshSoon below)
   const batchRuns = s.jobs.some((j) => j.state === "running");
   const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
-  if (S.root && s.changes !== S.changes && due && !S.refreshing) {
-    S.changes = s.changes;
-    S.lastRefresh = Date.now();
-    S.refreshing = true;
-    refresh().finally(() => { S.refreshing = false; });
-  }
+  if (S.root && s.changes !== S.changes && due) refreshSoon(s.changes);
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
   if (finished !== S.finished) {
@@ -1757,6 +2283,21 @@ async function poll() {
   $("ask").hidden = !s.close_asked;
   renderMoving(s.moving);
 }
+
+// What the project's catalog knows changed (the Library's own commands, the player's notes, a task's files as they
+// land): the view read again at once. One read at a time; another asked meanwhile follows it
+function refreshSoon(n) {
+  if (!S.root) return;
+  if (n !== undefined) { if (n === S.changes) return; S.changes = n; }
+  if (S.refreshing) { S.refreshAgain = true; return; }
+  S.refreshing = true;
+  S.lastRefresh = Date.now();
+  refresh().finally(() => {
+    S.refreshing = false;
+    if (S.refreshAgain) { S.refreshAgain = false; refreshSoon(); }
+  });
+}
+if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => refreshSoon(e.payload));
 
 // Move the project…: how far the copy is (a move on one disk is a rename, done at once)
 function renderMoving(m) {
@@ -1800,7 +2341,7 @@ async function addJob(kind) {
   try {
     await invoke("add_job", { kind, options, only: c.only, label });
     toast("In the queue: " + label);
-    S.tab = "queue";
+    showTab("queue");
     renderSide();
   } catch (e) { showError(String(e)); }
 }
@@ -1822,6 +2363,7 @@ document.addEventListener("click", async (e) => {
   }
   const a = el.dataset.a, v = el.dataset.v;
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
+  if (a.startsWith("geo")) return geoAct(a, v, el);
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;
@@ -1830,7 +2372,9 @@ document.addEventListener("click", async (e) => {
     case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
     case "view":
       S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false; S.renaming = null;
-      if (!DATA[v]) { renderAll(); await loadView(v).catch(() => {}); }
+      // Read again each time (from the project's catalog: quick), what it had shown meanwhile: what changed while
+      // another tab was open (a task's photos, exports) shows
+      renderAll(); await loadView(v).catch(() => {});
       break;
     case "addsource": return addSource();
     case "filters": S.filtersOpen = !S.filtersOpen; break;
@@ -1860,8 +2404,11 @@ document.addEventListener("click", async (e) => {
     }
     case "selall": S.sel = {}; VISIBLE.forEach((k) => { S.sel[k] = true; }); S.anchor = VISIBLE[0] || null; break;
     case "desel": S.sel = {}; S.anchor = null; break;
-    case "tab": S.tab = v; break;
-    case "sec": S.open[v] = !S.open[v]; break;
+    // The part shown again: the panel closes to its column (as the player's side panel does)
+    case "tab": if (S.tab === v && S.sideOpen) { S.sideOpen = false; remember("afl.side", ""); } else showTab(v); break;
+    case "srcsettings": showTab("source"); break;
+    case "srcapply": return applySource();
+    case "srcclear": S.srcDraft = {}; renderSide(); return;
     case "job": return addJob(v);
     case "openit": { const p = selectedPaths(); openItems(p); return; }
     case "revealit": { const c = ctx(); const first = c.selFolders.length ? (S.view === "sources" ? treeOnDisk(c.selFolders[0]) : folderOnDisk(c.selFolders[0])) : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
@@ -1896,7 +2443,7 @@ document.addEventListener("click", async (e) => {
       try {
         const r = await invoke("mend");
         toast("Mended " + r.mended + " of " + r.missing + (r.left.length ? ": " + r.left.length + " to choose or not found, in Checks" : "") + (r.problems.length ? "; " + r.problems.length + " couldn’t be written" : ""));
-        if (r.left.length) { S.found = r.left; S.checked = { issues: r.left.map((f) => f.issue) }; S.tab = "commands"; }
+        if (r.left.length) { S.found = r.left; S.checked = { issues: r.left.map((f) => f.issue) }; showTab("checks"); }
         refresh();
       } catch (er) { showError(String(er)); }
       S.mending = false; renderAll(); return;
@@ -1912,7 +2459,7 @@ document.addEventListener("click", async (e) => {
     case "ql": return quickLook();
     case "renameit": { const c = ctx(); if (canRename(c)) startRename(); else toast(S.view === "sources" ? "Sources’ folders and clips are renamed in Finder" : "A clip is renamed in Finder: Find moved files then follows"); return; }
     case "trash": return deleteSelection();
-    case "info": S.tab = "info"; break;
+    case "info": showTab("info"); break;
     case "revealhere": { const p = hereOnDisk(); if (p) call("reveal_path", { path: p }).catch(() => {}); return; }
     case "opengf": { const it = ctx().selItems[0]; if (it) call("open_in_gyroflow", { paths: it.kind === "clip" ? (it.copies || []).map((x) => x.path) : [it.path] }).catch(() => {}); return; }
     case "removesource": return removeSources(ctx().selFolders);
@@ -1973,12 +2520,18 @@ document.addEventListener("input", (e) => {
   else if (t.id === "hosts") { S.hostsText = t.value; }
   else if (t.id === "takeplace") { S.takePlace = t.value; }
   else if (t.id === "tagdraft") { S.tagDraft = t.value; }
+  else if (t.id === "geohand") { S.geoHand = t.value; }
+  else if (t.id === "geosite") { S.geoSite = t.value; }
+  else if (t.id === "geomax") { S.geoMax = +t.value; geoSlid(); }
 });
 document.addEventListener("change", (e) => {
   const el = e.target, a = el.dataset.a, v = el.dataset.v;
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
   if (a === "neverrename") { S.neverRename = el.checked; return; }
+  // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
+  if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
+  if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
   if (a === "prof") { S.profiles[v] = el.checked; renderSide(); return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
@@ -1988,6 +2541,7 @@ document.addEventListener("change", (e) => {
   else if (a === "alone_set") { S.alone = el.checked; remember("afl.alone", S.alone ? "1" : ""); return; }
   else if (a === "optlens") { S.opticalLens = el.value; renderSide(); return; }
   else if (a === "optredo") { S.opticalRedo = el.checked; renderSide(); return; }
+  else if (a === "srcset") { srcDraftSet(v, el.value); return; }
   else if (a === "setting") { call("set_setting", { key: v, value: el.checked }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
   else return;
   renderAll();

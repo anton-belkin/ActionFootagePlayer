@@ -166,6 +166,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
+| a NAS (x86-64 with Intel or AMD graphics, Docker): collaboration in one library, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
 
 **The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
@@ -267,7 +268,8 @@ switches and buttons, scrolled with the wheel:
 - **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame at full size, the temporal
   denoise (Full, Light, Off), what fills the edges and how often the trail is written, skipping the color aberration correction on
   this screen, whether it asks when the GPU can't keep up. They make playback lighter on this computer; what's
-  saved, exports and photos stay as they are.
+  saved, exports and photos stay as they are, but for the temporal denoise: exports have it as it plays here (Full,
+  Light, or none with Off).
 - **Telemetry**: whether it shows, the corner, the units, the fields.
 - **Dolby Vision** (Mac, the app): the trims, as sliders; back to the author's, or neutral ones.
 - **360° view**, for a 360° clip: looking around on or off, the projection, the field of view, the horizon, **Look
@@ -297,13 +299,13 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)), unless On, Wider or Off is saved for it | `gyroflow/toggle` |
 | `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
-| `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/lens` |
+| `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/above-water` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
 | `Ctrl+s` | The clip's next video output: HDR (HLG), HLG with Dolby Vision in HDR and in SDR (macOS), SDR tone-mapped by mpv, SDR through NBCUniversal's HLG → SDR conversion (the same for every camera), then SDR through the maker's LUT (DJI's, for D-Log M). Only the ones the clip has: an HDR clip (an export) has HDR as it is and NBCU's SDR. What you choose is what the next clips start in on that kind of screen, HDR or SDR, for the session (Look → Remember as default keeps it); an SDR look chosen on either becomes the SDR screen's. A clip starts in HDR on an HDR screen, in the SDR look last chosen on an SDR one. On an SDR screen HDR shows as macOS tones it down; on an HDR screen SDR shows as an SDR screen would | `dlogm/sdr` |
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: Source → Save to the source keeps it, for all its moments and clips | `dlogm/curve` |
-| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's | `gyroflow/still` |
+| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's. Exports have it too (not fully tested yet: measured headless, not tried in the app or on Windows/Linux) (`Shift+E`, moments, the Library's batches, a Live Photo's video): each frame cleaned from the frames on both sides of it by the Mac GPU path's own shader (Full or Light as Performance & Quality has it, and Stronger), which gyroflow-export runs offline | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
 | `Alt+s` | The frame on screen as a photo, in the project's `_Stills/` folder (beside `_Exports/`; with no project, `stabilized/` next to the clip): stabilized as it plays, cleaned up from the frames around it (as `Ctrl+p` does), with Save frame's frame and camera. The SDR look is the image, with a gain map to the HDR one (HLG), so an HDR screen shows it brighter: a HEIC on macOS, an Ultra HDR JPEG elsewhere (Android, Chrome and Apple read its ISO gain map). With 3 s of the video around it, as a phone's (the Save frame panel's Still / Live Photo / Motion Photo), exported as `Shift+E` would, at most 1920 wide or high: a Live Photo for Apple's devices (macOS: a `.mov` next to the HEIC; Photos and the iPhone take the two as one) or a Motion Photo for Android's (`<name>.MP.jpg`, an Ultra HDR JPEG with the video inside it, as Android's cameras write it) | `gyroflow/photo` |
@@ -548,8 +550,10 @@ channel is averaged over its spectrum, for a grey object in daylight through 3 m
 red's fringe at the edges of the frame, up to 3-7 px, goes to within about a pixel; blue's, up to 2-4 px, turns over
 to about 1-1.5 px the other way. Where the frame's own border shows (the wider view), it stays as recorded, against
 the edge fill or the background alike. Out of the water nothing moves. `Ctrl+a` leaves the fringes as recorded, and
-takes them out again; it switches nothing on above water (the lens stays as it is). Playback only,
-exports are as before. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
+takes them out again; it switches nothing on above water (the lens stays as it is). Exports and photos have it too
+(not fully tested yet in video exports: measured headless only), as the clip plays (`Shift+E`, moments, the Library's batches, `Alt+s`): gyroflow-export runs the same shader on each
+stabilized frame (`vs-gyroflow/src/user_shader.rs`; `--chromatic yes|no`), whatever Performance & Quality skips on
+this screen. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
 
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
@@ -598,6 +602,10 @@ of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not an
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
 Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part.
+**For YouTube** (untested: no file has been uploaded to YouTube yet, so how YouTube reads the LUT inside is still to be seen) (the Export button's list, the menu's Export for YouTube) makes HDR10 for YouTube that carries the SDR
+look too: YouTube makes the SDR version people see on SDR screens itself, and a 3D LUT inside the file (as YouTube's
+own [hdr_metadata](https://github.com/YouTubeHDR/hdr_metadata) tool attaches it) makes that version DJI's LUT or
+NBCU's conversion, as the player shows it, instead of YouTube's own conversion: `Turtle (YouTube).mkv`.
 
 It asks the export's name first, as a moment does (Enter alone takes the suggestion), and the file goes to the
 trip's **_Exports** folder: `_Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
@@ -643,6 +651,13 @@ What it renders:
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead, `--nbcu` any curve Rec.709 through NBCU's HLG → SDR conversion (the curve's LUT and NBCU's,
   made into one for the export).
+- `--youtube maker|nbcu|auto` (log, HLG or PQ clips): for YouTube, an MKV in HDR10: PQ in BT.2020 (log and HLG made PQ
+  for BT.2100's 1000-nit reference display, as BT.2408 does it), the mastering display (the BVM-X300's, as YouTube's
+  tool writes it) and the MaxCLL/MaxFALL measured, and a 65-point `.cube` attached (`application/x-cube`) that maps
+  that PQ to the SDR look: DJI's LUT (D-Log M; made on your computer from the LUT you downloaded) or NBCU's
+  conversion. YouTube honors such a LUT for PQ uploads, not HLG ones (users' reports), and doesn't document its
+  levels: `--youtube-lut full` (the default, 0 black and 1 white, as grading apps write LUTs) or `data` (0..1 the
+  10-bit codes).
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--level weak|medium|strong`: a clip without a project at that level (`Ctrl+k`; default medium).
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
@@ -650,6 +665,11 @@ What it renders:
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--underwater yes|no|auto|project`: the lens under water, above it, (the default) as the camera says over the
   clip, or as the project or preset says, as the menu's Lens has it (see Stabilization).
+- `--chromatic yes|no`: the water's color fringes taken out where the lens is under water (the default), as `Ctrl+a`
+  does it, or left as recorded. `--denoise light|full` (`--denoise-strong`, `--grain <0-1>`): the temporal denoise as
+  `Ctrl+p` plays it on the Mac's GPU path, each frame from the 3 or 5 frames on each side of it, the frames before
+  and after the part decoded for it; off by default. Both run the player's own shaders on the stabilized frame
+  (`chromatic.glsl`, `warp.glsl`'s denoise) on the GPU, as `Shift+E` passes them for the clip.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,
@@ -928,9 +948,9 @@ Project). Then, as buttons:
   whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
   clips where their camera has types (Osmo Action 6: Wide, Normal), kept with each clip (the player uses it too); a
   lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
-  measured anew. It needs a Gyroflow with the optical analysis
-  (built from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow): it isn't in Gyroflow's own releases
-  yet), found where Gyroflow installs itself, or by `AFP_GYROFLOW`.
+  measured anew. It needs [Gyroflow](https://gyroflow.xyz) 1.7.0 or newer, which has the optical analysis
+  ([its releases](https://github.com/gyroflow/gyroflow/releases)), found where Gyroflow installs itself, or by
+  `AFP_GYROFLOW`.
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
@@ -941,6 +961,11 @@ The Library plays and renders nothing itself: each batch is the player run witho
 settings, the same code as the menu used to run), so what it makes is what the player would. Its settings for the
 trip are in `Project.afproject`, which the player reads too. Not on Linux yet: there the batches aren't reachable
 until it is.
+
+With the project on a NAS, the **NAS Helper** ([tools/nas-helper](tools/nas-helper/README.md)), a Docker container
+there, lets several people work in one library together: what one of them changes reaches everyone else's
+player and Library in about a second; streams every clip and moment, stabilized and in HDR as the player shows them, to a browser, a phone or a TV;
+and, if you want, puts the moments (or the clips, or both) in a Jellyfin library.
 
 ### Notes for an AI agent
 
@@ -1412,6 +1437,9 @@ windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts 
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
 windows/AppIcon.ico           the Windows app's icon (tools/make_icon.sh, tools/png_to_ico.py)
 tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python, VapourSynth and ffmpeg pinned
+tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch), the stream and the links for Jellyfin in one
+                              Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
+tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
 tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries

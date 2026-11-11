@@ -5,6 +5,9 @@ Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for DJI's D-Log M, given the p
 (BT.2020), fMP4 segments of 2 s, the audio copied. Nothing leaves the GPU: VAAPI decodes, libplacebo renders into the
 encoder's own surfaces, VDEnc encodes (docs/gpu-render.md, "The streaming server").
 
+It ships as part of the **NAS Helper** (tools/nas-helper/README.md: one container with collaboration and the
+links for Jellyfin, its settings described there); what follows is how it works, and how it ran on its own before.
+
 - `http://<nas>:8099/`: the clips by folder, each with its stream (Safari and Apple TV play HLS by themselves; `watch`
   opens a page with a player) and how much of it is rendered; per folder, **pre-render openings** (the first 8 s of each
   clip, `AFP_OPENING`) and **pre-render whole clips**: queued, rendered one clip at a time at low priority, and only
@@ -39,20 +42,25 @@ On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` buil
 `dlogm_hlg.glsl` (tools/cube_to_glsl.py), the player's plugins in `player/` (below), and the container:
 
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
-      -v /home/claude/afp-test/clips:/clips:ro -v /volume1/DJI_Inbox:/library/DJI_Inbox:ro \
-      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/clips:/library/DJI_Inbox -e AFP_BITRATE=30M \
+      -v "/volume1/ssd/Action Footage Library:/library/project:ro" \
+      -v /volume2/photo:/shares/photo:ro -v /volume1/DJI_Inbox:/shares/DJI_Inbox:ro \
+      -v /home/claude/afp-test/stream:/stream -e AFP_LIBRARY=/library/project -e AFP_BITRATE=30M \
+      -e "AFP_SHARES=//DISKSTATIONDXP/photo=/shares/photo;//DISKSTATIONDXP/DJI_Inbox=/shares/DJI_Inbox" \
       -e AFP_TV_LOOK=pqg2.5r30 afp-stream:f43 \
       bash -c "cd /stream && cc -O2 afp-render.c -o /stream/afp-render \$(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig \
         pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm) -lm && python3 -u afp_stream.py"
 
-The library is mounted read-only: the service writes only its renders (`/stream/cache`) and what the player said
+The project (since 2026-11-11 Anton's `Action Footage Library` on the SSD) is the library; the shares its locations
+are on (`//DISKSTATIONDXP/photo/DATA`, `//DISKSTATIONDXP/DJI_Inbox/...` in its Project.afproject) are bound in and
+named in `AFP_SHARES`, as the player on a Mac finds them mounted. The library is mounted read-only: the service writes only its renders (`/stream/cache`) and what the player said
 (`/stream/args`). Read-only matters: opening a moment, the player fills a key missing from its link and writes it at
 once, as it does on a Mac; here the write fails and nothing changes.
 The memory cap keeps it from pushing the Home Assistant VM out.
 
 Settings (environment): `AFP_INTERP` (bilinear; bspline, bicubic, lanczos), `AFP_CHROMATIC` (0; 1 takes the water's
 color fringes out), `AFP_HEIGHT` (1080), `AFP_BITRATE` (12M), `AFP_SEGMENT` (1 s), `AFP_CACHE_GB` (40), `AFP_OPENING`
-(8 s), `AFP_LIBRARY`, `AFP_PORT` (8099), `AFP_PLAYER` (/stream/player), `AFP_ARGS` (/stream/args).
+(8 s), `AFP_LIBRARY`, `AFP_PORT` (8099), `AFP_PLAYER` (/stream/player), `AFP_ARGS` (/stream/args), `AFP_SHARES`
+(the player's: network shares as folders here, `//host/share=/dir;...`).
 
 ## As the player plays it
 

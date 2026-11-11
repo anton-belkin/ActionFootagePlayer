@@ -36,10 +36,11 @@ what the neighbours agree on; `luma_keep` of the grain left. Every other frame p
 count instead of the picture, `2` the specks.
 
 The project is rendered the way the Gyroflow app renders it (smoothing, zoom, lens, output size), with
-`gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `fixed-zoom`: Gyroflow
-master plus the Static zoom PR ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)). The plugin
-uses nothing beyond upstream, so it also builds against gyroflow/gyroflow master; only projects using the new zoom
-settings need the PR. Stock Gyroflow works for making projects: `gyroflow-project` writes out the project a clip
+`gyroflow-core` from [anton-belkin/gyroflow](https://github.com/anton-belkin/gyroflow) at `afp-v1.7.0`: Gyroflow
+1.7.0 plus what upstream doesn't have yet, crop mode's view rotation
+([gyroflow/gyroflow#1289](https://github.com/gyroflow/gyroflow/pull/1289)), the equirect output and a 360 rig's lenses
+([#1290](https://github.com/gyroflow/gyroflow/pull/1290)) and the Insta360 X4/X5 lens terms (see Cargo.toml). Stock
+Gyroflow (1.7.0 or newer for Stabilize optically) works for making projects: `gyroflow-project` writes out the project a clip
 without one plays with (the default preset's, at the level, in the view and with the horizon lock the player has, with
 the motion data in it, made by `src/project.rs` with gyroflow-core's own project writer) next to it, to open it in
 Gyroflow. A project saved without the motion data gets the video's read ahead into it before Gyroflow loads it, and

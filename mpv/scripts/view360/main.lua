@@ -80,8 +80,16 @@ do
     local ok_sidecar, sidecar_lib = pcall(require, 'sidecar')
     if ok_utils and ok_sidecar then
         local windows = (mp.get_property("platform") or "") == "windows" or package.config:sub(1, 1) == "\\"
+        -- Written where the clip's own file is (the workspace plugin says: beside the archive's clip while a working
+        -- copy plays), and noted in the project's catalog by it (the Library reads the catalog), as the marks are
+        local function own_path(clip)
+            local w = mp.get_property_native("user-data/workspace")
+            if type(w) ~= "table" or w.clip ~= clip then return nil end
+            return w.sidecar_file
+        end
         sidecar = sidecar_lib.new({ parse_json = function(text) return (utils.parse_json(text)) end, format_json = utils.format_json,
-                                    windows = windows })
+                                    windows = windows, own_path = own_path,
+                                    note = function(f) mp.commandv("script-message-to", "workspace", "catalog-note", f) end })
     else
         mp.msg.warn("no sidecar.lua in the workspace plugin's folder beside this one: the 360 recording isn't kept")
     end

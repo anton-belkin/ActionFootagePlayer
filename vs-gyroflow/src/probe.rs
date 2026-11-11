@@ -12,7 +12,7 @@ use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleIn
 /// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
 pub fn camera(path: &str) -> Option<(String, Option<String>)> {
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
     let maker = input.camera_type();
@@ -36,7 +36,7 @@ pub fn probe_with_camera_stabilization(path: &str) -> (Result<serde_json::Value,
 fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json::Value, String> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
 
     let video = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     // Up to the first metadata sample and gyro reading, which have what's decided here: a long clip has one sample
@@ -171,13 +171,25 @@ pub struct LensInfo {
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
+    // A file telemetry-parser can't read (a Mavic Pro's or Mavic Air 2's MOV, a HERO3's MP4): the camera's name alone,
+    // from the file
+    let p = std::path::Path::new(path);
+    lens_read(path).or_else(|| crate::geotag::dji_model(p).or_else(|| crate::geotag::gopro_model(p)).map(|camera| LensInfo { camera, ..Default::default() }))
+}
+
+fn lens_read(path: &str) -> Option<LensInfo> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let video = util::get_video_metadata(&mut file, size, &url).ok()?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
-    let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
+    let mut camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
+    // A DJI drone telemetry-parser names only "DJI" (Mini 4 Pro) or not at all (Mavic Pro, Mavic 2): its name from the
+    // file (geotag.rs)
+    if camera.is_empty() || camera == "DJI" {
+        if let Some(m) = crate::geotag::dji_model(std::path::Path::new(path)) { camera = m; }
+    }
     let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
     // Gyroflow's name for the lens mode the camera recorded ("Wide"), which the curated list's "recorded" can name too
     let lens_mode = CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps).map(|id| id.lens_info).unwrap_or_default();
@@ -221,7 +233,7 @@ pub fn color_profile(path: &str) -> Option<&'static str> {
         ("dvtm_oq101.proto", 4), // Osmo 360
     ];
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let mut mode = None;
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
@@ -263,7 +275,7 @@ pub fn dji_fov_type(path: &str) -> Option<u64> {
         ("dvtm_oq101.proto", 5), // Osmo 360
     ];
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let mut fov = None;
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
@@ -305,7 +317,7 @@ pub fn log_curve(path: &str) -> Option<&'static str> {
 /// which says where they are: keep the two in step
 pub fn gopro_color(path: &str) -> Option<(String, Option<String>, Option<f64>)> {
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let moov = read_moov(&mut file, size as u64)?;
     let udta = mp4_child(&moov, b"udta")?;
     let gpmf = mp4_child(udta, b"GPMF")?;

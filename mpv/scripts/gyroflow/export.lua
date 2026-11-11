@@ -15,9 +15,11 @@
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
 -- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
 -- in color only by itself. Script messages, for the right-click menu:
---   export [hdr|sdr|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look it
---                        plays in, else the one the dlogm plugin would choose (its sdr_look); for a 360 camera's file
---                        the whole sphere (360) or the view recorded as you looked around (flat: docs/360-reframe.md)
+--   export [hdr|sdr|youtube|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look
+--                        it plays in, else the one the dlogm plugin would choose (its sdr_look); for YouTube: HDR10 in
+--                        an MKV with that SDR look's LUT inside for YouTube's SDR version (gyroflow-export --youtube,
+--                        a .mkv; issue #95); for a 360 camera's file the whole sphere (360) or the view recorded as you
+--                        looked around (flat: docs/360-reframe.md)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
@@ -120,6 +122,24 @@ local function temp_name(kind)
 end
 
 -- The last line gyroflow-export printed for this video: "...: skipped, <why>" or "...: failed, <why>"
+-- Files made, told to the project's catalog (the workspace plugin's catalog-note: afp-catalog note), so the Library's
+-- views show them at once: on a share the system's notice comes late or never. A photo's Live Photo video with it
+local function tell_catalog(...)
+    for _, f in ipairs({ ... }) do
+        if type(f) == "string" and f ~= "" then
+            local info = utils.file_info(f)
+            if info and info.is_file then mp.commandv("script-message-to", "workspace", "catalog-note", f) end
+            local stem = f:match("^(.*)%.[^./\\]+$")
+            if stem and not f:lower():match("%.mov$") and not f:lower():match("%.mp4$") then
+                for _, e in ipairs({ ".mov", ".MOV" }) do
+                    local v = utils.file_info(stem .. e)
+                    if v and v.is_file then mp.commandv("script-message-to", "workspace", "catalog-note", stem .. e); break end
+                end
+            end
+        end
+    end
+end
+
 local function last_line(text)
     local last = nil
     for line in (text or ""):gsub("\r", "\n"):gmatch("[^\n]+") do
@@ -249,6 +269,28 @@ local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true
 --   nbcu, tonemap, dv, dvsdr  NBCU's conversion: Dolby Vision's own SDR, as macOS draws it, only exists on screen
 --                             (AVFoundation's decoders ignore the RPU), and the RPU's trims are fitted to NBCU's; mpv's
 --                             tone mapping isn't in gyroflow-export
+-- The clip's clean-up, as it plays, into args: the temporal denoise (Ctrl+p, the clip's transform; as much of it as
+-- this computer does, Performance & Quality's temporal_denoise: light or full, off none) with its Stronger, and the
+-- water's color fringes (Ctrl+a) taken out or left as recorded (whatever chromatic_skip leaves out on this screen).
+-- Every export carries them: the video, a moment, a batch's, a Live Photo's motion (gyroflow-export runs the player's
+-- own shaders for them). A clip whose saved view doesn't say: as the session has it, else the app's defaults
+local function cleanup_args(args, denoise, strong, chromatic)
+    local session = mp.get_property_native("user-data/gyroflow/session") or {}
+    local defaults = mp.get_property_native("user-data/gyroflow/defaults") or {}
+    local function pick(v, k)
+        if type(v) == "boolean" then return v end
+        if type(session[k]) == "boolean" then return session[k] end
+        return defaults[k] == true
+    end
+    local amount = mp.get_property_native("user-data/gyroflow/temporal_denoise") or "full"
+    if pick(denoise, "denoise") and (amount == "full" or amount == "light") then
+        table.insert(args, "--denoise"); table.insert(args, amount)
+        if pick(strong, "denoise_strong") then table.insert(args, "--denoise-strong") end
+    end
+    if type(chromatic) ~= "boolean" then chromatic = type(session.chromatic) == "boolean" and session.chromatic or defaults.chromatic ~= false end
+    table.insert(args, "--chromatic"); table.insert(args, chromatic and "yes" or "no")
+end
+
 local function as_it_plays(args, sdr, photo, live)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
@@ -301,6 +343,7 @@ local function as_it_plays(args, sdr, photo, live)
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
     if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
+    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"))
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
@@ -332,6 +375,21 @@ local function view_args(args, v)
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
+    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic)
+end
+
+-- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
+-- choices (the export's own), and the SDR look of the LUT inside: the one an SDR export takes (the dlogm plugin's
+-- sdr_look; the maker's is DJI's, D-Log M only), else gyroflow-export's own choice
+local function youtube_args(args)
+    for i = #args, 1, -1 do
+        local a = args[i]
+        if a == "--sdr" or a == "--nbcu" or a == "--dv-live-l1" then table.remove(args, i)
+        elseif a == "--dv-rpu" then table.remove(args, i + 1); table.remove(args, i) end
+    end
+    local d = mp.get_property_native("user-data/dlogm") or {}
+    local look = (d.sdr_look == "maker" and d.curve == "dlogm") and "maker" or d.sdr_look == "nbcu" and "nbcu" or "auto"
+    table.insert(args, "--youtube"); table.insert(args, look)
 end
 
 local function installed(what)
@@ -343,15 +401,17 @@ local function installed(what)
     return true
 end
 
--- `sdr`: in SDR whatever plays. `named`: the workspace plugin's answer, { output, link, from, to, alone }
-local function start(path, sdr, named)
+-- `how`: hdr (as it plays), sdr (in SDR whatever plays) or youtube. `named`: the workspace plugin's answer,
+-- { output, link, from, to, alone }
+local function start(path, how, named)
     if not installed("Export") then return end
     local progress = temp_name("progress")
     local control = platform.windows and temp_name("control") or nil
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    as_it_plays(args, sdr, false, false)
+    as_it_plays(args, how == "sdr", false, false)
+    if how == "youtube" then youtube_args(args) end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
     if named and named.from and named.to then a, b = named.from, named.to end
@@ -387,6 +447,7 @@ function run_export(path, args, range, progress, control)
             notify("Export cancelled", name .. range)
         elseif r and r.status == 0 and out then
             last_export = out
+            tell_catalog(out)
             publish()
             mp.osd_message("Exported " .. name .. range .. "\n" .. out, 5)
             notify("Exported " .. name, out)
@@ -403,19 +464,21 @@ function run_export(path, args, range, progress, control)
 end
 
 -- With the workspace plugin: it asks the name, and answers export-start. The look and whether it's stabilized go
--- into the name and the link: " (SDR)", " (Dolby Vision)", nothing for HDR
-local function begin(path, sdr)
+-- into the name and the link: " (SDR)", " (Dolby Vision)", " (YouTube)" (an MKV), nothing for HDR
+local function begin(path, how)
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, sdr) end
+    if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, how) end
     local args = {}
-    as_it_plays(args, sdr, false, false)
+    as_it_plays(args, how == "sdr", false, false)
     local has = {}
     for i, v in ipairs(args) do has[v] = true; if v == "--curve" and args[i + 1] == "none" then has.none = true end end
     local label = has["--dv-rpu"] and " (Dolby Vision)" or (has["--sdr"] or has["--nbcu"]) and " (SDR)" or ""
     local look = has["--dv-rpu"] and "dv" or has["--sdr"] and "maker" or has["--nbcu"] and "nbcu" or has.none and "recorded" or "hdr"
+    if how == "youtube" then label, look = " (YouTube)", "youtube" end
     local g = mp.get_property_native("user-data/gyroflow") or {}
     mp.commandv("script-message-to", "workspace", "export-name", utils.format_json({
-        sdr = sdr, label = label, look = look, stabilized = g.available == true and g.view ~= "off", reply = mp.get_script_name(),
+        sdr = how == "sdr", youtube = how == "youtube", ext = how == "youtube" and ".mkv" or nil, label = label, look = look,
+        stabilized = g.available == true and g.view ~= "off", reply = mp.get_script_name(),
     }))
 end
 
@@ -424,14 +487,14 @@ mp.register_script_message("export-start", function(json)
     local path = local_path()
     -- Still the clip it was asked for
     if type(r) ~= "table" or not path or r.clip ~= mp.get_property_native("user-data/workspace/clip") or running[path] then return end
-    start(path, r.sdr == true, r)
+    start(path, r.youtube == true and "youtube" or r.sdr == true and "sdr" or "hdr", r)
 end)
 
 mp.add_key_binding("E", "export", function()
     local path = local_path()
     if not path then return end
     local job = running[path]
-    if not job then return begin(path, false) end
+    if not job then return begin(path, "hdr") end
     if job.cancelling then return end
     if confirm and confirm.path == path and mp.get_time() < confirm.time + CONFIRM_SECONDS then
         confirm = nil
@@ -502,7 +565,7 @@ mp.register_script_message("export", function(how)
         return
     end
     if how == "360" or how == "flat" then return start_360(path, how) end
-    begin(path, how == "sdr")
+    begin(path, (how == "sdr" or how == "youtube") and how or "hdr")
 end)
 
 mp.register_script_message("cancel-export", function()
@@ -558,7 +621,11 @@ mp.register_script_message("preview", function(json)
     mp.msg.info("preview: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         local err = r and r.stderr or ""
-        if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then return reply(true) end
+        if r and r.status == 0 and ("\n" .. err):match("\n  %-> ") then
+            -- The moment and its own Gyroflow project (a batch's moments: k's notes them itself, again is harmless)
+            tell_catalog(req.output, type(req.project) == "string" and req.project or nil)
+            return reply(true)
+        end
         mp.msg.warn("preview: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
@@ -601,7 +668,7 @@ mp.register_script_message("export-batch", function(json)
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if job.cancelling then return reply(false, "cancelled") end
-        if r and r.status == 0 and out then return reply(true, nil, out) end
+        if r and r.status == 0 and out then tell_catalog(out); return reply(true, nil, out) end
         mp.msg.warn("export (batch): " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
@@ -645,6 +712,9 @@ local function gpu_frame()
     -- camera as the warp does (gpu_table's tests)
     local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
     if crop.active and crop.camera then return nil end
+    -- Nor with the color fringes skipped on this screen (Performance & Quality) where the clip has them taken out: the
+    -- photo has them out, gyroflow-export's
+    if mp.get_property_native("user-data/gyroflow/chromatic_skip") == true and mp.get_property_native("user-data/gyroflow/chromatic") == true then return nil end
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
     if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end
@@ -754,6 +824,7 @@ local function photo()
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
         if r and r.status == 0 and out then
             last_export = out
+            tell_catalog(out)
             publish()
             local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
             mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
@@ -802,7 +873,7 @@ mp.register_script_message("photo-at", function(json)
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
-        if r and r.status == 0 and out then return reply(true, nil, out) end
+        if r and r.status == 0 and out then tell_catalog(out); return reply(true, nil, out) end
         mp.msg.warn("photo: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)

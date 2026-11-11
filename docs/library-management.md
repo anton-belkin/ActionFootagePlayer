@@ -549,6 +549,14 @@ Nothing else. What was there goes:
 A project file with the old keys is read as before; the first time the Library opens it, the photo tags are written
 into the photos, the old file is kept beside it once as `Project.afproject.before-v3`, and the keys are dropped.
 
+**`version`** is what the project's files and its catalog hold, and **an older program refuses a project of a newer
+version** (since 2026-11-11, after the NAS's catalog from before locations wrote its records without them over the
+Library's, and locations went from the view). The Library, `afp-catalog` (the player's and the NAS's) and the player's
+project writer each know theirs (`afp_catalog::project::VERSION`, `projectfile.lua`'s `M.VERSION`): a project of a newer
+one isn't opened, read into the catalog or written; one of an older one is raised to theirs as they open it, so the
+older programs leave it alone from then on. Raise it whenever what's kept changes. 1: before locations (up to 0.10);
+2: with its locations (0.11); 3: the catalog keeps a clip's location (0.12).
+
 ### A link finds its clip by what the clip is
 
 Every link (moment, clip preview, export, render, photo) already carries what identifies its clip: `clip` (its path in
@@ -833,6 +841,9 @@ finds it by its folder's time.
 
 ### The NAS's watcher
 
+Shipped as part of the NAS Helper (tools/nas-helper/README.md), its "collaboration" part, with the stream and the
+links for Jellyfin in one container; built alone as below.
+
 `catalog/Dockerfile` builds `afp-catalog` alone; run as the project's watcher:
 
 ```
@@ -863,6 +874,42 @@ changes aren't told to it — which is what the NAS's watcher is for.
 - **Moved folders keep their times**: what's new is found by the folder it moved into (that one's time changed), then
   listed whole, whatever its own time.
 - **A file noted in a folder never listed** (the player's moment in a new folder) makes that folder one to list.
+  Until then the views take the folder as there (seen.rs's walk): the moment shows at once.
+
+### Who tells the catalog what they changed (audit, 2026-11-10)
+
+The views read the catalog, so whatever changes a file must say so at once; a look comes minutes later, and a file
+written in place (a link, a clip's own file) leaves its folder's time as it was, so a look doesn't even list it (only
+the daily deep look would). FSEvents tells a Mac only what that Mac changed, and on a share even that is no promise.
+
+- **The Library**, for everything it does: `seen::note_now(paths)` right after it writes, before the page reads the
+  view again. Files written, made or removed; folders made, removed, or renamed (both paths: what's in the new one
+  listed, what was in the old one gone). It reads them, notes them in this computer's journal through the views' own
+  catalog, touches their folders for the other computers, and counts a change for the page. Tags, lens type, location,
+  rename, delete, new folder, Mend / Find moved, Take in, renders deleted, links rewritten by a view, and Stabilize
+  optically's `.gyroflow` files (as the task's status names each clip done).
+- **The player**: `afp-catalog note` for what it writes (workspace plugin's `catalog.note`; other plugins send it
+  `catalog-note`). Marks, Save, moments (and their `.gyroflow`), moment rename and remove, anything it moves to the
+  Trash, Ctrl+x's parts, Ctrl+e's project, Shift+E and 360 exports, photos, and every batch's files as each lands (clip
+  previews, moments, photos, exports, renders). A batch quits only once its notes are written.
+- **Move the project…** takes `.afp` along; the new place's thread looks at the project's folder again before the views
+  read the catalog (its records of the folder it left are of the footage, now a location).
+- A setting written into `Project.afproject` doesn't make the Library read its catalog again: only its locations do.
+
+**On one computer, at once, both ways** (catalog/src/live.rs, in `<cache>/live/`). The journals are on the share and
+read every 3 s; the programs running here tell each other instead:
+
+- player → Library: `afp-catalog note`, once its line is in the journal, sends each Library running here (its
+  `library-<pid>.json`: a port on 127.0.0.1) the project and files. The Library reads the journal at once, and its page
+  hears a `catalog-changed` event and reads the view again (no more polling, no waiting for quiet).
+- Library → player: `note_now` appends a line to each player window's inbox, `player-<pid>.in` (a window has one, a
+  batch doesn't). The window looks at its size four times a second (a local stat), then asks for its clip's moments
+  again and counts the project again; a lens type given to the clip playing plays at once (the clip loaded again where
+  it was).
+
+Measured on the NAS (`live_e2e::both_ways_at_once`): a moment a batch makes in the Library's view 0.09 s after it's
+made; the Library's rename in the player's list 1.0 s (its catalog asked over the share); a lens type 0.13 s; a mark
+(M) in the Library's view 0.55 s (afp-catalog reading and writing on the share).
 
 ### What it costs (simulated, 2026-11-10)
 
@@ -1075,6 +1122,16 @@ Anton, 2026-11-09:
   Photos keep their tags in their own XMP. A clip in several places has one main own file, chosen the same way
   everywhere: the first copy that has one, by the locations' order (copies-only and local ones last), then the path in
   the tree; the others are read, never written.
+- **The side panel's parts, Source settings** (Anton, 2026-11-11). The side panel's parts are chosen with a column of
+  icons at its right edge, as the player's side panel has them: Info, Source Settings, Tags, Location, Moments &
+  Previews, Stabilize, Export at the top; Tasks and Checks at the bottom. The part shown clicked again leaves the column
+  alone. A part with nothing for the view (Location in Moments) has its icon dimmed and says where it is. Open, Select
+  all and none, Show in Finder are in the list's menu only. **Source Settings** sets how the selected originals are
+  read, one or many at once (*Batch set Source settings…* in the menu opens it): the log curve, the turn, the lens under
+  water, the lens type, each field at *Leave as is* until changed, only the changed ones written into each original's
+  own file (`source`, its other keys kept), as the player's Source tab saves them. *Auto* for the lens under water only
+  where the camera records when it's in the water (the probe's `water`, vs-gyroflow's water.rs); a camera that doesn't
+  gets No, and the tab says so.
 
 ## Open questions
 
