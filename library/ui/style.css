@@ -239,6 +239,14 @@ button.chip{cursor:pointer}
 .rlist{display:flex;flex-direction:column;gap:2px;margin-top:8px;width:100%}
 .rlist button{border:0;background:transparent;text-align:left;padding:8px 10px;border-radius:8px;color:var(--fg)}
 .rlist button:hover{background:var(--hover)}
+.rrow{display:flex;align-items:center;gap:4px;border-radius:8px}
+.rrow .rmain{flex:1;min-width:0}
+.rrow .btn.sm{flex:none}
+.rrow .rx{flex:none;width:28px;height:28px;min-height:0;padding:0;display:grid;place-items:center;color:var(--muted);border-radius:6px}
+.rrow .btn.sm{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:28px;padding:4px 10px;font-size:12px}
+.rrow .btn.sm:hover{background:var(--hover)}
+.rrow .rx:hover{color:var(--fg);background:var(--hover)}
+.rrow.off .nm{color:var(--fg2)}
 .fold.mosaic{display:grid}
 .indexing{padding:0 14px 6px;font-size:12px;color:var(--muted)}
 .err{color:var(--wa)}

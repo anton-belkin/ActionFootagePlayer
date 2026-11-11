@@ -461,7 +461,7 @@ function renderTop() {
     '<div class="menuwrap"><button class="proj" type="button" data-a="menu" aria-haspopup="menu" aria-expanded="' + S.menu + '">' + ICON.folder + '<span class="ttl"><span>' + esc(S.root ? S.name : "Action Footage Library") + '</span></span>' + ICON.down + '</button>' +
     (S.menu ? '<div class="menu" role="menu">' +
       (S.root ? '<button type="button" role="menuitem" class="cur" data-a="closemenu"><span class="ck">' + ICON.check + '</span><span style="min-width:0"><span style="display:block">' + esc(S.name) + '</span><span class="sub">' + esc(S.root) + '</span></span></button>' : '') +
-      recent.map((r) => '<button type="button" role="menuitem" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="ck"></span><span style="min-width:0"><span style="display:block">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></span></button>').join("") +
+      recent.map((r) => recentRow(r, true)).join("") +
       '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
       (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
         '<button type="button" role="menuitem" data-a="takein"><span class="ck"></span>Take in another project…</button>' +
@@ -1198,7 +1198,32 @@ async function applyMoved() {
 function renderEmpty() {
   $("empty").hidden = !!S.root;
   $("bodyrow").hidden = !S.root;
-  if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => '<button type="button" data-a="openrecent" data-v="' + esc(r.path) + '"><span class="nm">' + esc(r.name) + '</span><span class="sub">' + esc(r.path) + '</span></button>').join("") + '</div>' : "";
+  if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => recentRow(r, false)).join("") + '</div>' : "";
+}
+// A project opened before: opened with a click; offline (its share not mounted, its disk not plugged in) marked so, with
+// Connect when its share is known; taken off the list with ×
+function recentRow(r, menu) {
+  const busy = S.connecting["p:" + r.path];
+  const where = r.here ? r.path : r.path + (r.share ? " · on " + r.share : "");
+  return '<div class="rrow' + (r.here ? "" : " off") + '"><button type="button"' + (menu ? ' role="menuitem"' : "") + ' class="rmain" data-a="openrecent" data-v="' + esc(r.path) + '">' + (menu ? '<span class="ck"></span>' : "") +
+    '<span style="min-width:0"><span class="nm" style="display:block">' + esc(r.name) + (r.here ? "" : ' <span class="chip warn">Offline</span>') + '</span><span class="sub">' + esc(where) + '</span></span></button>' +
+    (!r.here && r.connect ? '<button type="button" class="btn sm" data-a="connectrecent" data-v="' + esc(r.path) + '"' + (busy ? " disabled" : "") + '>' + (busy ? "Connecting…" : "Connect") + '</button>' : "") +
+    '<button type="button" class="rx" data-a="forgetrecent" data-v="' + esc(r.path) + '" title="Remove from the list" aria-label="Remove ' + esc(r.name) + ' from the list">' + ICON.x + '</button></div>';
+}
+// An offline project's share connected (connect_project), then the project opened from where it is now
+async function connectRecent(path) {
+  const key = "p:" + path;
+  if (S.connecting[key]) return;
+  S.connecting[key] = true; renderAll();
+  try {
+    const here = await invoke("connect_project", { path });
+    S.menu = false;
+    await call("open_project", { path: here }).catch(() => {});
+  } catch (e) { showError(String(e)); }
+  delete S.connecting[key];
+  S.recent = await invoke("recent").catch(() => S.recent);
+  renderAll();
+  return poll();
 }
 // The folders shown now, on disk (Anton, 2026-11-10): the clip previews' pictures are made there first. Footage: the
 // folders of its empty previews under the folder open; Originals: the clips' own folders there
@@ -2399,7 +2424,13 @@ document.addEventListener("click", async (e) => {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;
     case "choose": S.menu = false; await call("choose_project").catch(() => {}); return poll();
-    case "openrecent": S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+    case "openrecent": {
+      const r = S.recent.find((x) => x.path === v);
+      if (r && !r.here) { if (r.connect) return connectRecent(v); showError(r.name + " isn’t reachable: connect " + (r.share || "its disk") + " first"); return; }
+      S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+    }
+    case "connectrecent": return connectRecent(v);
+    case "forgetrecent": await invoke("forget_recent", { path: v }).catch(() => {}); S.recent = await invoke("recent").catch(() => S.recent); renderAll(); return;
     case "revealroot": S.menu = false; call("reveal", {}).catch(() => {}); break;
     case "view":
       S.view = v; S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false; S.renaming = null;

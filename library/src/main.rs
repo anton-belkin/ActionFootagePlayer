@@ -22,7 +22,7 @@ mod tags;
 mod takein;
 mod thumbs;
 
-use serde::Serialize;
+use serde::{ Deserialize, Serialize };
 use serde_json::{ json, Value };
 use std::collections::VecDeque;
 use std::path::{ Path, PathBuf };
@@ -183,7 +183,9 @@ fn mount_share(path: &str) -> Result<(), String> {
     let (host, share, _) = locations::network(path).ok_or_else(|| format!("{path} isn't on a share"))?;
     if !cfg!(target_os = "macos") { return Err(format!("Connect //{host}/{share} in the system: its clips show then")); }
     let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
-    let url = format!("smb://{}/{}", enc(&host), enc(&share));
+    // "user@host" as mount names it: the user kept (the Keychain's password is that user's)
+    let who = match host.rsplit_once('@') { Some((u, h)) => format!("{}@{}", enc(u), enc(h.trim_end_matches('.'))), None => enc(host.trim_end_matches('.')) };
+    let url = format!("smb://{who}/{}", enc(&share));
     let out = std::process::Command::new("/usr/bin/osascript").arg("-e").arg(format!("mount volume \"{url}\"")).output().map_err(|e| e.to_string())?;
     if out.status.success() { Ok(()) } else { Err(format!("//{host}/{share} couldn't be connected ({})", String::from_utf8_lossy(&out.stderr).trim())) }
 }
@@ -257,19 +259,66 @@ fn recent_file(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|d| d.join("recent.json"))
 }
 
-fn recent_list(app: &tauri::AppHandle) -> Vec<String> {
-    recent_file(app).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()).unwrap_or_default()
+/// A project opened before: its folder, and the share it's on (as mount names it: "//user@host/share", and where in
+/// it), for connecting it when it isn't mounted
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+struct RecentEntry {
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    share: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    rel: String,
+}
+
+/// The list as kept: entries, or (before 0.13) the paths alone
+fn parse_recent(text: &str) -> Vec<RecentEntry> {
+    let Ok(Value::Array(a)) = serde_json::from_str::<Value>(text) else { return Vec::new() };
+    a.into_iter().filter_map(|v| match v {
+        Value::String(path) => Some(RecentEntry { path, ..Default::default() }),
+        v => serde_json::from_value::<RecentEntry>(v).ok(),
+    }).collect()
+}
+
+fn recent_list(app: &tauri::AppHandle) -> Vec<RecentEntry> {
+    recent_file(app).and_then(|f| std::fs::read_to_string(f).ok()).map(|t| parse_recent(&t)).unwrap_or_default()
+}
+
+fn write_recent(app: &tauri::AppHandle, list: &[RecentEntry]) {
+    let Some(file) = recent_file(app) else { return };
+    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(file, serde_json::to_vec(list).unwrap_or_default());
+}
+
+/// The share a folder is on, as mounted now (its source, and the folder's path in it)
+fn share_of(path: &Path, mounts: &[(String, PathBuf)]) -> Option<(String, String)> {
+    mounts.iter().filter(|(_, dir)| path.starts_with(dir)).max_by_key(|(_, dir)| dir.components().count())
+        .map(|(src, dir)| (src.clone(), path.strip_prefix(dir).map(|r| r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")).unwrap_or_default()))
+}
+
+/// Where a share is mounted now (the same host, by any of its names, and share), if it is
+fn mounted_at(share: &str, mounts: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let (host, name, _) = locations::network(share)?;
+    mounts.iter().find(|(src, _)| locations::network(src).is_some_and(|(h, n, _)| locations::host_key(&h) == locations::host_key(&host) && n.eq_ignore_ascii_case(&name)))
+        .map(|(_, d)| d.clone())
+}
+
+/// Where an entry's project is now: its folder, or the same place on its share mounted elsewhere (/Volumes/ssd-1)
+fn recent_here(e: &RecentEntry, mounts: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let p = PathBuf::from(&e.path);
+    if is_project(&p) { return Some(p); }
+    let mut d = mounted_at(e.share.as_deref()?, mounts)?;
+    for part in e.rel.split('/').filter(|x| !x.is_empty()) { d.push(part); }
+    is_project(&d).then_some(d)
 }
 
 fn remember(app: &tauri::AppHandle, root: &Path) {
-    let Some(file) = recent_file(app) else { return };
     let p = root.display().to_string();
     let mut list = recent_list(app);
-    list.retain(|x| x != &p);
-    list.insert(0, p);
+    list.retain(|x| x.path != p);
+    let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
+    list.insert(0, RecentEntry { path: p, share, rel });
     list.truncate(10);
-    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
-    let _ = std::fs::write(file, serde_json::to_vec(&list).unwrap_or_default());
+    write_recent(app, &list);
 }
 
 // ---------- the project ----------
@@ -737,17 +786,61 @@ async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: St
 }
 
 #[derive(Serialize)]
-struct Recent { path: String, name: String, here: bool }
+struct Recent {
+    path: String,
+    name: String,
+    /// Reachable now (else offline: its share not mounted, its disk not plugged in)
+    here: bool,
+    /// Its share, for saying where it is ("//DISKSTATIONDXP/ssd")
+    share: Option<String>,
+    /// Can be connected from here (the Mac, its share known)
+    connect: bool,
+}
 
-// The projects this computer has opened, the last first: the ones still there
+// The projects this computer has opened, the last first: every one, those not reachable now too (offline)
 #[tauri::command]
 async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
     // In the background: the window never waits on it (a share can take seconds)
     tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
-    recent_list(&app).into_iter().filter(|p| Path::new(p).join(PROJECT_FILE).is_file() || Path::new(p).join(LEGACY_DIR).is_dir())
-        .map(|p| Recent { name: Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()), here: true, path: p })
-        .collect()
+    let mounts = locations::mounts();
+    let mut list = recent_list(&app);
+    let mut changed = false;
+    let out = list.iter_mut().map(|e| {
+        let here = recent_here(e, &mounts);
+        // One kept before its share was (or mounted elsewhere now): its share noted, its path the one now
+        if let Some(h) = &here {
+            if let Some((s, r)) = share_of(h, &mounts) { if e.share.as_deref() != Some(s.as_str()) || e.rel != r { e.share = Some(s); e.rel = r; changed = true; } }
+            let hp = h.display().to_string();
+            if e.path != hp { e.path = hp; changed = true; }
+        }
+        let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
+        Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
+                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone() }
+    }).collect();
+    if changed { write_recent(&app, &list); }
+    out
 }).await.map_err(|e| e.to_string())
+}
+
+/// A project taken off the list of those opened before (a test one, one moved away)
+#[tauri::command]
+async fn forget_recent(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut list = recent_list(&app);
+    list.retain(|e| e.path != path);
+    write_recent(&app, &list);
+    Ok(())
+}
+
+/// An offline project's share connected: where the project is then
+#[tauri::command]
+async fn connect_project(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let e = recent_list(&app).into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        let share = e.share.clone().ok_or("Its share isn't known: connect it in Finder, then open it")?;
+        mount_share(&share)?;
+        recent_here(&e, &locations::mounts()).map(|p| p.display().to_string())
+            .ok_or_else(|| format!("{share} is connected, but {} isn't on it", e.path))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- browsing ----------
@@ -2111,7 +2204,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -2291,6 +2384,28 @@ mod tests {
         let t = Instant::now();
         while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < Duration::from_secs(8) { std::thread::sleep(Duration::from_millis(100)); }
         assert!(flag.load(std::sync::atomic::Ordering::Relaxed), "the location gone wasn't noticed");
+    }
+
+    // The projects opened before: kept with their share, found where it's mounted now, read from the old list of paths
+    #[test]
+    fn recent_projects_keep_their_share() {
+        let old = parse_recent(r#"["/Volumes/ssd/Action Footage Library", {"path":"/Volumes/ssd/T","share":"//u@NAS._smb._tcp.local/ssd","rel":"T"}, 3]"#);
+        assert_eq!(old.len(), 2);
+        assert_eq!((old[0].path.as_str(), old[0].share.as_deref()), ("/Volumes/ssd/Action Footage Library", None));
+        assert_eq!(old[1].share.as_deref(), Some("//u@NAS._smb._tcp.local/ssd"));
+        let base = temp("recent");
+        let (a, b) = (base.join("ssd"), base.join("ssd-1"));
+        let mounts = vec![("//u@NAS._smb._tcp.local/ssd".to_string(), a.clone()), ("//u@NAS._smb._tcp.local/photo".to_string(), base.join("photo"))];
+        assert_eq!(share_of(&a.join("Trips/P"), &mounts), Some(("//u@NAS._smb._tcp.local/ssd".to_string(), "Trips/P".to_string())));
+        assert_eq!(share_of(Path::new("/elsewhere/P"), &mounts), None);
+        // The same share mounted elsewhere now (another name for the NAS too): the project found there
+        std::fs::create_dir_all(b.join("Trips/P")).unwrap();
+        std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into() };
+        assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
+        // Not mounted: offline
+        assert_eq!(recent_here(&e, &[]), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn temp(name: &str) -> PathBuf {

@@ -104,6 +104,10 @@ Project "Footage", its folder //DISKSTATIONDXP/ssd/Projects/Footage
   mounted is mounted as Finder does (`mount volume "smb://host/share"`, the password from the Keychain); the strip's
   **Connect** does it again on demand. A share mounted or taken away while the Library is open is noticed within 5 s,
   and the project is read again as when it's opened. An ejected share isn't mounted again until the next run.
+- **A project on a share** (the Library's own folder on the NAS): the projects opened before are kept with the share
+  each is on (recent.json: its path, the share as mount names it, and where in it), so one whose share isn't mounted
+  still shows in the list, marked Offline, with **Connect** (mounts the share, then opens the project: from where the
+  share is mounted now, /Volumes/ssd-1 too). × takes a project off the list (a test one, one moved away).
 
 ### Where a location is
 
