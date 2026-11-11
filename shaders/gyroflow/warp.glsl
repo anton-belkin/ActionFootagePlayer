@@ -1019,7 +1019,7 @@ void hook()
     if (any(greaterThanEqual(j, ivec2(RT))) || any(greaterThan(ivec2(RT), DN_SLOT)) || !dn_fresh()) return;
     int s = dn_newest();
     imageStore(GDN_FRAMES, j + dn_cell(s) * DN_SLOT, vec4((HOOKED_mul * texelFetch(HOOKED_raw, j, 0)).rgb, 1.0));
-    if (all(equal(j % 4, ivec2(0))))
+    if (all(equal(j % ivec2(4), ivec2(0))))
         imageStore(GDN_QUART, j / 4 + dn_cell(s) * (DN_SLOT / 4), vec4(texelFetch(GDN_CUR4_raw, j / 4, 0).x * GDN_CUR4_mul));
 }
 #endif
@@ -1272,7 +1272,7 @@ vec4 hook()
         den = (sum - cur + ws * cur) / (wsum - 1.0 + ws);
     }
     // The noise, from the shown frame against the one before where they match
-    if (!dn_same() && noise_diff >= 0.0 && all(equal(j % 4, ivec2(0)))) {
+    if (!dn_same() && noise_diff >= 0.0 && all(equal(j % ivec2(4), ivec2(0)))) {
         uint bin = uint(clamp(l * 16.0, 0.0, 15.0));
         uint st = uint(clamp(noise_diff * 4096.0, 0.0, 255.0));
         atomicAdd(gdn_hist[bin * 256u + st], 1u);

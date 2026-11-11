@@ -61,6 +61,9 @@
 --   lens-mode corrected|as-recorded|toggle  the lens corrected (Gyroflow's lens correction and the projection) or as
 --                           recorded, apart from the stabilization: off with the lens corrected is the lens alone, nothing
 --                           smoothed; a clip with a lens profile and no motion data (kind "lens") plays that way
+--   projection <p>          the output's projection: linear, stereographic, equidistant, equisolid, orthographic, or
+--                           project (a Gyroflow project's own); over a project too, saved with the clip
+--   lens <kind>             as-recorded, or the lens corrected in projection <kind>: lens-mode and projection at once
 --   chromatic yes|no|toggle the water's color fringes taken out (Ctrl+a), or not
 --   denoise-strong yes|no|toggle  the temporal denoise's Stronger, for a very noisy clip (part of the transform)
 --   edges <mode>            what fills the edges (the modes of Ctrl+b)
@@ -628,7 +631,8 @@ local function take(b)
     horizon = h == "yes"
     if type(b.chromatic) == "boolean" then chromatic = b.chromatic else chromatic = session.chromatic end
     frame.aspect, frame.orientation = split_aspect(b.aspect, b.orientation)
-    frame.projection = PROJECTIONS[b.projection] and b.projection or "linear"
+    -- "project": a Gyroflow project's own (over one; linear without)
+    frame.projection = (PROJECTIONS[b.projection] or b.projection == "project") and b.projection or "linear"
     -- A bundle from before the lens was a key of its own: off showed the lens as recorded too
     if b.lens == "corrected" or b.lens == "as-recorded" then lens_mode = b.lens
     elseif b ~= session and b.view == "off" then lens_mode = "as-recorded"
@@ -644,6 +648,14 @@ end
 -- A change by hand to what plays: the session's too when the session's plays (nothing saved for the file, no project)
 local function sticks(k, v)
     if not fixed() then session[k] = v end
+end
+
+-- The output's lens over a Gyroflow project (#196): the bundle's (saved for the clip, or reverted to), as recorded or
+-- corrected in a projection of its own; with none, the project's own ("project"), corrected
+local function over_project(b)
+    b = type(b) == "table" and b or {}
+    lens_mode = b.lens == "as-recorded" and "as-recorded" or "corrected"
+    frame.projection = (PROJECTIONS[b.projection] or b.projection == "project") and b.projection or "project"
 end
 
 -- The input's turn and lens a clip starts with, and the horizon: a project's own, or the source's
@@ -728,6 +740,16 @@ end
 -- What the filter does with the lens and the motion (vs-gyroflow's LensMode, further down), nil: no filter
 local filter_lens
 
+-- The output projection the filter is given (vs-gyroflow's Frame: 0-4), nil for none of its own: over a Gyroflow
+-- project, the one picked whatever it is (linear too: in place of a fisheye project's), "project" its own; without one,
+-- linear is the preset's
+local function lens_projection(source)
+    local p = PROJECTIONS[frame.projection]
+    if not p then return nil end
+    if has_project(source) then return p end
+    return frame.projection ~= "linear" and p or nil
+end
+
 local function gyroflow_filter(source, enabled)
     local output = render_sizes(source, full_size).output
     local _, trim, alone = fixed()
@@ -748,7 +770,7 @@ local function gyroflow_filter(source, enabled)
                                                 alone = project_alone,
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
                                                 aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
-                                                projection = frame.projection ~= "linear" and PROJECTIONS[frame.projection] or nil,
+                                                projection = lens_projection(source),
                                                 lens = filter_lens(source) or "stabilized" }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
@@ -1356,15 +1378,17 @@ local function add_filter(source, done)
         window_resize = nil
     end
     -- The bundle saved for it, else the session's; then the input's turn and lens. With a Gyroflow project, what it
-    -- has is its own: the horizon, frame and projection. Not the view: saved for the clip it plays so (on, wider: the
-    -- project's zoom left out, off: the project not used), with none saved the project as it is
+    -- has is its own: the horizon and frame. Not the view: saved for the clip it plays so (on, wider: the project's
+    -- zoom left out, off: the project not used), with none saved the project as it is; nor the output's lens (as
+    -- recorded, or a projection in place of the project's), with none saved the project's
     local saved = fixed()
     local off = take(saved)
     clip_settings(source)
     if has_project(source) then
         if type(saved) ~= "table" or not saved.view then view, off = "normal", false end
-        horizon, lens_mode = nil, "corrected"
-        frame.aspect, frame.orientation, frame.projection, frame.rotation = "original", "as-is", "linear", 0
+        horizon = nil
+        over_project(saved)
+        frame.aspect, frame.orientation, frame.rotation = "original", "as-is", 0
         -- What it has, for the panel: its horizon lock, output size and projection
         local j = read_json(source.project) or {}
         local st, out = type(j.stabilization) == "table" and j.stabilization or {}, type(j.output) == "table" and j.output or {}
@@ -1911,8 +1935,8 @@ local function show(v)
     mp.osd_message("Gyroflow: " .. view_label(v) .. (filter_lens() == "only" and ", the lens corrected" or ""), 1.5)
 end
 
--- The lens corrected or as recorded (the transform's, apart from the stabilization); over a Gyroflow project, for
--- viewing only
+-- The lens corrected or as recorded (the transform's, apart from the stabilization); over a Gyroflow project too, saved
+-- with the clip, and not the session's then
 local function set_lens(v)
     if v == "toggle" then v = lens_mode == "corrected" and "as-recorded" or "corrected" end
     if v ~= "corrected" and v ~= "as-recorded" then return end
@@ -1965,7 +1989,7 @@ local ROTATION_LABELS = { [0] = "not turned", [90] = "turned 90° right", [180] 
 
 -- The frame turned and cut to an aspect, for this clip: set up again where it's stabilized (its output size changes)
 local PROJECTION_LABELS = { linear = "linear lens", stereographic = "stereographic fisheye", equidistant = "equidistant fisheye",
-                            equisolid = "equisolid fisheye", orthographic = "orthographic fisheye" }
+                            equisolid = "equisolid fisheye", orthographic = "orthographic fisheye", project = "the project's lens" }
 local ORIENTATION_LABELS = { ["as-is"] = "as the source is", landscape = "landscape", portrait = "portrait" }
 local function set_frame(aspect, rotation, projection, orientation)
     projection = projection or frame.projection
@@ -1992,10 +2016,32 @@ local function project_owns(what)
     return true
 end
 
-mp.register_script_message("projection", function(p)
-    if not PROJECTIONS[p] or project_owns("the projection") then return end
+-- The output's projection; over a Gyroflow project too, for viewing and saved with the clip ("project": the project's
+-- own), and not the session's then
+local function set_projection(p)
+    local project = has_project(current_source)
+    if not (PROJECTIONS[p] or (p == "project" and project)) then return end
     set_frame(frame.aspect, frame.rotation, p)
-    sticks("projection", p)
+    if not project then sticks("projection", p) end
+    publish()
+end
+mp.register_script_message("projection", set_projection)
+
+-- The Lens drop-down's pick (the side panel's): as-recorded, or corrected in a projection (linear, stereographic,
+-- equidistant, equisolid, orthographic; "project": a Gyroflow project's own), both changed at once
+mp.register_script_message("lens", function(k)
+    if k == "as-recorded" or k == "corrected" then return set_lens(k) end
+    local project = has_project(current_source)
+    if not (PROJECTIONS[k] or (k == "project" and project)) then return end
+    if lens_mode == "corrected" or not current_source then
+        if lens_mode ~= "corrected" then set_lens("corrected") end
+        return set_projection(k)
+    end
+    -- From as recorded: the filter set up once, for both
+    lens_mode, frame.projection = "corrected", k
+    if not project then sticks("lens", "corrected"); sticks("projection", k) end
+    with_pause("Gyroflow: the lens corrected, " .. PROJECTION_LABELS[k] .. "…", function() place_filters(filtering()) end)
+    mpv_frame()
     publish()
 end)
 
@@ -2350,10 +2396,11 @@ mp.register_script_message("apply-view", function(json)
     local off = take(b)
     frame.rotation = turn
     if has_project(current_source) then
-        -- The bundle's view stays (on, wider, off over the project); the rest is the project's
+        -- The bundle's view (on, wider, off over the project) and the output's lens stay; the rest is the project's
         if not b.view then view, off = "normal", false end
-        horizon, lens_mode = nil, "corrected"
-        frame.aspect, frame.orientation, frame.projection = "original", "as-is", "linear"
+        horizon = nil
+        over_project(b)
+        frame.aspect, frame.orientation = "original", "as-is"
     end
     stab_off = off
     write_edge_control()
@@ -2520,7 +2567,7 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     -- The frame as it plays: the project has it from then on (its output size, rotation and projection)
     if frame.rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(frame.rotation)) end
     if shown_aspect() ~= "original" then table.insert(args, "--aspect"); table.insert(args, shown_aspect()) end
-    if frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
+    if PROJECTIONS[frame.projection] and frame.projection ~= "linear" then table.insert(args, "--projection"); table.insert(args, frame.projection) end
     -- A moment's own project: its part as the trim range, smoothed on its own or as part of the clip
     local ws = workspace_of(path)
     if ws and ws.moment and ws.moment["in"] and ws.snap then

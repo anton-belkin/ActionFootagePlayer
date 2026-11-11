@@ -53,7 +53,7 @@ fn f32_at(msg: &[u8], field: u64) -> Option<f64> {
     pb_bytes(msg, field).filter(|b| b.len() == 4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64)
 }
 
-fn read(file: &mut Prefetched, size: usize) -> Option<Vec<Sample>> {
+fn read(file: &mut Prefetched, size: u64) -> Option<Vec<Sample>> {
     file.rewind();
     let mut layout = None;
     let mut out = Vec::new();
@@ -78,7 +78,7 @@ fn read(file: &mut Prefetched, size: usize) -> Option<Vec<Sample>> {
 
 /// The basis for the clip's frames (frame i at i / fps s plus `frame_offset_us`), `CHANNELS` values each; None when
 /// the camera records no accelerometer here
-pub fn basis(file: &mut Prefetched, size: usize, fps: f64, frame_count: usize, frame_offset_us: i64) -> Option<Vec<[f32; CHANNELS]>> {
+pub fn basis(file: &mut Prefetched, size: u64, fps: f64, frame_count: usize, frame_offset_us: i64) -> Option<Vec<[f32; CHANNELS]>> {
     let t = std::time::Instant::now();
     let samples = read(file, size)?;
     let b = basis_of(&samples, fps, frame_count, frame_offset_us);

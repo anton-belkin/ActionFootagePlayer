@@ -19,7 +19,9 @@ beside it (the main one when the clip is in several places, [library-management.
   photo it came from was (negative: before the clip).
 - `place` is written with it, so every computer shows and filters the same names without looking anything up.
 - The camera's own GPS isn't written: it's in the clip, read by `gyroflow-probe --library` (`gps`).
-- Nothing is written into the original itself, nor into clip previews, moments or photos made from it.
+- Nothing is written into the original itself, nor into clip previews or moments. A photo saved from the clip carries
+  its place in its own Exif ([Photos made from a clip](#photos-made-from-a-clip)): there it is the photo's, for apps
+  that know nothing of the clip.
 - The player keeps the key as it saves marks or a view (`sidecar.lua`), and a file holding only a location isn't
   removed as empty (`sidecar.lua`, the Library's `tags.rs`). The catalog reads it with the rest of the sidecar
   (`afp-catalog`, `inspect.rs`), so the Location filter costs no file reads.
@@ -145,9 +147,37 @@ In the left panel, Footage and Sources: **Country** (with **No location**), **Re
 nested by their parent, and **From** (Apple Photos, by hand, the camera's GPS). Counts and narrowing work as in the
 other lists: ticking a country leaves its regions and places.
 
+## Photos made from a clip
+
+Issue #50: a photo saved from a clip (`gyroflow-export --photo`: Save frame, the Project tab's photos of marks) carries
+where it was taken, so Apple Photos and Google Photos put it on their maps (`geotag::photo_place`):
+
+1. **The camera's own GPS at the frame's time** (`geotag::fix_at`): the fix nearest it, at most 30 s away (a GPS that
+   found its satellites a little after the start, or lost them for a while). GoPro: the GPS5 / GPS9 rows of the GPMF
+   samples around it, each at its time in its sample. DJI drones: the frame's own GpsBasic in the `djmd` track (a
+   sample a frame, read from the sample table: the frame's, then one a second further each way), else the .SRT beside
+   the clip (its block at that time). Insta360: its GPS track (nav.rs). Else QuickTime's location (`©xyz`, one place
+   a clip: the Mavic Pro, phones).
+2. Else **the location the Library keeps for the clip** in its own file (the main one over the project's locations,
+   then the other copies', then `<clip>.afp.json` beside it).
+3. Else none, and gyroflow-export says so.
+
+Altitude goes with it when known (GoPro's GPS altitude, a drone's `abs_alt` or GpsBasic altitude, the location's
+`alt`). Written as:
+
+| Photo | Where |
+|---|---|
+| JPEG / Ultra HDR JPEG (photo.rs) | Exif GPS IFD: GPSVersionID 2.3, latitude and longitude (degrees, minutes, seconds to 1/10000″) with their N/S, E/W, altitude and its reference (1: below sea level) |
+| HEIC (afp-photo) | the same, as ImageIO's GPS dictionary |
+| Live Photo | the HEIC's GPS, and its .mov's `com.apple.quicktime.location.ISO6709` (as an iPhone writes it) |
+| Motion Photo | the JPEG's GPS, and its MP4's `com.apple.quicktime.location.ISO6709` (mdta keys, mp4meta.rs) |
+
+The capture time stays as it was (the clip's start, local, plus the frame's time).
+
 ## Not yet
 
 - A map of the whole project (Map tab), clickable dots; the ⌖ badge on rows; maps on Windows and Linux.
-- Writing the location into what's made from a clip (moment MP4s' `©xyz`, photo EXIF GPS, exports): the original's is
-  the one source; they can read it from there when made.
+- Writing the location into moment MP4s and video exports (`©xyz` / ISO 6709): the original's is the one source; they
+  can read it from there when made. (Photos carry theirs: above.)
+- mpv's own "Save frame as image" (its `screenshot`) writes no metadata at all, place nor time.
 - Dive-site names from a dive log or a list of sites.

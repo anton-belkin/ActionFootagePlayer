@@ -81,8 +81,8 @@
 -- moment's place in user-data/workspace/moments, from 1. clips-make, clips-again (removed ones), clips-stop,
 -- project-folder, clips-folder (show them), init-project <folder>. cut-before, cut-after (all before or after where it
 -- plays cut out; Ctrl+x: the A-B part). open-original: an export's original, at its part. For the
--- gyroflow plugin: export-name <json> asks the export's name and answers export-start <json> ({ clip, sdr, output,
--- link }).
+-- gyroflow plugin: export-name <json> asks the export's name (ext: .mkv for YouTube's, else .mov) and answers
+-- export-start <json> ({ clip, sdr, youtube, output, link }).
 --
 -- workspace.lua is the lookup itself (plain Lua; tests/workspace_test.lua), and gyroflow-export has its twin
 -- (vs-gyroflow/src/workspace.rs) for the Finder quick action and the command line. moments.lua is the moments'
@@ -170,6 +170,9 @@ fs.files = function(p)
 end
 fs.mounts = function()
     local out = {}
+    -- Shares reached otherwise than mounted from the network (a container on the NAS itself, where they're its own
+    -- folders, bound in): AFP_SHARES="//NAS/photo=/shares/photo;//NAS/DJI_Inbox=/shares/DJI_Inbox" (afp-stream)
+    for src, dir in (os.getenv("AFP_SHARES") or ""):gmatch("(//[^=;]+)=([^;]+)") do out[#out + 1] = { source = src, dir = dir } end
     if windows then return out end
     local text
     if macos then
@@ -1393,7 +1396,8 @@ mp.register_script_message("export-name", function(json)
         if not root then return end
         local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), true, generated_runs(root))))
         mkdir(dir)
-        local output, final = moments.unique_file(dir, safe, label .. ".mov")
+        -- An export for YouTube is an MKV (gyroflow-export --youtube)
+        local output, final = moments.unique_file(dir, safe, label .. (req.ext == ".mkv" and ".mkv" or ".mov"))
         local info = utils.file_info(state.clip)
         local l = {
             v = 1, kind = "export", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
@@ -1401,7 +1405,7 @@ mp.register_script_message("export-name", function(json)
             look = req.look, stabilized = req.stabilized == true, roots = { root },
         }
         mp.commandv("script-message-to", req.reply, "export-start", utils.format_json({
-            clip = state.clip, sdr = req.sdr == true, output = output, link = utils.format_json(l),
+            clip = state.clip, sdr = req.sdr == true, youtube = req.youtube == true, output = output, link = utils.format_json(l),
             from = a, to = b,
             -- A moment stabilized on its own, without a project: its part (or the part of it) on its own
             alone = state.snap == true and state.alone or nil,

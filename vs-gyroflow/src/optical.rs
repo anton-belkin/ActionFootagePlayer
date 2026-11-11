@@ -21,7 +21,7 @@
 //   stabilized the picture with (GoPro's HyperSmooth, DJI's RockSteady): that motion data is set aside
 //   (ignore_file_motion), since the picture no longer moves as the camera did.
 //
-// The engine is Gyroflow's own command line (the fork's, which has the optical analysis): `gyroflow <clip> --preset
+// The engine is Gyroflow's own command line (1.7.0 or newer, which has the optical analysis): `gyroflow <clip> --preset
 // <p> --export-project 1`, the analysis asked for in the preset's synchronization (a preset's synchronization replaces
 // the command line's, so --optical-correction alone is lost), the project written into a work folder first and moved
 // beside the clip once it's whole.
@@ -118,7 +118,7 @@ pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
@@ -140,7 +140,7 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| format!("not a video Gyroflow reads: {e}"))?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
@@ -297,13 +297,13 @@ pub fn error_of(log: &str) -> Option<String> {
     Some(msg.split("] ").last().unwrap_or(msg).trim().to_string())
 }
 
-/// A project Gyroflow wrote with the analysis in it (the fork's gyro_source.optical_correction); Gyroflow without it
-/// writes the project with nothing measured
+/// A project Gyroflow wrote with the analysis in it (gyro_source.optical_correction); a Gyroflow without it (before
+/// 1.7.0) writes the project with nothing measured
 pub fn check_project(text: &str) -> Result<(), String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("Gyroflow wrote a project that isn't JSON: {e}"))?;
     let measured = v.pointer("/gyro_source/optical_correction").is_some_and(|o| !o.is_null() && o != &json!("") && o != &json!({}));
     if measured { Ok(()) } else {
-        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs the build from github.com/anton-belkin/gyroflow)".into())
+        Err("Gyroflow measured nothing: this Gyroflow has no optical analysis (it needs Gyroflow 1.7.0 or newer: github.com/gyroflow/gyroflow/releases)".into())
     }
 }
 
