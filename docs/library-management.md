@@ -841,6 +841,9 @@ finds it by its folder's time.
 
 ### The NAS's watcher
 
+Shipped as part of the NAS Helper (tools/nas-helper/README.md), its "collaboration" part, with the stream and the
+links for Jellyfin in one container; built alone as below.
+
 `catalog/Dockerfile` builds `afp-catalog` alone; run as the project's watcher:
 
 ```

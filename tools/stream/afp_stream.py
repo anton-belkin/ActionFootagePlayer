@@ -53,6 +53,10 @@ VIDEO = re.compile(r"\.(mp4|mov)$", re.I)
 LINK = re.compile(r"\.afplink\.mp4$", re.I)
 # The player's plugins and settings (render_args), and what they said for each file
 PLAYER = os.environ.get("AFP_PLAYER", "/stream/player")
+# The player's config (script-opts/gyroflow.conf and dlogm.conf: its defaults), apart from its plugins in the NAS Helper
+PLAYER_CONFIG = os.environ.get("AFP_PLAYER_CONFIG", os.path.join(PLAYER, "config"))
+# Where the looks' shaders with their values set are written (BIN may be read-only)
+GENERATED = os.environ.get("AFP_GENERATED", BIN)
 ARGS = os.environ.get("AFP_ARGS", "/stream/args")
 
 jobs = {}  # key -> {proc, dir, started}
@@ -145,7 +149,7 @@ def ask_player(clip):
     tmp = os.path.join(ARGS, clip["id"] + ".tmp.json")
     if os.path.exists(tmp):
         os.remove(tmp)
-    args = ["mpv", "--no-config", f"--config-dir={PLAYER}/config", "--load-scripts=no"]
+    args = ["mpv", "--no-config", f"--config-dir={PLAYER_CONFIG}", "--load-scripts=no"]
     args += [f"--script={os.path.join(PLAYER, p)}" for p in ("workspace", "gyroflow", "dlogm")]
     args += ["--vo=null", "--ao=null", "--hwdec=no", "--pause", "--autocreate-playlist=no", "--idle=no", "--msg-level=all=error",
              f"--script-opts-append=gyroflow-render_args={tmp}", "--", clip["path"]]
@@ -164,7 +168,7 @@ def ask_player(clip):
         a = {"error": (err or "no reply")[-300:]}
     if a.get("moment", {}) and a["moment"].get("missing"):
         a = {"error": "the original isn't there"}
-    deps = [clip["path"], os.path.join(PLAYER, "config", "script-opts", "gyroflow.conf"), os.path.join(PLAYER, "config", "script-opts", "dlogm.conf")]
+    deps = [clip["path"], os.path.join(PLAYER_CONFIG, "script-opts", "gyroflow.conf"), os.path.join(PLAYER_CONFIG, "script-opts", "dlogm.conf")]
     deps += sidecars(clip["path"])
     if a.get("clip"):
         deps += [a["clip"]] + sidecars(a["clip"])
@@ -263,7 +267,8 @@ def with_look(clip, look):
 
 def gain_shader(gain):
     """hlg_gain.glsl with its gain as the default"""
-    out = os.path.join(BIN, f"hlg_gain_{gain}.glsl")
+    os.makedirs(GENERATED, exist_ok=True)
+    out = os.path.join(GENERATED, f"hlg_gain_{gain}.glsl")
     src = os.path.join(BIN, "hlg_gain.glsl")
     if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
         text = open(src).read().replace("//!MAXIMUM 4.0\n2.0\n", f"//!MAXIMUM 4.0\n{float(gain):.2f}\n", 1)
@@ -275,7 +280,8 @@ def gain_shader(gain):
 
 def highlights_shader(peak):
     """hlg_highlights.glsl with its peak as the default (afp-render can't set a shader's parameters)"""
-    out = os.path.join(BIN, f"hlg_highlights_{peak}.glsl")
+    os.makedirs(GENERATED, exist_ok=True)
+    out = os.path.join(GENERATED, f"hlg_highlights_{peak}.glsl")
     src = os.path.join(BIN, "hlg_highlights.glsl")
     if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
         text = open(src).read().replace("//!MAXIMUM 1000.0\n1000.0\n", f"//!MAXIMUM 1000.0\n{float(peak):.1f}\n", 1)
@@ -623,7 +629,8 @@ def warm_worker():
     """The moments' and clip previews' player args, asked ahead (the catalog lists only those it has), again when a file
     they depend on changed; then their posters"""
     while True:
-        for c in clips():
+        # Moments first: they're what's watched most, and in Jellyfin with any scope but clips
+        for c in sorted(clips(), key=lambda c: c["kind"] != "moment"):
             if c["kind"] != "clip":
                 try:
                     if player_args(c):
@@ -631,6 +638,53 @@ def warm_worker():
                 except Exception as e:
                     log("warm:", c["name"], e)
         time.sleep(60)
+
+
+# The NAS Helper's (tools/nas-helper): its parts' state, written by helper.py, and its settings described
+HELPER_STATUS = os.environ.get("AFP_HELPER_STATUS")
+
+
+def settings_page():
+    """The NAS Helper: what runs and how it's doing, then each setting with what it does and its value now"""
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import nas_settings as S
+    try:
+        with open(HELPER_STATUS) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+    e = lambda v: html.escape(str(v))
+    out = [f"<h1>Action Footage NAS Helper {e(st.get('version', ''))}</h1><p><a href=/>The streams</a></p><h2>Running</h2><ul>"]
+    for name, p in sorted((st.get("parts") or {}).items()):
+        line = f"<b>{e(name)}</b>: {e(p.get('state'))}"
+        if p.get("restarts"):
+            line += f", started again {p['restarts']} times"
+        if p.get("state") == "stopped":
+            line += f" (exit {e(p.get('exit'))}, again at {e(p.get('again'))}): <code>{e(p.get('last', ''))}</code>"
+        out.append(f"<li>{line}</li>")
+    out.append("</ul>")
+    if st.get("problems"):
+        out.append("<h2>Problems</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in st["problems"]) + "</ul>")
+    out.append(f"<p>Projects: {e(', '.join(st.get('projects') or []) or 'none')}. Shares: {e(', '.join(st.get('shares') or []) or 'none')}.</p>")
+    now = st.get("settings") or {}
+    out.append("<p>Settings are the container's environment (compose.yaml's <code>environment:</code>): change one there and "
+               "recreate the container.</p>")
+    for part, title in S.PARTS:
+        out.append(f"<h2>{e(title)}</h2><table>")
+        for s in S.SETTINGS:
+            if s[2] != part:
+                continue
+            v = now.get(s[0], s[1])
+            choices = f"<br><small>One of: {e(', '.join(s[4]))}</small>" if len(s) > 4 else ""
+            mark = "" if v == s[1] else f" <small>(default {e(s[1]) or 'empty'})</small>"
+            out.append(f"<tr><td><code>{e(s[0])}</code></td><td><code>{e(v) or '&mdash;'}</code>{mark}</td><td>{e(s[3])}{choices}</td></tr>")
+        out.append("</table>")
+    out.append("<h2>Folders</h2><table>" + "".join(f"<tr><td><code>{e(p)}</code></td><td>{e(m)}</td><td>{e(w)}</td></tr>" for p, m, w in S.FOLDERS) + "</table>")
+    return ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>NAS Helper settings</title>"
+            "<body style='font-family:system-ui;background:#111;color:#ddd;max-width:70em;margin:auto;padding:0 1em'>"
+            "<style>a{color:#8cf}td{vertical-align:top;padding:.35em .6em;border-top:1px solid #333}table{border-collapse:collapse}"
+            "code{color:#fc8}</style>" + "".join(out))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -690,7 +744,8 @@ class Handler(BaseHTTPRequestHandler):
                 body += "</ul>"
             return self.send(200, f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Action Footage streams</title>"
                                   f"<body style='font-family:system-ui;background:#111;color:#ddd'><style>a{{color:#8cf}}</style><h1>Clips</h1><p>Stabilized, HDR (HLG). "
-                                  f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV. {status}.</p>{body}", "text/html; charset=utf-8")
+                                  f"<a href=/playlist.m3u>playlist.m3u</a> for Jellyfin Live TV. {status}."
+                                  f"{' <a href=/settings>Settings</a>.' if HELPER_STATUS else ''}</p>{body}", "text/html; charset=utf-8")
         if parts == ["prerender"]:
             # folder: a folder's clips (folders below it too with recursive=1; "" and recursive=1: everything);
             # what: opening | whole; look: the look to render (tv: AFP_TV_LOOK, what TVs are given; else as in a
@@ -700,7 +755,9 @@ class Handler(BaseHTTPRequestHandler):
             folder, what = (q.get("folder") or [""])[0], (q.get("what") or ["opening"])[0]
             look = (q.get("look") or [""])[0]
             look = TV_LOOK if look == "tv" else look
-            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0] == "1"
+            # links=moments: only the moments (what Jellyfin shows with the scope moments)
+            recursive, links = (q.get("recursive") or ["0"])[0] == "1", (q.get("links") or ["0"])[0]
+            links = {"1": ("moment", "preview"), "moments": ("moment",), "clips": ("preview",)}.get(links)
             if what not in ("opening", "whole"):
                 return self.send(400, "what: opening or whole", "text/plain")
             if look and not LOOK.match(look):
@@ -710,7 +767,7 @@ class Handler(BaseHTTPRequestHandler):
                 for c in clips():
                     f = folder_of(c)
                     inside = f == folder or (recursive and (folder in ("", ".") or f.startswith(folder.rstrip("/") + "/")))
-                    if not inside or (links and c["kind"] == "clip"):
+                    if not inside or (links and c["kind"] not in links):
                         continue
                     c = with_look(c, look)
                     if not any(x["clip"]["id"] == c["id"] and x["what"] == what for x in queue):
@@ -718,6 +775,8 @@ class Handler(BaseHTTPRequestHandler):
                         added += 1
             log("pre-render", what, folder or "(all)", "recursive" if recursive else "", look or "hlg", added, "clips")
             return self.send(303, "", "text/plain", {"Location": "/"})
+        if parts == ["settings"] and HELPER_STATUS:
+            return self.send(200, settings_page(), "text/html; charset=utf-8")
         if parts == ["status"]:
             return self.send(200, json.dumps({"prerendering": current["name"], "queued": len(queue), "tv_look": TV_LOOK,
                                               "rendering": [{"clip": v["clip"], "from": v["from"], "background": v["background"]} for v in jobs.values() if v["proc"].poll() is None]}),

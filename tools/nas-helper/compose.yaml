@@ -1,0 +1,40 @@
+# Action Footage NAS Helper: an example to change to your NAS's folders (tools/nas-helper/README.md).
+#
+#   docker load -i ActionFootageNASHelper-<version>-linux-x86_64.tar.gz
+#   docker compose up -d
+#
+# The left side of each volume is a folder on your NAS; the right side stays as it is. Every setting is described by
+# `docker run --rm actionfootage-nas-helper:<version> --help`, and on http://<nas>:8099/settings while it runs.
+services:
+  nas-helper:
+    image: actionfootage-nas-helper:${AFP_VERSION:-latest}
+    container_name: afp-nas-helper
+    restart: unless-stopped
+    # The host's network: the stream on the NAS's own port, Jellyfin reached at 127.0.0.1
+    network_mode: host
+    # The GPU (VA-API, Vulkan), for the stream
+    devices:
+      - /dev/dri:/dev/dri
+    # Leaves room for whatever else runs on the NAS (a VM, Jellyfin): the stream's renders take ~1 GB
+    mem_limit: 2g
+    environment:
+      AFP_COLLABORATION: "on"
+      AFP_STREAM: "on"
+      AFP_JELLYFIN: "off"
+      # With AFP_JELLYFIN on:
+      # AFP_JELLYFIN_SCOPE: moments
+      # AFP_PUBLIC_URL: http://192.168.1.10:8099
+      # AFP_JELLYFIN_URL: http://127.0.0.1:8096
+      # AFP_JELLYFIN_PATH: /media/_Action Footage
+    volumes:
+      # The project, twice: read-write for collaboration (its catalog), read-only for the stream
+      - "/volume1/Projects/Trip:/projects/Trip"
+      - "/volume1/Projects/Trip:/library/Trip:ro"
+      # The shares the project's locations are on (//NAS/video/... in Project.afproject), read-only
+      - "/volume1/video:/shares/video:ro"
+      # The helper's own: renders, the NAS's name in the journals, what the player said
+      - "/volume1/docker/afp-nas-helper/data:/data"
+      # Your settings for the player (player/script-opts/*.conf) and Jellyfin's API key (jellyfin.key)
+      - "/volume1/docker/afp-nas-helper/config:/config"
+      # With AFP_JELLYFIN on: the folder of a Jellyfin Home Videos library
+      # - "/volume1/video/_Action Footage:/jellyfin"

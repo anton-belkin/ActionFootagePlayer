@@ -10,12 +10,14 @@
 #   <out>/Moments/<trip>/<moment>.strm        a moment: its subfolder in _Moments/, else its clip's trip, else "No trip"
 #   <out>/Clips/<trip>/<clip>.strm            a clip preview (the whole clip): its folder in _Clips/
 #
+# --scope says which of the two (moments, clips or all); what was written outside it is removed.
+#
 # Nothing is written beside the footage: only <out>, whose files it lists in <out>/.afp-jellyfin.json and removes
 # when their item goes (a moment deleted, a clip preview deleted as not interesting). Removing <out> removes it all.
 # With --jellyfin and --key-file, the library whose folder is <out> is refreshed after a change (only that library).
 #
 #   jellyfin.py --catalog http://127.0.0.1:8099/catalog.json --stream http://192.168.50.186:8099 --out /out \
-#               [--jellyfin http://127.0.0.1:8899 --key-file /run/key] [--names en|ru] [--every 120]
+#               [--jellyfin http://127.0.0.1:8899 --key-file /run/key] [--names en|ru] [--scope moments|clips|all] [--every 120]
 
 import argparse, html, json, os, re, sys, time, urllib.parse, urllib.request
 
@@ -77,14 +79,20 @@ def label(item):
     return item["start"][:16].replace("T", " ") if item.get("start") else item["name"]
 
 
-def tree(items, t):
-    """{relative path: item} for each .strm: moments in their folder or their clip's trip, clips in theirs"""
+SCOPES = {"moments": ("moment",), "clips": ("preview",), "all": ("moment", "preview")}
+
+
+def tree(items, t, scope="all"):
+    """{relative path: item} for each .strm: moments in their folder or their clip's trip, clips in theirs; only the
+    kinds in scope (a moment still finds its trip from its clip's preview)"""
     trip_of = {}
     for it in items:
         if it["kind"] == "preview":
             trip_of[(it["project"], it["clip"])] = it["folder"]
     out = {}
     for it in sorted(items, key=lambda i: (i.get("start") or "", i["name"])):
+        if it["kind"] not in SCOPES[scope]:
+            continue
         if it["kind"] == "moment":
             folder = it["folder"] or trip_of.get((it["project"], it["clip"])) or t["none"]
             top = t["moments"]
@@ -128,7 +136,7 @@ def run(a):
     changed = 0
     wanted = set()
     folders = {}
-    for rel, it in tree(items, t).items():
+    for rel, it in tree(items, t, a.scope).items():
         base = os.path.join(a.out, rel[:-5])
         url = f"{stream}/clip/{it['id']}/index.m3u8"
         changed += write(base + ".strm", url + "\n")
@@ -156,6 +164,11 @@ def run(a):
             before = set(os.path.join(a.out, p) for p in json.load(f))
     except (OSError, ValueError):
         before = set()
+    # While afp-stream hasn't asked the player about every item yet (it just started), what it hasn't listed may only be
+    # waiting: nothing written before goes until it has
+    pending = cat.get("pending") or 0
+    if pending:
+        wanted |= before & set(p for p in before if os.path.exists(p))
     for p in sorted(before - wanted):
         try:
             os.remove(p)
@@ -166,7 +179,7 @@ def run(a):
         if d != a.out and not os.listdir(d):
             os.rmdir(d)
     write(os.path.join(a.out, MANIFEST), json.dumps(sorted(os.path.relpath(p, a.out) for p in wanted), ensure_ascii=False, indent=0))
-    log(f"{len(items)} items, {changed} files changed")
+    log(f"{len(items)} items, {a.scope} in Jellyfin, {changed} files changed")
     if changed and a.jellyfin and a.key_file:
         refresh(a)
 
@@ -195,6 +208,7 @@ if __name__ == "__main__":
     p.add_argument("--jellyfin-path", help="the folder as Jellyfin's library has it (its container's path), if not --out")
     p.add_argument("--key-file", help="a file with a Jellyfin API key")
     p.add_argument("--names", default="en", choices=sorted(NAMES))
+    p.add_argument("--scope", default="all", choices=sorted(SCOPES), help="what goes to Jellyfin: moments, clips (clip previews) or all; what's outside it is removed")
     p.add_argument("--every", type=float, default=0, help="seconds between runs; 0: once")
     a = p.parse_args()
     a.out = os.path.abspath(a.out)
