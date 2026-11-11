@@ -247,6 +247,11 @@ pub struct LensType {
     pub sizes: HashMap<String, Option<Profile>>,
     #[serde(default)]
     pub note: String,
+    /// The lens in the file, where a clip has it, comes before this type's profile, unless the clip was given the type
+    /// by hand: set on a type a lens was saved to from a Gyroflow project (`save_default`), whose clips of the same mode
+    /// may or may not carry their lens (an Action 6 in Wide does with EIS off, not with EIS on)
+    #[serde(default)]
+    pub file_first: bool,
     /// The folder of the list it's from, for a profile file named in it
     #[serde(skip)]
     dir: Option<std::path::PathBuf>,
@@ -493,8 +498,11 @@ pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pic
 
 /// `for_video`, for a clip Gyroflow may not know the camera of
 pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
-    if let Some(t) = clip.lens_type(path).and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t)) {
-        if let Some(p) = t.profile_for(clip.width, clip.height) {
+    let chosen = chosen_type(path);
+    let ty = chosen.clone().or_else(|| recorded_type_named(&clip.camera, path, &clip.lens_mode)).or_else(|| default_type(&clip.camera));
+    if let Some(t) = ty.and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t)) {
+        let file_first = in_file && t.file_first && chosen.as_deref() != Some(t.id.as_str());
+        if let Some(p) = t.profile_for(clip.width, clip.height).filter(|_| !file_first) {
             let focal_only = matches!(p, Profile::Focal { .. });
             match load_profile(p, t.dir.as_deref(), clip.width, clip.height) {
                 Ok((profile, name, official)) => return Some(Pick { profile, name, official, votes: (0, 0), exact: false, curated: Some(t.label.clone()), focal_only }),
@@ -526,6 +534,230 @@ pub fn apply(stab: &StabilizationManager, video: &str) -> Option<Pick> {
     }
     log::info!("Lens profile: {}", pick.label());
     Some(pick)
+}
+
+// ---- A Gyroflow project's lens kept in the user's list, for every clip of its camera, mode and size ----
+//
+// A clip whose lens isn't known gets a Gyroflow project where a lens was picked by hand, and it works: the Library
+// saves that lens to the user's list (`save_default`) as the clip's camera's, in the lens type the camera recorded
+// the clip in (its mode), for its resolution: `types[...].sizes["3840x2160"]`. A mode the list doesn't name yet gets
+// a type of its own ("mode-6": "Mode 6", or by Gyroflow's name for the mode, "wide": "Wide") and the camera's
+// `recorded` names it; a camera that records no mode, its `default`. The profile is the key of Gyroflow's database
+// the project's lens is (by its calibration, `db_key_of`), else the lens itself, written next to the list
+// (lenses/<name>-<checksum>.json). Clips given another type by hand, and clips with their own project, keep theirs.
+
+/// The Gyroflow project beside a clip, as the player finds it: <stem>.gyroflow, else <name>.gyroflow
+pub fn project_beside(path: &str) -> Option<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    let (dir, stem, name) = (p.parent()?, p.file_stem()?.to_string_lossy(), p.file_name()?.to_string_lossy());
+    [format!("{stem}.gyroflow"), format!("{name}.gyroflow")].into_iter().map(|f| dir.join(f)).find(|f| f.is_file())
+}
+
+/// The lens a Gyroflow project uses (its calibration_data)
+#[derive(Clone, Debug)]
+pub struct ProjectLens {
+    pub profile: LensProfile,
+    /// As the project has it, to be written next to the list when it isn't in the database
+    pub json: serde_json::Value,
+    /// As Gyroflow's list names it, else the profile's own name
+    pub name: String,
+    /// The key of Gyroflow's database it is, None for a calibration of one's own
+    pub key: Option<String>,
+}
+
+/// The lens of the Gyroflow project at `project`; an error when it has none
+pub fn project_lens(project: &std::path::Path) -> Result<ProjectLens, String> {
+    let text = std::fs::read_to_string(project).map_err(|e| format!("{}: {e}", project.display()))?;
+    let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", project.display()))?;
+    lens_of_project(&doc)
+}
+
+fn lens_of_project(doc: &serde_json::Value) -> Result<ProjectLens, String> {
+    let json = doc.get("calibration_data").filter(|c| c.is_object()).cloned().ok_or("the project has no lens profile")?;
+    let profile = LensProfile::from_value(json.clone()).map_err(|e| format!("the project's lens profile: {e}"))?;
+    if profile.fisheye_params.camera_matrix.len() != 3 || profile.calib_dimension.w == 0 || profile.calib_dimension.h == 0 {
+        return Err("the project has no lens profile".into());
+    }
+    let key = db_key_of(&profile);
+    let name = key.as_deref().and_then(|k| db().get_by_id(k)).map(|p| p.get_display_name())
+        .filter(|n| n != "---").unwrap_or_else(|| if profile.name.is_empty() { profile.get_name() } else { profile.name.clone() });
+    Ok(ProjectLens { profile, json, name, key })
+}
+
+/// The key of Gyroflow's database a profile is: the one with the same calibration (LensProfile::get_checksum, what the
+/// picture is projected with), by its identifier first, else among the profiles of its camera
+fn db_key_of(p: &LensProfile) -> Option<String> {
+    let sum = p.get_checksum();
+    let same = |k: &str| db().get_by_id(k).is_some_and(|d| d.get_checksum() == sum);
+    if !p.identifier.is_empty() && same(&p.identifier) { return Some(p.identifier.clone()); }
+    for query in [format!("{} {}", p.camera_brand, p.camera_model), p.camera_brand.clone()] {
+        let mut keys: Vec<String> = db().search(&query, &Default::default(), 0, 0).into_iter().map(|r| r.1).filter(|k| !k.ends_with(".gyroflow")).collect();
+        keys.sort();
+        keys.dedup();
+        for k in keys {
+            if same(&k) { return Some(k); }
+            // One file's other resolutions (compatible_settings) are in the database by their own identifiers
+            let Some(parent) = db().get_by_id(&k) else { continue };
+            if let Some(sub) = parent.get_all_matching_profiles().into_iter().find(|s| !s.identifier.is_empty() && same(&s.identifier)) {
+                return Some(sub.identifier);
+            }
+        }
+    }
+    None
+}
+
+/// Where in the list a clip's lens goes: its camera, the lens type the camera recorded it in, and its size
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ListKey {
+    pub camera: String,
+    #[serde(rename = "type")]
+    pub type_id: String,
+    pub type_label: String,
+    /// "3840x2160"
+    pub size: String,
+    /// A type the list doesn't have yet
+    pub new_type: bool,
+    /// The mode `recorded` is to name (the camera's number for it, "6", or Gyroflow's name, "Wide"); None: it does already
+    #[serde(skip)]
+    recorded: Option<String>,
+    /// The type is to be the camera's `default` (it records no mode)
+    #[serde(skip)]
+    default: bool,
+}
+
+// A lens type's id from a mode's name: what the Library keeps as source.lens_type (letters, digits, - and _)
+fn type_id(name: &str) -> String {
+    let s: String = name.trim().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let s = s.split('-').filter(|x| !x.is_empty()).collect::<Vec<_>>().join("-");
+    if s.is_empty() { "mode".into() } else { s }
+}
+
+/// Where the list keeps the lens of a clip at `path` (`clip`): the type the camera recorded it in (as the list names
+/// it, or the camera's default), else a new one for the mode it recorded. The type given by hand isn't the key: it's
+/// what the clip is, not what its camera recorded
+pub fn list_key(path: &str, clip: &Clip) -> Result<ListKey, String> {
+    let camera = clip.camera.trim().to_string();
+    if camera.is_empty() { return Err("its camera isn't known".into()); }
+    if clip.width == 0 || clip.height == 0 { return Err("its size isn't known".into()); }
+    let size = format!("{}x{}", clip.width, clip.height);
+    let types = lens_types(&camera);
+    let label = |id: &str, or: String| types.iter().find(|t| t.id == id).map(|t| t.label.clone()).unwrap_or(or);
+    let key = |type_id: String, type_label: String, recorded: Option<String>, default: bool| {
+        let new_type = !types.iter().any(|t| t.id == type_id);
+        ListKey { camera: camera.clone(), type_label: label(&type_id, type_label), type_id, size: size.clone(), new_type, recorded, default }
+    };
+    if let Some(t) = recorded_type_named(&camera, path, &clip.lens_mode) { return Ok(key(t.clone(), t, None, false)); }
+    if let Some(m) = crate::probe::recorded_lens_mode(path) { return Ok(key(format!("mode-{m}"), format!("Mode {m}"), Some(m.to_string()), false)); }
+    let mode = clip.lens_mode.trim();
+    if !mode.is_empty() { return Ok(key(type_id(mode), mode.to_string(), Some(mode.to_string()), false)); }
+    if let Some(t) = default_type(&camera) { return Ok(key(t.clone(), t, None, false)); }
+    Ok(key("any".into(), "Any mode".into(), None, true))
+}
+
+/// What the list's entry for the lens is: its key in Gyroflow's database, else the file it's kept in next to the list
+fn saved_profile_name(lens: &ProjectLens) -> String {
+    if let Some(k) = &lens.key { return k.clone(); }
+    let name: String = lens.name.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect();
+    format!("lenses/{}-{:08x}.json", name.trim().trim_matches('.'), lens.profile.get_checksum() as u32)
+}
+
+/// Whether the list already gives this lens for the key (for its size, its aspect ratio or the whole type)
+pub fn is_default(key: &ListKey, lens: &ProjectLens) -> bool {
+    let want = Profile::Named(saved_profile_name(lens));
+    let Some(t) = lens_types(&key.camera).into_iter().find(|t| t.id == key.type_id) else { return false };
+    let Some((w, h)) = key.size.split_once('x').and_then(|(w, h)| Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?))) else { return false };
+    t.profile_for(w, h) == Some(&want)
+}
+
+// "3840x2160" names this size, either way round
+fn same_size(k: &str, w: usize, h: usize) -> bool {
+    k.trim().split_once('x').and_then(|(a, b)| Some((a.trim().parse::<usize>().ok()?, b.trim().parse::<usize>().ok()?)))
+        .is_some_and(|ab| ab == (w, h) || ab == (h, w))
+}
+
+// Written whole or not at all: next to it first, then put in its place
+fn write_atomic(file: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?; }
+    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, file).map_err(|e| { let _ = std::fs::remove_file(&tmp); format!("{}: {e}", file.display()) })
+}
+
+/// The user's list (its text, "" for none) with the lens kept for the key: the camera found as the list names it (or
+/// added), the type taken from the user's list, else from the built-in one whole (the user's type replaces it), else
+/// made; the size's entry set (one for the other way round taken out), the type marked `file_first`, and the mode named
+fn with_default(text: &str, key: &ListKey, profile: &str) -> Result<serde_json::Value, String> {
+    use serde_json::{ json, Value };
+    let mut doc: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(text).map_err(|e| format!("the list can't be read, so it's left as it is: {e}"))? };
+    if !doc.is_object() { return Err("the list isn't a JSON object, so it's left as it is".into()); }
+    if !doc["cameras"].is_object() { doc["cameras"] = json!({}); }
+    let cameras = doc["cameras"].as_object_mut().unwrap();
+    let name = cameras.keys().find(|k| camera_key(k) == camera_key(&key.camera)).cloned().unwrap_or_else(|| key.camera.clone());
+    let cam = cameras.entry(name).or_insert_with(|| json!({}));
+    if !cam.is_object() { *cam = json!({}); }
+    if !cam["types"].is_array() { cam["types"] = json!([]); }
+    let types = cam["types"].as_array_mut().unwrap();
+    let at = match types.iter().position(|t| t["id"].as_str() == Some(key.type_id.as_str())) {
+        Some(i) => i,
+        None => {
+            let built_in: Value = serde_json::from_str(include_str!("../resources/curated_lenses.json")).unwrap_or_default();
+            let from_built_in = built_in["cameras"].as_object().into_iter().flatten()
+                .find(|(k, _)| camera_key(k) == camera_key(&key.camera))
+                .and_then(|(_, c)| c["types"].as_array()?.iter().find(|t| t["id"].as_str() == Some(key.type_id.as_str())).cloned());
+            types.push(from_built_in.unwrap_or_else(|| json!({ "id": key.type_id, "label": key.type_label, "profile": null })));
+            types.len() - 1
+        }
+    };
+    let t = &mut types[at];
+    if !t["sizes"].is_object() { t["sizes"] = json!({}); }
+    let (w, h) = key.size.split_once('x').and_then(|(w, h)| Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?))).ok_or("no size")?;
+    let sizes = t["sizes"].as_object_mut().unwrap();
+    sizes.retain(|k, _| !same_size(k, w, h));
+    sizes.insert(key.size.clone(), json!(profile));
+    t["file_first"] = json!(true);
+    if let Some(m) = &key.recorded {
+        if !cam["recorded"].is_object() { cam["recorded"] = json!({}); }
+        cam["recorded"][m.as_str()] = json!(key.type_id);
+    }
+    if key.default { cam["default"] = json!(key.type_id); }
+    Ok(doc)
+}
+
+/// What `save_default` did
+#[derive(Debug, serde::Serialize)]
+pub struct Saved {
+    #[serde(flatten)]
+    pub key: ListKey,
+    pub lens: String,
+    /// The entry: a key of Gyroflow's database, or the lens's file next to the list
+    pub profile: String,
+    /// The user's list it's in
+    pub file: String,
+}
+
+/// Keeps the lens of a Gyroflow project in the user's list as the one for the clip's camera, mode and size: every clip
+/// of them that has no lens of its own (in the file, a type given by hand, a project) takes it from now on
+pub fn save_default(path: &str, clip: &Clip, lens: &ProjectLens) -> Result<Saved, String> {
+    let file = user_file().ok_or("there's no place for the lens list (no home folder)")?;
+    let key = list_key(path, clip)?;
+    let profile = saved_profile_name(lens);
+    let dir = file.parent().ok_or("no folder for the lens list")?.to_path_buf();
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", file.display())),
+    };
+    let doc = with_default(&text, &key, &profile)?;
+    let out = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    // As the player will read it
+    parse_list(&out, Some(&dir)).map_err(|e| format!("the list wouldn't read: {e}"))?;
+    if lens.key.is_none() {
+        let json = serde_json::to_string_pretty(&lens.json).map_err(|e| e.to_string())?;
+        write_atomic(&dir.join(&profile), json.as_bytes())?;
+    }
+    write_atomic(&file, out.as_bytes())?;
+    log::info!("Lens list: {} {} {} = {profile} ({})", key.camera, key.type_id, key.size, file.display());
+    Ok(Saved { key, lens: lens.name.clone(), profile, file: file.display().to_string() })
 }
 
 #[cfg(test)]
@@ -621,6 +853,129 @@ mod tests {
         assert!(load_profile(&Profile::Focal { focal_35mm: None, hfov: None }, None, 100, 100).is_err());
         assert!(parse_list("{ \"cameras\": { \"x\": { \"types\": 5 } } }", None).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const OSMO_STANDARD: &str = "DJI/DJI_Osmo Action_standard_,_4k_16by9_3840x2160-59.94fps.json";
+
+    // A project's lens found in the database by its calibration: by the file's path for a profile without an
+    // identifier (Anton's dive projects, Osmo Action "standard"), by the identifier for one with; one's own isn't there
+    #[test]
+    fn project_lens_key() {
+        let osmo = db().get_by_id(OSMO_STANDARD).unwrap().get_json_value().unwrap();
+        let l = lens_of_project(&serde_json::json!({ "version": 3, "calibration_data": osmo.clone() })).unwrap();
+        assert_eq!(l.key.as_deref(), Some(OSMO_STANDARD));
+        assert!(l.name.contains("Osmo Action"), "{}", l.name);
+        assert_eq!(saved_profile_name(&l), OSMO_STANDARD);
+        let hero7 = db().get_by_id("gopro-hero7black-wide-1920x1080@59940-hseis").expect("a HERO7 1080p60 Wide HS profile");
+        let l = lens_of_project(&serde_json::json!({ "calibration_data": hero7.get_json_value().unwrap() })).unwrap();
+        assert_eq!(l.key.as_deref(), Some("gopro-hero7black-wide-1920x1080@59940-hseis"));
+        // Its own calibration: kept in a file next to the list
+        let mut own = osmo.clone();
+        own["fisheye_params"]["camera_matrix"][0][0] = serde_json::json!(1234.5);
+        own["name"] = serde_json::json!("My Action 6 / wide");
+        let l = lens_of_project(&serde_json::json!({ "calibration_data": own })).unwrap();
+        assert_eq!(l.key, None);
+        let f = saved_profile_name(&l);
+        assert!(f.starts_with("lenses/My Action 6 _ wide-") && f.ends_with(".json"), "{f}");
+        // No lens in the project (a preset), none at all
+        assert!(lens_of_project(&serde_json::json!({ "calibration_data": {} })).is_err());
+        assert!(lens_of_project(&serde_json::json!({ "stabilization": {} })).is_err());
+    }
+
+    fn key(camera: &str, type_id: &str, label: &str, size: &str, recorded: Option<&str>, default: bool) -> ListKey {
+        ListKey { camera: camera.into(), type_id: type_id.into(), type_label: label.into(), size: size.into(), new_type: true, recorded: recorded.map(String::from), default }
+    }
+
+    // The list's entry for a key: a new camera and mode, a type of the built-in list copied whole, the same size the other
+    // way round replaced, a camera without modes, a list that doesn't read left alone
+    #[test]
+    fn list_entry() {
+        let doc = with_default("", &key("GoPro HERO7 Black", "wide", "Wide", "1920x1080", Some("Wide"), false), "gopro-x").unwrap();
+        assert_eq!(doc, serde_json::json!({ "cameras": { "GoPro HERO7 Black": { "recorded": { "Wide": "wide" },
+            "types": [ { "id": "wide", "label": "Wide", "profile": null, "sizes": { "1920x1080": "gopro-x" }, "file_first": true } ] } } }));
+        // The user's own name for the camera; the built-in Normal (its profile) taken over with the size added
+        let mine = r#"{ "cameras": { "DJI Osmo Action 6": { "recorded": { "6": "wide" }, "types": [ { "id": "flat", "label": "Flat", "profile": { "hfov": 90 } } ] } } }"#;
+        let doc = with_default(mine, &key("DJI OsmoAction6", "normal", "Normal", "3840x2160", None, false), "mine.json").unwrap();
+        let cam = &doc["cameras"]["DJI Osmo Action 6"];
+        assert_eq!(doc["cameras"].as_object().unwrap().len(), 1);
+        assert_eq!(cam["recorded"], serde_json::json!({ "6": "wide" }));
+        assert_eq!(cam["types"][0]["id"], "flat");
+        assert_eq!(cam["types"][1]["profile"], OSMO_STANDARD);
+        assert_eq!(cam["types"][1]["sizes"], serde_json::json!({ "3840x2160": "mine.json" }));
+        // The same size again, turned: one entry, the new one
+        let doc = with_default(&doc.to_string(), &key("DJI OsmoAction6", "normal", "Normal", "2160x3840", None, false), "other.json").unwrap();
+        assert_eq!(doc["cameras"]["DJI Osmo Action 6"]["types"][1]["sizes"], serde_json::json!({ "2160x3840": "other.json" }));
+        // A mode the list didn't name, on the camera's number for it
+        let doc = with_default(&doc.to_string(), &key("DJI OsmoAction6", "mode-7", "Mode 7", "3840x2160", Some("7"), false), "x").unwrap();
+        assert_eq!(doc["cameras"]["DJI Osmo Action 6"]["recorded"], serde_json::json!({ "6": "wide", "7": "mode-7" }));
+        let mut layered = parse_list(include_str!("../resources/curated_lenses.json"), None).unwrap();
+        lay_over(&mut layered, parse_list(&doc.to_string(), None).unwrap());
+        let a6 = &layered[&camera_key("DJI OsmoAction6")];
+        assert_eq!(a6.types.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wide", "normal", "flat", "mode-7"]);
+        let normal = &a6.types[1];
+        assert!(normal.file_first);
+        assert_eq!(normal.profile_for(3840, 2160), Some(&Profile::Named("other.json".into())));
+        assert_eq!(normal.profile_for(1920, 1080), Some(&Profile::Named(OSMO_STANDARD.into())));
+        // No mode: the camera's default
+        let doc = with_default("", &key("DJI drone", "any", "Any mode", "1920x1080", None, true), "x").unwrap();
+        assert_eq!(doc["cameras"]["DJI drone"]["default"], "any");
+        assert!(with_default("{ not json", &key("A", "b", "B", "1x1", None, false), "x").is_err());
+        assert!(with_default("[]", &key("A", "b", "B", "1x1", None, false), "x").is_err());
+        assert_eq!(type_id(" Super View+ "), "super-view");
+        assert_eq!(type_id("??"), "mode");
+    }
+
+    // Saved through the user's list file ($AFP_CURATED_LENSES): the clips of the camera, mode and size take it, one
+    // with its lens in the file keeps that, another size gets nothing; a lens of one's own is written next to the list
+    #[test]
+    fn saved_default_is_taken() {
+        let dir = std::env::temp_dir().join(format!("afp-lens-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let list = dir.join("support/curated_lenses.json");
+        // SAFETY: no other test reads this variable or the user's list
+        unsafe { std::env::set_var("AFP_CURATED_LENSES", &list); }
+        let video = dir.join("GX010001.MP4").display().to_string();
+        let clip = Clip { camera: "GoPro HERO7 Black".into(), lens_mode: "Wide".into(), width: 1920, height: 1080, id: None };
+        let hero7 = db().get_by_id("gopro-hero7black-wide-1920x1080@59940-hseis").unwrap().get_json_value().unwrap();
+        let lens = lens_of_project(&serde_json::json!({ "calibration_data": hero7 })).unwrap();
+        let k = list_key(&video, &clip).unwrap();
+        assert_eq!((k.type_id.as_str(), k.type_label.as_str(), k.size.as_str(), k.new_type, k.recorded.as_deref()), ("wide", "Wide", "1920x1080", true, Some("Wide")));
+        assert!(!is_default(&k, &lens));
+        assert!(for_clip(&video, &clip, false).is_none());
+        let saved = save_default(&video, &clip, &lens).unwrap();
+        assert_eq!((saved.profile.as_str(), saved.file.as_str()), ("gopro-hero7black-wide-1920x1080@59940-hseis", list.display().to_string().as_str()));
+        assert!(is_default(&list_key(&video, &clip).unwrap(), &lens));
+        let p = for_clip(&video, &clip, false).expect("the saved lens");
+        assert_eq!(p.curated.as_deref(), Some("Wide"));
+        assert_eq!(p.profile.identifier, "gopro-hero7black-wide-1920x1080@59940-hseis");
+        // Its lens in the file comes first; another size isn't this one
+        assert!(for_clip(&video, &clip, true).is_none());
+        assert!(for_clip(&video, &Clip { width: 2704, height: 1520, ..clip.clone() }, false).is_none());
+        // A lens of one's own, for 2.7K: its file beside the list, the 1080p one kept
+        let mut own = db().get_by_id("gopro-hero7black-wide-1920x1080@59940-hseis").unwrap().get_json_value().unwrap();
+        own["fisheye_params"]["camera_matrix"][0][0] = serde_json::json!(1500.25);
+        own["name"] = serde_json::json!("Mine");
+        let lens2 = lens_of_project(&serde_json::json!({ "calibration_data": own })).unwrap();
+        let c27 = Clip { width: 2704, height: 1520, ..clip.clone() };
+        let saved = save_default(&video, &c27, &lens2).unwrap();
+        assert!(saved.profile.starts_with("lenses/Mine-"), "{}", saved.profile);
+        assert!(list.parent().unwrap().join(&saved.profile).is_file());
+        let p = for_clip(&video, &c27, false).expect("the lens of one's own");
+        assert!((p.profile.fisheye_params.camera_matrix[0][0] - 1500.25).abs() < 1e-9);
+        assert!(for_clip(&video, &clip, false).is_some());
+        let text = std::fs::read_to_string(&list).unwrap();
+        assert!(!list.with_extension(format!("tmp{}", std::process::id())).exists());
+        // The type is the camera's now: a clip of it is in it, by its mode
+        assert_eq!(list_key(&video, &clip).unwrap().new_type, false);
+        // The built-in list's Normal for the Action 6 is the dive projects' lens already: nothing to save
+        let osmo = lens_of_project(&serde_json::json!({ "calibration_data": db().get_by_id(OSMO_STANDARD).unwrap().get_json_value().unwrap() })).unwrap();
+        let a6 = ListKey { camera: "DJI OsmoAction6".into(), type_id: "normal".into(), type_label: "Normal".into(), size: "3840x2160".into(), new_type: false, recorded: None, default: false };
+        assert!(is_default(&a6, &osmo));
+        assert!(!is_default(&ListKey { type_id: "wide".into(), ..a6 }, &osmo));
+        unsafe { std::env::remove_var("AFP_CURATED_LENSES"); }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(text.contains("\"file_first\": true"), "{text}");
     }
 
     fn camera(model: &str, lens: &str, w: usize, h: usize, fps: usize, eis: &str) -> CameraIdentifier {

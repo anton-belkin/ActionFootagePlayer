@@ -36,7 +36,14 @@
 // "default": the one the list gives the camera's clips that have neither (a drone's),
 // "mode": the camera's own number for it (DJI's fov_type; null for cameras without lens types), which the side panel
 // shows while the list doesn't name it: "Unknown (mode 6)"; "curated_file": the user's own list laid over the built-in
-// one (lens_pick::user_file), when there is one, and "curated_error" when it couldn't be read (it's left out then).
+// one (lens_pick::user_file), when there is one, and "curated_error" when it couldn't be read (it's left out then);
+// "project", with a Gyroflow project beside the clip: the lens it uses ("lens", "key" of Gyroflow's database or null)
+// and where the user's list would keep it ("camera", "type", "type_label", "size", "new_type"), "saved" when it does
+// already, or "error" when it can't (probe::project_lens_answer).
+//
+// `gyroflow-probe --save-lens <video>`: that lens kept in the user's list as the default for the clip's camera, mode
+// and size (lens_pick::save_default): {"camera", "type", "type_label", "size", "new_type", "lens", "profile", "file"},
+// or {"error"} (exit 1).
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn}, "marks" {camera, times}: the highlights
@@ -70,6 +77,10 @@ fn main() {
     // --lens: the camera and the lens profile Gyroflow takes for it, for the side panel's Source tab
     let lens = args.first().is_some_and(|a| a == "--lens");
     if lens { args.remove(0); }
+    // --save-lens: the lens of the Gyroflow project beside the clip kept in the user's lens list, for its camera, mode
+    // and size (the Library's "Save as the default")
+    let save_lens = args.first().is_some_and(|a| a == "--save-lens");
+    if save_lens { args.remove(0); }
     // --library: everything Action Footage Library's index keeps about a clip
     let library = args.first().is_some_and(|a| a == "--library");
     if library { args.remove(0); }
@@ -77,7 +88,7 @@ fn main() {
     let reframe = args.first().is_some_and(|a| a == "--reframe");
     if reframe { args.remove(0); }
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --library | --reframe] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --save-lens | --library | --reframe] <video>");
         std::process::exit(2);
     };
     if reframe {
@@ -100,6 +111,12 @@ fn main() {
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
         println!("{}", serde_json::to_value(lens_info(&path).unwrap_or_default()).unwrap_or_default());
         return;
+    }
+    if save_lens {
+        let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
+        let out = vs_gyroflow::probe::save_project_lens(&path).unwrap_or_else(|e| serde_json::json!({ "error": e }));
+        println!("{out}");
+        std::process::exit(if out["error"].is_null() { 0 } else { 1 });
     }
     if headings {
         let report = match vs_gyroflow::rig::read(&path) {

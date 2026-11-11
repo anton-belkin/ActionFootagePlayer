@@ -780,6 +780,20 @@ impl Probes {
         for p in paths { if let Some(e) = self.known.get_mut(p) { e.2 = "\u{0}again".into(); } }
         self.want(paths);
     }
+    /// A lens was saved to the user's list as the default for a camera (`before`: the list's stamp until then): that
+    /// camera's clips worked out again, the others' answers kept with the list as it is now (their lens is as it was).
+    /// How many are asked again
+    pub fn lens_saved_for(&mut self, camera: &str, before: &str) -> usize {
+        let now = lens_list_stamp();
+        let key = |c: &str| c.to_lowercase().replace(' ', "");
+        let mut again = Vec::new();
+        for (p, e) in self.known.iter_mut() {
+            if e.3["camera"].as_str().is_some_and(|c| !c.is_empty() && key(c) == key(camera)) { again.push(p.clone()); }
+            else if e.2 == before { e.2 = now.clone(); }
+        }
+        self.forget(&again);
+        again.len()
+    }
     /// What's known that changed after `since`: (version now, path -> answer, how many wait)
     pub fn since(&self, since: u64) -> Value {
         let mut out = serde_json::Map::new();
@@ -934,6 +948,33 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // A lens saved for one camera: its clips asked again, the others kept as they are
+    #[test]
+    fn lens_saved_asks_that_camera_again() {
+        let dir = std::env::temp_dir().join(format!("afl-lens-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut p = Probes::default();
+        let mut paths = Vec::new();
+        for (name, camera) in [("A.MP4", "DJI OsmoAction6"), ("B.MP4", "DJI Osmo Action 6"), ("C.MP4", "GoPro HERO7 Black"), ("D.MP4", "")] {
+            let f = dir.join(name);
+            std::fs::write(&f, name).unwrap();
+            let path = f.display().to_string();
+            let (s, m) = stamp(&path).unwrap();
+            p.known.insert(path.clone(), (s, m, "old".into(), json!({ "camera": camera })));
+            paths.push(path);
+        }
+        // One known with an older list still: it stays to be asked again
+        p.known.get_mut(&paths[3]).unwrap().2 = "older".into();
+        assert_eq!(p.lens_saved_for("DJI OsmoAction6", "old"), 2);
+        let now = lens_list_stamp();
+        let queued: HashSet<&String> = p.queue.iter().collect();
+        assert!(queued.contains(&paths[0]) && queued.contains(&paths[1]) && !queued.contains(&paths[2]));
+        assert_eq!(p.known[&paths[2]].2, now);
+        assert_eq!(p.known[&paths[3]].2, "older");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn probes_again_with_another_lens_list() {

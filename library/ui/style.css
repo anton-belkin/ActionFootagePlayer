@@ -287,6 +287,11 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .kv dd{margin:0;color:var(--fg);font-size:12px;overflow-wrap:anywhere;-webkit-user-select:text;user-select:text;cursor:text}
 .kv dd.mono{font-family:var(--mono);font-size:11px}
 .mono.blk{display:block}
+.kv dd .blk{display:block}
+.kv dd .sub.blk{margin-top:2px}
+.lensave{margin-top:6px}
+.kv dt:has(+ dd .lensave),.kv dt:has(+ dd .blk + .sub){align-self:start}
+.lensave .btn{white-space:normal;text-align:left;line-height:1.3}
 .mono.blk+.mono.blk{margin-top:3px}
 .th.mk{display:flex;align-items:center;justify-content:center;color:var(--accent);background:var(--accent-soft)}
 body.waiting,body.waiting *{cursor:progress}
