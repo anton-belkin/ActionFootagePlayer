@@ -509,9 +509,18 @@ Anton, 2026-11-09: time to have them; the first use is Photos'.
   or export's in its link (`tags`); a photo's in its XMP (`dc:subject`, which Photos and Lightroom read as keywords).
   So they travel with the files and are the same from every computer. Finder tags are written alongside where the
   share keeps them, to be seen in Finder; the library's own are the truth.
-- **Yours**: any words (`dolphin`, `for family`, `best`). Set and removed in the Library's Tags part, on a selection.
+- **Yours**: any words (`dolphin`, `for family`, `best`). Set and removed in the Library's Tags part, on a selection,
+  and in the player (`K`, the Project tab) on what plays. Compared without case.
+- **Stars**, 1–5, `rating` beside `tags` (a clip's own file, a link; a photo's: not yet). Set on a selection; the same
+  stars again: none. A filter, *Stars*: at least so many, or none.
+- **Rename a tag everywhere** (the Tags part): over every clip, moment, photo and export of the project; to a name in
+  use, the two become one (merged).
 - **The app's**: *Deleted in Photos* (sync sets it), later others; shown apart, removable like any.
 - Search and filters take tags; *Marks to the editor* passes them on as keywords.
+- **Finder tags** follow the library's, on this computer's choice (Project settings, On this Mac): the project's own
+  files (default; a clip's go on its clip preview), all (the originals too) or none. A Finder tag set by hand stays.
+  Details: [moments-and-workspaces.md, Rating and tags](moments-and-workspaces.md#rating-and-tags).
+- Every change is noted to the catalog at once (`seen::note_now`), so the views show it right away.
 
 ## 8. The project is its files
 

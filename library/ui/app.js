@@ -85,6 +85,8 @@ const S = {
   locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
+  // Tags: the ones used last on this computer (the player's K too), a rename's two names, Finder's on this computer
+  recentTags: [], tagFrom: "", tagTo: "", finderTags: "own",
   geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
@@ -373,7 +375,12 @@ function buildFacets() {
   }
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
-  if (tagList.length) sections.push({ id: "tg", title: "Tags", facets: [{ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) }] });
+  const tagFacets = [];
+  if (tagList.length) tagFacets.push({ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) });
+  // Stars: at least so many (clips, moments, exports)
+  if (S.view !== "stills" && items.some((it) => it.rating)) tagFacets.push({ id: "stars", title: "Stars", opts: [5, 4, 3, 2, 1].map((n) => L("stars:" + n, n === 5 ? "★★★★★" : stars(n) + " or more", (it) => (it.rating || 0) >= n))
+    .concat([L("stars:0", "No stars", (it) => !it.rating)]) });
+  if (tagFacets.length) sections.push({ id: "tg", title: "Tags", facets: tagFacets });
   if (S.view === "moments") {
     const rf = (p, st) => (it) => (it.renders || {})[p] === st;
     sections.push({ id: "rn", title: "Renders", facets: ["HDR", "SDR"].map((p) => ({ id: "rn" + p, title: p, opts: [
@@ -565,6 +572,7 @@ function sizeText(n) {
 }
 function chips(it) {
   const c = [];
+  if (it.rating) c.push(["chip tag", stars(it.rating)]);
   for (const t of it.tags || []) c.push([t === "Deleted in Photos" ? "chip sys" : "chip tag", t]);
   if (it.kind === "folder") {
     const inner = under(it.path);
@@ -954,23 +962,75 @@ function checksSection(c) {
   }
   return sec("checks", "Checks", "issues, moved files", body);
 }
-// Tags on the selection (library/src/tags.rs): kept with each item, in the library
+// Tags on the selection (library/src/tags.rs): kept with each item, in the library. Its stars (clips, moments,
+// exports: 1–5), the tags used last offered, and a tag renamed (merged into one there) over the whole project
+const ci = (a, b) => a.toLowerCase() === b.toLowerCase();
+function stars(n) { return n ? "★".repeat(n) : ""; }
 function tagsSection(c) {
   const on = [];
-  for (const it of c.selItems) for (const t of it.tags || []) if (on.indexOf(t) < 0) on.push(t);
-  const body = c.any
-    ? '<div class="chips">' + (on.length ? on.map((t) => '<button type="button" class="chip ' + (t === "Deleted in Photos" ? "sys" : "tag") + '" data-a="untag" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + ' from the selection">' + esc(t) + ' ×</button>').join("") : '<span class="sub">No tags yet</span>') + '</div>' +
-      '<div class="tagin"><input id="tagdraft" type="text" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
-      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in its own metadata (XMP keywords).</span>'
-    : '<p>Select items or folders to tag them.</p>';
-  return sec("tags", "Tags", c.any ? on.length + " on the selection" : "select to tag", body);
+  for (const it of c.selItems) for (const t of it.tags || []) if (!on.some((x) => ci(x, t))) on.push(t);
+  const rateable = c.selItems.filter((it) => it.kind !== "still");
+  const ratings = rateable.map((it) => it.rating || 0);
+  const same = ratings.length && ratings.every((r) => r === ratings[0]) ? ratings[0] : null;
+  // The recent ones not on every selected item: a click puts them on all of it
+  const offer = S.recentTags.filter((t) => !c.selItems.every((it) => (it.tags || []).some((x) => ci(x, t)))).slice(0, 8);
+  let body = "";
+  if (c.any) {
+    if (rateable.length) {
+      body += '<div class="stars" role="group" aria-label="Stars">' + [1, 2, 3, 4, 5].map((n) => '<button type="button" class="star' + (same != null && n <= same ? " on" : "") + '" data-a="rate" data-v="' + n + '" aria-label="' + n + ' star' + (n > 1 ? "s" : "") + '" title="' + (same === n ? "Click again: no stars" : n + " star" + (n > 1 ? "s" : "")) + '">' + (same != null && n <= same ? "★" : "☆") + '</button>').join("") +
+        '<span class="sub">' + (same == null ? "mixed" : same ? "" : "no stars") + '</span></div>';
+    }
+    body += '<div class="chips">' + (on.length ? on.map((t) => '<button type="button" class="chip ' + (t === "Deleted in Photos" ? "sys" : "tag") + '" data-a="untag" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + ' from the selection">' + esc(t) + ' ×</button>').join("") : '<span class="sub">No tags yet</span>') + '</div>' +
+      (offer.length ? '<div class="chips">' + offer.map((t) => '<button type="button" class="chip" data-a="retag" data-v="' + esc(t) + '" aria-label="Add tag ' + esc(t) + ' to the selection">+ ' + esc(t) + '</button>').join("") + '</div>' : "") +
+      '<div class="tagin"><input id="tagdraft" type="text" list="tagnames" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
+      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in its own metadata (XMP keywords). ' +
+      (S.finderTags === "off" || !S.macos ? "" : "Finder shows them on moments, exports, photos and clip previews" + (S.finderTags === "all" ? ", and on the originals" : "") + " (Project settings, On this Mac).") + '</span>';
+  } else body += '<p>Select items or folders to tag them.</p>';
+  // Rename or merge, over the whole project
+  const known = [];
+  for (const v of ["footage", "moments", "stills", "exports"]) for (const it of (DATA[v] && DATA[v].items) || []) for (const t of it.tags || []) if (!known.some((x) => ci(x, t))) known.push(t);
+  for (const t of S.recentTags) if (!known.some((x) => ci(x, t))) known.push(t);
+  known.sort((a, b) => a.localeCompare(b));
+  body += '<datalist id="tagnames">' + known.map((t) => '<option value="' + esc(t) + '">').join("") + '</datalist>' +
+    '<div class="lab">Rename a tag everywhere</div><div class="tagin"><input id="tagfrom" type="text" list="tagnames" value="' + esc(S.tagFrom) + '" placeholder="Tag" aria-label="Tag to rename">' +
+    '<input id="tagto" type="text" list="tagnames" value="' + esc(S.tagTo) + '" placeholder="New name" aria-label="Its new name"><button type="button" class="btn sm" data-a="renametag">Rename</button></div>' +
+    '<span class="sub wrap">On clips, moments, photos and exports of the whole project. To a name in use: the two become one.</span>';
+  return sec("tags", "Tags", c.any ? on.length + " on the selection" + (same ? " · " + stars(same) : "") : "select to tag", body);
 }
+const tagItems = (c) => c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path, preview: it.preview || null }));
 async function setTags(add, remove) {
   const c = ctx();
   if (!c.any) return;
   try {
-    const problems = await invoke("set_tags", { items: c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), add, remove });
+    const problems = await invoke("set_tags", { items: tagItems(c), add, remove });
     if (problems.length) showError(problems.join(" · "));
+    if (add.length) S.recentTags = await invoke("recent_tags").catch(() => S.recentTags);
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function setRating(n) {
+  const c = ctx();
+  if (!c.any) return;
+  const rs = c.selItems.filter((it) => it.kind !== "still").map((it) => it.rating || 0);
+  // The stars all of it has already, clicked again: none
+  const rating = rs.length && rs.every((r) => r === n) ? null : n;
+  try {
+    const problems = await invoke("set_rating", { items: tagItems(c), rating });
+    if (problems.length) showError(problems.join(" · "));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function renameTag() {
+  const from = S.tagFrom.trim(), to = S.tagTo.trim();
+  if (!from || !to) { toast("The tag, and its new name"); return; }
+  try {
+    const r = await invoke("rename_tag", { from, to });
+    if (r.problems.length) showError(r.problems.join(" · "));
+    toast(r.count ? "“" + from + "” → “" + to + "” on " + r.count + " item" + (r.count === 1 ? "" : "s") : "No item has “" + from + "”");
+    S.tagFrom = ""; S.tagTo = "";
+    S.recentTags = await invoke("recent_tags").catch(() => S.recentTags);
+    // The other views read already: read again (the catalog was told of every file written)
+    for (const v of ["stills", "exports"]) if (DATA[v] && v !== S.view) loadView(v).catch(() => {});
     await refresh();
   } catch (e) { showError(String(e)); }
 }
@@ -1061,6 +1121,7 @@ async function openSettings() {
   S.locEdit = st.locations.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies,
     st: (l.reachable ? "Reachable" : "Not reachable here") + (l.pointer ? " · " + ptr + " in it" : l.reachable ? " · its " + ptr + " is written on Save" : "") }));
   S.neverRename = !!st.never_rename;
+  S.finderTags = st.finder_tags || "own";
   S.localEdit = st.local.map((l) => ({ name: l.name, at: l.at, path: l.path, bytes: l.bytes, files: l.files, reachable: l.reachable }));
   S.hostsText = hostsToText(st.hosts);
   S.sheet = "settings";
@@ -1146,6 +1207,11 @@ function renderSheet() {
     h += '<div class="btns"><button type="button" class="btn sm" data-a="localadd">Add a local copy…</button></div>' +
       '<div class="lab">Finding moved clips</div>' +
       '<label class="switch"><input type="checkbox" id="neverrename" data-a="neverrename"' + (S.neverRename ? " checked" : "") + '><span class="wrap">I never rename my footage: a clip that moved is found by its name too, not by its size and recording time alone. A fingerprint, where a link has one, decides either way.</span></label>' +
+      (st.finder_tags != null ? '<div class="lab">Finder tags</div>' +
+        '<div class="field"><label class="sub" for="findertags">Tags shown in Finder on</label><select id="findertags" data-a="findertags">' +
+        [["own", "The project’s own files: moments, exports, photos, clip previews"], ["all", "Those and the originals (an attribute on the footage, never its video)"], ["off", "None: the library’s own only"]]
+          .map((o) => '<option value="' + o[0] + '"' + (S.finderTags === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select></div>' +
+        '<p class="sub wrap">The library keeps tags with each item (a clip’s own file, a link, a photo’s XMP); Finder’s follow them, and a Finder tag set by hand stays. Spotlight finds them on this Mac’s disks; on the NAS Finder shows them, Spotlight doesn’t look.</p>' : "") +
       '<div class="lab">Caches on this computer, for all projects</div><div class="kv">';
     for (const c of st.caches) h += '<span style="min-width:0"><span class="nm">' + esc(c.key) + '</span><span class="sub">' + esc(c.what) + '</span></span><span class="num">' + c.files + " files · " + sizeText(c.bytes) + '</span><button type="button" class="btn sm" data-a="clearcache" data-v="' + esc(c.key) + '"' + (c.files ? "" : " disabled") + '>Clear</button>';
     h += '</div></div><footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Close</button><button type="button" class="btn pri" data-a="savelocal">Save</button></footer>';
@@ -2290,6 +2356,9 @@ document.addEventListener("click", async (e) => {
     }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
     case "untag": return setTags([], [v]);
+    case "retag": return setTags([v], []);
+    case "rate": return setRating(+v);
+    case "renametag": return renameTag();
     case "findmoved": return findMoved();
     case "applymoved": return applyMoved();
     case "pickmoved": { const [i, j] = String(v).split(":").map(Number); const f = S.found && S.found[i]; if (f && f.candidates[j]) { f.found = f.candidates[j]; f.by = "chosen"; renderSide(); } return; }
@@ -2304,7 +2373,7 @@ document.addEventListener("click", async (e) => {
     case "savelocs": return saveLocations();
     case "localadd": { const d = await call("choose_local").catch(() => null); if (d) { S.localEdit.push({ name: "On this computer", at: "", path: d }); renderSheet(); } return; }
     case "localrm": S.localEdit.splice(+v, 1); renderSheet(); return;
-    case "savelocal": try { const nr = $("neverrename"); await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })), neverRename: nr ? nr.checked : S.neverRename }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
+    case "savelocal": try { const nr = $("neverrename"); await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })), neverRename: nr ? nr.checked : S.neverRename, finderTags: S.finderTags }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
     case "clearcache": try { await invoke("clear_cache", { key: v }); toast("Cleared"); await openSettings(); } catch (er) { showError(String(er)); } return;
     case "exportjson": {
       S.menu = false; renderTop();
@@ -2340,6 +2409,8 @@ document.addEventListener("input", (e) => {
   else if (t.id === "hosts") { S.hostsText = t.value; }
   else if (t.id === "takeplace") { S.takePlace = t.value; }
   else if (t.id === "tagdraft") { S.tagDraft = t.value; }
+  else if (t.id === "tagfrom") { S.tagFrom = t.value; }
+  else if (t.id === "tagto") { S.tagTo = t.value; }
   else if (t.id === "geohand") { S.geoHand = t.value; }
   else if (t.id === "geosite") { S.geoSite = t.value; }
   else if (t.id === "geomax") { S.geoMax = +t.value; geoSlid(); }
@@ -2349,6 +2420,7 @@ document.addEventListener("change", (e) => {
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
   if (a === "neverrename") { S.neverRename = el.checked; return; }
+  if (a === "findertags") { S.finderTags = el.value; return; }
   // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
   if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
   if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
@@ -2367,6 +2439,7 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if ((e.target.id === "tagfrom" || e.target.id === "tagto") && e.key === "Enter") { e.preventDefault(); renameTag(); return; }
   if (e.target.id === "tagdraft" && e.key === "Enter") { e.preventDefault(); const t = S.tagDraft.trim(); if (t) { S.tagDraft = ""; setTags([t], []); } return; }
   if (e.target.id === "q") {
     const list = suggestions(), max = list.length;
@@ -2405,6 +2478,7 @@ try {
 
 (async () => {
   try { await invoke("engine"); } catch (e) { $("engine").textContent = String(e); $("engine").hidden = false; }
+  S.recentTags = await invoke("recent_tags").catch(() => []);
   S.recent = await invoke("recent").catch(() => []);
   await poll();
   if (!S.root) renderAll();

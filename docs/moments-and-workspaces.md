@@ -502,21 +502,40 @@ right within the trip, on the wrong day.
 
 ### Rating and tags
 
+Built 2026-11-11 (step 8), one feature with the Library's tags ([library-management.md §7](library-management.md#7-tags)).
+An earlier plan here (a green *Favorite* Finder tag as the only tag, read from the attributes) was dropped: Finder's
+attributes are lost by Explorer, FAT/exFAT and many copies, and the Library had its own tags by then.
+
 - **A moment that exists is liked; one that isn't, isn't.** Deleting the file (in Finder, or *Remove* in the
-  player, which moves it to the Trash) is the reject.
-- **Finder tags** on a moment are kept in the file's attributes and never change the file. The player reads
-  them (`xattr`), and the editors get them as keywords.
-- **The favorite is a Finder tag named *Favorite*, in green.** `K` sets it and takes it off. A tag is a name
-  plus a color, and Finder shows the color as the dot. The player counts as a favorite a tag with that name
-  (in any color, in any case) or Finder's own *Green* tag, so tagging green by hand in Finder works too.
-  *Favorite* is English because tags go to the editors as keywords, and the other names are the user's. The
-  name is a setting: `favorite_tag=Favorite` in `workspace.conf` (Right click → Project → Favorite tag, written
-  as the dlogm plugin writes its settings). It's read when deciding, so renaming it later doesn't need the files
-  retagged, provided the old tag is renamed in Finder too.
-- **Windows**: Explorer has no tags for an MP4, but its star rating (Properties → Details) is written *into*
-  the file, as an `Xtra` atom. For our own small files that's fine, unlike the originals. 4 or 5 stars is a
-  favorite (`favorite_stars=4`), and `K` sets 5. The player reads the atom with the same box reader. Writing it
-  goes through the Windows property system (`System.Rating`), so that Explorer reads it back as its own **(to try)**.
+  player, which moves it to the Trash) is the reject. Tags and stars say more.
+- **Where they're kept**, the same for both apps (`mpv/scripts/workspace/tags.lua` and `library/src/tags.rs`):
+  - a clip's: its own file, `<clip>.afp.json` beside it, `"tags": ["Turtle", "reef"]` and `"rating": 3` (1–5,
+    absent for none). A file holding only tags is kept; with none left (and nothing else), removed as before. A
+    clip preview playing tags its clip: the clip is what it shows;
+  - a moment's or an export's: its link, the same two keys (`afp-cut --set-key`, the file's other keys kept). A
+    moment updated with `k` keeps them;
+  - a photo's: its XMP keywords (the Library writes them; no stars yet).
+  So they move with the files, and every computer reads the same. A tag is a name compared without case; the first
+  spelling stays. "Deleted in Photos" is the app's own, like any other.
+- **`K`** asks for a tag (mpv's console, `mp.input`): a name puts it on, or takes it off when it's there; `+name` on,
+  `-name` off, commas for several, `***` or `*3` stars (`*0`: none). Tab completes from the tags used last on this
+  computer (both apps write them: `<data>/ActionFootage/tags-recent.json`). `K` was free: mpv binds nothing to it and
+  no plugin does; in a Cyrillic layout `Л` passes on as `K` (any-layout).
+- **The Project tab** shows them under *This clip* / *This moment*: five stars (the same star again: none), its tags
+  as chips (a click takes one off), the tags used last that it hasn't (a click puts one on) and *Tag…* (`K`).
+  Changes the Library makes reach the panel at once (the Library's notice, `heard`).
+- **Finder tags** (`com.apple.metadata:_kMDItemUserTags`, written beside, never instead): Finder shows them, Spotlight
+  finds them on a local disk (it doesn't index a network volume; Finder still shows them there). The library's own
+  are the truth and Finder's follow: what's taken off goes, what's put on comes, and a tag set by hand in Finder
+  stays (with its colour). Which files, this computer's choice (Library → Project settings → On this Mac,
+  `finder_tags` in its `projects/<id>.json`):
+  - **own** (default): the project's own files — moments, exports, photos, and a clip's *preview*, which carries its
+    clip's tags. So `_Clips/` in Finder is the trip, tagged, and the originals stay as the camera wrote them;
+  - **all**: the originals too. An attribute is metadata, not the video (the bytes and the modification time stay; the
+    change time moves), but it's written on the footage, on the NAS through SMB's streams;
+  - **off**.
+- **Windows and Linux**: the library's own only (the sidecar, the links). Explorer's stars inside an MP4 (`Xtra`)
+  aren't written: that's the file's bytes.
 
 ### Editing
 
@@ -635,7 +654,7 @@ All of them:
 | `k` | **save the A-B part as a moment** (asks for its name). On a moment being played: update it | free in mpv and the plugins |
 | `M` | **a mark here**; on a mark (within half a second): remove it. Final Cut's key for a marker | free (`m` is mute) |
 | `X` | **this clip isn't interesting**: its preview in `_Clips/` goes to the Trash; again: made again | free |
-| `K` | **favorite**: the *Favorite* tag on the moment playing, else on the clip's preview (5 stars on Windows); again: off | free |
+| `K` | **tags**: a tag typed goes on what plays (the clip, or the moment or export playing), one it has comes off; `***` stars it ([Rating and tags](#rating-and-tags)) | free in mpv (no default binding) and the plugins; `Л` in a Cyrillic layout |
 | `Shift+E` | export, asking for a name | as now |
 
 ### The menu
@@ -794,7 +813,8 @@ first".
      - `X` trashes one, and *Make* leaves it deleted;
      - `X` again and *Make again for removed clips* bring it back;
      - a preview opened plays its 30.4 s clip in its look.
-8. **Tags**: Finder tags and Explorer's stars read; `K`.
+8. **Tags**: `K` and the Project tab's tags and stars, kept as the Library keeps them; Finder tags written beside
+   ([Rating and tags](#rating-and-tags)). Explorer's stars: not yet.
 9. **Separate project folders**: `Sources.txt`, the list, the longest match, read-only folders, *Footage
    moved…*, *Keep this project separately*, the volume id.
 10. **Video previews** of moments, in place of stills.

@@ -32,6 +32,7 @@ local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
 local exportkind = require 'exportkind'
+local tagchips = require 'tagchips'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -629,6 +630,12 @@ local function project_part(u, x, w, y)
     elseif ws.editing then
         y = u:caption(x, w, y, "Editing the moment " .. ws.editing.name .. ": move its start or end below, then "
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
+    end
+
+    -- Its tags and stars (the clip's, the moment's or the export's: tagchips.lua)
+    if ws.tags then
+        y = tagchips.draw(u, ui, x, w, y + 4 * s, ws.tags, keys["script-binding workspace/tags"],
+                          function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
     end
 
     local pos = mp.get_property_number("time-pos", 0)

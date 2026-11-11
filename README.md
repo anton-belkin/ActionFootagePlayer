@@ -311,6 +311,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
 | `X` | This clip isn't interesting: its preview in `_Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `K` | Tag what plays (the clip, or the moment or export playing): type a tag to put it on, or one it has to take it off (`-name` off, `+name` on, commas for several; `***` or `*3` for stars, `*0` for none; Tab completes the tags used last). Kept with it, as the Library keeps them: a clip's in its own file, a moment's in its link; Finder shows them too. The Project tab has the same: stars, its tags, the recent ones a click away | `workspace/tags` |
 | `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |

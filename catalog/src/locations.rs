@@ -161,6 +161,20 @@ pub fn never_rename(project: &Path) -> bool {
         .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
 }
 
+/// Which files get Finder tags (Project settings, this computer's choices, kept in its own file; finder.rs): "own"
+/// (the default: moments, clip previews, exports, photos), "all" (the originals too), "off"
+pub fn finder_tags(project: &Path) -> String {
+    let doc = read_json(&project.join(PROJECT_FILE)).unwrap_or(Value::Null);
+    let v = doc.get("id").and_then(Value::as_str).and_then(local_file).and_then(|f| read_json(&f))
+        .and_then(|l| l.get("finder_tags").and_then(Value::as_str).map(str::to_string));
+    match v.as_deref() { Some("all") => "all".into(), Some("off") => "off".into(), _ => "own".into() }
+}
+
+/// The tags used last on this computer, the player's and the Library's (<data>/ActionFootage/tags-recent.json)
+pub fn recent_tags_file() -> Option<PathBuf> {
+    local_file("x").and_then(|f| f.parent().and_then(Path::parent).map(|d| d.join("tags-recent.json")))
+}
+
 fn from_json(list: Option<&Value>, project: &Path, hosts: Option<&Value>, mounts: &[(String, PathBuf)], local: bool) -> Vec<Location> {
     list.and_then(Value::as_array).into_iter().flatten().filter(|l| l.is_object()).map(|l| {
         let path = l.get("path").and_then(Value::as_str).unwrap_or("").to_string();

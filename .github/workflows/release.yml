@@ -79,6 +79,7 @@ jobs:
           luajit tests/sidepanel_test.lua
           luajit tests/camera_subs_test.lua
           luajit tests/agent_test.lua
+          luajit tests/tags_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
 
       - name: Build

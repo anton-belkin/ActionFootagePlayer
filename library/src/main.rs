@@ -840,6 +840,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
                    "never_rename": locations::never_rename(&root),
+                   "finder_tags": if cfg!(target_os = "macos") { json!(locations::finder_tags(&root)) } else { Value::Null },
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
@@ -889,7 +890,7 @@ fn choose_local(shared: State<Shared>) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: Option<bool>) -> Result<(), String> {
+async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: Option<bool>, finder_tags: Option<String>) -> Result<(), String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -903,9 +904,12 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
     // "I never rename my footage": kept, unless this save says otherwise
     let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
-    if clean.is_empty() && !never_rename { let _ = std::fs::remove_file(&file); return Ok(()); }
+    // Which files get Finder tags: kept, unless this save says; "own" is the default, not written
+    let finder_tags = finder_tags.filter(|f| ["own", "all", "off"].contains(&f.as_str())).unwrap_or_else(|| locations::finder_tags(&root));
+    if clean.is_empty() && !never_rename && finder_tags == "own" { let _ = std::fs::remove_file(&file); return Ok(()); }
     let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
     if never_rename { doc["never_rename"] = json!(true); }
+    if finder_tags != "own" { doc["finder_tags"] = json!(finder_tags); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }).await.map_err(|e| e.to_string())?
 }
@@ -1208,10 +1212,43 @@ async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
     let meta = meta_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
-                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
+    tauri::async_runtime::spawn_blocking(move || {
+        tags::remember(&add);
+        tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t))
+    }).await.map_err(|e| e.to_string())
+}
+
+// 1–5 stars on the selection (None: none), kept where its tags are (photos: not yet)
+#[tauri::command]
+async fn set_rating(shared: State<'_, Shared>, items: Vec<Value>, rating: Option<u8>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::apply(&root, &items, &tags::Op::Rating(rating), &|f, l| write_link(tool.as_ref(), f, l),
+                                                             &|f, t| write_photo_tags(meta.as_ref(), f, t), &|f, l, r| afp_catalog::finder::set(f, l, r)))
         .await.map_err(|e| e.to_string())
 }
+
+// A tag renamed everywhere in the project (every view's items that have it); to a name in use: merged into it
+#[tauri::command]
+async fn rename_tag(shared: State<'_, Shared>, from: String, to: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let (from, to) = (from.trim().to_string(), to.split_whitespace().collect::<Vec<_>>().join(" "));
+    if from.is_empty() || to.is_empty() { return Err("A tag and its new name".into()); }
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = tags::with_tag(&root, &from);
+        let problems = tags::apply(&root, &items, &tags::Op::Rename { from: &from, to: &to }, &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &|f, l, r| afp_catalog::finder::set(f, l, r));
+        tags::remember(std::slice::from_ref(&to));
+        json!({ "count": items.len(), "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tags used last on this computer (the player's K writes them too)
+#[tauri::command]
+fn recent_tags() -> Vec<String> { tags::recent() }
 
 // ---------- Stabilize optically: the lens ----------
 
@@ -2004,7 +2041,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, rename_tag, recent_tags, lens_types, set_lens_type, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
         .on_window_event(move |window, event| {

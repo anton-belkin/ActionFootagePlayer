@@ -454,6 +454,7 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
                                     "source": own.get("source").cloned().unwrap_or(Value::Null),
                                     "location": own.get("location").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                if let Some(r) = crate::tags::rating_of(&own["rating"]) { it["rating"] = json!(r); }
             }
         }
     }
@@ -517,6 +518,7 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 let stem = if lower.ends_with(LINK_EXT) { &name[..name.len() - LINK_EXT.len()] } else { name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name) };
                 it["name"] = json!(stem);
                 it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
                 it["gyroflow"] = json!(has_gyroflow(&path));
                 it["renders"] = renders_of(root, rel, &path, &l);
                 let (original, moved_to) = original_of(&l);
@@ -547,6 +549,7 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
             _ => {
                 it["kind"] = json!("export");
                 it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
                 it["link"] = l;
             }
         }

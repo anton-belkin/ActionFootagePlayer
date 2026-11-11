@@ -269,5 +269,30 @@ mp.set_property_native("user-data/dji_telemetry", { available = false, model = "
 expect("no subtitles: none in Telemetry", find("subtitles"), nil)
 messages.tab("output")
 
+-- Tags (the workspace plugin's tags.lua): the stars, the clip's tags (a click takes one off), the recent ones it hasn't
+-- (a click puts one on), Tag… (K); a moment's are the moment's
+mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", project = "/footage",
+    relative = "DJI_0001.MP4", moments = {},
+    tags = { kind = "clip", list = { "Turtle", "for family" }, rating = 2, recent = { "turtle", "Reef", "Dolphin" }, finder = "own" } })
+messages.tab("project")
+expect("tags: its chips", find("tag:Turtle") ~= nil and find("tag:for family") ~= nil, true)
+expect("tags: recent ones it hasn't", find("recent:Reef") ~= nil and find("recent:Dolphin") ~= nil, true)
+expect("tags: one it has isn't offered again", find("recent:turtle"), nil)
+click("tag:for family")
+expect("tags: a chip clicked takes it off", last_ran(), "script-message-to workspace tag-toggle for family")
+click("recent:Reef")
+expect("tags: a recent one clicked puts it on", last_ran(), "script-message-to workspace tag-toggle Reef")
+click("star:4")
+expect("tags: a star clicked rates", last_ran(), "script-message-to workspace tag-rate 4")
+click("tag-ask")
+expect("tags: Tag… asks", last_ran(), "script-message-to workspace tag-ask")
+mp.set_property_native("user-data/workspace", { path = "/footage/_Moments/Turtle.afplink.mp4", clip = "/footage/DJI_0001.MP4", project = "/footage",
+    moment = { file = "/footage/_Moments/Turtle.afplink.mp4", name = "Turtle", ["in"] = 1, out = 4 }, offset = 1, moments = {},
+    tags = { kind = "moment", list = {}, recent = {}, finder = "off" } })
+expect("tags: a moment's, none yet", find("tag:Turtle") == nil and find("tag-ask") ~= nil and find("star:1") ~= nil, true)
+mp.set_property_native("user-data/workspace", { path = "https://x/y.mp4", clip = "https://x/y.mp4" })
+expect("tags: none for a stream", find("tag-ask"), nil)
+messages.tab("output")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
