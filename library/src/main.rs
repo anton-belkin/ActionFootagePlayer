@@ -1496,7 +1496,10 @@ async fn save_project_lens(probes: State<'_, index::SharedProbes>, path: String)
         let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
             .ok_or("This ActionFootagePlayer can't save a lens: update it")?;
         if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
-        let again = probes.lock().unwrap().lens_saved_for(v["camera"].as_str().unwrap_or(""), &before);
+        // Saved for any mode: the camera's clips of that size have it at once (their answers asked again behind)
+        let whole = (v["type"].as_str() == Some("any")).then(|| (v["size"].as_str().unwrap_or("").to_string(),
+            format!("{}, from your list: {}", v["type_label"].as_str().unwrap_or("Any mode"), v["lens"].as_str().unwrap_or("").replace('_', " "))));
+        let again = probes.lock().unwrap().lens_saved_for(v["camera"].as_str().unwrap_or(""), &before, whole.as_ref().map(|(s, l)| (s.as_str(), l.as_str())));
         v["again"] = json!(again);
         Ok(v)
     }).await.map_err(|e| e.to_string())?

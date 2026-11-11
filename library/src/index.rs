@@ -781,17 +781,32 @@ impl Probes {
         self.want(paths);
     }
     /// A lens was saved to the user's list as the default for a camera (`before`: the list's stamp until then): that
-    /// camera's clips worked out again, the others' answers kept with the list as it is now (their lens is as it was).
-    /// How many are asked again
-    pub fn lens_saved_for(&mut self, camera: &str, before: &str) -> usize {
+    /// camera's clips worked out again, first in the queue, the others' answers kept with the list as it is now (their
+    /// lens is as it was). `whole`: saved for any mode of that camera at that size ("1920x1080"), its label: the clips
+    /// of that size with no lens yet have it at once (what the page counts on: Stabilize optically) until their answer
+    /// comes again. How many are asked again
+    pub fn lens_saved_for(&mut self, camera: &str, before: &str, whole: Option<(&str, &str)>) -> usize {
         let now = lens_list_stamp();
         let key = |c: &str| c.to_lowercase().replace(' ', "");
         let mut again = Vec::new();
+        let mut patched = Vec::new();
         for (p, e) in self.known.iter_mut() {
-            if e.3["camera"].as_str().is_some_and(|c| !c.is_empty() && key(c) == key(camera)) { again.push(p.clone()); }
+            if e.3["camera"].as_str().is_some_and(|c| !c.is_empty() && key(c) == key(camera)) {
+                again.push(p.clone());
+                let size = format!("{}x{}", e.3["width"].as_u64().unwrap_or(0), e.3["height"].as_u64().unwrap_or(0));
+                if let Some((s, label)) = whole {
+                    if size == s && e.3["mode"].is_null() && e.3["lens"].as_str() == Some("") { e.3["lens"] = json!(label); patched.push(p.clone()); }
+                }
+            }
             else if e.2 == before { e.2 = now.clone(); }
         }
+        for p in patched { self.version += 1; self.log.push((self.version, p)); }
         self.forget(&again);
+        // Asked before what was queued already: the page waits on these
+        let set: HashSet<&String> = again.iter().collect();
+        let (mut first, rest): (VecDeque<String>, VecDeque<String>) = self.queue.drain(..).partition(|p| set.contains(p));
+        first.extend(rest);
+        self.queue = first;
         again.len()
     }
     /// What's known that changed after `since`: (version now, path -> answer, how many wait)
@@ -967,7 +982,18 @@ pub(crate) mod tests {
         }
         // One known with an older list still: it stays to be asked again
         p.known.get_mut(&paths[3]).unwrap().2 = "older".into();
-        assert_eq!(p.lens_saved_for("DJI OsmoAction6", "old"), 2);
+        // Something queued before: the camera's clips go ahead of it
+        p.queue.push_back("/elsewhere/Z.MP4".into());
+        p.queued.insert("/elsewhere/Z.MP4".into());
+        p.known.get_mut(&paths[0]).unwrap().3 = json!({ "camera": "DJI OsmoAction6", "width": 3840, "height": 2160, "mode": null, "lens": "" });
+        p.known.get_mut(&paths[1]).unwrap().3 = json!({ "camera": "DJI Osmo Action 6", "width": 1920, "height": 1080, "mode": null, "lens": "" });
+        let v0 = p.version;
+        assert_eq!(p.lens_saved_for("DJI OsmoAction6", "old", Some(("3840x2160", "Any mode, from your list: X"))), 2);
+        // The one of that size has it at once (and the page hears of it); the other size waits for its answer
+        assert_eq!(p.known[&paths[0]].3["lens"], json!("Any mode, from your list: X"));
+        assert_eq!(p.known[&paths[1]].3["lens"], json!(""));
+        assert!(p.since(v0)["items"].get(&paths[0]).is_some());
+        assert_eq!(p.queue.back().map(String::as_str), Some("/elsewhere/Z.MP4"));
         let now = lens_list_stamp();
         let queued: HashSet<&String> = p.queue.iter().collect();
         assert!(queued.contains(&paths[0]) && queued.contains(&paths[1]) && !queued.contains(&paths[2]));
