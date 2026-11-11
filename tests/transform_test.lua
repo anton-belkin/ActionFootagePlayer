@@ -88,7 +88,15 @@ local lensy = {}
 for k, v in pairs(whole) do lensy[k] = v end
 lensy.lens = "as-recorded"
 expect("status: the lens changed", t.status(whole, lensy, false), "changed")
-expect("status: the lens over a project is for viewing", t.status(whole, lensy, true), "saved")
+-- Over a Gyroflow project the lens and its projection are the player's too, saved with the clip (#196)
+expect("status: the lens over a project is a change", t.status(whole, lensy, true), "changed")
+lensy.lens, lensy.projection = "corrected", "stereographic"
+expect("status: a projection over a project is a change", t.status(whole, lensy, true), "changed")
+lensy.projection = "project"
+expect("status: the project's own projection is a change from linear", t.status(whole, lensy, true), "changed")
+b = t.complete({ view = "normal", projection = "project", lens = "as-recorded" }, session)
+expect("the project's own projection is kept", b.projection, "project")
+expect("…as is the lens", b.lens, "as-recorded")
 
 -- pick, input_of
 expect("pick: none", t.pick({ curve = "dlogm" }), nil)

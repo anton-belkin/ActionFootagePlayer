@@ -249,7 +249,7 @@ if bar_hit then
     mp.set_property_native("mouse-pos", { x = after.x0 + 3, y = -500, hover = true })
     bindings.click.fn({ event = "up" })
     expect("dragged up past the top: back at the top", find("export"), nil)
-    expect("…the top part showing", find("collapse") ~= nil and find("look:maker") ~= nil, true)
+    expect("…the top part showing", find("collapse") ~= nil and find("look") ~= nil, true)
 end
 mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
 
@@ -267,6 +267,109 @@ expect("…and in Telemetry, with no telemetry", find("subtitles") ~= nil, true)
 mp.set_property_native("user-data/dji_telemetry", { available = false, model = "", visible = true,
                                                     subtitles = { count = 0, camera = false, shown = false } })
 expect("no subtitles: none in Telemetry", find("subtitles"), nil)
+messages.tab("output")
+
+-- Drop-downs (#196): a single choice is a field with the value chosen; a click opens its list over the panel, a pick
+-- runs it and closes the list; Esc, a click outside or the field again close it; Up, Down and Enter work in it
+local stab = { available = true, kind = "default", motion = true, view = "normal", level = "medium", horizon_lock = "yes",
+               lens_mode = "corrected", projection = "linear", filter = "stabilized", edges = "sphere", aspect = "original",
+               orientation = "as-is", source_aspect = "4:3", frame_aspect = "4:3", exporting = false, last_export = "" }
+mp.set_property_native("user-data/gyroflow", stab)
+messages.tab("transform")
+expect("level: one field, no buttons", find("level") ~= nil and find("level:2") == nil, true)
+expect("closed: no rows", find("level:strong"), nil)
+click("level")
+expect("open: its rows", find("level:weak") ~= nil and find("level:medium") ~= nil and find("level:strong") ~= nil, true)
+expect("Esc bound while it's open", bindings["popover-esc"] ~= nil, true)
+expect("Up, Down and Enter too", bindings["popover-up"] ~= nil and bindings["popover-down"] ~= nil and bindings["popover-enter"] ~= nil, true)
+n = #ran
+click("level:strong")
+expect("a pick runs its command", last_ran(), "script-message-to gyroflow level strong")
+expect("…one", #ran, n + 1)
+expect("…and closes the list", find("level:strong"), nil)
+expect("…and lets the keys go", bindings["popover-down"] == nil and bindings["popover-esc"] == nil, true)
+-- A click outside: closed, nothing run
+click("level")
+n = #ran
+click_at(100, 300)
+expect("a click outside closes it", find("level:weak"), nil)
+expect("…and runs nothing", #ran, n)
+-- The field again
+click("level")
+click("level")
+expect("the field again closes it", find("level:weak"), nil)
+-- Esc
+click("level")
+bindings["popover-esc"].fn()
+expect("Esc closes it", find("level:weak"), nil)
+-- Another drop-down's field while one is open: the click only closes the open one
+click("level")
+n = #ran
+click("view")
+expect("one list at a time", find("view:wide") == nil and find("level:weak") == nil, true)
+expect("…nothing run", #ran, n)
+-- The keys: from the one chosen (medium), down and Enter
+click("level")
+bindings["popover-down"].fn()
+bindings["popover-enter"].fn()
+expect("Down, Enter: the next one", last_ran(), "script-message-to gyroflow level strong")
+expect("Enter closes it", find("level:weak") == nil and bindings["popover-enter"] == nil, true)
+click("level")
+bindings["popover-up"].fn()
+bindings["popover-up"].fn()
+bindings["popover-up"].fn()
+bindings["popover-enter"].fn()
+expect("Up past the top stays on the first", last_ran(), "script-message-to gyroflow level weak")
+-- Enter on the one chosen picks it again (no harm), and closes
+click("level")
+bindings["popover-kp-enter"].fn()
+expect("Enter alone: the one chosen", last_ran(), "script-message-to gyroflow level medium")
+-- Greyed rows are skipped by the keys and can't be clicked
+mp.set_property_native("user-data/view360", { available = true, active = true, stamped = true, heading = "camera", projection = "auto",
+                                              modes = { travel = { available = false, why = "no GPS" }, north = { available = false } },
+                                              recording = { can = true, parts = 0, spans = {} } })
+messages.tab("view360")
+click("view360-heading")
+expect("a greyed row has no place", find("view360-heading:travel"), nil)
+expect("…the others have", find("view360-heading:world") ~= nil, true)
+bindings["popover-up"].fn()
+bindings["popover-enter"].fn()
+expect("Up from the first one it can be: stays", last_ran(), "script-message-to view360 view360-heading camera")
+click("view360-heading")
+bindings["popover-down"].fn()
+bindings["popover-enter"].fn()
+expect("Down skips north (greyed)", last_ran(), "script-message-to view360 view360-heading world")
+-- A switch stays a switch
+mp.set_property_native("user-data/view360", { available = false })
+messages.tab("transform")
+expect("on/off stays a switch", find("still") ~= nil and find("still:1") == nil, true)
+
+-- The output's lens for a clip with its own Gyroflow project (#196): a drop-down there too, the project's own first,
+-- the projections and as recorded; a pick goes to the gyroflow plugin as for any clip
+local proj = {}
+for k, v in pairs(stab) do proj[k] = v end
+proj.kind, proj.project, proj.horizon_lock, proj.projection = "project", "/footage/DJI_0001.gyroflow", "project", "project"
+proj.project_info = { horizon = 0, projection = "Equidistant" }
+mp.set_property_native("user-data/gyroflow", proj)
+messages.tab("transform")
+expect("project: the lens can be picked", find("lens") ~= nil, true)
+click("lens")
+expect("project: its own listed", find("lens:project") ~= nil, true)
+expect("…a projection", find("lens:stereographic") ~= nil and find("lens:linear") ~= nil, true)
+expect("…and as recorded", find("lens:as-recorded") ~= nil, true)
+local ids = {}
+for _, h in ipairs(panel.hits) do if h.popover and h.id:find("^lens:") then ids[#ids + 1] = h.id end end
+expect("project's own first", ids[1], "lens:project")
+click("lens:stereographic")
+expect("project: a projection picked", last_ran(), "script-message-to gyroflow lens stereographic")
+click("lens")
+click("lens:as-recorded")
+expect("project: as recorded", last_ran(), "script-message-to gyroflow lens as-recorded")
+-- Without a project: no "project's own" row
+mp.set_property_native("user-data/gyroflow", stab)
+click("lens")
+expect("no project: no project's own", find("lens:project"), nil)
+bindings["popover-esc"].fn()
 messages.tab("output")
 
 print(("%d checks, %d failed"):format(checks, failures))

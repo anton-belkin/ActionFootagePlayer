@@ -62,7 +62,7 @@ jobs:
       # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
       # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
       # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
-      # for mpv; LuaJIT is one of mpv's dependencies
+      # for mpv, its drop-downs, and the gyroflow plugin's lens over a Gyroflow project; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
@@ -77,6 +77,7 @@ jobs:
           luajit tests/timeline_test.lua
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
+          luajit tests/gyroflow_lens_test.lua
           luajit tests/camera_subs_test.lua
           luajit tests/agent_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
