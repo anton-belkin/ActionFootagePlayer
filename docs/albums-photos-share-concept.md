@@ -3,13 +3,34 @@
 **Status:** a concept, not built. It came out of Anton's discussion of the comparative study
 (`reports/library-comparison-2026-11-11.md`) on 2026-11-11.
 
-**Related issues:**
-- Albums: #215
-- Photos as objects: #216
-- Share: #214
-- Telemetry search: #213
-- The card check: #211
-- The tag decisions: the comment on PR #197
+## The issues
+
+**The work this concept defines** (all open, `roadmap: to decide`):
+
+| Issue | What | Concept section |
+|---|---|---|
+| #215 | Albums: the Library as Originals + Albums (your albums, timeline, map, smart albums); renders by hash, local and pinned | [Albums](#albums), [Renders](#renders) |
+| #216 | Photos as objects: a frame and a crop, marked while watching, rendered when shared | [Photos as objects](#photos-as-objects) |
+| #214 | Share: choose what, then where; the render in the background; export becomes one destination | [Share replaces export](#share-replaces-export) |
+| #213 | Search by telemetry: start, min, max, mean per clip, as filters and smart albums | [Finding](#finding) |
+| #211 | Is this card safe to format? A read-only check that a card is in the library | [The rules that stay](#the-rules-that-stay) |
+| #217 | Photos as originals: an intention, in stages; not now | [Photos as originals](#photos-as-originals) |
+
+**Work it builds on or touches:**
+
+| Issue / PR | What | Relation |
+|---|---|---|
+| PR #197 (open) | Tags and culling: Accept/Reject, stars, Finder sync | Its decisions are in its comments; [Culling and tags](#culling-and-tags) |
+| #47 (open, tier 2) | Every export remembered, to be made again after an update | Covered by render recipes; Share ([#214](#share-replaces-export)) |
+| #57 (open, tier 3) | Hand-off to the editing apps | Deferred, possibly a paid add-on ([Not in this concept](#not-in-this-concept)) |
+| #95 (closed) | YouTube export (PQ in MKV) | A future Share destination |
+| #188 (merged) | Where clips were recorded, from Apple Photos | Feeds the map |
+| #191 (merged) | Fast thumbnails | Why clip previews are no longer needed |
+| #73 (merged) | Water's colour fringes (`Ctrl+a`) | Applied to photos later (#217) |
+| #112 | Crop mode | The crop key for photos (#216) |
+| #122 (closed) | Live Photos and Motion Photos | The `Live` and `Motion` render profiles |
+
+The comparative study it came from is a local report, `reports/library-comparison-2026-11-11.md` (not in the repo).
 
 It changes the Library's views and adds one kind of object, the photo. The rules of the files stay as they are.
 
