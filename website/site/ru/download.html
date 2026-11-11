@@ -55,6 +55,7 @@
           <li><a href="organizing.html">Организация</a></li>
           <li><a href="photos.html">Фото</a></li>
           <li><a href="360.html">360-видео</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
           <li><a href="features.html" class="nm-all">Все функции</a></li>
         </ul>
       </details>
@@ -78,6 +79,7 @@
         <li><a href="organizing.html">Организация</a></li>
         <li><a href="photos.html">Фото</a></li>
         <li><a href="360.html">360-видео</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
         <li><a href="features.html">Все функции</a></li>
         <li class="sm-dl"><a href="download.html" aria-current="page">Скачать</a></li>
       </ul>
@@ -389,6 +391,49 @@
 
       </div>
       <p class="note">Каждый плагин есть и в отдельном zip — среди <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">файлов выпуска</a>. На Mac <a class="text-link" data-asset="source" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">исходный код с готовой сборкой</a> <span class="size" data-fill="size"></span> устанавливается через <code>./install.sh --apps</code> без Rust.</p>
+    </div>
+  </section>
+
+  <section class="section band tight-top" id="nas">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Видео лежит на NAS?</p>
+        <h2>NAS Helper</h2>
+        <p class="lede">Docker-контейнер для достаточно мощного NAS на x86-64 (графика Intel или AMD), рядом с вашими проектами. Он позволяет нескольким людям работать в одной библиотеке вместе: каждый видит изменения других через секунду. Он отдаёт каждый клип и момент стабилизированными и в HDR, как их показывает плеер, — в браузер, на телефон или телевизор. А если включить, кладёт ваши моменты, клипы или и то и другое в Jellyfin, Emby или Kodi. Для тех, кто на «ты» с Docker: каждая настройка описана.</p>
+      </div>
+      <div class="platforms">
+
+      <article class="platform" id="nas-helper">
+        <div class="platform-head">
+          <h3>Linux, Docker</h3>
+        </div>
+        <p class="platform-req">NAS на x86-64 с графикой, кодирующей HEVC (Intel или AMD, VA-API), Docker. Проверено на UGREEN DXP с Intel N100</p>
+        <a class="btn dl-btn" data-asset="nas-helper" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Скачать<span class="vh"> NAS Helper</span> <small data-fill="size">.tar.gz</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="nas-helper-steps">Как установить</button>
+        <div class="install-pop" id="nas-helper-steps" popover>
+          <div class="pop-head">
+            <h4>Установка NAS Helper</h4>
+            <button type="button" class="pop-close" popovertarget="nas-helper-steps" popovertargetaction="hide" aria-label="Закрыть">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Скопируйте файл на NAS и загрузите его по SSH: <code>docker load -i ActionFootageNASHelper-*-linux-x86_64.tar.gz</code>.</li>
+            <li>Возьмите пример compose-файла и поменяйте в нём папки на папки NAS: каждый проект дважды (на запись — для совместной работы, только на чтение — для стрима), сетевые папки с его видео и две папки для самого помощника.</li>
+            <li>Запустите: <code>docker compose up -d</code> или проектом в Docker-приложении NAS. В логе видно, что он нашёл и что запустил; <code>http://&lt;nas&gt;:8099/settings</code> показывает каждую настройку и что она делает.</li>
+          </ol>
+          <p class="note"><a class="text-link" data-asset="nas-compose" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Пример compose-файла</a> · <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">Все настройки подробно (по-английски)</a></p>
+          <p class="platform-note">Альфа: пока работает на одном NAS. Ссылки для Jellyfin выключены, пока вы их не включите.</p>
+          <dl class="file-meta">
+            <dt>Файл</dt><dd><code data-fill="name">ActionFootageNASHelper-&lt;version&gt;-linux-x86_64.tar.gz</code></dd>
+            <dt>Версия</dt><dd data-release="version">последняя</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">в SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      </div>
     </div>
   </section>
 

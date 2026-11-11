@@ -56,6 +56,7 @@
           <li><a href="organizing.html">Organizing</a></li>
           <li><a href="photos.html">Photos</a></li>
           <li><a href="360.html">360 video</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
           <li><a href="features.html" class="nm-all" aria-current="page">All features</a></li>
         </ul>
       </details>
@@ -79,6 +80,7 @@
         <li><a href="organizing.html">Organizing</a></li>
         <li><a href="photos.html">Photos</a></li>
         <li><a href="360.html">360 video</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
         <li><a href="features.html" aria-current="page">All features</a></li>
         <li class="sm-dl"><a href="download.html">Download</a></li>
       </ul>
@@ -145,6 +147,7 @@
             </ol>
           </li>
           <li><a href="#v360">360 video</a></li>
+          <li><a href="#nas">NAS Helper</a></li>
           <li><a href="#telemetry">Telemetry</a></li>
           <li><a href="#highlights">Highlights &amp; parts</a></li>
           <li><a href="#moments">Moments, marks &amp; projects</a></li>
@@ -570,6 +573,38 @@
           </div>
           <div class="btns">
             <a class="btn" href="360.html">360 video</a>
+          </div>
+        </section>
+
+        <section class="group" id="nas">
+          <h2>NAS Helper</h2>
+          <p class="group-lede">A Docker container on your NAS: several people working in one library together, every clip and moment streamed stabilized and in HDR, and links for Jellyfin, Emby and Kodi.</p>
+          <p class="note"><a class="text-link" href="nas.html">The NAS Helper, explained →</a></p>
+          <div class="feats">
+            <div class="feat">
+              <div><h3>Collaboration</h3><p class="feat-keys"><code>AFP_COLLABORATION</code></p></div>
+              <div class="feat-text"><p>Several people can work in one library at once: one marks moments on a laptop, another sorts the clips on a desktop, a third copies in a new trip. The NAS is told at once what changes on its own disks and writes it into the project's catalog, so everyone's player and Library shows the others' work about a second later, without anyone waiting for the share to be read again. It writes nothing but the catalog.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>The stream</h3><p class="feat-keys"><code>AFP_STREAM</code></p></div>
+              <div class="feat-text"><p>Every clip, moment and clip preview of the project becomes a video stream, the way the player shows it: stabilized with Gyroflow's engine on the NAS's graphics, D-Log M in HDR, each file with its own saved settings. It's rendered as you watch and kept for next time, and the frame never leaves the graphics chip.</p></div>
+            </div>
+            <div class="feat">
+              <div><h3>Links for media servers</h3><p class="feat-keys"><code>AFP_JELLYFIN</code> · <code>AFP_JELLYFIN_SCOPE</code></p></div>
+              <div class="feat-text"><p>If you turn it on, your moments (or your clips, or both: its <b>scope</b>) appear in Jellyfin, Emby or Kodi, sorted into trips, with their titles, dates and covers. Their apps on the TV, the phone or the tablet then play the streams as they are, without converting them again.</p>
+                <p class="feat-status">
+                  <span><span class="pill ok">Tried</span> Jellyfin</span>
+                  <span><span class="pill ok">Supported</span> Emby, Kodi, and their apps</span>
+                </p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Heavy clips</h3></div>
+              <div class="feat-text"><p>Some clips ask more than a NAS can render while you watch: 8K, high frame rates, a long dive. Render them ahead, whole, and they play from the NAS like any video file. One click on the helper's page renders a folder's clips whole, in the background, one at a time, while nobody watches. What's rendered stays in the cache.</p></div>
+            </div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="nas.html">NAS Helper</a>
           </div>
         </section>
 

@@ -55,6 +55,7 @@
           <li><a href="organizing.html">Organiser</a></li>
           <li><a href="photos.html">Photos</a></li>
           <li><a href="360.html">Vidéo 360</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
           <li><a href="features.html" class="nm-all">Toutes les fonctions</a></li>
         </ul>
       </details>
@@ -78,6 +79,7 @@
         <li><a href="organizing.html">Organiser</a></li>
         <li><a href="photos.html">Photos</a></li>
         <li><a href="360.html">Vidéo 360</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
         <li><a href="features.html">Toutes les fonctions</a></li>
         <li class="sm-dl"><a href="download.html" aria-current="page">Télécharger</a></li>
       </ul>
@@ -389,6 +391,49 @@
 
       </div>
       <p class="note">Chaque plugin existe aussi dans un zip à part, parmi <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">les fichiers de la version</a>. Sur Mac, <a class="text-link" data-asset="source" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">le code source avec les binaires précompilés</a> <span class="size" data-fill="size"></span> s’installe avec <code>./install.sh --apps</code>, sans Rust.</p>
+    </div>
+  </section>
+
+  <section class="section band tight-top" id="nas">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Vos images sur un NAS ?</p>
+        <h2>NAS Helper</h2>
+        <p class="lede">Un conteneur Docker pour un NAS x86-64 assez puissant (puce graphique Intel ou AMD), à côté de vos projets. Il permet à plusieurs personnes de travailler ensemble dans une même bibliothèque, chacune voyant les changements des autres en une seconde. Il diffuse chaque clip et chaque moment stabilisés et en HDR, tels que le lecteur les montre, vers un navigateur, un téléphone ou une télévision. Et, si vous l’activez, il met vos moments, vos clips ou les deux dans Jellyfin, Emby ou Kodi. Pour qui est à l’aise avec Docker : chaque réglage est décrit.</p>
+      </div>
+      <div class="platforms">
+
+      <article class="platform" id="nas-helper">
+        <div class="platform-head">
+          <h3>Linux, Docker</h3>
+        </div>
+        <p class="platform-req">Un NAS x86-64 avec une puce graphique qui encode le HEVC (Intel ou AMD, VA-API), Docker. Essayé sur un UGREEN DXP avec un Intel N100</p>
+        <a class="btn dl-btn" data-asset="nas-helper" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Télécharger<span class="vh"> le NAS Helper</span> <small data-fill="size">.tar.gz</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="nas-helper-steps">Étapes d’installation</button>
+        <div class="install-pop" id="nas-helper-steps" popover>
+          <div class="pop-head">
+            <h4>Installer le NAS Helper</h4>
+            <button type="button" class="pop-close" popovertarget="nas-helper-steps" popovertargetaction="hide" aria-label="Fermer">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Copiez le fichier sur le NAS et chargez-le en SSH : <code>docker load -i ActionFootageNASHelper-*-linux-x86_64.tar.gz</code>.</li>
+            <li>Prenez le fichier compose d’exemple et remplacez ses dossiers par ceux du NAS : chaque projet deux fois (en lecture-écriture pour la collaboration, en lecture seule pour la diffusion), les partages où sont ses images, et deux dossiers pour le helper lui-même.</li>
+            <li>Lancez-le : <code>docker compose up -d</code>, ou en projet dans l’app Docker du NAS. Son journal dit ce qu’il a trouvé et ce qu’il lance ; <code>http://&lt;nas&gt;:8099/settings</code> montre chaque réglage et ce qu’il fait.</li>
+          </ol>
+          <p class="note"><a class="text-link" data-asset="nas-compose" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">Le fichier compose d’exemple</a> · <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">Chaque réglage, en détail (en anglais)</a></p>
+          <p class="platform-note">Alpha : utilisé sur un seul NAS pour l’instant. Les liens pour Jellyfin restent coupés tant que vous ne les activez pas.</p>
+          <dl class="file-meta">
+            <dt>Fichier</dt><dd><code data-fill="name">ActionFootageNASHelper-&lt;version&gt;-linux-x86_64.tar.gz</code></dd>
+            <dt>Version</dt><dd data-release="version">la dernière</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">dans SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      </div>
     </div>
   </section>
 

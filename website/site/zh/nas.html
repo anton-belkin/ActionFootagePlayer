@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NAS Helper：大家共用一个素材库，串流到每块屏幕 · Action Footage Player</title>
+<meta name="description" content="一个运行在 NAS 上的 Docker 容器：几个人一起在同一个素材库里工作，片段和精彩瞬间以防抖后的 HDR 画面串流到电视、手机或浏览器，并可放进 Jellyfin、Emby 或 Kodi。免费，开源。">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/nas">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/nas">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/nas">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/nas">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/nas">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../stabilization.css">
+<link rel="stylesheet" href="../nas.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player，首页">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="网站">
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">功能</summary>
+        <ul>
+          <li><a href="log.html">Log 素材</a></li>
+          <li><a href="stabilization.html">防抖</a></li>
+          <li><a href="organizing.html">整理素材</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="360.html">360 视频</a></li>
+          <li><a href="nas.html" aria-current="page">NAS Helper</a></li>
+          <li><a href="features.html" class="nm-all">全部功能</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">下载</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html">Log 素材</a></li>
+        <li><a href="stabilization.html">防抖</a></li>
+        <li><a href="organizing.html">整理素材</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="360.html">360 视频</a></li>
+        <li><a href="nas.html" aria-current="page">NAS Helper</a></li>
+        <li><a href="features.html">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html">下载</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
+      <ul>
+        <li><a href="../nas.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/nas.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/nas.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/nas.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../nas.html" hreflang="en">阅读英文原文</a></p>
+</div>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">NAS Helper</p>
+        <h1>素材放在 NAS 上，家里每块屏幕都稳稳播放。</h1>
+        <p class="lede">把旅行素材放在 NAS 上，那里的一个小容器做三件事：让几个人一起在同一个素材库里工作，每个人一秒内就能看到别人的改动；把片段和精彩瞬间以防抖后的 HDR 画面串流到电视、手机或浏览器；如果你愿意，再把它们放进 Jellyfin、Emby 或 Kodi。</p>
+        <div class="btns">
+          <a class="btn primary" href="download.html#nas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            下载 NAS Helper <small>Docker · x86-64</small>
+          </a>
+          <a class="btn dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Mac 版播放器 <small>Apple Silicon</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>性能足够的 NAS</span>
+          <span>Docker</span>
+          <span>Alpha 版</span>
+        </div>
+      </div>
+      <figure class="media">
+        <svg class="nas-svg" viewBox="0 0 640 300" role="img" aria-labelledby="nas-title">
+          <title id="nas-title">每个人的电脑通过 NAS Helper 共用一个素材库；它向电视、手机和浏览器串流，并为 Jellyfin、Emby 和 Kodi 写入链接。</title>
+          <rect class="box" x="16" y="104" width="150" height="92" rx="10"/>
+          <text class="t" x="91" y="144" text-anchor="middle">每个人的电脑</text>
+          <text class="s" x="91" y="166" text-anchor="middle">播放器 · Library</text>
+          <rect class="nas" x="214" y="40" width="212" height="220" rx="12"/>
+          <text class="t" x="320" y="70" text-anchor="middle">NAS</text>
+          <text class="s" x="320" y="90" text-anchor="middle">项目与素材</text>
+          <rect class="part" x="234" y="108" width="172" height="36" rx="7"/>
+          <text class="p" x="320" y="131" text-anchor="middle">协作</text>
+          <rect class="part" x="234" y="154" width="172" height="36" rx="7"/>
+          <text class="p" x="320" y="177" text-anchor="middle">串流</text>
+          <rect class="part" x="234" y="200" width="172" height="36" rx="7"/>
+          <text class="p" x="320" y="223" text-anchor="middle">媒体服务器链接</text>
+          <rect class="box" x="474" y="56" width="150" height="92" rx="10"/>
+          <text class="t" x="549" y="96" text-anchor="middle">电视 · 手机 · 浏览器</text>
+          <text class="s" x="549" y="118" text-anchor="middle">HLS，防抖，HDR</text>
+          <rect class="box" x="474" y="176" width="150" height="80" rx="10"/>
+          <text class="t" x="549" y="210" text-anchor="middle">Jellyfin · Emby · Kodi</text>
+          <text class="s" x="549" y="232" text-anchor="middle">精彩瞬间、片段</text>
+          <path class="arrow" d="M172 126H228m-8-6 8 6-8 6M228 140H172m8-6-8 6 8 6"/>
+          <path class="arrow" d="M412 172C440 172 444 102 468 102m-8-6 8 6-8 6"/>
+          <path class="arrow" d="M412 218H468m-8-6 8 6-8 6"/>
+          <text class="s" x="91" y="94" text-anchor="middle">改动，约 1 秒</text>
+        </svg>
+        <figcaption>NAS 上的一个容器：大家共用一个素材库，串流供每块屏幕观看。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section band" id="how-it-works">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">工作原理</p>
+        <h2>三项工作，各有开关。</h2>
+        <p class="lede">它在素材旁边运行，使用 NAS 自己的处理器和显卡。每项工作都可以单独打开或关闭。</p>
+      </div>
+      <div class="gap-grid nas-three">
+        <div class="gap-item">
+          <h3>协作</h3>
+          <p>几个人可以同时在同一个素材库里工作：一人在笔记本上标记精彩瞬间，另一人在台式机上整理片段，第三人拷入新的旅行。NAS 立刻知道自己磁盘上发生的改动并写进项目目录，每个人的播放器和 Library 大约一秒后就能看到别人的工作，无需等待共享文件夹重新读取。除了目录，它什么也不写。</p>
+        </div>
+        <div class="gap-item">
+          <h3>串流</h3>
+          <p>项目里的每个片段、精彩瞬间和片段预览都变成一路视频流，与播放器里看到的一样：在 NAS 的显卡上用 Gyroflow 引擎防抖，D-Log M 以 HDR 呈现，每个文件带着自己保存的设置。边看边渲染，留到下次再看，画面始终不离开显卡。</p>
+        </div>
+        <div class="gap-item">
+          <h3>媒体服务器链接</h3>
+          <p>打开后，你的精彩瞬间（或片段，或两者：即它的<b>范围</b>）会出现在 Jellyfin、Emby 或 Kodi 中，按旅行分类，带标题、日期和封面。它们在电视、手机或平板上的应用直接播放这些视频流，无需再次转码。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What it needs -->
+  <section class="section band tight-top" id="needs">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">所需条件</p>
+        <h2>一台性能足够、能运行 Docker 的 NAS。</h2>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>NAS</h3>
+          <p>一台有一定性能的 x86-64 NAS，显卡能硬件解码和编码 HEVC（VA-API）：Intel 或 AMD。在搭载 Intel N100 的 UGREEN DXP 上试过，它渲染 1080p 视频流可达每秒 67–69 帧，超过 60 帧片段的需要。</p>
+        </div>
+        <div class="gap-item">
+          <h3>Docker</h3>
+          <p>以 Docker 镜像发布，附带示例 compose 文件。由你指定它能看到的文件夹：每个项目、素材所在的共享文件夹，以及它自己的两个文件夹。</p>
+        </div>
+        <div class="gap-item">
+          <h3>一个项目</h3>
+          <p>由 Library 创建的旅行：NAS 上一个带 <code>Project.afproject</code> 的文件夹，素材在 NAS 的共享文件夹里。</p>
+        </div>
+        <div class="gap-item">
+          <h3>一些空间</h3>
+          <p>看过的内容留在缓存里，默认 40 GB，再次观看立即开始。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Watching -->
+  <section class="section band" id="watch">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">观看</p>
+        <h2>在电视或手机上按下播放。</h2>
+        <p class="lede">它的页面 <code>http://&lt;你的 NAS&gt;:8099</code> 按文件夹列出片段，每个都有自己的视频流。</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>启动快</h3>
+          <p>从未播放过的片段约 5 秒开始，开头已预先渲染的约 2 秒，看过的立即开始。点一下即可在后台、无人观看时预先渲染整个文件夹的开头。</p>
+        </div>
+        <div class="gap-item">
+          <h3>HDR，或按电视的需要</h3>
+          <p>视频流为 HDR（HLG）的 HEVC。只接受 MPEG-TS 的旧电视会得到 MPEG-TS；把 HLG 显示得太暗的电视可以得到更亮、适合明亮房间的 HDR10。</p>
+        </div>
+        <div class="gap-item">
+          <h3>随意跳转</h3>
+          <p>每路视频流一开始就列出全部分段：播放器从头开始，也可以向后跳，渲染随之跟上。</p>
+        </div>
+        <div class="gap-item">
+          <h3>你的设置</h3>
+          <p>你在播放器里的设置（锁定地平线、取景、某个精彩瞬间自己的设置）就是串流的内容。改了设置，片段会重新渲染。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Media servers -->
+  <section class="section band tight-top" id="media-servers">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">媒体服务器</p>
+        <h2>Jellyfin、Emby、Kodi，以及所有从它们播放的应用。</h2>
+        <p class="lede">链接是媒体服务器多年来一直在读的小文件：<code>.strm</code> 存放视频流地址，<code>.nfo</code> 存放标题、日期和时长，旁边是一张封面。</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="cams">
+          <thead><tr><th scope="col">在哪里</th><th scope="col"></th><th scope="col">如何使用</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Jellyfin</th><td><span class="pill ok">已试过</span></td><td>精彩瞬间和片段放在“家庭视频”媒体库中，按旅行分类；媒体库自动刷新。在 iPhone 和三星电视上看过。</td></tr>
+            <tr><th scope="row">Emby</th><td><span class="pill ok">支持</span></td><td>读取同样的 <code>.strm</code> 和 <code>.nfo</code> 文件，放在“家庭视频”媒体库中。</td></tr>
+            <tr><th scope="row">Kodi、LibreELEC、OSMC、CoreELEC</th><td><span class="pill ok">支持</span></td><td><code>.strm</code> 和 <code>.nfo</code> 是 Kodi 自己的格式：把文件夹添加为视频来源即可。</td></tr>
+            <tr><th scope="row">Jellyfin 和 Emby 的应用</th><td><span class="pill ok">支持</span></td><td>iPhone、iPad、Android、Android TV、Fire TV、Roku、三星和 LG 电视、Xbox；Apple TV 上的 Swiftfin 和 Infuse。</td></tr>
+            <tr><th scope="row">Mac、iPhone 或 iPad 上的 Safari</th><td><span class="pill ok">已试过</span></td><td>直接在它的页面上播放视频流。</td></tr>
+            <tr><th scope="row">VLC、IINA、mpv</th><td><span class="pill ok">支持</span></td><td>打开 <code>http://&lt;你的 NAS&gt;:8099/playlist.m3u</code>：每个片段一项。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scope -->
+  <section class="section band" id="scope">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">范围</p>
+        <h2>精彩瞬间、片段，或两者。</h2>
+        <p class="lede"><code>AFP_JELLYFIN_SCOPE</code> 决定什么进入媒体服务器。范围之外的会从文件夹里移除，随时可以改主意。</p>
+      </div>
+      <div class="gap-grid nas-three">
+        <div class="gap-item">
+          <h3><code>moments</code></h3>
+          <p>你标记的精彩瞬间，各归其旅行：简短、最好的部分。适合作为家庭媒体库的开始。</p>
+        </div>
+        <div class="gap-item">
+          <h3><code>clips</code></h3>
+          <p>每个片段预览：完整的片段，按你在 Library 里分好的旅行排列。</p>
+        </div>
+        <div class="gap-item">
+          <h3><code>all</code></h3>
+          <p>两者都要，放在两个文件夹里。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="section band tight-top" id="settings">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">设置</p>
+        <h2>偏技术，但每项设置都有说明。</h2>
+        <p class="lede">一切都在容器的环境变量里设置。<code>--help</code> 说明每项设置，它的 <code>/settings</code> 页面列出全部设置的当前值以及每项工作的状态。</p>
+      </div>
+      <div class="keys">
+        <div class="key"><span><code>AFP_COLLABORATION · AFP_STREAM · AFP_JELLYFIN</code></span><span>每项工作的开关。媒体服务器链接默认关闭，需要你自己打开。</span></div>
+        <div class="key"><span><code>AFP_JELLYFIN_SCOPE</code></span><span>moments、clips 或 all。</span></div>
+        <div class="key"><span><code>AFP_BITRATE · AFP_HEIGHT</code></span><span>视频流质量：默认 30 Mbit/s、1080p。</span></div>
+        <div class="key"><span><code>AFP_TV_LOOK</code></span><span>旧电视得到什么：HLG、HDR10 或 SDR，更亮，30 帧。</span></div>
+        <div class="key"><span><code>AFP_CACHE_GB</code></span><span>看过的内容在 NAS 上保留多少。</span></div>
+        <div class="key"><span><code>AFP_PUBLIC_URL</code></span><span>Jellyfin 应用访问 NAS 所用的地址。</span></div>
+      </div>
+      <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">所有设置的详细说明（英文） →</a></p>
+    </div>
+  </section>
+
+  <!-- Heavy clips -->
+  <section class="section band" id="heavy">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">大体积片段</p>
+        <h2>提前渲染，流畅播放。</h2>
+        <p class="lede">有些片段超出了 NAS 边看边渲染的能力：8K、高帧率、长时间的潜水。提前把它们完整渲染出来，就能像普通视频文件一样从 NAS 播放。</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>一次一个文件夹</h3>
+          <p>在它的页面上点一下，即可在后台、无人观看时逐个完整渲染一个文件夹的片段。渲染好的内容留在缓存里。</p>
+        </div>
+        <div class="gap-item">
+          <h3>再重也流畅</h3>
+          <p>从提前渲染的内容播放，8K 或 120 帧的片段在任何屏幕上都和其他片段一样流畅。</p>
+        </div>
+        <div class="gap-item">
+          <h3>改了设置也会重新渲染</h3>
+          <p>在播放器里改了片段的设置，它就会以同样的方式重新提前渲染。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band tight-top" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">限制</p>
+        <h2>值得了解。</h2>
+      </div>
+      <ul class="st-limits">
+        <li><b>这是 Alpha 版。</b>目前只在一台 NAS 上试过：搭载 Intel N100 的 UGREEN DXP。</li>
+        <li><b>需要带硬件视频的显卡。</b>视频流通过 VA-API 渲染，Intel 和 AMD 显卡都有；NVIDIA 显卡不提供用于编码的 VA-API。</li>
+        <li><b>只用于家庭网络。</b>没有登录：不要让它暴露在互联网上，或在前面加一层 VPN。</li>
+        <li><b>D-Log M 以 HDR 呈现。</b>其他 log 曲线目前按原样串流。</li>
+        <li><b>8K 片段</b>在 N100 上渲染略慢于播放（每秒约 42 帧对 50 帧）：播放器会多缓冲一些。</li>
+        <li><b>同时超过一路视频流可能吃不消。</b>N100 这类 NAS 渲染一段 4K60 片段只比播放略快，同时再开第二路可能会卡顿。提前渲染好的片段可以同时播放任意多路。</li>
+        <li><b>Dolby Vision</b> 还不在视频流中：目前是 HLG，电视则为 HDR10。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>装到 NAS 上，然后在电视上按下播放。</h2>
+        <p class="lede">免费、开源。你的素材保持原样：它只读取素材。</p>
+        <div class="btns">
+          <a class="btn primary" href="download.html#nas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            下载 NAS Helper <small>Docker · x86-64</small>
+          </a>
+          <a class="btn dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Mac 版播放器 <small>Apple Silicon</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>安装步骤</h3>
+          <p>载入镜像、compose 文件、启动。</p>
+          <a href="download.html#nas">下载</a>
+        </div>
+        <div class="help-card">
+          <h3>所有设置</h3>
+          <p>每项设置的作用，以及它能看到的文件夹。</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">在 GitHub 上</a>
+        </div>
+        <div class="help-card">
+          <h3>整理素材</h3>
+          <p>项目、精彩瞬间和片段预览：NAS Helper 串流的内容。</p>
+          <a href="organizing.html">整理素材</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
+      <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">全部功能</a>
+      <a href="download.html">下载</a>
+    </div>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p class="tm">Dolby、Dolby Vision 和双 D 标志是 Dolby Laboratories Licensing Corporation 的商标。Action Footage Player 与 Dolby 无关联，也未获 Dolby 认可。播放器借助开源库 <code>dolby_vision</code>（MIT）自行写入 Dolby Vision 元数据，其中不包含任何 Dolby 软件。</p>
+    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../nas.html" hreflang="en">阅读英文原文</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>
