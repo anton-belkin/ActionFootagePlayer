@@ -186,7 +186,7 @@ function deriveSource(it, probe) {
   it.color = col ? col[1] : null;
   it.motion = probe ? probe.mode != null : null;
   // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
-  // "EIS: RockSteady", "FlowState"); null: off, or not said. With motion data (a GoPro HERO8+ with HyperSmooth on), the
+  // "EIS: RockSteady", "FlowState"); null: off, or not said. With motion data (a GoPro HERO12+ with HyperSmooth on), the
   // player stabilizes on top of it
   it.camStab = probe && typeof probe.stabilized_in_camera === "string" ? probe.stabilized_in_camera : null;
   it.is360 = !!(probe && (probe.spherical || probe.rig360));

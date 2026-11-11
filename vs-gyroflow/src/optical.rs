@@ -18,8 +18,8 @@
 //   camera's. Known: the lens the file has (DJI, newer GoPros), else the profile Gyroflow's database has for the camera,
 //   lens mode in Gyroflow's database (lens_pick.rs: as the player picks it);
 // - the rest are stabilized: no motion data (DJI with EIS on, older cameras), or motion data the camera already
-//   stabilized the picture with (HyperSmooth on a HERO7 or older, DJI's RockSteady): that motion data is set aside
-//   (ignore_file_motion), since the picture no longer moves as the camera did. (A HERO8 or later records how
+//   stabilized the picture with (HyperSmooth on a HERO11 or older, DJI's RockSteady): that motion data is set aside
+//   (ignore_file_motion), since the picture no longer moves as the camera did. (A HERO12 or later records how
 //   HyperSmooth turned the picture, so the player stabilizes it from its own motion data: in_camera.rs.)
 //
 // The engine is Gyroflow's own command line (the fork's, which has the optical analysis): `gyroflow <clip> --preset

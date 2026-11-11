@@ -133,7 +133,7 @@ this reads):
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | none: the camera doesn't mark them | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work: Action 4, Action 5 Pro | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | | should work, with a project |
-| GoPro | **verified**: HDR from GP-Log (HERO12 Black on firmware 1.20+). Should work: HERO13 Black, and GP-Log2 (MISSION 1) ⁴ | **verified**: HERO12 Black (HyperSmooth off). HyperSmooth on: HERO12 Black rendered from the command line (on top of it, half the crop), not yet played in the app; should work: HERO8 and later. HERO5-7 Black: HyperSmooth off only | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
+| GoPro | **verified**: HDR from GP-Log (HERO12 Black on firmware 1.20+). Should work: HERO13 Black, and GP-Log2 (MISSION 1) ⁴ | **verified**: HERO12 Black (HyperSmooth off). HyperSmooth on: HERO12 Black rendered from the command line (on top of it, half the crop), not yet played in the app; should work: HERO13 Black. HERO11 and older: HyperSmooth off only | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | | should work, with a project |
 
@@ -420,11 +420,13 @@ Clips with gyro data of their own, recorded with the camera's stabilization off,
 project: DJI with EIS off, GoPro with HyperSmooth off (tried on a HERO12 Black), and (not yet tried on a real clip, see
 Other cameras) Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
 that it was off: footage the camera stabilized already gets worse stabilized again, so a clip that doesn't say
-plays as it is. One exception, as in Gyroflow itself: a GoPro HERO8 or later with HyperSmooth on (any mode: On, Boost,
-AutoBoost, horizon leveling) records with each frame how HyperSmooth turned the picture, so its motion data is the
-picture's own and the player stabilizes what HyperSmooth left, with half the level's crop (HyperSmooth cropped for
-itself already: `vs-gyroflow/src/in_camera.rs`). The HERO5, 6 and 7 Black don't record it: theirs play as they are
-with HyperSmooth on. These clips get Gyroflow's default preset
+plays as it is. One exception: a GoPro HERO12 or later with HyperSmooth on (any mode: On, Boost, AutoBoost,
+horizon leveling) records with each frame how HyperSmooth turned the picture, so its motion data is the picture's own
+and the player stabilizes what HyperSmooth left, with half the level's crop (HyperSmooth cropped for itself already:
+`vs-gyroflow/src/in_camera.rs`). The HERO11 and older play as they are with HyperSmooth on: Gyroflow's
+[GoPro page](https://docs.gyroflow.xyz/app/getting-started/supported-cameras/gopro) lists HyperSmooth as supported
+from the HERO8, but here it's taken only from the HERO12 on, the one tried (the HERO5-7 Black don't record the turn
+at all). These clips get Gyroflow's default preset
 and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFootagePlayer/gyroflow/` if you put one
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
@@ -892,7 +894,7 @@ Project). Then, as buttons:
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
 - **Stabilize optically** (Footage, Originals): for the selected clips whose motion the player can't take from the
-  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth on a HERO7 or older, RockSteady), Gyroflow
+  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth on a HERO11 or older, RockSteady), Gyroflow
   measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
   with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
   listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
@@ -1135,7 +1137,7 @@ camera's metadata is read from (what has been tried: [What works, camera by came
 | DJI Osmo Action 6 | yes | D-Log M | yes | the `hglg` box, as ExifTool reads it from an Action 4, not seen |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen | none |
 | Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no | Action 4, Action 5 Pro: as the Action 6, not seen |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; played in the app on HERO12 Black clips, checked on GoPro's own sample clips. HyperSmooth on, when the clip records how it turned the picture (`IORI` next to `CORI`, HERO8 and later; a HERO7 Black's has neither): its motion data is the picture's (`CORI` × `IORI`), stabilized with half the level's crop; rendered with `gyroflow-export` on HERO12 Black clips (HS EIS, HS AutoBoost), above and under water, not yet played in the app | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip; GP-Log played in the app on a HERO12 Black clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; played in the app on HERO12 Black clips, checked on GoPro's own sample clips. HyperSmooth on, from the HERO12 (`MINF`) when the clip records how it turned the picture (`IORI` next to `CORI`; a HERO7 Black's has neither; HERO8-11 record it but play as recorded): its motion data is the picture's (`CORI` × `IORI`), stabilized with half the level's crop; rendered with `gyroflow-export` on HERO12 Black clips (HS EIS, HS AutoBoost), above and under water, not yet played in the app | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip; GP-Log played in the app on a HERO12 Black clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no | not yet (telemetry-parser reads them) |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was

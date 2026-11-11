@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Clips the camera stabilized itself, stabilized further: GoPro's HyperSmooth on the HERO8 and later (issue #86).
-// Those cameras record with each frame the camera's turn (CORI) and the turn HyperSmooth gave the picture (IORI),
-// and telemetry-parser hands Gyroflow their product, the turn of the picture as the camera left it. So Gyroflow
-// stabilizes what's left of the motion in the picture, as its app does ("since HERO8 you can record with in-camera
-// stabilization on and then stabilize further"). The HERO5, 6 and 7 Black don't record IORI: their gyro is the
-// camera's, of a picture HyperSmooth already turned, so they're stabilized only with HyperSmooth off (probe.rs).
+// Clips the camera stabilized itself, stabilized further: GoPro's HyperSmooth on the HERO12 and later (issue #86).
+// GoPros from the HERO8 on record with each frame the camera's turn (CORI) and the turn HyperSmooth gave the picture
+// (IORI), and telemetry-parser hands Gyroflow their product, the turn of the picture as the camera left it, so
+// Gyroflow stabilizes what's left of the motion in the picture. Gyroflow's GoPro page
+// (docs.gyroflow.xyz/app/getting-started/supported-cameras/gopro) lists HyperSmooth as supported from the HERO8 on,
+// but only the HERO12 and later are taken here: Anton's call on PR #201 (HERO11 and older aren't re-stabilized; they
+// play as recorded with HyperSmooth on), and only HERO12 Black clips were tried. The HERO5, 6 and 7 Black don't
+// record IORI at all: their gyro is the camera's, of a picture HyperSmooth already turned (probe.rs).
 //
 // What differs from a clip the camera didn't stabilize is the crop. HyperSmooth cropped the frame for its own margin
 // already (a HERO12's Linear 4K: 100.6° across the diagonal off, 95.5° on, 90° boosted), and what it leaves (a slow
@@ -24,8 +26,18 @@ pub const CROP_SHARE: f64 = 0.5;
 /// Whether the clip's motion data is the turn of a picture the camera stabilized itself: a GoPro whose HyperSmooth was
 /// on (its EISA, as Gyroflow reads it for the lens profile) and that recorded how it turned the picture (IORI)
 pub fn stabilized(stab: &StabilizationManager) -> bool {
-    let on = stab.camera_id.read().as_ref().is_some_and(|id| id.brand == "GoPro" && hypersmooth_on(&id.additional));
+    let on = stab.camera_id.read().as_ref().is_some_and(|id| id.brand == "GoPro" && hypersmooth_on(&id.additional) && restabilized_model(&id.model));
     on && stab.gyro.read().file_metadata.read().image_orientations.as_ref().is_some_and(|io| !io.is_empty())
+}
+
+/// Whether a GoPro model's HyperSmooth clips are stabilized further: the HERO12 Black and later HEROs ("HERO12 Black",
+/// "HERO13 Black" as MINF names them, "GoPro " in front or not). Not the HERO11 and older, nor a model without a HERO
+/// number (MAX, Fusion, MISSION)
+pub fn restabilized_model(model: &str) -> bool {
+    let upper = model.to_ascii_uppercase();
+    let Some(i) = upper.find("HERO") else { return false };
+    let digits: String = upper[i + 4..].trim_start().chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse::<u32>().is_ok_and(|n| n >= 12)
 }
 
 /// Gyroflow's camera identifier's `additional` for a GoPro: EISA as written ("HS EIS", "HS AutoBoost", ...), "EIS-Y",
@@ -47,6 +59,14 @@ mod tests {
     fn hypersmooth_as_gyroflow_names_it() {
         for on in ["HS EIS", "HS AutoBoost", "HS HLevel", "EIS-Y"] { assert!(hypersmooth_on(on), "{on}"); }
         for off in ["", "NO-EIS"] { assert!(!hypersmooth_on(off), "{off}"); }
+    }
+
+    #[test]
+    fn from_the_hero12_on() {
+        for yes in ["HERO12 Black", "HERO13 Black", "GoPro HERO12 Black", "HERO 14"] { assert!(restabilized_model(yes), "{yes}"); }
+        for no in ["HERO11 Black", "HERO11 Black Mini", "HERO10 Black", "HERO8 Black", "HERO7 Black", "MAX", "Fusion", ""] {
+            assert!(!restabilized_model(no), "{no}");
+        }
     }
 
     #[test]

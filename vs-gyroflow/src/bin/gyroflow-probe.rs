@@ -6,8 +6,8 @@
 //   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera),
-//                                                       or of the picture the camera stabilized (GoPro HERO8 and
-//                                                       later with HyperSmooth on: "stabilized_in_camera" says so,
+//                                                       or of the picture the camera stabilized (GoPro HERO12
+//                                                       and later with HyperSmooth on: "stabilized_in_camera" says so,
 //                                                       in_camera.rs): stabilize it with the default preset
 //   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
 //                                                       player takes for it ("in the file", the label of the one picked
@@ -144,7 +144,7 @@ fn main() {
         out["clock"] = serde_json::to_value(clock).unwrap_or_default();
         out["gps"] = serde_json::to_value(gps).unwrap_or_default();
         // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed, 4 = GoPro
-        // HERO8+ with HyperSmooth on stabilized (in_camera.rs) (the Library asks again for older answers)
+        // HERO12+ with HyperSmooth on stabilized (in_camera.rs) (the Library asks again for older answers)
         out["geotag"] = 4.into();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();

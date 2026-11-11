@@ -3,7 +3,7 @@
 --
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
---       with HyperSmooth off, or on from a HERO8 or later, which records how it turned the picture: stabilized on top
+--       with HyperSmooth off, or on from a HERO12 or later, which records how it turned the picture: stabilized on top
 --       of it with less crop, vs-gyroflow/src/in_camera.rs; and Insta360 ones with FlowState off in the camera, when
 --       Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
@@ -356,7 +356,7 @@ local function find_source(path, done)
             end
         end
         -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
-        -- in_camera: how the camera stabilized it itself (GoPro HERO8+ HyperSmooth), stabilized further on top of it
+        -- in_camera: how the camera stabilized it itself (GoPro HERO12+ HyperSmooth), stabilized further on top of it
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
                rotation = tonumber(info.rotation) or 0, in_camera = type(info.stabilized_in_camera) == "string" and info.stabilized_in_camera or nil })
     end)
