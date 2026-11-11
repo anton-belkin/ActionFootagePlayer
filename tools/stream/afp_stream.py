@@ -629,7 +629,8 @@ def warm_worker():
     """The moments' and clip previews' player args, asked ahead (the catalog lists only those it has), again when a file
     they depend on changed; then their posters"""
     while True:
-        for c in clips():
+        # Moments first: they're what's watched most, and in Jellyfin with any scope but clips
+        for c in sorted(clips(), key=lambda c: c["kind"] != "moment"):
             if c["kind"] != "clip":
                 try:
                     if player_args(c):

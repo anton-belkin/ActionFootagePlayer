@@ -164,6 +164,11 @@ def run(a):
             before = set(os.path.join(a.out, p) for p in json.load(f))
     except (OSError, ValueError):
         before = set()
+    # While afp-stream hasn't asked the player about every item yet (it just started), what it hasn't listed may only be
+    # waiting: nothing written before goes until it has
+    pending = cat.get("pending") or 0
+    if pending:
+        wanted |= before & set(p for p in before if os.path.exists(p))
     for p in sorted(before - wanted):
         try:
             os.remove(p)
