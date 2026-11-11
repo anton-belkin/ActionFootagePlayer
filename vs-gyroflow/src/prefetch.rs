@@ -62,25 +62,24 @@ pub struct Sample { pub start: u64, pub end: u64, pub time: f64 }
 
 impl Prefetched {
     /// The file and its size, with the metadata track's samples read
-    pub fn open(path: impl AsRef<Path>) -> Result<(Self, usize)> {
+    pub fn open(path: impl AsRef<Path>) -> Result<(Self, u64)> {
         Self::open_until(path, None)
     }
 
     /// The file and its size, with the metadata track's samples up to `until` s into the clip read, all without it.
     /// With it, the others read as zeros until they're read (`fetch`, `copy_from`)
-    pub fn open_until(path: impl AsRef<Path>, until: Option<f64>) -> Result<(Self, usize)> {
+    pub fn open_until(path: impl AsRef<Path>, until: Option<f64>) -> Result<(Self, u64)> {
         Self::open_range(path, until.map(|u| (f64::NEG_INFINITY, u)))
     }
 
     /// The same with the samples from `range.0` to `range.1` s into the clip read, all without it
-    pub fn open_range(path: impl AsRef<Path>, range: Option<(f64, f64)>) -> Result<(Self, usize)> {
+    pub fn open_range(path: impl AsRef<Path>, range: Option<(f64, f64)>) -> Result<(Self, u64)> {
         let file = File::open(path)?;
-        let size = file.metadata()?.len() as usize;
-        let len = size as u64;
+        let len = file.metadata()?.len();
         let share = on_share(&file);
         let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new(), samples: Vec::new(), read: Vec::new(), blank_unread: false, from_file: (0, 0), share };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
-        if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len as usize) {
+        if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len) {
             this.samples = metadata_samples(&ctx);
             this.read = vec![false; this.samples.len()];
             let wanted = this.within(range);
@@ -88,7 +87,7 @@ impl Prefetched {
             this.blank_unread = range.is_some();
         }
         this.pos = 0;
-        Ok((this, len as usize))
+        Ok((this, len))
     }
 
     /// The samples (indices) from `range.0` to `range.1` s into the clip, all without it
@@ -106,7 +105,7 @@ impl Prefetched {
 
     pub fn file(&self) -> &File { &self.file }
 
-    pub fn len(&self) -> usize { self.len as usize }
+    pub fn len(&self) -> u64 { self.len }
 
     /// For the parser to read from the start again
     pub fn rewind(&mut self) { self.pos = 0; }
@@ -390,7 +389,7 @@ mod tests {
         let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
         std::fs::write(&path, &data).unwrap();
         let (mut f, len) = Prefetched::open(&path).unwrap();
-        assert_eq!(len, data.len());
+        assert_eq!(len, data.len() as u64);
         // A big read is kept, and read back from memory
         let mut big = vec![0u8; 2_000_000];
         f.seek(SeekFrom::Start(500_000)).unwrap();

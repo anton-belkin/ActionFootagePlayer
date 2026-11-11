@@ -688,7 +688,7 @@ pub fn reading(path: &Path) -> Reading {
 /// The motion data as telemetry-parser reads it: (time, values), in the file's order
 fn motion(path: &Path) -> Result<Vec<(f64, [f64; 4])>, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), InputOptions::default()).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for s in input.samples.as_deref().unwrap_or_default() {

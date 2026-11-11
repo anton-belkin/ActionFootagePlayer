@@ -73,8 +73,9 @@ impl View {
 
         let sm = {
             let gyro = params.gyro.read();
-            // As FrameTransform turns it: the camera of crop mode on top of the smoothing
-            gyro.org_quat_at_timestamp(timestamp_ms) * FrameTransform::smoothed_with_view(&gyro, params, timestamp_ms).inverse()
+            // As FrameTransform turns it: the camera of crop mode on top of the smoothing, of the frame's own motion data
+            let lookup = gyro.lookup_for_frame(frame);
+            gyro.org_quat_at(timestamp_ms, &lookup) * FrameTransform::smoothed_with_view(&gyro, params, timestamp_ms, &lookup).inverse()
         };
         let d = if params.framebuffer_inverted { Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, -1.0)) }
                 else { Matrix3::from_diagonal(&Vector3::new(1.0, -1.0, -1.0)) };
@@ -552,8 +553,8 @@ mod gyroflow_geometry {
             let mut gyro = stab.gyro.write();
             gyro.duration_ms = 10_000.0;
             let ts: Vec<i64> = (0..=10_000).map(|ms| ms * 1000).collect();
-            gyro.quaternions = ts.iter().map(|&us| (us, camera(us as f64 / 1e6))).collect::<BTreeMap<_, _>>();
-            gyro.smoothed_quaternions = ts.iter().map(|&us| { let t = us as f64 / 1e6; (us, smoothed(t).inverse() * camera(t)) }).collect();
+            gyro.quaternions = std::sync::Arc::new(ts.iter().map(|&us| (us, camera(us as f64 / 1e6))).collect::<BTreeMap<_, _>>());
+            gyro.smoothed_quaternions = std::sync::Arc::new(ts.iter().map(|&us| { let t = us as f64 / 1e6; (us, smoothed(t).inverse() * camera(t)) }).collect());
         }
         stab
     }

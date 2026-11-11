@@ -118,7 +118,7 @@ pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| e.to_string())?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)
@@ -140,7 +140,7 @@ pub fn facts(video: &Path) -> Result<Facts, String> {
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| format!("not a video Gyroflow reads: {e}"))?;
     let options = InputOptions { probe_only: true, ..Default::default() };
     let input = Input::from_stream_with_options(&mut file, size, &path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options)

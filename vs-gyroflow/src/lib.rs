@@ -40,6 +40,7 @@ pub mod photo;
 pub mod xmp;
 pub mod stamp;
 pub mod rig;
+pub mod rig_masks;
 pub mod nav;
 pub mod geotag;
 pub mod heading;

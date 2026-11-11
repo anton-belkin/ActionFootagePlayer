@@ -54,7 +54,7 @@ fn number(v: &serde_json::Value, key: &str) -> Option<f64> {
 impl Telemetry {
     pub fn read(path: &str) -> Option<Telemetry> {
         let mut file = std::fs::File::open(path).ok()?;
-        let size = file.metadata().ok()?.len() as usize;
+        let size = file.metadata().ok()?.len();
         let mut options = InputOptions::default();
         options.dont_look_for_sidecar_files = true;
         let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
@@ -158,7 +158,7 @@ mod tests {
         eprintln!("GPS records {}, fixes {}, clock {:?}, compass {}", t.gps_records, t.gps.len(), t.gps_clock, t.has_compass);
         for f in t.gps.iter().step_by(50) { eprintln!("GPS {f:?}"); }
         let mut file = std::fs::File::open(&clip).unwrap();
-        let size = file.metadata().unwrap().len() as usize;
+        let size = file.metadata().unwrap().len();
         let input = Input::from_stream_with_options(&mut file, size, &clip, |_| (), Arc::new(AtomicBool::new(false)), InputOptions::default()).unwrap();
         for s in input.samples.as_deref().unwrap_or_default() {
             let Some(g) = s.tag_map.as_ref() else { continue };
