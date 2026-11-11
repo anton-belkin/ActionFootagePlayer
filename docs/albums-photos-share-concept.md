@@ -274,9 +274,12 @@ render's link for people reading the folder.
 - **Option:** pinned renders on this computer only.
 
 **Lookup:** the library's pinned renders first, then this computer's own. afp-stream looks the same way, so a render
-pinned from the Mac is what the TV plays.
+pinned from the Mac is what the TV plays, adjusted to the TV as it streams.
 
-**Which profiles a pin makes:** a library setting, `HDR` and `TV` by default, changeable in the settings. In the
+**Which profiles a pin makes:** a library setting, `HDR` alone by default, changeable in the settings. No `TV`
+render is pinned. `TV` is only the streamer's adjustment to the television (PQ, gain), and afp-stream makes it on the
+fly from the pinned 4K `HDR` render. *(To check: that the N100 converts 4K HLG → the TV's PQ in real time with
+QuickSync; if not, at 1080p.)* In the
 UI, pinning is one click with no choice. The detailed UI comes later.
 
 **Apple Photos needs no pinned renders.** Photos imports what it's given and keeps its own copy. Sync renders only
@@ -378,7 +381,8 @@ Telling what changed goes by the recipe kept with the pair (item ↔ Photos asse
 8. ~~Where renders live~~: decided.
    - Renders on this computer by default.
    - Pinned renders in the library by default.
-   - Pins make the profiles set in the library's settings (`HDR` + `TV` by default).
+   - Pins make the profiles set in the library's settings: `HDR` by default. The streamer makes `TV` from it on the
+     fly (to check on the N100 at 4K).
    - Still open: the pinned folder's name (`_Renders/` or `.afp/renders/`).
 9. **A `Light` profile** for messengers, or `SDR` alone.
 10. **Photo originals:**
