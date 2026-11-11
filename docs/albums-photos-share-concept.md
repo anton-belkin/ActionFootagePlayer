@@ -105,8 +105,17 @@ Photos already carry this link today. Tags go into `dc:subject`. Finder and Quic
 - **Risk:** someone shares the preview from Finder, thinking it's the photo. Keeping it visibly small is the guard.
   *(Open: size, and whether to mark it.)*
 
-**Photos made before this** (full HEIC or JPEG with `afp:link`) are photo objects whose render is the file itself.
-Nothing breaks.
+**Photos made before this** (a full HEIC or JPEG with `afp:link`, a Live Photo's HEIC + MOV) are converted, once,
+by a command run on the project or a selection:
+1. **A photo object is made for each one, where the file is now** (same folder, same name): its preview, plus its link
+   with the clip, time and crop read from the file's XMP.
+2. **The file moves into `_Renders/`** as that object's render, in its profile: HEIC with a gain map → `Photo HDR`, a
+   pair → `Live`, a JPEG → `JPEG` or `Motion`. A Live Photo's two files move together.
+3. **The recipe:** a file with a recipe in its XMP is checked like any render. One without a recipe counts as
+   current until something in the photo changes (its crop, the clip's transform).
+
+As with *Take in*, it lists what it will do first, and starts only when you say so. It moves files within the project
+and deletes nothing. *(Open: Apple Photos sync pairs, once that exists, would follow the move.)*
 
 ## Photos as originals
 
@@ -324,7 +333,7 @@ Three places are possible, each with a reason:
 | Clip previews made for every clip (look + organization) | no batch: thumbnails are fast now (#191); a clip link is made when you put a clip in an album |
 | Previews "by trips" | the Timeline |
 | `X` deletes a clip preview | `X` = Reject |
-| A photo = an exported file, rendered at once | a photo object; rendered when shared |
+| A photo = an exported file, rendered at once | a photo object; rendered when shared. Existing photos converted: object in place, file moved to `_Renders/` |
 | Export | Share → Save to a folder |
 | Renders of moments, at a path mirroring the moment's | renders of clips, moments and photos, found by recipe hash; shared and local tiers |
 
