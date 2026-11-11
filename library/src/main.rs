@@ -176,18 +176,44 @@ fn poll_reach(root: &Path, before: String, changed: &Arc<std::sync::atomic::Atom
     }).ok();
 }
 
-/// A location's share mounted, as Finder does: with the password the Keychain has for it (none: the Mac asks for one).
-/// Only the Mac; elsewhere the share is connected in the system and then shows. Err: it couldn't (the NAS isn't on this
-/// network: a dozen seconds to find out)
-fn mount_share(path: &str) -> Result<(), String> {
-    let (host, share, _) = locations::network(path).ok_or_else(|| format!("{path} isn't on a share"))?;
-    if !cfg!(target_os = "macos") { return Err(format!("Connect //{host}/{share} in the system: its clips show then")); }
+/// A NAS's names: the one given, then the others the project's hosts list for it ("DISKSTATIONDXP = web.nas,
+/// 192.168.50.186" in Project settings), each once
+pub(crate) fn host_names(host: &str, hosts: Option<&Value>) -> Vec<String> {
+    let host = host.rsplit_once('@').map(|x| x.1).unwrap_or(host).trim_end_matches('.');
+    let mut out = vec![host.to_string()];
+    for (k, list) in hosts.and_then(Value::as_object).into_iter().flatten() {
+        let mut all = vec![k.clone()];
+        all.extend(list.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)));
+        if !all.iter().any(|x| locations::host_key(x) == locations::host_key(host)) { continue; }
+        // Each once as spelled (a Bonjour name and the plain one are two ways to reach it: both kept)
+        for x in all { if !out.iter().any(|o| o.eq_ignore_ascii_case(&x)) { out.push(x); } }
+    }
+    out
+}
+
+/// One share mounted by one name, as Finder does: with the password the Keychain has for it (none: the Mac asks for
+/// one). `who`: the host, or "user@host" as mount names it (the user kept: the Keychain's password is that user's)
+fn mount_url(who: &str, share: &str) -> Result<(), String> {
     let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
-    // "user@host" as mount names it: the user kept (the Keychain's password is that user's)
-    let who = match host.rsplit_once('@') { Some((u, h)) => format!("{}@{}", enc(u), enc(h.trim_end_matches('.'))), None => enc(host.trim_end_matches('.')) };
-    let url = format!("smb://{who}/{}", enc(&share));
+    let w = match who.rsplit_once('@') { Some((u, h)) => format!("{}@{}", enc(u), enc(h.trim_end_matches('.'))), None => enc(who.trim_end_matches('.')) };
+    let url = format!("smb://{w}/{}", enc(share));
     let out = std::process::Command::new("/usr/bin/osascript").arg("-e").arg(format!("mount volume \"{url}\"")).output().map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else { Err(format!("//{host}/{share} couldn't be connected ({})", String::from_utf8_lossy(&out.stderr).trim())) }
+    if out.status.success() { Ok(()) } else { Err(format!("//{}/{share}: {}", who.rsplit_once('@').map(|x| x.1).unwrap_or(who), String::from_utf8_lossy(&out.stderr).trim())) }
+}
+
+/// A share mounted: `path` names it ("//[user@]host/share/…"), tried by each of `names` in turn (the NAS's names, the
+/// one it's written with first) until one connects. Only the Mac; elsewhere the share is connected in the system and
+/// then shows. Ok: the name that worked. Err: none did (a NAS not on this network: a dozen seconds a name)
+fn mount_share(path: &str, names: &[String]) -> Result<String, String> {
+    let (host, share, _) = locations::network(path).ok_or_else(|| format!("{path} isn't on a share"))?;
+    if !cfg!(target_os = "macos") { return Err(format!("Connect //{host}/{share} in the system: it shows then")); }
+    let user = host.rsplit_once('@').map(|x| x.0.to_string());
+    let mut errors = Vec::new();
+    for n in names {
+        let who = user.as_ref().map(|u| format!("{u}@{n}")).unwrap_or_else(|| n.clone());
+        match mount_url(&who, &share) { Ok(()) => return Ok(n.clone()), Err(e) => errors.push(e) }
+    }
+    Err(format!("{share} couldn't be connected: {}", errors.join("; ")))
 }
 
 /// The projects whose shares were mounted on opening them, once a run: one taken away afterwards (ejected) stays away
@@ -208,7 +234,7 @@ fn mount_on_open(root: &Path) {
             let key = (locations::host_key(&host), share.to_lowercase());
             if shares.contains(&key) { continue; }
             shares.push(key);
-            let _ = mount_share(&l.path);
+            let _ = mount_share(&l.path, &host_names(&host, read_doc(&root).get("hosts")));
         }
     }).ok();
 }
@@ -268,6 +294,10 @@ struct RecentEntry {
     share: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     rel: String,
+    /// The NAS's other names, from the project's hosts when it was last reachable (its file is on the share: not read
+    /// while it's offline)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hosts: Vec<String>,
 }
 
 /// The list as kept: entries, or (before 0.13) the paths alone
@@ -311,12 +341,27 @@ fn recent_here(e: &RecentEntry, mounts: &[(String, PathBuf)]) -> Option<PathBuf>
     is_project(&d).then_some(d)
 }
 
+/// The other names of the NAS a project is on, as its file lists them
+fn other_names(root: &Path, share: Option<&str>) -> Vec<String> {
+    let Some((host, _, _)) = share.and_then(locations::network) else { return Vec::new() };
+    host_names(&host, read_doc(root).get("hosts")).into_iter().skip(1).collect()
+}
+
+/// An offline project's share by all its names: as mounted when it was last seen first, then its other names
+fn recent_names(e: &RecentEntry) -> Vec<String> {
+    let Some((host, _, _)) = e.share.as_deref().and_then(locations::network) else { return Vec::new() };
+    let mut out = host_names(&host, None);
+    for h in &e.hosts { if !out.iter().any(|o| o.eq_ignore_ascii_case(h)) { out.push(h.clone()); } }
+    out
+}
+
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
     let mut list = recent_list(app);
     list.retain(|x| x.path != p);
     let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
-    list.insert(0, RecentEntry { path: p, share, rel });
+    let hosts = other_names(root, share.as_deref());
+    list.insert(0, RecentEntry { path: p, share, rel, hosts });
     list.truncate(10);
     write_recent(app, &list);
 }
@@ -795,6 +840,8 @@ struct Recent {
     share: Option<String>,
     /// Can be connected from here (the Mac, its share known)
     connect: bool,
+    /// The names it can be connected by (the NAS's), for Connect's list
+    names: Vec<String>,
 }
 
 // The projects this computer has opened, the last first: every one, those not reachable now too (offline)
@@ -810,12 +857,15 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
         // One kept before its share was (or mounted elsewhere now): its share noted, its path the one now
         if let Some(h) = &here {
             if let Some((s, r)) = share_of(h, &mounts) { if e.share.as_deref() != Some(s.as_str()) || e.rel != r { e.share = Some(s); e.rel = r; changed = true; } }
+            let names = other_names(h, e.share.as_deref());
+            if e.hosts != names { e.hosts = names; changed = true; }
             let hp = h.display().to_string();
             if e.path != hp { e.path = hp; changed = true; }
         }
         let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
-                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone() }
+                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
+                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
@@ -833,11 +883,12 @@ async fn forget_recent(app: tauri::AppHandle, path: String) -> Result<(), String
 
 /// An offline project's share connected: where the project is then
 #[tauri::command]
-async fn connect_project(app: tauri::AppHandle, path: String) -> Result<String, String> {
+async fn connect_project(app: tauri::AppHandle, path: String, host: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let e = recent_list(&app).into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
         let share = e.share.clone().ok_or("Its share isn't known: connect it in Finder, then open it")?;
-        mount_share(&share)?;
+        // By the name chosen, else each of the NAS's names in turn
+        mount_share(&share, &host.map(|h| vec![h]).unwrap_or_else(|| recent_names(&e)))?;
         recent_here(&e, &locations::mounts()).map(|p| p.display().to_string())
             .ok_or_else(|| format!("{share} is connected, but {} isn't on it", e.path))
     }).await.map_err(|e| e.to_string())?
@@ -924,10 +975,14 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
 
 /// An offline location's share connected (the Sources banner's Connect): its clips show as soon as it's there
 #[tauri::command]
-async fn connect_location(shared: State<'_, Shared>, path: String) -> Result<(), String> {
+async fn connect_location(shared: State<'_, Shared>, path: String, host: Option<String>) -> Result<(), String> {
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        mount_share(&path)?;
+        // By the name chosen, else each of the NAS's names in turn
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let (h, _, _) = locations::network(&path).ok_or("Not on a share")?;
+        let names = match host { Some(n) => vec![n], None => host_names(&h, read_doc(&root).get("hosts")) };
+        mount_share(&path, &names)?;
         // Seen now, not at the next look
         if let Some(w) = shared.lock().unwrap().watch.as_ref() { w.reach_changed.store(true, std::sync::atomic::Ordering::Relaxed); }
         Ok(())
@@ -2401,10 +2456,22 @@ mod tests {
         // The same share mounted elsewhere now (another name for the NAS too): the project found there
         std::fs::create_dir_all(b.join("Trips/P")).unwrap();
         std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
-        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into() };
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new() };
         assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
         // Not mounted: offline
         assert_eq!(recent_here(&e, &[]), None);
+        // The NAS's names: as written first, then the project's others for it, each once as spelled
+        let hosts = json!({ "DISKSTATIONDXP": ["web.nas", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"], "OTHER": ["x"] });
+        assert_eq!(host_names("antonadmin@DISKSTATIONDXP._smb._tcp.local.", Some(&hosts)), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        assert_eq!(host_names("web.nas", Some(&hosts)), ["web.nas", "DISKSTATIONDXP", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"]);
+        assert_eq!(host_names("diskstationdxp", Some(&hosts)), ["diskstationdxp", "web.nas", "192.168.50.186", "DISKSTATIONDXP._smb._tcp.local"]);
+        assert_eq!(host_names("nas2", Some(&hosts)), ["nas2"]);
+        // …kept with a project on it, for when it's offline (its file, on the share, can't be read then)
+        std::fs::write(b.join("Trips/P").join(PROJECT_FILE), json!({ "hosts": hosts }).to_string()).unwrap();
+        let names = other_names(&b.join("Trips/P"), Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd"));
+        assert_eq!(names, ["DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        let e = RecentEntry { share: Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd".into()), hosts: names, ..e };
+        assert_eq!(recent_names(&e), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
         let _ = std::fs::remove_dir_all(&base);
     }
 

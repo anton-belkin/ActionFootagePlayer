@@ -388,6 +388,8 @@ fn has_gyroflow(file: &Path) -> bool {
 fn footage(root: &Path, flat_previews: bool) -> Value {
     let mounts = crate::locations::mounts();
     let locs = crate::locations::locations(root, &mounts);
+    // The NAS's other names (Project settings): an offline location's Connect offers each
+    let hosts = read_json(&root.join(crate::locations::PROJECT_FILE)).and_then(|d| d.get("hosts").cloned()).unwrap_or(Value::Null);
     let (linked, clips_dirs) = previews(root);
     let mut dirs: Vec<String> = Vec::new();
     let mut seen_dirs: HashSet<String> = HashSet::new();
@@ -490,7 +492,8 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
     }
     let locs_json: Vec<Value> = locs.iter().enumerate().map(|(i, l)| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
                                                              "copies": l.copies, "local": l.local, "dirs": loc_dirs[i], "offline": offline[i],
-                                                             "connect": offline[i] && cfg!(target_os = "macos") && crate::locations::network(&l.path).is_some() })).collect();
+                                                             "connect": offline[i] && cfg!(target_os = "macos") && crate::locations::network(&l.path).is_some(),
+                                                             "names": if offline[i] { crate::locations::network(&l.path).map(|(h, _, _)| crate::host_names(&h, Some(&hosts))).unwrap_or_default() } else { Vec::new() } })).collect();
     json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
 }
 

@@ -108,6 +108,10 @@ Project "Footage", its folder //DISKSTATIONDXP/ssd/Projects/Footage
   each is on (recent.json: its path, the share as mount names it, and where in it), so one whose share isn't mounted
   still shows in the list, marked Offline, with **Connect** (mounts the share, then opens the project: from where the
   share is mounted now, /Volumes/ssd-1 too). × takes a project off the list (a test one, one moved away).
+- **A NAS with several names** (Project settings → The NAS's other names: `DISKSTATIONDXP = web.nas,
+  192.168.50.186`): Connect tries each in turn, the one the share is written with (or was mounted by) first, keeping
+  the user it was mounted as; its ▾ lists them to connect by one. A project on the share keeps its NAS's names in the
+  list of projects opened before (its file can't be read while the share is offline).
 
 ### Where a location is
 

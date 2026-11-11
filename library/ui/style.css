@@ -247,6 +247,13 @@ button.chip{cursor:pointer}
 .rrow .btn.sm:hover{background:var(--hover)}
 .rrow .rx:hover{color:var(--fg);background:var(--hover)}
 .rrow.off .nm{color:var(--fg2)}
+.split{position:relative;display:inline-flex;vertical-align:middle}
+.split>.btn.sm:first-child:not(:last-child){border-top-right-radius:0;border-bottom-right-radius:0}
+.split .btn.caret{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0;padding:4px 6px;min-width:0}
+.cvia{position:absolute;top:calc(100% + 4px);right:0;z-index:8;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:6px;display:flex;flex-direction:column}
+.cvia .sub{padding:4px 10px 2px}
+.cvia button{border:0;background:transparent;text-align:left;padding:7px 10px;border-radius:6px;color:var(--fg);font-family:var(--mono,ui-monospace,monospace);font-size:12px}
+.cvia button:hover{background:var(--hover)}
 .fold.mosaic{display:grid}
 .indexing{padding:0 14px 6px;font-size:12px;color:var(--muted)}
 .err{color:var(--wa)}
