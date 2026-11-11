@@ -27,7 +27,7 @@ It changes the Library's views and adds one kind of object, the photo. The rules
 
 | Object | What it is | Its file | Where it lives |
 |---|---|---|---|
-| **Original** | the camera's recording | the clip itself, plus its own file `<clip>.afp.json` | Originals (the locations, as on disk) |
+| **Original** | the camera's recording: a clip, or a photo (below) | the file itself, plus its own `<file>.afp.json` | Originals (the locations, as on disk) |
 | **Mark** | a time in a clip: a camera highlight or `M` | none: a line in `<clip>.afp.json` | inside its clip |
 | **Clip in an album** | the whole clip, placed in an album | a link file (what a clip preview is today) | an album |
 | **Moment** | a range of a clip | a link MP4 (150–350 KB, one frame + the link) | an album |
@@ -95,6 +95,56 @@ Photos already carry this link today. Tags go into `dc:subject`. Finder and Quic
 
 **Photos made before this** (full HEIC or JPEG with `afp:link`) are photo objects whose render is the file itself.
 Nothing breaks.
+
+## Photos as originals
+
+Cameras shoot photos too: Action 6 and GoPro JPEG, GoPro GPR raw, drone DNG, Insta360 `.insp` (360°), plus phone
+photos in the same folders. Today the Library lists only videos, so photo originals are invisible to it.
+
+**The intention:** a photo original is a full object of the library, like a clip. It lies in Originals, is never
+changed, and gets the same treatment our video flows already give footage:
+- development and HDR;
+- the lens and the water corrected;
+- tags, albums and Share.
+
+**Nothing of this is planned for now.** This section records the intention and the order the work would go in.
+
+### Stages
+
+1. **Seen and organized.**
+   - **Where they show:** JPEG, HEIC and RAW in Originals, with thumbnails. RAW shows its embedded preview.
+   - **Organizing:** a photo original goes into albums by a link, as a clip does. It takes tags and Accept/Reject, by
+     the same rules (Finder xattr allowed, the bytes never touched).
+   - **Timeline and map:** filled from EXIF `DateTimeOriginal` and EXIF GPS. Photos with GPS can also suggest the
+     place of clips shot near them, like #188, but from the library itself.
+   - **Share:** the file as it is, or a JPEG for Android and the web.
+2. **Lens and water.** Our clips' lenses are known, and so are the cameras that shot the photos (EXIF make, model and
+   mode). The same corrections apply:
+   - **The lens:** distortion corrected from the Gyroflow lens profile of the camera's photo mode. *(Open: the photo
+     modes need their own profiles; the database is mostly video modes.)*
+   - **Under water:** the refraction correction, as the player does for video.
+   - **Colour fringes:** the chromatic aberration of the housing's port under water, taken out as `Ctrl+a` does for
+     video (#73).
+   - **Why it matters:** nobody else does this for divers' photos. Lightroom corrects lens profiles but knows nothing of
+     the water; the makers' apps do nothing.
+   - **As renders:** the result is a photo render (HEIC with a gain map, JPEG), cached like any other.
+3. **RAW to HDR.** DNG and GPR developed (LibRaw, or the system's RAW engine on a Mac) into our looks, ending in an HDR
+   HEIC with a gain map. It's the same idea as log→HDR for video: the picture right as soon as you browse, with
+   nothing to set up.
+4. **360° photos** (`.insp`): look around in the 360 view and save a view as a flat photo, as for 360 clips.
+5. **Noise.**
+   - **What works:** our clean still frame is temporal (5 frames on each side). A single photo has no neighbours, so
+     only spatial denoise applies, which is weaker. Bursts are the exception: there the neighbours exist.
+   - **Promise:** nothing about noise until it's measured.
+
+### What it needs from the files
+
+- **Identity:** a link to a photo original finds it by size, EXIF `DateTimeOriginal` (in place of the video's `created`)
+  and fingerprint.
+- **Its own file:** settings such as a lens choice, the water and tags live in `<photo>.afp.json` beside it, like a
+  clip's.
+- **Where it's viewed:** the player (mpv) shows images, but probably not HDR with a gain map. Quick Look from the
+  Library may be the first viewer. *(Open.)*
 
 ## Share replaces export
 
@@ -290,3 +340,7 @@ Three places are possible, each with a reason:
    - Shared in the project plus local per computer, as proposed, or local only?
    - Copy shared renders to a laptop's cache?
 9. **A `Light` profile** for messengers, or `SDR` alone.
+10. **Photo originals:**
+    - lens profiles for the cameras' photo modes;
+    - the first viewer (Quick Look or the player);
+    - LibRaw or the system's RAW engine.
