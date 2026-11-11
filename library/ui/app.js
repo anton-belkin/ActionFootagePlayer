@@ -1066,10 +1066,14 @@ function askLensTypes(paths) {
 // when its Info shows: the profile's name, "From the file", or "Unknown (<type>, mode N)" / "Unknown (mode N)" where
 // nothing fits, with the camera's own number for its mode
 const LENS_INFO = {};
-function lensInfoText(path) {
+function lensInfoText(path, project) {
+  // Asked again once a Gyroflow project is beside it (one saved in Gyroflow after the answer: it has no project's lens)
+  const r0 = LENS_INFO[path];
+  if (project && r0 && !r0.project && !r0.withProject) delete LENS_INFO[path];
   if (!(path in LENS_INFO)) {
     LENS_INFO[path] = null;
-    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = r || {}; }, () => { LENS_INFO[path] = {}; }).finally(() => { if (S.tab === "info") renderSide(); });
+    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = Object.assign(r || {}, { withProject: !!project }); }, () => { LENS_INFO[path] = { withProject: !!project }; })
+      .finally(() => { if (S.tab === "info") renderSide(); });
   }
   const r = LENS_INFO[path];
   if (r === null) return "Reading…";
@@ -1717,7 +1721,7 @@ function itemInfo(it) {
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
-    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path)], ["In its Gyroflow project", projectLensHtml(it), false, true],
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path, it.gyroflow)], ["In its Gyroflow project", projectLensHtml(it), false, true],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
       ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
