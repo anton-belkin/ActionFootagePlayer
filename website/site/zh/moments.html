@@ -180,7 +180,7 @@
           <p>拍摄时关了防抖？播放时片段画面依然稳定，依据的是相机记录下的运动数据，边看边处理。</p>
         </li>
         <li>
-          <h3>你的标记，就在进度条上</h3>
+          <h3>你的标记，就在视频下方</h3>
           <p>你用相机按键标记的精彩时刻都在上面，按一个键就跳到下一个。</p>
         </li>
       </ul>
@@ -201,17 +201,16 @@
             <p>看到了按键漏掉的画面？<kbd>M</kbd> 在当前位置加一个标记。在标记上再按 <kbd>M</kbd> 则删除它。</p>
           </div>
           <div>
-            <h3>放到一边，或设为收藏 <span class="soon"><kbd>K</kbd> 即将推出</span></h3>
-            <p class="os-mac"><kbd>X</kbd> 把片段标为没意思，放到一边。<kbd>K</kbd> 把它设为收藏，在访达里带上绿色的 Favorite 标签。</p>
-            <p class="os-win"><kbd>X</kbd> 把片段标为没意思，放到一边。<kbd>K</kbd> 把它设为收藏，在文件资源管理器里给它 5 星评分（4 星及以上评分都算收藏）。</p>
+            <h3>放到一边，或加标签</h3>
+            <p><kbd>X</kbd> 把片段标为没意思，放到一边。在 Action Footage Library 中，给片段和精彩瞬间加上词语，比如<i>最佳</i>或<i>给家人</i>，再用它的筛选把它们找回来。</p>
           </div>
           <div>
             <h3>整个旅程一目了然</h3>
-            <p><a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 是随播放器附带的一个小应用，它会在 <code>_Clips</code> 文件夹里为每个片段生成一本彩色的翻页小书，而不是一墙灰色缩略图。从侧边面板的 Project 标签页打开它。</p>
+            <p><a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 是随播放器附带的应用，它给你所有旅行的每个片段都配上缩略图，并按相机、地点或标签找到它们。它会在 <code>_Clips</code> 文件夹里为每个片段生成一本彩色的翻页小书，而不是一墙灰色缩略图。从侧边面板的 Project 标签页打开它。</p>
           </div>
           <div>
             <h3>无需维护素材库</h3>
-            <p>建子文件夹来整理你的精彩瞬间，怎么分由你决定。删掉一个文件，那个瞬间也就没了。</p>
+            <p>建文件夹来整理你的精彩瞬间，怎么分由你决定，而且每个精彩瞬间仍然能找到它的片段，即使你移动了素材。删掉一个文件，那个瞬间也就没了。</p>
           </div>
         </div>
       </div>
@@ -222,14 +221,18 @@
               <li><span class="dir">第1天</span><span class="c">素材，每个片段旁边是你的标记</span></li>
               <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>山顶山脊.afplink.mp4</li>
-                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">一个你没有命名的精彩瞬间</span></li>
-                  <li><span class="dir">自行车公园</span><span class="c">你自己建的子文件夹</span></li>
+                  <li><span class="dir">Generated</span><span class="c">新的精彩瞬间放在这里</span>
+                    <ul>
+                      <li>山顶山脊.afplink.mp4</li>
+                      <li>2026-07-14 16.02.11.afplink.mp4<span class="c">一个你没有命名的精彩瞬间</span></li>
+                    </ul>
+                  </li>
+                  <li><span class="dir">自行车公园</span><span class="c">你自己建的文件夹</span></li>
                 </ul>
               </li>
               <li><span class="dir">_Clips</span><span class="c">每个片段一个彩色翻页预览</span></li>
               <li><span class="dir">_Exports</span><span class="c">你导出的文件</span></li>
-              <li>Project.afproject<span class="c">项目文件：双击它，就在 Action Footage Library 中打开这次旅行</span></li>
+              <li>Project.afproject<span class="c">项目文件：素材在哪里。双击它，就在 Action Footage Library 中打开这次旅行</span></li>
             </ul>
           </li>
         </ul>
@@ -274,8 +277,8 @@
           <figcaption>拍摄时关闭了相机防抖：录制时在抖，播放时稳定。</figcaption>
         </figure>
         <figure class="media">
-          <img src="../media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="播放器暂停在一个片段上，侧边面板已打开，进度条上的两道刻度是相机记录的精彩时刻标记。">
-          <figcaption>进度条上相机记录的精彩时刻标记。</figcaption>
+          <img src="../media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="播放器暂停在一段沉船潜水画面上，侧边面板打开在 Project 标签页，视频下方的导航栏上，相机的精彩时刻标记显示为琥珀色的菱形。">
+          <figcaption>视频下方导航栏上相机记录的精彩时刻标记。</figcaption>
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
@@ -332,8 +335,8 @@
           <div class="a"><p>只有你要求时才会。要把片段中拍坏的一段剪掉（<kbd>Ctrl</kbd>+<kbd>x</kbd>），播放器会重写这个片段、去掉那一段，不做任何重新编码，原始文件则移到废纸篓。除此之外，你的原始文件都保持原样：精彩瞬间、片段预览和导出的文件都是独立的新文件，你的标记则是片段旁边的一个小文件。</p></div>
         </details>
         <details>
-          <summary>我的精彩瞬间存在哪里？写保护的存储卡上呢？</summary>
-          <div class="a"><p><code>_Moments</code>、<code>_Clips</code> 和 <code>_Exports</code> 文件夹放在项目文件夹里，也就是这次旅行的文件夹，你只需在侧边面板的 Project 标签页里选一次（<i>Initialize the project here</i>）。它可以是片段所在的文件夹，也可以是它的上一级文件夹。如果是写保护的存储卡或只读的共享文件夹，播放器会先询问一个名字，再把它们放在“文稿”（Documents）里它自己的文件夹中。 <span class="soon">即将推出</span></p></div>
+          <summary>我的精彩瞬间存在哪里？</summary>
+          <div class="a"><p><code>_Moments</code>、<code>_Clips</code> 和 <code>_Exports</code> 文件夹放在项目文件夹里，也就是这次旅行的文件夹，你只需在侧边面板的 Project 标签页里选一次（<i>Initialize the project here</i>）。它可以是片段所在的文件夹，也可以是它的上一级文件夹；其他硬盘或 NAS 上的素材，可以在 Action Footage Library 中加进来。写保护的存储卡：先把它拷到你的硬盘或 NAS 上。</p></div>
         </details>
         <details>
           <summary>Mac 还是 Windows？</summary>

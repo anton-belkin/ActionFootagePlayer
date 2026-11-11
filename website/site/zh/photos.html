@@ -179,7 +179,7 @@
       <ol class="steps">
         <li>
           <h3>停在那一刻</h3>
-          <p>片刻之后，暂停的帧会在屏幕上被净化。这默认开启；<kbd>Ctrl</kbd>+<kbd>p</kbd> 关闭它，再按一次重新开启。</p>
+          <p>屏幕上的这一帧已经去掉了传感器的噪点：播放器在片段播放时就在做这件事。这默认开启；<kbd>Ctrl</kbd>+<kbd>p</kbd> 关闭它，再按一次重新开启。</p>
         </li>
         <li>
           <h3>以全尺寸查看</h3>
@@ -204,9 +204,9 @@
       <div class="stack">
         <p class="eyebrow">静帧净化</p>
         <h2>一帧画面，由十一帧重建。</h2>
-        <p>单个视频帧比照片噪点更多，光线越暗越明显：深水中、黄昏时、室内。那些颗粒来自相机的传感器。所以你暂停时，播放器会稍等片刻（0.4&nbsp;秒），然后用时域降噪净化这一帧：用暂停的帧本身及其前后各 5 帧重建它。</p>
-        <p>每一帧先按它们之间的运动，对齐到暂停的那一帧上，然后合并起来。传感器的噪点在每一帧中都不同，所以大多被平均掉了。珊瑚礁、脚蹼和人脸在每一帧中都一样，所以细节得以保留。屏幕上的提示是 <i>Cleaning up the frame…</i>（正在净化画面…），4K 大约需要一秒。</p>
-        <p>这需要片段已经防抖：正是防抖知道相机在帧与帧之间怎样运动。它在侧边面板中叫 <b>Temporal denoise</b>（时域降噪），会对后面的片段保持开启，直到你关闭它。</p>
+        <p>单个视频帧比照片噪点更多，光线越暗越明显：深水中、黄昏时、室内。那些颗粒来自相机的传感器。所以播放器用时域降噪净化画面，片段播放时和你暂停时都会：用每一帧本身及其前后各 5 帧重建它。</p>
+        <p>每一帧先按它们之间的运动，对齐到暂停的那一帧上，然后合并起来。传感器的噪点在每一帧中都不同，所以大多被平均掉了。珊瑚礁、脚蹼和人脸在每一帧中都一样，所以细节得以保留。播放时，画面会比平常晚几帧显示，声音会等它。</p>
+        <p>这需要片段已经防抖：正是防抖知道相机在帧与帧之间怎样运动。它就是侧边面板 Transform 标签页中的 <b>Temporal denoise</b>（时域降噪），默认开启，与片段的设置保存在一起；<b>Stronger, for a very noisy clip</b>（更强，用于噪点很多的片段）会纳入更多帧。Performance &amp; Quality 决定这台电脑做多少：<b>Full</b>（完整）、<b>Light</b>（轻度，前后各 3 帧）或 <b>Off</b>（关闭）。不会往你的文件里写入任何东西：导出的文件按录制原样播放，你保存的照片会被净化。</p>
         <h3 class="ph-h3">全尺寸的暂停帧</h3>
         <p>为了流畅播放，播放器显示的视频可能比录制时小（侧边面板 Performance &amp; Quality 部分中的播放尺寸和帧率设置）。这时暂停的帧显示的细节就比文件中少。<kbd>Ctrl</kbd>+<kbd>f</kbd> 以视频本身的分辨率重新渲染暂停的帧，只做一次，并在同一次处理中净化它。想在每次暂停后都这样，就在侧边面板中把 <b>Paused frame</b> 设为 <b>Full size</b>。</p>
         <p class="honest">这只是用来看的。保存的照片总是从文件以全分辨率渲染，不管有没有按 <kbd>Ctrl</kbd>+<kbd>f</kbd>。</p>
@@ -399,7 +399,7 @@
               <thead><tr><th scope="col">设置</th><th scope="col">作用</th><th scope="col">默认</th></tr></thead>
               <tbody>
                 <tr><th scope="row">Paused frame</th><td><b>As it played</b>：以播放尺寸显示暂停的帧。<b>Full size</b>：每次暂停片刻后，以视频本身的尺寸重新渲染（<kbd>Ctrl</kbd>+<kbd>f</kbd> 只做一次）。</td><td>As it played</td></tr>
-                <tr><th scope="row">Temporal denoise <span class="cam-sub"><kbd>Ctrl</kbd>+<kbd>p</kbd></span></th><td>用暂停的帧及其前后各 5 帧重建画面，用于屏幕显示和你保存的照片。</td><td>开启</td></tr>
+                <tr><th scope="row">Temporal denoise</th><td><b>Full</b>：播放时和暂停时，每一帧都用它前后各 5 帧重建。<b>Light</b>：3 帧，对显卡的负担更轻。<b>Off</b>：这台电脑上不做，不管 Transform 标签页的开关（<kbd>Ctrl</kbd>+<kbd>p</kbd>）怎么设。无论哪种，你保存的照片都会被净化。</td><td>Full</td></tr>
               </tbody>
             </table>
           </div>
@@ -411,7 +411,7 @@
             <figcaption>Save frame 部分，在 Mac 上。</figcaption>
           </figure>
           <figure class="media" id="shot-photos-5">
-            <img src="../media/photos-5.jpg" alt="侧边面板中的 Performance &amp; Quality：Paused frame（As it played 或 Full size），以及开启的 Temporal denoise 开关，附带说明文字。" width="570" height="400" loading="lazy">
+            <img src="../media/photos-5.jpg" alt="侧边面板中的 Performance &amp; Quality：Paused frame（As it played 或 Full size）；Temporal denoise（Off、Light 或 Full，这里是 Light）；附带说明文字。" width="584" height="485" loading="lazy">
             <figcaption>Performance &amp; Quality 中的 Paused frame 和 Temporal denoise。</figcaption>
           </figure>
         </div>
@@ -427,7 +427,7 @@
         <h2>本页的所有按键。</h2>
       </div>
       <div class="keys">
-        <div class="key"><span>静帧净化，开或关</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>时域降噪，开或关</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
         <div class="key"><span>全尺寸显示暂停的帧，一次</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
         <div class="key"><span>Save frame，开或关</span><span><kbd>c</kbd></span></div>
         <div class="key"><span>下一个 / 上一个比例</span><span><kbd>a</kbd> / <kbd>Shift</kbd>+<kbd>a</kbd></span></div>

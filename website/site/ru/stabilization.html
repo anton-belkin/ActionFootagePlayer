@@ -209,6 +209,7 @@
           <div>
             <h3>Нет данных гироскопа? Не беда</h3>
             <p>В Gyroflow открывается само видео, и Gyroflow стабилизирует его оптически: находит движение в самом изображении (оптический поток). Панель показывает «Waiting for the project from Gyroflow…» (ждём проект из Gyroflow). Сохраните проект рядом с клипом, и клип снова загрузится с того же места, уже стабилизированным.</p>
+            <p>Много клипов сразу: <b>Stabilize optically</b> в <a class="text-link" href="organizing.html#optical">Action Footage Library</a> обрабатывает их один за другим в фоне.</p>
             <p class="os-win">В Windows, чтобы открыть видео без проекта, нужно указать путь к Gyroflow в <code>gyroflow_app=</code> в файле <code>gyroflow.conf</code>.</p>
           </div>
           <div>
@@ -269,10 +270,22 @@
             <dt>Water: Reduce color aberration <span class="st-def-val">по умолчанию вкл.</span> <kbd>Ctrl</kbd>+<kbd>a</kbd></dt>
             <dd>Уменьшение хроматической аберрации под водой. Под водой плоское стекло перед объективом разводит цвета к краям кадра. Эта настройка сводит их обратно там, где объектив под водой. На клипах с погружений на Osmo Action 6 красная кайма у края уменьшается с 3–7 px примерно до 1 px. Это часть преобразования, она сохраняется вместе с остальным. Только при воспроизведении: экспорт сохраняет кайму. Неактивна, когда в Source › <b>Under water, flat port</b> стоит No.</dd>
           </div>
+          <div>
+            <dt>Temporal denoise: Clean the noise <span class="st-def-val">по умолчанию вкл.</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
+            <dd>Временное шумоподавление: шум слабого света убирается во время воспроизведения и на паузе. Каждый кадр усредняется с кадрами с каждой стороны от него, и каждый из них сначала совмещается с ним по движению между ними, так что шум уходит, а детали остаются. Картинка показывается на несколько кадров позже, а звук её ждёт. <b>Stronger, for a very noisy clip</b> (сильнее, для очень шумного клипа; по умолчанию выкл.): берётся больше кадров, зерно не сохраняется, тёмные точки убираются, а ровные участки сглаживаются — открытая вода чистая, тонкая текстура мягче. Это часть преобразования, поэтому хранится для каждого клипа. В файлы ничего не записывается: экспорт воспроизводится как записано. Сколько его делает этот компьютер, задаётся в <a class="text-link" href="#quality">Performance &amp; Quality</a>.</dd>
+          </div>
+          <div>
+            <dt>Sideways jerks <kbd>Ctrl</kbd>+<kbd>j</kbd></dt>
+            <dd>Боковые рывки. Вблизи мелкое боковое дрожание руки трясёт картинку, как бы хорошо ни были убраны повороты камеры. <b>Measure for this clip</b> (измерить для этого клипа) один раз измеряет его — по акселерометру камеры и по изображению — и запоминает; с этого момента картинка во время воспроизведения сдвигается ему навстречу. На клипе с Osmo Action 6 измерение занимает примерно половину длительности клипа. Для стабилизированных клипов.</dd>
+          </div>
         </dl>
         <figure class="media" id="shot-stabilization-2">
           <img src="../media/stabilization-2.jpg" alt="Вкладка Transform боковой панели на клипе с погружения: Transform defined in this session, Stabilization On, Level Medium, Horizon Free, Lens Corrected и Linear, Frame Own и As is, Reduce color aberration включено." width="584" height="2019" loading="lazy">
           <figcaption>Клип с погружения с настройками по умолчанию, выровненный по данным гироскопа.</figcaption>
+        </figure>
+        <figure class="media" id="shot-stabilization-7">
+          <img src="../media/stabilization-7.jpg" alt="Нижняя часть вкладки Transform: Water с включённым Reduce color aberration; Temporal denoise с включённым Clean the noise и выключенным Stronger, for a very noisy clip, у каждого подпись; Sideways jerks с кнопкой Measure for this clip." width="584" height="875" loading="lazy">
+          <figcaption>Ниже на вкладке Transform: вода, временное шумоподавление и боковые рывки.</figcaption>
         </figure>
       </div>
 
@@ -312,7 +325,8 @@
             <tr><th scope="row">Level, Horizon, Frame, проекция</th><td>Часть преобразования, как выше.</td><td>Из проекта, показаны в <b>In the Gyroflow project</b>.</td></tr>
             <tr><th scope="row">Lens, хроматическая аберрация</th><td colspan="2">Часть преобразования. С проектом Lens в положении As recorded — только для просмотра.</td></tr>
             <tr><th scope="row">Recorded turned, Under water</th><td>Вход источника: сохраняется кнопкой <b>Save to the source</b>, для клипа и его моментов. На следующий клип не переносится.</td><td>Из проекта.</td></tr>
-            <tr><th scope="row">Края, временное шумоподавление</th><td colspan="2">Это функции самого плеера, а не Gyroflow: они сохраняются для всех клипов.</td></tr>
+            <tr><th scope="row">Временное шумоподавление, боковые рывки</th><td colspan="2">Часть преобразования, хранится для каждого клипа; это функции самого плеера, а не Gyroflow.</td></tr>
+            <tr><th scope="row">Края</th><td colspan="2">Это функция самого плеера, а не Gyroflow: она сохраняется для всех клипов.</td></tr>
             <tr><th scope="row">Выбор в Performance &amp; Quality</th><td colspan="2">Запоминается для этого компьютера сразу, как только вы его сделали.</td></tr>
           </tbody>
         </table>
@@ -374,16 +388,16 @@
           <dd><b>Every frame</b> (каждый кадр), <b>30 fps</b> или <b>15 fps</b>: как часто рендерится выровненный кадр. Клип с более высокой частотой играет с этой частотой.</dd>
         </div>
         <div>
-          <dt>Size <span class="st-def-val">по умолчанию Display</span></dt>
-          <dd><b>Video</b>: собственный размер видео. <b>Display</b>: не больше, чем его показывает экран. <b>1080p</b> или <b>720p</b>: не больше этого.</dd>
+          <dt>Size <span class="st-def-val">по умолчанию Auto</span></dt>
+          <dd><b>Auto</b>: размер экрана, но не больше 1080p, пока включено временное шумоподавление. <b>Screen</b>: не больше, чем его показывает экран. <b>1080p</b> или <b>720p</b>: не больше этого. <b>Video</b>: собственный размер видео.</dd>
         </div>
         <div>
           <dt>Paused frame <span class="st-def-val">по умолчанию As it played</span> <kbd>Ctrl</kbd>+<kbd>f</kbd></dt>
           <dd>Кадр на паузе. <b>Full size</b> (полный размер): через мгновение после паузы кадр рендерится заново в собственном размере видео. <kbd>Ctrl</kbd>+<kbd>f</kbd> делает это один раз. Подробнее — на странице <a class="text-link" href="photos.html">Фото</a>.</dd>
         </div>
         <div>
-          <dt>Temporal denoise <span class="st-def-val">по умолчанию вкл.</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
-          <dd>Временное шумоподавление: кадр на паузе собирается заново из 5 кадров с каждой стороны от него, так что шум сенсора при слабом свете в основном уходит. Нужна включённая стабилизация. Подробнее — на странице <a class="text-link" href="photos.html">Фото</a>.</dd>
+          <dt>Temporal denoise <span class="st-def-val">по умолчанию Full</span></dt>
+          <dd>Временное шумоподавление. <b>Full</b>: по 5 кадров с каждой стороны. <b>Light</b>: по 3, на четверть легче для видеочипа и чуть менее чисто. <b>Off</b>: на этом компьютере не делается вовсе, что бы ни показывал переключатель на вкладке Transform. Экспорт и фото остаются как есть. Подробнее — на странице <a class="text-link" href="photos.html#clean">Фото</a>.</dd>
         </div>
         <div>
           <dt>Edges <span class="st-def-val">по умолчанию Trail by direction</span> <kbd>Ctrl</kbd>+<kbd>b</kbd></dt>
@@ -534,7 +548,8 @@
         <div class="key"><span>Чем заполнять края</span><span><kbd>Ctrl</kbd>+<kbd>b</kbd></span></div>
         <div class="key"><span>Открыть в Gyroflow</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
         <div class="key"><span>Кадр на паузе в полном размере, один раз</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
-        <div class="key"><span>Временное шумоподавление на паузе: вкл. или выкл.</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Временное шумоподавление: вкл. или выкл.</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Боковые рывки: измерить, затем вкл. или выкл.</span><span><kbd>Ctrl</kbd>+<kbd>j</kbd></span></div>
         <div class="key"><span>Экспорт так, как играет</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
         <div class="key"><span>Скрыть или показать панель</span><span><kbd>Tab</kbd></span></div>
       </div>
@@ -549,7 +564,7 @@
         <h2>Чего он не делает.</h2>
       </div>
       <ul class="st-limits">
-        <li><b>Нет данных гироскопа? Gyroflow стабилизирует клип оптически.</b> В клипе DJI, снятом с включённым EIS или с FOV, отличным от Wide, их может не быть. <kbd>Ctrl</kbd>+<kbd>e</kbd> открывает его в Gyroflow; сохраните там проект, и здесь клип будет играть ровно.</li>
+        <li><b>Нет данных гироскопа? Gyroflow стабилизирует клип оптически.</b> В клипе DJI, снятом с включённым EIS или с FOV, отличным от Wide, их может не быть. <kbd>Ctrl</kbd>+<kbd>e</kbd> открывает его в Gyroflow; сохраните там проект, и здесь клип будет играть ровно. Для многих клипов — <a class="text-link" href="organizing.html#optical">Stabilize optically</a> в Action Footage Library.</li>
         <li><b>Включённая стабилизация камеры означает «как записано»,</b> в том числе HyperSmooth у GoPro и FlowState у Insta360, хотя эти камеры записывают данные гироскопа в любом случае.</li>
         <li><b>Вкладка Transform пишет «No motion data in this clip» для любого клипа, который не стабилизирует,</b> в том числе для клипа GoPro с включённым HyperSmooth, в котором данные гироскопа есть. Тогда Gyroflow может использовать эти данные вместо оптического потока.</li>
         <li><b>Проверено на двух камерах:</b> Osmo Action 6 и GoPro HERO12 Black. Для клипов GoPro и Insta360 нужно, чтобы их объектив был в базе объективов Gyroflow.</li>

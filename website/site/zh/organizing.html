@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>整理你的素材 · Action Footage Player</title>
-<meta name="description" content="把一次旅行中最好的片段留成精彩瞬间，在访达或文件资源管理器中就能看到；标记片段，把无聊的放到一边，导出到同一个文件夹，剪掉不小心拍下的一分钟，再把这一切带进 Final Cut Pro、DaVinci Resolve 或 Premiere Pro。全都是旅行文件夹里的普通文件。">
+<meta name="description" content="你的素材自成一个项目，在这台电脑上或 NAS 上：精彩瞬间、标记、片段预览、照片和导出的文件，都是放在它旁边的普通文件；Action Footage Library 用来浏览、筛选和处理这一切：位置、并入项目、检查、标签、渲染、每个片段的录制地点、每个片段的缩略图，以及为没有运动数据的片段做光学防抖。">
 <link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/organizing">
 <link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/organizing">
 <link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/organizing">
@@ -104,13 +104,8 @@
     <div class="wrap">
       <div class="hero-text">
         <p class="eyebrow">整理素材</p>
-        <h1>整理你的素材，用的就是普通文件。</h1>
-        <p class="lede">把一次旅行中最好的部分留成精彩瞬间，标出重要的地方，把无聊的片段放到一边，导出到同一个文件夹。到了正式剪辑的时候，Final Cut Pro、DaVinci Resolve 或 Premiere Pro 都能拿到这一切，落在你的原始片段上。</p>
-        <ul class="lib-gets">
-          <li><strong>无需导入。</strong>一切都是旅行文件夹里的文件，<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>像显示其他文件一样显示它们。</li>
-          <li><strong>观看从不等于保存。</strong>打开、观看片段不会写入任何东西。只有你为此按下按键或按钮，或者打开 <strong>Auto save</strong>（自动保存）时，播放器才会写入。</li>
-          <li><strong>没有隐藏文件。</strong>播放器生成的每个文件，你都能看到、移动和删除。</li>
-        </ul>
+        <h1>你的素材自成一个项目，不管它放在哪里。</h1>
+        <p class="lede">把一次旅行中最好的部分留成精彩瞬间，标出重要的地方，并按相机、地点或标签找到任何片段，无论它在这台电脑上还是在你的 NAS 上。随播放器附带的应用 Action Footage Library 能看到全部素材，并在你观看的同时在后台处理它们。</p>
         <div class="btns" data-os-swap>
           <a class="btn primary dl-mac" href="download.html#mac">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -121,40 +116,70 @@
             <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
           </a>
         </div>
+        <ul class="lib-gets">
+          <li><strong>无需导入。</strong>你的素材留在它原来的文件夹里。精彩瞬间、预览、照片和导出的文件就放在它旁边，<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>像显示其他文件一样显示它们。</li>
+          <li><strong>它跟着素材走。</strong>每个文件都按片段本身是什么来认出它，而不只是按它原来在哪里。移动、复制或重命名文件夹，一切仍然链接在一起。</li>
+          <li><strong>观看从不等于保存。</strong>打开、观看片段不会往里面写入任何东西。只有你为此按下按键或按钮时，播放器才会写入。</li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- The folder -->
-  <section class="section band" id="folder">
+  <!-- How it works: a project -->
+  <section class="section band" id="project">
     <div class="wrap lib-two">
       <div class="stack">
-        <p class="eyebrow">旅行文件夹</p>
-        <h2>一次旅行，一个文件夹。所有内容都看得见。</h2>
-        <p class="lede">这是用播放器度过一个晚上之后的旅行文件夹。播放器自己的文件夹以下划线开头，所以排在最前面，在你的素材上方。它唯一的文件 <code>Project.afproject</code> 没有下划线，所以按名称排在你的各天文件夹之间。</p>
+        <p class="eyebrow">项目</p>
+        <h2>素材在哪里，你做出的东西放到哪里。</h2>
+        <p class="lede">项目说明两件事。一是你的原始片段在哪里：任意文件夹，在这台电脑上或 NAS 上。二是你用它们做出的东西放在哪里：精彩瞬间在 <code>_Moments</code>，片段预览在 <code>_Clips</code>，导出的文件在 <code>_Exports</code>，照片在 <code>_Stills</code>。</p>
+        <p>它的文件 <code>Project.afproject</code> 只保存这些：素材所在的文件夹，称为它的<strong>位置</strong>（locations）。其他一切都在文件本身里。精彩瞬间里带着它的片段的身份，照片也一样；片段的标记和保存的画面设置，在片段旁边的一个小文件里。所以项目跟着素材走：把整个文件夹，连同素材和项目一起，复制到另一块硬盘或 NAS 上，一切照常运作。</p>
+        <p>每次旅行一个项目，或者所有素材一个项目：两种都行。原始文件从不被改动，它们可以留在相机 Wi-Fi 上传或你的 NAS 放它们的地方。</p>
+        <h3>创建项目</h3>
+        <p>播放器从不自行创建项目。你第一次保存精彩瞬间或导出时，侧边面板会打开到 <strong>Project</strong>（项目）标签页，显示 <strong>No project yet</strong>（还没有项目）。从列表中选择文件夹，列表从片段所在的文件夹一直到磁盘的最上层，然后按 <strong>Initialize the project here</strong>（在此初始化项目）。其中的每个文件夹都属于这个项目，更多位置可以在 Library 中添加。双击 <code>Project.afproject</code>，就在 <a class="text-link" href="#library-app">Action Footage Library</a> 中打开它。</p>
+        <p>项目自己的文件可以和素材分开存放，比如放在快速的 SSD 上，而片段留在 NAS 的大硬盘上：Library 的 <strong>Move the project</strong>（移动项目）会把 <code>Project.afproject</code> 和项目的文件夹搬到那里，原来的文件夹则成为一个位置。</p>
+        <p class="honest">标记不需要项目：它们反正都保存在片段旁边。</p>
+      </div>
+      <figure class="media lib-tall" id="shot-library-6">
+        <img src="../media/library-6.jpg" alt="侧边面板的 Project 标签页：项目 Action Footage Library，38 moments，Open in Action Footage Library 和 Show all moments in Finder；这个片段的标记：Mark 1 和两个 DJI quick switch；它的两个精彩瞬间、Make this clip's preview，以及 Selected part 和 Mark start。" width="584" height="1340" loading="lazy">
+        <figcaption>播放器的 Project 标签页：先是项目，然后是这个片段的标记和精彩瞬间。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- The folder -->
+  <section class="section band tight-top" id="folder">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">文件</p>
+        <h2>一切都是你看得见的文件。</h2>
+        <p class="lede">经过几次旅行之后的一个项目：它自己的文件夹在 SSD 上，素材在 NAS 上。项目的文件夹以下划线开头，所以排在最前面。</p>
         <p>右边的大小说明了一切：原始文件和导出的文件很大，精彩瞬间和片段的翻页预览很小。留几百个也没关系，复制到哪里都行。</p>
-        <p>删掉一个精彩瞬间的文件，这个精彩瞬间就没了。删掉一个片段的预览，这个片段就被放到一边。在 <code>_Moments</code> 里建子文件夹来整理精彩瞬间：它们由你安排，剪辑软件会把它们当作素材箱。</p>
+        <p>播放器和 Library 生成的东西，会放进对应类别文件夹里的 <code>Generated</code> 文件夹。从那里，你可以把它移到项目中的任何地方、重命名它、建你自己的文件夹：它仍然能被找到，因为每个文件里都带着它的链接。删掉一个精彩瞬间的文件，这个精彩瞬间就没了。</p>
+        <p>项目文件旁边是 <code>.afp</code>，也就是<a class="text-link" href="#catalog">共享目录</a>：Library 对这些文件所知道的信息，让它打开得很快。它可以删除：会根据文件重新建立。</p>
       </div>
       <div class="stack">
-      <ul class="lib-tree" aria-label="用播放器度过一个晚上之后的旅行文件夹">
-        <li><span class="dir">2026-10 Egypt</span><span class="c">你在其中创建项目的文件夹</span>
+      <ul class="lib-tree" aria-label="项目在 SSD 上的文件夹，以及它在 NAS 上的素材">
+        <li><span class="dir">Footage</span><span class="c">项目自己的文件夹，在 SSD 上</span>
           <ul>
+            <li><span class="sz">几 KB</span>Project.afproject<span class="c">项目本身：它的位置。双击它，就在 Action Footage Library 中打开项目</span></li>
+            <li><span class="dir">.afp</span><span class="c">共享目录，在项目旁边</span></li>
             <li><span class="dir">_Moments</span>
               <ul>
-                <li><span class="sz">0.3 MB</span>Turtle.afplink.mp4<span class="c">一个精彩瞬间：可看的一帧画面，里面有指向原始文件的链接</span></li>
-                <li><span class="sz">2 MB</span>Turtle.gyroflow<span class="c">它自己的 Gyroflow 项目，当片段有项目时</span></li>
-                <li><span class="dir">Reef</span><span class="c">你自己建的子文件夹</span>
-                  <ul><li><span class="sz">0.3 MB</span>Moray eel.afplink.mp4</li></ul>
+                <li><span class="dir">Generated</span><span class="c">新的精彩瞬间放在这里</span>
+                  <ul><li><span class="sz">0.3 MB</span>Turtle.afplink.mp4<span class="c">一个精彩瞬间：可看的一帧画面，里面有指向原始文件的链接</span></li></ul>
                 </li>
-                <li><span class="sz">0.3 MB</span>export_2026-10-22 15.28.52.afplink.mp4<span class="c">导出还不是精彩瞬间的一段时保存的</span></li>
+                <li><span class="dir">Egypt</span><span class="c">你自己建的文件夹</span>
+                  <ul>
+                    <li><span class="sz">0.3 MB</span>Moray eel.afplink.mp4</li>
+                    <li><span class="sz">2 MB</span>Moray eel.gyroflow<span class="c">它自己的 Gyroflow 项目，当片段有项目时</span></li>
+                  </ul>
+                </li>
               </ul>
             </li>
             <li><span class="dir">_Clips</span>
-              <ul>
-                <li><span class="dir">Day 1</span>
-                  <ul><li><span class="sz">0.4 MB</span>DJI_20261022152841_0068_D.afplink.mp4<span class="c">片段的彩色翻页预览</span></li></ul>
-                </li>
-              </ul>
+              <ul><li><span class="dir">Generated</span>
+                <ul><li><span class="sz">0.4 MB</span>DJI_20261022152841_0068_D.afplink.mp4<span class="c">片段的彩色翻页预览</span></li></ul>
+              </li></ul>
             </li>
             <li><span class="dir">_Exports</span>
               <ul><li><span class="sz big">115 MB</span>Turtle.mov<span class="c">以及 Turtle (SDR).mov、Turtle (Dolby Vision).mov</span></li></ul>
@@ -162,41 +187,202 @@
             <li><span class="dir">_Stills</span>
               <ul><li><span class="sz">3 MB</span>DJI_20261022152841_0068_D_8.00s.heic<span class="c">从片段中保存的照片，见<a class="text-link" href="photos.html">照片</a></span></li></ul>
             </li>
-            <li><span class="sz">几 KB</span>2026-10 Egypt (Final Cut Pro).fcpxml<span class="c">由 Marks for the editor 写入</span> <span class="soon">即将推出</span></li>
-            <li><span class="dir">Day 1</span><span class="c">你的素材</span>
+            <li><span class="dir">_Renders</span><span class="c">提前渲染好的精彩瞬间，在你要求时生成</span></li>
+          </ul>
+        </li>
+        <li><span class="dir">Archive</span><span class="c">一个位置：你的素材，在 NAS 上</span>
+          <ul>
+            <li><span class="sz">1 KB</span>Footage.afplocation<span class="c">让从<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>打开的片段找到它的项目</span></li>
+            <li><span class="dir">2026-10 Egypt</span>
               <ul>
                 <li><span class="sz big">500 MB</span>DJI_20261022152841_0068_D.MP4</li>
                 <li><span class="sz big">50 MB</span>DJI_20261022152841_0068_D.LRF<span class="c">相机生成的小代理文件</span></li>
-                <li><span class="sz">1 KB</span>DJI_20261022152841_0068_D.afp.json<span class="c">你的标记和片段保存的画面设置，在你改动标记或保存画面设置之后</span></li>
+                <li><span class="sz">1 KB</span>DJI_20261022152841_0068_D.afp.json<span class="c">片段自己的文件：你的标记、它保存的画面设置、它的地点和标签</span></li>
                 <li><span class="sz">2 MB</span>DJI_20261022152841_0068_D.gyroflow<span class="c">片段的 Gyroflow 项目，如果有的话</span></li>
               </ul>
             </li>
-            <li><span class="sz">几 KB</span>Project.afproject<span class="c">项目本身：双击它，就在 Action Footage Library 中打开这次旅行。里面有：你输入过的名称、哪些片段有预览、哪些标记有照片、项目的设置</span></li>
           </ul>
         </li>
       </ul>
-      <p class="note lib-tree-note">各文件的大致大小，来自我们的测试旅行：Osmo Action 6 拍摄的一段 45 秒 4K 片段，以及其中一个 10 秒的精彩瞬间，以 HDR 导出。</p>
+      <p class="note lib-tree-note">各文件的大致大小，来自我们的测试旅行：Osmo Action 6 拍摄的一段 45 秒 4K 片段，以及其中一个 10 秒的精彩瞬间，以 HDR 导出。一次旅行的项目也完全可以就是这次旅行自己的文件夹，素材就在里面。</p>
       </div>
     </div>
   </section>
 
-  <!-- How it works: a project -->
-  <section class="section band tight-top" id="project">
+  <!-- The whole library at once: Action Footage Library -->
+  <section class="section band dive" id="library-app">
+    <div class="wrap">
+      <div class="section-head kbd-dark">
+        <p class="eyebrow">Action Footage Library</p>
+        <h2>整个项目，在一个独立的应用里。</h2>
+        <p class="lede">对单个片段做的事，在播放器里完成。对许多片段做的事，在 Action Footage Library 里完成，它是随播放器附带的应用。它把项目按文件夹浏览，按片段本身的特点找到它们，并在后台一个接一个地执行你要求的任务，你可以同时继续观看。</p>
+      </div>
+      <!-- Shot pending (the Library window, Footage, a folder of a trip in the grid, Filters open, Commands on the right): media/library-window.jpg -->
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>浏览</h3>
+          <p>顶部有五个视图：<b>Originals</b>（原始文件），即各个位置在磁盘上的原样；<b>Footage</b>（素材），即按你在 <code>_Clips</code> 中整理预览的方式排列的片段；以及 <b>Moments</b>、<b>Photos</b> 和 <b>Exports</b>。双击打开文件夹，就像在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中一样，可以用图片网格或列表显示。片段会在播放器中打开。</p>
+        </div>
+        <div class="gap-item">
+          <h3>筛选和搜索</h3>
+          <p><b>Filters</b>（筛选）缩小你所在文件夹的范围：按相机、按色彩（Log、HDR 或 SDR）、按片段有没有运动数据或是否为 360°、按标记和精彩瞬间、标签、渲染，以及录制地点，每一项都显示有多少个匹配。在搜索框中输入，就会在下方列出所有匹配，或者在整个视图中搜索。</p>
+        </div>
+        <div class="gap-item">
+          <h3>对所选内容执行命令</h3>
+          <p>选择方式和<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>一样：单击、<kbd class="os-mac">⌘</kbd><kbd class="os-win">Ctrl</kbd>+单击、<kbd>Shift</kbd>+单击，选中文件夹就是选中其中的一切。右侧的 <b>Commands</b>（命令）只作用于所选内容，不涉及其他：片段预览、标记的精彩瞬间和照片、渲染、导出、<a class="text-link" href="#optical">Stabilize optically</a>、检查、标签、位置。</p>
+        </div>
+        <div class="gap-item">
+          <h3>任务和信息</h3>
+          <p><b>Tasks</b>（任务）列出正在运行和等待中的任务，每项都显示进度、正在处理的内容和 <b>Stop</b>（停止）；无法生成的内容会连同原因一起列出。<span class="os-mac">任务运行期间，Mac 不会进入睡眠。</span><b>Info</b>（信息）说明你选中的内容：片段的日期、时长、相机、<a class="text-link" href="#info">镜头配置文件</a>和地点，或者一个文件夹的汇总。</p>
+        </div>
+      </div>
+      <div class="lib-cols">
+        <p>打开方式：在播放器的 Project 标签页中点 <b>Open in Action Footage Library</b>，或者双击 <code>Project.afproject</code>。它不用自己的代码生成任何东西：每项任务都是在没有窗口的情况下运行播放器，所以一切产出都和播放器生成的完全一样。</p>
+        <p>在 <span class="os-mac">Mac 上，它在下载包里，就在播放器旁边</span><span class="os-win">Windows 上，它随播放器一起安装，在开始菜单中有自己的条目</span>。在 Linux 上，播放器目前一次处理一个片段，Library 正在路上。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Locations, take in, checks -->
+  <section class="section band" id="locations">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">位置</p>
+        <h2>素材分在几块硬盘上，仍是一个项目。</h2>
+        <p class="lede">相机上传到 NAS 上快速的收件文件夹，片段之后再移到归档，你要剪辑的那些在 SSD 上留一份副本。项目把它们看作一棵文件夹树。</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>位置</h3>
+          <p>在项目的设置中，<b>Locations</b>（位置）列出素材所在的文件夹，每个都放在项目的文件夹树中：放在最上层，或者作为其中的一个文件夹（比如把收件文件夹放成 <code>Action 6/</code>）。它们以网络路径的形式写下，所以每台电脑都能找到。片段取自第一个拥有它的位置，所以 SSD 上的副本会代替归档中的那一份播放。</p>
+        </div>
+        <div class="gap-item">
+          <h3>从<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>也能找到</h3>
+          <p>保存位置时，会在每个位置的最上层留下一个小文件 <code>&lt;project&gt;.afplocation</code>，这样你双击的片段能找到它的项目、它的精彩瞬间和它的标记。被移出的位置会失去这个文件；其中的其他东西都不变。</p>
+        </div>
+        <div class="gap-item">
+          <h3>并入另一个项目</h3>
+          <p>在笔记本电脑上做的一次旅行，拷到了 NAS 上？<b>Take in another project…</b>（并入另一个项目）会把它的精彩瞬间、预览、照片和导出的文件一次性并入这个项目，并在它的素材还不在这个项目之内时，添加它的位置。然后它的 <code>Project.afproject</code> 会移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。开始之前，它会列出将要做的事。</p>
+        </div>
+        <div class="gap-item">
+          <h3>检查</h3>
+          <p>对所选内容执行 <b>Check</b>（检查），会告诉你哪里有问题：原始文件丢失、精彩瞬间找不到它的片段、同一个片段出现两次、一个片段有两个自己的文件。<b>Find moved files</b>（查找移动过的文件）会在项目的各个位置中寻找丢失的文件并修复链接，无法判断时会问你。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Links follow the files; the catalog -->
+  <section class="section band tight-top" id="links">
     <div class="wrap lib-two">
       <div class="stack">
-        <p class="eyebrow">项目</p>
-        <h2>项目只是说明东西放在哪里。</h2>
-        <p>项目说明两件事。一是旅行的原始片段在哪里，播放器从不改动它们。二是你用它们做出的东西放在哪里：精彩瞬间在 <code>_Moments</code>，片段的翻页预览在 <code>_Clips</code>，导出的文件在 <code>_Exports</code>，照片在 <code>_Stills</code>。项目就是这些。其他一切都是这些文件夹里各自独立的文件，下面几节会逐一介绍。</p>
-        <p>默认情况下，项目就是旅行文件夹本身，其中的一切都按片段在这个文件夹里的位置找到它们。把整个文件夹，连同素材和项目一起，复制或移动到另一块硬盘或 NAS 上，一切照常运作。</p>
-        <p>播放器从不自行创建项目。你第一次保存精彩瞬间、导出、按 <kbd>X</kbd> 或打开 Action Footage Library 时，侧边面板会打开到 <strong>Project</strong>（项目）标签页，显示 <strong>No project yet</strong>（还没有项目）。从列表中选择文件夹，列表从片段所在的文件夹一直到磁盘的最上层（如果是存储卡，会自动为你选好 <code>DCIM</code> 上一层的文件夹），然后按 <strong>Initialize the project here</strong>（在此初始化项目）。这会创建一个文件 <code>Project.afproject</code>：它就是项目本身，里面有播放器自己的记录。双击它，就在 <a class="text-link" href="#library-app">Action Footage Library</a> 中打开这次旅行。其他文件夹要等有东西放进去时才出现。</p>
-        <p>早期版本的项目用的是一个文件夹 <code>_ActionFootagePlayer</code>。下次打开这次旅行中的某个片段时，播放器会把其中的内容移进 <code>Project.afproject</code>。</p>
-        <p class="honest">请选择旅行文件夹，也就是各天文件夹的上一层，这样整次旅行就是一个项目。标记完全不需要项目。</p>
-        <p class="note">侧边面板用 <kbd>Tab</kbd> 显示和隐藏。</p>
+        <p class="eyebrow">链接</p>
+        <h2>跟着文件走的链接。</h2>
+        <p>精彩瞬间、片段预览、照片和导出的文件，都按片段本身是什么来认出它：它的大小、相机写在里面的时间，以及它内容的指纹。它原来在哪里只是一个线索。所以素材移到了另一个文件夹或位置，或者被重命名，仍然保持链接：链接会重新找到它，并记下它的新位置。</p>
+        <p>你自己的文件也是这样被找到的：靠它们里面的链接，放在项目的任何文件夹里都行。精彩瞬间和预览随你怎么整理。</p>
+        <p class="note">在项目的设置中，<b>I never rename my footage</b>（我从不重命名素材）让移动过的片段也能按名称找到，这在大型归档上更快。</p>
       </div>
-      <figure class="media" id="shot-library-1">
-        <img src="../media/library-1.jpg" alt="没有项目时侧边面板的 Project 标签页：No project yet，说明项目会得到 _Moments、_Clips 和 _Exports 文件夹以及 Project.afproject 文件；文件夹列表展开，显示 Trips、2026-10 Egypt 和 Day 1，已选中 2026-10 Egypt，以及 Initialize the project here。" width="584" height="848" loading="lazy">
-        <figcaption>No project yet：选择旅行文件夹，然后按 Initialize the project here。</figcaption>
-      </figure>
+      <div class="stack" id="catalog">
+        <p class="eyebrow">目录</p>
+        <h2>共享目录，让它打开得很快。</h2>
+        <p>Library 把它对项目文件所知道的信息保存在项目旁边的 <code>.afp</code> 中。NAS 上一个有几千个片段的项目，从任何一台电脑上都能瞬间打开：第一次打开它的电脑读取目录，而不是逐个查看每个文件。</p>
+        <p>播放器和 Library 做的任何事，都会立刻显示在视图中：保存的精彩瞬间、任务生成的文件、一个标签。在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中所做的改动，会在 Library 下次查看这些文件夹时显示出来，几分钟之内。文件始终是准绳：目录只是上次看到它们时的样子。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Where clips were recorded; Info -->
+  <section class="section band" id="info">
+    <div class="wrap lib-two">
+      <div class="stack">
+        <p class="eyebrow">在哪里，用什么</p>
+        <h2>每个片段在哪里录制，用的是哪个镜头。</h2>
+        <h3>地点，来自你的照片</h3>
+        <p>运动相机很少记录它在哪里。你的手机记录了：选中片段，在 Library 的 <b>Location</b>（地点）中按 <b>Suggest from Apple Photos</b>（根据 Apple 照片建议），时间上最接近的带地点的照片就会给出建议。每条建议都显示它们在时间上相差多少；合适的你就留下。照片只会被读取，从不被改动<span class="os-mac">；Mac 会请你允许一次，让 Library 读取它</span>。相机录下了 GPS 的片段已经有地点了。也可以手动设置：像地图复制出来的那样填写纬度和经度，喜欢的话再加上潜点的名称。</p>
+        <p>地点会写进每个原始文件自己的那个文件，就在它旁边，所以它跟着片段走。<b>Info</b> 显示地点的名称<span class="os-mac">，在一张小地图上</span>，<b>Location</b> 筛选按国家、地区和地点找到片段。</p>
+        <h3>Info 中的镜头配置文件</h3>
+        <p>防抖需要镜头的配置文件。片段上的 <b>Info</b> 会说明播放器用的是哪一个：相机写在文件里的那个，或者 Gyroflow 数据库中针对这台相机和这个模式评分最高的那个。还没有合适的配置文件时，它会显示相机的模式编号，把它告诉我们，就能把配置文件加进来。</p>
+      </div>
+      <!-- Shot pending (the Library's Info on one clip: its map, place and Lens profile): media/library-info.jpg -->
+      <div class="stack">
+        <ul class="lib-list">
+          <li><strong>根据 Apple 照片给出的建议</strong>只在 Mac 上有。在 Windows 上，请手动设置地点。</li>
+          <li><strong>按片段的时钟对应。</strong>相机记时间的方式各不相同：DJI、Insta360 和较新的 GoPro 用世界协调时间，较老的 GoPro 用当地时间。Library 按每台相机的方式读取，所以它比较的照片来自正确的那个小时。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pictures and clip previews -->
+  <section class="section band" id="clip-previews">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">缩略图</p>
+        <h2>每个片段都有一张缩略图，和<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>画出来的一样快。</h2>
+        <p class="lede">Library 向系统要它自己的缩略图，<span class="os-mac">在 Mac 上是快速查看的</span><span class="os-win">在 Windows 上是文件资源管理器的</span>：NAS 上的 300 个片段，第一次 9 秒就显示出来，之后不到一秒。然后，要让整次旅行都是彩色的，还有片段预览。</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Make clip previews</h3>
+          <p>Log 素材（一种保留更多光线信息的录制模式，在转换之前看起来又平又灰）是一整墙灰色图标。选中片段或文件夹，<b>Make clip previews</b>（生成片段预览）会为每个还没有预览的片段生成一个小 MP4：由片段中带标记的帧组成的翻页预览，或者由均匀分布在片段中的约 12 帧组成，都是彩色的。一次一个，在后台进行。</p>
+        </div>
+        <div class="gap-item">
+          <h3>随你怎么排列</h3>
+          <p>它们放在 <code>_Clips/Generated</code> 中：<b>as the footage's folders</b>（按素材的文件夹）、<b>by trips</b>（按旅行，相隔不超过 2 天的片段放在一起），或者 <b>all in one folder</b>（全部放在一个文件夹里）。<span class="os-mac">在访达的图标视图中，整个旅程都是彩色的；快速查看（空格键）几秒钟就能翻完一个片段。</span><span class="os-win">在大图标视图中，整个旅程都是彩色的。</span>在播放器中打开一个预览，播放的是整个片段。</p>
+        </div>
+        <div class="gap-item">
+          <h3>整理它们</h3>
+          <p>它们就是文件：复制、整理进你自己的文件夹、随意重命名都可以。每一个都始终链接到它的原始片段，Library 的 <b>Footage</b> 视图会按你排列的样子显示这些片段。</p>
+        </div>
+        <div class="gap-item">
+          <h3>把片段放到一边</h3>
+          <p>在播放器中，<kbd>X</kbd> 把片段的预览移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>：“Not interesting”（不感兴趣）。片段本身不动。再按一次 <kbd>X</kbd> 会重新生成预览；对于还没有预览的片段，Project 标签页的 <strong>Make this clip's preview</strong>（生成此片段的预览）只生成这一个。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stabilize optically -->
+  <section class="section band dive" id="optical">
+    <div class="wrap lib-two">
+      <div class="stack kbd-dark">
+        <p class="eyebrow">Stabilize optically</p>
+        <h2>片段里没有运动数据？没关系。</h2>
+        <p class="lede">播放器根据相机随片段一起记录的运动来稳定画面。DJI 相机只有在它的防抖（EIS）关闭时才记录运动数据，有些相机则根本不记录。对于这些片段，Gyroflow 会从画面本身找出运动。</p>
+        <p>选中片段或它们所在的文件夹，按 <b>Stabilize optically</b>（光学防抖）。Gyroflow 从每个片段的画面中测出它的运动，在后台一个接一个地进行，所需时间大约与片段的播放时长相当（4K 60 fps 时再多一半）。它的项目放在每个片段旁边，从此播放器就会像对待其他片段一样稳定地播放它。</p>
+        <p><b>Lens</b>（镜头）为这些片段选择镜头：每个片段自己的，即相机录下的那个；或者在相机有多种镜头类型时选一种（Osmo Action 6：Wide 或 Normal）。它与每个片段一起保存，播放器也会用它。选了镜头，或按 <b>Redo</b>（重做），会重新生成这些片段的 Gyroflow 项目，保留它们的设置。</p>
+        <p>不需要的片段会被排除，并列出原因：播放器能用上运动数据的、已经有 Gyroflow 项目的、360° 片段，以及镜头还未知的片段。</p>
+        <p class="note">它使用 Gyroflow 的命令行光学分析，这项功能正在进入 Gyroflow 的官方版本。在那之前，它需要用<a class="text-link" href="https://github.com/anton-belkin/gyroflow" rel="noopener">我们的分支</a>构建的 Gyroflow。在播放器中一次处理一个片段，任何版本的 Gyroflow 都可以：<kbd>Ctrl</kbd>+<kbd>e</kbd>，见<a class="text-link" href="stabilization.html">防抖</a>。</p>
+      </div>
+      <!-- Shot pending (Commands › Stabilize optically on a folder of Action 6 clips with EIS on: N clips to stabilize, left out, Lens): media/library-optical.jpg -->
+    </div>
+  </section>
+
+  <!-- Tags and renders -->
+  <section class="section band" id="tags">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">标签和渲染</p>
+        <h2>用来查找的词语，以及提前做好的精彩瞬间。</h2>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>标签</h3>
+          <p>给片段、精彩瞬间、预览、照片和导出的文件加上任意词语：<i>海豚</i>、<i>给家人</i>、<i>最佳</i>。命令中的 <b>Tags</b>（标签）在所选内容上添加和移除标签；筛选和搜索都能找到它们。标签与它的条目保存在一起：在片段自己的文件里，在精彩瞬间或预览内部的链接里，以及照片的元数据里，Apple 照片和 Lightroom 会把它读作关键词。</p>
+        </div>
+        <div class="gap-item">
+          <h3>渲染</h3>
+          <p>在 <b>Moments</b> 中，<b>Render</b>（渲染）把选中的精彩瞬间做成成品视频，HDR、SDR 或两者都要，在后台进行，放进 <code>_Renders</code>。每个渲染都知道自己是由什么做成的：修改了精彩瞬间，它就会显示为过期；再按一次 <b>Render</b> 只重做改变了的部分。同一风格的导出会直接复制一份最新的渲染，而不是再渲染一遍。删掉渲染不会破坏任何东西。</p>
+        </div>
+        <div class="gap-item">
+          <h3>所有标记的精彩瞬间和照片</h3>
+          <p>在选中的片段上：<b>Moments of the marks</b>（标记的精彩瞬间）为每个还不在精彩瞬间里的标记生成一个精彩瞬间，前后各 2 秒，以发生的时间命名。<b>Photos of the marks</b>（标记的照片）在每个标记处保存一张照片，可以是静态照片、<span class="os-mac">Live Photo 或 </span>Motion Photo。</p>
+        </div>
+        <div class="gap-item">
+          <h3>导出</h3>
+          <p>在 <b>Moments</b> 中，<b>Export</b>（导出）为每个选中的精彩瞬间生成一个视频，各自按自己的设置，就像 <kbd>Shift</kbd>+<kbd>E</kbd> 导出单个一样：按播放器显示的样子导出为 HDR，或者导出为 SDR。已经以该风格导出过的会被跳过。</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -204,17 +390,16 @@
   <section class="section band tight-top" id="marks">
     <div class="wrap lib-two">
       <div class="stack">
-        <p class="eyebrow">标记</p>
+        <p class="eyebrow">在播放器中：标记</p>
         <h2>先是相机的精彩时刻，然后是你自己的标记。</h2>
-        <p>标记是片段中的一个时间点。录制时按过精彩时刻按键？这些标记已经在进度条上了：DJI Osmo Action 4、Action 5 Pro 或 Action 6 上的快捷切换按键或遥控器，GoPro HERO5 及更新机型上的 HiLight。<kbd>Ctrl</kbd>+<kbd>]</kbd> 和 <kbd>Ctrl</kbd>+<kbd>[</kbd> 跳到下一个和上一个，落在它之前 2 秒处。</p>
+        <p>标记是片段中的一个时间点。录制时按过精彩时刻按键？这些标记已经在视频下方的导航栏上了，显示为琥珀色的菱形：DJI Osmo Action 4、Action 5 Pro 或 Action 6 上的快捷切换按键或遥控器，GoPro HERO5 及更新机型上的 HiLight。你的标记是白色的。指向其中一个，导航栏会显示它的名称和精确到百分之一秒的时间；点一下就跳到它所在的那一帧。<kbd>Ctrl</kbd>+<kbd>]</kbd> 和 <kbd>Ctrl</kbd>+<kbd>[</kbd>，或者导航栏上的箭头，跳到下一个和上一个。</p>
         <p><kbd>M</kbd> 在视频当前位置添加一个标记。在标记上（半秒以内）按 <kbd>M</kbd> 则删除它，相机的标记也一样。</p>
         <p>第一次改动会在片段旁边写入 <code>&lt;clip&gt;.afp.json</code>，并把相机的标记复制进去。从此以后，这个文件就是片段的标记。片段保存的画面设置也放在这里：也就是你在侧边面板的 <strong>Source</strong>（源）和 <strong>Transform</strong>（变换）标签页中用 <strong>Save to the source</strong>（保存到源）保存的内容，这样片段打开时就是你保存的样子。删掉这个文件，相机的精彩时刻就恢复原样，保存的画面设置也会被忘掉。片段本身从不被写入。</p>
-        <p class="note">早期版本的 <code>.marks.json</code> 会照常读取，并在下次改动时变成 <code>.afp.json</code>。</p>
         <p>标记不需要项目。在侧边面板中，<strong>Marks of this clip</strong>（此片段的标记）列出它们：相机的标记显示为 “DJI quick switch” 或 “GoPro HiLight”，你的显示为 “Mark 3”。点一下就跳过去。</p>
       </div>
       <figure class="media" id="shot-library-2">
-        <img src="../media/library-2.jpg" alt="播放器底部：进度条上有相机精彩时刻、两个标记和两个精彩瞬间的刻度，鼠标指在 Turtle 的刻度上，显示 Chapter: Turtle。" width="1600" height="300" loading="lazy">
-        <figcaption>进度条上相机的精彩时刻、你的标记和一个精彩瞬间。</figcaption>
+        <img src="../media/library-2.jpg" alt="视频下方的导航栏：轨道上有相机的两个精彩时刻（琥珀色菱形）和一个白色标记，下方有两个精彩瞬间（灰色条），鼠标所在处显示气泡 0:26.38 Highlight 2；再下面是按钮和时间 0:21.00 / 0:44。" width="1600" height="255" loading="lazy">
+        <figcaption>导航栏上相机的精彩时刻、你的标记和两个精彩瞬间。</figcaption>
       </figure>
     </div>
   </section>
@@ -223,7 +408,7 @@
   <section class="section band dive" id="moments">
     <div class="wrap dive-grid">
       <div class="stack kbd-dark">
-        <p class="eyebrow">精彩瞬间</p>
+        <p class="eyebrow">在播放器中：精彩瞬间</p>
         <h2>精彩瞬间是一个小文件。打开它，播放的是原始文件。</h2>
         <p class="lede">在一段的开头按 <kbd>l</kbd>，结尾再按 <kbd>l</kbd>，然后按 <kbd>k</kbd>，输入一个名称。</p>
         <div class="dive-points">
@@ -233,15 +418,15 @@
           </div>
           <div>
             <h3>文件</h3>
-            <p>它成为 <code>_Moments/Turtle.afplink.mp4</code>：一个小 MP4，显示这一段中的一帧彩色画面（其中的第一个标记，否则是中间那一帧），里面有指向原始文件的链接。<span class="os-mac">访达和快速查看</span><span class="os-win">文件资源管理器</span>显示的就是这一帧。它的文件日期是拍摄的时间，所以按日期排序时，精彩瞬间会按发生的先后排列。</p>
+            <p>它成为 <code>_Moments/Generated</code> 中的 <code>Turtle.afplink.mp4</code>：一个小 MP4，显示这一段中的一帧彩色画面（其中的第一个标记，否则是中间那一帧），里面有指向原始文件的链接。<span class="os-mac">访达和快速查看</span><span class="os-win">文件资源管理器</span>显示的就是这一帧。它的文件日期是拍摄的时间，所以按日期排序时，精彩瞬间会按发生的先后排列。</p>
           </div>
           <div>
             <h3>播放它</h3>
-            <p>在播放器中打开时，它以完整画质播放原始文件中的这一段，然后是文件夹里的下一个精彩瞬间。打开 <code>_Moments</code> 文件夹本身，所有精彩瞬间都会按发生的先后播放。双击时也是这样，前提是 Action Footage Player 是打开 MP4 文件的 App<span class="os-mac">（显示简介 → 打开方式 → 全部更改…）</span>；否则系统播放的是只有一帧的预览。</p>
+            <p>在播放器中打开时，它以完整画质播放原始文件中的这一段，然后是文件夹里的下一个精彩瞬间。从 NAS 上播放也只要几秒钟：一个 2.5 GB 片段中的精彩瞬间 3 到 5 秒就能显示，因为播放器先读取它要播放的那一段的运动数据，其余的边播边读。打开一个精彩瞬间文件夹本身，其中所有精彩瞬间都会按发生的先后播放。双击时也是这样，前提是 Action Footage Player 是打开 MP4 文件的 App<span class="os-mac">（显示简介 → 打开方式 → 全部更改…）</span>；否则系统播放的是只有一帧的预览。</p>
           </div>
           <div>
             <h3>删掉文件，就删掉了精彩瞬间</h3>
-            <p>没有需要同步维护的列表。重命名它、移进子文件夹、给它加标签：它仍然是一个精彩瞬间。在侧边面板中，<strong>Moments of this clip</strong>（此片段的精彩瞬间）有 <strong>Rename…</strong> 和 <strong>Remove</strong>，后者把它移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。</p>
+            <p>没有需要同步维护的列表。重命名它、移进你自己的文件夹、给它加标签：它仍然是一个精彩瞬间。在侧边面板中，<strong>Moments of this clip</strong>（此片段的精彩瞬间）有 <strong>Rename…</strong> 和 <strong>Remove</strong>，后者把它移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。</p>
           </div>
           <div>
             <h3>修改它的首尾</h3>
@@ -256,7 +441,7 @@
         </figure>
         <div class="lib-snap">
           <h3>按保存时的样子观看</h3>
-          <p>精彩瞬间是完整保存下来的，取自你按 <kbd>k</kbd> 时正在播放的样子：它的防抖、强度、地平线、镜头、色差校正和画幅。如果片段有 Gyroflow 项目，精彩瞬间会得到它自己的一份副本，裁短到这一段。精彩瞬间从不自行改变：之后修改片段或片段的项目，都不会影响它。片段如何读取（它的 Log 曲线、它的旋转、水下的镜头）仍属于片段本身，对它所有的精彩瞬间都适用。</p>
+          <p>精彩瞬间是完整保存下来的，取自你按 <kbd>k</kbd> 时正在播放的样子：它的防抖、强度、地平线、镜头、色差校正、时域降噪和画幅。如果片段有 Gyroflow 项目，精彩瞬间会得到它自己的一份副本，裁短到这一段。精彩瞬间从不自行改变：之后修改片段或片段的项目，都不会影响它。片段如何读取（它的 Log 曲线、它的旋转、水下的镜头）仍属于片段本身，对它所有的精彩瞬间都适用。</p>
           <p>精彩瞬间播放时，侧边面板的 <strong>Transform</strong> 标签页会显示 <strong>Transform defined in</strong>（变换定义于）the moment（精彩瞬间）。改动任何设置都只用于观看，除非打开了 <strong>Auto save</strong>：“Changed for viewing. The dot marks what's saved”（仅为观看而改动，圆点标出已保存的设置）。<strong>Save to the moment</strong>（保存到精彩瞬间）会写入它，<strong>Revert to saved</strong>（恢复为已保存）则恢复原样。关闭 <strong>Settings of its own</strong>（自己的设置），精彩瞬间就按它的片段保存的方式播放；它自己的设置和它的 Gyroflow 副本都会去掉，副本移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。</p>
         </div>
         <figure class="media" id="shot-library-4">
@@ -267,96 +452,17 @@
     </div>
   </section>
 
-  <!-- Clip previews -->
-  <section class="section band" id="clip-previews">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">片段预览</p>
-        <h2>整个旅程都是彩色的，不需要的片段按 <kbd>X</kbd>。</h2>
-        <p class="lede">Log 素材（一种保留更多光线信息的录制模式，在转换之前看起来又平又灰）是一整墙灰色图标。片段预览把它变成彩色的旅程。</p>
-      </div>
-      <div class="gap-grid">
-        <div class="gap-item">
-          <h3>Make clip previews</h3>
-          <p>在 <a class="text-link" href="#library-app">Action Footage Library</a> 中，<strong>Make clip previews</strong>（生成片段预览）会在 <code>_Clips</code> 中为每个片段生成一个小 MP4：由片段中带标记的帧组成的翻页预览，或者由均匀分布在片段中的约 12 帧组成。从侧边面板的 Project 标签页，用 <strong>Open in Action Footage Library</strong>（在 Action Footage Library 中打开）打开它。它在后台逐个生成预览，并显示进度。绝不会自动生成：只有你按下按钮时才会。</p>
-        </div>
-        <div class="gap-item">
-          <h3>在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中浏览</h3>
-          <p><code>_Clips</code> 沿用你的各天文件夹结构，除非你在 Library 中勾选 <strong>All in _Clips itself, without the clips' folders</strong>（全部直接放在 _Clips 中，不按片段的文件夹）。<span class="os-mac">在图标视图中，整个旅程都是彩色的；快速查看（空格键）几秒钟就能翻完一个片段。</span><span class="os-win">在大图标视图中，整个旅程都是彩色的。</span>在播放器中打开一个预览，播放的是整个片段。</p>
-          <p>它们就是文件：复制、整理进你自己的文件夹、随意重命名都可以。每一个都始终链接到它的原始片段。</p>
-        </div>
-        <div class="gap-item">
-          <h3>把片段放到一边</h3>
-          <p><kbd>X</kbd> 把片段的预览移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>：“Not interesting”（不感兴趣）。片段本身不动。手动删除预览效果相同。再按一次 <kbd>X</kbd> 会重新生成它。这是在播放器中：对于还没有预览的片段，Project 标签页的 <strong>Make this clip's preview</strong>（生成此片段的预览）只生成这一个。</p>
-        </div>
-        <div class="gap-item">
-          <h3>删了就是删了</h3>
-          <p>Make clip previews 只为从未有过预览的片段生成预览，所以新素材会得到预览，而你放到一边的片段不会再回来。Library 中的 <strong>Again for removed clips</strong>（为已移除的片段重新生成）会把它们全部找回来。</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- The whole trip at once: Action Footage Library -->
-  <section class="section band dive" id="library-app">
-    <div class="wrap">
-      <div class="section-head kbd-dark">
-        <p class="eyebrow">Action Footage Library</p>
-        <h2>整次旅行一次处理，在一个独立的应用里。</h2>
-        <p class="lede">对单个片段做的事，在播放器里完成。对整次旅行做的事，在 Action Footage Library 里完成，它是随播放器附带的一个小应用。它在后台按队列工作，所以你可以同时继续观看，或者关掉播放器。</p>
-      </div>
-      <div class="gap-grid">
-        <div class="gap-item">
-          <h3>片段预览</h3>
-          <p>每个片段的彩色翻页预览，放在 <code>_Clips</code> 中：在<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>中整个旅程一目了然。只为还没有预览的片段生成，所以你移除的预览不会回来；<b>Again for removed clips</b> 会把它们找回来。</p>
-        </div>
-        <div class="gap-item">
-          <h3>所有标记的精彩瞬间</h3>
-          <p>每个还不在精彩瞬间里的标记，都会变成一个精彩瞬间，放在 <code>_Moments</code> 中：前后各 2 秒，相距很近的标记合并成一个，每个都以发生的时间命名。</p>
-        </div>
-        <div class="gap-item">
-          <h3>所有标记的照片</h3>
-          <p>在每个标记处生成一张照片，放进 <code>_Stills</code>，按片段保存的样子：静态照片、<span class="os-mac">Live Photo 或 </span>Motion Photo。每个只生成一次：你删掉的照片不会再生成。</p>
-        </div>
-        <div class="gap-item">
-          <h3>导出所有精彩瞬间</h3>
-          <p>每个还没导出的精彩瞬间，导出到 <code>_Exports</code> 中，各自按自己的设置，就像 <kbd>Shift</kbd>+<kbd>E</kbd> 导出单个一样。可以是录制时的 HDR，也可以是 SDR。</p>
-        </div>
-      </div>
-      <div class="lib-cols">
-        <p>每项任务都会显示进度和正在处理的项目，并且可以停止；无法生成的内容会连同原因一起列出。任务一次运行一个。<span class="os-mac">任务运行期间，Mac 不会进入睡眠。</span></p>
-        <p>打开方式：在侧边面板的 Project 标签页中点 <b>Open in Action Footage Library</b>，或者在旅行文件夹中双击 <code>Project.afproject</code>。它不用自己的代码生成任何东西：它在没有窗口的情况下运行播放器，所以一切产出都和播放器生成的完全一样。</p>
-      </div>
-      <p class="note">这是它的第一个版本：它批量生成内容，还不能浏览你的素材。在 <span class="os-mac">Mac 上，它在下载包里，就在播放器旁边</span><span class="os-win">Windows 上，它随播放器一起安装，在开始菜单中有自己的条目</span>；Linux 上还没有。</p>
-    </div>
-  </section>
-
-  <!-- Favorites -->
-  <section class="section band tight-top" id="favorites">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">收藏</p>
-        <h2>按 <kbd>K</kbd> 设为收藏。 <span class="soon">即将推出</span></h2>
-      </div>
-      <div class="lib-cols">
-        <p class="os-mac"><kbd>K</kbd> 把正在播放的精彩瞬间设为收藏，在片段上则是它在 <code>_Clips</code> 中的预览。在访达中，它是绿色的 <strong>Favorite</strong> 标签。再按一次 <kbd>K</kbd> 取消。在访达中手动给文件加上绿色标签也算。</p>
-        <p class="os-win"><kbd>K</kbd> 把正在播放的精彩瞬间设为收藏，在片段上则是它在 <code>_Clips</code> 中的预览。在文件资源管理器中，它是 5 星评分（属性 → 详细信息）。再按一次 <kbd>K</kbd> 取消。手动给出的 4 星或 5 星评分也算。</p>
-        <p><span class="os-mac">你的其他访达标签会作为关键词送到剪辑软件，收藏则作为收藏。</span><span class="os-win">收藏会作为收藏送到剪辑软件。</span>还存在的精彩瞬间或片段就是保留的；你删掉的就是不要的。整个评分系统就是这样。</p>
-      </div>
-    </div>
-  </section>
-
   <!-- Exports -->
   <section class="section band tight-top" id="exports">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">导出</p>
+        <p class="eyebrow">在播放器中：导出</p>
         <h2>导出的文件放在 <code>_Exports</code>，带有指回原始文件的链接。</h2>
       </div>
       <div class="lib-cols">
         <p><kbd>Shift</kbd>+<kbd>E</kbd> 按播放的样子导出标记的一段或整个片段：画面稳定，色彩正常。它像精彩瞬间一样询问名称，如果这一段本身就是精彩瞬间，则建议用它的名称：“Export 0:20–0:30 (SDR) as (Enter: Turtle):”。导出进行中再按一次 <kbd>Shift</kbd>+<kbd>E</kbd> 即可取消。</p>
         <p>文件是 <code>_Exports/Turtle.mov</code>。不带括号的名称是 HDR（在能显示的屏幕上有明亮的高光）；其他风格会注明：<code>Turtle (SDR).mov</code>、<code>Turtle (Dolby Vision).mov</code>。每个导出的文件都带有指向原始文件的链接。还不是精彩瞬间的一段，也会同时保存为一个精彩瞬间 <code>export_Turtle</code>，这样你可以删掉导出的文件腾出空间，以后仍能以完整画质播放这一段。</p>
-        <p>侧边面板的 <strong>Output</strong>（输出）标签页在 <strong>Export</strong>（导出）下也有同样的功能：<strong>Export the part</strong> 或 <strong>Export the clip</strong>、<strong>Export in SDR</strong>、<strong>Show the last export</strong>。要一次导出整次旅行的所有精彩瞬间，请用 <a class="text-link" href="#library-app">Action Footage Library</a>。早期版本留下的 <code>stabilized</code> 文件夹原地保留。各种风格和格式见 <a class="text-link" href="log.html">Log 素材</a>页面。</p>
+        <p>侧边面板的 <strong>Output</strong>（输出）标签页在 <strong>Export</strong>（导出）下也有同样的功能：<strong>Export the part</strong> 或 <strong>Export the clip</strong>、<strong>Export in SDR</strong>、<strong>Show the last export</strong>。要一次导出许多精彩瞬间，请用 <a class="text-link" href="#tags">Action Footage Library</a>。各种风格和格式见 <a class="text-link" href="log.html">Log 素材</a>页面。</p>
       </div>
     </div>
   </section>
@@ -365,7 +471,7 @@
   <section class="section band" id="cut">
     <div class="wrap lib-two">
       <div class="stack">
-        <p class="eyebrow">剪掉</p>
+        <p class="eyebrow">在播放器中：剪掉</p>
         <h2>剪掉在口袋里拍下的那一分钟。</h2>
         <p>用 <kbd>l</kbd> 和 <kbd>l</kbd> 标出拍坏的一段，按 <kbd>Ctrl</kbd>+<kbd>x</kbd>，然后确认。片段会被重写，去掉这一段，且不重新编码：保留的每一帧都原样复制。不需要项目。</p>
         <p>播放器会先询问：“Cut 0:05–0:20 out of DJI_20261024094541_0093_D.MP4? Kept: 0:00–0:05 and 0:20–end (two clips; the second from the keyframe at or before 0:20), without re-encoding. The original goes to the Trash.”（从片段中剪掉 0:05–0:20？保留 0:00–0:05 和 0:20 至结尾，成为两个片段，第二个从 0:20 处或之前的关键帧开始，不重新编码。原始文件移到废纸篓。）选择 <strong>Cut it out</strong>（剪掉）或 <strong>Keep the clip as it is</strong>（保留片段原样）。</p>
@@ -382,7 +488,7 @@
           <li><strong>原始文件会移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span></strong>，连同它的附属文件：<code>.LRF</code>、它的 Gyroflow 项目、它的 <code>.afp.json</code> 和片段预览。<span class="os-win">在网络共享文件夹或存储卡上没有回收站，所以它们会改为放进项目的 <code>.Trash</code> 文件夹，消息中也会说明。</span></li>
           <li><strong>播放器中无法撤销。</strong>你可以手动把原始文件从<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>中取回，但第一个新片段现在用的是它的名称。</li>
           <li><strong>目前只支持 DJI 的片段。</strong>我们正在支持其他相机。在那之前，GoPro 的片段要先通过检查才会剪切，Insta360 和 iPhone 的片段则会被拒绝。</li>
-          <li>导出的文件不受影响，它们的链接仍然指向原始文件。要为新片段生成片段预览，请按 <strong>Make clip previews</strong>，它在 <a class="text-link" href="#library-app">Action Footage Library</a> 中。</li>
+          <li>导出的文件不受影响，它们的链接仍然指向原始文件。要为新片段生成片段预览，请按 <strong>Make clip previews</strong>，它在 <a class="text-link" href="#clip-previews">Action Footage Library</a> 中。</li>
         </ul>
       </div>
       <div class="stack">
@@ -424,7 +530,7 @@
       <div class="section-head">
         <p class="eyebrow">送到剪辑软件</p>
         <h2>你的精彩瞬间和标记，进入 Final Cut Pro、DaVinci Resolve 或 Premiere Pro。 <span class="soon">即将推出</span></h2>
-        <p class="lede">挑选完成后，就把这次旅行带去剪辑。剪辑软件拿到的是你的原始片段，按它们自己的时间码，上面带着你的精彩瞬间、标记、收藏和文件夹。不用重新找，也不用标第二遍。</p>
+        <p class="lede">挑选完成后，就把这次旅行带去剪辑。剪辑软件拿到的是你的原始片段，按它们自己的时间码，上面带着你的精彩瞬间、标记、标签和文件夹。不用重新找，也不用标第二遍。</p>
       </div>
       <ol class="checklist lib-steps">
         <li>
@@ -447,40 +553,22 @@
             <tr>
               <th scope="row">Final Cut Pro<br><span class="cam-sub">10.6 或更高版本，Mac</span></th>
               <td data-label="如何导入"><code>… (Final Cut Pro).fcpxml</code>：文件 → 导入 → XML，或双击它。选择“让文件保留在原位”（Leave files in place）时，片段留在原处，在存储卡或 NAS 上。</td>
-              <td data-label="得到什么">一个以旅行命名的事件，每个片段按它的时间码排列。你的标记作为标记点（相机的标记注明 “DJI quick switch” 或 “GoPro HiLight”）。每个精彩瞬间作为一个命名的范围，按文件夹和标签归入关键词精选。收藏和放到一边的片段分别作为收藏和拒绝。一个项目 “2026-10 Egypt – moments”，所有精彩瞬间依次排列，并已命名。</td>
+              <td data-label="得到什么">一个以旅行命名的事件，每个片段按它的时间码排列。你的标记作为标记点（相机的标记注明 “DJI quick switch” 或 “GoPro HiLight”）。每个精彩瞬间作为一个命名的范围，按文件夹和标签归入关键词精选。放到一边的片段作为拒绝。一个项目 “2026-10 Egypt – moments”，所有精彩瞬间依次排列，并已命名。</td>
             </tr>
             <tr>
               <th scope="row">DaVinci Resolve<br><span class="cam-sub">免费版也可以</span></th>
               <td data-label="如何导入">三个文件，因为免费版不能运行脚本：<br><code>… (Resolve).fcpxml</code>：File → Import → Timeline，勾选 “Automatically import source clips into media pool”。<br><code>… (Resolve markers).edl</code>：右键点击 “clips” 时间线 → Timelines → Import → Timeline Markers from EDL。<br><code>… (Resolve metadata).csv</code>：File → Import Metadata To → Media Pool。</td>
-              <td data-label="得到什么">基于原始片段的时间线：所有精彩瞬间依次排列，每个精彩瞬间文件夹一条；以及你保留的每个片段，完整的。clips 时间线上的标记点：相机的为蓝色，你的为青色，精彩瞬间为绿色，带有名称和长度。在媒体池中：收藏为绿色，放到一边的片段为红色，你的文件夹和标签作为关键词，每个片段的备注中列出它的精彩瞬间。</td>
+              <td data-label="得到什么">基于原始片段的时间线：所有精彩瞬间依次排列，每个精彩瞬间文件夹一条；以及你保留的每个片段，完整的。clips 时间线上的标记点：相机的为蓝色，你的为青色，精彩瞬间为绿色，带有名称和长度。在媒体池中：放到一边的片段为红色，你的文件夹和标签作为关键词，每个片段的备注中列出它的精彩瞬间。</td>
             </tr>
             <tr>
               <th scope="row">Premiere Pro</th>
               <td data-label="如何导入"><code>… (Premiere).xml</code>：文件 → 导入。</td>
-              <td data-label="得到什么">与你的文件夹对应的素材箱。每个片段带有它的标记点。每个精彩瞬间作为一个带入点和出点的片段，放在它所在文件夹的素材箱里。一个由精彩瞬间组成的序列，已命名。收藏用标签颜色表示，标签写在备注中。放到一边的片段不包含在内。</td>
+              <td data-label="得到什么">与你的文件夹对应的素材箱。每个片段带有它的标记点。每个精彩瞬间作为一个带入点和出点的片段，放在它所在文件夹的素材箱里。一个由精彩瞬间组成的序列，已命名。标签写在备注中。放到一边的片段不包含在内。</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p class="note">对于 Final Cut Pro，有一个默认关闭的选项，会把每个精彩瞬间也做成一个独立的片段，这样名称就会显示在浏览器中：<strong>Moments as clips of their own</strong>。它会让事件中的片段数量翻倍。</p>
-    </div>
-  </section>
-
-  <!-- Read-only cards -->
-  <section class="section band tight-top" id="read-only">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">只读存储卡</p>
-        <h2>锁定的存储卡，项目放在 Documents 里。 <span class="soon">即将推出</span></h2>
-      </div>
-      <div class="lib-cols">
-        <p>打开了写保护锁的存储卡，或者你只能读取的共享文件夹，都无法存放项目。当你选择的文件夹无法写入时，项目会改为放在 <span class="os-mac"><code>Documents/ActionFootagePlayer/</code></span><span class="os-win"><code>Documents\ActionFootagePlayer\</code></span>，播放器会询问它的名称：“The card is read-only. Project name (Enter: OSMO ACTION 2026-10-22):”（存储卡是只读的。项目名称：）。</p>
-        <p>这个文件夹里存放的，就是旅行文件夹里本该有的东西：<code>_Moments</code>、<code>_Clips</code>、<code>_Exports</code>，以及按片段原有路径存放的片段 <code>.afp.json</code> 文件。另外还有 <code>Sources.txt</code>，一个说明素材在哪里的纯文本文件。它还记下存储卡的 ID，所以下个月在同一张格式化过的存储卡上拍的旅行，会有它自己的项目。</p>
-        <p>把存储卡拷到了 NAS 上？把新路径加到 <code>Sources.txt</code> 的第一行。精彩瞬间和预览里的链接是相对路径，所以它们都会跟着走。一直锁定的存储卡无法用 <kbd>Ctrl</kbd>+<kbd>x</kbd> 剪切：解锁它，或者剪切拷贝出来的副本。</p>
-      </div>
-      <pre class="lib-pre" aria-label="一个 Sources.txt 示例"># Where this project's footage is. The first path that exists is used; edit it if the footage moves.
-/Volumes/video/2026-10 Egypt
-Z:\2026-10 Egypt</pre>
     </div>
   </section>
 
@@ -491,7 +579,7 @@ Z:\2026-10 Egypt</pre>
         <div class="section-head">
           <p class="eyebrow">Project 标签页</p>
           <h2>每个控件，从上到下。</h2>
-          <p class="lede">侧边面板的第一个标签页。它显示与当前情况相符的内容：先是项目，然后是这个片段，再是你标记的一段。</p>
+          <p class="lede">播放器侧边面板的第一个标签页。它显示与当前情况相符的内容：先是项目，然后是这个片段，再是你标记的一段。</p>
         </div>
         <div class="lib-settings-wrap">
           <table class="settings">
@@ -502,9 +590,9 @@ Z:\2026-10 Egypt</pre>
               <tr><th scope="row">Initialize the project here</th><td>在选中的文件夹中创建项目：也就是 <code>Project.afproject</code> 文件。</td></tr>
               <tr class="grp"><th colspan="2" scope="colgroup">项目</th></tr>
               <tr><th scope="row">项目名称 ⋯</th><td><strong><span class="os-mac">Project folder in Finder</span><span class="os-win">Project folder</span></strong>；<strong>New moments stabilized on their own</strong>：新的精彩瞬间只按它自己这一段平滑，而不是作为整个片段的一部分。默认关闭。</td></tr>
-              <tr><th scope="row">3 moments · 12 of 40 clip previews</th><td>各项数量。</td></tr>
-              <tr><th scope="row">Open in Action Footage Library</th><td>在 <a class="text-link" href="#library-app">Action Footage Library</a> 中打开这次旅行。下面写着：“Clip previews (28 new clips), moments and photos of all marks, exports of all moments: made there, in the background”（片段预览、所有标记的精彩瞬间和照片、所有精彩瞬间的导出：都在那里于后台完成）。无法生成的内容会在那里列出，并说明原因。</td></tr>
-              <tr><th scope="row">Show all clips <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>打开 <code>_Clips</code>。</td></tr>
+              <tr><th scope="row">38 moments · 12 of 40 clip previews</th><td>各项数量。</td></tr>
+              <tr><th scope="row">Open in Action Footage Library</th><td>在 <a class="text-link" href="#library-app">Action Footage Library</a> 中打开项目。下面写着：“Clip previews, moments and photos of all marks, exports of all moments: made there, in the background”（片段预览、所有标记的精彩瞬间和照片、所有精彩瞬间的导出：都在那里于后台完成）。</td></tr>
+              <tr><th scope="row">Show all clips <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>有片段预览时，打开 <code>_Clips</code>。</td></tr>
               <tr><th scope="row">Show all moments <span class="os-mac">in Finder</span><span class="os-win">in the folder</span></th><td>打开 <code>_Moments</code>。</td></tr>
               <tr><th scope="row">Marks for the editor <span class="soon">即将推出</span></th><td><strong>Final Cut Pro…</strong>、<strong>DaVinci Resolve…</strong>、<strong>Premiere Pro…</strong>；包含哪些片段：<strong>All but rejects</strong>（默认，被拒绝的除外）或 <strong>With moments or marks</strong>（有精彩瞬间或标记的）。</td></tr>
               <tr class="grp"><th colspan="2" scope="colgroup">这个片段</th></tr>
@@ -524,9 +612,9 @@ Z:\2026-10 Egypt</pre>
           </table>
         </div>
       </div>
-      <figure class="media lib-tall" id="shot-library-6">
-        <img src="../media/library-6.jpg" alt="侧边面板的 Project 标签页：2026-10 Egypt，3 moments 和 3 of 7 clip previews，Open in Action Footage Library 及其说明，Show all clips in Finder 和 Show all moments in Finder，片段的标记和精彩瞬间（Turtle 的菜单已展开），以及 Save as moment 0:28–0:32。" width="584" height="1594" loading="lazy">
-        <figcaption>一次有几个精彩瞬间的旅行的 Project 标签页。</figcaption>
+      <figure class="media lib-tall" id="shot-player-marks">
+        <img src="../media/player-marks.jpg" alt="播放器暂停在一次沉船潜水上，上方有潜水员，视频旁边是打开在 Project 标签页的侧边面板，视频下方的导航栏上有相机的精彩时刻；鼠标指在第二个上，显示 0:26.38 Highlight 2。" width="1600" height="900" loading="lazy">
+        <figcaption>视频旁边是 Project 标签页，下方是导航栏。</figcaption>
       </figure>
     </div>
   </section>
@@ -544,12 +632,13 @@ Z:\2026-10 Egypt</pre>
         <div class="key"><span>在此处添加标记；在标记上：删除它</span><span><kbd>M</kbd></span></div>
         <div class="key"><span>下一个标记 · 上一个标记</span><span><kbd>Ctrl</kbd>+<kbd>]</kbd> · <kbd>Ctrl</kbd>+<kbd>[</kbd></span></div>
         <div class="key"><span>不感兴趣：片段的预览移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>；再按：恢复</span><span><kbd>X</kbd></span></div>
-        <div class="key"><span>收藏：正在播放的精彩瞬间，否则是片段；再按：取消 <span class="soon">即将推出</span></span><span><kbd>K</kbd></span></div>
         <div class="key"><span>导出这一段或整个片段；再按：取消</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
         <div class="key"><span>把标记的一段从片段中剪掉，先询问</span><span><kbd>Ctrl</kbd>+<kbd>x</kbd></span></div>
         <div class="key"><span>显示或隐藏侧边面板</span><span><kbd>Tab</kbd></span></div>
+        <div class="key"><span>在 Library 中：全选 · 全不选</span><span><kbd class="os-mac">⌘</kbd><kbd class="os-win">Ctrl</kbd>+<kbd>A</kbd> · <kbd>Esc</kbd></span></div>
+        <div class="key"><span>在 Library 中：打开 · 重命名</span><span class="os-mac"><kbd>⌘</kbd>+<kbd>↓</kbd> · <kbd>Return</kbd></span><span class="os-win"><kbd>Enter</kbd> · <kbd>F2</kbd></span></div>
       </div>
-      <p class="note">在俄语、乌克兰语或白俄罗斯语键盘布局下，这些快捷键同样有效。</p>
+      <p class="note">在俄语、乌克兰语或白俄罗斯语键盘布局下，播放器的快捷键同样有效。</p>
     </div>
   </section>
 
@@ -561,14 +650,15 @@ Z:\2026-10 Egypt</pre>
         <h2>依赖它之前要知道的事。</h2>
       </div>
       <ul class="lib-limits">
-        <li><strong>精彩瞬间是一个链接。</strong>它需要原始文件在项目中的同一位置，且未经改动。移动整个旅行文件夹没问题；重命名或重新编码原始文件，会让它的精彩瞬间和预览失效。</li>
+        <li><strong>精彩瞬间是一个链接。</strong>它需要它的原始文件在项目的某个位置中，且未经改动。移动或重命名都没问题；重新编码过的原始文件是另一个文件，它的精彩瞬间会失去它。</li>
         <li><strong>精彩瞬间文件不是用来发送的。</strong>在别处它只是一帧静止画面，聊天软件和重新编码也会去掉其中的链接。请发送导出的文件。</li>
         <li><strong>精彩瞬间的文件只显示一帧</strong>，不是这一段的视频。</li>
         <li><strong>片段预览没有防抖</strong>，它们的帧是最近的关键帧，与标记最多相差约一秒。</li>
         <li><strong>标记还不能自己命名</strong>：它们叫 “Mark 1”、“Mark 2”，或者沿用相机的名称。</li>
+        <li><strong>项目需要一个可以写入的文件夹。</strong>打开了写保护锁的存储卡：先把它拷到你的硬盘或 NAS 上，再在那里创建项目。</li>
         <li><strong>剪切会替换片段。</strong>原始文件移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>，播放器中无法撤销，导出的文件仍指向旧的原始文件，而且这个功能是为 DJI 片段做的。</li>
-        <li><strong>给剪辑软件的文件只能导入一次。</strong>Final Cut Pro 和 Resolve 不会合并同一批片段的第二次导入。所以等你标完想要的内容再生成它。</li>
-        <li><strong>在 Linux 上，目前只能一个片段一个片段地处理整次旅行。</strong>Linux 上还没有 Action Footage Library，所以在那里无法一次生成整次旅行的片段预览、所有标记的精彩瞬间和照片，也无法一次导出所有精彩瞬间。</li>
+        <li><strong>跟随项目文件夹的 Apple 照片相簿</strong>会在以后的版本中推出；目前 Library 读取照片只是为了地点。</li>
+        <li><strong>在 Linux 上，播放器目前一次处理一个片段。</strong>Linux 上还没有 Action Footage Library，所以在那里，一次处理许多片段的任务要等它推出。</li>
         <li><strong>在 Windows 上</strong>，项目、精彩瞬间、预览和 Action Footage Library 目前测试不多。</li>
       </ul>
     </div>
@@ -584,23 +674,27 @@ Z:\2026-10 Egypt</pre>
       <div class="faq">
         <details>
           <summary>播放器会修改我的素材吗？</summary>
-          <div class="a"><p>只有在你用 <kbd>Ctrl</kbd>+<kbd>x</kbd> 剪掉一段并确认时才会：这时片段会被保留下来的部分替换，原始文件移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。除此之外，它只读取你的片段。在每个片段旁边，它会在你改动标记或保存片段的画面设置后，写入一个属于这个片段的小文件 <code>&lt;clip&gt;.afp.json</code>；在你制作 Gyroflow 项目时写入这个项目。其他一切都放在项目里：项目自己的文件夹和 <code>Project.afproject</code>。</p></div>
+          <div class="a"><p>只有在你用 <kbd>Ctrl</kbd>+<kbd>x</kbd> 剪掉一段并确认时才会：这时片段会被保留下来的部分替换，原始文件移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。除此之外，它只读取你的片段。在每个片段旁边，它会在你改动标记、保存片段的画面设置，或者给它设置地点或标签之后，写入一个属于这个片段的小文件 <code>&lt;clip&gt;.afp.json</code>；在你制作 Gyroflow 项目时写入这个项目。其他一切都放在项目的文件夹里。</p></div>
         </details>
         <details>
           <summary>标记需要项目吗？</summary>
           <div class="a"><p>不需要。不管有没有项目，标记都保存在片段旁边。精彩瞬间、片段预览、导出、<kbd>X</kbd> 和 Action Footage Library 才需要项目。</p></div>
         </details>
         <details>
-          <summary>我把旅行移到了 NAS 上。我的精彩瞬间丢了吗？</summary>
-          <div class="a"><p>没有，只要旅行文件夹是整体移动的，素材和项目在一起。链接是相对于项目的，所以仍然能找到它们的片段。放在 Documents 中的项目，要在它的 <code>Sources.txt</code> 中加一行新路径。</p></div>
+          <summary>我把素材移到了 NAS 上。我的精彩瞬间丢了吗？</summary>
+          <div class="a"><p>没有。把新文件夹加到项目的位置中，或者把整个项目文件夹和它一起移动。精彩瞬间按片段本身是什么来找到它，而不只是按它原来在哪里，并记下它的新位置。Library 中的 <b>Check</b> 会显示仍然缺失的东西，<b>Find moved files</b> 会修复它。</p></div>
+        </details>
+        <details>
+          <summary>所有素材一个项目，还是每次旅行一个？</summary>
+          <div class="a"><p>都可以。所有素材一个项目，Library 就能跨所有旅行搜索和筛选；每次旅行一个项目，就是一个可以整体移动或归档的文件夹。一次旅行的项目以后可以用 <b>Take in another project…</b> 并入一个更大的项目。</p></div>
         </details>
         <details>
           <summary>可以把精彩瞬间发给朋友吗？</summary>
           <div class="a"><p>请改为发送导出的文件：在精彩瞬间上按 <kbd>Shift</kbd>+<kbd>E</kbd>。精彩瞬间自己的文件只是一帧画面，外加一个指向只有你才有的片段的链接。</p></div>
         </details>
         <details>
-          <summary>免费版 DaVinci Resolve 能用吗？</summary>
-          <div class="a"><p>能。免费版不能运行脚本，所以播放器写出三个文件，由你手动导入：一个时间线文件、一个标记点列表和一个元数据表。</p></div>
+          <summary>Library 会改动我的 Apple 照片吗？</summary>
+          <div class="a"><p>不会。它读取你照片的时间和地点，用来建议片段是在哪里录制的，不会改动照片中的任何东西。</p></div>
         </details>
       </div>
     </div>

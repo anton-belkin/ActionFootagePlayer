@@ -179,7 +179,7 @@
       <ol class="steps">
         <li>
           <h3>Mettez en pause sur le bon moment</h3>
-          <p>Un instant plus tard, l’image en pause est nettoyée à l’écran. C’est activé par défaut ; <kbd>Ctrl</kbd>+<kbd>p</kbd> le désactive et le réactive.</p>
+          <p>L’image à l’écran est déjà nettoyée du bruit du capteur : le lecteur le fait pendant la lecture du clip. C’est activé par défaut ; <kbd>Ctrl</kbd>+<kbd>p</kbd> le désactive et le réactive.</p>
         </li>
         <li>
           <h3>Regardez-la en pleine taille</h3>
@@ -204,9 +204,9 @@
       <div class="stack">
         <p class="eyebrow">Image nettoyée</p>
         <h2>Une image, reconstruite à partir de onze.</h2>
-        <p>Une seule image de vidéo est plus bruitée qu’une photo, d’autant plus en faible lumière : en profondeur sous l’eau, au crépuscule, en intérieur. Ce grain vient du capteur de la caméra. Alors, quand vous mettez en pause, le lecteur attend un instant (0,4&nbsp;s), puis nettoie l’image par réduction temporelle du bruit : il reconstruit l’image en pause à partir d’elle-même et des 5 images de chaque côté.</p>
-        <p>Chacune de ces images est d’abord ramenée sur l’image en pause, d’après le mouvement entre elles. Puis elles sont combinées. Le bruit du capteur est différent dans chaque image, il s’annule donc en grande partie dans la moyenne. Le récif, les palmes et les visages sont les mêmes dans chaque image, donc leur détail reste. Le message à l’écran indique <i>Cleaning up the frame…</i> (nettoyage de l’image), et cela prend environ une seconde pour de la 4K.</p>
-        <p>Il faut que le clip soit stabilisé : c’est la stabilisation qui sait comment la caméra a bougé entre les images. Dans le panneau latéral, cela s’appelle <b>Temporal denoise</b> (débruitage temporel), et cela reste activé pour les clips suivants jusqu’à ce que vous le désactiviez.</p>
+        <p>Une seule image de vidéo est plus bruitée qu’une photo, d’autant plus en faible lumière : en profondeur sous l’eau, au crépuscule, en intérieur. Ce grain vient du capteur de la caméra. Alors le lecteur le nettoie par réduction temporelle du bruit, pendant la lecture et quand vous mettez en pause : il reconstruit chaque image à partir d’elle-même et des 5 images de chaque côté.</p>
+        <p>Chacune de ces images est d’abord ramenée sur l’image en pause, d’après le mouvement entre elles. Puis elles sont combinées. Le bruit du capteur est différent dans chaque image, il s’annule donc en grande partie dans la moyenne. Le récif, les palmes et les visages sont les mêmes dans chaque image, donc leur détail reste. Pendant la lecture, l’image s’affiche quelques images plus tard qu’elle ne le ferait, et le son l’attend.</p>
+        <p>Il faut que le clip soit stabilisé : c’est la stabilisation qui sait comment la caméra a bougé entre les images. C’est <b>Temporal denoise</b> (débruitage temporel) dans l’onglet Transform du panneau latéral, activé par défaut et gardé avec les réglages du clip ; <b>Stronger, for a very noisy clip</b> (plus fort, pour un clip très bruité) prend plus d’images. Performance &amp; Quality indique quelle part de ce travail fait cet ordinateur : <b>Full</b> (complet), <b>Light</b> (léger, 3 images de chaque côté) ou <b>Off</b> (désactivé). Rien n’est écrit dans vos fichiers : les exports se lisent tels qu’enregistrés, et les photos que vous enregistrez sont nettoyées.</p>
         <h3 class="ph-h3">L’image en pause en pleine taille</h3>
         <p>Pour une lecture fluide, le lecteur peut afficher la vidéo plus petite qu’elle n’a été enregistrée (les réglages de taille de lecture et de fréquence d’images dans la partie Performance &amp; Quality du panneau latéral). Une image en pause montre alors moins de détail que n’en contient le fichier. <kbd>Ctrl</kbd>+<kbd>f</kbd> rend de nouveau l’image en pause à la résolution propre de la vidéo, une fois, et la nettoie dans la même passe. Pour l’avoir après chaque pause, réglez <b>Paused frame</b> sur <b>Full size</b> dans le panneau latéral.</p>
         <p class="honest">C’est seulement pour regarder. Une photo enregistrée est toujours rendue à partir du fichier en pleine résolution, avec ou sans <kbd>Ctrl</kbd>+<kbd>f</kbd>.</p>
@@ -399,7 +399,7 @@
               <thead><tr><th scope="col">Réglage</th><th scope="col">Ce qu’il fait</th><th scope="col">Par défaut</th></tr></thead>
               <tbody>
                 <tr><th scope="row">Paused frame</th><td><b>As it played</b> : l’image en pause à la taille de lecture. <b>Full size</b> : rendue de nouveau à la taille propre de la vidéo un instant après chaque pause (<kbd>Ctrl</kbd>+<kbd>f</kbd> le fait une fois).</td><td>As it played</td></tr>
-                <tr><th scope="row">Temporal denoise <span class="cam-sub"><kbd>Ctrl</kbd>+<kbd>p</kbd></span></th><td>L’image en pause reconstruite à partir des 5 images de chaque côté, à l’écran et dans les photos que vous enregistrez.</td><td>On</td></tr>
+                <tr><th scope="row">Temporal denoise</th><td><b>Full</b> : chaque image reconstruite à partir des 5 images de chaque côté, pendant la lecture et en pause. <b>Light</b> : 3, plus léger pour la puce graphique. <b>Off</b> : aucun sur cet ordinateur, quoi que dise l’interrupteur de l’onglet Transform (<kbd>Ctrl</kbd>+<kbd>p</kbd>). Les photos que vous enregistrez sont nettoyées dans tous les cas.</td><td>Full</td></tr>
               </tbody>
             </table>
           </div>
@@ -411,7 +411,7 @@
             <figcaption>La partie Save frame, sur Mac.</figcaption>
           </figure>
           <figure class="media" id="shot-photos-5">
-            <img src="../media/photos-5.jpg" alt="Performance &amp; Quality dans le panneau latéral : Paused frame, As it played ou Full size, et l’interrupteur Temporal denoise activé, avec leurs légendes." width="570" height="400" loading="lazy">
+            <img src="../media/photos-5.jpg" alt="Performance &amp; Quality dans le panneau latéral : Paused frame, As it played ou Full size ; Temporal denoise, Off, Light ou Full, ici Light ; avec leurs légendes." width="584" height="485" loading="lazy">
             <figcaption>Paused frame et Temporal denoise, dans Performance &amp; Quality.</figcaption>
           </figure>
         </div>
@@ -427,7 +427,7 @@
         <h2>Toutes les touches de cette page.</h2>
       </div>
       <div class="keys">
-        <div class="key"><span>Image en pause nettoyée, activée ou non</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Débruitage temporel, activé ou non</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
         <div class="key"><span>L’image en pause en pleine taille, une fois</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
         <div class="key"><span>Save frame, activé ou non</span><span><kbd>c</kbd></span></div>
         <div class="key"><span>Forme suivante / précédente</span><span><kbd>a</kbd> / <kbd>Shift</kbd>+<kbd>a</kbd></span></div>

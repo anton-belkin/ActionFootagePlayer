@@ -461,6 +461,26 @@
                 <p>播放器自己无法防抖的片段，会原样在 Gyroflow 中打开。没有运动数据的片段（开着 EIS 的 DJI，或根本不记录运动数据的相机）在那里从画面本身进行防抖（光流）；开着相机防抖拍摄的 GoPro 或 Insta360 片段带有运动数据，Gyroflow 会加载它。在那里保存项目后，片段就会用它防抖播放。侧边面板中对应的是 <i>Stabilize in Gyroflow…</i></p>
               </div>
             </div>
+            <div class="feat">
+              <div><h3>许多没有运动数据的片段：Stabilize optically</h3><p class="feat-keys">Action Footage Library</p></div>
+              <div class="feat-text">
+                <p>在 <a class="text-link" href="organizing.html#optical">Action Footage Library</a> 中选中片段或文件夹，按 <b>Stabilize optically</b>（光学防抖）：Gyroflow 从每个片段的画面中测出它的运动，在后台一个接一个地进行，所需时间大约与片段的播放时长相当，它的项目放在片段旁边。不需要的片段会被排除，并逐个说明原因。它需要能从命令行做光学分析的 Gyroflow，在这项功能进入 Gyroflow 官方版本之前，需要用<a class="text-link" href="https://github.com/anton-belkin/gyroflow" rel="noopener">我们的分支</a>构建。</p>
+                <p class="feat-status"><span><span class="where">Mac、Windows</span> Linux 上暂时没有</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>近距离的横向抖动</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>j</kbd> · 面板 → Transform</p></div>
+              <div class="feat-text">
+                <p>陀螺仪防抖去掉的是相机的转动；近距离拍摄时，手的细小横向位移仍然会让画面晃动。<b>Measure for this clip</b>（为此片段测量）根据相机的加速度计和画面，把这些位移测量一次并保存下来；之后播放时，画面会朝相反方向移动来抵消它们。<kbd>Ctrl</kbd>+<kbd>j</kbd> 先测量，之后用来关闭和开启。</p>
+                <p class="feat-status"><span><span class="pill ok">已验证</span> Osmo Action 6</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>从 NAS 播放也很快</h3></div>
+              <div class="feat-text">
+                <p>防抖先读取它最先播放的那一段的运动数据，其余的边播边读。NAS 上一个 2.5 GB 片段中的精彩瞬间，3 到 5 秒就能显示，而第一次打开需要 22 秒；整个片段需要 1.5 到 3 秒。</p>
+              </div>
+            </div>
             <div class="feat" id="stab-underwater">
               <div><h3>水下</h3></div>
               <div class="feat-text">
@@ -544,9 +564,10 @@
               </div>
             </div>
             <div class="feat">
-              <div><h3>360 导出 <span class="soon">即将推出</span></h3></div>
+              <div><h3>环顾四周，得到一段普通视频</h3><p class="feat-keys"><kbd>Alt</kbd>+<kbd>r</kbd> · 面板 → 360° view → Flat video</p></div>
               <div class="feat-text">
-                <p>整个球面导出为保持水平的 360 视频，或者沿着你看过的方向导出普通的 16:9 视频，像其他片段一样从播放器中保存。</p>
+                <p>按 <b>Record</b>（录制），在片段播放时环顾四周：你看到的画面就成为一段普通的平面视频。暂停、跳转或片段结束都会结束一次录制；在某一段上重新录制，只替换那一段；最多可以撤销 20 次录制。<b>Play the recording</b>（播放录制，<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>r</kbd>）在生成任何东西之前先给你看效果；<b>Smooth the turns</b>（平滑转向）、<b>Level the horizon</b>（校平地平线）和 <b>Hold on what's in the middle</b>（盯住中间的东西）用来整理它。<b>Export flat</b>（导出平面视频）把它做成普通视频，16:9、9:16 或 1:1，1080p 或 4K；<b>Export 360°</b>（导出 360°）导出保持水平的整个球面，任何 360 播放器都能播放。录制的内容保存在片段自己的文件里。</p>
+                <p class="feat-status"><span><span class="pill ok">已验证</span> Insta360 X5，在 Mac 上</span></p>
               </div>
             </div>
           </div>
@@ -588,6 +609,13 @@
                 <p>视频的任意一角（默认左下角），公制或英制（英尺、mph、°F），可在菜单或侧边面板中设置。</p>
               </div>
             </div>
+            <div class="feat">
+              <div><h3>无人机的数据</h3><p class="feat-keys"><kbd>v</kbd></p></div>
+              <div class="feat-text">
+                <p>DJI 无人机把相机数据写成字幕：高度、速度、GPS、曝光，放在片段旁边的 <code>.SRT</code> 文件里，或者作为片段中的字幕轨。播放器把它们当作遥测数据读取，所以它们不会用大字盖住画面：片段开始时它们是关闭的，按 <kbd>v</kbd> 显示。其他字幕照常播放。</p>
+                <p class="feat-status"><span><span class="pill ok">已验证</span> DJI Mini 4 Pro</span></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -597,7 +625,7 @@
             <div class="feat">
               <div><h3>相机的精彩时刻</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></p></div>
               <div class="feat-text">
-                <p>录制时按下相机的精彩时刻按键：标记会显示在进度条上，快捷键可跳到下一个或上一个，落在标记前两秒处，因为按下按键时，那一刻通常已经发生了。<kbd>Page Up</kbd> / <kbd>Page Down</kbd> 跳到标记本身。</p>
+                <p>录制时按下相机的精彩时刻按键：标记会显示在视频下方的导航栏上，是琥珀色的菱形（你自己的是白色），快捷键可跳到下一个或上一个，落在标记前两秒处，因为按下按键时，那一刻通常已经发生了。<kbd>Page Up</kbd> / <kbd>Page Down</kbd> 跳到标记本身。</p>
                 <p class="feat-status">
                   <span><span class="pill ok">已验证</span> DJI Osmo Action 6（快捷切换按键，或 GPS 蓝牙遥控器）</span>
                   <span><span class="pill exp">应可用</span> DJI Osmo Action 4 和 Action 5 Pro；GoPro HERO5 及更新机型（HiLight 按键、“GoPro, HiLight”语音指令或遥控器）</span>
@@ -609,6 +637,12 @@
               <div><h3>全部精彩时刻，按时间排列</h3><p class="feat-keys">面板 → Source</p></div>
               <div class="feat-text">
                 <p>侧边面板的 Source → <b>Marks</b>（标记）列出每个标记及其时间：点一下就跳到那里。没有面板时，插件菜单会按时间列出它们。</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>导航栏和 Playlist</h3><p class="feat-keys"><kbd>F8</kbd> · 面板 → Playlist</p></div>
+              <div class="feat-text">
+                <p>视频下方的导航栏是播放器自己的。指向轨道，它会显示精确到百分之一秒的时间；靠近标记或精彩瞬间的结尾时，它会吸附上去并显示名称。点一下就跳到那一帧，在导航栏上滚动滚轮或横向滑动则逐帧移动。它的按钮：上一个和下一个片段、后退一帧和前进一帧、上一个和下一个标记、在此处标记、选段（A–B）、速度、循环、声音和全屏。打开侧边面板时，它位于视频下方，始终显示。面板的 <b>Playlist</b>（播放列表）标签页列出片段所在文件夹中的视频，正在播放的那个有标记；点一下就播放它。</p>
               </div>
             </div>
             <div class="feat">
@@ -634,14 +668,14 @@
             <div class="feat">
               <div><h3>一个精彩瞬间就是一个小文件</h3></div>
               <div class="feat-text">
-                <p>每个精彩瞬间都是项目 <code>_Moments/</code> 文件夹里的一个小 MP4，以它的名称命名：<code>&lt;name&gt;.afplink.mp4</code>。<span class="os-mac">访达的缩略图和快速查看</span><span class="os-win">文件资源管理器的缩略图和预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）</span>都以正常色彩显示它，而不是 Log 的灰色。在播放器中打开，它会以完整画质播放原始文件中的这一段，显示效果与你保存时一样：它完整的<a class="text-link" href="#stab-transform">变换</a>，包括防抖和画幅。</p>
+                <p>每个精彩瞬间都是项目 <code>_Moments/Generated/</code> 文件夹里的一个小 MP4，以它的名称命名：<code>&lt;name&gt;.afplink.mp4</code>。<span class="os-mac">访达的缩略图和快速查看</span><span class="os-win">文件资源管理器的缩略图和预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）</span>都以正常色彩显示它，而不是 Log 的灰色。在播放器中打开，它会以完整画质播放原始文件中的这一段，显示效果与你保存时一样：它完整的<a class="text-link" href="#stab-transform">变换</a>，包括防抖和画幅。</p>
                 <p>它的图标是其中的第一个标记，没有标记时则是中间那一帧。文件日期就是这一刻真实发生的时间，所以按日期排序时，精彩瞬间会按发生的先后排列。</p>
               </div>
             </div>
             <div class="feat">
               <div><h3>像普通文件一样整理</h3></div>
               <div class="feat-text">
-                <p>删掉文件，就删掉了这个精彩瞬间。<code>_Moments/</code> 里的子文件夹由你安排，用来给精彩瞬间分类；重命名文件，就重命名了精彩瞬间。</p>
+                <p>删掉文件，就删掉了这个精彩瞬间。把它移进项目文件夹中任何你自己的文件夹、重命名它：它仍然是一个精彩瞬间，靠里面的链接被找到。</p>
               </div>
             </div>
             <div class="feat">
@@ -653,32 +687,34 @@
             <div class="feat">
               <div><h3>标记</h3><p class="feat-keys"><kbd>M</kbd></p></div>
               <div class="feat-text">
-                <p>片段中的时间点，显示在进度条上。<kbd>M</kbd> 在视频当前位置添加一个标记；在标记上按则删除它。在你改动任何一个之前，标记就是相机的精彩时刻：第一次改动会把它们全部保存到这个片段专属的小文件 <code>&lt;clip&gt;.afp.json</code> 中，它还保存你为片段保存的播放方式。删掉这个文件，相机的标记就回来了，片段也会忘掉你保存的播放方式。早期版本的 <code>&lt;clip&gt;.marks.json</code> 会被读取，并在下次改动时变成 <code>.afp.json</code>。</p>
+                <p>片段中的时间点，显示在导航栏上。<kbd>M</kbd> 在视频当前位置添加一个标记；在标记上按则删除它。在你改动任何一个之前，标记就是相机的精彩时刻：第一次改动会把它们全部保存到这个片段专属的小文件 <code>&lt;clip&gt;.afp.json</code> 中，它还保存你为片段保存的播放方式。删掉这个文件，相机的标记就回来了，片段也会忘掉你保存的播放方式。早期版本的 <code>&lt;clip&gt;.marks.json</code> 会被读取，并在下次改动时变成 <code>.afp.json</code>。</p>
               </div>
             </div>
             <div class="feat">
               <div><h3>整个旅程一目了然</h3><p class="feat-keys">Action Footage Library</p></div>
               <div class="feat-text">
-                <p>在你需要时生成：用 <b>Make clip previews</b>（生成片段预览），它在 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 中，从侧边面板的 Project 标签页打开，就会得到一个 <code>_Clips/</code> 文件夹，每个片段一个小 MP4，即该片段的彩色翻页预览。<span class="os-mac">在图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；快速查看几秒钟就能翻完一个片段。</span><span class="os-win">在大图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）几秒钟就能翻完一个片段。</span></p>
+                <p>在你需要时生成：在 <a class="text-link" href="organizing.html#clip-previews">Action Footage Library</a> 中对片段或文件夹使用 <b>Make clip previews</b>（生成片段预览），就会在 <code>_Clips/Generated/</code> 中为每个片段生成一个小 MP4，即该片段的彩色翻页预览，按素材的文件夹、按旅行或全部放在一个文件夹中排列。<span class="os-mac">在图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；快速查看几秒钟就能翻完一个片段。</span><span class="os-win">在大图标视图中，这个文件夹就是彩色的整个旅程，不再是一片 Log 的灰色；预览窗格（<kbd>Alt</kbd>+<kbd>P</kbd>）几秒钟就能翻完一个片段。</span></p>
               </div>
             </div>
             <div class="feat">
               <div><h3>把片段放到一边</h3><p class="feat-keys"><kbd>X</kbd></p></div>
               <div class="feat-text">
-                <p>不感兴趣：在播放器里按 <kbd>X</kbd>，或者从 <code>_Clips/</code> 删掉这个片段的翻页预览，两者效果相同。片段本身原地不动。</p>
+                <p>不感兴趣：在播放器里按 <kbd>X</kbd>，会把这个片段的翻页预览移到废纸篓，再按一次 <kbd>X</kbd> 则重新生成它。片段本身原地不动。</p>
               </div>
             </div>
             <div class="feat">
-              <div><h3>一次处理整个旅程</h3><p class="feat-keys">Action Footage Library</p></div>
+              <div><h3>Action Footage Library</h3><p class="feat-keys">Project.afproject</p></div>
               <div class="feat-text">
-                <p>对一个片段做的事在播放器中完成；对整个旅程做的事在 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 中完成，这是随播放器附带的第二个小 App。它在后台逐个完成旅程的批量任务：片段预览、所有标记的精彩瞬间和照片，以及所有精彩瞬间的导出。用侧边面板 Project 标签页中的 <b>Open in Action Footage Library</b>（在 Action Footage Library 中打开）打开它，或双击旅程的 <code>Project.afproject</code>。</p>
+                <p>对一个片段做的事在播放器中完成；对许多片段做的事在 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 中完成，这是随播放器附带的 App。它把项目按文件夹浏览（Originals、Footage、Moments、Photos、Exports），带有筛选和搜索，它的命令作用于你选中的内容，作为后台任务逐个运行：</p>
+                <ul>
+                  <li>片段预览、标记的精彩瞬间和照片、精彩瞬间的渲染和导出；</li>
+                  <li>为没有运动数据的片段做 <b>Stabilize optically</b>（光学防抖）；</li>
+                  <li><b>Check</b>（检查）和 <b>Find moved files</b>（查找移动过的文件）；<b>Take in another project…</b>（并入另一个项目）；</li>
+                  <li><b>Tags</b>（标签），与每个条目保存在一起；以及 <b>Location</b>（地点）：片段在哪里录制，根据你在差不多同一时间拍的 Apple 照片给出建议（在 Mac 上），或手动设置，还有地点筛选；</li>
+                  <li><b>Info</b>（信息）：片段的日期、相机、地点和播放器使用的镜头配置文件，还没有合适的配置文件时则显示相机的模式编号。</li>
+                </ul>
+                <p>每个片段都有一张缩略图，和<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>画出来的一样快：NAS 上的 300 个片段，第一次 9 秒，之后不到一秒。项目旁边的共享目录保存着它所知道的信息，所以大型项目在每台电脑上都能很快打开。用侧边面板 Project 标签页中的 <b>Open in Action Footage Library</b>（在 Action Footage Library 中打开）打开它，或双击 <code>Project.afproject</code>。</p>
                 <p class="feat-status"><span><span class="where">Mac、Windows</span> Linux 上暂时没有</span></p>
-              </div>
-            </div>
-            <div class="feat">
-              <div><h3>收藏与评分 <span class="soon">即将推出</span></h3><p class="feat-keys"><kbd>K</kbd></p></div>
-              <div class="feat-text">
-                <p>还在的精彩瞬间或片段翻页预览就是保留的，删掉的就是不要的。<kbd>K</kbd> 把正在播放的精彩瞬间（没有时则是当前片段）设为收藏，再按一次取消：<span class="os-mac">在访达中是绿色的 <i>Favorite</i> 标签</span><span class="os-win">在文件资源管理器中是 4 星及以上评分</span>。剪辑软件也会收到这些信息。</p>
               </div>
             </div>
             <div class="feat" id="lossless-cut">
@@ -692,7 +728,7 @@
             <div class="feat" id="projects">
               <div><h3>项目文件夹</h3><p class="feat-keys">面板 → Project</p></div>
               <div class="feat-text">
-                <p>项目就是一次旅行的文件夹，只需设置一次：第一次保存精彩瞬间、导出或打开 Action Footage Library 时，侧边面板的 Project 标签页会问你用哪个文件夹，是片段所在的文件夹还是它上面的某一层，然后 <i>Initialize the project here</i>（在此初始化项目）会创建项目。其中的每个文件夹都属于这个项目。里面放着 <code>_Moments/</code>、<code>_Clips/</code>、<code>_Exports/</code> 和 <code>_Stills/</code>，以及文件 <code>Project.afproject</code>，它会在 <a class="text-link" href="organizing.html#library-app">Action Footage Library</a> 中打开这次旅行。早期版本创建的项目里则是一个 <code>_ActionFootagePlayer/</code> 文件夹：播放器下次打开其中的某个片段时，会把它转入 <code>Project.afproject</code>。每个片段的 <code>.afp.json</code> 和 Gyroflow 项目留在它旁边。当那个文件夹无法写入时（锁定的存储卡、只读的共享文件夹），播放器会询问一个名称，在“文稿”中它自己的文件夹里（<code>Documents/ActionFootagePlayer/</code>）新建一个项目文件夹，其中的 <code>Sources.txt</code> 指向素材所在的位置。 <span class="soon">即将推出</span></p>
+                <p>项目就是你的原始文件所在的地方，即这台电脑上或 NAS 上的任意文件夹（它的位置），再加上它的精彩瞬间、片段预览、导出的文件和照片放在哪里：<code>_Moments/</code>、<code>_Clips/</code>、<code>_Exports/</code> 和 <code>_Stills/</code>，新生成的放进其中的 <code>Generated/</code> 文件夹。它的文件 <code>Project.afproject</code> 只保存这些位置；其他一切都在文件本身里，每个文件按片段本身是什么来找到它，所以项目跟着素材走。第一次保存精彩瞬间或导出时，侧边面板的 Project 标签页会问你用哪个文件夹，是片段所在的文件夹还是它上面的某一层，然后 <i>Initialize the project here</i>（在此初始化项目）会创建项目。每个片段的 <code>.afp.json</code> 和 Gyroflow 项目留在它旁边。早期版本的项目会照原样读取。</p>
                 <p>你的原始文件保持原样，除非你<a class="text-link" href="#lossless-cut">剪掉其中拍坏的一段</a>。</p>
               </div>
             </div>
@@ -789,9 +825,9 @@
           <p class="note"><a class="text-link" href="photos.html">从视频中取照片，一步步讲清楚 →</a></p>
           <div class="feats">
             <div class="feat">
-              <div><h3>暂停帧的时域降噪</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
+              <div><h3>时域降噪，边播边做</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd> · 面板 → Transform</p></div>
               <div class="feat-text">
-                <p>视频暂停片刻后，用这一帧及其前后各 5 帧重建画面，每一帧都按它们之间的运动对齐到这一帧上：光线昏暗时传感器产生的噪点大多消失（时域降噪），细节保留。4K 大约需要一秒；必须开启防抖。它默认开启，所以只要暂停就行；<kbd>Ctrl</kbd>+<kbd>p</kbd> 关闭它，再按一次重新开启，对后续片段同样有效。</p>
+                <p>每一帧都用它本身及其前后各 5 帧重建，每一帧都按它们之间的运动对齐到这一帧上：光线昏暗时传感器产生的噪点消失（时域降噪），细节保留。播放时和暂停时都会这样做；画面会晚几帧显示，声音会等它。必须开启防抖。它默认开启，与片段的设置保存在一起；<b>Stronger, for a very noisy clip</b>（更强，用于噪点很多的片段）会纳入更多帧，并去掉暗斑。Performance &amp; Quality → <b>Temporal denoise</b>：在这台电脑上用 <b>Full</b>（完整）、<b>Light</b>（轻度，前后各 3 帧）或 <b>Off</b>（关闭）。不会往文件里写入任何东西：导出的文件按录制原样播放。</p>
               </div>
             </div>
             <div class="feat">
@@ -830,7 +866,7 @@
             <div class="feat">
               <div><h3>降噪</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
               <div class="feat-text">
-                <p>暂停的帧和你保存的照片会被净化，用前后的帧重建：即<a class="text-link" href="#still">静帧净化</a>。播放时的降噪已经没有快捷键、菜单或开关；<code>dlogm.conf</code> 中的 <code>denoise=yes</code> 仍然可以开启它。</p>
+                <p>经过防抖的片段播放时没有昏暗光线下的噪点：这就是<a class="text-link" href="#still">时域降噪</a>，播放时和暂停时都有，你保存的照片也一样。对于没有防抖的片段，<code>dlogm.conf</code> 中的 <code>denoise=yes</code> 会在播放时开启一种较轻的降噪。</p>
               </div>
             </div>
             <div class="feat">
@@ -854,14 +890,15 @@
                 <p>各项设置都在窗口右侧、视频旁边的面板中，视频会为它让出位置；快捷键标在对应功能旁边。<kbd>Tab</kbd> 隐藏或显示面板。</p>
                 <ul>
                   <li><b>Project</b>，面板打开时所在的部分：这次旅行的项目文件夹（<i>Initialize the project here</i>）、<b>Open in Action Footage Library</b>、这个片段的标记和精彩瞬间、标记一段并把它保存为精彩瞬间；</li>
+                  <li><b>Playlist</b>：片段所在文件夹中的视频；点一下就播放；</li>
                   <li><b>Source</b>：片段的信息、<span class="os-mac">访达</span><span class="os-win">文件资源管理器</span>和路径、如何读取它（Log 曲线、录制时的旋转、它的镜头、水下且用平面镜罩），附有 <b>Save to the source</b> 和 <b>Revert to saved</b>，以及它的标记；</li>
-                  <li><b>Transform</b>：定义于哪里、<b>Save</b>、<b>Revert to saved</b>、<b>Use as default</b>、<b>Auto save</b> 和 <b>Settings of its own</b>；防抖、强度、地平线、镜头及其投影、画幅的形状和方向、水下色边；有 Gyroflow 项目时，则是项目的值；</li>
+                  <li><b>Transform</b>：定义于哪里、<b>Save</b>、<b>Revert to saved</b>、<b>Use as default</b>、<b>Auto save</b> 和 <b>Settings of its own</b>；防抖、强度、地平线、镜头及其投影、画幅的形状和方向、水下色边、时域降噪和横向抖动；有 Gyroflow 项目时，则是项目的值；</li>
                   <li><b>Output</b>：<b>Display</b>，各种风格；<b>Export</b>，导出片段或标记的一段、<b>Export in SDR</b>、最近一次导出；</li>
                   <li><b>Save frame</b>：为照片构图、它的形状、相机、照片的类型；</li>
-                  <li><b>Performance &amp; Quality</b>：防抖时的帧率和尺寸、暂停的帧、边缘填充、在这块屏幕上跳过色差校正、GPU 跟不上时是否询问；</li>
+                  <li><b>Performance &amp; Quality</b>：防抖时的帧率和尺寸、暂停的帧、这台电脑做多少时域降噪、边缘填充、在这块屏幕上跳过色差校正、GPU 跟不上时是否询问；</li>
                   <li><b>Telemetry</b>：是否显示、所在角落、单位、字段；</li>
                   <li><b>Dolby Vision</b>（Mac App）：trim 参数滑块；</li>
-                  <li><b>360° view</b>（360° 视图），在播放 360 片段时：投影、视图以及它跟随什么；</li>
+                  <li><b>360° view</b>（360° 视图），在播放 360 片段时：投影、视图以及它跟随什么，还有 <b>Flat video</b>（平面视频）：录制你的视角并导出；</li>
                   <li><b>Support</b>：版本号、Keys…、Note for the agent…、Report this camera…、Set up again…，以及网站和 GitHub 的链接。</li>
                 </ul>
                 <p>Source 和 Output 的末尾都是 <b>In the folder</b>：<b>Previous clip</b>、<b>Next clip</b>、<b>Autoplay next</b> 和 <b>Loop the clip</b>。</p>
@@ -900,7 +937,6 @@
                 <tr><td><kbd>M</kbd></td><td>在此处添加标记；在标记上：删除它</td><td></td></tr>
                 <tr><td><kbd>X</kbd></td><td>把片段放到一边：不感兴趣</td><td></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>x</kbd></td><td>把标记的一段从片段中剪掉（先询问）；原始文件移到废纸篓</td><td></td></tr>
-                <tr><td><kbd>K</kbd></td><td>收藏：正在播放的精彩瞬间，否则是当前片段；再按一次：取消</td><td></td></tr>
                 <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>按播放的样子导出片段或标记的一段（先询问名称）；按两次：取消</td><td><code>gyroflow/export</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>g</kbd></td><td>防抖开启 → 更宽视角 → 关闭</td><td><code>gyroflow/toggle</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>k</kbd></td><td>防抖强度：弱 → 中 → 强</td><td><code>gyroflow/level</code></td></tr>
@@ -908,7 +944,8 @@
                 <tr><td><kbd>Ctrl</kbd>+<kbd>u</kbd></td><td>镜头在水下且用平面镜罩，或在水上（或位于球面镜罩之后），来回切换：源的读取方式，用 <i>Save to the source</i> 保存</td><td><code>gyroflow/lens</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>a</kbd></td><td>去除水下色边，或保留录制原样</td><td><code>gyroflow/fringes</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>e</kbd></td><td>在 Gyroflow 中打开片段</td><td><code>gyroflow/edit</code></td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>暂停帧的时域降噪（静帧净化），开（默认）或关</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>时域降噪，播放时和暂停时，开（默认）或关</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>j</kbd></td><td>横向抖动：为片段测量，然后去除或保留录制原样</td><td><code>gyroflow/translation</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>f</kbd></td><td>全尺寸显示暂停的帧</td><td><code>gyroflow/full</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>s</kbd></td><td>下一种视频输出：HDR、<i>HLG+DV</i>（Mac App）和各种 SDR 风格</td><td><code>dlogm/sdr</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>h</kbd></td><td>直接切换到 HDR</td><td><code>dlogm/hdr</code></td></tr>
@@ -920,6 +957,10 @@
                 <tr><td><kbd>Alt</kbd>+<kbd>v</kbd></td><td>360 片段：视图，或展平的整个球面</td><td><code>view360/toggle</code></td></tr>
                 <tr><td><kbd>Alt</kbd>+<kbd>p</kbd></td><td>360 片段：下一种投影</td><td><code>view360/projection</code></td></tr>
                 <tr><td><kbd>Alt</kbd>+<kbd>h</kbd></td><td>360 片段：正前方跟随什么</td><td><code>view360/heading</code></td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>r</kbd></td><td>360 片段：录制你的视角，或停止</td><td><code>view360/record</code></td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>r</kbd></td><td>360 片段：播放录制</td><td><code>view360/play-recording</code></td></tr>
+                <tr><td><kbd>v</kbd></td><td>字幕关或开：片段自己的，或 DJI 无人机的相机数据</td><td><code>dji_telemetry/subtitles</code></td></tr>
+                <tr><td><kbd>F8</kbd></td><td>侧边面板的 Playlist</td><td><code>side_panel/playlist</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>r</kbd></td><td>给 AI 智能体的笔记</td><td><code>agent/report</code></td></tr>
                 <tr><td>右键</td><td>没有侧边面板时为插件菜单（有面板时为 mpv 自己的菜单）</td><td><code>footage_menu/menu</code></td></tr>
                 <tr><td><kbd>Tab</kbd></td><td>侧边面板，隐藏或显示</td><td><code>side_panel/toggle</code></td></tr>

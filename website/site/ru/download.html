@@ -134,7 +134,7 @@
             <button type="button" class="pop-close" popovertarget="install-mac" popovertargetaction="hide" aria-label="Закрыть">&times;</button>
           </div>
           <ol class="install">
-            <li>Откройте загруженный файл и перетащите <b>ActionFootagePlayer</b> в папку «Программы».</li>
+            <li>Откройте загруженный файл и перетащите оба приложения, <b>ActionFootagePlayer</b> и <b>ActionFootageLibrary</b>, в папку «Программы».</li>
             <li>Откройте его. В первый раз macOS не даст этого сделать: приложение подписано ad hoc, а не учётной записью разработчика Apple. Откройте <b>Системные настройки → Конфиденциальность и безопасность</b>, прокрутите вниз до раздела «Безопасность», нажмите <b>Всё равно открыть</b> рядом с ActionFootagePlayer и подтвердите.</li>
             <li>Согласитесь на начальную настройку: приложение станет плеером для видео MP4 (macOS попросит это подтвердить), в Finder появятся быстрые действия <i>Play Stabilized</i> и <i>Stabilize + LUT</i>, а LUT Rec.709 от DJI будет скачан с сайта DJI.</li>
           </ol>
@@ -273,7 +273,7 @@
           </div>
           <ol class="install">
             <li>Установите mpv и ffmpeg (для экспорта) через Homebrew: <code>brew install mpv ffmpeg</code>.</li>
-            <li>Распакуйте архив в папку scripts вашего mpv: <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code>. Если распаковать его в Finder, получится папка: перенесите пять папок из неё в <code>~/.config/mpv/scripts/</code>.</li>
+            <li>Распакуйте архив в папку scripts вашего mpv: <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code>. Если распаковать его в Finder, получится папка: перенесите папки из неё в <code>~/.config/mpv/scripts/</code>.</li>
             <li>Если скачать архив через браузер, исполняемые файлы стабилизации получают атрибут карантина, и macOS отказывается их запускать: <code>xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow</code></li>
           </ol>
           <p class="platform-note">D-Log M показывается в HDR: LUT Rec.709 от DJI вместе с плагином не распространяется. <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#plugins-in-your-own-mpv">Как его добавить, и остальное подробно</a></p>
