@@ -268,7 +268,6 @@ render's link for people reading the folder.
 - **What it's for:**
   - A clip too heavy to play live anywhere but the Mac: pin it, and the phone, the TV (afp-stream, Jellyfin) or a weaker
     laptop play the render, looking as it should rather than in some degraded form.
-  - Albums synced to Apple Photos are pinned by nature.
 - **Backups:** pinned renders do go into backups. That's accepted: they're few, chosen, and expensive to make. To keep
   them out, exclude their folder from the NAS's backup by hand. A visible name (`_Renders/`) makes that easier to find
   in a backup app than a hidden `.afp/renders/`. *(Open: which name.)*
@@ -277,12 +276,16 @@ render's link for people reading the folder.
 **Lookup:** the library's pinned renders first, then this computer's own. afp-stream looks the same way, so a render
 pinned from the Mac is what the TV plays.
 
-**Which profiles a pin makes** *(open)*: `HDR` for the phone and Apple devices, and `TV` for afp-stream. Either both by
-default, or the profiles of the devices ticked in the library's settings.
+**Which profiles a pin makes:** a library setting, `HDR` and `TV` by default, changeable in the settings. In the
+UI, pinning is one click with no choice. The detailed UI comes later.
+
+**Apple Photos needs no pinned renders.** Photos imports what it's given and keeps its own copy. Sync renders only
+what's new (or changed), hands it to Photos, and the render is no longer needed: it's an ordinary, evictable render.
+Telling what changed goes by the recipe kept with the pair (item ↔ Photos asset), not by the render file.
 
 ### Keeping and cleaning
 
-- **Pinned:** renders an album needs (Photos sync, the TV, "keep rendered") are never evicted.
+- **Pinned** (*Keep rendered*): never evicted.
 - **Everything else is evictable:**
   - on a computer, by a size budget, oldest first, plus stale and unreferenced ones;
   - in the library's folder, only by *Clean renders*: stale or unpinned ones. Unpinning makes a render cleanable.
@@ -297,7 +300,8 @@ default, or the profiles of the devices ticked in the library's settings.
 - **The player, headless,** in the background queue. Today's mechanism, on the computer you're at.
 - **Never by default:**
   - Share renders what it needs, then hands over.
-  - A synced or "keep rendered" album renders its new items by itself.
+  - A pinned album renders its new items by itself; an album synced to Photos renders its new items, hands them
+    over, and keeps nothing.
   - *Render* on a selection, to prepare ahead.
 - **The NAS (N100) overnight:** possible only for a GPU-warp path (stabilization on its CPU runs at ~17 fps at best).
   *(Open, later.)*
@@ -374,7 +378,8 @@ default, or the profiles of the devices ticked in the library's settings.
 8. ~~Where renders live~~: decided.
    - Renders on this computer by default.
    - Pinned renders in the library by default.
-   - Still open: the pinned folder's name (`_Renders/` or `.afp/renders/`), and which profiles a pin makes.
+   - Pins make the profiles set in the library's settings (`HDR` + `TV` by default).
+   - Still open: the pinned folder's name (`_Renders/` or `.afp/renders/`).
 9. **A `Light` profile** for messengers, or `SDR` alone.
 10. **Photo originals:**
     - lens profiles for the cameras' photo modes;
