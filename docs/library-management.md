@@ -1122,6 +1122,16 @@ Anton, 2026-11-09:
   Photos keep their tags in their own XMP. A clip in several places has one main own file, chosen the same way
   everywhere: the first copy that has one, by the locations' order (copies-only and local ones last), then the path in
   the tree; the others are read, never written.
+- **The side panel's parts, Source settings** (Anton, 2026-11-11). The side panel's parts are chosen with a column of
+  icons at its right edge, as the player's side panel has them: Info, Source Settings, Tags, Location, Moments &
+  Previews, Stabilize, Export at the top; Tasks and Checks at the bottom. The part shown clicked again leaves the column
+  alone. A part with nothing for the view (Location in Moments) has its icon dimmed and says where it is. Open, Select
+  all and none, Show in Finder are in the list's menu only. **Source Settings** sets how the selected originals are
+  read, one or many at once (*Batch set Source settings…* in the menu opens it): the log curve, the turn, the lens under
+  water, the lens type, each field at *Leave as is* until changed, only the changed ones written into each original's
+  own file (`source`, its other keys kept), as the player's Source tab saves them. *Auto* for the lens under water only
+  where the camera records when it's in the water (the probe's `water`, vs-gyroflow's water.rs); a camera that doesn't
+  gets No, and the tab says so.
 
 ## Open questions
 

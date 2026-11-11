@@ -1265,6 +1265,16 @@ async fn set_lens_type(shared: State<'_, Shared>, clips: Vec<String>, lens_type:
     tauri::async_runtime::spawn_blocking(move || tags::set_lens_type(&root, &clips, lens_type.as_deref())).await.map_err(|e| e.to_string())
 }
 
+/// The Source settings of clips (the Source Settings tab, Batch set Source settings): [{ "clip": its path in the
+/// tree, "source": { key: value, or null to take it out } }], each clip's own; only the keys given are written
+#[tauri::command]
+async fn set_source(shared: State<'_, Shared>, entries: Vec<Value>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let list: Vec<(String, serde_json::Map<String, Value>)> = entries.iter().filter_map(|e| Some((e["clip"].as_str()?.to_string(), e["source"].as_object()?.clone())))
+        .filter(|(_, s)| !s.is_empty()).collect();
+    tauri::async_runtime::spawn_blocking(move || tags::set_source(&root, &list)).await.map_err(|e| e.to_string())
+}
+
 // ---------- Take in another project ----------
 
 #[tauri::command]
@@ -2015,7 +2025,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
         .on_window_event(move |window, event| {

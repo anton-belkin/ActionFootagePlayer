@@ -87,21 +87,33 @@ button.chip{cursor:pointer}
 .card:hover{background:var(--hover)}
 .card .th,.card .fold{width:100%;max-width:100%;height:auto;aspect-ratio:16/9}
 .empty{padding:40px 14px;color:var(--muted)}
-.side{flex:1 1 340px;max-width:410px;min-width:0;background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column}
+.side{flex:1 1 388px;max-width:458px;min-width:0;background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column}
 .side.left{border-left:0;border-right:1px solid var(--line);max-width:300px;flex:1 1 260px}
 .tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--line2)}
 .tabs button{border:0;background:transparent;padding:8px 12px;border-bottom:2px solid transparent;color:var(--muted);font-weight:500;min-height:38px}
 .tabs button.on{color:var(--fg);border-bottom-color:var(--accent)}
 .count{display:inline-block;min-width:16px;padding:0 5px;margin-left:5px;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
-.summary{padding:12px 16px;border-bottom:1px solid var(--line2)}
-.summary b{font-size:14px}
-.sec{border-bottom:1px solid var(--line2)}
-.sech{width:100%;display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:11px 16px;text-align:left;font-weight:600;min-height:44px;color:var(--fg)}
-.sech:hover{background:var(--hover)}
-.sech .hint{margin-left:auto;font-weight:400;font-size:12px;color:var(--muted)}
-.sech svg{transition:transform .15s}
-.sech[aria-expanded="true"] svg{transform:rotate(90deg)}
-.secb{padding:2px 16px 14px;display:flex;flex-direction:column;gap:9px}
+/* The side panel: the part shown, and the column of icons at the right edge that chooses it (as the player's side panel's rail) */
+.side{flex-direction:row}
+.side.closed{flex:0 0 auto;max-width:none}
+.pane{flex:1;min-width:0;overflow:auto;display:flex;flex-direction:column}
+.rail{flex:0 0 48px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;border-left:1px solid var(--line2);background:var(--win)}
+.side.closed .rail{border-left:0}
+.rail .sp{flex:1}
+.rb{position:relative;width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:0}
+.rb:hover{background:var(--hover);color:var(--fg)}
+.rb.on{background:var(--accent-soft);color:var(--accent-deep)}
+.rb.na{opacity:.45}
+.rb.na.on,.rb.na:hover{opacity:1}
+.rb .count{position:absolute;top:0;right:-2px;margin:0;min-width:14px;padding:0 4px;font-size:10px;line-height:14px}
+.ph{padding:12px 16px 10px;border-bottom:1px solid var(--line2);display:flex;flex-direction:column;gap:2px}
+.ph h2{margin:0;font-size:15px}
+.secb{padding:12px 16px 14px;display:flex;flex-direction:column;gap:9px}
+.secb+.secb{border-top:1px solid var(--line2)}
+.secb .now{margin-top:-6px}
+.secb .now.warn{color:var(--st)}
+.field select.chg{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-line)}
+.field select:disabled{opacity:.6}
 .secb p{margin:0;color:var(--fg2);line-height:1.45}
 .lab{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px}
 .checks{display:flex;flex-wrap:wrap;gap:4px 14px}
@@ -134,7 +146,7 @@ button.chip{cursor:pointer}
   .fpop{grid-template-columns:repeat(2,minmax(0,1fr))}
   .th,.fold{width:64px}
 }
-@media (prefers-reduced-motion:reduce){.bar2 i,.sech svg{transition:none}}
+@media (prefers-reduced-motion:reduce){.bar2 i{transition:none}}
 .mosaic{width:72px;height:40px;border-radius:5px;overflow:hidden;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:var(--line);position:relative}
 .mosaic i{display:block;background:var(--line2)}
 .mosaic .fb{position:absolute;left:3px;bottom:2px;width:16px;height:13px;border-radius:3px;background:rgba(0,0,0,.6);color:#FFFFFF;display:flex;align-items:center;justify-content:center}
@@ -214,7 +226,8 @@ button.chip{cursor:pointer}
 
 .body{flex:1;min-height:0;flex-wrap:nowrap}
 .main{overflow:auto}
-.fpanel,.side{overflow:auto}
+.fpanel{overflow:auto}
+.side{overflow:hidden}
 .top .ttl{display:flex;flex-direction:column;min-width:0}
 .banner{padding:8px 14px;font-size:12px}
 .banner.bad{background:var(--wa-bg);color:var(--wa);border-bottom:1px solid var(--wa-line)}
