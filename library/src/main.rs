@@ -1192,12 +1192,19 @@ fn lens_types_of(text: &str) -> Vec<Value> {
 
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
-async fn set_lens_type(shared: State<'_, Shared>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
+async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if lens_type.as_deref().is_some_and(|t| t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
         return Err("no such lens type".into());
     }
-    tauri::async_runtime::spawn_blocking(move || tags::set_lens_type(&root, &clips, lens_type.as_deref())).await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_lens_type(&root, &clips, lens_type.as_deref());
+        // What the index knows about their lens was worked out with the type they had: read again
+        let paths: Vec<String> = clips.iter().filter_map(|t| tags::clip_own(&root, t).ok()).map(|(_, c)| c.display().to_string()).collect();
+        probes.lock().unwrap().forget(&paths);
+        problems
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------

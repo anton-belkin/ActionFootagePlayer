@@ -656,7 +656,8 @@ pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usi
 
 #[derive(Default)]
 pub struct Probes {
-    known: HashMap<String, (u64, i64, Value)>,
+    /// path -> (size, time, the lens list's stamp, answer)
+    known: HashMap<String, (u64, i64, String, Value)>,
     queue: VecDeque<String>,
     queued: HashSet<String>,
     log: Vec<(u64, String)>,
@@ -666,6 +667,21 @@ pub struct Probes {
 }
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
+
+/// The user's own lens list (vs-gyroflow's lens_pick::user_file, the same place): what tells its versions apart, ""
+/// when there's none. The probe's answer about a clip's lens is worked out with it, so it's kept only while that stays
+/// the same (lens_pick::user_file_stamp)
+pub fn lens_list_stamp() -> String {
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let file = env("AFP_CURATED_LENSES").or_else(|| {
+        let base = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
+                   else if cfg!(windows) { env("APPDATA")? }
+                   else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
+        Some(base.join("ActionFootagePlayer").join("curated_lenses.json"))
+    });
+    file.and_then(|f| std::fs::metadata(&f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
+        .unwrap_or_default()
+}
 
 /// A file's size and time: as the project's catalog has it (no question to the share for each clip: thousands of
 /// clips took minutes, looking as though they were read again), else from the disk
@@ -681,34 +697,40 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
-            self.known.insert(k.clone(), (s, m, e["v"].clone()));
+            self.known.insert(k.clone(), (s, m, e["l"].as_str().unwrap_or_default().to_string(), e["v"].clone()));
         }
     }
     pub fn save(&self, file: &Path) {
-        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, v))| (k.clone(), json!({ "s": s, "m": m, "v": v }))).collect();
+        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, l, v))| (k.clone(), json!({ "s": s, "m": m, "l": l, "v": v }))).collect();
         if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
         let tmp = file.with_extension("tmp");
         if std::fs::write(&tmp, serde_json::to_vec(&Value::Object(m)).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, file); }
     }
-    /// Asked for these clips: the ones not known (or changed since) are queued
+    /// Asked for these clips: the ones not known (or changed since, or known with another lens list) are queued
     pub fn want(&mut self, paths: &[String]) {
+        let lenses = lens_list_stamp();
         for p in paths {
-            let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, _)), Some((s2, m2))) => *s == s2 && *m == m2, _ => false };
+            let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, l, _)), Some((s2, m2))) => *s == s2 && *m == m2 && *l == lenses, _ => false };
             if !fresh && self.queued.insert(p.clone()) { self.queue.push_back(p.clone()); }
         }
+    }
+    /// These clips' answers to be worked out again (a lens type chosen for them): kept until then, and queued
+    pub fn forget(&mut self, paths: &[String]) {
+        for p in paths { if let Some(e) = self.known.get_mut(p) { e.2 = "\u{0}again".into(); } }
+        self.want(paths);
     }
     /// What's known that changed after `since`: (version now, path -> answer, how many wait)
     pub fn since(&self, since: u64) -> Value {
         let mut out = serde_json::Map::new();
         for (v, p) in self.log.iter().rev() {
             if *v <= since { break; }
-            if !out.contains_key(p) { if let Some((_, _, val)) = self.known.get(p) { out.insert(p.clone(), val.clone()); } }
+            if !out.contains_key(p) { if let Some((_, _, _, val)) = self.known.get(p) { out.insert(p.clone(), val.clone()); } }
         }
         json!({ "version": self.version, "items": out, "pending": self.queue.len() + usize::from(self.busy) })
     }
     pub fn known(&self, paths: &[String]) -> Value {
         let mut out = serde_json::Map::new();
-        for p in paths { if let Some((_, _, v)) = self.known.get(p) { out.insert(p.clone(), v.clone()); } }
+        for p in paths { if let Some((_, _, _, v)) = self.known.get(p) { out.insert(p.clone(), v.clone()); } }
         json!({ "version": self.version, "items": out, "pending": self.queue.len() + usize::from(self.busy) })
     }
 }
@@ -730,6 +752,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
             continue;
         };
         let stamp_before = stamp(&path);
+        let lenses = lens_list_stamp();
         let mut cmd = Command::new(&tool);
         cmd.arg("--library").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
         #[cfg(windows)]
@@ -741,7 +764,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
         if let Some((s, m)) = stamp_before {
             p.version += 1;
             let v = p.version;
-            p.known.insert(path.clone(), (s, m, answer));
+            p.known.insert(path.clone(), (s, m, lenses, answer));
             p.log.push((v, path));
         }
         p.busy = false;
@@ -839,6 +862,32 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probes_again_with_another_lens_list() {
+        let dir = std::env::temp_dir().join(format!("afl-lenses-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (clip, list) = (dir.join("A.MP4"), dir.join("curated_lenses.json"));
+        std::fs::write(&clip, b"clip").unwrap();
+        std::env::set_var("AFP_CURATED_LENSES", &list);
+        let path = clip.display().to_string();
+        let (s, m) = stamp(&path).unwrap();
+        let mut p = Probes::default();
+        p.known.insert(path.clone(), (s, m, lens_list_stamp(), json!({ "lens": "" })));
+        p.want(&[path.clone()]);
+        assert!(p.queue.is_empty(), "the same list: known");
+        std::fs::write(&list, br#"{"cameras": {}}"#).unwrap();
+        p.want(&[path.clone()]);
+        assert_eq!(p.queue.len(), 1, "a list made since: asked again");
+        // Its answer is kept until then; a type chosen for it asks again too
+        let mut p = Probes::default();
+        p.known.insert(path.clone(), (s, m, lens_list_stamp(), json!({ "lens": "" })));
+        p.forget(&[path.clone()]);
+        assert_eq!(p.queue.len(), 1);
+        assert_eq!(p.known(&[path.clone()])["items"][&path]["lens"], "");
+        std::env::remove_var("AFP_CURATED_LENSES");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn preview_paths() {

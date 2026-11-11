@@ -129,7 +129,7 @@ pub fn lens_types(video: &Path) -> Result<LensTypes, String> {
     if types.is_empty() { return Ok(LensTypes { camera, ..Default::default() }); }
     Ok(LensTypes {
         chosen: crate::lens_pick::chosen_type(&path),
-        recorded: crate::lens_pick::recorded_type(&camera, &path),
+        recorded: crate::lens_pick::recorded_type(&camera, &path, &id.lens_info),
         mode: crate::probe::recorded_lens_mode(&path),
         camera, types,
     })
