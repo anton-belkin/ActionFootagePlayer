@@ -1,7 +1,8 @@
 # Action Footage NAS Helper
 
 What a NAS does for Action Footage Player and its Library, in one Docker container for a NAS with an x86-64
-processor and an Intel GPU (built and run on a UGREEN DXP with an N100). It's for people at ease with Docker:
+processor and graphics that decode and encode HEVC through VA-API (Intel, AMD; tried on a UGREEN DXP with an
+Intel N100). It's for people at ease with Docker:
 everything is set in the container's environment and volumes, described below, by `--help`, and on its page.
 
 It does three things, each a setting of its own:
@@ -24,6 +25,9 @@ It does three things, each a setting of its own:
   preview: the whole clip) or `all`; what's outside it is removed. Jellyfin then plays the streams on its apps
   (TVs, phones) without transcoding. The `.strm` and `.nfo` files are Kodi's formats, which Emby and Kodi read too
   (with the refresh left to their own scans); Plex doesn't take them.
+
+One stream at a time is what a NAS like the N100 surely keeps up with: it renders a 4K60 clip only a little faster
+than it plays, so a second stream at the same time may stutter (clips rendered ahead play any number at once).
 
 What it doesn't do: change the projects (the stream reads them read-only and refuses a folder it could write to),
 exports, Dolby Vision streams, logins (the stream is for the home network: put it behind nothing reachable from
@@ -64,7 +68,7 @@ container (`docker compose up -d`).
 | Setting | Default | What it does |
 |---|---|---|
 | `AFP_COLLABORATION` | `on` | Collaboration: several people and computers working in one library at once. The NAS is told what changes on its own disks and writes it into each project's catalog (afp-catalog watch), so what one person does (a moment marked, clips sorted, a trip added, also on the NAS itself) reaches everyone else's player and Library in about a second, without anyone walking the share. It writes nothing but the catalog. A project newer than this helper is refused, not touched: update the helper. One of: `on`, `off`. |
-| `AFP_STREAM` | `on` | The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri (an Intel GPU with VA-API). One of: `on`, `off`. |
+| `AFP_STREAM` | `on` | The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri: graphics with VA-API that encode HEVC (Intel, AMD). One stream at a time is what an N100 surely keeps up with; a second at once may stutter. One of: `on`, `off`. |
 | `AFP_JELLYFIN` | `off` | Links for Jellyfin: a folder (/jellyfin) a Jellyfin Home Videos library reads, a .strm (the stream's URL), .nfo and cover per item, sorted into trips; the library refreshed after a change. Needs the stream. One of: `on`, `off`. |
 
 ### What it looks at
@@ -121,8 +125,8 @@ again what it changes.
 
 ## How it's built
 
-`tools/nas-helper/Dockerfile`, from the repository's top: Fedora 43 with RPM Fusion's ffmpeg and Intel's media
-driver, libplacebo 7.387 and mpv 0.42 from their sources, the Rust programs (`afp-catalog`, `gyroflow-gpu-table`
+`tools/nas-helper/Dockerfile`, from the repository's top: Fedora 43 with RPM Fusion's ffmpeg and the GPUs' VA-API
+drivers (Intel's, Mesa's for AMD), libplacebo 7.387 and mpv 0.42 from their sources, the Rust programs (`afp-catalog`, `gyroflow-gpu-table`
 and the gyroflow plugin's), afp-render, and the player's Lua plugins (workspace, gyroflow, dlogm), which the stream
 asks how each file plays. The release workflow builds it, tries it (`--check`) and saves it with `docker save`.
 

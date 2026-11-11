@@ -32,7 +32,7 @@ SETTINGS = [
      "catalog. A project newer than this helper is refused, not touched: update the helper.", ("on", "off")),
     ("AFP_STREAM", "on", "parts", "The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the "
      "player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it "
-     "is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri (an Intel GPU with VA-API).", ("on", "off")),
+     "is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri: graphics with VA-API that encode HEVC (Intel, AMD). One stream at a time is what an N100 surely keeps up with; a second at once may stutter.", ("on", "off")),
     ("AFP_JELLYFIN", "off", "parts", "Links for Jellyfin: a folder (/jellyfin) a Jellyfin Home Videos library reads, a "
      ".strm (the stream's URL), .nfo and cover per item, sorted into trips; the library refreshed after a change. Needs "
      "the stream.", ("on", "off")),

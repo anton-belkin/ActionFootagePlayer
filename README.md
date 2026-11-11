@@ -166,7 +166,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
-| a NAS (x86-64 with an Intel GPU, Docker): collaboration in one library, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
+| a NAS (x86-64 with Intel or AMD graphics, Docker): collaboration in one library, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
 
 **The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
