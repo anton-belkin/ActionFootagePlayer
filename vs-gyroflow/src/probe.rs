@@ -5,7 +5,7 @@
 
 use std::io::{ Read, Seek, SeekFrom };
 use std::sync::{ Arc, atomic::{ AtomicBool, Ordering } };
-use gyroflow_core::{ filesystem, util, camera_identifier::CameraIdentifier };
+use gyroflow_core::{ filesystem, util };
 use crate::lens_pick;
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
@@ -129,7 +129,7 @@ fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> 
 // in Gyroflow's database (lens_pick.rs)
 fn has_lens_profile(path: &str, input: &Input, samples: &[SampleInfo], width: usize, height: usize, fps: f64) -> bool {
     let builtin = lens_in_file(samples);
-    builtin || chosen_lens(path, input, width, height, fps, builtin).is_some()
+    builtin || chosen_lens(path, &lens_pick::Clip::from_input(path, input, width, height, fps), builtin).is_some()
 }
 
 // Whether the file has its own lens (DJI with EIS off, newer GoPros)
@@ -140,15 +140,15 @@ fn lens_in_file(samples: &[SampleInfo]) -> bool {
 
 /// The profile the player loads for the video, as `lens_pick::apply` does when it plays: the curated one of its lens
 /// type, else (unless the lens is in the file) the database's pick
-fn chosen_lens(path: &str, input: &Input, width: usize, height: usize, fps: f64, in_file: bool) -> Option<lens_pick::Pick> {
-    let id = CameraIdentifier::from_telemetry_parser(input, width, height, fps).ok()?;
-    lens_pick::for_video(path, &id, in_file)
+fn chosen_lens(path: &str, clip: &lens_pick::Clip, in_file: bool) -> Option<lens_pick::Pick> {
+    lens_pick::for_clip(path, clip, in_file)
 }
 
 /// The camera and its lens as the player takes them, for the side panel's Source tab and the Library
 #[derive(Debug, Default, serde::Serialize)]
 pub struct LensInfo {
-    /// As Gyroflow tells it: "DJI OsmoAction6"
+    /// As Gyroflow tells it, "DJI OsmoAction6", or as the file names itself where Gyroflow doesn't know the model
+    /// ("DJI Mini4 Pro", lens_pick::camera_name)
     pub camera: String,
     /// "in the file", the label of the profile loaded (lens_pick.rs: the database's pick with its stars, "Nearest: "
     /// when it isn't made for exactly this mode, or "<Type>, from the curated list: <name>"), or "" when none
@@ -159,6 +159,13 @@ pub struct LensInfo {
     #[serde(rename = "type")]
     pub chosen: Option<String>,
     pub recorded: Option<String>,
+    /// The type the curated list gives the camera's clips that neither were given one nor recorded one it names
+    /// (a drone's), null for none
+    pub default: Option<String>,
+    /// The lens loaded is a focal length alone: nothing in the picture to correct, so the player doesn't add the
+    /// filter to correct it (camera_and_lens says "" for it)
+    #[serde(skip)]
+    pub focal_only: bool,
     /// The lens mode the camera wrote, as its number (DJI's fov_type, the HERO4's SETT), for a camera with lens types: shown as
     /// "Unknown (mode 6)" while the curated list doesn't name it
     pub mode: Option<u64>,
@@ -183,33 +190,37 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let size = file.metadata().ok()?.len();
     let video = util::get_video_metadata(&mut file, size, &url).ok()?;
     let options = InputOptions { probe_only: true, ..Default::default() };
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
-    let mut camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
-    // A DJI drone telemetry-parser names only "DJI" (Mini 4 Pro) or not at all (Mavic Pro, Mavic 2): its name from the
-    // file (geotag.rs)
-    if camera.is_empty() || camera == "DJI" {
-        if let Some(m) = crate::geotag::dji_model(std::path::Path::new(path)) { camera = m; }
-    }
-    let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
-    // Gyroflow's name for the lens mode the camera recorded ("Wide"), which the curated list's "recorded" can name too
-    let lens_mode = CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps).map(|id| id.lens_info).unwrap_or_default();
-    let lens = match chosen_lens(path, &input, video.width, video.height, video.fps, in_file) {
+    // A file telemetry-parser doesn't read at all (a Mavic Pro's) can still name its camera itself
+    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok();
+    let in_file = input.as_ref().is_some_and(|i| lens_in_file(i.samples.as_deref().unwrap_or_default()));
+    // The camera, Gyroflow's name for the lens mode it recorded ("Wide"), which the curated list's "recorded" can
+    // name too, and the size
+    let clip = match &input {
+        Some(input) => lens_pick::Clip::from_input(path, input, video.width, video.height, video.fps),
+        None => lens_pick::Clip::from_file(path, video.width, video.height),
+    };
+    let pick = chosen_lens(path, &clip, in_file);
+    let focal_only = pick.as_ref().is_some_and(|p| p.focal_only);
+    let lens = match pick {
         Some(p) => p.label(),
         None if in_file => "in the file".to_string(),
         None => String::new(),
     };
+    let camera = clip.camera.clone();
     let types = lens_pick::lens_types(&camera);
-    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path, &lens_mode) };
+    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type_named(&camera, path, &clip.lens_mode) };
+    let default = if types.is_empty() { None } else { lens_pick::default_type(&camera) };
     let mode = if types.is_empty() { None } else { recorded_lens_mode(path) };
     let lists = lens_pick::lists();
     let curated_file = lists.user_file.as_ref().map(|f| f.to_string_lossy().to_string());
-    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone() })
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone() })
 }
 
-/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video
-/// (`LensInfo::lens`): what the side panel shows, and what a cut must still read as (cut.rs)
+/// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player corrects the video with
+/// (`LensInfo::lens`; "" for a focal length alone, which corrects nothing): whether the plugin corrects the lens of a
+/// clip it can't stabilize, and what a cut must still read as (cut.rs)
 pub fn camera_and_lens(path: &str) -> Option<(String, String)> {
-    lens_info(path).map(|l| (l.camera, l.lens))
+    lens_info(path).map(|l| { let lens = if l.focal_only { String::new() } else { l.lens }; (l.camera, lens) })
 }
 
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
@@ -310,6 +321,35 @@ pub fn log_curve(path: &str) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// The camera a file names itself, for one Gyroflow doesn't know the model of (or doesn't know at all): DJI's drones.
+/// A Mini 4 Pro writes "DJI Mini4 Pro" as its encoder (moov/udta/meta/ilst/©too, what ffprobe shows as "encoder"); a
+/// Mavic Pro its camera's code in moov/udta/©mdl ("FC220-Se..."), which is named here where it's known ("DJI Mavic
+/// Pro"), else "DJI FC220". None when it says neither (a clip saved again by another program: "Lavf56.15.102")
+pub fn file_camera(path: &str) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    file_camera_in_moov(&read_moov(&mut file, size)?)
+}
+
+// DJI's camera codes (the ©mdl a drone writes) that are named; the others are given as "DJI <code>"
+const DJI_CAMERA_CODES: &[(&str, &str)] = &[("FC220", "DJI Mavic Pro")];
+
+fn file_camera_in_moov(moov: &[u8]) -> Option<String> {
+    let udta = mp4_child(moov, b"udta")?;
+    let clean = |b: &[u8]| -> String {
+        String::from_utf8_lossy(b).split('\0').next().unwrap_or("").trim().to_string()
+    };
+    // ilst's ©too: its data box, after the type (4 bytes) and locale (4)
+    let encoder = mp4_child(udta, b"meta").and_then(|m| m.get(4..)).and_then(|m| mp4_child(m, b"ilst"))
+        .and_then(|i| mp4_child(i, b"\xa9too")).and_then(|t| mp4_child(t, b"data")).and_then(|d| d.get(8..)).map(clean);
+    if let Some(e) = encoder.filter(|e| e.starts_with("DJI ") && e.len() > 4) { return Some(e); }
+    if mp4_child(udta, b"\xa9dji").is_none() { return None; }
+    let code = clean(mp4_child(udta, b"\xa9mdl")?);
+    let code = code.split('-').next().unwrap_or("").trim();
+    if code.is_empty() || !code.bytes().all(|b| b.is_ascii_alphanumeric()) { return None; }
+    Some(DJI_CAMERA_CODES.iter().find(|(c, _)| *c == code).map(|(_, n)| n.to_string()).unwrap_or_else(|| format!("DJI {code}")))
 }
 
 /// The Protune color a GoPro recorded the video in (PTCL: "NATURAL", "FLAT", "LOG", "GPLOG2", ...), the camera (MINF)
@@ -590,6 +630,20 @@ mod tests {
         // Truncated: no moov
         let mut cut = file[..20].to_vec();
         assert!(read_moov(&mut std::io::Cursor::new(&mut cut), 20).is_none());
+    }
+
+    // The camera a drone's file names: as a Mini 4 Pro and a Mavic Pro write it (checked on Anton's clips)
+    #[test]
+    fn file_cameras() {
+        let ilst = |enc: &[u8]| mp4_box(b"meta", &[&[0u8; 4][..], &mp4_box(b"ilst", &mp4_box(b"\xa9too", &mp4_box(b"data", &[&[0, 0, 0, 1, 0, 0, 0, 0][..], enc].concat())))].concat());
+        let moov = |udta: Vec<u8>| mp4_box(b"udta", &udta);
+        assert_eq!(file_camera_in_moov(&moov(ilst(b"DJI Mini4 Pro"))).as_deref(), Some("DJI Mini4 Pro"));
+        assert_eq!(file_camera_in_moov(&moov(ilst(b"Lavf56.15.102"))), None);
+        let mavic = |code: &[u8]| moov([mp4_box(b"\xa9dji", &[0; 16]), mp4_box(b"\xa9mdl", &[code, &[0u8; 16][..]].concat())].concat());
+        assert_eq!(file_camera_in_moov(&mavic(b"FC220-Se")).as_deref(), Some("DJI Mavic Pro"));
+        assert_eq!(file_camera_in_moov(&mavic(b"FC1234")).as_deref(), Some("DJI FC1234"));
+        // A ©mdl without DJI's own box isn't taken as a drone's
+        assert_eq!(file_camera_in_moov(&moov(mp4_box(b"\xa9mdl", b"FC220"))), None);
     }
 
     // A video track with these boxes after its sample entry's 78 bytes, and these next to its mdia

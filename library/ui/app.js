@@ -952,7 +952,7 @@ function sourceBody(c) {
   if (!asking && d.lens_type && d.lens_type !== "recorded" && !types.some((t) => t[0] === d.lens_type)) delete d.lens_type;
   const without = d.lens_type && d.lens_type !== "recorded" ? n - typed.filter((it) => (LENS_OF[it.path].types || []).some((t) => t[0] === d.lens_type)).length : 0;
   h += srcField("lens_type", "Lens type", types.length ? [["recorded", "As the camera recorded"]].concat(types) : [],
-    typed.length ? srcNow(typed, (it) => { const t = srcOf(it).lens_type; const r = LENS_OF[it.path] || {}; return t ? tl(t) : "as recorded" + (r.recorded ? " (" + tl(r.recorded) + ")" : ""); }) + (typed.length < n ? " (of the " + typed.length + " with lens types)" : "") : "",
+    typed.length ? srcNow(typed, (it) => { const t = srcOf(it).lens_type; const r = LENS_OF[it.path] || {}; return t ? tl(t) : "as recorded" + (r.recorded || r.default ? " (" + tl(r.recorded || r.default) + ")" : ""); }) + (typed.length < n ? " (of the " + typed.length + " with lens types)" : "") : "",
     { off: !types.length, note: asking ? "Asking which lens types these cameras have…" : !types.length ? (n === 1 ? "Its camera has" : "These cameras have") + " no lens types to choose: the lens is in the file, or Gyroflow’s database has it."
       : without ? "Only where the camera has it: " + without + (without === 1 ? " clip" : " clips") + " left as " + (without === 1 ? "it is" : "they are") + "." : "" });
   const gf = clips.filter((it) => it.gyroflow).length;
@@ -1014,7 +1014,7 @@ function opticalPlan(c) {
     if (p && p.mode === "default") { out.own++; continue; }
     if (it.gyroflow && !redo) { out.project++; continue; }
     // A lens type chosen may give a lens the camera's mode doesn't (vs-gyroflow's curated list)
-    const typed = r && (r.types || []).length && (r.type || r.recorded || lensTypeOf(it));
+    const typed = r && (r.types || []).length && (r.type || r.recorded || r.default || lensTypeOf(it));
     if (p && p.mode == null && p.lens === "" && (S.opticalLens === "keep" || S.opticalLens === "recorded") && !typed) { out.lens++; if (r && (r.types || []).length) out.lensTyped++; continue; }
     if (it.gyroflow) out.redo++;
     out.go.push(it.id);
@@ -1057,17 +1057,18 @@ function lensInfoText(path) {
   if (r === null) return "Reading…";
   if (r.lens === "in the file") return "From the file";
   if (r.lens) return String(r.lens).replace(/_/g, " ");
-  const t = r.type || r.recorded;
+  const t = r.type || r.recorded || r.default;
   const lb = t ? (((r.types || []).find((x) => x.id === t) || {}).label || t) : "";
   const mode = r.mode != null ? "mode " + r.mode : "";
   const inside = [lb, mode].filter(Boolean).join(", ");
   return r.camera || inside ? "Unknown" + (inside ? " (" + inside + ")" : "") : "";
 }
-// What a clip's camera recorded, said as the player's panel says it: its type, or "unknown (mode 6)" where the curated
-// list doesn't name the camera's mode yet; "" for a camera without types
+// What a clip's camera recorded, said as the player's panel says it: its type, its camera's default type where it
+// records none (a drone's main camera), or "unknown (mode 6)" where the curated list doesn't name the camera's mode
+// yet; "" for a camera without types
 function recordedText(r, label) {
   if (!r || !(r.types || []).length) return "";
-  if (r.recorded) return label(r.recorded, r.types);
+  if (r.recorded || r.default) return label(r.recorded || r.default, r.types);
   return r.mode != null ? "unknown (mode " + r.mode + ")" : "unknown";
 }
 function opticalBody(c) {

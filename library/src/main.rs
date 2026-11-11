@@ -1237,7 +1237,7 @@ async fn lens_types(paths: Vec<String>) -> Result<Vec<Value>, String> {
 fn lens_types_of(text: &str) -> Vec<Value> {
     text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| v["path"].is_string() && v["types"].is_array())
-        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"], "type": v["type"], "recorded": v["recorded"], "mode": v["mode"] })).collect()
+        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"], "type": v["type"], "recorded": v["recorded"], "default": v["default"], "mode": v["mode"] })).collect()
 }
 
 /// A clip's camera and the lens profile the player takes for it (gyroflow-probe --lens, as the player's Source → Lens

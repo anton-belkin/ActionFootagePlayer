@@ -453,6 +453,11 @@ but its file's settings box (`udta/SETT`) has a number that looks like the mode:
 Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its one type, Wide, has the best-voted HERO4
 Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
 
+The drones are in it as well, with a focal length alone, since a drone straightens its picture itself and the
+gimbal holds it: the Mini 4 Pro at 24 mm equivalent and the Mavic Pro (FC220) at 26 mm, from DJI's specs. Each has one
+type, Main camera, that its clips take by default (`"default"`). Gyroflow's database has nothing good for either
+(a 720p screen profile of the Mini 4 Pro; a Mavic Pro 4K profile voted down, 1 good of 38).
+
 **Your own lens list.** The same list can be kept outside the app, so a profile can be tried without a new build:
 `curated_lenses.json` in the app's data folder (macOS: `~/Library/Application Support/ActionFootagePlayer/`;
 Windows: `%APPDATA%\ActionFootagePlayer\`; Linux: `~/.config/ActionFootagePlayer/`), or the file
@@ -469,20 +474,28 @@ If it can't be read, the built-in list is used and `gyroflow-probe --lens <clip>
           "sizes": { "4:3": "DJI/DJI_Osmo Action___4k_4by3_4000x3000-29.97fps.json" } },
         { "id": "straight", "label": "Straight", "profile": { "focal_35mm": 20 } },
         { "id": "mine", "label": "My calibration", "profile": "my_action6_wide.json" } ] },
-    "GoPro HERO4 Black": { "recorded": { "0": "wide" } } } }
+    "GoPro HERO4 Black": { "recorded": { "0": "wide" } },
+    "DJI Mini4 Pro": { "default": "main",
+      "types": [ { "id": "main", "label": "Main camera", "profile": { "focal_35mm": 24 } } ] } } }
 ```
 
 - A camera's key is its brand and model as `gyroflow-probe --lens <clip>` prints them (`"camera"`); case and spaces
-  don't matter.
+  don't matter. Where Gyroflow doesn't know the model (a Mini 4 Pro reads as just "DJI") or the camera at all (a
+  Mavic Pro), it's the name the file gives itself: the encoder tag ("DJI Mini4 Pro"), or DJI's camera code in
+  `udta/©mdl` ("FC220" is "DJI Mavic Pro"; an unknown code reads as "DJI FC1234"). A clip saved again by another
+  program (encoder "Lavf…") names no camera and can't be listed.
 - `recorded`: the camera's own number for its lens mode (DJI's fov_type and the HERO4's SETT, the number in
   "Unknown (mode 6)"), or Gyroflow's name for the mode ("Wide", "Linear" on GoPros with GPMF) → a type's id.
+- `default`: the type of a clip that wasn't given one in the Library and didn't record one the list names: for a
+  camera that records no mode at all, such as a drone. A type chosen in the Library still wins.
 - `profile`: a key of Gyroflow's database (its file path under `camera_presets`, as in the built-in list); a lens
   profile file (`.json`, as Gyroflow's calibrator saves it): a full path, or a name next to the list; `null`: the
   lens in the file, else what the database gives; or **a focal length only**: no distortion, the picture taken as a
   plain (pinhole) camera's, for clips the camera already straightened (in-camera stabilization, distortion
   correction). `{"focal_35mm": 20}` is its 35 mm equivalent (on the diagonal, as camera specs give it);
-  `{"hfov": 100}` is how wide the picture is across, in degrees. That corrects nothing in the picture; it's what
-  the stabilization needs to know to turn it right.
+  `{"hfov": 100}` is how wide the picture is across, in degrees. That corrects nothing in the picture, so the player
+  doesn't add the filter for it on a clip it can't stabilize; it's what stabilization (Library → Stabilize
+  optically) needs to know to turn the picture right.
 - `sizes`: another profile for one resolution (`"3840x2880"`) or aspect ratio (`"4:3"`), either way round. An
   exact resolution wins over an aspect ratio, which wins over the type's own `profile`.
 
@@ -946,7 +959,7 @@ Project). Then, as buttons:
   with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
   listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
   whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
-  clips where their camera has types (Osmo Action 6: Wide, Normal), kept with each clip (the player uses it too); a
+  clips where their camera has types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player uses it too); a
   lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
   measured anew. It needs [Gyroflow](https://gyroflow.xyz) 1.7.0 or newer, which has the optical analysis
   ([its releases](https://github.com/gyroflow/gyroflow/releases)), found where Gyroflow installs itself, or by
