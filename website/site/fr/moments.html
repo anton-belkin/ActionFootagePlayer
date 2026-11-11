@@ -180,7 +180,7 @@
           <p>Filmé sans stabilisation ? Le clip se lit stabilisé, à partir des mouvements enregistrés par la caméra, pendant que vous regardez.</p>
         </li>
         <li>
-          <h3>Vos repères, sur la barre de lecture</h3>
+          <h3>Vos repères, sous la vidéo</h3>
           <p>Les temps forts marqués avec le bouton de la caméra y sont, et une touche suffit pour passer au suivant.</p>
         </li>
       </ul>
@@ -201,17 +201,16 @@
             <p>Vous avez vu quelque chose que le bouton a manqué ? <kbd>M</kbd> ajoute un repère là où vous êtes. <kbd>M</kbd> sur un repère le supprime.</p>
           </div>
           <div>
-            <h3>De côté, ou en favori <span class="soon"><kbd>K</kbd> Bientôt</span></h3>
-            <p class="os-mac"><kbd>X</kbd> met un clip de côté comme sans intérêt. <kbd>K</kbd> en fait un favori, avec un tag vert Favorite dans le Finder.</p>
-            <p class="os-win"><kbd>X</kbd> met un clip de côté comme sans intérêt. <kbd>K</kbd> en fait un favori, avec 5 étoiles dans l’Explorateur de fichiers (une note de 4 étoiles ou plus compte comme favori).</p>
+            <h3>De côté, ou avec un tag</h3>
+            <p><kbd>X</kbd> met un clip de côté comme sans intérêt. Dans Action Footage Library, mettez des mots sur les clips et les moments, <i>meilleurs</i> ou <i>pour la famille</i>, et retrouvez-les avec ses filtres.</p>
           </div>
           <div>
             <h3>Tout le voyage d’un coup d’œil</h3>
-            <p><a class="text-link" href="organizing.html#library-app">Action Footage Library</a>, une petite seconde app fournie avec le lecteur, remplit un dossier <code>_Clips</code> d’un flip-book en couleur par clip, au lieu d’un mur de vignettes grises. Ouvrez-la depuis l’onglet Project du panneau latéral.</p>
+            <p><a class="text-link" href="organizing.html#library-app">Action Footage Library</a>, l’app fournie avec le lecteur, montre chaque clip de vos voyages avec une image, et les retrouve par caméra, lieu ou tag. Elle remplit un dossier <code>_Clips</code> d’un flip-book en couleur par clip, au lieu d’un mur de vignettes grises. Ouvrez-la depuis l’onglet Project du panneau latéral.</p>
           </div>
           <div>
             <h3>Aucune bibliothèque à entretenir</h3>
-            <p>Créez des sous-dossiers pour classer vos moments : ils sont à vous. Supprimez un fichier, et ce moment disparaît.</p>
+            <p>Créez des dossiers pour classer vos moments : ils sont à vous, et chaque moment retrouve toujours son clip, même après que vous avez déplacé les vidéos. Supprimez un fichier, et ce moment disparaît.</p>
           </div>
         </div>
       </div>
@@ -222,14 +221,18 @@
               <li><span class="dir">Jour 1</span><span class="c">les vidéos, avec vos repères à côté de chaque clip</span></li>
               <li><span class="dir">_Moments</span>
                 <ul>
-                  <li>Arête du sommet.afplink.mp4</li>
-                  <li>2026-07-14 16.02.11.afplink.mp4<span class="c">un moment que vous n’avez pas nommé</span></li>
-                  <li><span class="dir">Bike park</span><span class="c">un sous-dossier à vous</span></li>
+                  <li><span class="dir">Generated</span><span class="c">là où arrivent les nouveaux moments</span>
+                    <ul>
+                      <li>Arête du sommet.afplink.mp4</li>
+                      <li>2026-07-14 16.02.11.afplink.mp4<span class="c">un moment que vous n’avez pas nommé</span></li>
+                    </ul>
+                  </li>
+                  <li><span class="dir">Bike park</span><span class="c">un dossier à vous</span></li>
                 </ul>
               </li>
               <li><span class="dir">_Clips</span><span class="c">un flip-book en couleur par clip</span></li>
               <li><span class="dir">_Exports</span><span class="c">ce que vous avez exporté</span></li>
-              <li>Project.afproject<span class="c">le projet : double-cliquez dessus pour ouvrir le voyage dans Action Footage Library</span></li>
+              <li>Project.afproject<span class="c">le projet : où sont les vidéos. Double-cliquez dessus pour ouvrir le voyage dans Action Footage Library</span></li>
             </ul>
           </li>
         </ul>
@@ -274,8 +277,8 @@
           <figcaption>Filmé avec la stabilisation de la caméra coupée : tremblé tel qu’enregistré, stabilisé tel qu’il se lit.</figcaption>
         </figure>
         <figure class="media">
-          <img src="../media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="Le lecteur en pause sur un clip, le panneau latéral ouvert, et les deux temps forts marqués par la caméra en traits sur la barre de lecture.">
-          <figcaption>Les temps forts marqués par la caméra, sur la barre de lecture.</figcaption>
+          <img src="../media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="Le lecteur en pause sur une plongée sur épave, le panneau latéral ouvert sur son onglet Project, et les temps forts marqués par la caméra en losanges ambre sur la barre de navigation sous la vidéo.">
+          <figcaption>Les temps forts marqués par la caméra, sur la barre sous la vidéo.</figcaption>
         </figure>
         <figure class="media">
           <!-- TODO: Finder screenshot; a File Explorer one is wanted too, for Windows visitors -->
@@ -332,8 +335,8 @@
           <div class="a"><p>Seulement si vous le demandez. Pour couper un passage raté d’un clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), le lecteur réécrit le clip sans ce passage, sans rien réencoder, et l’original part à la Corbeille. Sinon, vos originaux restent tels quels : les moments, les aperçus des clips et les exports sont de nouveaux fichiers à part, et vos repères un petit fichier à côté du clip.</p></div>
         </details>
         <details>
-          <summary>Où vont mes moments ? Et sur une carte verrouillée ?</summary>
-          <div class="a"><p>Les dossiers <code>_Moments</code>, <code>_Clips</code> et <code>_Exports</code> vont dans le dossier de projet : le dossier du voyage, que vous choisissez une fois dans l’onglet Project du panneau latéral (<i>Initialize the project here</i>). Ce peut être le dossier des clips lui-même ou un dossier au-dessus. Sur une carte verrouillée ou un partage en lecture seule, le lecteur demande un nom et les garde dans son propre dossier, dans Documents. <span class="soon">Bientôt</span></p></div>
+          <summary>Où vont mes moments ?</summary>
+          <div class="a"><p>Les dossiers <code>_Moments</code>, <code>_Clips</code> et <code>_Exports</code> vont dans le dossier de projet : le dossier du voyage, que vous choisissez une fois dans l’onglet Project du panneau latéral (<i>Initialize the project here</i>). Ce peut être le dossier des clips lui-même ou un dossier au-dessus, et des vidéos sur d’autres disques ou un NAS peuvent y être ajoutées dans Action Footage Library. Une carte verrouillée : copiez-la d’abord sur votre disque ou votre NAS.</p></div>
         </details>
         <details>
           <summary>Mac ou Windows ?</summary>

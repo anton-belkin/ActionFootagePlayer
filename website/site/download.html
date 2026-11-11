@@ -131,7 +131,7 @@
             <button type="button" class="pop-close" popovertarget="install-mac" popovertargetaction="hide" aria-label="Close">&times;</button>
           </div>
           <ol class="install">
-            <li>Open the download and drag <b>ActionFootagePlayer</b> onto Applications.</li>
+            <li>Open the download and drag both apps, <b>ActionFootagePlayer</b> and <b>ActionFootageLibrary</b>, onto Applications.</li>
             <li>Open it. The first time, macOS won't: the app is signed ad hoc, not by an Apple developer account. Open <b>System Settings → Privacy &amp; Security</b>, scroll down to Security, click <b>Open Anyway</b> next to ActionFootagePlayer and confirm.</li>
             <li>Accept its setup: it becomes the player for MP4 videos (macOS asks you to confirm), Finder gets the Quick Actions <i>Play Stabilized</i> and <i>Stabilize + LUT</i>, and DJI's Rec.709 LUT is downloaded from DJI.</li>
           </ol>
@@ -270,7 +270,7 @@
           </div>
           <ol class="install">
             <li>Install mpv, and ffmpeg for exports, with Homebrew: <code>brew install mpv ffmpeg</code>.</li>
-            <li>Unzip it into mpv's scripts folder: <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code>. Unzipped in Finder, it's a folder: move the five folders in it to <code>~/.config/mpv/scripts/</code>.</li>
+            <li>Unzip it into mpv's scripts folder: <code>unzip mpv-plugins-*.zip -d ~/.config/mpv/scripts</code>. Unzipped in Finder, it's a folder: move the folders in it to <code>~/.config/mpv/scripts/</code>.</li>
             <li>Downloaded with a browser, the stabilization's binaries carry the quarantine flag, and macOS refuses them: <code>xattr -dr com.apple.quarantine ~/.config/mpv/scripts/gyroflow</code></li>
           </ol>
           <p class="platform-note">D-Log M plays in HDR: DJI's Rec.709 LUT isn't redistributed. <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer#plugins-in-your-own-mpv">Adding it, and the rest in detail</a></p>

@@ -206,6 +206,7 @@
           <div>
             <h3>No gyro data? No problem</h3>
             <p>The video itself opens in Gyroflow, which stabilizes it optically: it finds the motion in the picture itself (optical flow). The panel shows “Waiting for the project from Gyroflow…”. Save the project next to the clip, and the clip loads again where it was, stabilized.</p>
+            <p>Many clips at once: <b>Stabilize optically</b> in <a class="text-link" href="organizing.html#optical">Action Footage Library</a> does them one after another in the background.</p>
             <p class="os-win">On Windows, opening a video that has no project needs Gyroflow's path in <code>gyroflow_app=</code> in <code>gyroflow.conf</code>.</p>
           </div>
           <div>
@@ -266,10 +267,22 @@
             <dt>Water: Reduce color aberration <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>a</kbd></dt>
             <dd>Under water, the flat glass in front of the lens splits colors apart towards the frame's edges. This puts them back, wherever the lens is under water. On Osmo Action 6 dive clips, red's fringe at the edge goes from 3-7 px to about 1 px. It's part of the transform, saved with the rest. Playback only: exports keep the fringes. Greyed when Source › <b>Under water, flat port</b> is No.</dd>
           </div>
+          <div>
+            <dt>Temporal denoise: Clean the noise <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
+            <dd>The noise of dim light taken out while the clip plays, and paused: each frame is averaged with the frames on each side of it, each moved onto it by the motion between them, so the noise goes and the detail stays. The picture shows a few frames later, and the sound waits for it. <b>Stronger, for a very noisy clip</b> (off): more frames taken in, no grain kept, dark specks out and flat areas smoothed: open water clean, fine texture softer. Part of the transform, so it's kept per clip. Nothing is written into the files: exports play as recorded. How much of it this computer does is in <a class="text-link" href="#quality">Performance &amp; Quality</a>.</dd>
+          </div>
+          <div>
+            <dt>Sideways jerks <kbd>Ctrl</kbd>+<kbd>j</kbd></dt>
+            <dd>Up close, a hand's small sideways jitter shakes the picture however well the camera's turns are taken out. <b>Measure for this clip</b> measures it once, from the camera's accelerometer and the picture, and keeps it; from then on the picture is moved against it as it plays. On an Osmo Action 6 clip, measuring takes about half the clip's length. For a clip that's stabilized.</dd>
+          </div>
         </dl>
         <figure class="media" id="shot-stabilization-2">
           <img src="media/stabilization-2.jpg" alt="The side panel's Transform tab on a dive clip: Transform defined in this session, Stabilization On, Level Medium, Horizon Free, Lens Corrected and Linear, Frame Own and As is, Reduce color aberration on." width="584" height="2019" loading="lazy">
           <figcaption>A dive clip with the default settings, steadied from its gyro data.</figcaption>
+        </figure>
+        <figure class="media" id="shot-stabilization-7">
+          <img src="media/stabilization-7.jpg" alt="The lower part of the Transform tab: Water with Reduce color aberration on; Temporal denoise with Clean the noise on and Stronger, for a very noisy clip, off, each with its caption; Sideways jerks with the button Measure for this clip." width="584" height="875" loading="lazy">
+          <figcaption>Further down the Transform tab: the water, the temporal denoise and the sideways jerks.</figcaption>
         </figure>
       </div>
 
@@ -309,7 +322,8 @@
             <tr><th scope="row">Level, Horizon, Frame, projection</th><td>Part of the transform, as above.</td><td>The project's, shown in <b>In the Gyroflow project</b>.</td></tr>
             <tr><th scope="row">Lens, color aberration</th><td colspan="2">Part of the transform. With a project, the lens As recorded is for viewing only.</td></tr>
             <tr><th scope="row">Recorded turned, Under water</th><td>The source's input: kept by <b>Save to the source</b>, for the clip and its moments. Not carried to the next clip.</td><td>The project's.</td></tr>
-            <tr><th scope="row">Edges, temporal denoise</th><td colspan="2">The player's own, not Gyroflow's: they stick for every clip.</td></tr>
+            <tr><th scope="row">Temporal denoise, sideways jerks</th><td colspan="2">Part of the transform, kept per clip; the player's own, not Gyroflow's.</td></tr>
+            <tr><th scope="row">Edges</th><td colspan="2">The player's own, not Gyroflow's: they stick for every clip.</td></tr>
             <tr><th scope="row">Performance &amp; Quality picks</th><td colspan="2">Kept for this computer as soon as you pick them.</td></tr>
           </tbody>
         </table>
@@ -371,16 +385,16 @@
           <dd><b>Every frame</b>, <b>30 fps</b> or <b>15 fps</b>: how often the steadied frame is rendered. A faster clip plays at that rate.</dd>
         </div>
         <div>
-          <dt>Size <span class="st-def-val">default Display</span></dt>
-          <dd><b>Video</b>: the video's own size. <b>Display</b>: no bigger than the screen shows it. <b>1080p</b> or <b>720p</b>: at most that.</dd>
+          <dt>Size <span class="st-def-val">default Auto</span></dt>
+          <dd><b>Auto</b>: the screen's, at most 1080p while the temporal denoise is on. <b>Screen</b>: no bigger than the screen shows it. <b>1080p</b> or <b>720p</b>: at most that. <b>Video</b>: the video's own size.</dd>
         </div>
         <div>
           <dt>Paused frame <span class="st-def-val">default As it played</span> <kbd>Ctrl</kbd>+<kbd>f</kbd></dt>
           <dd><b>Full size</b>: rendered again at the video's own size a moment after pausing. <kbd>Ctrl</kbd>+<kbd>f</kbd> does it once. More in <a class="text-link" href="photos.html">Photos</a>.</dd>
         </div>
         <div>
-          <dt>Temporal denoise <span class="st-def-val">default on</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
-          <dd>The paused frame rebuilt from the 5 frames on each side of it, so the sensor's noise from dim light mostly goes. Needs the stabilization on. More in <a class="text-link" href="photos.html">Photos</a>.</dd>
+          <dt>Temporal denoise <span class="st-def-val">default Full</span></dt>
+          <dd><b>Full</b>: 5 frames on each side. <b>Light</b>: 3, a quarter lighter on the graphics chip and a little less clean. <b>Off</b>: none on this computer, whatever the Transform tab's switch says. Exports and photos stay as they are. More in <a class="text-link" href="photos.html#clean">Photos</a>.</dd>
         </div>
         <div>
           <dt>Edges <span class="st-def-val">default Trail by direction</span> <kbd>Ctrl</kbd>+<kbd>b</kbd></dt>
@@ -531,7 +545,8 @@
         <div class="key"><span>What fills the edges</span><span><kbd>Ctrl</kbd>+<kbd>b</kbd></span></div>
         <div class="key"><span>Open in Gyroflow</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
         <div class="key"><span>Paused frame at full size, once</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
-        <div class="key"><span>Temporal denoise on pause, on or off</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Temporal denoise, on or off</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Sideways jerks: measure, then on or off</span><span><kbd>Ctrl</kbd>+<kbd>j</kbd></span></div>
         <div class="key"><span>Export as it plays</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
         <div class="key"><span>Hide or show the panel</span><span><kbd>Tab</kbd></span></div>
       </div>
@@ -546,7 +561,7 @@
         <h2>What it doesn't do.</h2>
       </div>
       <ul class="st-limits">
-        <li><b>No gyro data? Gyroflow stabilizes it optically.</b> A DJI clip shot with EIS on, or in another FOV than Wide, may have none. <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow; save the project there, and it plays steady here.</li>
+        <li><b>No gyro data? Gyroflow stabilizes it optically.</b> A DJI clip shot with EIS on, or in another FOV than Wide, may have none. <kbd>Ctrl</kbd>+<kbd>e</kbd> opens it in Gyroflow; save the project there, and it plays steady here. For many clips, <a class="text-link" href="organizing.html#optical">Stabilize optically</a> in Action Footage Library.</li>
         <li><b>Camera stabilization on means as recorded,</b> GoPro HyperSmooth and Insta360 FlowState included, even though those cameras record gyro data anyway.</li>
         <li><b>The Transform tab says “No motion data in this clip” for any clip it doesn't stabilize,</b> also a GoPro clip with HyperSmooth on that has gyro data. Gyroflow may then use that gyro data rather than optical flow.</li>
         <li><b>Checked on two cameras:</b> the Osmo Action 6 and the GoPro HERO12 Black. GoPro and Insta360 clips need their lens in Gyroflow's lens database.</li>

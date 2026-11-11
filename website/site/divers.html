@@ -181,11 +181,11 @@
           </li>
           <li>
             <h3>Jump straight to the turtle</h3>
-            <p>Press the camera's highlight button during the dive, and the marks show on the seek bar. <kbd>Ctrl</kbd>+<kbd>]</kbd> jumps to the next one.</p>
+            <p>Press the camera's highlight button during the dive, and the marks show on the bar under the video. <kbd>Ctrl</kbd>+<kbd>]</kbd> jumps to the next one.</p>
           </li>
-          <li>
-            <h3>A clean still of the moment</h3>
-            <p>Pause: a moment later the frame is rebuilt from the frames around it, so the sensor's noise from the dim light under water mostly goes. <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again.</p>
+          <li id="noise">
+            <h3>Old noisy dives, clean</h3>
+            <p>A dive the player steadies also plays without the noise of the dim light under water: each frame is averaged with the frames around it, each moved onto it by the motion between them, and the reef keeps its detail. Old noisy dives look good now. Nothing is done to the files: you only watch them clean, and the originals stay as they were. Pause, and the still is clean too. <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again.</p>
           </li>
           <li>
             <h3>Keep the moments that matter</h3>
@@ -197,8 +197,8 @@
           </li>
         </ol>
         <figure class="media dv-shot">
-          <img src="media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="The player paused on a wreck dive, with the camera's two highlight marks on the seek bar and In water at the bottom left.">
-          <figcaption>The marks on the seek bar are the highlights the camera recorded.</figcaption>
+          <img src="media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="The player paused on a wreck dive with divers above it, the side panel open beside the video, and the camera's highlight marks as amber diamonds on the navigation bar under it.">
+          <figcaption>The amber marks on the bar under the video are the highlights the camera recorded.</figcaption>
         </figure>
       </div>
     </div>
@@ -332,7 +332,7 @@
         </details>
         <details>
           <summary>Will my old dive videos look better?</summary>
-          <div class="a"><p>Clips shot with EIS off and the Wide field of view play steady straight from the folder: nothing is rendered or copied. Clips shot in log play in HDR. Clips shot in the normal mode with stabilization on look as they always did: Action Footage Player can't add what wasn't recorded.</p></div>
+          <div class="a"><p>Clips shot with EIS off and the Wide field of view play steady straight from the folder: nothing is rendered or copied. Clips shot in log play in HDR. The ones it steadies also play without the noise of the dim water, and nothing in the files changes. Clips shot in the normal mode with stabilization on look as they always did: Action Footage Player can't add what wasn't recorded.</p></div>
         </details>
         <details>
           <summary>Does it change my original files?</summary>
