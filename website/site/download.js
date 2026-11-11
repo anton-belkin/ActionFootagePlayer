@@ -31,6 +31,8 @@
     "plugins-windows": /^mpv-plugins-.+-windows-x86_64\.zip$/,
     "plugins-windows-arm": /^mpv-plugins-.+-windows-arm64\.zip$/,
     "plugins-linux": /^mpv-plugins-.+-linux-x86_64\.zip$/,
+    "nas-helper": /^ActionFootageNASHelper-.+-linux-x86_64\.tar\.gz$/,
+    "nas-compose": /^ActionFootageNASHelper-.+-compose\.yaml$/,
     "sums": /^SHA256SUMS$/
   };
 

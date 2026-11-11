@@ -389,6 +389,49 @@
     </div>
   </section>
 
+  <section class="section band tight-top" id="nas">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Your footage on a NAS?</p>
+        <h2>NAS Helper</h2>
+        <p class="lede">A Docker container for a NAS with an x86-64 processor and an Intel GPU, next to your projects. It keeps a project’s catalog current from the NAS’s side, so what one computer changes shows on the others at once. It streams every clip and moment stabilized and in HDR, as the player shows them, to a browser, a phone or a TV. And, if you turn it on, it puts your moments, your clips or both in a Jellyfin library. It’s for people at ease with Docker: every setting is described.</p>
+      </div>
+      <div class="platforms">
+
+      <article class="platform" id="nas-helper">
+        <div class="platform-head">
+          <h3>Linux, Docker</h3>
+        </div>
+        <p class="platform-req">A NAS with an x86-64 processor and an Intel GPU (VA-API), Docker. Built on a UGREEN DXP with an N100</p>
+        <a class="btn dl-btn" data-asset="nas-helper" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Download<span class="vh"> the NAS Helper</span> <small data-fill="size">.tar.gz</small>
+        </a>
+        <button type="button" class="steps-btn" popovertarget="nas-helper-steps">Install steps</button>
+        <div class="install-pop" id="nas-helper-steps" popover>
+          <div class="pop-head">
+            <h4>Installing the NAS Helper</h4>
+            <button type="button" class="pop-close" popovertarget="nas-helper-steps" popovertargetaction="hide" aria-label="Close">&times;</button>
+          </div>
+          <ol class="install">
+            <li>Copy the download to the NAS and load it over SSH: <code>docker load -i ActionFootageNASHelper-*-linux-x86_64.tar.gz</code>.</li>
+            <li>Take the example compose file and change its folders to the NAS’s: each project twice (read-write for the guardian, read-only for the stream), the shares its footage is on, and two folders of the helper’s own.</li>
+            <li>Start it: <code>docker compose up -d</code>, or as a project in the NAS’s Docker app. Its log says what it found and runs; <code>http://&lt;nas&gt;:8099/settings</code> shows every setting with what it does.</li>
+          </ol>
+          <p class="note"><a class="text-link" data-asset="nas-compose" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">The example compose file</a> · <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">Every setting, in detail</a></p>
+          <p class="platform-note">Alpha: used on one NAS so far. Links for Jellyfin are off until you turn them on.</p>
+          <dl class="file-meta">
+            <dt>File</dt><dd><code data-fill="name">ActionFootageNASHelper-&lt;version&gt;-linux-x86_64.tar.gz</code></dd>
+            <dt>Version</dt><dd data-release="version">latest</dd>
+            <dt>SHA-256</dt><dd><code class="hash" data-fill="sha256">in SHA256SUMS</code></dd>
+          </dl>
+        </div>
+      </article>
+
+      </div>
+    </div>
+  </section>
+
   <section class="section band tight-top" id="release">
     <div class="wrap">
       <div class="section-head">
