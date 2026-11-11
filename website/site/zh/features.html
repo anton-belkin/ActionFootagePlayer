@@ -581,26 +581,29 @@
 
         <section class="group" id="nas">
           <h2>NAS Helper</h2>
-          <p class="group-lede">NAS 上的一个 Docker 容器：项目目录为每台电脑同步，每个片段和精彩瞬间防抖后以 HDR 串流，并提供 Jellyfin 链接。</p>
+          <p class="group-lede">NAS 上的一个 Docker 容器：几个人一起在同一个素材库里工作，每个片段和精彩瞬间防抖后以 HDR 串流，并提供 Jellyfin、Emby 和 Kodi 链接。</p>
           <p class="note"><a class="text-link" href="nas.html">NAS Helper 详解 →</a></p>
           <div class="feats">
             <div class="feat">
-              <div><h3>素材库守护进程</h3><p class="feat-keys"><code>AFP_GUARDIAN</code></p></div>
-              <div class="feat-text"><p>几台电脑可以同时处理同一次旅行。NAS 立刻知道自己磁盘上发生的改动，守护进程把它写进项目目录，每个播放器和每个 Library 大约一秒后就能看到新的精彩瞬间、移动过的文件夹或删除的片段，无需重新遍历整个共享文件夹。除了目录，它什么也不写。</p></div>
+              <div><h3>协作</h3><p class="feat-keys"><code>AFP_COLLABORATION</code></p></div>
+              <div class="feat-text"><p>几个人可以同时在同一个素材库里工作：一人在笔记本上标记精彩瞬间，另一人在台式机上整理片段，第三人拷入新的旅行。NAS 立刻知道自己磁盘上发生的改动并写进项目目录，每个人的播放器和 Library 大约一秒后就能看到别人的工作，无需等待共享文件夹重新读取。除了目录，它什么也不写。</p></div>
             </div>
             <div class="feat">
               <div><h3>串流</h3><p class="feat-keys"><code>AFP_STREAM</code></p></div>
               <div class="feat-text"><p>项目里的每个片段、精彩瞬间和片段预览都变成一路视频流，与播放器里看到的一样：在 NAS 的显卡上用 Gyroflow 引擎防抖，D-Log M 以 HDR 呈现，每个文件带着自己保存的设置。边看边渲染，留到下次再看，画面始终不离开显卡。</p></div>
             </div>
             <div class="feat">
-              <div><h3>Jellyfin 链接</h3><p class="feat-keys"><code>AFP_JELLYFIN</code> · <code>AFP_JELLYFIN_SCOPE</code></p></div>
-              <div class="feat-text"><p>打开后，你的精彩瞬间（或片段，或两者：即它的<b>范围</b>）会出现在 Jellyfin 媒体库里，按旅行分类，带标题、日期和封面。电视和手机上的 Jellyfin 应用直接播放这些视频流，无需再次转码。</p>
+              <div><h3>媒体服务器链接</h3><p class="feat-keys"><code>AFP_JELLYFIN</code> · <code>AFP_JELLYFIN_SCOPE</code></p></div>
+              <div class="feat-text"><p>打开后，你的精彩瞬间（或片段，或两者：即它的<b>范围</b>）会出现在 Jellyfin、Emby 或 Kodi 中，按旅行分类，带标题、日期和封面。它们在电视、手机或平板上的应用直接播放这些视频流，无需再次转码。</p>
                 <p class="feat-status">
                   <span><span class="pill ok">已试过</span> Jellyfin</span>
-                  <span><span class="pill exp">应该可以</span> Emby, Kodi</span>
-                  <span><span class="pill part">暂不支持</span> Plex</span>
+                  <span><span class="pill ok">支持</span> Emby、Kodi 及其应用</span>
                 </p>
               </div>
+            </div>
+            <div class="feat">
+              <div><h3>大体积片段</h3></div>
+              <div class="feat-text"><p>有些片段超出了 NAS 边看边渲染的能力：8K、高帧率、长时间的潜水。提前把它们完整渲染出来，就能像普通视频文件一样从 NAS 播放。 时间充裕时，渲染可以用上最精细的设置：更精确的变形、去除水下的彩色边缘，以及让昏暗潜水画面变干净的降噪。</p></div>
             </div>
           </div>
           <div class="btns">

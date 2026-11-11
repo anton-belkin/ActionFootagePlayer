@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>NAS Helper : votre bibliothèque sur le NAS, diffusée et synchronisée · Action Footage Player</title>
-<meta name="description" content="Un conteneur Docker pour votre NAS : il tient le catalogue d’un projet à jour pour chaque ordinateur, diffuse vos clips et moments stabilisés et en HDR vers une télévision, un téléphone ou un navigateur, et les met dans Jellyfin si vous le voulez. Gratuit, open source.">
+<title>NAS Helper : une bibliothèque pour tous, diffusée sur chaque écran · Action Footage Player</title>
+<meta name="description" content="Un conteneur Docker pour votre NAS : plusieurs personnes dans une même bibliothèque, vos clips et moments diffusés stabilisés et en HDR vers une télévision, un téléphone ou un navigateur, et dans Jellyfin, Emby ou Kodi si vous le voulez. Gratuit, open source.">
 <link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/nas">
 <link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/nas">
 <link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/nas">
@@ -108,7 +108,7 @@
       <div class="hero-text">
         <p class="eyebrow">NAS Helper</p>
         <h1>Vos images sur le NAS, stables sur chaque écran de la maison.</h1>
-        <p class="lede">Gardez vos voyages sur un NAS, et un petit conteneur y fait trois choses : il dit aussitôt à chaque ordinateur ce qui a changé dans un projet, il diffuse vos clips et moments stabilisés et en HDR vers la télévision, un téléphone ou un navigateur, et, si vous le voulez, il les met dans Jellyfin.</p>
+        <p class="lede">Gardez vos voyages sur un NAS, et un petit conteneur y fait trois choses : il permet à plusieurs personnes de travailler ensemble dans une même bibliothèque, chacune voyant les changements des autres en une seconde ; il diffuse vos clips et moments stabilisés et en HDR vers la télévision, un téléphone ou un navigateur ; et, si vous le voulez, il les met dans Jellyfin, Emby ou Kodi.</p>
         <div class="btns">
           <a class="btn primary" href="download.html#nas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -127,31 +127,31 @@
       </div>
       <figure class="media">
         <svg class="nas-svg" viewBox="0 0 640 300" role="img" aria-labelledby="nas-title">
-          <title id="nas-title">Vos ordinateurs et le NAS Helper partagent le catalogue du projet ; le helper diffuse vers les télévisions, téléphones et navigateurs, et écrit des liens pour Jellyfin.</title>
+          <title id="nas-title">Les ordinateurs de chacun partagent une bibliothèque grâce au NAS Helper ; il diffuse vers les télévisions, téléphones et navigateurs, et écrit des liens pour Jellyfin, Emby et Kodi.</title>
           <rect class="box" x="16" y="104" width="150" height="92" rx="10"/>
-          <text class="t" x="91" y="144" text-anchor="middle">Vos ordinateurs</text>
+          <text class="t" x="91" y="144" text-anchor="middle">Les ordinateurs de chacun</text>
           <text class="s" x="91" y="166" text-anchor="middle">lecteur · Library</text>
           <rect class="nas" x="214" y="40" width="212" height="220" rx="12"/>
           <text class="t" x="320" y="70" text-anchor="middle">NAS</text>
           <text class="s" x="320" y="90" text-anchor="middle">le projet, les images</text>
           <rect class="part" x="234" y="108" width="172" height="36" rx="7"/>
-          <text class="p" x="320" y="131" text-anchor="middle">gardien</text>
+          <text class="p" x="320" y="131" text-anchor="middle">collaboration</text>
           <rect class="part" x="234" y="154" width="172" height="36" rx="7"/>
           <text class="p" x="320" y="177" text-anchor="middle">diffusion</text>
           <rect class="part" x="234" y="200" width="172" height="36" rx="7"/>
-          <text class="p" x="320" y="223" text-anchor="middle">liens Jellyfin</text>
+          <text class="p" x="320" y="223" text-anchor="middle">liens médiathèque</text>
           <rect class="box" x="474" y="56" width="150" height="92" rx="10"/>
           <text class="t" x="549" y="96" text-anchor="middle">TV · téléphone · navigateur</text>
           <text class="s" x="549" y="118" text-anchor="middle">HLS, stabilisé, HDR</text>
           <rect class="box" x="474" y="176" width="150" height="80" rx="10"/>
-          <text class="t" x="549" y="210" text-anchor="middle">Jellyfin</text>
+          <text class="t" x="549" y="210" text-anchor="middle">Jellyfin · Emby · Kodi</text>
           <text class="s" x="549" y="232" text-anchor="middle">moments, clips</text>
           <path class="arrow" d="M172 126H228m-8-6 8 6-8 6M228 140H172m8-6-8 6 8 6"/>
           <path class="arrow" d="M412 172C440 172 444 102 468 102m-8-6 8 6-8 6"/>
           <path class="arrow" d="M412 218H468m-8-6 8 6-8 6"/>
           <text class="s" x="91" y="94" text-anchor="middle">ce qui a changé, ~1 s</text>
         </svg>
-        <figcaption>Un conteneur sur le NAS : le catalogue du projet pour chaque ordinateur, des flux pour chaque écran.</figcaption>
+        <figcaption>Un conteneur sur le NAS : une bibliothèque pour tous, des flux pour chaque écran.</figcaption>
       </figure>
     </div>
   </section>
@@ -166,16 +166,16 @@
       </div>
       <div class="gap-grid nas-three">
         <div class="gap-item">
-          <h3>Le gardien de la bibliothèque</h3>
-          <p>Plusieurs ordinateurs peuvent travailler sur un même voyage. Le NAS sait tout de suite ce qui change sur ses propres disques : le gardien l’écrit dans le catalogue du projet, et chaque lecteur et chaque Library voient un nouveau moment, un dossier déplacé ou un clip supprimé environ une seconde plus tard, sans reparcourir tout le partage. Il n’écrit rien d’autre que le catalogue.</p>
+          <h3>Collaboration</h3>
+          <p>Plusieurs personnes peuvent travailler dans une même bibliothèque en même temps : l’une marque des moments sur un portable, une autre range les clips sur un fixe, une troisième copie un nouveau voyage. Le NAS apprend aussitôt ce qui change sur ses propres disques et l’écrit dans le catalogue du projet : le lecteur et la Library de chacun montrent le travail des autres une seconde plus tard environ, sans attendre que le partage soit relu. Il n’écrit rien d’autre que le catalogue.</p>
         </div>
         <div class="gap-item">
           <h3>La diffusion</h3>
           <p>Chaque clip, moment et aperçu de clip du projet devient un flux vidéo, tel que le lecteur le montre : stabilisé par le moteur de Gyroflow sur la puce graphique du NAS, le D-Log M en HDR, chaque fichier avec ses propres réglages. Le rendu se fait pendant que vous regardez et reste pour la prochaine fois, et l’image ne quitte jamais la puce graphique.</p>
         </div>
         <div class="gap-item">
-          <h3>Liens pour Jellyfin</h3>
-          <p>Si vous l’activez, vos moments (ou vos clips, ou les deux : sa <b>portée</b>) apparaissent dans une bibliothèque Jellyfin, rangés par voyage, avec titres, dates et vignettes. Les apps de Jellyfin sur la télévision et le téléphone lisent alors les flux tels quels, sans les reconvertir.</p>
+          <h3>Liens pour les médiathèques</h3>
+          <p>Si vous l’activez, vos moments (ou vos clips, ou les deux : sa <b>portée</b>) apparaissent dans Jellyfin, Emby ou Kodi, rangés par voyage, avec titres, dates et vignettes. Leurs apps sur la télévision, le téléphone ou la tablette lisent alors les flux tels quels, sans les reconvertir.</p>
         </div>
       </div>
     </div>
@@ -242,20 +242,20 @@
   <section class="section band tight-top" id="media-servers">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow">Serveurs multimédia</p>
-        <h2>Jellyfin, et ce qui lit aussi les flux.</h2>
-        <p class="lede">Les liens sont de petits fichiers : un <code>.strm</code> avec l’adresse du flux et un <code>.nfo</code> avec le titre, la date et la durée, à côté d’une vignette.</p>
+        <p class="eyebrow">Médiathèques</p>
+        <h2>Jellyfin, Emby, Kodi, et chaque app qui lit depuis eux.</h2>
+        <p class="lede">Les liens sont de petits fichiers que les médiathèques lisent depuis des années : un <code>.strm</code> avec l’adresse du flux et un <code>.nfo</code> avec le titre, la date et la durée, à côté d’une vignette.</p>
       </div>
       <div class="compare-wrap">
         <table class="cams">
-          <thead><tr><th scope="col">Où</th><th scope="col">Lecture</th><th scope="col">Notes</th></tr></thead>
+          <thead><tr><th scope="col">Où</th><th scope="col"></th><th scope="col">Comment</th></tr></thead>
           <tbody>
             <tr><th scope="row">Jellyfin</th><td><span class="pill ok">Essayé</span></td><td>Moments et clips dans une bibliothèque Vidéos personnelles, rangés par voyage ; la bibliothèque se met à jour d’elle-même. Regardé sur un iPhone et une télévision Samsung.</td></tr>
-            <tr><th scope="row">Emby</th><td><span class="pill exp">Devrait marcher</span></td><td>Lit les mêmes fichiers <code>.strm</code> et <code>.nfo</code>. Pas encore essayé ; la bibliothèque se met alors à jour à son prochain scan.</td></tr>
-            <tr><th scope="row">Kodi</th><td><span class="pill exp">Devrait marcher</span></td><td><code>.strm</code> et <code>.nfo</code> sont les formats de Kodi lui-même. Pas encore essayé.</td></tr>
-            <tr><th scope="row">Plex</th><td><span class="pill part">Pas encore</span></td><td>Plex n’ouvre pas de liens vers des flux. Pour Plex, le helper devrait écrire des fichiers vidéo finis : dites-nous si cela vous servirait.</td></tr>
+            <tr><th scope="row">Emby</th><td><span class="pill ok">Pris en charge</span></td><td>Lit les mêmes fichiers <code>.strm</code> et <code>.nfo</code>, dans une bibliothèque Vidéos personnelles.</td></tr>
+            <tr><th scope="row">Kodi, LibreELEC, OSMC, CoreELEC</th><td><span class="pill ok">Pris en charge</span></td><td><code>.strm</code> et <code>.nfo</code> sont les formats de Kodi lui-même : ajoutez le dossier comme source vidéo.</td></tr>
+            <tr><th scope="row">Les apps de Jellyfin et d’Emby</th><td><span class="pill ok">Pris en charge</span></td><td>iPhone, iPad, Android, Android TV, Fire TV, Roku, télévisions Samsung et LG, Xbox ; Swiftfin et Infuse sur Apple TV.</td></tr>
             <tr><th scope="row">Safari sur Mac, iPhone ou iPad</th><td><span class="pill ok">Essayé</span></td><td>Lit les flux directement depuis la page du helper.</td></tr>
-            <tr><th scope="row">VLC et d’autres lecteurs</th><td><span class="pill exp">Devrait marcher</span></td><td>Ouvrez <code>http://&lt;votre NAS&gt;:8099/playlist.m3u</code> : chaque clip en entrée.</td></tr>
+            <tr><th scope="row">VLC, IINA, mpv</th><td><span class="pill ok">Pris en charge</span></td><td>Ouvrez <code>http://&lt;votre NAS&gt;:8099/playlist.m3u</code> : chaque clip en entrée.</td></tr>
           </tbody>
         </table>
       </div>
@@ -268,7 +268,7 @@
       <div class="section-head">
         <p class="eyebrow">Portée</p>
         <h2>Les moments, les clips, ou les deux.</h2>
-        <p class="lede"><code>AFP_JELLYFIN_SCOPE</code> dit ce qui va dans Jellyfin. Ce qui en sort est retiré du dossier de Jellyfin : vous pouvez changer d’avis quand vous voulez.</p>
+        <p class="lede"><code>AFP_JELLYFIN_SCOPE</code> dit ce qui va dans la médiathèque. Ce qui en sort est retiré du dossier : vous pouvez changer d’avis quand vous voulez.</p>
       </div>
       <div class="gap-grid nas-three">
         <div class="gap-item">
@@ -296,7 +296,7 @@
         <p class="lede">Tout se règle dans l’environnement du conteneur. <code>--help</code> décrit chaque réglage, et la page <code>/settings</code> du helper les montre tous, avec leurs valeurs et l’état de chaque tâche.</p>
       </div>
       <div class="keys">
-        <div class="key"><span><code>AFP_GUARDIAN · AFP_STREAM · AFP_JELLYFIN</code></span><span>Chaque tâche activée ou non. Les liens Jellyfin sont coupés tant que vous ne les activez pas.</span></div>
+        <div class="key"><span><code>AFP_COLLABORATION · AFP_STREAM · AFP_JELLYFIN</code></span><span>Chaque tâche activée ou non. Les liens pour les médiathèques sont coupés tant que vous ne les activez pas.</span></div>
         <div class="key"><span><code>AFP_JELLYFIN_SCOPE</code></span><span>moments, clips ou all.</span></div>
         <div class="key"><span><code>AFP_BITRATE · AFP_HEIGHT</code></span><span>La qualité des flux : 30 Mbit/s et 1080p par défaut.</span></div>
         <div class="key"><span><code>AFP_TV_LOOK</code></span><span>Ce que reçoivent les télévisions plus anciennes : HLG, HDR10 ou SDR, plus lumineux, à 30 i/s.</span></div>
@@ -304,6 +304,35 @@
         <div class="key"><span><code>AFP_PUBLIC_URL</code></span><span>L’adresse du NAS, telle que les apps de Jellyfin l’atteignent.</span></div>
       </div>
       <p class="note"><a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">Chaque réglage, en détail (en anglais) →</a></p>
+    </div>
+  </section>
+
+  <!-- Heavy clips -->
+  <section class="section band" id="heavy">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Clips lourds</p>
+        <h2>Rendus d’avance, lus sans à-coups, en pleine qualité.</h2>
+        <p class="lede">Certains clips demandent plus qu’un NAS ne peut rendre pendant qu’on regarde : la 8K, les hautes cadences, une longue plongée. Rendez-les d’avance, en entier, et ils se lisent depuis le NAS comme n’importe quel fichier vidéo.</p>
+      </div>
+      <div class="gap-grid">
+        <div class="gap-item">
+          <h3>Un dossier à la fois</h3>
+          <p>Un clic sur la page du helper rend les clips d’un dossier en entier, en arrière-plan, un par un, quand personne ne regarde. Ce qui est rendu reste en cache.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Fluide, aussi lourd soit-il</h3>
+          <p>Lu depuis ce qui a été rendu d’avance, un clip 8K ou à 120 i/s passe aussi fluide qu’un autre, sur n’importe quel écran.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Toutes les améliorations</h3>
+          <p>Avec du temps devant lui, le rendu peut prendre les réglages les plus fins : la déformation plus précise, les franges colorées de l’eau retirées, et le débruitage qui nettoie les plongées sombres.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Et à nouveau quand vous changez</h3>
+          <p>Changez les réglages d’un clip dans le lecteur, et il est rendu à nouveau, d’avance, de la même façon.</p>
+        </div>
+      </div>
     </div>
   </section>
 

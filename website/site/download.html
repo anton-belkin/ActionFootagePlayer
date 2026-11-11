@@ -396,7 +396,7 @@
       <div class="section-head">
         <p class="eyebrow">Your footage on a NAS?</p>
         <h2>NAS Helper</h2>
-        <p class="lede">A Docker container for a NAS with an x86-64 processor and an Intel GPU, next to your projects. It keeps a project’s catalog current from the NAS’s side, so what one computer changes shows on the others at once. It streams every clip and moment stabilized and in HDR, as the player shows them, to a browser, a phone or a TV. And, if you turn it on, it puts your moments, your clips or both in a Jellyfin library. It’s for people at ease with Docker: every setting is described.</p>
+        <p class="lede">A Docker container for a NAS with an x86-64 processor and an Intel GPU, next to your projects. It lets several people work in one library together, each seeing the others’ changes in a second. It streams every clip and moment stabilized and in HDR, as the player shows them, to a browser, a phone or a TV. And, if you turn it on, it puts your moments, your clips or both in Jellyfin, Emby or Kodi. It’s for people at ease with Docker: every setting is described.</p>
       </div>
       <div class="platforms">
 
@@ -417,7 +417,7 @@
           </div>
           <ol class="install">
             <li>Copy the download to the NAS and load it over SSH: <code>docker load -i ActionFootageNASHelper-*-linux-x86_64.tar.gz</code>.</li>
-            <li>Take the example compose file and change its folders to the NAS’s: each project twice (read-write for the guardian, read-only for the stream), the shares its footage is on, and two folders of the helper’s own.</li>
+            <li>Take the example compose file and change its folders to the NAS’s: each project twice (read-write for collaboration, read-only for the stream), the shares its footage is on, and two folders of the helper’s own.</li>
             <li>Start it: <code>docker compose up -d</code>, or as a project in the NAS’s Docker app. Its log says what it found and runs; <code>http://&lt;nas&gt;:8099/settings</code> shows every setting with what it does.</li>
           </ol>
           <p class="note"><a class="text-link" data-asset="nas-compose" href="https://github.com/anton-belkin/ActionFootagePlayer/releases/latest">The example compose file</a> · <a class="text-link" href="https://github.com/anton-belkin/ActionFootagePlayer/blob/main/tools/nas-helper/README.md">Every setting, in detail</a></p>
