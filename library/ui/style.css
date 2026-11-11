@@ -235,6 +235,7 @@ button.chip{cursor:pointer}
 .empty h2{margin:0;font-size:20px}
 .empty p{margin:0;line-height:1.5;color:var(--fg2)}
 .dim{color:var(--muted)}
+.off .th{opacity:.45}
 .rlist{display:flex;flex-direction:column;gap:2px;margin-top:8px;width:100%}
 .rlist button{border:0;background:transparent;text-align:left;padding:8px 10px;border-radius:8px;color:var(--fg)}
 .rlist button:hover{background:var(--hover)}

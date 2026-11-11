@@ -96,8 +96,14 @@ Project "Footage", its folder //DISKSTATIONDXP/ssd/Projects/Footage
 - **Copies only**: a location marked so (Working) holds copies of clips that are somewhere else in the project. Nothing
   is ever written into it ([The clip's own file](#the-clips-own-file)).
 - Locations may overlap (Working and Archive both at the root) or not.
-- **A location that isn't reachable** is skipped. Moments still show (their previews are in the project folder), and
-  say "the original isn't reachable" when played.
+- **A location that isn't reachable** (a share not mounted, a disk not plugged in) shows its clips as the project's
+  catalog last saw them, marked **Offline**, with a strip above the list that says so. Their marks, tags, camera and
+  previews are known from before; opening one connects its share instead. Moments still show (their previews are in
+  the project folder), and say "the original isn't reachable" when played.
+- **On a Mac the Library connects the shares itself:** once a run, on opening the project, each location's share not
+  mounted is mounted as Finder does (`mount volume "smb://host/share"`, the password from the Keychain); the strip's
+  **Connect** does it again on demand. A share mounted or taken away while the Library is open is noticed within 5 s,
+  and the project is read again as when it's opened. An ejected share isn't mounted again until the next run.
 
 ### Where a location is
 

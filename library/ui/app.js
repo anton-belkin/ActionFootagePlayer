@@ -86,7 +86,7 @@ const S = {
   // Source settings changed in the Source Settings tab, not written yet (key -> value), and for which clips
   srcDraft: {}, srcFor: null,
   photoKind: "live", exportSdr: false, jobs: [], finished: 0,
-  locations: [], sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
+  locations: [], connecting: {}, sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
   geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
@@ -128,6 +128,15 @@ function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; cl
 let opening = 0;
 async function openItems(paths) {
   if (!paths.length) return;
+  // Clips whose location is offline: their share connected instead (opened again once they show)
+  const off = (RAW_FOOTAGE.items || []).filter((it) => it.offline && paths.includes(it.path));
+  if (off.length) {
+    const locs = S.locations.filter((l) => l.offline && off.some((it) => it.loc === l.name));
+    const can = locs.filter((l) => l.connect);
+    if (!can.length) { toast((off.length > 1 ? off.length + " clips are" : off[0].name + " is") + " offline: connect " + (locs.map((l) => l.path).join(", ") || "its location") + " first"); return; }
+    for (const l of can) connectLocation(l.path);
+    return;
+  }
   const id = ++opening;
   const name = (paths[0].split(/[\\/]/).pop() || "").replace(/\.afplink\.mp4$/i, "");
   const busy = setTimeout(() => {
@@ -521,6 +530,14 @@ function renderMain() {
   if (S.missing > 0 || S.mending) h += '<div class="indexing">' + (S.mending ? '<span class="spin" aria-hidden="true"></span>Looking for the moved originals and mending the links…'
     : S.missing + (S.missing === 1 ? " moment, clip preview, export or photo points" : " moments, clip previews, exports and photos point") + ' at an original that isn’t where it was. <button type="button" class="btn sm" data-a="showbroken">Show</button> <button type="button" class="btn sm pri" data-a="mend">Find and mend</button>' +
       (S.showBrokenList ? '<div class="sub wrap" style="margin-top:6px">' + (S.missingList || []).map((x) => '<div><code>' + esc(x.file.replace(S.root + "/", "")) + '</code> → ' + esc(x.tree || "?") + ' <button type="button" class="btn sm" data-a="revealpath" data-v="' + esc(x.file) + '">' + (S.macos ? "Show in Finder" : "Show in Explorer") + '</button></div>').join("") + '</div>' : "")) + '</div>';
+  // Locations not reachable now: their clips as last seen, marked offline; a share connected from here (the Mac)
+  if (S.view === "footage" || S.view === "sources") {
+    for (const l of S.locations.filter((x) => x.offline)) {
+      const busy = S.connecting[l.path];
+      h += '<div class="indexing">' + (busy ? '<span class="spin" aria-hidden="true"></span>' : '') + '<b>' + esc(l.name || l.path) + '</b> (' + esc(l.path) + ') is offline: its clips show as they were last seen, and play once it’s connected.' +
+        (l.connect ? ' <button type="button" class="btn sm pri" data-a="connectloc" data-v="' + esc(l.path) + '"' + (busy ? " disabled" : "") + '>' + (busy ? "Connecting…" : "Connect") + '</button>' : "") + '</div>';
+    }
+  }
   if (probesPending && (S.view === "footage" || S.view === "sources" || S.view === "moments")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
@@ -538,7 +555,7 @@ function renderMain() {
     h += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (clipsV ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div><div class="list">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
-      h += '<button type="button" class="row' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         '<span style="min-width:0">' + (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
@@ -549,7 +566,7 @@ function renderMain() {
     h += '<div class="grid">';
     for (const it of list) {
       const key = keyOf(it), sel = !!S.sel[key];
-      h += '<button type="button" class="card' + (sel ? " sel" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     }
     h += '</div>';
@@ -576,6 +593,7 @@ function chips(it) {
     // Footage's folders are its previews' already: the count says something only in Originals
     if (S.view === "sources" && inner.length) c.push(["chip " + (prev === inner.length ? "ok" : ""), prev + " of " + inner.length + " previews"]);
   } else if (it.kind === "clip") {
+    if (it.offline) c.push(["chip warn", "Offline"]);
     if (it.conflict) c.push(["chip warn", it.own_conflict.length + " own files"]);
     if ((it.locs || []).length > 1) c.push(["chip fast", "Also in " + it.locs.slice(1).join(", ")]);
     if (!it.preview) c.push(["chip", "No preview"]);
@@ -2016,6 +2034,18 @@ async function geoAct(a, v, el) {
   }
 }
 
+// An offline location's share connected (library/src/main.rs connect_location): its clips show once it's there
+async function connectLocation(path) {
+  if (S.connecting[path]) return;
+  S.connecting[path] = true;
+  toast("Connecting " + path + "…");
+  renderAll();
+  try { await invoke("connect_location", { path }); toast("Connected " + path + ": its clips show in a moment"); }
+  catch (e) { showError(String(e)); }
+  delete S.connecting[path];
+  renderAll();
+}
+
 // ---------- Sources, renaming, the keyboard, Quick Look ----------
 
 // A source's line: where it is, its place in the tree, copies only, not here
@@ -2411,6 +2441,7 @@ document.addEventListener("click", async (e) => {
     case "srcapply": return applySource();
     case "srcclear": S.srcDraft = {}; renderSide(); return;
     case "job": return addJob(v);
+    case "connectloc": connectLocation(v); return;
     case "openit": { const p = selectedPaths(); openItems(p); return; }
     case "revealit": { const c = ctx(); const first = c.selFolders.length ? (S.view === "sources" ? treeOnDisk(c.selFolders[0]) : folderOnDisk(c.selFolders[0])) : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();

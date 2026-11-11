@@ -176,6 +176,41 @@ fn poll_reach(root: &Path, before: String, changed: &Arc<std::sync::atomic::Atom
     }).ok();
 }
 
+/// A location's share mounted, as Finder does: with the password the Keychain has for it (none: the Mac asks for one).
+/// Only the Mac; elsewhere the share is connected in the system and then shows. Err: it couldn't (the NAS isn't on this
+/// network: a dozen seconds to find out)
+fn mount_share(path: &str) -> Result<(), String> {
+    let (host, share, _) = locations::network(path).ok_or_else(|| format!("{path} isn't on a share"))?;
+    if !cfg!(target_os = "macos") { return Err(format!("Connect //{host}/{share} in the system: its clips show then")); }
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let url = format!("smb://{}/{}", enc(&host), enc(&share));
+    let out = std::process::Command::new("/usr/bin/osascript").arg("-e").arg(format!("mount volume \"{url}\"")).output().map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else { Err(format!("//{host}/{share} couldn't be connected ({})", String::from_utf8_lossy(&out.stderr).trim())) }
+}
+
+/// The projects whose shares were mounted on opening them, once a run: one taken away afterwards (ejected) stays away
+static MOUNTED_ON_OPEN: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// On opening a project (the first time this run), its locations' shares not mounted: mounted, in the background (the
+/// look every 5 s then sees them)
+fn mount_on_open(root: &Path) {
+    // (not from tests: the shares are this Mac's)
+    if !cfg!(target_os = "macos") || cfg!(test) { return; }
+    { let mut m = MOUNTED_ON_OPEN.lock().unwrap(); if m.iter().any(|r| r == root) { return; } m.push(root.to_path_buf()); }
+    let root = root.to_path_buf();
+    std::thread::Builder::new().name("mount".into()).spawn(move || {
+        let mut shares: Vec<(String, String)> = Vec::new();
+        for l in locations::locations(&root, &locations::mounts()) {
+            if l.local || l.dir.is_some() { continue; }
+            let Some((host, share, _)) = locations::network(&l.path) else { continue };
+            let key = (locations::host_key(&host), share.to_lowercase());
+            if shares.contains(&key) { continue; }
+            shares.push(key);
+            let _ = mount_share(&l.path);
+        }
+    }).ok();
+}
+
 /// `moved`: its own files just moved here (Move the project…), its catalog with them
 fn watch(root: &Path, moved: bool) -> Watch {
     use notify::Watcher;
@@ -183,6 +218,7 @@ fn watch(root: &Path, moved: bool) -> Watch {
     let reach = reach_key(root);
     let reach_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     poll_reach(root, reach, &reach_changed);
+    mount_on_open(root);
     let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (c, l) = (changes.clone(), last.clone());
@@ -775,7 +811,11 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
                 _ => {}
             }
         }
-        let known = { let mut p = probes.lock().unwrap(); p.want(&want); p.known(&want) };
+        // An offline clip's answer as known from before; not asked for (its file isn't there to read)
+        let off: std::collections::HashSet<&str> = out["items"].as_array().into_iter().flatten()
+            .filter(|it| it["offline"].as_bool() == Some(true)).filter_map(|it| it["path"].as_str()).collect();
+        let ask: Vec<String> = want.iter().filter(|p| !off.contains(p.as_str())).cloned().collect();
+        let known = { let mut p = probes.lock().unwrap(); p.want(&ask); p.known(&want) };
         let mut v = out.clone();
         v["root"] = json!(root.display().to_string());
         v["view"] = json!(view);
@@ -787,6 +827,18 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         v["probes"] = known;
         v
     }).await.map_err(|e| e.to_string())
+}
+
+/// An offline location's share connected (the Sources banner's Connect): its clips show as soon as it's there
+#[tauri::command]
+async fn connect_location(shared: State<'_, Shared>, path: String) -> Result<(), String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        mount_share(&path)?;
+        // Seen now, not at the next look
+        if let Some(w) = shared.lock().unwrap().watch.as_ref() { w.reach_changed.store(true, std::sync::atomic::Ordering::Relaxed); }
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2059,7 +2111,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,

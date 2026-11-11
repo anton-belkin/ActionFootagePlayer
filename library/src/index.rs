@@ -403,33 +403,56 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
     let mut by_tree: HashMap<String, usize> = HashMap::new();
     // Each location's own folders, as it is on its disk (the Library's Sources)
     let mut loc_dirs: Vec<Vec<String>> = vec![Vec::new(); locs.len()];
-    for (li, l) in locs.iter().enumerate() {
-        let Some(dir) = &l.dir else { continue };
-        if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
+    // A location not reachable now (a share not mounted, a disk not plugged in): its clips as the project's catalog
+    // last saw them, marked offline, after the reachable ones (a clip in both plays from the one here)
+    let offline: Vec<bool> = locs.iter().map(|l| !l.local && l.dir.as_ref().is_none_or(|d| !d.is_dir())).collect();
+    let mut order: Vec<usize> = (0..locs.len()).collect();
+    order.sort_by_key(|&i| offline[i]);
+    for li in order {
+        let l = &locs[li];
+        let off = offline[li];
+        let id = format!("l:{}", l.path);
         // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
         // aren't footage
         let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
-        for (rel, is_dir, size, mtime) in walk(dir, &skip) {
+        let (dir, found) = if off {
+            let Some(found) = crate::seen::walk_root(&id, &skip, MAX_DEPTH) else { continue };
+            (offline_dir(l), found)
+        } else {
+            let Some(dir) = &l.dir else { continue };
+            (dir.clone(), walk(dir, &skip))
+        };
+        let dir = &dir;
+        if !l.at.is_empty() { add_dir(&l.at, &mut dirs); }
+        for (rel, is_dir, size, mtime) in found {
             let tree = if l.at.is_empty() { rel.clone() } else { format!("{}/{rel}", l.at) };
             if is_dir { add_dir(&tree, &mut dirs); loc_dirs[li].push(rel.clone()); continue; }
             let lower = rel.to_lowercase();
             if !(lower.ends_with(".mp4") || lower.ends_with(".mov")) || lower.ends_with(LINK_EXT) { continue; }
             let path = dir.join(&rel);
-            let own_here = { let f = path.with_extension("afp.json"); if crate::seen::is_file(&f) { Some(f) } else { let o = path.with_extension("marks.json"); crate::seen::is_file(&o).then_some(o) } };
+            // Offline: what's beside it as the catalog last saw it (its own file read from there, not the disk)
+            let beside = |name: String| -> bool { crate::seen::file_in(&id, &rel_join(&parent_of(&rel), &name)).is_some_and(|f| !f.dir) };
+            let stem = |ext: &str| Path::new(name_of(&rel)).with_extension(ext).to_string_lossy().into_owned();
+            let own_here = if off {
+                ["afp.json", "marks.json"].into_iter().map(|e| stem(e)).find(|n| beside(n.clone())).map(|n| path.with_file_name(n))
+            } else { let f = path.with_extension("afp.json"); if crate::seen::is_file(&f) { Some(f) } else { let o = path.with_extension("marks.json"); crate::seen::is_file(&o).then_some(o) } };
+            let gyroflow = if off { beside(stem("gyroflow")) || beside(format!("{}.gyroflow", name_of(&rel))) } else { has_gyroflow(&path) };
+            let copy = json!({ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string(), "offline": off });
             if let Some(&i) = by_tree.get(&tree) {
                 let it = &mut items[i];
-                it["copies"].as_array_mut().unwrap().push(json!({ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }));
-                if has_gyroflow(&path) { it["gyroflow"] = json!(true); }
+                it["copies"].as_array_mut().unwrap().push(copy);
+                if gyroflow { it["gyroflow"] = json!(true); }
                 if let Some(o) = own_here { it["own_files"].as_array_mut().unwrap().push(json!(o.display().to_string())); }
                 continue;
             }
             let mut it = json!({ "id": tree, "dir": parent_of(&tree), "name": name_of(&tree), "path": path.display().to_string(), "size": size,
-                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [{ "loc": l.name, "li": li, "rel": rel, "path": path.display().to_string() }],
+                                 "mtime": mtime, "kind": "clip", "loc": l.name, "copies": [copy],
                                  "own_files": own_here.map(|o| vec![json!(o.display().to_string())]).unwrap_or_default() });
-            it["gyroflow"] = json!(has_gyroflow(&path));
+            it["gyroflow"] = json!(gyroflow);
+            if off { it["offline"] = json!(true); }
             // What the camera wrote beside it for its own quick look (DJI's and GoPro's .LRF proxy, GoPro's .THM): the
             // clip's picture until it has a preview
-            if let Some(t) = camera_thumb(&path) { it["thumb"] = json!(t.display().to_string()); }
+            if !off { if let Some(t) = camera_thumb(&path) { it["thumb"] = json!(t.display().to_string()); } }
             let preview = linked.get(tree.as_str()).cloned().or_else(|| [clip_preview_relative(&tree, flat_previews), clip_preview_relative(&tree, !flat_previews)]
                 .into_iter().map(|p| root.join("_Clips").join(p)).find(|p| crate::seen::is_file(p)));
             // Where it is as its preview was put (its folder in the project's): the Library shows footage that way
@@ -447,9 +470,17 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         let files: Vec<String> = it["own_files"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
         if files.len() > 1 { it["own_conflict"] = json!(files); }
         if let Some(f) = files.first() {
-            // The sidecar's marks, view, source and tags as the catalog read them, else the file
-            let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
-            if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
+            // The sidecar's marks, view, source and tags as the catalog read them, else the file (offline: only the
+            // catalog's, by its location's root)
+            let off = it["offline"].as_bool() == Some(true);
+            let seen = if off {
+                let c = &it["copies"][0];
+                let li = c["li"].as_u64().unwrap_or(0) as usize;
+                let rel = Path::new(c["rel"].as_str().unwrap_or("")).parent().map(|d| d.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+                let name = Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                locs.get(li).and_then(|l| crate::seen::file_in(&format!("l:{}", l.path), &rel_join(&rel, &name))).and_then(|f| f.meta).and_then(|m| m.get("own").cloned())
+            } else { crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned()) };
+            if let Some(own) = seen.or_else(|| if off { None } else { read_json(Path::new(f)) }) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
                                     "source": own.get("source").cloned().unwrap_or(Value::Null),
                                     "location": own.get("location").cloned().unwrap_or(Value::Null) });
@@ -458,8 +489,24 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         }
     }
     let locs_json: Vec<Value> = locs.iter().enumerate().map(|(i, l)| json!({ "name": l.name, "at": l.at, "path": l.path, "dir": l.dir.as_ref().map(|d| d.display().to_string()),
-                                                             "copies": l.copies, "local": l.local, "dirs": loc_dirs[i] })).collect();
+                                                             "copies": l.copies, "local": l.local, "dirs": loc_dirs[i], "offline": offline[i],
+                                                             "connect": offline[i] && cfg!(target_os = "macos") && crate::locations::network(&l.path).is_some() })).collect();
     json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
+}
+
+/// Where an offline location's clips would be: its folder when it names one (a disk not plugged in), else where the
+/// Mac mounts its share (/Volumes/<share>, as Finder does: the clips' answers known from before are found by that
+/// path), else its network path
+fn offline_dir(l: &crate::locations::Location) -> PathBuf {
+    if let Some(d) = &l.dir { return d.clone(); }
+    match crate::locations::network(&l.path) {
+        Some((_, share, sub)) if cfg!(target_os = "macos") => {
+            let mut d = PathBuf::from("/Volumes").join(share);
+            for p in sub.split('/').filter(|p| !p.is_empty()) { d.push(p); }
+            d
+        }
+        _ => PathBuf::from(&l.path),
+    }
 }
 
 pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
@@ -1074,6 +1121,54 @@ mod from_the_catalog {
         *crate::seen::SEEN.write().unwrap() = None;
         assert_eq!(scan(&root, "moments", false)["items"].as_array().unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+// A location on a share not mounted now: its clips as the catalog last saw them, marked offline (not gone)
+#[cfg(test)]
+mod offline {
+    use super::*;
+
+    #[test]
+    fn a_share_not_mounted_shows_its_clips_offline() {
+        let _one = crate::seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("afl-offline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, share) = (base.join("P"), base.join("share"));
+        for d in [root.join("_Clips/Day 1"), share.join("x/Day 1")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(share.join("x/Day 1/A.MP4"), b"clip").unwrap();
+        std::fs::write(share.join("x/Day 1/A.afp.json"), br#"{"marks":[{"t":2}],"tags":["reef"]}"#).unwrap();
+        std::fs::write(share.join("x/Day 1/A.gyroflow"), b"{}").unwrap();
+        // Its marker: the catalog looks only at a location that says it's this project's
+        std::fs::write(share.join("x").join(crate::locations::pointer_name(&root)), b"{}").unwrap();
+        std::fs::write(root.join("_Clips/Day 1/A.afplink.mp4"), tests::tests_mp4_with_link(r#"{"v":1,"kind":"clip","clip":"Day 1/A.MP4"}"#)).unwrap();
+        std::fs::write(root.join("Project.afproject"), r#"{"id":"offline-test","locations":[{"name":"NAS","at":"","path":"//NOHOST-AFL/share/x"}]}"#).unwrap();
+        let root = root.canonicalize().unwrap();
+        // The catalog made while the share was mounted (here: the share's folder given as where it is)
+        let (roots, ours) = afp_catalog::project::roots_with(&root, &[("share".into(), share.canonicalize().unwrap())]);
+        assert!(roots.iter().any(|r| r.id == "l://NOHOST-AFL/share/x"));
+        let store: std::sync::Arc<dyn afp_catalog::Store> = std::sync::Arc::new(afp_catalog::DiskStore);
+        let mut cat = afp_catalog::Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
+        cat.load(&afp_catalog::Want::All).unwrap();
+        cat.sweep(&roots, &ours, &Default::default()).unwrap();
+        // …and read now that it isn't
+        *crate::seen::SEEN.write().unwrap() = Some(crate::seen::Seen::of(&root, cat));
+        let f = scan(&root, "footage", false);
+        *crate::seen::SEEN.write().unwrap() = None;
+        let items = f["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "{f}");
+        let a = &items[0];
+        assert_eq!((a["id"].as_str(), a["offline"].as_bool(), a["copies"][0]["offline"].as_bool()), (Some("Day 1/A.MP4"), Some(true), Some(true)));
+        if cfg!(target_os = "macos") { assert_eq!(a["path"], json!("/Volumes/share/x/Day 1/A.MP4")); }
+        assert_eq!(a["own"]["marks"][0]["t"], json!(2));
+        assert_eq!(a["tags"], json!(["reef"]));
+        assert_eq!(a["gyroflow"], json!(true));
+        assert!(a["preview"].as_str().unwrap().ends_with("_Clips/Day 1/A.afplink.mp4"));
+        assert_eq!(f["locations"][0]["offline"], json!(true));
+        assert_eq!(f["locations"][0]["connect"], json!(cfg!(target_os = "macos")));
+        // Without a catalog that has looked at it: nothing to show (as before)
+        assert!(scan(&root, "footage", false)["items"].as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 
