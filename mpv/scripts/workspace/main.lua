@@ -2406,7 +2406,12 @@ end)
 mp.register_script_message("input-save", function()
     if not input_place() then return mp.osd_message("Not saved: this file isn't a source", 2) end
     local pack = input_pack(state.input_now or state.input)
-    local ok, err = sidecar.update(state.clip, function(d) d.source = pack; stamp(d) end)
+    -- The input's keys written over the source's; its others kept (the lens type the Library sets there)
+    local ok, err = sidecar.update(state.clip, function(d)
+        d.source = type(d.source) == "table" and d.source or {}
+        for k, v in pairs(pack) do d.source[k] = v end
+        stamp(d)
+    end)
     if not ok then return mp.osd_message("Couldn't save the input in the source's file: " .. tostring(err), 4) end
     state.input, state.input_now = pack, nil
     state.input_status = input_status()
