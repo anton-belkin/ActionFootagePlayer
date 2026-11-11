@@ -28,6 +28,7 @@ pub mod water;
 pub mod prefetch;
 pub mod still;
 pub mod levels;
+pub mod in_camera;
 pub mod smoothing;
 pub mod motion;
 pub mod dovi;
@@ -587,8 +588,9 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
             let geometry = motion::Geometry::of(&stab, still);
             motion::restabilize(&stab, &geometry, level);
             stab.recompute_undistortion();
-            log::info!("{project}: the frame covers FOV {still:.3} held still; {} at FOV {:.3}, margin {:.1}°", level.name(), level.fov(still),
-                geometry.smoothing(level).margin.to_degrees());
+            log::info!("{project}: the frame covers FOV {still:.3} held still; {} at FOV {:.3}, margin {:.1}°{}", level.name(), geometry.fov(level),
+                geometry.smoothing(level).margin.to_degrees(),
+                if geometry.crop_share < 1.0 { format!(", on top of the camera's stabilization ({:.0} % of the crop)", geometry.crop_share * 100.0) } else { String::new() });
             geometry
         });
         if level_geometry.is_none() {
@@ -616,7 +618,7 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
                 }
                 Some(g) => {
                     log::info!("{project}: wider view at FOV {fov:.3}");
-                    let mut params: Vec<ComputeParams> = Level::ALL.iter().map(|l| wide_view(&base, set_fov.unwrap_or(l.fov(g.still_fov)))).collect();
+                    let mut params: Vec<ComputeParams> = Level::ALL.iter().map(|l| wide_view(&base, set_fov.unwrap_or(g.fov(*l)))).collect();
                     params.push(wide);
                     // Measured as it plays: with what's ahead unknown, the edge fill is ready wherever it shows
                     let frames = base.frame_count.max(1);

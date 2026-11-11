@@ -661,7 +661,7 @@ pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usi
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 3;
+pub const GEOTAG: u64 = 4;
 
 #[derive(Default)]
 pub struct Probes {
@@ -690,7 +690,8 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
-            // An answer from before the probe knew drones' names and places (geotag.rs): asked again
+            // An answer from before the probe knew drones' names and places (geotag.rs), or stabilized GoPro clips with
+            // HyperSmooth on (in_camera.rs): asked again
             if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
             self.known.insert(k.clone(), (s, m, e["v"].clone()));
         }

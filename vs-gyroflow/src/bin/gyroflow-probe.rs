@@ -5,8 +5,10 @@
 // Steady Router. Prints one JSON line:
 //   {"mode":"default","width":3840,"height":2160,...}   no project, but motion data of its own, recorded without
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
-//                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
-//                                                       stabilize it with the default preset
+//                                                       HyperSmooth off, Insta360 with FlowState off in the camera),
+//                                                       or of the picture the camera stabilized (GoPro HERO12
+//                                                       and later with HyperSmooth on: "stabilized_in_camera" says so,
+//                                                       in_camera.rs): stabilize it with the default preset
 //   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
 //                                                       player takes for it ("in the file", the label of the one picked
 //                                                       from Gyroflow's database, lens_pick.rs, "" for none), to correct
@@ -15,7 +17,8 @@
 // DJI file, or a model whose metadata layout isn't known here), "water": whether the camera records when it's in
 // the water, for the lens under water to follow it (water.rs), "stabilized_in_camera": how the camera stabilized the
 // picture itself ("HyperSmooth (HS EIS)", "EIS: RockSteady", "FlowState"), false when it recorded that it didn't, null
-// when it doesn't say (such a clip isn't stabilized again here, whatever motion data it has), "rotation": how much a player turns the video to
+// when it doesn't say (such a clip isn't stabilized again here, whatever motion data it has, except a GoPro that
+// recorded how HyperSmooth turned the picture: mode "default" then), "rotation": how much a player turns the video to
 // show it upright, clockwise, 0, 90, 180 or 270 (its display matrix, mp4meta.rs: a camera held vertical), which the
 // plugin's output already has, and "spherical": what a stitched 360° video says it is (its projection, stereo
 // layout, pose or initial view: probe::spherical), null for any other video. A 360 camera's own file (its lenses in
@@ -140,8 +143,9 @@ fn main() {
         let (clock, gps) = vs_gyroflow::geotag::read(std::path::Path::new(&path), out["camera"].as_str().unwrap_or(""), created);
         out["clock"] = serde_json::to_value(clock).unwrap_or_default();
         out["gps"] = serde_json::to_value(gps).unwrap_or_default();
-        // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed (the Library asks again for older answers)
-        out["geotag"] = 3.into();
+        // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed, 4 = GoPro
+        // HERO12+ with HyperSmooth on stabilized (in_camera.rs) (the Library asks again for older answers)
+        out["geotag"] = 4.into();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
         println!("{out}");

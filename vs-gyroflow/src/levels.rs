@@ -46,9 +46,10 @@ impl Level {
         match self { Level::Weak => 0.5, Level::Medium => 0.75, Level::Strong => 1.0 }
     }
 
-    /// The FOV the level renders at, with Gyroflow's zoom off
-    pub fn fov(self, still_fov: f64) -> f64 {
-        still_fov * (1.0 - self.crop())
+    /// The FOV the level renders at, with Gyroflow's zoom off. `share`: of the level's crop, the clip's (in_camera.rs:
+    /// less on top of the camera's own stabilization)
+    pub fn fov(self, still_fov: f64, share: f64) -> f64 {
+        still_fov * (1.0 - self.crop() * share)
     }
 }
 
@@ -77,16 +78,17 @@ pub fn still_fov(stab: &StabilizationManager) -> f64 {
     measured[measured.len() / 2].clamp(0.1, 4.0)
 }
 
-/// How far the camera may turn away from the smoothed path before the crop runs out, in radians: the level's crop of
-/// the half of the output's shorter side the frame covers at `still_fov`, seen from the lens (`fx`, in the source's
+/// How far the camera may turn away from the smoothed path before the crop runs out, in radians: the `crop` (a level's,
+/// Level::crop, times the clip's share of it) of the half of the output's shorter side the frame covers at `still_fov`,
+/// seen from the lens (`fx`, in the source's
 /// pixels, which is also the scale of Gyroflow's undistorted plane at FOV 1, where the output's width is the source's
 /// `width`). The shorter side, the shorter way the picture has to go: the height of a landscape output, the width of
 /// a portrait one (a frame turned a quarter, or cut to 9:16). Seen through the output's `projection` (Gyroflow's
 /// OutputProjection: rectilinear's angle is the arctangent)
-pub fn margin(level: Level, still_fov: f64, fx: f64, output_aspect: f64, width: f64, projection: i32) -> f64 {
+pub fn margin(crop: f64, still_fov: f64, fx: f64, output_aspect: f64, width: f64, projection: i32) -> f64 {
     use gyroflow_core::stabilization::projection::OutputProjection;
     let half_side = still_fov * width / output_aspect.max(1.0) / 2.0;
-    OutputProjection::from_i32(projection).theta_of_radius(level.crop() * half_side / fx.max(1.0))
+    OutputProjection::from_i32(projection).theta_of_radius(crop * half_side / fx.max(1.0))
 }
 
 #[cfg(test)]
@@ -97,13 +99,15 @@ mod tests {
     fn levels_as_named() {
         for l in Level::ALL { assert_eq!(Level::parse(l.name()), Some(l)); }
         assert_eq!(Level::parse("extreme"), None);
-        assert!((Level::Medium.fov(0.7) - 0.56).abs() < 1e-9);
+        assert!((Level::Medium.fov(0.7, 1.0) - 0.56).abs() < 1e-9);
+        // On top of HyperSmooth, half the crop
+        assert!((Level::Medium.fov(0.7, 0.5) - 0.63).abs() < 1e-9);
     }
 
     #[test]
     fn margin_grows_with_the_crop() {
         // Osmo Action 6 at 4K: fx 1473, the frame covering FOV 0.7 at 16:9
-        let m: Vec<f64> = Level::ALL.iter().map(|l| margin(*l, 0.7, 1473.0, 16.0 / 9.0, 3840.0, 0).to_degrees()).collect();
+        let m: Vec<f64> = Level::ALL.iter().map(|l| margin(l.crop(), 0.7, 1473.0, 16.0 / 9.0, 3840.0, 0).to_degrees()).collect();
         assert!(m[0] < m[1] && m[1] < m[2]);
         assert!((m[1] - 5.87).abs() < 0.1, "{m:?}");
     }
@@ -111,17 +115,17 @@ mod tests {
     #[test]
     fn a_portrait_output_has_the_margin_of_its_width() {
         // The same frame turned a quarter: 9:16, the output's width the source's 3840 at FOV 1, its height more
-        let landscape = margin(Level::Medium, 0.7, 1473.0, 16.0 / 9.0, 3840.0, 0);
-        let portrait = margin(Level::Medium, 0.4, 1473.0, 9.0 / 16.0, 3840.0, 0);
+        let landscape = margin(Level::Medium.crop(), 0.7, 1473.0, 16.0 / 9.0, 3840.0, 0);
+        let portrait = margin(Level::Medium.crop(), 0.4, 1473.0, 9.0 / 16.0, 3840.0, 0);
         let width_only = (Level::Medium.crop() * 0.4 * 3840.0 / 2.0 / 1473.0).atan();
         assert!((portrait - width_only).abs() < 1e-12 && portrait > 0.0 && landscape > 0.0);
-        assert_eq!(margin(Level::Medium, 0.7, 1473.0, 1.0, 3840.0, 0), margin(Level::Medium, 0.7, 1473.0, 0.5, 3840.0, 0));
+        assert_eq!(margin(Level::Medium.crop(), 0.7, 1473.0, 1.0, 3840.0, 0), margin(Level::Medium.crop(), 0.7, 1473.0, 0.5, 3840.0, 0));
     }
 
     #[test]
     fn the_margin_as_the_projection_sees_it() {
         // Equidistant: the radius is the angle; rectilinear's the arctangent of it, the smaller
-        let (rect, equi) = (margin(Level::Strong, 1.2, 1473.0, 16.0 / 9.0, 3840.0, 0), margin(Level::Strong, 1.2, 1473.0, 16.0 / 9.0, 3840.0, 2));
+        let (rect, equi) = (margin(Level::Strong.crop(), 1.2, 1473.0, 16.0 / 9.0, 3840.0, 0), margin(Level::Strong.crop(), 1.2, 1473.0, 16.0 / 9.0, 3840.0, 2));
         assert!((equi - 0.3 * 1.2 * 3840.0 * 9.0 / 16.0 / 2.0 / 1473.0).abs() < 1e-9 && rect < equi);
     }
 }
