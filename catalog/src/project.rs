@@ -54,6 +54,40 @@ pub fn project_id(project: &Path) -> String {
         .unwrap_or_else(|| crate::snapshot::sha(project.to_string_lossy().as_bytes()))
 }
 
+/// The project's version (Project.afproject's "version"): raised when what the project's files or its catalog hold
+/// changes, so that an older program, which would write them its way and lose what it doesn't know, refuses the
+/// project instead (2026-11-11: the NAS's catalog from before locations noted every sidecar the Library had just
+/// written without its location, and the locations went from the view).
+///   1  before locations (up to 0.10)          2  with its locations (the Library, 0.11)
+///   3  the catalog keeps a clip's location (0.12)
+pub const VERSION: u64 = 3;
+
+/// The version the project's file says (1 when it says none; None: no file, or not one to read)
+pub fn version(project: &Path) -> Option<u64> {
+    let doc = locations::read_json(&project.join(locations::PROJECT_FILE))?;
+    Some(doc.get("version").and_then(|v| v.as_u64()).unwrap_or(1))
+}
+
+/// Why this program mustn't work with the project: one of a newer version
+pub fn too_new(project: &Path) -> Option<String> {
+    let v = version(project)?;
+    (v > VERSION).then(|| format!("{} is of a newer version ({v}) than this program knows ({VERSION}): update it to work with this project",
+                                   project.join(locations::PROJECT_FILE).display()))
+}
+
+/// The project's file raised to this version, the rest of it kept (an older program then refuses it); written only
+/// when it says less
+pub fn raise(project: &Path) -> std::io::Result<()> {
+    let file = project.join(locations::PROJECT_FILE);
+    let Some(mut doc) = locations::read_json(&file) else { return Ok(()) };
+    let Some(map) = doc.as_object_mut() else { return Ok(()) };
+    if map.get("version").and_then(|v| v.as_u64()).unwrap_or(1) >= VERSION { return Ok(()); }
+    map.insert("version".into(), serde_json::json!(VERSION));
+    let tmp = file.with_extension("afproject.tmp");
+    std::fs::write(&tmp, serde_json::to_vec(&doc)?)?;
+    std::fs::rename(&tmp, &file)
+}
+
 /// The roots to look at, and what's read in them
 pub fn roots(project: &Path) -> (Vec<Root>, Ours) { roots_from(project, &locations::mounts()) }
 
@@ -127,6 +161,27 @@ pub fn open(project: &Path) -> Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_newer_project_refused_an_older_raised() {
+        let p = std::env::temp_dir().join(format!("afp-version-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        let file = p.join(locations::PROJECT_FILE);
+        std::fs::write(&file, r#"{"format":"actionfootage-project","version":2,"id":"x","locations":[]}"#).unwrap();
+        assert!(too_new(&p).is_none());
+        raise(&p).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert_eq!((doc["version"].as_u64(), doc["id"].as_str()), (Some(VERSION), Some("x")));
+        std::fs::write(&file, format!(r#"{{"format":"actionfootage-project","version":{}}}"#, VERSION + 1)).unwrap();
+        assert!(too_new(&p).is_some_and(|e| e.contains("newer")));
+        raise(&p).unwrap();
+        assert_eq!(version(&p), Some(VERSION + 1), "never lowered");
+        let mut cat = open(&p);
+        assert!(matches!(cat.load(&crate::Want::All), Err(crate::Error::TooNew(_))));
+        assert!(matches!(cat.note(vec![("p".into(), "a".into(), None)]), Err(crate::Error::TooNew(_))));
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
     #[test]
     fn a_share_named_by_the_locations_is_found_where_it_is_on_the_nas() {
         let d = std::env::temp_dir().join(format!("afp-cat-roots-{}", std::process::id()));
