@@ -69,6 +69,8 @@ local mp = {
     register_event = function(name, fn) events[name] = events[name] or {}; table.insert(events[name], fn) end,
     add_hook = function(name, prio, fn) hooks[#hooks + 1] = { name = name, prio = prio, fn = fn } end,
     register_script_message = function(name, fn) messages[name] = fn end,
+    -- As mpv's defaults.lua: a key binding's name is a script message too (one of the same name taken over)
+    add_key_binding = function(_, name, fn) if name then messages[name] = function() fn({ event = "press" }) end end end,
     add_timeout = function(_, fn) local t = { kill = function() end, is_enabled = function() return false end, resume = function() end }; fn(); return t end,
     add_periodic_timer = function() return { kill = function() end, resume = function() end, is_enabled = function() return false end, stop = function() end } end,
     get_time = function() return 0 end,

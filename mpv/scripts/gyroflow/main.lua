@@ -1395,6 +1395,9 @@ local function add_filter(source, done)
         source.info = { horizon = tonumber(st.horizon_lock_amount) or 0, width = tonumber(out.output_width), height = tonumber(out.output_height),
                         projection = type(st.output_projection) == "string" and st.output_projection or nil }
     end
+    -- Nothing stabilizes it (no motion data: its lens alone could be corrected): as recorded unless saved for it so
+    -- (Anton, 2026-11-11: such a clip is the camera's own picture, a stabilized one's often; a corrected lens is a choice)
+    if source.kind == "lens" and not (type(saved) == "table" and saved.lens == "corrected") then lens_mode = "as-recorded" end
     stab_off = off
     write_edge_control()
 
@@ -2145,8 +2148,9 @@ mp.register_script_message("underwater", function(value)
     if UNDERWATER_LABELS[value] then set_underwater(value) end
 end)
 
--- Above water <-> what it was (under water, as the camera says, or as the project says)
-mp.add_key_binding("Ctrl+u", "lens", function()
+-- Above water <-> what it was (under water, as the camera says, or as the project says). Not named "lens": a key
+-- binding's name is a script message too (mpv's defaults.lua), and it took the Lens drop-down's message over
+mp.add_key_binding("Ctrl+u", "above-water", function()
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
