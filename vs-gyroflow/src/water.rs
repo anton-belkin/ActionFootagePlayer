@@ -59,7 +59,7 @@ pub struct Span { pub start_ms: f64, pub end_ms: f64, pub in_water: bool }
 /// Whether the camera records it: the model the clip's first metadata sample names. Only that sample is read
 pub fn recorded(path: &str) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else { return false };
-    let Ok(size) = file.metadata().map(|m| m.len() as usize) else { return false };
+    let Ok(size) = file.metadata().map(|m| m.len()) else { return false };
     let mut found = false;
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel2 = cancel.clone();
@@ -104,7 +104,7 @@ pub fn spans_sparse(path: &str) -> Option<Vec<Span>> {
 
 /// The same from the samples `file` has read: of a clip that plays as its motion data comes in (motion.rs), the
 /// stretches as far as it's read (the samples not read yet read as zeros, which say nothing)
-pub fn spans_in(file: &mut Prefetched, size: usize) -> Option<Vec<Span>> {
+pub fn spans_in(file: &mut Prefetched, size: u64) -> Option<Vec<Span>> {
     file.rewind();
     let mut layout = None;
     let mut samples = Vec::new();

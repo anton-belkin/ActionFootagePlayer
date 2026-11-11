@@ -175,7 +175,7 @@ impl Motion {
         {
             let url = filesystem::path_to_url(video);
             let mut file = std::fs::File::open(video).map_err(|e| format!("{video}: {e}"))?;
-            let size = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+            let size = file.metadata().map_err(|e| e.to_string())?.len();
             stab.load_video_file(&mut file, size, &url, None, true).map_err(|e| format!("Can't load {video}: {e:?}"))?;
         }
         if !stab.gyro.read().has_motion() { return Err(format!("{video} has no motion data")); }
@@ -953,7 +953,7 @@ mod imu_frames {
         let clip = std::env::var("AFP_360_CLIP").expect("AFP_360_CLIP");
         let stab = gyroflow_core::StabilizationManager::default();
         let mut file = std::fs::File::open(&clip).unwrap();
-        let size = file.metadata().unwrap().len() as usize;
+        let size = file.metadata().unwrap().len();
         stab.load_video_file(&mut file, size, &gyroflow_core::filesystem::path_to_url(&clip), None, true).unwrap();
         stab.gyro.write().integration_method = 3;
         stab.recompute_gyro();
@@ -990,7 +990,7 @@ mod imu_frames {
         let clip = std::env::var("AFP_360_CLIP").expect("AFP_360_CLIP");
         let stab = gyroflow_core::StabilizationManager::default();
         let mut file = std::fs::File::open(&clip).unwrap();
-        let size = file.metadata().unwrap().len() as usize;
+        let size = file.metadata().unwrap().len();
         stab.load_video_file(&mut file, size, &gyroflow_core::filesystem::path_to_url(&clip), None, true).unwrap();
         stab.gyro.write().integration_method = 3;
         stab.recompute_gyro();

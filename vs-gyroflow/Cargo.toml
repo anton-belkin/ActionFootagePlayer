@@ -9,24 +9,22 @@ description = "Gyroflow stabilization as a VapourSynth filter, for realtime play
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Gyroflow master, which has the Static zoom modes (gyroflow/gyroflow#1264) the plugin renders. The plugin itself
-# uses nothing beyond what upstream exports.
+# Gyroflow 1.7.0 (it has the Static zoom modes, gyroflow/gyroflow#1264, and the iGPU memory hint, #1280), from the fork
+# until upstream has the rest: branch afp-v1.7.0 on anton-belkin/gyroflow, three commits on the v1.7.0 tag, each its own
+# pull request: ComputeParams::view_rotation, the output camera turned after the smoothing, for crop mode's pan
+# (gyroflow/gyroflow#1289); the equirect output projection and RigLens, a 360 rig's lens: its turn, its offset at the
+# stitching distance, its validity (#1290); the Insta360 model's RadtanPro terms (X4, X5; not proposed yet). Back to
+# gyroflow/gyroflow once they're merged.
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon. No cache-gyro-metadata: it
 # would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
-# From the fork until upstream has it: 3d9f610 with MemoryHints::MemoryUsage on integrated GPUs (branch
-# integrated-gpu-memory-usage-3d9f610), without which 3 workers on an Intel iGPU took 9 GB of RAM and the next clip ran
-# the GPU out of memory. Back to gyroflow/gyroflow once the pull request with it is merged. On top of it (branch
-# view-rotation): ComputeParams::view_rotation, the output camera turned after the smoothing, for crop mode's pan. On
-# top of that (branch 360-raw-clips, on equirect-projection): the equirect output projection and RigLens (a 360 rig's
-# lens: its turn, its offset at the stitching distance, its validity), and the Insta360 model's RadtanPro terms (X4, X5)
-gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "d130105", default-features = false, features = ["bundle-lens-profiles"] }
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "65e5cc6", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
-mp4parse = { package = "mp4parse-patched", version = "0.17.1", features = ["unstable-api"] }
+mp4parse = { package = "mp4parse-patched", version = "0.17.2", features = ["unstable-api"] }
 url = "2"
 vapoursynth4-sys = "0.4.1"
 log = "0.4"
 simplelog = "0.12"
-parking_lot = "0.12"
+parking_lot = "0.13"
 serde_json = "1"
 # The original's fingerprint in a link (workspace::fingerprint)
 sha2 = "0.10"

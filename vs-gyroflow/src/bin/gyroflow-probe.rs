@@ -51,7 +51,7 @@ use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, came
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let m = gyroflow_core::util::get_video_metadata(&mut file, size, &gyroflow_core::filesystem::path_to_url(path)).ok()?;
     Some((m.width, m.height, m.fps))
 }
