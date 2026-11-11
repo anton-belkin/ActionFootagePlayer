@@ -549,6 +549,14 @@ Nothing else. What was there goes:
 A project file with the old keys is read as before; the first time the Library opens it, the photo tags are written
 into the photos, the old file is kept beside it once as `Project.afproject.before-v3`, and the keys are dropped.
 
+**`version`** is what the project's files and its catalog hold, and **an older program refuses a project of a newer
+version** (since 2026-11-11, after the NAS's catalog from before locations wrote its records without them over the
+Library's, and locations went from the view). The Library, `afp-catalog` (the player's and the NAS's) and the player's
+project writer each know theirs (`afp_catalog::project::VERSION`, `projectfile.lua`'s `M.VERSION`): a project of a newer
+one isn't opened, read into the catalog or written; one of an older one is raised to theirs as they open it, so the
+older programs leave it alone from then on. Raise it whenever what's kept changes. 1: before locations (up to 0.10);
+2: with its locations (0.11); 3: the catalog keeps a clip's location (0.12).
+
 ### A link finds its clip by what the clip is
 
 Every link (moment, clip preview, export, render, photo) already carries what identifies its clip: `clip` (its path in

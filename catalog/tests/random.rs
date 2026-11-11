@@ -27,6 +27,7 @@ fn load(c: &mut Computer, want: &Want) -> bool {
             Err(Error::Gap(_)) => continue,
             Err(Error::Io(_)) => return false,
             Err(Error::Damaged(e)) => panic!("{}: damaged: {e}", c.name),
+            Err(Error::TooNew(e)) => panic!("{}: {e}", c.name),
         }
     }
     false
@@ -36,7 +37,7 @@ fn refresh(c: &mut Computer) {
     match c.cat.refresh() {
         Ok(_) | Err(Error::Io(_)) => {}
         Err(Error::Gap(_)) => { load(c, &Want::All); }
-        Err(Error::Damaged(e)) => panic!("{e}"),
+        Err(Error::Damaged(e)) | Err(Error::TooNew(e)) => panic!("{e}"),
     }
 }
 

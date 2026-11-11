@@ -244,11 +244,12 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
         .is_some_and(|v| v.get("format").is_some_and(|f| f != FORMAT)) {
         return Err(format!("{} isn't Action Footage's", file.display()));
     }
+    if let Some(e) = afp_catalog::project::too_new(root) { return Err(e); }
     let mut doc = read_doc(root);
     let map = doc.as_object_mut().ok_or("not an object")?;
     map.insert("format".into(), json!(FORMAT));
-    // 2 once it has locations (docs/library-management.md); the player reads both
-    let v = map.get("version").and_then(Value::as_u64).unwrap_or(1).max(1);
+    // This Library's version (afp_catalog::project::VERSION), never lowered: older ones then refuse the project
+    let v = map.get("version").and_then(Value::as_u64).unwrap_or(1).max(afp_catalog::project::VERSION);
     map.insert("version".into(), json!(v));
     if !map.get("settings").is_some_and(Value::is_object) { map.insert("settings".into(), json!({})); }
     change(map);
@@ -653,6 +654,7 @@ fn open_path(app: &tauri::AppHandle, shared: &Shared, path: &Path) -> Result<Str
     let root = project_of(path).ok_or_else(|| format!(
         "{} isn't in a project. A project is a trip folder with {PROJECT_FILE} in it: open a clip of it in \
          ActionFootagePlayer and initialize the project there (the side panel's Project tab)", path.display()))?;
+    usable(&root)?;
     shared.lock().unwrap().project = Some(root.clone());
     remember(app, &root);
     Ok(root.display().to_string())
@@ -1922,8 +1924,17 @@ fn busy(shared: &Shared) -> bool {
     shared.lock().unwrap().jobs.iter().any(|j| !j.state.finished())
 }
 
+/// A project this Library may work with: Err for one of a newer version (afp_catalog::project::VERSION), which it
+/// would spoil (its catalog and files written without what it doesn't know); one of an older version is raised to
+/// this one's, so older Libraries leave it alone from now on
+fn usable(root: &Path) -> Result<(), String> {
+    if let Some(e) = afp_catalog::project::too_new(root) { return Err(e); }
+    afp_catalog::project::raise(root).map_err(|e| format!("{}: {e}", root.join(PROJECT_FILE).display()))
+}
+
 fn opened(shared: &Shared, app: &tauri::AppHandle, path: PathBuf) {
     match project_of(&path) {
+        Some(root) if usable(&root).is_err() => eprintln!("{}", usable(&root).unwrap_err()),
         Some(root) => {
             remember(app, &root);
             let mut inner = shared.lock().unwrap();
@@ -1945,7 +1956,7 @@ fn main() {
     for arg in std::env::args_os().skip(1) {
         let p = PathBuf::from(&arg);
         if !arg.to_string_lossy().starts_with('-') {
-            if let Some(root) = project_of(&p) { shared.lock().unwrap().project = Some(root); }
+            if let Some(root) = project_of(&p).filter(|r| usable(r).map_err(|e| eprintln!("{e}")).is_ok()) { shared.lock().unwrap().project = Some(root); }
         }
     }
     let probes: index::SharedProbes = Arc::new(Mutex::new(index::Probes::default()));

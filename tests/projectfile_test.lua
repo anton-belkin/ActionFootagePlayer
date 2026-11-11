@@ -3,6 +3,7 @@
 
 package.path = "mpv/scripts/workspace/?.lua;" .. package.path
 local projectfile = require 'projectfile'
+local M_VERSION = projectfile.VERSION
 
 local failures, checks = 0, 0
 local function expect(what, got, want)
@@ -61,11 +62,16 @@ expect("made kept", doc.clips_made[1], "Day 1/A.MP4\t100")
 expect("unknown kept", doc.mine, "kept")
 expect("setting", doc.settings.clips_flat, true)
 expect("no temporary left", exists(pf.path(root) .. ".tmp"), false)
-expect("version 1", doc.version, 1)
--- A newer file's version (2: with locations) isn't lowered by writing it
-expect("version 2 written", pf.update(root, function(d) d.version = 2 end), true)
-expect("update after it", pf.update(root, function(d) d.settings.moments_alone = true end), true)
-expect("version 2 kept", pf.read(root).version, 2)
+-- Written by this player: its version (an older Library or catalog then refuses the project)
+expect("this player's version", doc.version, M_VERSION)
+-- One of a newer version isn't written: the player would lose what it doesn't know
+local newer = M_VERSION + 1
+write(pf.path(root), serialize({ format = "actionfootage-project", version = newer, mine = "kept" }))
+local ok, err = pf.update(root, function(d) d.settings.moments_alone = true end)
+expect("newer refused", ok, false)
+expect("newer: why", tostring(err):find("newer") ~= nil, true)
+expect("newer left as it was", pf.read(root).version, newer)
+expect("newer: nothing written", pf.read(root).settings.moments_alone, nil)
 
 -- The folder of before, with no file: read from it, then moved into the file and removed
 local root2 = root .. "/old"
