@@ -231,7 +231,7 @@ The real pixels of one **item** in one **profile**:
 - **A possible `Light` profile:** for messengers' size limits, 1080p and a lower bitrate. *(Open: is it needed, or is
   `SDR` small enough?)*
 
-### Found by recipe, not by path (proposed change)
+### Found by recipe, not by path (decided: Anton, 2026-11-11)
 
 **The problem:** today a render's path mirrors its moment's. With albums, items move between folders all the time:
 - Moving a moment leaves its render behind as an orphan.
@@ -242,8 +242,10 @@ render's link for people reading the folder.
 - Moving, renaming or copying an item keeps its render.
 - Two copies of the same moment share one render.
 - A changed transform gives a new hash. The old render becomes unreferenced, and cleaning removes it.
-- **Cost:** `_Renders/` is no longer browsable as a mirror of your albums. That's fine for a cache. Showing an item's
-  renders is the Library's job (Info).
+- **Renders are the library's internals.** It manages them itself, and the user never needs to know how they lie on
+  disk. An item's renders show in Info, and the room they take shows in the Library.
+- **Proposed:** since they're internals, the shared tier moves from a visible `_Renders/` to the project's hidden
+  `.afp/renders/`, next to the catalog. It moves with the project like the rest of `.afp/`. *(Open.)*
 
 ### Where they're stored
 
@@ -357,7 +359,7 @@ Three places are possible, each with a reason:
    - Does ctime move when a tag changes?
 5. **Where the telemetry summary is stored:** `<clip>.afp.json` proposed (#213).
 6. **The Timeline's place:** inside Albums for now (Anton); it could become the first screen later.
-7. **Renders by recipe hash** instead of by path: proposed above. Needed once items move between albums.
+7. ~~Renders by recipe hash~~: decided. Still open: the shared tier in `.afp/renders/` instead of `_Renders/`?
 8. **Where renders live:**
    - Shared in the project plus local per computer, as proposed, or local only?
    - Copy shared renders to a laptop's cache?
