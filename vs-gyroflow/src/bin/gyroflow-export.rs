@@ -92,6 +92,13 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --edges <mode>   what fills the edges the stabilized frame leaves: sphere, smooth, or off (the project's
                    background color, the default)
   --edges-blur <%> blur of the edge fill, % of the frame height (default 2)
+  --denoise <off|light|full>  the temporal denoise as the player's GPU path plays it (Ctrl+p; its shader,
+                   warp.glsl's dn_ passes): each frame averaged with 3 (light) or 5 (full) frames on each side, where
+                   the motion between them puts them, some of the grain kept (--grain, as for a photo); off, the
+                   default, as recorded. Stabilized only
+  --denoise-strong the denoise's Stronger (the clip's transform: for a very noisy clip)
+  --chromatic <yes|no>  the water's color fringes taken out where the lens is under water (Ctrl+a; the player's
+                   chromatic.glsl), yes by default; no: as recorded. Stabilized only
   --prores         ProRes 422 HQ instead of HEVC 10-bit
   --dv-rpu <file>  HLG as Dolby Vision 8.4 (PQ as 8.1: an RPU made with afp-rpu --profile 8.1), with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
                    video gets RPU N, the last the frames after it) in place of VideoToolbox's, and the dvvC box Apple
@@ -203,6 +210,10 @@ struct Options {
     frame: vs_gyroflow::Frame,
     edges: EdgeMode,
     edge_settings: EdgeSettings,
+    // --denoise: the temporal denoise's frames on each side (0: none), --denoise-strong its Stronger; --chromatic
+    denoise: usize,
+    denoise_strong: bool,
+    chromatic: bool,
     prores: bool,
     from: Option<f64>,
     to: Option<f64>,
@@ -286,7 +297,7 @@ fn main() {
     vs_gyroflow::init_logging();
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
-                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), prores: false, from: None, to: None, out: None, project: None, force: false,
+                             edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
@@ -324,6 +335,18 @@ fn main() {
                 .unwrap_or_else(|| fail(&format!("unknown edges {v} (off, sphere, smooth)"))); }
             "--edges-blur" => opts.edge_settings.blur = (value("--edges-blur").parse::<f32>()
                 .unwrap_or_else(|_| fail("--edges-blur takes a number")) / 100.0).clamp(0.0, 0.2),
+            "--denoise" => opts.denoise = match value("--denoise").as_str() {
+                "off" => 0,
+                "light" => 3,
+                "full" => 5,
+                other => fail(&format!("unknown denoise {other} (off, light, full)")),
+            },
+            "--denoise-strong" => opts.denoise_strong = true,
+            "--chromatic" => opts.chromatic = match value("--chromatic").as_str() {
+                "yes" => true,
+                "no" => false,
+                other => fail(&format!("--chromatic {other}: yes or no")),
+            },
             "--prores" => opts.prores = true,
             "--dv-rpu" => opts.dv_rpu = Some(PathBuf::from(value("--dv-rpu"))),
             "--dv-live-l1" => opts.dv_live_l1 = true,
@@ -1407,6 +1430,21 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         }
     };
 
+    // The player's shaders over the stabilized frame (Post): the denoise takes frames on both sides of each one, so the
+    // export decodes some before its first (as many again to settle its measure of the noise) and after its last
+    let denoise = if preview.is_none() { opts.denoise } else { 0 };
+    let pre_roll = if denoise > 0 { 2 * denoise as u64 + 10 } else { 0 };
+    let dec_first = first_frame.saturating_sub(pre_roll);
+    let dec_last = (last_frame + denoise as u64).min(info.frames.max(1) - 1);
+    let post = match &engine {
+        Some(e) if preview.is_none() => Post::new(e, opts, &info, (ow, oh), fps, (dec_first, dec_last), view, camera, denoise),
+        _ => None,
+    };
+    // With the denoise, every frame goes through it (its frames are each other's neighbours), a part at a lower frame
+    // rate too; and the frames before and after the export's
+    let all_frames = post.as_ref().is_some_and(|p| p.radius > 0);
+    let (dec_first, dec_last) = if all_frames { (dec_first, dec_last) } else { (first_frame, last_frame) };
+
     let mut graph = graph;
     let gpu_lut = match lut_job {
         None => None,
@@ -1433,6 +1471,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         _ => {}
     }
     if edges != EdgeMode::Off { source_label += &format!(", edges {}", format!("{edges:?}").to_lowercase()); }
+    if let Some(p) = &post { source_label += &format!(", {}", p.label); }
     eprintln!("{}: {color_label} · {source_label} · {}x{} -> {fw}x{fh} · {duration_label}", file_name(file), w, h);
 
     if stopped() { return Err("cancelled".into()); }
@@ -1447,8 +1486,14 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let mut dec_cmd = ffmpeg_command("ffmpeg");
     dec_cmd.args(["-nostdin", "-v", "error"]);
     if let Some(h) = hwaccel { dec_cmd.args(["-hwaccel", h]); }
-    if preview.is_some() || opt_from.is_some() { dec_cmd.args(["-ss", &format!("{seek:.6}")]); }
-    if preview.is_none() && opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
+    if all_frames {
+        // From the frames before the first, to those after the last
+        if dec_first > 0 { dec_cmd.args(["-ss", &format!("{:.6}", (dec_first as f64 - 0.25).max(0.0) / fps)]); }
+        if opt_to.is_some() { dec_cmd.args(["-to", &format!("{:.6}", (dec_last as f64 + 0.5) / fps)]); }
+    } else {
+        if preview.is_some() || opt_from.is_some() { dec_cmd.args(["-ss", &format!("{seek:.6}")]); }
+        if preview.is_none() && opt_to.is_some() { dec_cmd.args(["-to", &format!("{to:.6}")]); }
+    }
     dec_cmd.args(["-noautorotate", "-i"]).arg(&path).args(["-map", "0:v:0"]);
     if preview.is_some() { dec_cmd.args(["-frames:v", "1"]); }
     dec_cmd.args(["-vf", &format!("scale={w}:{h}{}{turn}", if turn.is_empty() { "" } else { "," }), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-"])
@@ -1586,16 +1631,18 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                 Err(e) => return Err(format!("reading decoded frames: {e}")),
             }
             read += 1;
-            if (read - 1) % step != 0 { continue; }
+            if !all_frames && (read - 1) % step != 0 { continue; }
             if frame_tx.send((n, buf)).is_err() { return Ok(n); }
             n += 1;
         }
     });
     let frame_rx = Arc::new(Mutex::new(frame_rx));
+    // With the player's shaders, the LUT after them (the writer's, below); the fringes' marker in each frame
+    let marker = post.as_ref().is_some_and(|p| p.chromatic);
     let gpu_threads: Vec<_> = (0..workers).map(|_| {
         let (frame_rx, done_tx, engine) = (frame_rx.clone(), done_tx.clone(), engine.clone());
         let full_range = info.full_range;
-        let mut lut = gpu_lut.as_ref().map(|l| l.worker());
+        let mut lut = if post.is_some() { None } else { gpu_lut.as_ref().map(|l| l.worker()) };
         std::thread::spawn(move || {
             loop {
                 let Ok((n, src)) = frame_rx.lock().recv() else { break };
@@ -1604,7 +1651,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                     Some(engine) => {
                         let mut dst = vec![0u8; out_frame];
                         // Frame times from the start of the file, as Gyroflow and mpv count them
-                        let timestamp_us = (((first_frame + n * step) as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
+                        let index = if all_frames { dec_first + n } else { first_frame + n * step };
+                        let timestamp_us = ((index as f64 / fps) * 1_000_000.0).round() as i64 + engine.frame_offset_us;
                         let mut planes = Vec::with_capacity(3);
                         let (mut so, mut doff) = (0, 0);
                         for ((sw, sh), (dw, dh)) in plane_dims((w, h)).into_iter().zip(plane_dims((ow, oh))) {
@@ -1615,7 +1663,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        engine.process(timestamp_us, planes, !full_range, false).map(|_| dst)
+                        engine.process(timestamp_us, planes, !full_range, marker).map(|_| dst)
                     }
                 };
                 let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|l1| (f, l1)), None => Ok((f, None)) });
@@ -1625,7 +1673,37 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     }).collect();
     drop(done_tx);
 
-    let mut enc_in = encoder.stdin.take().unwrap();
+    // The writer: each frame as it comes, in order; or through the player's shaders on a thread of their own (with the
+    // denoise a frame waits for those after it), then the LUT
+    let written = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mut direct = None;
+    let mut post_tx = None;
+    let mut post_thread = None;
+    let enc_in = encoder.stdin.take().unwrap();
+    match post {
+        None => direct = Some(enc_in),
+        Some(p) => {
+            let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2);
+            post_tx = Some(tx);
+            let mut lut = gpu_lut.as_ref().map(|l| l.worker());
+            let l1_tx = l1_tx.take();
+            let written = written.clone();
+            let first = if all_frames { dec_first } else { first_frame };
+            post_thread = Some(std::thread::spawn(move || -> Result<(), String> {
+                let mut enc_in = enc_in;
+                let mut emit = |index: u64, mut f: Vec<u8>| -> Result<(), String> {
+                    // Only the export's own frames (not those around them), every `step`th
+                    if all_frames && (index < first_frame || index > last_frame || (index - first_frame) % step != 0) { return Ok(()); }
+                    let l1 = match lut.as_mut() { Some(l) => l.apply(&mut f)?, None => None };
+                    if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
+                    enc_in.write_all(&f).map_err(|e| format!("encoder stopped: {e}"))?;
+                    written.fetch_add(1, Relaxed);
+                    Ok(())
+                };
+                p.run(first, rx, &mut emit)
+            }));
+        }
+    }
     let mut pending = BTreeMap::new();
     let mut next = 0u64;
     let started = Instant::now();
@@ -1652,29 +1730,37 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             Err(e) => { error = Some(format!("frame {n}: {e}")); break; }
         }
         while let Some((buf, l1)) = pending.remove(&next) {
-            // The frame's L1 before the frame: the rewriter waits for it when the encoder hands the frame back
-            if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
-            if let Err(e) = enc_in.write_all(&buf) { error = Some(format!("encoder stopped: {e}")); break; }
+            if let Some(enc_in) = direct.as_mut() {
+                // The frame's L1 before the frame: the rewriter waits for it when the encoder hands the frame back
+                if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
+                if let Err(e) = enc_in.write_all(&buf) { error = Some(format!("encoder stopped: {e}")); break; }
+                written.fetch_add(1, Relaxed);
+            } else if let Some(tx) = &post_tx {
+                if tx.send(buf).is_err() { error = Some("the player's shaders stopped".to_string()); break; }
+            }
             next += 1;
         }
         if error.is_some() { break; }
         if last_report.elapsed().as_millis() >= 500 {
             // The recent rate, not the average: it changes with the priority
-            let now = (next - reported) as f64 / last_report.elapsed().as_secs_f64();
+            let done = written.load(Relaxed);
+            let now = done.saturating_sub(reported) as f64 / last_report.elapsed().as_secs_f64();
             rate = if reported == 0 { now } else { rate * 0.7 + now * 0.3 };
             last_report = Instant::now();
-            reported = next;
-            let done = next as f64;
+            reported = done;
+            let done = done as f64;
             let pct = (done / total_frames as f64 * 100.0).min(100.0);
             let eta = ((total_frames as f64 - done).max(0.0) / rate.max(1e-3)).min(359_999.0) as u64;
             if part.is_none() { eprint!("\r  {pct:3.0}%  {rate:4.0} fps  ETA {}:{:02}   ", eta / 60, eta % 60); }
             opts.progress.write(serde_json::json!({
-                "pid": std::process::id(), "done": next, "total": total_frames, "fps": rate, "eta": eta,
+                "pid": std::process::id(), "done": done as u64, "total": total_frames, "fps": rate, "eta": eta,
                 "background": want, "partial": tmp_path,
             }));
         }
     }
-    drop(enc_in);
+    drop(direct);
+    // The shaders' last frames (the denoise's, with the frames there are after them), then the encoder's end
+    drop(post_tx);
     drop(l1_tx.take()); // the rewriter's last frames, if any are left, keep the file's L1
     if error.is_some() || stopped() {
         let _ = decoder.kill();
@@ -1684,8 +1770,14 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let _ = encoder.kill();
         if let Some(m) = muxer.as_mut() { let _ = m.kill(); }
     }
+    let shaded = post_thread.is_some();
+    if let Some(t) = post_thread {
+        // Its own error says more than the writer's "stopped"
+        if let Err(e) = t.join().map_err(|_| "the player's shaders failed".to_string()).and_then(|r| r) { error = Some(e); }
+    }
     for t in gpu_threads { let _ = t.join(); }
-    let read = reader.join().map_err(|_| "reader panicked".to_string())?;
+    // The frames written: with the player's shaders, those of the export alone (not those decoded around them)
+    let read = reader.join().map_err(|_| "reader panicked".to_string())?.map(|n| if shaded { written.load(Relaxed) } else { n });
     let dec_status = decoder.wait().map_err(|e| e.to_string())?;
     let enc_status = encoder.wait().map_err(|e| e.to_string())?;
     let rewritten = rewriter.map(|r| r.join().map_err(|_| "the RPU rewriter panicked".to_string()));
@@ -1740,6 +1832,122 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
     Ok(Outcome::Done(out_path))
+}
+
+// ---------------------------------------------------------------------------------------------------
+// What the player draws over the stabilized frame, by its own shaders (vs_gyroflow::user_shader): the water's color
+// fringes taken out, as chromatic.glsl does it in mpv from the marker the engine writes into each frame, and the
+// temporal denoise, the GPU path's (warp.glsl's dn_ passes), each frame from the frames around it, which an export
+// has on both sides. In the player's order: the fringes, then the denoise (on the GPU path both follow the warp)
+
+const CHROMATIC_GLSL: &str = include_str!("../../../mpv/scripts/gyroflow/chromatic.glsl");
+
+struct Post {
+    shaders: vs_gyroflow::user_shader::Shaders,
+    /// The engine writes each frame's marker, for chromatic.glsl
+    chromatic: bool,
+    /// The denoise's frames on each side (0: none): the frame it shows is that many behind the newest one it has, as in
+    /// the player (gyroflow_dn_after)
+    radius: usize,
+    fps: f64,
+    label: String,
+}
+
+impl Post {
+    /// For the frames `range` (all the export decodes) rendered at `size`, as the engine renders them (its view at the
+    /// level, the camera); `denoise`: the frames on each side, 0 none. None when there's nothing to do: no denoise, and
+    /// no frame of it with the lens under water (or the fringes left as recorded)
+    #[allow(clippy::too_many_arguments)]
+    fn new(engine: &Engine, opts: &Options, info: &VideoInfo, size: (usize, usize), fps: f64, range: (u64, u64), view: u8, camera: vs_gyroflow::Camera,
+           denoise: usize) -> Option<Post> {
+        use vs_gyroflow::gpu_table::{ self, Clip, Mode, Table };
+        let index = engine.views.index(view, opts.level).min(engine.views.params.len() - 1);
+        let params = camera.apply(&engine.views.params[index]);
+        let clip = Clip { size: (params.width, params.height), output_size: (params.output_width, params.output_height), fps,
+                          frame_count: params.frame_count.max(1), frame_offset_us: engine.frame_offset_us, params };
+        let (first, last) = ((range.0 as usize).min(clip.frame_count - 1), (range.1 as usize).min(clip.frame_count - 1));
+        // The fringes where some frame of it has the lens under water and fully corrected, as the player's GPU path
+        // tells (gyroflow-gpu-table); chromatic.glsl leaves the others as they are
+        let chromatic = opts.chromatic && (first..=last).step_by(15).chain(std::iter::once(last)).any(|f| {
+            let kp = clip.transform(f, clip.output_size).kernel_params;
+            kp.light_refraction_coefficient > 1.0 && kp.lens_correction_amount >= 0.999
+        });
+        let mut sources = Vec::new();
+        let mut labels = Vec::new();
+        if chromatic {
+            // AFP_CHROMATIC_GLSL: another chromatic.glsl, for work on the shader without a rebuild
+            sources.push(std::env::var_os("AFP_CHROMATIC_GLSL").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_else(|| CHROMATIC_GLSL.to_string()));
+            labels.push("color fringes taken out".to_string());
+        }
+        let mut data = Vec::new();
+        let mut params = Vec::new();
+        let mut radius = 0;
+        if denoise > 0 {
+            // The table the denoise predicts the motion between frames by (each frame's camera; two knots a frame
+            // are enough, the rows' rotations aren't read)
+            let o = gpu_table::Options { mode: Mode::Exact, grid_step: 8, grid_linear: false, chroma_bilinear: false, chromatic: false, chromatic_fast: false,
+                                         edge_fill: None, sphere: false, time_offset: 0.0, denoise: true, knots: 2, interp: 0, shrink: false, range: Some((first, last)) };
+            match Table::build(&clip, &o).map(|t| (gpu_table::denoise_shader(&clip, &o, &t, size), t)) {
+                Ok((Some(text), table)) => {
+                    sources.push(text);
+                    data.push(("GYROFLOW_TABLE".to_string(), table.data));
+                    params = vec![("gyroflow_dn_radius".to_string(), denoise as f64), ("gyroflow_dn_after".to_string(), denoise as f64),
+                                  ("gyroflow_dn_strong".to_string(), opts.denoise_strong as i32 as f64), ("gyroflow_dn_keep".to_string(), opts.photo_grain as f64),
+                                  ("gyroflow_gpu_on".to_string(), 1.0), ("gyroflow_render_scale".to_string(), 1.0)];
+                    radius = denoise;
+                    labels.push(format!("temporal denoise {}{}", if denoise >= 5 { "full" } else { "light" }, if opts.denoise_strong { ", stronger" } else { "" }));
+                }
+                Ok((None, _)) => eprintln!("  no temporal denoise: {}x{} is more than it takes", size.0, size.1),
+                Err(e) => eprintln!("  no temporal denoise: {e}"),
+            }
+        }
+        if sources.is_empty() { return None; }
+        let matrix = gpu_lut::matrix_coefficients(yuv_matrix(info.matrix.as_deref())).unwrap_or((0.2126, 0.0722));
+        let config = |sources: Vec<String>, data, params| vs_gyroflow::user_shader::Config { sources, size, prelude: format!("#define RT vec2({}.0, {}.0)", size.0, size.1),
+                                                                                        data, matrix, full_range: info.full_range, params };
+        match vs_gyroflow::user_shader::Shaders::new(config(sources.clone(), data, params)) {
+            Ok(shaders) => Some(Post { shaders, chromatic, radius, fps, label: labels.join(", ") }),
+            Err(e) => {
+                eprintln!("  not as the player draws it ({}): {e}", labels.join(", "));
+                // The fringes alone, without the denoise that failed
+                if !(chromatic && radius > 0) { return None; }
+                let shaders = vs_gyroflow::user_shader::Shaders::new(config(sources[..1].to_vec(), Vec::new(), Vec::new())).ok()?;
+                Some(Post { shaders, chromatic, radius: 0, fps, label: labels[0].clone() })
+            }
+        }
+    }
+
+    /// The frames in order (`first`: the first one's index in the clip), each through the shaders; `emit` gets each
+    /// frame that comes out (its index in the clip, the frame). With the denoise a frame comes out when the frames
+    /// after it are in, the last ones at the end with the frames there are after them (as the player shows a clip's
+    /// last frames)
+    fn run(mut self, first: u64, frames: mpsc::Receiver<Vec<u8>>, emit: &mut dyn FnMut(u64, Vec<u8>) -> Result<(), String>) -> Result<(), String> {
+        // The frames before the newest the denoise's window counts (warp.glsl's 2 x DN_RADIUS)
+        const BACK: u64 = 10;
+        let after = self.radius as u64;
+        let mut fed = 0u64;
+        let mut last: Option<(u64, Vec<u8>)> = None;
+        let mut gpu = 0.0;
+        for buf in frames {
+            let f = first + fed;
+            self.shaders.set("PTS", f as f64 / self.fps);
+            let out = self.shaders.render(&buf)?;
+            gpu += self.shaders.millis;
+            let shown = after.min(fed.min(BACK));
+            fed += 1;
+            if shown == after { emit(f - after, out)?; }
+            last = Some((f, buf));
+        }
+        if let Some((f, buf)) = last {
+            for k in (0..after.min(fed)).rev() {
+                self.shaders.set("gyroflow_dn_after", k as f64);
+                let out = self.shaders.render(&buf)?;
+                emit(f - k, out)?;
+            }
+        }
+        if fed > 0 && std::env::var_os("AFP_TIMES").is_some() { eprintln!("  the player's shaders: {:.1} ms a frame", gpu / fed as f64); }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -2001,6 +2209,10 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             None => (dw, dh),
         };
         let (near, last) = (n.saturating_sub(r), (n + r).min(total - 1));
+        // The water's color fringes taken out after the clean-up, as the player does it (Post: chromatic.glsl, from the
+        // marker the engine writes into each frame)
+        let post = engine.as_ref().and_then(|e| Post::new(e, opts, &info, (rw, rh), fps, (n, n), view, camera, 0));
+        let marker = post.as_ref().is_some_and(|p| p.chromatic);
         let hwaccel = if cfg!(target_os = "macos") { Some("videotoolbox") } else if hwaccel_works(&path) { Some("auto") } else { None };
         let plane_dims = |(w, h): (usize, usize)| [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
         // Frames `first` to `last`, decoded and rendered: those from `near` on kept, the ones before them only rendered
@@ -2059,7 +2271,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        if let Err(e) = engine.process(timestamp_us, planes, !info.full_range, false) { result = Err(e); break; }
+                        if let Err(e) = engine.process(timestamp_us, planes, !info.full_range, marker) { result = Err(e); break; }
                         dst
                     }
                 };
@@ -2114,12 +2326,34 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             }).collect();
             let settings = still::Settings { luma_keep: opts.photo_grain, ..Default::default() };
             match still::denoise(&frames, 2, 1023, (1, 1), &settings) {
-                Ok(out) => { planes = out.planes; cleaned = frames.len(); }
+                Ok(out) => {
+                    planes = out.planes;
+                    cleaned = frames.len();
+                    // The last row of luma carries the fringes' marker (dispersion.rs): as it was, as the player's Still
+                    // filter keeps it
+                    if marker {
+                        let f = &window[target].1;
+                        planes[0][(rh - 1) * rw..].copy_from_slice(&as_u16(&f[(rh - 1) * rw * 2..ysz * 2]));
+                    }
+                }
                 Err(e) => eprintln!("  not cleaned up: {e}"),
             }
         }
         drop(window);
         lap("cleaned up");
+        if let Some(mut p) = post {
+            // The clean-up keeps the target's marker row as it was (still.rs): chromatic.glsl reads it, then paints it over
+            let bytes: Vec<u8> = planes.iter().flatten().flat_map(|v| v.to_le_bytes()).collect();
+            match p.shaders.render(&bytes) {
+                Ok(out) => {
+                    let s = as_u16(&out);
+                    planes = vec![s[..ysz].to_vec(), s[ysz..ysz + csz].to_vec(), s[ysz + csz..].to_vec()];
+                    eprintln!("  {}", p.label);
+                    lap(&p.label);
+                }
+                Err(e) => eprintln!("  {} not done: {e}", p.label),
+            }
+        }
 
         // The part to keep, on even pixels
         let [cx, cy, cw, ch] = opts.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);

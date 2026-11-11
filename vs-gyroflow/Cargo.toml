@@ -30,8 +30,9 @@ parking_lot = "0.12"
 serde_json = "1"
 # The original's fingerprint in a link (workspace::fingerprint)
 sha2 = "0.10"
-# gyroflow-export's LUT on the GPU; the same wgpu as gyroflow-core
-wgpu = "30"
+# gyroflow-export's LUT on the GPU; the same wgpu as gyroflow-core. GLSL and naga's IR: the player's mpv shaders run
+# in an export (src/user_shader.rs)
+wgpu = { version = "30", features = ["glsl", "naga-ir"] }
 pollster = "1"
 bytemuck = { version = "1", features = ["derive"] }
 # gyroflow-export: stopping cleanly on SIGTERM, background priority

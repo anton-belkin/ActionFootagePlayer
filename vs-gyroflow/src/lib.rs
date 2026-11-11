@@ -48,6 +48,7 @@ pub mod view360;
 pub mod export360;
 pub mod reframe;
 pub mod gpu_table;
+pub mod user_shader;
 pub mod translation;
 pub mod optical;
 pub use levels::Level;
