@@ -14,10 +14,11 @@ crate-type = ["cdylib", "rlib"]
 # pull request: ComputeParams::view_rotation, the output camera turned after the smoothing, for crop mode's pan
 # (gyroflow/gyroflow#1289); the equirect output projection and RigLens, a 360 rig's lens: its turn, its offset at the
 # stitching distance, its validity (#1290); the Insta360 model's RadtanPro terms (X4, X5; not proposed yet). Back to
-# gyroflow/gyroflow once they're merged.
+# gyroflow/gyroflow once they're merged. On top of them (branch afp-v1.7.0-optical-checksum, #130): a project's optical
+# correction matched up to the last bits another machine computes its checksums' values with (Fingerprint::matches)
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon. No cache-gyro-metadata: it
 # would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
-gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "65e5cc6", default-features = false, features = ["bundle-lens-profiles"] }
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "990772f", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.2", features = ["unstable-api"] }
 url = "2"
