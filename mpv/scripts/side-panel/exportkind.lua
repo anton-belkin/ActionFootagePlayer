@@ -50,7 +50,7 @@ function M.rows(d, v)
         table.insert(rows, { kind = "sdr", label = "In SDR" })
     end
     local _, sdr_name = M.youtube_sdr(d)
-    if sdr_name then table.insert(rows, { kind = "youtube", label = "For YouTube (HDR, its SDR by " .. sdr_name .. ")" }) end
+    if sdr_name then table.insert(rows, { kind = "youtube", label = "For YouTube (HDR, its SDR by " .. sdr_name .. "; untested)" }) end
     if M.is360(v) then
         table.insert(rows, { kind = "360", label = "360° video" })
         local recorded = (recording(v).parts or 0) > 0
