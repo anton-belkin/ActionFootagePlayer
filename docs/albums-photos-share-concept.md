@@ -105,17 +105,18 @@ Photos already carry this link today. Tags go into `dc:subject`. Finder and Quic
 - **Risk:** someone shares the preview from Finder, thinking it's the photo. Keeping it visibly small is the guard.
   *(Open: size, and whether to mark it.)*
 
-**Photos made before this** (a full HEIC or JPEG with `afp:link`, a Live Photo's HEIC + MOV) are converted, once,
-by a command run on the project or a selection:
-1. **A photo object is made for each one, where the file is now** (same folder, same name): its preview, plus its link
-   with the clip, time and crop read from the file's XMP.
-2. **The file moves into `_Renders/`** as that object's render, in its profile: HEIC with a gain map → `Photo HDR`, a
-   pair → `Live`, a JPEG → `JPEG` or `Motion`. A Live Photo's two files move together.
-3. **The recipe:** a file with a recipe in its XMP is checked like any render. One without a recipe counts as
-   current until something in the photo changes (its crop, the clip's transform).
+**Photos made before this** (a full HEIC or JPEG with `afp:link`, a Live Photo's HEIC + MOV): **no feature for it.**
+Anton is the only user so far, so a one-off migration script is run once, on his library, when he says so, and then
+forgotten.
 
-As with *Take in*, it lists what it will do first, and starts only when you say so. It moves files within the project
-and deletes nothing. *(Open: Apple Photos sync pairs, once that exists, would follow the move.)*
+For each photo, the script:
+1. Makes a photo object where the file is now (same folder, same name), with the clip, time and crop read from its
+   XMP.
+2. Moves the file into `_Renders/` as that object's render, in its profile (HEIC → `Photo HDR`, a Live pair → `Live`,
+   JPEG → `JPEG`). A pair moves together.
+
+A render without a recipe counts as current until the photo changes. The script lists what it will do first, and
+deletes nothing.
 
 ## Photos as originals
 
@@ -333,7 +334,7 @@ Three places are possible, each with a reason:
 | Clip previews made for every clip (look + organization) | no batch: thumbnails are fast now (#191); a clip link is made when you put a clip in an album |
 | Previews "by trips" | the Timeline |
 | `X` deletes a clip preview | `X` = Reject |
-| A photo = an exported file, rendered at once | a photo object; rendered when shared. Existing photos converted: object in place, file moved to `_Renders/` |
+| A photo = an exported file, rendered at once | a photo object; rendered when shared. Existing photos: a one-off migration script on Anton's library |
 | Export | Share → Save to a folder |
 | Renders of moments, at a path mirroring the moment's | renders of clips, moments and photos, found by recipe hash; shared and local tiers |
 
