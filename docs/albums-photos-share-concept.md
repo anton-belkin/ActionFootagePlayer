@@ -78,8 +78,20 @@ Until now a photo existed only as the product of an export: rendered on the spot
 while watching (the clip stutters while the photo renders), and it fixes the format before you know who it's for.
 
 **Now:**
-1. While watching, a key marks **a photo here**. That makes the photo object at once, with a cheap preview (the frame
-   as displayed, small). Nothing is rendered, and playback isn't interrupted.
+A photo is **a moment and a crop**: one frame, plus the part of it you want. The crop is part of the photo, like a
+moment's `in`/`out`. It lives in the photo's link and in its render's recipe (the crop's camera is already in the
+recipe), so changing it later makes the render stale.
+
+**Two keys:**
+- **Snap.** The whole frame, or the last crop used, becomes a photo at once. Playback doesn't stop.
+- **Crop.** Playback pauses, and the crop mode (#112) opens on the frame. Frame it, confirm, and the photo is made and
+  playback continues.
+
+Aspect presets (4:3, 1:1, 9:16) belong to the crop. On a 360 clip, the crop is the view you look at. A photo's crop can
+be changed later: open the photo, adjust, done.
+
+1. While watching, either key makes the photo object at once, with a cheap preview (the frame as displayed, cropped,
+   small). Nothing is rendered.
 2. *Photos of the marks* does the same for every mark of a selection.
 3. Later, select the photos (in an album, the timeline, a smart album) and **Share** them. Only then is each one
    rendered, in the format the destination needs:
