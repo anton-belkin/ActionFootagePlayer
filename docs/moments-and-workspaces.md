@@ -274,11 +274,12 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
 - **Moments** are made whole (`k`: what plays; the batch: the source's bundle, else the defaults, not the session's)
   with a copy of the source's Gyroflow project when it has one, and never change by themselves. A clip preview is made
   without its own.
-- **A Gyroflow project owns** what it has: the smoothing, horizon, frame and projection, and of the input the turn and
-  the lens. The panel shows them as the project's; the player never writes them (Ctrl+e makes a project only where
-  there's none, from what plays; a moment's copy gets only its trim and "within the trim range"). Over a project
-  only a wider view or none, for viewing. Values saved beside the clip before stay in its file, not played, and come
-  back if the project goes.
+- **A Gyroflow project owns** what it has: the smoothing, horizon and frame, and of the input the turn and the lens
+  under water. The panel shows them as the project's; the player never writes them (Ctrl+e makes a project only where
+  there's none, from what plays; a moment's copy gets only its trim and "within the trim range"). Over a project the
+  view (wider, or none) and the output's lens (#196: as recorded, or corrected in a projection in place of the
+  project's; `projection: "project"` its own) are the player's, saved with the clip and exported as they play. Values
+  saved beside the clip before stay in its file, not played, and come back if the project goes.
 - Not kept with a clip: the video output (Output → Display, the screen's), Performance & Quality (this computer's:
   lighter playback, `chromatic_skip` among them, never what's saved or exported). The noise reduction while it plays
   is off and out of the menus.

@@ -347,29 +347,38 @@ end
 
 M.ROW = 28
 
--- A list to pick from, over the panel's content: under the place [left, right] × [top, bottom] (a button), its right
--- edge at the button's, or above it when there's no room below. rows: { kind, label, disabled, cmd }; chosen: the kind
--- checked. Only noted here: popover() draws it, after everything else, so it's above it all and the mouse finds its
--- rows first
-function Ui:dropdown(left, right, top, bottom, id, rows, chosen)
-    self.pending = { left = left, right = right, top = top, bottom = bottom, id = id, rows = rows, chosen = chosen }
+-- A list to pick from, over the panel's content: under the place [left, right] × [top, bottom] (a button, a
+-- drop-down's field), or above it when there's no room below. rows: { kind, label, disabled, cmd, note }; chosen: the
+-- kind checked. opts: width (at least this wide, from the left edge: a drop-down's field; else its right edge at the
+-- button's, 180 points or as wide as its labels), saved (the kind saved: a dot by it when it isn't the one chosen).
+-- Only noted here: popover() draws it, after everything else, so it's above it all and the mouse finds its rows first
+function Ui:dropdown(left, right, top, bottom, id, rows, chosen, opts)
+    opts = opts or {}
+    self.pending = { left = left, right = right, top = top, bottom = bottom, id = id, rows = rows, chosen = chosen,
+                     width = opts.width, saved = opts.saved }
 end
 
 -- The list noted by dropdown, drawn within [top, bottom] of the window. Its places are marked popover = true: a click
 -- elsewhere closes it. seen: { y0, y1 }, what shows of the scrolled area: a list whose button is out of it isn't drawn.
--- Returns where it is ({ x0, y0, x1, y1 }), or nil when there's none
+-- The row with the keyboard's focus (self.focus, a kind) is lit as the mouse's is. Returns where it is
+-- ({ x0, y0, x1, y1 }), or nil when there's none; self.shown_list is then { id, rows, chosen } (for the keys)
 function Ui:popover(top, bottom, seen)
     local p = self.pending
+    self.shown_list = nil
     if not p then return nil end
     self.pending = nil
     if seen and (p.bottom <= seen[1] or p.top >= seen[2]) then return nil end
     local s = self.s
     local rh, pad = M.ROW * s, 4 * s
     local lw = 0
-    for _, r in ipairs(p.rows) do lw = math.max(lw, M.text_width(r.label, 12, s)) end
-    local w = math.min(math.max(180 * s, lw + 46 * s), p.right - p.left)
+    for _, r in ipairs(p.rows) do
+        lw = math.max(lw, M.text_width(r.label, 12, s) + (r.note and (M.text_width(r.note, 11, s) + 16 * s) or 0))
+    end
+    local w
+    if p.width then w = math.max(p.width, lw + 46 * s)
+    else w = math.min(math.max(180 * s, lw + 46 * s), p.right - p.left) end
+    local x = p.width and math.min(p.left, p.right - w) or (p.right - w)
     local h = #p.rows * rh + 2 * pad
-    local x = p.right - w
     local y = p.bottom + 4 * s
     if y + h > bottom and p.top - 4 * s - h >= top then y = p.top - 4 * s - h end
     local saved_clip = self.clip
@@ -381,19 +390,103 @@ function Ui:popover(top, bottom, seen)
     for i, r in ipairs(p.rows) do
         local ry = y + pad + (i - 1) * rh
         local key = p.id .. ":" .. r.kind
-        if self:hovered(key) and not r.disabled then self:box(x + pad, ry, w - 2 * pad, rh, 5, M.C.hover) end
+        if (self:hovered(key) or (self.focus ~= nil and self.focus == r.kind)) and not r.disabled then
+            self:box(x + pad, ry, w - 2 * pad, rh, 5, M.C.hover)
+        end
         local cx, cy = x + 16 * s, ry + rh / 2
         if r.kind == p.chosen then
             self:shape(stroke_path(cx - 4.5 * s, cy + 0.2 * s, cx - 1.5 * s, cy + 3.2 * s, 1.8 * s), M.C.accent)
             self:shape(stroke_path(cx - 2.1 * s, cy + 3.2 * s, cx + 4.5 * s, cy - 3.6 * s, 1.8 * s), M.C.accent)
         end
         self:text(x + 30 * s, cy, r.label, { size = 12, color = r.disabled and M.C.dim or M.C.text, alpha = r.disabled and "50" or "00" })
+        if p.saved ~= nil and r.kind == p.saved and r.kind ~= p.chosen then
+            self:shape(circle_path(x + 30 * s + M.text_width(r.label, 12, s) + 8 * s, cy, 2.6 * s), M.C.saved)
+        end
+        if r.note then self:text(x + w - 12 * s, cy, r.note, { align = 6, size = 11, color = M.C.dim, alpha = r.disabled and "50" or "00" }) end
         if not r.disabled then
             table.insert(self.hits, { x0 = x + pad, y0 = ry, x1 = x + w - pad, y1 = ry + rh, id = key, cmd = r.cmd, popover = true })
         end
     end
     self.clip = saved_clip
+    self.shown_list = { id = p.id, rows = p.rows, chosen = p.chosen }
     return { x, y, x + w, y + h }
+end
+
+-- A chevron, ▾ (or ▴ when up), centered at cx, cy
+function Ui:chevron(cx, cy, up, color, alpha)
+    local s = self.s
+    local d = up and -1 or 1
+    self:shape(stroke_path(cx - 4 * s, cy - 2 * d * s, cx + 0.4 * s, cy + 2.4 * d * s, 1.5 * s), color, { alpha = alpha })
+    self:shape(stroke_path(cx - 0.4 * s, cy + 2.4 * d * s, cx + 4 * s, cy - 2 * d * s, 1.5 * s), color, { alpha = alpha })
+end
+
+-- What a pick in a drop-down runs: the list closed, then its command
+local function picked(self, cmd)
+    return function()
+        if self.set_popover then self.set_popover(nil) end
+        if type(cmd) == "function" then cmd() elseif cmd then mp.command(cmd) end
+    end
+end
+
+-- A drop-down, its field at x, y, w wide: closed, the label of the kind chosen and a chevron; a click opens its list
+-- over the panel (the popover with this id: self.open_id is the one open, self.set_popover(id) opens or closes one:
+-- the panel's), and a pick there runs the row's cmd and closes it. rows: { { kind, label, cmd, disabled, note } };
+-- chosen: the kind. opts: disabled, saved (the kind saved: a dot when it isn't the one chosen), text (shown in place of
+-- the chosen one's label). Returns the next y
+function Ui:select(x, w, y, id, rows, chosen, opts)
+    opts = opts or {}
+    local s = self.s
+    local h = 28 * s
+    local open = self.open_id == id and not opts.disabled
+    local label = opts.text
+    if not label then
+        for _, r in ipairs(rows) do if r.kind == chosen then label = r.label end end
+    end
+    label = label or "—"
+    local lit = self:hovered(id) and not opts.disabled
+    self:box(x, y, w, h, 7, lit and M.C.hover or M.C.field,
+             { border = 1 * s, border_color = open and M.C.accent or M.C.line, alpha = opts.disabled and "60" or "00" })
+    local a = dim_alpha(opts.disabled)
+    local room = (w - 40 * s) * 0.92
+    if M.text_width(label, 12, s) > room then
+        local chars = {}
+        for ch in label:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = ch end
+        while #chars > 1 and M.text_width(table.concat(chars) .. "…", 12, s) > room do table.remove(chars) end
+        label = table.concat(chars) .. "…"
+    end
+    self:text(x + 10 * s, y + h / 2, label, { size = 12, color = M.C.text, alpha = a })
+    if opts.saved ~= nil and opts.saved ~= chosen then self:shape(circle_path(x + w - 27 * s, y + h / 2, 2.6 * s), M.C.saved) end
+    self:chevron(x + w - 14 * s, y + h / 2, open, M.C.dim, a)
+    if not opts.disabled then
+        self:hit(x, y, w, h, id, function() if self.set_popover then self.set_popover((not open) and id or nil) end end)
+    end
+    if open then
+        local list = {}
+        for _, r in ipairs(rows) do
+            list[#list + 1] = { kind = r.kind, label = r.label, note = r.note, disabled = r.disabled, cmd = picked(self, r.cmd) }
+        end
+        self:dropdown(x, x + w, y, y + h, id, list, chosen, { width = w, saved = opts.saved })
+    end
+    return y + h + 6 * s
+end
+
+-- A drop-down in a row: the label at the left (a key at its right, before the field), the field at the right. opts as
+-- select's, and field (its width in pixels; else a little over half the row). Returns the next y
+function Ui:select_row(x, w, y, id, label, rows, chosen, opts)
+    opts = opts or {}
+    local s = self.s
+    local fw = opts.field or math.floor(w * 0.56)
+    local cy = y + 14 * s
+    -- The label and its key before the field: the field narrower for them, down to two fifths of the row; the key left
+    -- out when they still don't fit
+    local key = opts.key
+    local kw = key and (math.max(18 * s, M.text_width(key, 11, s) + 10 * s) + 8 * s) or 0
+    local need = M.text_width(label, 13, s) + 10 * s
+    fw = math.max(math.min(fw, w - need - kw), math.floor(w * 0.4))
+    if key and need + kw > w - fw then key = nil end
+    self:text(x, cy, label, { size = 13, alpha = dim_alpha(opts.disabled) })
+    if key then self:kbd(x + w - fw - 8 * s, cy, key) end
+    return self:select(x + w - fw, fw, y, id, rows, chosen, opts)
 end
 
 function Ui:divider(x, w, y)
