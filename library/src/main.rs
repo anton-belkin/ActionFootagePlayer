@@ -355,6 +355,30 @@ fn recent_names(e: &RecentEntry) -> Vec<String> {
     out
 }
 
+/// A project kept before its share was (recent.json of 0.12 had paths alone), not reachable now: its share guessed from
+/// where its path is (/Volumes/<share>/…, as the Mac mounts one) and the NAS this computer has shares of (mounted now,
+/// or the other projects' kept): the entry with that share, and the names to try. None: no guess (not under /Volumes,
+/// no NAS known)
+fn guess_share(e: &RecentEntry, mounts: &[(String, PathBuf)], kept: &[String]) -> Option<(RecentEntry, Vec<String>)> {
+    if e.share.is_some() || !cfg!(target_os = "macos") { return None; }
+    let rest = Path::new(&e.path).strip_prefix("/Volumes").ok()?;
+    let mut parts = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    let vol = parts.next()?;
+    let rel = parts.collect::<Vec<_>>().join("/");
+    // The NAS's names, each once as spelled, and the user its shares are mounted as
+    let (mut names, mut user): (Vec<String>, Option<String>) = (Vec::new(), None);
+    for src in mounts.iter().map(|(s, _)| s.as_str()).chain(kept.iter().map(String::as_str)) {
+        let Some((host, _, _)) = locations::network(src) else { continue };
+        let (u, h) = host.rsplit_once('@').map(|(u, h)| (Some(u.to_string()), h.to_string())).unwrap_or((None, host.clone()));
+        let h = h.trim_end_matches('.').to_string();
+        if user.is_none() { user = u; }
+        if !names.iter().any(|n: &String| n.eq_ignore_ascii_case(&h)) { names.push(h); }
+    }
+    let first = names.first()?;
+    let share = format!("//{}{first}/{vol}", user.map(|u| format!("{u}@")).unwrap_or_default());
+    Some((RecentEntry { share: Some(share), rel, ..e.clone() }, names))
+}
+
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
     let mut list = recent_list(app);
@@ -843,6 +867,7 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
     tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
     let mounts = locations::mounts();
     let mut list = recent_list(&app);
+    let kept: Vec<String> = list.iter().filter_map(|e| e.share.clone()).collect();
     let mut changed = false;
     let out = list.iter_mut().map(|e| {
         let here = recent_here(e, &mounts);
@@ -854,10 +879,13 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
             let hp = h.display().to_string();
             if e.path != hp { e.path = hp; changed = true; }
         }
-        let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
+        // Its share not kept (a list of before): guessed, to connect it all the same
+        let guess = if here.is_none() { guess_share(e, &mounts, &kept) } else { None };
+        let known = guess.as_ref().map(|g| &g.0).unwrap_or(e);
+        let share = known.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
-                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
-                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
+                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && known.share.is_some(), share, path: e.path.clone(),
+                 names: match (&here, &guess) { (Some(_), _) => Vec::new(), (None, Some(g)) => g.1.clone(), (None, None) => recent_names(e) } }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
@@ -877,10 +905,14 @@ async fn forget_recent(app: tauri::AppHandle, path: String) -> Result<(), String
 #[tauri::command]
 async fn connect_project(app: tauri::AppHandle, path: String, host: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let e = recent_list(&app).into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        let list = recent_list(&app);
+        let kept: Vec<String> = list.iter().filter_map(|e| e.share.clone()).collect();
+        let e = list.into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        // Its share as kept, else guessed from its path and the NAS known here
+        let (e, names) = match guess_share(&e, &locations::mounts(), &kept) { Some(g) => g, None => { let n = recent_names(&e); (e, n) } };
         let share = e.share.clone().ok_or("Its share isn't known: connect it in Finder, then open it")?;
         // By the name chosen, else each of the NAS's names in turn
-        mount_share(&share, &host.map(|h| vec![h]).unwrap_or_else(|| recent_names(&e)))?;
+        mount_share(&share, &host.map(|h| vec![h]).unwrap_or(names))?;
         recent_here(&e, &locations::mounts()).map(|p| p.display().to_string())
             .ok_or_else(|| format!("{share} is connected, but {} isn't on it", e.path))
     }).await.map_err(|e| e.to_string())?
@@ -2464,6 +2496,18 @@ mod tests {
         assert_eq!(names, ["DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
         let e = RecentEntry { share: Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd".into()), hosts: names, ..e };
         assert_eq!(recent_names(&e), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        // One of a list of before (its path alone), offline: its share guessed from its path and the NAS known here (the
+        // Mac's /Volumes)
+        if cfg!(target_os = "macos") {
+        let old = RecentEntry { path: "/Volumes/ssd/Action Footage Library".into(), ..Default::default() };
+        let mounted = [("//antonadmin@DISKSTATIONDXP/photo".to_string(), PathBuf::from("/Volumes/photo"))];
+        let (g, names) = guess_share(&old, &mounted, &["//antonadmin@DISKSTATIONDXP._smb._tcp.local/ssd".into()]).unwrap();
+        assert_eq!((g.share.as_deref(), g.rel.as_str()), (Some("//antonadmin@DISKSTATIONDXP/ssd"), "Action Footage Library"));
+        assert_eq!(names, ["DISKSTATIONDXP", "DISKSTATIONDXP._smb._tcp.local"]);
+        // Nothing known, or not under /Volumes: no guess
+        assert!(guess_share(&old, &[], &[]).is_none());
+        assert!(guess_share(&RecentEntry { path: "/Users/a/P".into(), ..Default::default() }, &mounted, &[]).is_none());
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 
