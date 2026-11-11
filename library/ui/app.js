@@ -2340,6 +2340,13 @@ async function poll() {
   const batchRuns = s.jobs.some((j) => j.state === "running");
   const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
   if (S.root && s.changes !== S.changes && due) refreshSoon(s.changes);
+  // No project open: the list of those opened before looked at again every few seconds (a share connected or taken
+  // away meanwhile: Offline and Connect come and go)
+  if (!S.root && Date.now() - (S.recentAt || 0) > 3000) {
+    S.recentAt = Date.now();
+    const r = await invoke("recent").catch(() => null);
+    if (r && JSON.stringify(r) !== JSON.stringify(S.recent)) { S.recent = r; renderAll(); }
+  }
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
   if (finished !== S.finished) {
@@ -2439,6 +2446,8 @@ document.addEventListener("click", async (e) => {
     case "closemenu": S.menu = false; break;
     case "choose": S.menu = false; await call("choose_project").catch(() => {}); return poll();
     case "openrecent": {
+      // As it is now (a share connected by hand since the list was drawn)
+      S.recent = await invoke("recent").catch(() => S.recent);
       const r = S.recent.find((x) => x.path === v);
       if (r && !r.here) { if (r.connect) return connectRecent(v); showError(r.name + " isn’t reachable: connect " + (r.share || "its disk") + " first"); return; }
       S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
