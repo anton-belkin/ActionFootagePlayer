@@ -279,8 +279,9 @@ pinned from the Mac is what the TV plays, adjusted to the TV as it streams.
 **Which profiles a pin makes:** a library setting, `HDR` alone by default, changeable in the settings. No `TV`
 render is pinned. `TV` is only the streamer's adjustment to the television (PQ, gain), and afp-stream makes it on the
 fly from the pinned 4K `HDR` render. *(To check: that the N100 converts 4K HLG → the TV's PQ in real time with
-QuickSync; if not, at 1080p.)* In the
-UI, pinning is one click with no choice. The detailed UI comes later.
+QuickSync; if not, at 1080p.)*
+
+In the UI, pinning is one click with no choice. The detailed UI comes later.
 
 **Apple Photos needs no pinned renders.** Photos imports what it's given and keeps its own copy. Sync renders only
 what's new (or changed), hands it to Photos, and the render is no longer needed: it's an ordinary, evictable render.
