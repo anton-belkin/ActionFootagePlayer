@@ -40,7 +40,28 @@ impl Underwater {
 }
 
 /// Water's, as Gyroflow's "Lens is underwater" sets it
-const WATER_REFRACTION: f64 = 1.33;
+pub const WATER_REFRACTION: f64 = 1.33;
+
+/// The clip's lens under water as a project Gyroflow makes for it should have it (its light_refraction_coefficient):
+/// as its own file says (source.underwater, the player's and the Library's "Lens under water": yes or no), else (auto,
+/// or nothing said) as the camera recorded it over the clip, where it does: all of it in or out of the water, else
+/// the longer of the two (a project made from the picture has one refraction). None: nothing says (the project's or
+/// preset's stays)
+pub fn refraction_for(video: &std::path::Path) -> Option<f64> {
+    let said = std::fs::read_to_string(crate::workspace::sidecar_file(video)).ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|d| d.pointer("/source/underwater").and_then(|v| v.as_str()).map(String::from));
+    match said.as_deref().and_then(Underwater::parse) {
+        Some(Underwater::Yes) => return Some(WATER_REFRACTION),
+        Some(Underwater::No) => return Some(1.0),
+        _ => {}
+    }
+    let spans = spans(&video.to_string_lossy())?;
+    let (mut wet, mut dry) = (0.0, 0.0);
+    for s in &spans { if s.in_water { wet += s.end_ms - s.start_ms; } else { dry += s.end_ms - s.start_ms; } }
+    if spans.is_empty() { return None; }
+    Some(if wet >= dry { WATER_REFRACTION } else { 1.0 })
+}
 
 /// The models that record it, and where in their FrameMeta's camera part (3.2 of ProductMeta; the dji-telemetry
 /// plugin's LAYOUTS has the same paths): the in-water flag, the underwater confidence

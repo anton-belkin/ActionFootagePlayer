@@ -211,6 +211,17 @@ pub fn preset_from_project(project: &Value, s: &Settings) -> Value {
     p
 }
 
+/// The preset given the lens's refraction (`r`: water's, or 1 out of it), returned as set. A project made again that
+/// keyframes it keeps its keyframes (None returned), and one under water with its own (salt water's 1.34) keeps that
+pub fn with_refraction(preset: &mut Value, r: Option<f64>) -> Option<f64> {
+    let r = r?;
+    if preset.pointer("/keyframes/LightRefractionCoeff").is_some() { return None; }
+    let own = preset["light_refraction_coefficient"].as_f64().filter(|v| *v > 1.0);
+    let r = if r > 1.0 { own.unwrap_or(r) } else { r };
+    preset["light_refraction_coefficient"] = json!(r);
+    Some(r)
+}
+
 /// What Gyroflow renders the project to, as it would set it itself (beside the clip, `<stem>_stabilized.mp4`): Gyroflow
 /// wrote this run's work folder there
 pub fn fix_output(project: &mut Value, video: &Path) {
@@ -382,10 +393,13 @@ pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, replaces:
     let stem = video.file_stem().ok_or("the clip has no name")?.to_string_lossy().into_owned();
     // Made again: the project as it is now, its settings the preset
     let was = match replaces { Some(p) => Some(std::fs::read(p).map_err(|e| format!("couldn't read its Gyroflow project: {e}"))?), None => None };
-    let preset_json = match &was {
+    let mut preset_json = match &was {
         Some(bytes) => preset_from_project(&serde_json::from_slice(bytes).map_err(|e| format!("its Gyroflow project isn't JSON: {e}"))?, settings),
         None => preset(settings),
     };
+    // The lens under water as the clip's own file or its camera says (Gyroflow's "Lens is underwater"): the analysis
+    // uses it (the lens is undistorted with it), and the project keeps it
+    let refraction = with_refraction(&mut preset_json, crate::water::refraction_for(video));
     let preset_file = work.join("preset.gyroflow");
     std::fs::write(&preset_file, preset_json.to_string()).map_err(|e| e.to_string())?;
     // Gyroflow's output options are JSON with ' for " (it swaps them): the work folder's path has neither
@@ -437,6 +451,7 @@ pub fn stabilize(gyroflow: &Path, video: &Path, profile: Option<&str>, replaces:
     check_project(&text)?;
     let mut project: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     fix_output(&mut project, video);
+    if let Some(r) = refraction { project["light_refraction_coefficient"] = json!(r); }
     std::fs::write(&made, serde_json::to_string_pretty(&project).unwrap_or(text)).map_err(|e| e.to_string())?;
     place(&made, video, replaces.zip(was.as_deref()))
 }
@@ -463,6 +478,39 @@ mod tests {
         let mut f = facts(false, Some("in the file"));
         f.spherical = true;
         assert!(matches!(decide(None, false, &f), Verdict::LeaveOut(r) if r.contains("360")));
+    }
+
+    #[test]
+    fn under_water() {
+        // As the clip's own file says
+        let dir = std::env::temp_dir().join(format!("afp-optical-water-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("A.MP4");
+        std::fs::write(&clip, b"not a video").unwrap();
+        assert_eq!(crate::water::refraction_for(&clip), None, "nothing says");
+        let side = crate::workspace::sidecar_file(&clip);
+        std::fs::write(&side, r#"{"source":{"underwater":"yes"}}"#).unwrap();
+        assert_eq!(crate::water::refraction_for(&clip), Some(1.33));
+        std::fs::write(&side, r#"{"source":{"underwater":"no"}}"#).unwrap();
+        assert_eq!(crate::water::refraction_for(&clip), Some(1.0));
+        std::fs::write(&side, r#"{"source":{"underwater":"auto"}}"#).unwrap();
+        assert_eq!(crate::water::refraction_for(&clip), None, "auto, and the camera doesn't say");
+        let _ = std::fs::remove_dir_all(&dir);
+        // Into the preset; a project made again keeps its own under water, and its keyframes
+        let mut p = preset(&Settings::default());
+        assert_eq!(with_refraction(&mut p, Some(1.33)), Some(1.33));
+        assert_eq!(p["light_refraction_coefficient"], json!(1.33));
+        assert_eq!(p["synchronization"]["do_optical_correction"], json!(true));
+        let mut salt = json!({ "light_refraction_coefficient": 1.34 });
+        assert_eq!(with_refraction(&mut salt, Some(1.33)), Some(1.34));
+        assert_eq!(with_refraction(&mut salt, Some(1.0)), Some(1.0));
+        let mut keyed = json!({ "keyframes": { "LightRefractionCoeff": {} }, "light_refraction_coefficient": 1.0 });
+        assert_eq!(with_refraction(&mut keyed, Some(1.33)), None);
+        assert_eq!(keyed["light_refraction_coefficient"], json!(1.0));
+        let mut none = preset(&Settings::default());
+        assert_eq!(with_refraction(&mut none, None), None);
+        assert!(none.get("light_refraction_coefficient").is_none());
     }
 
     #[test]
