@@ -458,6 +458,26 @@
                 <p>A clip the player doesn't stabilize by itself opens in Gyroflow as it is. One with no motion data (DJI with EIS on, or a camera that records none) is stabilized there from the picture (optical flow); a GoPro or Insta360 clip shot with the camera's stabilization on has its motion data, and Gyroflow loads it. Save the project there, and the clip plays stabilized with it. The side panel has it as <i>Stabilize in Gyroflow…</i></p>
               </div>
             </div>
+            <div class="feat">
+              <div><h3>Many clips without motion data: Stabilize optically</h3><p class="feat-keys">Action Footage Library</p></div>
+              <div class="feat-text">
+                <p>Select clips or folders in <a class="text-link" href="organizing.html#optical">Action Footage Library</a> and press <b>Stabilize optically</b>: Gyroflow measures each clip's motion from its picture, one clip after another in the background, in about the time the clip plays, and its project goes beside the clip. Clips that don't need it are left out, each with why. It needs Gyroflow with its optical analysis from the command line, built from <a class="text-link" href="https://github.com/anton-belkin/gyroflow" rel="noopener">our fork</a> until it's in Gyroflow's own releases.</p>
+                <p class="feat-status"><span><span class="where">Mac, Windows</span> not on Linux yet</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Sideways jerks, up close</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>j</kbd> · panel → Transform</p></div>
+              <div class="feat-text">
+                <p>Gyro stabilization takes out how the camera turned; up close, the hand's small sideways shifts still shake the picture. <b>Measure for this clip</b> measures them once, from the camera's accelerometer and the picture, and keeps them; from then on the picture is moved against them as it plays. <kbd>Ctrl</kbd>+<kbd>j</kbd> measures, then turns it off and on.</p>
+                <p class="feat-status"><span><span class="pill ok">Verified</span> Osmo Action 6</span></p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>Quick from a NAS</h3></div>
+              <div class="feat-text">
+                <p>The stabilization reads the motion data of the part it plays first, and the rest while it plays. A moment of a 2.5 GB clip on a NAS shows in 3 to 5 seconds, where the first opening took 22; a whole clip in 1.5 to 3 seconds.</p>
+              </div>
+            </div>
             <div class="feat" id="stab-underwater">
               <div><h3>Under water</h3></div>
               <div class="feat-text">
@@ -541,9 +561,10 @@
               </div>
             </div>
             <div class="feat">
-              <div><h3>360 exports <span class="soon">Coming soon</span></h3></div>
+              <div><h3>A flat video, by looking around</h3><p class="feat-keys"><kbd>Alt</kbd>+<kbd>r</kbd> · panel → 360° view → Flat video</p></div>
               <div class="feat-text">
-                <p>The whole sphere as a level 360 video, or a normal 16:9 video along where you looked, saved from the player like other clips.</p>
+                <p>Press <b>Record</b> and look around as the clip plays: what you see becomes a flat video. Pausing, a seek or the clip's end ends a take, and recording again over a part replaces just that part; up to 20 takes can be undone. <b>Play the recording</b> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>r</kbd>) shows it before anything is made; <b>Smooth the turns</b>, <b>Level the horizon</b> and <b>Hold on what's in the middle</b> tidy it. <b>Export flat</b> makes it an ordinary video, 16:9, 9:16 or 1:1, in 1080p or 4K; <b>Export 360°</b> makes the whole sphere, level, for any 360 player. The recording is kept in the clip's own file.</p>
+                <p class="feat-status"><span><span class="pill ok">Verified</span> Insta360 X5, on a Mac</span></p>
               </div>
             </div>
           </div>
@@ -585,6 +606,13 @@
                 <p>Any corner of the video (bottom left by default), metric or imperial (feet, mph, °F), from the menu or the side panel.</p>
               </div>
             </div>
+            <div class="feat">
+              <div><h3>A drone's data</h3><p class="feat-keys"><kbd>v</kbd></p></div>
+              <div class="feat-text">
+                <p>A DJI drone writes its camera data as subtitles: height, speed, GPS, exposure, in an <code>.SRT</code> beside the clip or a subtitle track in it. The player reads them as telemetry, so they don't cover the picture in big letters: they're off when a clip starts, and <kbd>v</kbd> shows them. Other subtitles play as usual.</p>
+                <p class="feat-status"><span><span class="pill ok">Verified</span> DJI Mini 4 Pro</span></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -594,7 +622,7 @@
             <div class="feat">
               <div><h3>The camera's highlights</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></p></div>
               <div class="feat-text">
-                <p>Press the camera's highlight button while it records: the marks show on the seek bar, and the keys jump to the next one and back, landing two seconds before it, since the moment has usually happened by the time you press. <kbd>Page Up</kbd> / <kbd>Page Down</kbd> go to the mark itself.</p>
+                <p>Press the camera's highlight button while it records: the marks show on the navigation bar under the video, as amber diamonds (yours are white), and the keys jump to the next one and back, landing two seconds before it, since the moment has usually happened by the time you press. <kbd>Page Up</kbd> / <kbd>Page Down</kbd> go to the mark itself.</p>
                 <p class="feat-status">
                   <span><span class="pill ok">Verified</span> DJI Osmo Action 6 (the quick switch button, or the GPS Bluetooth remote)</span>
                   <span><span class="pill exp">Should work</span> DJI Osmo Action 4 and Action 5 Pro; GoPro HERO5 and later (HiLight, "GoPro, HiLight", or the remote)</span>
@@ -606,6 +634,12 @@
               <div><h3>All of them, by time</h3><p class="feat-keys">panel → Source</p></div>
               <div class="feat-text">
                 <p>The side panel's Source → <b>Marks</b> has every mark, with its time: a click jumps there. Without the panel, the plugins' menu lists them by time.</p>
+              </div>
+            </div>
+            <div class="feat">
+              <div><h3>The navigation bar and the Playlist</h3><p class="feat-keys"><kbd>F8</kbd> · panel → Playlist</p></div>
+              <div class="feat-text">
+                <p>The bar under the video is the player's own. Point at the track, and it says the time to the hundredth; near a mark or a moment's end it lands on it and says its name. A click goes to that exact frame, and the wheel or a sideways swipe over the bar steps frame by frame. Its buttons: the previous and next clip, a frame back and on, the previous and next mark, a mark here, the part (A–B), the speed, looping, the sound and full screen. With the side panel open it sits below the video, always there. The panel's <b>Playlist</b> tab lists the videos in the clip's folder, the one playing marked; a click plays one.</p>
               </div>
             </div>
             <div class="feat">
@@ -631,14 +665,14 @@
             <div class="feat">
               <div><h3>A moment is a small file</h3></div>
               <div class="feat-text">
-                <p>Each moment is a small MP4 in the project's <code>_Moments/</code> folder, under its name: <code>&lt;name&gt;.afplink.mp4</code>. <span class="os-mac">Finder's thumbnails and Quick Look show it</span><span class="os-win">File Explorer's thumbnails and its preview pane (<kbd>Alt</kbd>+<kbd>P</kbd>) show it</span> in color, not log grey. Opened in the player, it plays that part of the original, in full quality, shown as it was when you saved it: its whole <a class="text-link" href="#stab-transform">transform</a>, the stabilization and the frame included.</p>
+                <p>Each moment is a small MP4 in the project's <code>_Moments/Generated/</code> folder, under its name: <code>&lt;name&gt;.afplink.mp4</code>. <span class="os-mac">Finder's thumbnails and Quick Look show it</span><span class="os-win">File Explorer's thumbnails and its preview pane (<kbd>Alt</kbd>+<kbd>P</kbd>) show it</span> in color, not log grey. Opened in the player, it plays that part of the original, in full quality, shown as it was when you saved it: its whole <a class="text-link" href="#stab-transform">transform</a>, the stabilization and the frame included.</p>
                 <p>Its icon is the first mark inside it, else its middle frame. Its file dates are the moment's real time, so sorting by date puts the moments in the order they happened.</p>
               </div>
             </div>
             <div class="feat">
               <div><h3>Sort them like any files</h3></div>
               <div class="feat-text">
-                <p>Deleting the file deletes the moment. Subfolders of <code>_Moments/</code> are yours, to sort moments into; renaming a file renames the moment.</p>
+                <p>Deleting the file deletes the moment. Move it into folders of your own anywhere in the project folder, rename it: it stays a moment, found by the link inside it.</p>
               </div>
             </div>
             <div class="feat">
@@ -650,32 +684,34 @@
             <div class="feat">
               <div><h3>Marks</h3><p class="feat-keys"><kbd>M</kbd></p></div>
               <div class="feat-text">
-                <p>Points in a clip, on the seek bar. <kbd>M</kbd> adds a mark where the video is; on a mark, it removes it. The marks are the camera's highlights until you change one: your first change saves all of them to the clip's own small file, <code>&lt;clip&gt;.afp.json</code>, which also keeps how you saved the clip to play. Delete that file, and the camera's marks are back, and the clip forgets how you saved it. A <code>&lt;clip&gt;.marks.json</code> from an earlier version is read, and becomes <code>.afp.json</code> at the next change.</p>
+                <p>Points in a clip, on the navigation bar. <kbd>M</kbd> adds a mark where the video is; on a mark, it removes it. The marks are the camera's highlights until you change one: your first change saves all of them to the clip's own small file, <code>&lt;clip&gt;.afp.json</code>, which also keeps how you saved the clip to play. Delete that file, and the camera's marks are back, and the clip forgets how you saved it. A <code>&lt;clip&gt;.marks.json</code> from an earlier version is read, and becomes <code>.afp.json</code> at the next change.</p>
               </div>
             </div>
             <div class="feat">
               <div><h3>The trip at a glance</h3><p class="feat-keys">Action Footage Library</p></div>
               <div class="feat-text">
-                <p>Made when you ask, with <b>Make clip previews</b> in <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>, opened from the side panel's Project tab: a <code>_Clips/</code> folder with one small MP4 per clip, a flip-book of the clip in color. <span class="os-mac">In icon view the folder is the whole trip in color instead of a wall of grey log, and Quick Look flips through each clip in seconds.</span><span class="os-win">With large icons the folder is the whole trip in color instead of a wall of grey log, and the preview pane (<kbd>Alt</kbd>+<kbd>P</kbd>) flips through each clip in seconds.</span></p>
+                <p>Made when you ask, with <b>Make clip previews</b> on clips or folders in <a class="text-link" href="organizing.html#clip-previews">Action Footage Library</a>: one small MP4 per clip in <code>_Clips/Generated/</code>, a flip-book of the clip in color, laid out as the footage's folders, by trips or all in one folder. <span class="os-mac">In icon view the folder is the whole trip in color instead of a wall of grey log, and Quick Look flips through each clip in seconds.</span><span class="os-win">With large icons the folder is the whole trip in color instead of a wall of grey log, and the preview pane (<kbd>Alt</kbd>+<kbd>P</kbd>) flips through each clip in seconds.</span></p>
               </div>
             </div>
             <div class="feat">
               <div><h3>Set a clip aside</h3><p class="feat-keys"><kbd>X</kbd></p></div>
               <div class="feat-text">
-                <p>Not interesting: <kbd>X</kbd> in the player, or deleting the clip's flip-book from <code>_Clips/</code>, which is the same thing. The clip itself stays where it is.</p>
+                <p>Not interesting: <kbd>X</kbd> in the player moves the clip's flip-book to the Trash, and <kbd>X</kbd> again makes it again. The clip itself stays where it is.</p>
               </div>
             </div>
             <div class="feat">
-              <div><h3>The whole trip at once</h3><p class="feat-keys">Action Footage Library</p></div>
+              <div><h3>Action Footage Library</h3><p class="feat-keys">Project.afproject</p></div>
               <div class="feat-text">
-                <p>What you do to one clip happens in the player; what you do to the whole trip happens in <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>, a small second app that comes with the player. It makes the trip's batches in the background, one at a time: clip previews, moments and photos of all marks, and exports of all moments. Open it with <b>Open in Action Footage Library</b> in the side panel's Project tab, or double-click the trip's <code>Project.afproject</code>.</p>
+                <p>What you do to one clip happens in the player; what you do to many happens in <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>, the app that comes with the player. It browses the project as folders (Originals, Footage, Moments, Photos, Exports), with filters and search, and its commands act on what you select, as tasks in the background, one at a time:</p>
+                <ul>
+                  <li>clip previews, moments and photos of the marks, renders and exports of moments;</li>
+                  <li><b>Stabilize optically</b> for clips without motion data;</li>
+                  <li><b>Check</b> and <b>Find moved files</b>; <b>Take in another project…</b>;</li>
+                  <li><b>Tags</b>, kept with each item, and <b>Location</b>: where a clip was recorded, suggested from your Apple Photos taken around the same time (on a Mac), or set by hand, with a Location filter;</li>
+                  <li><b>Info</b>: a clip's date, camera, place and the lens profile the player uses, or the camera's mode number where none fits yet.</li>
+                </ul>
+                <p>Every clip has a picture, as fast as <span class="os-mac">Finder</span><span class="os-win">File Explorer</span> draws one: 300 clips on a NAS in 9 seconds the first time, under a second after. A shared catalog next to the project keeps what it knows, so a big project opens fast on every computer. Open it with <b>Open in Action Footage Library</b> in the side panel's Project tab, or double-click <code>Project.afproject</code>.</p>
                 <p class="feat-status"><span><span class="where">Mac, Windows</span> not on Linux yet</span></p>
-              </div>
-            </div>
-            <div class="feat">
-              <div><h3>Favorites and ratings <span class="soon">Coming soon</span></h3><p class="feat-keys"><kbd>K</kbd></p></div>
-              <div class="feat-text">
-                <p>A moment or a clip's flip-book that exists is kept; one deleted is not. <kbd>K</kbd> makes the moment playing, else the clip, a favorite, and again takes it off: <span class="os-mac">a green <i>Favorite</i> tag in Finder</span><span class="os-win">a rating of 4 stars or more in File Explorer</span>. Your editor gets them too.</p>
               </div>
             </div>
             <div class="feat" id="lossless-cut">
@@ -689,7 +725,7 @@
             <div class="feat" id="projects">
               <div><h3>Project folders</h3><p class="feat-keys">panel → Project</p></div>
               <div class="feat-text">
-                <p>A project is a trip's folder, set up once: the first time you save a moment or export, or open Action Footage Library, the side panel's Project tab asks which folder, the clips' own or one above it, and <i>Initialize the project here</i> makes it. Every folder inside belongs to the project. In it go <code>_Moments/</code>, <code>_Clips/</code>, <code>_Exports/</code> and <code>_Stills/</code>, and the file <code>Project.afproject</code>, which opens the trip in <a class="text-link" href="organizing.html#library-app">Action Footage Library</a>. A project made by an earlier version has an <code>_ActionFootagePlayer/</code> folder instead: the player moves it into <code>Project.afproject</code> the next time it opens one of its clips. Each clip's <code>.afp.json</code> and Gyroflow project stay beside it. When that folder can't be written to (a locked card, a read-only share), the player asks for a name and makes a project folder in its folder in Documents (<code>Documents/ActionFootagePlayer/</code>), with a <code>Sources.txt</code> that points to the footage. <span class="soon">Coming soon</span></p>
+                <p>A project is where your originals are, any folders on this computer or a NAS (its locations), plus where its moments, clip previews, exports and photos go: <code>_Moments/</code>, <code>_Clips/</code>, <code>_Exports/</code> and <code>_Stills/</code>, new ones landing in a <code>Generated/</code> folder inside. Its file, <code>Project.afproject</code>, keeps only the locations; everything else is in the files themselves, and each file finds its clip by what the clip is, so the project moves with the footage. The first time you save a moment or export, the side panel's Project tab asks which folder, the clip's own or one above it, and <i>Initialize the project here</i> makes it. Each clip's <code>.afp.json</code> and Gyroflow project stay beside it. A project from an earlier version is read as it is.</p>
                 <p>Your originals stay as they are, unless you <a class="text-link" href="#lossless-cut">cut a spoiled part out</a>.</p>
               </div>
             </div>
@@ -786,9 +822,9 @@
           <p class="note"><a class="text-link" href="photos.html">Photos from your video, explained step by step →</a></p>
           <div class="feats">
             <div class="feat">
-              <div><h3>Temporal denoise of the paused frame</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
+              <div><h3>Temporal denoise, as it plays</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd> · panel → Transform</p></div>
               <div class="feat-text">
-                <p>A moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it, each moved onto it by the motion between them: the sensor's noise from dim light mostly goes (temporal noise reduction), and the detail stays. About a second for 4K; the stabilization must be on. It's on by default, so pausing is enough; <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off, and on again, for the next clips too.</p>
+                <p>Each frame is rebuilt from itself and the 5 frames on each side of it, each moved onto it by the motion between them: the sensor's noise from dim light goes (temporal noise reduction), and the detail stays. While it plays and paused; the picture shows a few frames later, and the sound waits for it. The stabilization must be on. It's on by default, kept with the clip's settings; <b>Stronger, for a very noisy clip</b> takes more frames in and the dark specks out. Performance &amp; Quality → <b>Temporal denoise</b>: <b>Full</b>, <b>Light</b> (3 frames on each side) or <b>Off</b> on this computer. Nothing is written into the files: exports play as recorded.</p>
               </div>
             </div>
             <div class="feat">
@@ -827,7 +863,7 @@
             <div class="feat">
               <div><h3>Noise reduction</h3><p class="feat-keys"><kbd>Ctrl</kbd>+<kbd>p</kbd></p></div>
               <div class="feat-text">
-                <p>The paused frame and the photos you save are cleaned, rebuilt from the frames around them: the <a class="text-link" href="#still">clean still frame</a>. The noise reduction while playing has no key, menu or switch any more; <code>denoise=yes</code> in <code>dlogm.conf</code> still turns it on.</p>
+                <p>Clips that go through the stabilization play without the noise of dim light: the <a class="text-link" href="#still">temporal denoise</a>, as they play and paused, and in the photos you save. For a clip that isn't stabilized, <code>denoise=yes</code> in <code>dlogm.conf</code> turns on a lighter noise reduction while it plays.</p>
               </div>
             </div>
             <div class="feat">
@@ -851,14 +887,15 @@
                 <p>The settings, in a panel at the right of the window, beside the video, which moves over for it; the keys are beside what they do. <kbd>Tab</kbd> hides it and shows it again.</p>
                 <ul>
                   <li><b>Project</b>, where the panel opens: the trip's project folder (<i>Initialize the project here</i>), <b>Open in Action Footage Library</b>, this clip's marks and moments, marking a part and saving it as a moment;</li>
+                  <li><b>Playlist</b>: the videos in the clip's folder; a click plays one;</li>
                   <li><b>Source</b>: what the clip is, <span class="os-mac">Finder</span><span class="os-win">File Explorer</span> and its path, how to read it (the log curve, how it was recorded turned, its lens, under water with a flat port) with <b>Save to the source</b> and <b>Revert to saved</b>, and its marks;</li>
-                  <li><b>Transform</b>: where it's defined, <b>Save</b>, <b>Revert to saved</b>, <b>Use as default</b>, <b>Auto save</b> and <b>Settings of its own</b>; the stabilization, the level, the horizon, the lens and its projection, the frame's shape and orientation, the color fringes under water; or, with a Gyroflow project, the project's values;</li>
+                  <li><b>Transform</b>: where it's defined, <b>Save</b>, <b>Revert to saved</b>, <b>Use as default</b>, <b>Auto save</b> and <b>Settings of its own</b>; the stabilization, the level, the horizon, the lens and its projection, the frame's shape and orientation, the color fringes under water, the temporal denoise and the sideways jerks; or, with a Gyroflow project, the project's values;</li>
                   <li><b>Output</b>: <b>Display</b>, the looks; <b>Export</b>, the clip or the marked part, <b>Export in SDR</b>, the last export;</li>
                   <li><b>Save frame</b>: framing a photo, its shape, the camera, the kind of photo;</li>
-                  <li><b>Performance &amp; Quality</b>: the frame rate and size it's stabilized at, the paused frame, the edge fill, skipping the color aberration correction on this screen, whether it asks when the GPU can't keep up;</li>
+                  <li><b>Performance &amp; Quality</b>: the frame rate and size it's stabilized at, the paused frame, how much temporal denoise this computer does, the edge fill, skipping the color aberration correction on this screen, whether it asks when the GPU can't keep up;</li>
                   <li><b>Telemetry</b>: whether it shows, the corner, the units, the fields;</li>
                   <li><b>Dolby Vision</b> (the Mac app): the trims, as sliders;</li>
-                  <li><b>360° view</b>, while a 360 clip plays: the projection, the view and what it follows;</li>
+                  <li><b>360° view</b>, while a 360 clip plays: the projection, the view and what it follows, and <b>Flat video</b>: recording your view and exporting it;</li>
                   <li><b>Support</b>: the version, Keys…, Note for the agent…, Report this camera…, Set up again…, and links to the website and GitHub.</li>
                 </ul>
                 <p>Source and Output end with <b>In the folder</b>: <b>Previous clip</b>, <b>Next clip</b>, <b>Autoplay next</b> and <b>Loop the clip</b>.</p>
@@ -897,15 +934,15 @@
                 <tr><td><kbd>M</kbd></td><td>A mark here; on a mark: remove it</td><td></td></tr>
                 <tr><td><kbd>X</kbd></td><td>Set the clip aside: not interesting</td><td></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>x</kbd></td><td>Cut the marked part out of the clip, after asking; the original goes to the Trash</td><td></td></tr>
-                <tr><td><kbd>K</kbd></td><td>Favorite: the moment playing, else the clip; again: off</td><td></td></tr>
-                <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>Export the clip as it plays, or the marked part, after asking for its name; twice: cancel</td><td><code>gyroflow/export</code></td></tr>
+                                <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>Export the clip as it plays, or the marked part, after asking for its name; twice: cancel</td><td><code>gyroflow/export</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>g</kbd></td><td>Stabilization on → wider view → off</td><td><code>gyroflow/toggle</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>k</kbd></td><td>Stabilization level: weak → medium → strong</td><td><code>gyroflow/level</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>b</kbd></td><td>What fills the edges: trail by direction, the frame's edge spread out, the background color</td><td><code>gyroflow/edges</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>u</kbd></td><td>The lens under water with a flat port, or above water (or behind a dome port), and back: how the source is read, kept with <i>Save to the source</i></td><td><code>gyroflow/lens</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>a</kbd></td><td>Color fringes under water taken out, or left as recorded</td><td><code>gyroflow/fringes</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>e</kbd></td><td>Open the clip in Gyroflow</td><td><code>gyroflow/edit</code></td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>Temporal denoise of the paused frame (the clean still frame), on (the default) or off</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>p</kbd></td><td>Temporal denoise, as it plays and paused, on (the default) or off</td><td><code>gyroflow/still</code></td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>j</kbd></td><td>Sideways jerks: measured for the clip, then taken out or left as recorded</td><td><code>gyroflow/translation</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>f</kbd></td><td>The paused frame at full size</td><td><code>gyroflow/full</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>s</kbd></td><td>The next video output: HDR, <i>HLG+DV</i> (Mac app) and the SDR looks</td><td><code>dlogm/sdr</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>h</kbd></td><td>Straight to HDR</td><td><code>dlogm/hdr</code></td></tr>
@@ -917,6 +954,10 @@
                 <tr><td><kbd>Alt</kbd>+<kbd>v</kbd></td><td>360 clips: the view, or the whole sphere unrolled flat</td><td><code>view360/toggle</code></td></tr>
                 <tr><td><kbd>Alt</kbd>+<kbd>p</kbd></td><td>360 clips: the next projection</td><td><code>view360/projection</code></td></tr>
                 <tr><td><kbd>Alt</kbd>+<kbd>h</kbd></td><td>360 clips: what straight ahead follows</td><td><code>view360/heading</code></td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>r</kbd></td><td>360 clips: record your view, or stop</td><td><code>view360/record</code></td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>r</kbd></td><td>360 clips: play the recording</td><td><code>view360/play-recording</code></td></tr>
+                <tr><td><kbd>v</kbd></td><td>Subtitles off or on: the clip's own, or a DJI drone's camera data</td><td><code>dji_telemetry/subtitles</code></td></tr>
+                <tr><td><kbd>F8</kbd></td><td>The side panel's Playlist</td><td><code>side_panel/playlist</code></td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>r</kbd></td><td>A note for an AI agent</td><td><code>agent/report</code></td></tr>
                 <tr><td>right click</td><td>The plugins' menu, when there's no side panel (mpv's own menu with it)</td><td><code>footage_menu/menu</code></td></tr>
                 <tr><td><kbd>Tab</kbd></td><td>The side panel, hidden or shown</td><td><code>side_panel/toggle</code></td></tr>

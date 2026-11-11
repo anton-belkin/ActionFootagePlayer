@@ -176,7 +176,7 @@
       <ol class="steps">
         <li>
           <h3>Pause on the moment</h3>
-          <p>A moment later the paused frame is cleaned up on screen. It's on by default; <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off and on again.</p>
+          <p>The frame on screen is already cleaned of the sensor's noise: the player does it as the clip plays. It's on by default; <kbd>Ctrl</kbd>+<kbd>p</kbd> turns it off and on again.</p>
         </li>
         <li>
           <h3>Look at it at full size</h3>
@@ -201,9 +201,9 @@
       <div class="stack">
         <p class="eyebrow">Clean frame</p>
         <h2>One frame, rebuilt from eleven.</h2>
-        <p>A single video frame is noisier than a photo, the more so in dim light: deep under water, at dusk, indoors. That grain is the camera's sensor. So when you pause, the player waits a moment (0.4&nbsp;s), then cleans the frame with temporal noise reduction: it rebuilds the paused frame from itself and the 5 frames on each side of it.</p>
-        <p>Each of those frames is first moved onto the paused one, using the motion between them. Then they are combined. The sensor's noise is different in every frame, so it mostly averages away. The reef, the fins and the faces are the same in every frame, so their detail stays. The on-screen message says <i>Cleaning up the frame…</i>, and it takes about a second for 4K.</p>
-        <p>It needs the clip to be stabilized: the stabilization is what knows how the camera moved between the frames. It's called <b>Temporal denoise</b> in the side panel, and it stays on for the next clips until you turn it off.</p>
+        <p>A single video frame is noisier than a photo, the more so in dim light: deep under water, at dusk, indoors. That grain is the camera's sensor. So the player cleans it with temporal noise reduction, while the clip plays and when you pause: it rebuilds each frame from itself and the 5 frames on each side of it.</p>
+        <p>Each of those frames is first moved onto the paused one, using the motion between them. Then they are combined. The sensor's noise is different in every frame, so it mostly averages away. The reef, the fins and the faces are the same in every frame, so their detail stays. While it plays, the picture shows a few frames later than it would, and the sound waits for it.</p>
+        <p>It needs the clip to be stabilized: the stabilization is what knows how the camera moved between the frames. It's <b>Temporal denoise</b> in the side panel's Transform tab, on by default and kept with the clip's settings; <b>Stronger, for a very noisy clip</b> takes more frames in. Performance &amp; Quality says how much of it this computer does: <b>Full</b>, <b>Light</b> (3 frames on each side) or <b>Off</b>. Nothing is written into your files: exports play as recorded, and the photos you save are cleaned.</p>
         <h3 class="ph-h3">The paused frame at full size</h3>
         <p>To play smoothly, the player may show the video smaller than it was recorded (the playback size and frame-rate settings in the side panel's Performance &amp; Quality part). A paused frame then shows less detail than the file has. <kbd>Ctrl</kbd>+<kbd>f</kbd> renders the paused frame again at the video's own resolution, once, and cleans it in the same pass. To have that after every pause, set <b>Paused frame</b> to <b>Full size</b> in the side panel.</p>
         <p class="honest">This is only for looking. A saved photo is always rendered from the file at full resolution, with or without <kbd>Ctrl</kbd>+<kbd>f</kbd>.</p>
@@ -396,7 +396,7 @@
               <thead><tr><th scope="col">Setting</th><th scope="col">What it does</th><th scope="col">Default</th></tr></thead>
               <tbody>
                 <tr><th scope="row">Paused frame</th><td><b>As it played</b>: the paused frame at the playback size. <b>Full size</b>: rendered again at the video's own size a moment after each pause (<kbd>Ctrl</kbd>+<kbd>f</kbd> does it once).</td><td>As it played</td></tr>
-                <tr><th scope="row">Temporal denoise <span class="cam-sub"><kbd>Ctrl</kbd>+<kbd>p</kbd></span></th><td>The paused frame rebuilt from the 5 frames on each side of it, on screen and in the photos you save.</td><td>On</td></tr>
+                <tr><th scope="row">Temporal denoise</th><td><b>Full</b>: each frame rebuilt from the 5 frames on each side of it, as it plays and paused. <b>Light</b>: 3, lighter on the graphics chip. <b>Off</b>: none on this computer, whatever the Transform tab's switch (<kbd>Ctrl</kbd>+<kbd>p</kbd>) says. The photos you save are cleaned either way.</td><td>Full</td></tr>
               </tbody>
             </table>
           </div>
@@ -408,7 +408,7 @@
             <figcaption>The Save frame part, on a Mac.</figcaption>
           </figure>
           <figure class="media" id="shot-photos-5">
-            <img src="media/photos-5.jpg" alt="Performance &amp; Quality in the side panel: Paused frame, As it played or Full size, and the Temporal denoise switch on, with their captions." width="570" height="400" loading="lazy">
+            <img src="media/photos-5.jpg" alt="Performance &amp; Quality in the side panel: Paused frame, As it played or Full size; Temporal denoise, Off, Light or Full, here Light; with their captions." width="584" height="485" loading="lazy">
             <figcaption>Paused frame and Temporal denoise, in Performance &amp; Quality.</figcaption>
           </figure>
         </div>
@@ -424,7 +424,7 @@
         <h2>Every key on this page.</h2>
       </div>
       <div class="keys">
-        <div class="key"><span>Clean paused frame on or off</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>Temporal denoise on or off</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
         <div class="key"><span>Paused frame at full size, once</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
         <div class="key"><span>Save frame on or off</span><span><kbd>c</kbd></span></div>
         <div class="key"><span>Next / previous shape</span><span><kbd>a</kbd> / <kbd>Shift</kbd>+<kbd>a</kbd></span></div>
