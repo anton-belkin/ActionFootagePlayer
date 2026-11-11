@@ -162,6 +162,12 @@ pub struct LensInfo {
     /// The lens mode the camera wrote, as its number (DJI's fov_type, the HERO4's SETT), for a camera with lens types: shown as
     /// "Unknown (mode 6)" while the curated list doesn't name it
     pub mode: Option<u64>,
+    /// The user's own curated list laid over the built-in one (lens_pick::user_file), when there is one, and why it
+    /// was left out, if it was
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curated_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curated_error: Option<String>,
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
@@ -173,15 +179,19 @@ pub fn lens_info(path: &str) -> Option<LensInfo> {
     let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
     let camera = format!("{} {}", input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or("")).trim().to_string();
     let in_file = lens_in_file(input.samples.as_deref().unwrap_or_default());
+    // Gyroflow's name for the lens mode the camera recorded ("Wide"), which the curated list's "recorded" can name too
+    let lens_mode = CameraIdentifier::from_telemetry_parser(&input, video.width, video.height, video.fps).map(|id| id.lens_info).unwrap_or_default();
     let lens = match chosen_lens(path, &input, video.width, video.height, video.fps, in_file) {
         Some(p) => p.label(),
         None if in_file => "in the file".to_string(),
         None => String::new(),
     };
     let types = lens_pick::lens_types(&camera);
-    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path) };
+    let recorded = if types.is_empty() { None } else { lens_pick::recorded_type(&camera, path, &lens_mode) };
     let mode = if types.is_empty() { None } else { recorded_lens_mode(path) };
-    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens })
+    let lists = lens_pick::lists();
+    let curated_file = lists.user_file.as_ref().map(|f| f.to_string_lossy().to_string());
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone() })
 }
 
 /// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player loads for the video
