@@ -502,25 +502,11 @@ left to win.
 
 ## 7. Tags
 
-Words on items (clips, moments, clip previews, photos, exports), for searching, filtering, and for the commands.
-Anton, 2026-11-09: time to have them; the first use is Photos'.
-
-- **Kept with the item, in the library**: a clip's in its own file (`.afp.json`, `tags`); a moment's, clip preview's
-  or export's in its link (`tags`); a photo's in its XMP (`dc:subject`, which Photos and Lightroom read as keywords).
-  So they travel with the files and are the same from every computer. Finder tags are written alongside where the
-  share keeps them, to be seen in Finder; the library's own are the truth.
-- **Yours**: any words (`dolphin`, `for family`, `best`). Set and removed in the Library's Tags part, on a selection,
-  and in the player (`K`, the Project tab) on what plays. Compared without case.
-- **Stars**, 1–5, `rating` beside `tags` (a clip's own file, a link; a photo's: not yet). Set on a selection; the same
-  stars again: none. A filter, *Stars*: at least so many, or none.
-- **Rename a tag everywhere** (the Tags part): over every clip, moment, photo and export of the project; to a name in
-  use, the two become one (merged).
-- **The app's**: *Deleted in Photos* (sync sets it), later others; shown apart, removable like any.
-- Search and filters take tags; *Marks to the editor* passes them on as keywords.
-- **Finder tags** follow the library's, on this computer's choice (Project settings, On this Mac): the project's own
-  files (default; a clip's go on its clip preview), all (the originals too) or none. A Finder tag set by hand stays.
-  Details: [moments-and-workspaces.md, Rating and tags](moments-and-workspaces.md#rating-and-tags).
-- Every change is noted to the catalog at once (`seen::note_now`), so the views show it right away.
+Now [tags-and-culling.md](tags-and-culling.md) (2026-11-11): Accept / Reject, 1–5 stars and custom tags on originals,
+moments and stills, kept with each item in the library (an original's own file, a moment's link, a still's XMP), and
+synced both ways with the stores the library turns on (Project settings → Tags: Finder tags now; XMP sidecars, Windows,
+the NAS photo apps designed). In the Library: *Keep, rate, tag* on the selection, *Rename a tag everywhere* (merging
+into a name in use), filters *Keep it?*, *Stars*, *Tags*. *Deleted in Photos* stays the app's own custom tag.
 
 ## 8. The project is its files
 

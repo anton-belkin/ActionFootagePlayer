@@ -1,7 +1,8 @@
--- The Project tab's tags of what plays (the workspace plugin's user-data/workspace/tags, its tags.lua): the stars, its
--- tags as chips (a click takes one off), the tags used last that it hasn't (a click puts one on), and "Tag…" (K),
--- which asks for a new one. The layout is plain Lua (tests/sidepanel_test.lua draws the tab with it); clicks run
--- `script-message-to workspace tag-toggle <name>`, `tag-rate <n>` and `tag-ask`.
+-- The Project tab's culling and tags of what plays (the workspace plugin's user-data/workspace/tags, its tags.lua;
+-- docs/tags-and-culling.md): Accept / Reject (one or the other), the stars, the custom tags as chips (a click takes
+-- one off), the tags used last that it hasn't (a click puts one on), and "Tag…" (K). The layout is plain Lua
+-- (tests/sidepanel_test.lua draws the tab with it); clicks run `script-message-to workspace tag-pick <which>`,
+-- `tag-rate <n>`, `tag-toggle <name>` and `tag-ask`.
 
 local M = {}
 
@@ -20,12 +21,25 @@ function M.offered(t)
     return out
 end
 
--- Draws it at x, y, w wide: the next y. `send(...)` runs a script message to the workspace plugin
-function M.draw(u, ui, x, w, y, t, key, send)
+-- Draws it at x, y, w wide: the next y. `send(...)` runs a script message to the workspace plugin; keys: the keys of
+-- accept, reject, tags (as the panel shows them)
+function M.draw(u, ui, x, w, y, t, keys, send)
     local C, s = ui.C, u.s
-    local what = ({ clip = "this clip", moment = "this moment", export = "this export" })[t.kind] or "it"
-    y = u:heading(x, w, y, "Tags of " .. what, key)
-    -- The stars: the one clicked, or none when it's the one there
+    keys = keys or {}
+    y = u:heading(x, w, y, t.kind == "moment" and "This moment: keep it?" or "The original: keep it?")
+    -- Accept / Reject: the one on is lit; clicked again, neither
+    local half = (w - 8 * s) / 2
+    local function pick(px, id, label, key, on, color)
+        local h = 28 * s
+        u:box(px, y, half, h, 7, on and color or (u:hovered(id) and C.hover or C.field), { border = 1 * s, border_color = on and color or C.line })
+        u:text(px + (key and 10 * s or half / 2), y + h / 2, label, { align = key and 4 or 5, size = 12, bold = on, color = on and C.knob or C.label })
+        if key then u:kbd(px + half - 6 * s, y + h / 2, key) end
+        u:hit(px, y, half, h, id, function() send("tag-pick", id:match("^pick:(.*)$")) end)
+    end
+    pick(x, "pick:accept", "✓ Accept", keys.accept, t.pick == "accept", "3A8F4E")
+    pick(x + half + 8 * s, "pick:reject", "✕ Reject", keys.reject, t.pick == "reject", "3A3AC8")
+    y = y + 34 * s
+    -- The stars: the one clicked, or none when it's the one there (keys 1–5, 0)
     local sx = x
     local cy = y + 10 * s
     for n = 1, 5 do
@@ -36,10 +50,10 @@ function M.draw(u, ui, x, w, y, t, key, send)
         u:hit(sx - 2 * s, y, 22 * s, 20 * s, id, function() send("tag-rate", tostring(n)) end)
         sx = sx + 22 * s
     end
-    if not t.rating then u:text(sx + 6 * s, cy, "no stars", { size = 11, color = C.dim }) end
+    u:text(sx + 6 * s, cy, t.rating and "1–5, 0: none" or "no stars · 1–5", { size = 11, color = C.dim })
     y = y + 26 * s
 
-    -- The chips, flowing over lines: { label, id, on (its own), cmd }
+    -- The custom tags, flowing over lines: { label, id, on (its own), cmd }
     local chips = {}
     for _, n in ipairs(t.list or {}) do
         chips[#chips + 1] = { n .. "  ×", "tag:" .. n, true, function() send("tag-toggle", n) end }
@@ -47,7 +61,7 @@ function M.draw(u, ui, x, w, y, t, key, send)
     for _, n in ipairs(M.offered(t)) do
         chips[#chips + 1] = { "+ " .. n, "recent:" .. n, false, function() send("tag-toggle", n) end }
     end
-    chips[#chips + 1] = { "Tag…", "tag-ask", false, function() send("tag-ask") end }
+    chips[#chips + 1] = { "Tag…" .. (keys.tags and ("  " .. keys.tags) or ""), "tag-ask", false, function() send("tag-ask") end }
     local h, gap = 22 * s, 4 * s
     local cx = x
     for _, c in ipairs(chips) do
@@ -61,10 +75,10 @@ function M.draw(u, ui, x, w, y, t, key, send)
         cx = cx + tw + gap
     end
     y = y + h + 6 * s
-    if t.finder and t.finder ~= "off" then
-        y = u:caption(x, w, y, t.kind == "clip" and (t.finder == "all" and "Kept in the clip's own file; Finder shows them on the clip and its preview"
-            or "Kept in the clip's own file; Finder shows them on its clip preview") or "Kept in its link; Finder shows them on its file")
-    end
+    local where = t.kind == "moment" and "Kept in its link" or "Kept in the original's own file"
+    local synced = {}
+    for _, st in ipairs(t.stores or {}) do synced[#synced + 1] = st == "finder" and "Finder's tags" or st end
+    y = u:caption(x, w, y, where .. (#synced > 0 and ("; synced with " .. table.concat(synced, ", ")) or ""))
     return y
 end
 

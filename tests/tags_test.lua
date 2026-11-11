@@ -99,12 +99,41 @@ expect("sidecar rating only kept", exists(dir .. "/A.afp.json"), true)
 s.update(clip, function(d) return tags.apply(d, tags.parse("*0")) end)
 expect("sidecar empty removed", exists(dir .. "/A.afp.json"), false)
 
--- Finder's tags: names with a colour kept, hand-set ones left, removed ones taken off
-local f = tags.finder_follow({ "Turtle\n6", "Mine" }, { "turtle", "reef" }, { "old" })
-expect("finder follow", j(f), "Turtle\n6|Mine|reef")
-expect("finder same", tags.finder_follow({ "Turtle\n6" }, { "Turtle" }, {}), nil)
-f = tags.finder_follow({ "Turtle\n6", "old", "Mine" }, { "Turtle" }, { "old" })
-expect("finder removed", j(f), "Turtle\n6|Mine")
+-- The pick: accept or reject, one or the other; the sidecar keeps a pick alone
+doc = {}
+expect("pick accept", tags.apply(doc, { pick = "accept" }) and doc.pick, "accept")
+expect("pick reject replaces", tags.apply(doc, { pick = "reject" }) and doc.pick, "reject")
+expect("pick none", tags.apply(doc, { pick = "none" }) and doc.pick == nil, true)
+expect("pick unknown", tags.pick("maybe"), nil)
+s.update(clip, function(d) return tags.apply(d, { pick = "reject" }) end)
+expect("sidecar pick only kept", exists(dir .. "/A.afp.json") and s.read(clip).pick, "reject")
+s.update(clip, function(d) return tags.apply(d, { pick = "none" }) end)
+expect("sidecar no pick: removed", exists(dir .. "/A.afp.json"), false)
+
+-- Finder's strings as the model and back: Accept/Reject, ★ the rating, the rest custom; colours kept
+local m = tags.from_finder({ "Accept\n2", "★★★", "Turtle\n6", "reef", "★" })
+expect("from finder pick", m.pick, "accept")
+expect("from finder rating (the most)", m.rating, 3)
+expect("from finder tags", j(m.tags), "Turtle|reef")
+expect("from finder both picks: reject", tags.from_finder({ "accept", "REJECT" }).pick, "reject")
+local f = tags.to_finder({ pick = "reject", rating = 2, tags = { "turtle", "new" } }, { "Turtle\n6", "Accept\n2", "★★★" })
+expect("to finder", j(f), "Turtle\n6|Reject\n6|★★|new")
+expect("to finder empty", j(tags.to_finder({ tags = {} }, { "Old" })), "")
+
+-- Three-way: tags, the changes of both; pick and rating, the side that changed (both: the newer)
+local base = { pick = "accept", rating = 3, tags = { "a", "b" } }
+local lib = { pick = "accept", rating = 4, tags = { "a", "b", "lib" } }
+local store = { pick = "reject", rating = 3, tags = { "a", "store" } }
+local r1 = tags.merge(base, lib, store, false)
+expect("merge tags", j(r1.tags), "a|lib|store")
+expect("merge pick: store changed", r1.pick, "reject")
+expect("merge rating: library changed", r1.rating, 4)
+local both = tags.merge(base, { pick = "reject", rating = 5, tags = {} }, { pick = nil, rating = 1, tags = {} }, false)
+expect("both changed, library newer", tostring(both.pick) .. both.rating, "reject5")
+both = tags.merge(base, { pick = "reject", rating = 5, tags = {} }, { pick = nil, rating = 1, tags = {} }, true)
+expect("both changed, store newer", tostring(both.pick) .. both.rating, "nil1")
+local first = tags.merge(nil, { tags = { "x" } }, { pick = "accept", tags = { "y" } }, false)
+expect("first sync: union, the store's pick", j(first.tags) .. tostring(first.pick), "x|yaccept")
 
 -- The property list, round trip, ASCII, Cyrillic, an emoji, more than 15 entries
 local names = { "Red\n6", "Привет", "🐢 turtle", "a" }

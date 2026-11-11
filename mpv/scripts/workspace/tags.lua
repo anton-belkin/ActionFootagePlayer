@@ -1,20 +1,17 @@
--- Tags and the rating (docs/moments-and-workspaces.md, "Rating and tags"; docs/library-management.md §7): words on a
--- clip, a moment or an export, and 1 to 5 stars, kept with the item in the library, the same place the Library keeps
--- them (library/src/tags.rs is this file's twin):
---   a clip        its own file, <clip>.afp.json beside it (sidecar.lua): `tags` (a list), `rating` (1–5)
---   a moment, an export, a clip preview's own   its link (the MP4 key, written in place by afp-cut --set-key):
---                 `tags`, `rating`. A clip preview playing tags its clip: the clip is what it shows
--- A tag is a name, compared without case ("Turtle" is "turtle"); the first spelling stays.
+-- Tags and culling (docs/tags-and-culling.md): on an original, a moment or a still (never a clip preview or an
+-- export), one model of three parts, kept with the item in the library (library/src/tags.rs is this file's twin):
+--   pick     "accept" or "reject" (one or the other), absent: neither          P, X, U
+--   rating   1–5 stars, absent: none                                           1–5, 0
+--   tags     custom words, compared without case, the first spelling kept      K
+-- The library's own store is the truth: an original's own file (<clip>.afp.json, sidecar.lua), a moment's link (the
+-- MP4 key, written in place by afp-cut --set-key). Stores the library enables besides (Project.afproject's
+-- `tag_stores`: "finder" for now) are synced both ways, three-way: the library now, the store now, and what they
+-- last agreed on (`synced.<store>` in the item's own record; absent: empty). Custom tags: the changes of both sides
+-- (union of additions and of removals); pick and rating: the side that changed, both: the last writer.
 --
--- macOS Finder tags are written beside, so that Finder shows them and Spotlight finds them (a local disk; Spotlight
--- doesn't index a network volume, Finder still shows them): the xattr com.apple.metadata:_kMDItemUserTags, a binary
--- property list of strings ("Name", or "Name\n6" with Finder's colour). The library's own are the truth; Finder's
--- follow them, and a Finder tag set by hand that the library doesn't have is left alone. Which files get them is this
--- computer's choice (the Library's Project settings, On this Mac: `finder_tags` in its projects/<id>.json):
---   own   (default) the project's own files: moments, exports, clip previews (with their clip's tags), photos
---   all   the originals too: an attribute, never the video's bytes, but it's written on the footage
---   off   none
--- Windows and Linux: the library's own only.
+-- macOS Finder tags: the xattr com.apple.metadata:_kMDItemUserTags, a binary property list of strings ("Name", or
+-- "Name\n6" with Finder's colour). Accept is "Accept" (green), Reject "Reject" (red), a rating "★★★"; the rest are the
+-- custom tags. A Finder tag's colour is kept.
 --
 -- Plain Lua, no mpv (tests/tags_test.lua).
 
@@ -23,6 +20,9 @@ local M = {}
 M.FINDER_XATTR = "com.apple.metadata:_kMDItemUserTags"
 M.RECENT_MAX = 12
 M.MAX_RATING = 5
+M.ACCEPT, M.REJECT = "Accept", "Reject"
+-- Finder's colours: 2 green, 6 red
+M.FINDER_ACCEPT, M.FINDER_REJECT = "Accept\n2", "Reject\n6"
 
 -- A tag as typed: trimmed, spaces folded; nil when nothing's left
 function M.clean(name)
@@ -132,17 +132,98 @@ function M.parse(text)
     return r
 end
 
--- A tags-and-rating doc (a sidecar, a link) changed by what was parsed: true when anything changed. `doc.tags` is
--- left out when empty, `doc.rating` when none
+-- A pick as kept: "accept", "reject", else nil (neither)
+function M.pick(v)
+    if type(v) ~= "string" then return nil end
+    v = v:lower()
+    return (v == "accept" or v == "reject") and v or nil
+end
+
+-- An item's model from its record (a sidecar, a link): { pick, rating, tags }
+function M.model(doc)
+    doc = type(doc) == "table" and doc or {}
+    return { pick = M.pick(doc.pick), rating = M.rating(doc.rating), tags = M.list(doc.tags) }
+end
+
+local function key(m) return tostring(m.pick) .. "|" .. tostring(m.rating) .. "|" .. table.concat(m.tags, "\n") end
+function M.same(a, b) return key(a) == key(b) end
+
+-- The model written into a record: keys out when empty
+function M.put(doc, m)
+    doc.pick, doc.rating = m.pick, m.rating
+    doc.tags = #m.tags > 0 and m.tags or nil
+end
+
+-- A record changed by `op` (parse's, or { pick = "accept"|"reject"|"none", rating = n (0: none), rename = {a, b} }):
+-- true when anything changed
 function M.apply(doc, op)
-    local before = table.concat(M.list(doc.tags), "\n") .. "|" .. tostring(M.rating(doc.rating))
-    local list = M.list(doc.tags)
-    for _, t in ipairs(op.toggle or {}) do list = M.toggle(list, t) end
-    list = M.changed(list, op.add, op.remove)
-    if op.rename then list = M.rename(list, op.rename[1], op.rename[2]) end
-    doc.tags = #list > 0 and list or nil
-    if op.rating ~= nil then doc.rating = M.rating(op.rating) else doc.rating = M.rating(doc.rating) end
-    return before ~= table.concat(list, "\n") .. "|" .. tostring(doc.rating)
+    local before = M.model(doc)
+    local m = M.model(doc)
+    for _, t in ipairs(op.toggle or {}) do m.tags = M.toggle(m.tags, t) end
+    m.tags = M.changed(m.tags, op.add, op.remove)
+    if op.rename then m.tags = M.rename(m.tags, op.rename[1], op.rename[2]) end
+    if op.rating ~= nil then m.rating = M.rating(op.rating) end
+    if op.pick ~= nil then m.pick = M.pick(op.pick) end
+    M.put(doc, m)
+    return not M.same(before, m)
+end
+
+-- ---------- Finder's tags as the model ----------
+
+-- A Finder tag's name ("Name\n6" -> "Name")
+local function finder_name(s) return (s:match("^(.-)\n%d+$") or s) end
+M.finder_name = finder_name
+
+-- Finder's strings read as the model: Accept / Reject (both: Reject), a tag of only stars the rating (several: the
+-- most), the rest custom
+function M.from_finder(list)
+    local m = { tags = {} }
+    for _, f in ipairs(list or {}) do
+        local n = M.clean(finder_name(f))
+        if n then
+            local rest, stars = n:gsub("★", "")
+            if n:lower() == "reject" then m.pick = "reject"
+            elseif n:lower() == "accept" then if m.pick ~= "reject" then m.pick = "accept" end
+            elseif rest == "" and stars > 0 then m.rating = math.max(m.rating or 0, math.min(stars, M.MAX_RATING))
+            elseif not M.find(m.tags, n) then m.tags[#m.tags + 1] = n end
+        end
+    end
+    return m
+end
+
+-- The model as Finder's strings, the ones there (`now`) kept as they are (their colour, their order) where they say
+-- the same, the new ones after them
+function M.to_finder(m, now)
+    local want = {}
+    if m.pick == "accept" then want[#want + 1] = { M.ACCEPT, M.FINDER_ACCEPT } end
+    if m.pick == "reject" then want[#want + 1] = { M.REJECT, M.FINDER_REJECT } end
+    if m.rating then want[#want + 1] = { string.rep("★", m.rating), string.rep("★", m.rating) } end
+    for _, t in ipairs(m.tags) do want[#want + 1] = { t, t } end
+    local out, used = {}, {}
+    for _, f in ipairs(now or {}) do
+        for i, w in ipairs(want) do
+            if not used[i] and same(finder_name(f), w[1]) then used[i] = true; out[#out + 1] = f; break end
+        end
+    end
+    for i, w in ipairs(want) do if not used[i] then out[#out + 1] = w[2] end end
+    return out
+end
+
+-- ---------- Sync: three-way ----------
+
+-- The library's model and a store's, with what they last agreed on (`base`; nil: nothing): the model both get.
+-- store_newer: the store's change is later than the library's (pick and rating changed on both sides)
+function M.merge(base, lib, store, store_newer)
+    base = base or { tags = {} }
+    local out = { tags = M.list(lib.tags) }
+    -- Tags: what the store added or removed since, onto the library's
+    for _, t in ipairs(store.tags) do if not M.find(base.tags, t) then out.tags = M.changed(out.tags, { t }) end end
+    for _, t in ipairs(base.tags) do if not M.find(store.tags, t) then out.tags = M.changed(out.tags, nil, { t }) end end
+    for _, k in ipairs({ "pick", "rating" }) do
+        local lib_changed, store_changed = lib[k] ~= base[k], store[k] ~= base[k]
+        if store_changed and (not lib_changed or store_newer) then out[k] = store[k] else out[k] = lib[k] end
+    end
+    return out
 end
 
 -- The tags used last (most recent first): `used` put at the front, at most RECENT_MAX
@@ -301,25 +382,6 @@ function M.unhex(h)
     h = (h or ""):gsub("%s", "")
     if #h % 2 == 1 or h:find("[^%x]") then return nil end
     return (h:gsub("%x%x", function(x) return string.char(tonumber(x, 16)) end))
-end
-
--- A Finder tag's name ("Name\n6" -> "Name")
-local function finder_name(s) return (s:match("^(.-)\n%d+$") or s) end
-
--- Finder's tags made to follow the library's: `removed` taken off, `list` all there (a colour kept for one there
--- already), the others (set by hand in Finder) left. nil when nothing changes
-function M.finder_follow(finder, list, removed)
-    local out, changed = {}, false
-    for _, f in ipairs(finder or {}) do
-        local name = finder_name(f)
-        if M.find(removed or {}, name) and not M.find(list, name) then changed = true else out[#out + 1] = f end
-    end
-    for _, t in ipairs(list or {}) do
-        local there = false
-        for _, f in ipairs(out) do if same(finder_name(f), t) then there = true end end
-        if not there then out[#out + 1] = t; changed = true end
-    end
-    return changed and out or nil
 end
 
 return M

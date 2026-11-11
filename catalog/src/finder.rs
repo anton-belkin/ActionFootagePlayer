@@ -2,9 +2,9 @@
 //
 // macOS Finder tags, written beside the library's own (docs/library-management.md §7): the extended attribute
 // com.apple.metadata:_kMDItemUserTags, a binary property list, an array of strings ("Name", or "Name\n6" with Finder's
-// colour). The library's tags (a clip's own file, a link, a photo's XMP) are the truth; Finder's follow them: the ones
-// taken off go, the library's are put on, and a tag set by hand in Finder that the library doesn't have stays. The
-// player's twin is mpv/scripts/workspace/tags.lua (through /usr/bin/xattr). Elsewhere than on a Mac: nothing.
+// colour). Read and written as they are here; what they mean (Accept, Reject, ★★★, custom) and the two-way sync with
+// the library's own are library/src/tags.rs's (docs/tags-and-culling.md). The player's twin is
+// mpv/scripts/workspace/tags.lua (through /usr/bin/xattr). Elsewhere than on a Mac: nothing.
 
 use std::path::Path;
 
@@ -93,22 +93,8 @@ pub fn parse(d: &[u8]) -> Option<Vec<String>> {
     Some(out)
 }
 
-fn name(f: &str) -> &str { f.rsplit_once('\n').filter(|(_, c)| c.chars().all(|c| c.is_ascii_digit())).map(|(n, _)| n).unwrap_or(f) }
-
-/// Finder's tags made to follow the library's: `removed` taken off, `list` all there (a colour kept for one there
-/// already), the others left. None when nothing changes
-pub fn follow(finder: &[String], list: &[String], removed: &[String]) -> Option<Vec<String>> {
-    let has = |l: &[String], n: &str| l.iter().any(|x| x.eq_ignore_ascii_case(n));
-    let mut changed = false;
-    let mut out: Vec<String> = Vec::new();
-    for f in finder {
-        if has(removed, name(f)) && !has(list, name(f)) { changed = true; } else { out.push(f.clone()); }
-    }
-    for t in list {
-        if !out.iter().any(|f| name(f).eq_ignore_ascii_case(t)) { out.push(t.clone()); changed = true; }
-    }
-    changed.then_some(out)
-}
+/// A Finder tag's name ("Name\n6" -> "Name")
+pub fn name(f: &str) -> &str { f.rsplit_once('\n').filter(|(_, c)| c.chars().all(|c| c.is_ascii_digit())).map(|(n, _)| n).unwrap_or(f) }
 
 #[cfg(target_os = "macos")]
 mod sys {
@@ -159,18 +145,15 @@ pub fn read(path: &Path) -> Option<Vec<String>> {
     { let _ = path; None }
 }
 
-/// A file's Finder tags made to follow the library's (`list` on, `removed` off): true when written. Not a Mac: nothing
-pub fn set(path: &Path, list: &[String], removed: &[String]) -> Result<bool, String> {
+/// A file's Finder tags written as they are (none: the attribute removed). Not a Mac: nothing
+pub fn write(path: &Path, list: &[String]) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let now = sys::get(path, XATTR).map_err(|e| format!("{}: {e}", path.display()))?.and_then(|d| parse(&d)).unwrap_or_default();
-        let Some(new) = follow(&now, list, removed) else { return Ok(false) };
-        let bytes = (!new.is_empty()).then(|| plist(&new));
-        sys::set(path, XATTR, bytes.as_deref()).map_err(|e| format!("{}: Finder tags: {e}", path.display()))?;
-        return Ok(true);
+        let bytes = (!list.is_empty()).then(|| plist(list));
+        return sys::set(path, XATTR, bytes.as_deref()).map_err(|e| format!("{}: Finder tags: {e}", path.display()));
     }
     #[allow(unreachable_code)]
-    { let _ = (path, list, removed); Ok(false) }
+    { let _ = (path, list); Ok(()) }
 }
 
 #[cfg(test)]
@@ -187,11 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn follows_the_library() {
-        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert_eq!(follow(&s(&["Turtle\n6", "Mine"]), &s(&["turtle", "reef"]), &s(&["old"])), Some(s(&["Turtle\n6", "Mine", "reef"])));
-        assert_eq!(follow(&s(&["Turtle\n6"]), &s(&["Turtle"]), &[]), None);
-        assert_eq!(follow(&s(&["Turtle\n6", "old", "Mine"]), &s(&["Turtle"]), &s(&["OLD"])), Some(s(&["Turtle\n6", "Mine"])));
+    fn names() {
+        assert_eq!(name("Red\n6"), "Red");
+        assert_eq!(name("A\nB"), "A\nB");
     }
 
     #[cfg(target_os = "macos")]
@@ -200,7 +181,7 @@ mod tests {
         let f = std::env::temp_dir().join(format!("afp-finder-{}.mp4", std::process::id()));
         std::fs::write(&f, b"x").unwrap();
         assert_eq!(read(&f), Some(vec![]));
-        assert!(set(&f, &["Turtle".into(), "Ёж".into()], &[]).unwrap());
+        write(&f, &["Turtle".into(), "Ёж".into()]).unwrap();
         assert_eq!(read(&f), Some(vec!["Turtle".to_string(), "Ёж".into()]));
         // The system's own tool reads it as an array of these strings
         let o = std::process::Command::new("/usr/bin/xattr").arg("-px").arg(XATTR).arg(&f).output().unwrap();
@@ -211,7 +192,7 @@ mod tests {
         let json = std::process::Command::new("/usr/bin/plutil").args(["-convert", "json", "-o", "-"]).arg(&tmp).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&json.stdout).trim(), r#"["Turtle","Ёж"]"#);
         // Taken off: the attribute goes
-        assert!(set(&f, &[], &["turtle".into(), "Ёж".into()]).unwrap());
+        write(&f, &[]).unwrap();
         assert_eq!(read(&f), Some(vec![]));
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_file(&tmp);

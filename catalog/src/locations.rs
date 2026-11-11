@@ -161,13 +161,11 @@ pub fn never_rename(project: &Path) -> bool {
         .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
 }
 
-/// Which files get Finder tags (Project settings, this computer's choices, kept in its own file; finder.rs): "own"
-/// (the default: moments, clip previews, exports, photos), "all" (the originals too), "off"
-pub fn finder_tags(project: &Path) -> String {
-    let doc = read_json(&project.join(PROJECT_FILE)).unwrap_or(Value::Null);
-    let v = doc.get("id").and_then(Value::as_str).and_then(local_file).and_then(|f| read_json(&f))
-        .and_then(|l| l.get("finder_tags").and_then(Value::as_str).map(str::to_string));
-    match v.as_deref() { Some("all") => "all".into(), Some("off") => "off".into(), _ => "own".into() }
+/// The tag stores the library syncs besides its own (docs/tags-and-culling.md): Project.afproject's `tag_stores`
+/// ("finder"), the library's choice, the same from every computer
+pub fn tag_stores(project: &Path) -> Vec<String> {
+    read_json(&project.join(PROJECT_FILE)).and_then(|d| d.get("tag_stores").cloned()).and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default().into_iter().filter(|s| s == "finder").collect()
 }
 
 /// The tags used last on this computer, the player's and the Library's (<data>/ActionFootage/tags-recent.json)

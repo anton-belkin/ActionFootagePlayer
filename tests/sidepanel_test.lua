@@ -269,12 +269,20 @@ mp.set_property_native("user-data/dji_telemetry", { available = false, model = "
 expect("no subtitles: none in Telemetry", find("subtitles"), nil)
 messages.tab("output")
 
--- Tags (the workspace plugin's tags.lua): the stars, the clip's tags (a click takes one off), the recent ones it hasn't
--- (a click puts one on), Tag… (K); a moment's are the moment's
+-- Culling and tags (the workspace plugin's tags.lua, docs/tags-and-culling.md): Accept / Reject, the stars, the
+-- original's tags (a click takes one off), the recent ones it hasn't (a click puts one on), Tag… (K); a moment's are
+-- the moment's; the clip preview button isn't culling any more
 mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", project = "/footage",
-    relative = "DJI_0001.MP4", moments = {},
-    tags = { kind = "clip", list = { "Turtle", "for family" }, rating = 2, recent = { "turtle", "Reef", "Dolphin" }, finder = "own" } })
+    relative = "DJI_0001.MP4", moments = {}, clip_preview = "made",
+    tags = { kind = "original", pick = "accept", list = { "Turtle", "for family" }, rating = 2, recent = { "turtle", "Reef", "Dolphin" }, stores = { "finder" } } })
 messages.tab("project")
+expect("pick: both buttons", find("pick:accept") ~= nil and find("pick:reject") ~= nil, true)
+click("pick:reject")
+expect("pick: Reject clicked", last_ran(), "script-message-to workspace tag-pick reject")
+click("pick:accept")
+expect("pick: Accept clicked (on: the plugin takes it off)", last_ran(), "script-message-to workspace tag-pick accept")
+click("clip-preview")
+expect("the preview button: removes the preview", last_ran(), "script-binding workspace/clip-preview")
 expect("tags: its chips", find("tag:Turtle") ~= nil and find("tag:for family") ~= nil, true)
 expect("tags: recent ones it hasn't", find("recent:Reef") ~= nil and find("recent:Dolphin") ~= nil, true)
 expect("tags: one it has isn't offered again", find("recent:turtle"), nil)
@@ -288,7 +296,7 @@ click("tag-ask")
 expect("tags: Tag… asks", last_ran(), "script-message-to workspace tag-ask")
 mp.set_property_native("user-data/workspace", { path = "/footage/_Moments/Turtle.afplink.mp4", clip = "/footage/DJI_0001.MP4", project = "/footage",
     moment = { file = "/footage/_Moments/Turtle.afplink.mp4", name = "Turtle", ["in"] = 1, out = 4 }, offset = 1, moments = {},
-    tags = { kind = "moment", list = {}, recent = {}, finder = "off" } })
+    tags = { kind = "moment", list = {}, recent = {}, stores = {} } })
 expect("tags: a moment's, none yet", find("tag:Turtle") == nil and find("tag-ask") ~= nil and find("star:1") ~= nil, true)
 mp.set_property_native("user-data/workspace", { path = "https://x/y.mp4", clip = "https://x/y.mp4" })
 expect("tags: none for a stream", find("tag-ask"), nil)

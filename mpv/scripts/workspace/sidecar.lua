@@ -9,7 +9,8 @@
 -- `marks` absent: the camera's marks are the clip's (nothing changed yet); present, even empty: they're these.
 -- `view` absent: the clip plays as the defaults say.
 -- `view360` (the view360 plugin's): a 360° clip's recorded view, `view360.recording` (docs/360-reframe.md).
--- `tags` (a list of names) and `rating` (1–5 stars): the clip's, set in the player (K) or the Library (tags.lua).
+-- `pick` ("accept"|"reject"), `rating` (1–5), `tags` (custom) and `synced` (what tag stores last agreed on): the
+-- original's, set in the player or the Library (tags.lua, docs/tags-and-culling.md).
 --
 -- Plain Lua, no mpv (tests/sidecar_test.lua):
 --   local sidecar = require('sidecar').new({ parse_json, format_json, windows, own_path })
@@ -97,7 +98,7 @@ function M.new(env)
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
     -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water), no
-    -- 360 recording, no location (the Library's, docs/geolocation.md), no tags and no rating (tags.lua): the file removed
+    -- 360 recording, no location (the Library's, docs/geolocation.md), no tags, rating or pick (tags.lua; `synced` alone keeps nothing): the file removed
     function s.update(clip, fn)
         local p, list = own(clip)
         if not p then
@@ -110,7 +111,7 @@ function M.new(env)
         doc.format = M.FORMAT
         local file = p
         if doc.marks == nil and doc.view == nil and doc.source == nil and doc.view360 == nil and doc.location == nil
-            and (type(doc.tags) ~= "table" or next(doc.tags) == nil) and doc.rating == nil then
+            and (type(doc.tags) ~= "table" or next(doc.tags) == nil) and doc.rating == nil and doc.pick == nil then
             if from then os.remove(from); if env.note then env.note(from) end end
             return true
         end

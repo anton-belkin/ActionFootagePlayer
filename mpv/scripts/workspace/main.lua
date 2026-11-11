@@ -19,14 +19,15 @@
 --   _Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
--- Tags and stars (tags.lua, the Library's too): K asks for a tag for what plays (the clip; the moment or export
--- playing), kept in the clip's own file or the link; Finder's tags follow (section "Tags and the rating", below).
+-- Tags and culling (tags.lua, docs/tags-and-culling.md): P accept, X reject, U neither, 1-5 stars, 0 none, K a custom
+-- tag, on the original or the moment playing; kept in the original's own file or the link, synced with the library's
+-- stores (Finder's tags), section "Tags and culling" below.
 --
 -- Clip previews: <the clip's path>.afplink.mp4 in a run's Generated/<date> <time> Clip previews/ (moved anywhere in
 -- the project's folder from there), a flipbook of the clip in color (its marks, else a dozen frames), made by Action
 -- Footage Library (the batch mode at the end of this file), one at a time in the background, for the clips without
 -- one. Nothing remembers a deleted one (docs/library-management.md §8): asked again, it's made again.
---   X                   this clip isn't interesting: its preview to the Trash; again: made again
+--   (menu)              this clip's preview to the Trash, or made again (X was it: now Reject, docs/tags-and-culling.md)
 -- A clip preview's file plays its original, all of it.
 --
 -- A clip spoiled in part (docs/lossless-cut.md): Ctrl+x cuts the A-B part out, the menu also all before or after
@@ -62,7 +63,7 @@
 --   own_others      the clip's own files beside its other copies (in other locations): read, never written; the main
 --                   one is sidecar_file (workspace.lua's own_file)
 --   moments         after it loads: the clip's moments, { name, file, in, out }, in the order of their in
---   tags            once it loads: { kind (clip, moment, export), list, rating (1–5, absent: none), recent, finder }
+--   tags            once it loads: { kind (original, moment), pick, rating, list (custom), recent, stores }
 --   moments_folder  where the project's new moments go: its Generated/ folder (_Moments/ in a project of before)
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
@@ -1057,7 +1058,8 @@ local function save(name, update, typed, quiet, opts)
     -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
     if update then
         local old = utils.parse_json(fs.read_link(update.file) or "")
-        if type(old) == "table" then l.tags, l.rating = old.tags, old.rating end
+        -- (not what the stores agreed on: the new file has no Finder tags yet, the next sync puts them on)
+        if type(old) == "table" then l.tags, l.rating, l.pick = old.tags, old.rating, old.pick end
     end
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
     -- own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
@@ -1864,16 +1866,17 @@ mp.register_script_message("project-folder", function()
 end)
 
 -- X: this clip isn't interesting, its preview to the Trash; without one, it's made (again)
-mp.add_key_binding("X", "not-interesting", function()
+-- A clip preview removed (to the Trash), or made (again): the menu's; X was it before culling (docs/tags-and-culling.md)
+mp.add_key_binding(nil, "clip-preview", function()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return end
-    if not need_project("Marking a clip not interesting") then return end
+    if not need_project("A clip preview") then return end
     do
         local info = utils.file_info(state.clip)
         local preview = preview_for(state.relative, info and info.size)
         if preview then
             local where = trash_name(preview)
             return trash(preview, function(ok)
-                mp.osd_message(ok and ("Not interesting: its preview is in " .. where .. " (X again: made again)") or ("Couldn't move the preview to " .. where), 3)
+                mp.osd_message(ok and ("Its preview is in " .. where) or ("Couldn't move the preview to " .. where), 3)
                 recount()
             end)
         end
@@ -3040,16 +3043,19 @@ local function lens_type_of(clip)
     local doc = clip and sidecar.read(clip)
     return type(doc) == "table" and type(doc.source) == "table" and doc.source.lens_type or nil
 end
--- ---------- Tags and the rating (tags.lua) ----------
--- The clip's, the moment's or the export's that plays: a moment playing (its file, even with its original away) is
--- the moment's, an export's the export's, else the clip's (a clip preview playing: its clip's). Published as
--- user-data/workspace/tags: { kind (clip, moment, export), list, rating, recent (the tags used last on this computer,
--- the Library's too), finder (own, all, off: which files get Finder tags) }.
---   K                     a tag typed: on, or off when on (tags.lua's parse: +a, -a, *3 stars, *0 none; commas)
--- Script messages: tag <text> (as typed at K), tag-toggle <name>, tag-rate <0-5> (the same stars again: none),
--- tag-ask (K). The Library's changes to the file come through heard (below): read again.
--- (in a block of its own: the file's main chunk is at Lua's 200 locals; tags_reload is fs's, for heard below)
-do
+-- ---------- Tags and culling (tags.lua, docs/tags-and-culling.md) ----------
+-- What plays is tagged: the original (also while its clip preview plays), or the moment playing. An export has
+-- nothing to tag. Published as user-data/workspace/tags: { kind (original, moment), pick, rating, list (custom tags),
+-- recent (the tags used last on this computer, the Library's too), stores (the library's enabled stores this computer
+-- syncs: "finder") }.
+--   P / X / U             accept / reject / neither (P or X again: neither)
+--   1–5, 0                that many stars (the same again: none), none
+--   K                     a custom tag typed: on, or off when on (tags.lua's parse: +a, -a, *3 stars, commas)
+-- Script messages: tag <text> (as typed at K), tag-toggle <name>, tag-rate <0-5>, tag-pick <accept|reject|none>,
+-- tag-ask (K). Each enabled store is synced both ways as the item loads and after each change (three-way, tags.lua's
+-- merge). The Library's changes come through heard (below): read again.
+-- (A function of its own: the file's main chunk is at Lua's 200 locals; what heard and the moments need is fs's)
+;(function()
 local tags_lib = require 'tags'
 local function support_dir()
     local base = windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
@@ -3070,104 +3076,136 @@ local function remember_tags(used)
     os.rename(recent_file() .. ".tmp", recent_file())
 end
 
+-- What plays, to tag: { kind, file (the original or the moment's file) }; nil for an export, a stream
 local function tag_target()
-    if not state.clip or state.clip:find("://", 1, true) then return nil end
+    if not state.clip or state.clip:find("://", 1, true) or state.export then return nil end
     if state.moment and state.moment.file then return { kind = "moment", file = state.moment.file } end
-    if state.export then return { kind = "export", file = state.clip } end
-    return { kind = "clip", file = state.clip }
+    return { kind = "original", file = state.clip }
 end
 
--- The target's tags and rating as kept: a link's, or the clip's own file's
+-- The target's record: a moment's link, or the original's own file (and the file that holds it, for its time)
 local function tags_read(t)
-    if t.kind == "clip" then
+    if t.kind == "original" then
         local doc = sidecar.read(t.file)
-        return type(doc) == "table" and doc or {}
+        return type(doc) == "table" and doc or {}, sidecar.path(t.file)
     end
     local l = utils.parse_json(fs.read_link(t.file) or "")
-    return type(l) == "table" and l or {}
+    return type(l) == "table" and l or {}, t.file
 end
 
--- Finder's tags on a file made to follow the library's (macOS only): `removed` taken off, `list` put on
-local function finder_follow(file, list, removed)
-    if not macos or not file or not fs.is_file(file) then return end
+-- The record changed by fn(record) (true: changed): the original's own file, or the moment's link
+local function tags_write(t, fn)
+    if t.kind == "original" then
+        return sidecar.update(t.file, function(d) local c = fn(d); if c then stamp(d) end; return c end)
+    end
+    local doc = tags_read(t)
+    if not fn(doc) then return true end
+    local ok = rewrite_link(t.file, function(l) fn(l) end)
+    return ok, not ok and "couldn't write its link (afp-cut)" or nil
+end
+
+-- The stores the library enabled (Project.afproject's tag_stores) that this computer syncs: Finder's on a Mac
+local function enabled_stores()
+    if not macos or not state.project then return {} end
+    local d = fs.read_json(ws.join(state.project, workspace.PROJECT_FILE)) or {}
+    for _, s in ipairs(type(d.tag_stores) == "table" and d.tag_stores or {}) do
+        if s == "finder" then return { "finder" } end
+    end
+    return {}
+end
+
+-- A file's Finder tags (strings) and its change time
+local function finder_read(file)
     local r = mp.command_native({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true,
                                   args = { "/usr/bin/xattr", "-px", tags_lib.FINDER_XATTR, file } })
-    local now = (r and r.status == 0) and tags_lib.finder_parse(tags_lib.unhex(r.stdout) or "") or {}
-    local new = tags_lib.finder_follow(now, list, removed)
-    if not new then return end
-    local args = #new == 0 and { "/usr/bin/xattr", "-d", tags_lib.FINDER_XATTR, file }
-        or { "/usr/bin/xattr", "-wx", tags_lib.FINDER_XATTR, tags_lib.hex(tags_lib.finder_plist(new)), file }
+    local info = utils.file_info(file)
+    local list = (r and r.status == 0) and tags_lib.finder_parse(tags_lib.unhex(r.stdout) or "") or {}
+    return list, info and info.ctime or 0
+end
+local function finder_write(file, list)
+    local args = #list == 0 and { "/usr/bin/xattr", "-d", tags_lib.FINDER_XATTR, file }
+        or { "/usr/bin/xattr", "-wx", tags_lib.FINDER_XATTR, tags_lib.hex(tags_lib.finder_plist(list)), file }
     local w = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true, args = args })
-    if not (w and w.status == 0) then mp.msg.warn("couldn't write Finder tags on " .. file .. ": " .. tostring(w and w.stderr)) end
+    if not (w and w.status == 0) and #list > 0 then mp.msg.warn("couldn't write Finder tags on " .. file .. ": " .. tostring(w and w.stderr)) end
 end
 
--- The files that show the target's tags in Finder: a moment's or export's own file; a clip's preview (all: and the
--- clip itself)
-local function finder_files(t)
-    local mode = fs.finder_tags(state.project)
-    if mode == "off" then return {} end
-    if t.kind ~= "clip" then return { t.file } end
-    local out = {}
-    local preview = state.playing_preview and state.playing_preview.file
-    if not preview and state.project and state.relative then
-        local info = utils.file_info(t.file)
-        local ok, p = pcall(preview_for, state.relative, info and info.size)
-        preview = ok and p or nil
+-- The original's file whose Finder tags are its: the copy beside its own file (the archive's, a working copy playing)
+local function store_file(t)
+    if t.kind ~= "original" then return t.file end
+    local own = sidecar.path(t.file)
+    local ext = t.file:match("(%.[^./\\]+)$") or ""
+    local main = own and own:gsub("%.afp%.json$", "") .. ext
+    return (main and fs.is_file(main)) and main or t.file
+end
+
+-- The item synced with each enabled store, three-way: what changed outside comes in, what changed here goes out.
+-- What came in, for the OSD
+local function tags_sync(t)
+    local came = nil
+    for _, store in ipairs(enabled_stores()) do
+        if store == "finder" then
+            local file = store_file(t)
+            if fs.is_file(file) then
+                local now, ctime = finder_read(file)
+                local rec, rec_file = tags_read(t)
+                local info = rec_file and utils.file_info(rec_file)
+                local base = type(rec.synced) == "table" and type(rec.synced.finder) == "table" and tags_lib.from_finder(rec.synced.finder) or nil
+                local lib = tags_lib.model(rec)
+                local merged = tags_lib.merge(base, lib, tags_lib.from_finder(now), ctime > (info and info.mtime or 0) + 1)
+                local strings = tags_lib.to_finder(merged, now)
+                local agreed = #strings > 0 and strings or nil
+                local had = type(rec.synced) == "table" and rec.synced.finder or nil
+                -- The record first (a link written again may be a new file), then Finder's
+                if not tags_lib.same(merged, lib) or table.concat(had or {}, "\0") ~= table.concat(agreed or {}, "\0") then
+                    tags_write(t, function(d)
+                        tags_lib.put(d, merged)
+                        d.synced = type(d.synced) == "table" and d.synced or {}
+                        d.synced.finder = agreed
+                        if next(d.synced) == nil then d.synced = nil end
+                        return true
+                    end)
+                    if not tags_lib.same(merged, lib) then came = "Finder" end
+                end
+                if table.concat(strings, "\0") ~= table.concat(now, "\0") then finder_write(file, strings) end
+            end
+        end
     end
-    if preview then out[#out + 1] = preview end
-    if mode == "all" then out[#out + 1] = t.file end
-    return out
+    return came
 end
 
-local function tags_reload()
+local function tags_reload(sync)
     local t = tag_target()
     if not t then state.tags = nil; return publish() end
-    local d = tags_read(t)
-    state.tags = { kind = t.kind, list = tags_lib.list(d.tags), rating = tags_lib.rating(d.rating), recent = recent_tags(),
-                   finder = macos and fs.finder_tags(state.project) or "off" }
+    if sync then
+        local came = tags_sync(t)
+        if came then mp.osd_message("Tags changed in " .. came .. ": taken into the library", 2) end
+    end
+    local m = tags_lib.model(tags_read(t))
+    state.tags = { kind = t.kind, pick = m.pick, rating = m.rating, list = m.tags, recent = recent_tags(), stores = enabled_stores() }
     publish()
 end
 
--- What was asked (tags.lua's parse, or { rename } ...) done to what plays
+-- What was asked (tags.lua's parse, { pick }, { rating }) done to what plays, then synced to the stores
 local function tags_change(op)
     local t = tag_target()
-    if not t then return mp.osd_message("Nothing to tag: a clip, a moment or an export of footage on this computer", 3) end
-    local before = tags_lib.list(tags_read(t).tags)
-    local after, rating
-    local function change(d)
-        local changed = tags_lib.apply(d, op)
-        after, rating = tags_lib.list(d.tags), d.rating
-        return changed
-    end
-    local ok, err
-    if t.kind == "clip" then
-        ok, err = sidecar.update(t.file, function(d) local c = change(d); if c then stamp(d) end; return c end)
-    else
-        local doc = tags_read(t)
-        if change(doc) then
-            ok = rewrite_link(t.file, function(l) change(l) end)
-            err = not ok and "couldn't write its link (afp-cut)" or nil
-        else
-            ok = true
-        end
-    end
+    if not t then return mp.osd_message(state.export and "An export isn't tagged: its moment or original is" or "Nothing to tag here", 3) end
+    local before = tags_lib.model(tags_read(t))
+    local ok, err = tags_write(t, function(d) return tags_lib.apply(d, op) end)
     if not ok then
         mp.osd_message("Tags not saved: " .. tostring(err), 5)
-        return tags_reload()
+        return tags_reload(false)
     end
-    after = after or before
-    local removed = {}
-    for _, b in ipairs(before) do if not tags_lib.find(after, b) then removed[#removed + 1] = b end end
-    local added = {}
-    for _, a in ipairs(after) do if not tags_lib.find(before, a) then added[#added + 1] = a end end
-    for _, f in ipairs(finder_files(t)) do finder_follow(f, after, removed) end
-    remember_tags(added)
+    tags_sync(t)
+    local after = tags_lib.model(tags_read(t))
     local parts = {}
-    for _, a in ipairs(added) do parts[#parts + 1] = "+" .. a end
-    for _, r in ipairs(removed) do parts[#parts + 1] = "−" .. r end
-    if op.rating ~= nil then parts[#parts + 1] = (rating and string.rep("★", rating) or "no stars") end
-    if #parts > 0 then mp.osd_message(({ clip = "Clip", moment = "Moment", export = "Export" })[t.kind] .. ": " .. table.concat(parts, "  "), 2) end
-    tags_reload()
+    if after.pick ~= before.pick then parts[#parts + 1] = after.pick == "accept" and "✓ Accepted" or after.pick == "reject" and "✕ Rejected" or "Not picked" end
+    if after.rating ~= before.rating then parts[#parts + 1] = after.rating and string.rep("★", after.rating) or "No stars" end
+    local added = {}
+    for _, a in ipairs(after.tags) do if not tags_lib.find(before.tags, a) then added[#added + 1] = a; parts[#parts + 1] = "+" .. a end end
+    for _, b in ipairs(before.tags) do if not tags_lib.find(after.tags, b) then parts[#parts + 1] = "−" .. b end end
+    remember_tags(added)
+    if #parts > 0 then mp.osd_message((t.kind == "moment" and "Moment: " or "Original: ") .. table.concat(parts, "  "), 2) end
+    tags_reload(false)
 end
 
 -- K: a tag typed, the recent ones offered (Tab completes the one being typed)
@@ -3179,10 +3217,8 @@ local function tags_ask()
     local offer = {}
     for _, r in ipairs(recent_tags()) do offer[#offer + 1] = r end
     for _, n in ipairs(now) do if not tags_lib.find(offer, n) then offer[#offer + 1] = n end end
-    local stars = state.tags and state.tags.rating
     input.get({
-        prompt = "Tag " .. t.kind .. (#now > 0 and (" [" .. table.concat(now, ", ") .. "]") or "")
-            .. (stars and (" " .. string.rep("★", stars)) or "") .. " (a tag on/off, -off, *3 stars):",
+        prompt = "Tag the " .. t.kind .. (#now > 0 and (" [" .. table.concat(now, ", ") .. "]") or "") .. " (a tag on/off, -off):",
         id = "workspace-tags",
         complete = function(before)
             local head, word = before:match("^(.*,%s*[%+%-]?)(.*)$")
@@ -3199,26 +3235,36 @@ local function tags_ask()
     })
 end
 
+local function pick(which)
+    -- The same again: neither
+    if which ~= "none" and state.tags and state.tags.pick == which then which = "none" end
+    tags_change({ pick = which })
+end
+local function rate(n)
+    n = tonumber(n) or 0
+    if n > 0 and state.tags and state.tags.rating == n then n = 0 end
+    tags_change({ rating = n })
+end
+
 mp.add_key_binding("K", "tags", tags_ask)
+mp.add_key_binding("P", "accept", function() pick("accept") end)
+mp.add_key_binding("X", "reject", function() pick("reject") end)
+mp.add_key_binding("U", "unpick", function() pick("none") end)
+for n = 0, 5 do mp.add_key_binding(tostring(n), "rate-" .. n, function() rate(n) end) end
 mp.register_script_message("tag-ask", tags_ask)
 mp.register_script_message("tag", function(text) if text and text ~= "" then tags_change(tags_lib.parse(text)) end end)
 mp.register_script_message("tag-toggle", function(name) if tags_lib.clean(name) then tags_change({ toggle = { name } }) end end)
-mp.register_script_message("tag-rate", function(n)
-    n = tonumber(n) or 0
-    -- The stars it has, clicked again: none
-    if state.tags and state.tags.rating == n then n = 0 end
-    tags_change({ rating = n })
-end)
-mp.register_event("file-loaded", tags_reload)
-fs.tags_reload = tags_reload
--- A moment written again (k on one playing: a new file renamed over the old, its attributes gone): its Finder tags
--- put back from its link, which kept them
+mp.register_script_message("tag-rate", rate)
+mp.register_script_message("tag-pick", function(which) if which == "accept" or which == "reject" or which == "none" then pick(which) end end)
+-- Each item synced with the stores as it loads: what was changed in Finder meanwhile comes in
+mp.register_event("file-loaded", function() tags_reload(true) end)
+fs.tags_reload = function() tags_reload(true) end
+-- A moment written again (k on one playing: a new file renamed over the old, its attributes gone): synced again, so
+-- its Finder tags come back from its link, which kept them
 fs.tags_refollow = function(file)
-    if fs.finder_tags(state.project) == "off" then return end
-    local l = utils.parse_json(fs.read_link(file) or "")
-    if type(l) == "table" then finder_follow(file, tags_lib.list(l.tags), {}) end
+    if state.moment and state.moment.file == file then tags_reload(true) end
 end
-end
+end)()
 
 local inbox, inbox_at, lens_loaded = nil, 0, nil
 mp.register_event("file-loaded", function() lens_loaded = lens_type_of(state.clip) end)

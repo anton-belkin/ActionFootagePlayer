@@ -145,7 +145,7 @@ pub fn read(path: &Path) -> io::Result<Option<Value>> {
         let text = std::fs::read(path)?;
         let Ok(own) = serde_json::from_slice::<Value>(&text) else { return Ok(None) };
         let pick = |k: &str| own.get(k).cloned().unwrap_or(Value::Null);
-        return Ok(Some(json!({ "own": { "marks": pick("marks"), "view": pick("view"), "source": pick("source"), "tags": pick("tags"), "rating": pick("rating"), "location": pick("location") } })));
+        return Ok(Some(json!({ "own": { "marks": pick("marks"), "view": pick("view"), "source": pick("source"), "tags": pick("tags"), "rating": pick("rating"), "pick": pick("pick"), "location": pick("location") } })));
     }
     if is_video(&lower) {
         let keys = mp4_keys(path)?;

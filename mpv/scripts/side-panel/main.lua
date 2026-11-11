@@ -632,10 +632,10 @@ local function project_part(u, x, w, y)
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
     end
 
-    -- Its tags and stars (the clip's, the moment's or the export's: tagchips.lua)
+    -- Keep it? Accept / Reject, stars, tags (the original's or the moment's: tagchips.lua, docs/tags-and-culling.md)
     if ws.tags then
-        y = tagchips.draw(u, ui, x, w, y + 4 * s, ws.tags, keys["script-binding workspace/tags"],
-                          function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
+        y = tagchips.draw(u, ui, x, w, y + 4 * s, ws.tags, { accept = keys["script-binding workspace/accept"], reject = keys["script-binding workspace/reject"],
+                          tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
     end
 
     local pos = mp.get_property_number("time-pos", 0)
@@ -680,10 +680,9 @@ local function project_part(u, x, w, y)
     end
 
     if ws.project and not mo then
-        local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
-            or ws.clip_preview == "removed" and "Not interesting · undo" or "Make this clip's preview"
-        y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting",
-                     { key = keys["script-binding workspace/not-interesting"], disabled = ws.clips ~= nil })
+        -- Not culling any more (Reject is: docs/tags-and-culling.md): the preview itself, removed or made
+        local label = ws.clip_preview == "made" and "Remove this clip's preview" or "Make this clip's preview"
+        y = u:button(x, w, y + 6 * s, "clip-preview", label, "script-binding workspace/clip-preview", { disabled = ws.clips ~= nil })
     end
 
     -- The part marked now: it goes with the clip
