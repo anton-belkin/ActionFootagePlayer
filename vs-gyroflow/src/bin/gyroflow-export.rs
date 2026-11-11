@@ -164,7 +164,8 @@ at 960 px as with the options above (--project, --level, --underwater, --horizon
 measured, fitted to the camera's own jerks. Prints a JSON line: the cache file (translation), the jitter above 1 Hz at 960 px
 wide measured and left (before, after) and the share of the fit used (share); --progress writes the percent done
 Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
-rendition as the image, the HDR one (HLG) above it
+rendition as the image, the HDR one (HLG) above it. Its place in its Exif GPS (a Live or Motion Photo's video in its
+QuickTime location): the camera's GPS at that time, else the clip's location in the Library (docs/geolocation.md)
   --sdr-image <maker|nbcu|macos>  the SDR image: DJI's LUT (D-Log M; the default for it), NBCU's conversion of the
                    HLG (the default for the others), or the HLG as macOS shows it on an SDR screen (afp-photo)
   --radius <n>     clean it up from n frames on each side (0-7, default 5; 0: as it is), as the player's Ctrl+p
@@ -1184,6 +1185,8 @@ struct Part {
     dv: bool,
     // In an SDR look ("maker", "nbcu"), the one its photo's image has; None: as the export plays (a Live Photo's HLG)
     sdr: Option<&'static str>,
+    // Where its photo was taken (ISO 6709), as its QuickTime location
+    location: Option<String>,
 }
 
 // How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
@@ -1718,11 +1721,15 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         }
         Ok(read)
     })();
-    // A preview: its MP4 from the frame. An export: its link
+    // A preview: its MP4 from the frame. An export: its link, and a photo's motion its photo's place
     let result = result.and_then(|read| match (&preview_files, &opts.link) {
         (Some(files), _) => write_preview(files, 1, (to - from).max(1.0 / fps), &tags, &tmp_path, opts, opts.dates.map(|d| (d, true))).map(|_| read),
-        (None, Some(link)) => vs_gyroflow::mp4meta::write_keys(&tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, link)]).map(|_| read),
-        (None, None) => Ok(read),
+        (None, link) => {
+            let mut keys = Vec::new();
+            if let Some(l) = link { keys.push((vs_gyroflow::mp4meta::LINK_KEY, l.as_str())); }
+            if let Some(l) = part.and_then(|p| p.location.as_deref()) { keys.push((vs_gyroflow::mp4meta::LOCATION_KEY, l)); }
+            if keys.is_empty() { Ok(read) } else { vs_gyroflow::mp4meta::write_keys(&tmp_path, &keys).map(|_| read) }
+        }
     });
     let frames = match result {
         Ok(f) => f,
@@ -1898,6 +1905,11 @@ fn photo_link(clip: &Path, opts: &Options, t: f64) -> String {
     }
     if let Ok(m) = std::fs::metadata(clip) { o.entry("size").or_insert(m.len().into()); }
     ws::with_fingerprint(&serde_json::Value::Object(o).to_string(), clip)
+}
+
+/// A place for afp-photo's --gps: "lat,lon[,alt]"
+fn gps_arg(p: &vs_gyroflow::geotag::Fix) -> String {
+    format!("{:.8},{:.8}{}", p.lat, p.lon, p.alt.map(|a| format!(",{a:.3}")).unwrap_or_default())
 }
 
 fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
@@ -2149,6 +2161,14 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         Ok((sdr, hdr, label, cleaned))
     };
 
+    // The camera, and where the frame was taken (the camera's GPS at its time, else the Library's location for the
+    // clip): the photo's Exif GPS, its video's QuickTime location
+    let maker = probe::camera(&path.to_string_lossy());
+    let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
+    let place = vs_gyroflow::geotag::photo_place(&path, make.as_deref().unwrap_or(""), n as f64 / fps);
+    lap("place");
+    let place = place.as_ref();
+
     std::thread::scope(|scope| {
         // The motion: the part of the video around it, exported as it plays, at the same time as the image
         let motion = opts.live.then(|| {
@@ -2160,7 +2180,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let from = first as f64 / fps;
             let to = (t + half).min(info.duration.max(from + 1.0 / fps));
             let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
-            let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr };
+            let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr,
+                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)) };
             // The photo's frame in it: the part starts at `first`
             let at = (n - first) as f64 / fps;
             scope.spawn(move || {
@@ -2184,10 +2205,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
 
         let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
         let link = photo_link(&path, opts, n as f64 / fps);
-        let maker = probe::camera(&path.to_string_lossy());
-        let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
         if jpeg {
-            let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref());
+            let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref(), place.map(|p| &p.0));
             let video = match &live { Some((f, _)) => Some(std::fs::read(&f.0).map_err(|e| format!("{}: {e}", f.0.display()))?), None => None };
             let motion = video.as_deref().zip(live.as_ref()).map(|(v, (_, at))| ph::Motion { video: v, presentation_us: (at * 1e6).round() as i64 });
             let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref(), Some(&link))?;
@@ -2204,6 +2223,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             if let Some(t) = &taken { cmd.args(["--taken", t]); }
             if let Some(m) = &make { cmd.args(["--make", m]); }
             if let Some(m) = &model { cmd.args(["--model", m]); }
+            if let Some((p, _)) = place { cmd.args(["--gps", &gps_arg(p)]); }
             cmd.args(["--link", &link]);
             // A Live Photo: the video copied next to it, the two with one content identifier
             if let Some((video, at)) = &live {
@@ -2218,6 +2238,10 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
                   if cleaned > 0 { format!(" · cleaned up from {cleaned} frames") } else { String::new() },
                   if hdr.is_some() { if jpeg { "Ultra HDR JPEG" } else { "HEIC with a gain map" } } else if jpeg { "JPEG" } else { "HEIC" });
         if live.is_some() { eprintln!("  {}", if jpeg { "Motion Photo: the video in the JPEG" } else { "Live Photo: the .mov next to it" }); }
+        match place {
+            Some((p, why)) => eprintln!("  at {:.6}, {:.6}{} ({why})", p.lat, p.lon, p.alt.map(|a| format!(", {a:.1} m")).unwrap_or_default()),
+            None => eprintln!("  no place: no GPS in the clip, no location for it in the Library"),
+        }
         Ok(Outcome::Done(out_path))
     })
 }
