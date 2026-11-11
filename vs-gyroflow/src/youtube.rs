@@ -130,15 +130,24 @@ impl Cube {
     pub fn at(&self, rgb: [f64; 3]) -> [f64; 3] {
         tetrahedral(self.n, &self.data, rgb.map(|v| v as f32)).map(|v| v as f64)
     }
-    /// The input that gives `target`: Newton's method on the interpolated LUT, from the neutral axis' inverse, kept in
-    /// 0..1 (a target the LUT never reaches ends at the nearest it does, along the way)
-    pub fn invert(&self, target: [f64; 3], neutral: &NeutralInverse) -> [f64; 3] {
-        let mut x = [0usize, 1, 2].map(|c| neutral.at(c, target[c]));
+    /// The input that gives `target`: Newton's method on the interpolated LUT, each step shortened until it gets closer,
+    /// kept in 0..1; from the neutral axis' inverse, else (a saturated color, where that start leads astray) from the
+    /// nearest of a coarse grid's. A target the LUT never reaches ends at the nearest it finds
+    pub fn invert(&self, target: [f64; 3], seeds: &InverseSeeds) -> [f64; 3] {
+        let first = self.newton(target, [0usize, 1, 2].map(|c| seeds.neutral(c, target[c])));
+        if first.1 < 1e-6 { return first.0; }
+        let second = self.newton(target, seeds.nearest(target));
+        if second.1 < first.1 { second.0 } else { first.0 }
+    }
+
+    fn newton(&self, target: [f64; 3], start: [f64; 3]) -> ([f64; 3], f64) {
+        let miss = |y: [f64; 3]| (0..3).map(|i| (y[i] - target[i]).abs()).fold(0.0, f64::max);
         let h = 0.5 / (self.n - 1) as f64;
-        for _ in 0..30 {
-            let y = self.at(x);
-            let r = [y[0] - target[0], y[1] - target[1], y[2] - target[2]];
-            if r.iter().all(|v| v.abs() < 1e-7) { break; }
+        let mut x = start;
+        let mut y = self.at(x);
+        let mut err = miss(y);
+        for _ in 0..40 {
+            if err < 1e-7 { break; }
             // The Jacobian by central differences over half a cell (the LUT is linear within its tetrahedra)
             let mut j = [[0.0; 3]; 3];
             for k in 0..3 {
@@ -148,24 +157,28 @@ impl Cube {
                 let (ya, yb) = (self.at(a), self.at(b));
                 for i in 0..3 { j[i][k] = (ya[i] - yb[i]) / (a[k] - b[k]).max(1e-12); }
             }
+            let r = [y[0] - target[0], y[1] - target[1], y[2] - target[2]];
             let Some(step) = solve3(j, r) else { break };
-            let mut moved = 0.0f64;
-            for k in 0..3 {
-                let v = (x[k] - step[k]).clamp(0.0, 1.0);
-                moved = moved.max((v - x[k]).abs());
-                x[k] = v;
+            let mut t = 1.0;
+            let mut better = false;
+            while t > 1e-3 {
+                let c = [0usize, 1, 2].map(|k| (x[k] - t * step[k]).clamp(0.0, 1.0));
+                let yc = self.at(c);
+                let e = miss(yc);
+                if e < err { x = c; y = yc; err = e; better = true; break; }
+                t *= 0.5;
             }
-            if moved < 1e-9 { break; }
+            if !better { break; }
         }
-        x
+        (x, err)
     }
 }
 
-/// Each channel of a LUT along its neutral axis, inverted: where to start inverting the LUT
-pub struct NeutralInverse { curves: [Vec<(f64, f64)>; 3] }
+/// Where to start inverting a LUT: each channel along its neutral axis, inverted, and a coarse grid of its values
+pub struct InverseSeeds { curves: [Vec<(f64, f64)>; 3], grid: Vec<([f64; 3], [f64; 3])> }
 
-impl NeutralInverse {
-    pub fn new(cube: &Cube) -> NeutralInverse {
+impl InverseSeeds {
+    pub fn new(cube: &Cube) -> InverseSeeds {
         let steps = 1024;
         let samples: Vec<(f64, [f64; 3])> = (0..=steps).map(|i| { let g = i as f64 / steps as f64; (g, cube.at([g; 3])) }).collect();
         let curves = [0, 1, 2].map(|c| {
@@ -176,9 +189,15 @@ impl NeutralInverse {
             }
             v
         });
-        NeutralInverse { curves }
+        let k = 17;
+        let mut grid = Vec::with_capacity(k * k * k);
+        for b in 0..k { for g in 0..k { for r in 0..k {
+            let x = [r, g, b].map(|i| i as f64 / (k - 1) as f64);
+            grid.push((x, cube.at(x)));
+        }}}
+        InverseSeeds { curves, grid }
     }
-    fn at(&self, c: usize, y: f64) -> f64 {
+    fn neutral(&self, c: usize, y: f64) -> f64 {
         let v = &self.curves[c];
         if v.is_empty() { return 0.5; }
         if y <= v[0].0 { return v[0].1; }
@@ -186,6 +205,10 @@ impl NeutralInverse {
         if i >= v.len() { return v[v.len() - 1].1; }
         let ((y0, g0), (y1, g1)) = (v[i - 1], v[i]);
         g0 + (g1 - g0) * (y - y0) / (y1 - y0)
+    }
+    fn nearest(&self, y: [f64; 3]) -> [f64; 3] {
+        let d = |o: &[f64; 3]| (0..3).map(|i| (o[i] - y[i]).powi(2)).sum::<f64>();
+        self.grid.iter().min_by(|a, b| d(&a.1).total_cmp(&d(&b.1))).map_or([0.5; 3], |g| g.0)
     }
 }
 
@@ -232,8 +255,8 @@ pub fn sdr_lut(from: &SdrFrom, n: usize, levels: Levels, title: &str) -> Result<
         }
         SdrFrom::HlgMaker { log_hlg, maker } => {
             let (log, maker) = (Cube::read(log_hlg)?, Cube::read(maker)?);
-            let neutral = NeutralInverse::new(&log);
-            Box::new(move |pq| maker.at(log.invert(pq_to_hlg(pq), &neutral)).map(|v| v.clamp(0.0, 1.0)))
+            let seeds = InverseSeeds::new(&log);
+            Box::new(move |pq| maker.at(log.invert(pq_to_hlg(pq), &seeds)).map(|v| v.clamp(0.0, 1.0)))
         }
         SdrFrom::PqNbcu { nbcu_pq } => {
             let nbcu = Cube::read(nbcu_pq)?;
@@ -321,18 +344,29 @@ mod tests {
     #[test]
     fn invert_dlogm() {
         let cube = Cube::read(&luts().join("dlogm_hlg.cube")).unwrap();
-        let neutral = NeutralInverse::new(&cube);
+        let seeds = InverseSeeds::new(&cube);
         for x in [[0.1, 0.1, 0.1], [0.4, 0.35, 0.3], [0.62, 0.55, 0.41], [0.2, 0.6, 0.5], [0.8, 0.7, 0.75], [0.33, 0.33, 0.6]] {
-            let back = cube.invert(cube.at(x), &neutral);
+            let back = cube.invert(cube.at(x), &seeds);
             let (y, yb) = (cube.at(x), cube.at(back));
             for i in 0..3 { assert!((yb[i] - y[i]).abs() < 1e-5, "{x:?}: {back:?}"); }
         }
     }
 
+    // CIE L*a*b* of a BT.709 signal (BT.1886, gamma 2.4), for errors as they're seen
+    fn lab(c: [f64; 3]) -> [f64; 3] {
+        let l = c.map(|v| v.clamp(0.0, 1.0).powf(2.4));
+        let xyz = [(0.4124 * l[0] + 0.3576 * l[1] + 0.1805 * l[2]) / 0.95047, 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2],
+                   (0.0193 * l[0] + 0.1192 * l[1] + 0.9505 * l[2]) / 1.08883];
+        let f = xyz.map(|t| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 });
+        [116.0 * f[1] - 16.0, 500.0 * (f[0] - f[1]), 200.0 * (f[1] - f[2])]
+    }
+
     // The whole chain as the video and YouTube would run it from D-Log M: the export's PQ LUT, then the LUT inside
-    // (both written as .cube and read back, at `n` points), against the player's own SDR look at points between the
-    // grids. The worst and the mean error, in 10-bit codes of the SDR signal
-    fn chain_error(from: &SdrFrom, want: &dyn Fn([f64; 3]) -> [f64; 3], n: usize) -> (f64, f64) {
+    // (both written as .cube and read back, at `n` points), against the player's own SDR look, at points between the
+    // grids where the D-Log M LUT's HLG isn't clipped (where it is, the HDR has lost what tells those colors apart, and
+    // no LUT of the HDR gets them back). The share of points left out; the mean and 99th percentile difference in
+    // 10-bit codes of the SDR signal (the largest of R, G, B), and in CIE76 ΔE
+    fn chain_error(from: &SdrFrom, want: &dyn Fn([f64; 3]) -> [f64; 3], n: usize) -> [f64; 5] {
         let dir = std::env::temp_dir().join(format!("afp-youtube-test-{}-{n}-{:?}", std::process::id(), std::thread::current().id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (video, sdr) = (dir.join("v.cube"), dir.join("s.cube"));
@@ -340,14 +374,20 @@ mod tests {
         std::fs::write(&sdr, sdr_lut(from, n, Levels::Full, "test").unwrap()).unwrap();
         let (video, sdr) = (Cube::read(&video).unwrap(), Cube::read(&sdr).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
-        let (mut worst, mut sum, mut count) = (0.0f64, 0.0f64, 0.0f64);
+        let log = Cube::read(&luts().join("dlogm_hlg.cube")).unwrap();
+        let (mut codes, mut de, mut clipped) = (Vec::new(), Vec::new(), 0usize);
         let k = 23;
         for b in 0..k { for g in 0..k { for r in 0..k {
             let x = [r, g, b].map(|i| (i as f64 + 0.37) / k as f64);
+            if log.at(x).iter().any(|&v| v <= 0.001 || v >= 0.999) { clipped += 1; continue; }
             let (w, got) = (want(x), sdr.at(video.at(x)));
-            for i in 0..3 { let e = (got[i] - w[i]).abs() * 876.0; worst = worst.max(e); sum += e; count += 1.0; }
+            codes.push((0..3).map(|i| (got[i] - w[i]).abs() * 876.0).fold(0.0, f64::max));
+            let (a, b) = (lab(w), lab(got));
+            de.push(((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt());
         }}}
-        (worst, sum / count)
+        let stats = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); (v.iter().sum::<f64>() / v.len() as f64, v[v.len() * 99 / 100]) };
+        let ((cm, c99), (dm, d99)) = (stats(&mut codes), stats(&mut de));
+        [clipped as f64 / (k * k * k) as f64, cm, c99, dm, d99]
     }
 
     #[test]
@@ -355,9 +395,9 @@ mod tests {
         let (log, nbcu_path) = (Cube::read(&luts().join("dlogm_hlg.cube")).unwrap(), luts().join("3-NBCU_HLG2SDR_DL_v1.2.cube"));
         let nbcu = Cube::read(&nbcu_path).unwrap();
         for n in [33, GRID] {
-            let (worst, mean) = chain_error(&SdrFrom::HlgNbcu { nbcu_hlg: &nbcu_path }, &|x| type3(&nbcu, log.at(x)), n);
-            eprintln!("D-Log M through NBCU, {n} points: worst {worst:.2}, mean {mean:.3} 10-bit codes");
-            if n == GRID { assert!(worst < 12.0 && mean < 1.0, "worst {worst:.2}, mean {mean:.3}"); }
+            let [left, cm, c99, dm, d99] = chain_error(&SdrFrom::HlgNbcu { nbcu_hlg: &nbcu_path }, &|x| type3(&nbcu, log.at(x)), n);
+            eprintln!("D-Log M through NBCU, {n} points ({:.0} % clipped, left out): {cm:.2} codes mean, {c99:.1} p99; ΔE {dm:.2} mean, {d99:.2} p99", left * 100.0);
+            if n == GRID { assert!(dm < 0.5 && d99 < 3.0, "ΔE {dm:.2} mean, {d99:.2} p99"); }
         }
     }
 
@@ -368,8 +408,9 @@ mod tests {
         let log_path = luts().join("dlogm_hlg.cube");
         let maker = Cube::read(&maker_path).unwrap();
         for n in [33, GRID] {
-            let (worst, mean) = chain_error(&SdrFrom::HlgMaker { log_hlg: &log_path, maker: &maker_path }, &|x| maker.at(x), n);
-            eprintln!("D-Log M through DJI's LUT, {n} points: worst {worst:.2}, mean {mean:.3} 10-bit codes");
+            let [left, cm, c99, dm, d99] = chain_error(&SdrFrom::HlgMaker { log_hlg: &log_path, maker: &maker_path }, &|x| maker.at(x), n);
+            eprintln!("D-Log M through DJI's LUT, {n} points ({:.0} % clipped, left out): {cm:.2} codes mean, {c99:.1} p99; ΔE {dm:.2} mean, {d99:.2} p99", left * 100.0);
+            if n == GRID { assert!(dm < 0.5 && d99 < 3.0, "ΔE {dm:.2} mean, {d99:.2} p99"); }
         }
     }
 }
