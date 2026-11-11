@@ -54,6 +54,14 @@ struct PassDecl {
 #[derive(Default)]
 struct Parsed { params: Vec<Param>, textures: Vec<TextureDecl>, buffers: Vec<BufferDecl>, passes: Vec<PassDecl> }
 
+/// A shader file's parameters and their values as libplacebo would read them, or why it wouldn't (for tests)
+#[cfg(test)]
+pub(crate) fn param_values(text: &str) -> Result<Vec<(String, f64)>, String> {
+    let mut p = Parsed::default();
+    parse(text, &mut p)?;
+    Ok(p.params.iter().map(|x| (x.name.clone(), x.value)).collect())
+}
+
 /// One shader file's blocks into `out`
 fn parse(text: &str, out: &mut Parsed) -> Result<(), String> {
     let text = text.replace("\r\n", "\n");
@@ -88,7 +96,9 @@ fn parse(text: &str, out: &mut Parsed) -> Result<(), String> {
                         if t.split_whitespace().any(|w| w == "int" || w == "uint") { p.kind = Kind::Int; }
                     }
                 }
-                p.value = body.trim().parse::<f64>().unwrap_or(0.0);
+                // As libplacebo: the value is all up to the next block; a comment there makes it no number
+                p.value = body.trim().parse::<f64>()
+                    .map_err(|_| format!("PARAM {}: its value {:?} isn't a number (a comment after it?)", p.name, body.trim()))?;
                 out.params.push(p);
             }
             "TEXTURE" => {
@@ -952,6 +962,29 @@ fn std430_size(vars: &[String]) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_shader_of_ours_parses() {
+        // The player's and the export's shaders, as libplacebo reads their blocks (a PARAM's value is all up to the
+        // next block: a comment there is no number)
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for dir in ["shaders", "mpv/scripts"] {
+            let mut todo = vec![root.join(dir)];
+            while let Some(d) = todo.pop() {
+                for e in std::fs::read_dir(&d).unwrap().flatten() {
+                    let p = e.path();
+                    if p.is_dir() { todo.push(p); } else if p.extension().is_some_and(|x| x == "glsl") { files.push(p); }
+                }
+            }
+        }
+        assert!(files.len() > 5, "{files:?}");
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            if text.contains("@PASSES@") { continue; } // the warp's template: gpu_table's tests fill it
+            super::param_values(&text).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+        }
+    }
+
     use super::*;
 
     fn frame(w: usize, h: usize, f: impl Fn(usize, usize, usize) -> u16) -> Vec<u8> {

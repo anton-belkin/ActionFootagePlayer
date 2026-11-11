@@ -25,6 +25,11 @@
 //   sampling pass falls back to the exact geometry.
 //
 // No directive marks (two slashes and a bang) in the comments of a pass: libplacebo takes them as directives anywhere.
+// No comments between the directive blocks either: libplacebo reads them as the block before's data (a PARAM's value).
+//
+// Where a moment starts in its clip (gyroflow_time_offset, s) is a parameter, not a define: each moment's shader then
+// has the same code as the others of its kind, and mpv takes its pipelines from its cache instead of building them
+// again (~2.5 s on an M-series Mac). gyroflow-gpu-table writes its value; nothing changes it.
 
 //!PARAM PTS
 //!TYPE DYNAMIC float
@@ -95,6 +100,10 @@
 //!MINIMUM 0.0
 //!MAXIMUM 1.0
 1.0
+
+//!PARAM gyroflow_time_offset
+//!TYPE DYNAMIC float
+@TIME_OFFSET@
 
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@
@@ -421,7 +430,7 @@ vec2 trans_shift(int f, vec2 out_f)
 // The frame's parameters, from the table by PTS. False where the table has none
 bool frame_setup()
 {
-    // A moment played as a video of its own starts TIME_OFFSET seconds into the clip
+    // A moment played as a video of its own starts TIME_OFFSET (gyroflow_time_offset) seconds into the clip
     // The frame count is frame 0's texel 9's w
     int frames = int(texelFetch(GYROFLOW_TABLE, ivec2(9, 0), 0).w);
     table_frame = clamp(int(floor((PTS + TIME_OFFSET) * FPS + 0.5)), 0, max(frames - 1, 0));

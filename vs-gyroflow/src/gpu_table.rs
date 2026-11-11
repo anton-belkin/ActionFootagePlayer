@@ -400,10 +400,10 @@ impl Table {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET {:.6}\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
-        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32, opts.time_offset,
+        bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
         (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
@@ -623,10 +623,8 @@ pub fn denoise_shader(clip: &Clip, opts: &Options, table: &Table, size: (usize, 
     let slot = (size.0.div_ceil(4) * 4, size.1.div_ceil(4) * 4);
     dn_layout(slot, MAX_TEX)?;
     let opts = Options { mode: Mode::Exact, denoise: true, ..*opts };
-    let (head, _, _) = sections();
     let passes = denoise_passes(clip, &opts, &defines(clip, &opts, table), &[], slot);
-    Some(head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", "").replace("@PASSES@", &passes))
+    Some(fill_head(table, "", &passes, opts.time_offset))
 }
 
 /// How the ring's slots of `slot` pixels go into one texture of at most `max` a side: (across, down), the fewest
@@ -645,9 +643,15 @@ pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String { shader_wit
 
 /// The same with the translation compensation kept for the clip (translation.rs)
 pub fn shader_with(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 2]]>) -> String {
+    fill_head(table, &table.hex(), &passes(clip, opts, table, trans), opts.time_offset)
+}
+
+/// warp.glsl's head with the table's size and data, the passes and the moment's start (`time_offset`, a parameter:
+/// the code stays the same from one moment to the next, for mpv's pipeline cache)
+fn fill_head(table: &Table, hex: &str, passes: &str, time_offset: f64) -> String {
     let (head, _, _) = sections();
     head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes(clip, opts, table, trans))
+        .replace("@TIME_OFFSET@", &format!("{time_offset:.6}")).replace("@TABLE_HEX@", hex).replace("@PASSES@", passes)
 }
 
 /// The GPU path's 360 mode: a 360 camera's sphere shader (warp.glsl's sphere360 and stamp360 passes) for its lens
@@ -709,10 +713,7 @@ pub fn sphere_shader(prep: &crate::sphere360::Prepared360, time_offset: f64) -> 
     let passes = format!("//!TEXTURE GYROFLOW_WEIGHTS\n//!SIZE {ww} {wh}\n//!FORMAT rgba8\n//!FILTER LINEAR\n{hex}\n\n{}",
         hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_WEIGHTS", &format!("//!WIDTH {sw}"), &format!("//!HEIGHT {sh}"),
                             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)\n#define RT target_size", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
-    let (head, _, _) = sections();
-    let text = head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TABLE_HEX@", &table.hex()).replace("@PASSES@", &passes);
-    Ok((text, (sw, sh)))
+    Ok((fill_head(&table, &table.hex(), &passes, time_offset), (sw, sh)))
 }
 
 /// Each row's 3x3 (row-major, `M·d`) as a quaternion (x, y, z, w), signs kept continuous along the rows
@@ -987,6 +988,20 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let (head2, common2, passes2) = split_sections(&normalized);
         assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
         assert!(!pass_body(passes[0].0).is_empty());
+    }
+
+    #[test]
+    fn moments_differ_only_in_a_parameter() {
+        // Two moments of one clip: the same code (mpv's pipeline cache hits), only the parameter's value differs
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let (a, b) = (fill_head(&t, "", "PASSES", 2.909), fill_head(&t, "", "PASSES", 38.887));
+        let diff: Vec<(&str, &str)> = a.lines().zip(b.lines()).filter(|(x, y)| x != y).collect();
+        assert_eq!(diff, vec![("2.909000", "38.887000")]);
+        assert!(a.contains("//!PARAM gyroflow_time_offset\n//!TYPE DYNAMIC float\n2.909000\n"));
+        for mark in ["@TABLE_W@", "@TABLE_H@", "@TABLE_HEX@", "@TIME_OFFSET@", "@PASSES@"] { assert!(!a.contains(mark), "{mark} left"); }
+        // Every block's data as libplacebo reads it (a comment between blocks broke a PARAM's value once)
+        let params = crate::user_shader::param_values(&a).expect("the head parses");
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 2.909)), "{params:?}");
     }
 
     #[test]
