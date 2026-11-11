@@ -33,6 +33,7 @@
 // "<Type>, from the curated list: <name>": lens_pick.rs), or "" when it has none (Unknown: pick one in Gyroflow);
 // "types": the lens types the curated list has for the camera (resources/curated_lenses.json, empty for most);
 // "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote,
+// "default": the one the list gives the camera's clips that have neither (a drone's),
 // "mode": the camera's own number for it (DJI's fov_type; null for cameras without lens types), which the side panel
 // shows while the list doesn't name it: "Unknown (mode 6)"; "curated_file": the user's own list laid over the built-in
 // one (lens_pick::user_file), when there is one, and "curated_error" when it couldn't be read (it's left out then).

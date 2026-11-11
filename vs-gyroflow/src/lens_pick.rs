@@ -38,6 +38,8 @@ pub struct Pick {
     pub exact: bool,
     /// Taken from the curated list for this lens type (its label, "Normal"), not picked from the database
     pub curated: Option<String>,
+    /// A focal length alone (no distortion): nothing in the picture to correct, only what the stabilization needs
+    pub focal_only: bool,
 }
 
 impl Pick {
@@ -166,7 +168,7 @@ fn pick_in(db: &LensProfileDatabase, votes: &HashMap<String, (u32, u32)>, id: &C
             };
             if best.as_ref().is_none_or(|(r, _)| rank > *r) {
                 let exact = rank.exact;
-                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact, curated: None }));
+                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact, curated: None, focal_only: false }));
             }
         }
     }
@@ -186,7 +188,7 @@ pub fn lens_in_file(stab: &StabilizationManager) -> bool {
 // for which of its lens types is kept by hand in resources/curated_lenses.json, built in. The type is the one the clip
 // was given (source.lens_type in its .afp.json: the Library sets it for the clips selected, a whole dive at once), else
 // the one the camera recorded (the list's "recorded": DJI's fov_type, the HERO4's SETT, or Gyroflow's name for the lens
-// mode, "Wide"). A type's profile is a key of Gyroflow's database, a lens profile file, or a focal length alone; per
+// mode, "Wide"), else the camera's "default" (a camera that records no mode: a drone). A type's profile is a key of Gyroflow's database, a lens profile file, or a focal length alone; per
 // resolution or aspect ratio another ("sizes"). A type whose profile is null takes what it would without the list: the
 // lens in the file, else the database's pick.
 //
@@ -197,7 +199,12 @@ pub fn lens_in_file(stab: &StabilizationManager) -> bool {
 #[derive(serde::Deserialize, Default)]
 struct Curated { #[serde(default)] cameras: HashMap<String, CuratedCamera> }
 #[derive(serde::Deserialize, Default, Clone)]
-struct CuratedCamera { #[serde(default)] recorded: HashMap<String, String>, #[serde(default)] types: Vec<LensType> }
+struct CuratedCamera {
+    #[serde(default)] recorded: HashMap<String, String>,
+    #[serde(default)] types: Vec<LensType>,
+    /// The type of a clip that neither was given one nor recorded one the list names
+    #[serde(default)] default: Option<String>,
+}
 
 /// A lens type's profile, as the curated list gives it
 #[derive(serde::Deserialize, Clone, Debug, PartialEq)]
@@ -317,6 +324,7 @@ fn lay_over(base: &mut HashMap<String, CuratedCamera>, top: HashMap<String, Cura
     for (k, c) in top {
         let b = base.entry(k).or_default();
         b.recorded.extend(c.recorded);
+        if c.default.is_some() { b.default = c.default; }
         for t in c.types {
             match b.types.iter_mut().find(|x| x.id == t.id) {
                 Some(x) => *x = t,
@@ -360,16 +368,66 @@ pub fn lens_types(camera: &str) -> Vec<LensType> {
     lists().cameras.get(&camera_key(camera)).map(|c| c.types.clone()).unwrap_or_default()
 }
 
-/// The type the camera recorded the clip in, as the curated list names it ("wide"): by the camera's own number for its
-/// lens mode (`probe::recorded_lens_mode`), else by Gyroflow's name for it (`lens_mode`: "Wide", "Linear"; "" for none).
-/// None when it doesn't say or the list doesn't know the mode
-pub fn recorded_type(camera: &str, path: &str, lens_mode: &str) -> Option<String> {
+/// The type the camera recorded the clip in, as the curated list names it ("wide"), by the camera's own number for its
+/// lens mode (`probe::recorded_lens_mode`). None when it doesn't say or the list doesn't know the mode
+pub fn recorded_type(camera: &str, path: &str) -> Option<String> { recorded_type_named(camera, path, "") }
+
+/// `recorded_type`, else by Gyroflow's name for the lens mode (`lens_mode`: "Wide", "Linear"; "" for none)
+pub fn recorded_type_named(camera: &str, path: &str, lens_mode: &str) -> Option<String> {
     let l = lists();
     let c = l.cameras.get(&camera_key(camera))?;
     if let Some(t) = crate::probe::recorded_lens_mode(path).and_then(|m| c.recorded.get(&m.to_string())) { return Some(t.clone()); }
     let name = lens_mode.trim().to_lowercase();
     if name.is_empty() { return None; }
     c.recorded.iter().find(|(k, _)| k.trim().to_lowercase() == name).map(|(_, t)| t.clone())
+}
+
+/// The type the curated list gives a camera's clips that neither were given one nor recorded one it names
+pub fn default_type(camera: &str) -> Option<String> {
+    lists().cameras.get(&camera_key(camera))?.default.clone()
+}
+
+/// A camera as the player names it: Gyroflow's brand and model, or, when Gyroflow doesn't know the model (a Mini 4
+/// Pro: "DJI") or the camera at all (a Mavic Pro), the one the file names itself (`probe::file_camera`)
+pub fn camera_name(brand: &str, model: &str, path: &str) -> String {
+    let gyroflow = format!("{brand} {model}").trim().to_string();
+    if !model.trim().is_empty() { return gyroflow; }
+    match crate::probe::file_camera(path) {
+        Some(c) if brand.trim().is_empty() || camera_key(&c).starts_with(&camera_key(brand)) => c,
+        _ => gyroflow,
+    }
+}
+
+/// A clip as its lens is decided: its camera (`camera_name`), Gyroflow's name for the lens mode it recorded, its
+/// size, and Gyroflow's camera identifier where Gyroflow knows the camera (for the database's pick)
+#[derive(Clone, Debug, Default)]
+pub struct Clip {
+    pub camera: String,
+    pub lens_mode: String,
+    pub width: usize,
+    pub height: usize,
+    pub id: Option<CameraIdentifier>,
+}
+
+impl Clip {
+    pub fn from_id(path: &str, id: &CameraIdentifier) -> Clip {
+        Clip { camera: camera_name(&id.brand, &id.model, path), lens_mode: id.lens_info.clone(), width: id.video_width, height: id.video_height, id: Some(id.clone()) }
+    }
+    /// From telemetry-parser's reading of the file and the video's size and rate
+    pub fn from_input(path: &str, input: &gyroflow_core::telemetry_parser::Input, width: usize, height: usize, fps: f64) -> Clip {
+        match CameraIdentifier::from_telemetry_parser(input, width, height, fps) {
+            Ok(id) => Clip::from_id(path, &id),
+            Err(_) => Clip { camera: camera_name(&input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or(""), path), width, height, ..Default::default() },
+        }
+    }
+    /// A clip Gyroflow doesn't read: by what its file says alone
+    pub fn from_file(path: &str, width: usize, height: usize) -> Clip {
+        Clip { camera: camera_name("", "", path), width, height, ..Default::default() }
+    }
+    /// Its lens type: the one given by hand, else the one recorded, else its camera's default
+    pub fn lens_type(&self, path: &str) -> Option<String> {
+        chosen_type(path).or_else(|| recorded_type_named(&self.camera, path, &self.lens_mode)).or_else(|| default_type(&self.camera))
+    }
 }
 
 /// The type the clip was given by hand: source.lens_type in its .afp.json
@@ -423,22 +481,26 @@ fn load_profile(p: &Profile, dir: Option<&std::path::Path>, w: usize, h: usize) 
     }
 }
 
-/// The profile for a video as the player takes it: its type's curated profile (the one given by hand, else the one
-/// recorded), else, unless the lens is in the file, the database's pick. None: the lens in the file, or nothing.
-/// `id` is Gyroflow's camera identifier, `in_file` whether the file has its own lens
+/// The profile for a video as the player takes it: its type's curated profile (`Clip::lens_type`), else, unless the
+/// lens is in the file, the database's pick. None: the lens in the file, or nothing. `id` is Gyroflow's camera
+/// identifier, `in_file` whether the file has its own lens
 pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pick> {
-    let camera = format!("{} {}", id.brand, id.model);
-    let typ = chosen_type(path).or_else(|| recorded_type(&camera, path, &id.lens_info));
-    if let Some(t) = typ.and_then(|t| lens_types(&camera).into_iter().find(|x| x.id == t)) {
-        if let Some(p) = t.profile_for(id.video_width, id.video_height) {
-            match load_profile(p, t.dir.as_deref(), id.video_width, id.video_height) {
-                Ok((profile, name, official)) => return Some(Pick { profile, name, official, votes: (0, 0), exact: false, curated: Some(t.label) }),
-                Err(e) => log::error!("Curated lenses, {camera} {}: {e}", t.id),
+    for_clip(path, &Clip::from_id(path, id), in_file)
+}
+
+/// `for_video`, for a clip Gyroflow may not know the camera of
+pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
+    if let Some(t) = clip.lens_type(path).and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t)) {
+        if let Some(p) = t.profile_for(clip.width, clip.height) {
+            let focal_only = matches!(p, Profile::Focal { .. });
+            match load_profile(p, t.dir.as_deref(), clip.width, clip.height) {
+                Ok((profile, name, official)) => return Some(Pick { profile, name, official, votes: (0, 0), exact: false, curated: Some(t.label.clone()), focal_only }),
+                Err(e) => log::error!("Curated lenses, {} {}: {e}", clip.camera, t.id),
             }
         }
     }
     if in_file { return None; }
-    pick(id)
+    pick(clip.id.as_ref()?)
 }
 
 /// Loads the profile the player takes for the video at `video` (`for_video`) into a manager that has it loaded
@@ -499,6 +561,15 @@ mod tests {
         assert_eq!(ids(&base[&camera_key("DJI Osmo Action 6")]), ["wide", "normal"]);
         assert!(!base.contains_key(&camera_key("GoPro HERO7 Black")));
         assert_eq!(ids(&base[&camera_key("GoPro HERO4 Black")]), ["wide"]);
+        // Drones record no mode: a default type, with a focal length alone
+        for drone in ["DJI Mini4 Pro", "DJI Mavic Pro"] {
+            let c = &base[&camera_key(drone)];
+            assert_eq!(c.default.as_deref(), Some("main"), "{drone}");
+            assert!(matches!(c.types[0].profile, Some(Profile::Focal { focal_35mm: Some(_), .. })), "{drone}");
+        }
+        for (camera, c) in &base {
+            if let Some(d) = &c.default { assert!(c.types.iter().any(|x| &x.id == d), "{camera}: default {d}, no such type"); }
+        }
     }
 
     // The user's list over the built-in one, the profile by size, a focal length alone, a profile file next to the list
@@ -520,6 +591,12 @@ mod tests {
         let a6 = &base[&camera_key("DJI OsmoAction6")];
         assert_eq!(a6.types.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wide", "normal", "flat"]);
         assert_eq!((a6.recorded["1"].as_str(), a6.recorded["2"].as_str(), a6.recorded["6"].as_str()), ("wide", "flat", "wide"));
+        assert_eq!(a6.default, None);
+        let mut top = HashMap::new();
+        top.insert(camera_key("DJI Osmo Action 6"), CuratedCamera { default: Some("flat".into()), ..Default::default() });
+        lay_over(&mut base, top);
+        let a6 = &base[&camera_key("DJI OsmoAction6")];
+        assert_eq!((a6.default.as_deref(), a6.types.len()), (Some("flat"), 3));
         let wide = &a6.types[0];
         assert_eq!(wide.label, "Wide (mine)");
         assert_eq!(wide.profile_for(3840, 2160), Some(&Profile::Focal { focal_35mm: Some(16.0), hfov: None }));
