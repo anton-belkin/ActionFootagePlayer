@@ -1,0 +1,6 @@
+# Blank issues stay on: the player's Report this camera… opens /issues/new with the clip's details as its body
+blank_issues_enabled: true
+contact_links:
+  - name: Website
+    url: https://actionfootageplayer.ch
+    about: What the player does, the cameras it knows, and how to write without a GitHub account
