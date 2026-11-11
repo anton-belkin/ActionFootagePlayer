@@ -10,8 +10,6 @@ services:
     image: actionfootage-nas-helper:${AFP_VERSION:-latest}
     container_name: afp-nas-helper
     restart: unless-stopped
-    # The guardian is a computer of its own in the project's journals: keep its name (and /data) from run to run
-    hostname: nas
     # The host's network: the stream on the NAS's own port, Jellyfin reached at 127.0.0.1
     network_mode: host
     # The GPU (VA-API, Vulkan), for the stream
@@ -20,7 +18,7 @@ services:
     # Leaves room for whatever else runs on the NAS (a VM, Jellyfin): the stream's renders take ~1 GB
     mem_limit: 2g
     environment:
-      AFP_GUARDIAN: "on"
+      AFP_COLLABORATION: "on"
       AFP_STREAM: "on"
       AFP_JELLYFIN: "off"
       # With AFP_JELLYFIN on:
@@ -29,12 +27,12 @@ services:
       # AFP_JELLYFIN_URL: http://127.0.0.1:8096
       # AFP_JELLYFIN_PATH: /media/_Action Footage
     volumes:
-      # The project, twice: read-write for the guardian (its catalog), read-only for the stream
+      # The project, twice: read-write for collaboration (its catalog), read-only for the stream
       - "/volume1/Projects/Trip:/projects/Trip"
       - "/volume1/Projects/Trip:/library/Trip:ro"
       # The shares the project's locations are on (//NAS/video/... in Project.afproject), read-only
       - "/volume1/video:/shares/video:ro"
-      # The helper's own: renders, the guardian's name, what the player said
+      # The helper's own: renders, the NAS's name in the journals, what the player said
       - "/volume1/docker/afp-nas-helper/data:/data"
       # Your settings for the player (player/script-opts/*.conf) and Jellyfin's API key (jellyfin.key)
       - "/volume1/docker/afp-nas-helper/config:/config"

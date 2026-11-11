@@ -1,4 +1,4 @@
-# Action Footage NAS Helper (tools/nas-helper/README.md): the guardian, the stream and the links for Jellyfin in one
+# Action Footage NAS Helper (tools/nas-helper/README.md): collaboration, the stream and the links for Jellyfin in one
 # image, everything built here from the repository. Built from the repository's top:
 #
 #   docker build -f tools/nas-helper/Dockerfile --build-arg VERSION=0.13.0 -t actionfootage-nas-helper:0.13.0 .
@@ -88,7 +88,7 @@ COPY tools/stream/hlg_gain.glsl tools/stream/hlg_highlights.glsl /opt/afp/bin/
 COPY tools/stream/afp_stream.py tools/stream/jellyfin.py tools/nas-helper/helper.py tools/nas-helper/nas_settings.py /opt/afp/helper/
 ENV PATH=/opt/mpv/bin:$PATH LD_LIBRARY_PATH=/opt/pl/lib AFP_BIN=/opt/afp/bin AFP_PLAYER=/opt/afp/player PYTHONDONTWRITEBYTECODE=1
 # Everything links (a library missing at run time would show only when a part starts)
-# No machine id of its own: the guardian's name (kept in /data/catalog) stays the same from one image to the next
+# No machine id of its own: the NAS's name in the journals (kept in /data/catalog) stays the same from one image to the next
 RUN echo "$VERSION" > /opt/afp/helper/VERSION && : > /etc/machine-id \
  && ! (cd /opt/afp/player/gyroflow && ldd /opt/mpv/bin/mpv /opt/afp/bin/afp-render libvs_gyroflow.so gyroflow-probe gyroflow-project \
         gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical | grep "not found") \

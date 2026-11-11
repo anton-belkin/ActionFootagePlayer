@@ -5,7 +5,7 @@ Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for DJI's D-Log M, given the p
 (BT.2020), fMP4 segments of 2 s, the audio copied. Nothing leaves the GPU: VAAPI decodes, libplacebo renders into the
 encoder's own surfaces, VDEnc encodes (docs/gpu-render.md, "The streaming server").
 
-It ships as part of the **NAS Helper** (tools/nas-helper/README.md: one container with the library guardian and the
+It ships as part of the **NAS Helper** (tools/nas-helper/README.md: one container with collaboration and the
 links for Jellyfin, its settings described there); what follows is how it works, and how it ran on its own before.
 
 - `http://<nas>:8099/`: the clips by folder, each with its stream (Safari and Apple TV play HLS by themselves; `watch`

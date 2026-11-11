@@ -6,10 +6,11 @@ everything is set in the container's environment and volumes, described below, b
 
 It does three things, each a setting of its own:
 
-- **The library guardian** (`AFP_GUARDIAN`, on): keeps each project's catalog (`<project>/.afp/catalog`,
-  docs/library-management.md §9) current from the NAS's side. The NAS's system tells it what changes on its own
-  disks, so what one computer, or the NAS itself, changes reaches the other computers' players and Libraries in about
-  a second, none of them walking the share. It writes nothing but the catalog. A project newer than the helper (its
+- **Collaboration** (`AFP_COLLABORATION`, on): several people and computers working in one library at once. The
+  NAS's system tells it what changes on its own disks, and it writes that into each project's catalog
+  (`<project>/.afp/catalog`, docs/library-management.md §9), so what one person does (a moment marked, clips sorted,
+  a trip added, or a change made on the NAS itself) reaches everyone else's player and Library in about a second,
+  none of them walking the share. It writes nothing but the catalog. A project newer than the helper (its
   `version` in Project.afproject) is refused, not touched: then update the helper.
 - **The stream** (`AFP_STREAM`, on): every clip, moment and clip preview of the projects as an HLS stream, the way
   the player shows it: stabilized with Gyroflow's warp on the GPU, D-Log M in HDR (HLG), each file with its saved view
@@ -21,7 +22,8 @@ It does three things, each a setting of its own:
   (the stream's address), a `.nfo` (title, date, length) and a cover per item, sorted into trips, the library
   refreshed after a change. Its scope (`AFP_JELLYFIN_SCOPE`) says what goes there: `moments`, `clips` (each clip
   preview: the whole clip) or `all`; what's outside it is removed. Jellyfin then plays the streams on its apps
-  (TVs, phones) without transcoding.
+  (TVs, phones) without transcoding. The `.strm` and `.nfo` files are Kodi's formats, which Emby and Kodi read too
+  (with the refresh left to their own scans); Plex doesn't take them.
 
 What it doesn't do: change the projects (the stream reads them read-only and refuses a folder it could write to),
 exports, Dolby Vision streams, logins (the stream is for the home network: put it behind nothing reachable from
@@ -40,16 +42,16 @@ with the file as `compose.yaml`, or as a project in the NAS's Docker app (UGOS: 
     docker compose up -d
     docker logs -f afp-nas-helper
 
-The log says what it found and runs (`helper: runs: guardian[Trip], stream`) and any problem with the settings;
+The log says what it found and runs (`helper: runs: collaboration[Trip], stream`) and any problem with the settings;
 `docker run --rm actionfootage-nas-helper:<version> --help` describes every setting.
 
-Each project is bound twice, by its folder's own name: `/projects/<name>` read-write for the guardian,
+Each project is bound twice, by its folder's own name: `/projects/<name>` read-write for collaboration,
 `/library/<name>` read-only (`:ro`) for the stream. The shares its locations are on (the `//NAS/photo/...` paths in
 Project.afproject, as the Library added them on a Mac) go in `/shares/<share>`, read-only: the helper finds each by
 its share's name, as a Mac finds it mounted.
 
 To update: load the new release's image, change the tag in the compose file, `docker compose up -d`. What's in
-`/data` and `/config` stays. To remove it: `docker compose down`, then the two folders; the guardian's catalog stays
+`/data` and `/config` stays. To remove it: `docker compose down`, then the two folders; the catalog stays
 in the projects (the Library keeps it as well).
 
 ## Settings
@@ -61,7 +63,7 @@ container (`docker compose up -d`).
 
 | Setting | Default | What it does |
 |---|---|---|
-| `AFP_GUARDIAN` | `on` | The library guardian (afp-catalog watch): keeps each project's catalog current from the NAS's side. The system tells it what changes on the NAS's own disks, so what any computer (or the NAS itself) changes reaches the other computers' players and Libraries in about a second, without them walking the share. A project newer than this helper is refused, not touched: update the helper. One of: `on`, `off`. |
+| `AFP_COLLABORATION` | `on` | Collaboration: several people and computers working in one library at once. The NAS is told what changes on its own disks and writes it into each project's catalog (afp-catalog watch), so what one person does (a moment marked, clips sorted, a trip added, also on the NAS itself) reaches everyone else's player and Library in about a second, without anyone walking the share. It writes nothing but the catalog. A project newer than this helper is refused, not touched: update the helper. One of: `on`, `off`. |
 | `AFP_STREAM` | `on` | The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri (an Intel GPU with VA-API). One of: `on`, `off`. |
 | `AFP_JELLYFIN` | `off` | Links for Jellyfin: a folder (/jellyfin) a Jellyfin Home Videos library reads, a .strm (the stream's URL), .nfo and cover per item, sorted into trips; the library refreshed after a change. Needs the stream. One of: `on`, `off`. |
 
@@ -71,7 +73,7 @@ container (`docker compose up -d`).
 |---|---|---|
 | `AFP_PROJECTS` | | The projects, ':'-separated paths inside the container. Empty: every folder in /projects that has a Project.afproject. |
 | `AFP_SHARES` | | Where the shares the projects' locations name are here: '//HOST/share=/shares/share;...'. Empty: every folder in /shares, as a share of the NAS the projects' locations name (//DISKSTATIONDXP/photo for /shares/photo). |
-| `AFP_COMPUTER_NAME` | `nas` | The guardian's name in the projects' journals, the first time it runs (it's kept in /data/catalog after that, with an id of its own). |
+| `AFP_COMPUTER_NAME` | `nas` | This NAS's name in the projects' journals, the first time collaboration runs (it's kept in /data/catalog after that, with an id of its own). |
 
 ### The stream
 
@@ -105,10 +107,10 @@ container (`docker compose up -d`).
 
 | In the container | | What it is |
 |---|---|---|
-| `/projects/<name>` | read-write | Each project (the folder with Project.afproject), under its own folder's name: the guardian keeps its catalog in <project>/.afp/catalog. Nothing else is written there. |
+| `/projects/<name>` | read-write | Each project (the folder with Project.afproject), under its own folder's name: collaboration keeps its catalog in <project>/.afp/catalog. Nothing else is written there. |
 | `/library/<name>` | read-only | The same project folders again, read-only, for the stream: the player it asks may want to fill a missing key into a moment's link, and here that write fails, as it should. The stream refuses a folder it could write to. |
 | `/shares/<share>` | read-only | The network shares the projects' locations are on (//NAS/photo/... in Project.afproject), each under its share's name, as a Mac finds them mounted. |
-| `/data` | read-write | The helper's own: the guardian's computer name and caches (/data/catalog), the stream's renders (/data/stream/cache, up to AFP_CACHE_GB) and what the player said (/data/stream/args). |
+| `/data` | read-write | The helper's own: this NAS's name in the projects' journals and its caches (/data/catalog), the stream's renders (/data/stream/cache, up to AFP_CACHE_GB) and what the player said (/data/stream/args). |
 | `/config` | read-write | What you set: the player's defaults (/config/player/script-opts/gyroflow.conf and dlogm.conf, as in the app's mpv/script-opts), Jellyfin's API key (/config/jellyfin.key). |
 | `/jellyfin` | read-write | Only with AFP_JELLYFIN=on: the folder a Jellyfin library reads (a Home Videos library). The helper writes only there and removes what it wrote. |
 
@@ -127,6 +129,6 @@ asks how each file plays. The release workflow builds it, tries it (`--check`) a
     docker build -f tools/nas-helper/Dockerfile --build-arg VERSION=dev -t actionfootage-nas-helper:dev .
 
 `helper.py` runs the parts as processes and starts each again when it stops (after 5 s, longer while it keeps
-failing; an hour when the project is newer than the guardian); their lines go to the container's log with the
+failing; an hour when the project is newer than the helper); their lines go to the container's log with the
 part's name, and their state to `/data/helper.json`. `nas_settings.py` is the list of settings this file's tables
 come from (`helper.py --markdown`).

@@ -216,7 +216,7 @@ jobs:
           if-no-files-found: error
 
   # All the plugins in one zip per system, mpv-plugins-<version>-<os>-<arch>.zip, from the zips the builds made
-  # The NAS Helper (tools/nas-helper): the guardian, the stream and the links for Jellyfin as one Docker image for an
+  # The NAS Helper (tools/nas-helper): collaboration, the stream and the links for Jellyfin as one Docker image for an
   # x86-64 NAS, saved as ActionFootageNASHelper-<version>-linux-x86_64.tar.gz (`docker load -i` it) with its example
   # compose.yaml. Its own artifact: the plugins job doesn't need it
   nas-helper:

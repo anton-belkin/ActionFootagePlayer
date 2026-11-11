@@ -4,7 +4,8 @@
 # Action Footage NAS Helper: what a NAS does for the player and the Library, in one container (tools/nas-helper/
 # README.md). It runs, as its settings say (nas_settings.py; `helper.py --help` lists them):
 #
-#   the guardian   afp-catalog watch, one per project: the project's catalog kept current from the NAS's side
+#   collaboration  afp-catalog watch, one per project: the project's catalog kept current from the NAS's side, so
+#                  that several people can work in one library
 #   the stream     afp_stream.py: each clip, moment and clip preview as HLS, as the player plays it
 #   the links      jellyfin.py: the stream's moments and clip previews as a Jellyfin library (its scope)
 #
@@ -177,10 +178,10 @@ def plan():
     parts, problems = [], list(S.problems())
     if not projs:
         problems.append("no project: bind a project's folder to /projects/<its name> (a folder with Project.afproject), or set AFP_PROJECTS")
-    if S.on("AFP_GUARDIAN"):
+    if S.on("AFP_COLLABORATION"):
         for p in projs:
             if read_only(p):
-                problems.append(f"the guardian needs {p} read-write (it writes the catalog in .afp/catalog)")
+                problems.append(f"collaboration needs {p} read-write (it writes the catalog in .afp/catalog)")
                 continue
             args = [os.path.join(BIN, "afp-catalog"), "watch", p]
             for src, d in sh:
@@ -189,7 +190,7 @@ def plan():
                     args += ["--share", f"{name}={d}"]
             # As root (UGOS refuses inotify on root's folders to other users), what it writes open to all; exit 3: the
             # project is newer than this helper
-            parts.append((f"guardian[{os.path.basename(p)}]", dict(args=args, env={"AFP_HOME": os.path.join(DATA, "catalog"), "COMPUTERNAME": S.get("AFP_COMPUTER_NAME")},
+            parts.append((f"collaboration[{os.path.basename(p)}]", dict(args=args, env={"AFP_HOME": os.path.join(DATA, "catalog"), "COMPUTERNAME": S.get("AFP_COMPUTER_NAME")},
                                                               umask=0, stop_codes=(3,))))
     if S.on("AFP_STREAM"):
         # The stream reads the projects read-only: /library/<name> for /projects/<name>
@@ -197,7 +198,7 @@ def plan():
         for p in projs:
             view = os.path.join("/library", os.path.basename(p)) if p.startswith("/projects/") else p
             if not os.path.isdir(view):
-                problems.append(f"the stream needs {view}: the project bound again, read-only ({p} is the guardian's)")
+                problems.append(f"the stream needs {view}: the project bound again, read-only ({p} is collaboration's)")
             elif not read_only(view):
                 problems.append(f"the stream refuses {view}: it must be bound read-only (':ro'), so that the player it asks can't write in the project")
             else:

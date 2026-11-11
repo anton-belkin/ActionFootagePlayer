@@ -8,13 +8,13 @@ import os
 
 # The folders inside the container, bound to the NAS's folders by the container's volumes
 FOLDERS = [
-    ("/projects/<name>", "read-write", "Each project (the folder with Project.afproject), under its own folder's name: the guardian keeps its "
+    ("/projects/<name>", "read-write", "Each project (the folder with Project.afproject), under its own folder's name: collaboration keeps its "
      "catalog in <project>/.afp/catalog. Nothing else is written there."),
     ("/library/<name>", "read-only", "The same project folders again, read-only, for the stream: the player it asks may want to fill a missing "
      "key into a moment's link, and here that write fails, as it should. The stream refuses a folder it could write to."),
     ("/shares/<share>", "read-only", "The network shares the projects' locations are on (//NAS/photo/... in Project.afproject), each "
      "under its share's name, as a Mac finds them mounted."),
-    ("/data", "read-write", "The helper's own: the guardian's computer name and caches (/data/catalog), the stream's renders "
+    ("/data", "read-write", "The helper's own: this NAS's name in the projects' journals and its caches (/data/catalog), the stream's renders "
      "(/data/stream/cache, up to AFP_CACHE_GB) and what the player said (/data/stream/args)."),
     ("/config", "read-write", "What you set: the player's defaults (/config/player/script-opts/gyroflow.conf and dlogm.conf, as in "
      "the app's mpv/script-opts), Jellyfin's API key (/config/jellyfin.key)."),
@@ -25,10 +25,11 @@ FOLDERS = [
 # name, default, part, what it does; choices where there are some
 SETTINGS = [
     # What runs
-    ("AFP_GUARDIAN", "on", "parts", "The library guardian (afp-catalog watch): keeps each project's catalog current from "
-     "the NAS's side. The system tells it what changes on the NAS's own disks, so what any computer (or the NAS itself) "
-     "changes reaches the other computers' players and Libraries in about a second, without them walking the share. A "
-     "project newer than this helper is refused, not touched: update the helper.", ("on", "off")),
+    ("AFP_COLLABORATION", "on", "parts", "Collaboration: several people and computers working in one library at once. "
+     "The NAS is told what changes on its own disks and writes it into each project's catalog (afp-catalog watch), so "
+     "what one person does (a moment marked, clips sorted, a trip added, also on the NAS itself) reaches everyone "
+     "else's player and Library in about a second, without anyone walking the share. It writes nothing but the "
+     "catalog. A project newer than this helper is refused, not touched: update the helper.", ("on", "off")),
     ("AFP_STREAM", "on", "parts", "The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the "
      "player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it "
      "is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri (an Intel GPU with VA-API).", ("on", "off")),
@@ -43,7 +44,7 @@ SETTINGS = [
      "'//HOST/share=/shares/share;...'. Empty: every folder in /shares, as a share of the NAS the projects' locations "
      "name (//DISKSTATIONDXP/photo for /shares/photo)."),
 
-    ("AFP_COMPUTER_NAME", "nas", "projects", "The guardian's name in the projects' journals, the first time it runs "
+    ("AFP_COMPUTER_NAME", "nas", "projects", "This NAS's name in the projects' journals, the first time collaboration runs "
      "(it's kept in /data/catalog after that, with an id of its own)."),
 
     # The stream

@@ -166,7 +166,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
 | stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
-| a NAS (x86-64 with an Intel GPU, Docker): the library guardian, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
+| a NAS (x86-64 with an Intel GPU, Docker): collaboration in one library, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
 
 **The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
 exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
@@ -930,8 +930,8 @@ trip are in `Project.afproject`, which the player reads too. Not on Linux yet: t
 until it is.
 
 With the project on a NAS, the **NAS Helper** ([tools/nas-helper](tools/nas-helper/README.md)), a Docker container
-there, keeps the project's catalog current from the NAS's side, so what one computer changes reaches the others at
-once; streams every clip and moment, stabilized and in HDR as the player shows them, to a browser, a phone or a TV;
+there, lets several people work in one library together: what one of them changes reaches everyone else's
+player and Library in about a second; streams every clip and moment, stabilized and in HDR as the player shows them, to a browser, a phone or a TV;
 and, if you want, puts the moments (or the clips, or both) in a Jellyfin library.
 
 ### Notes for an AI agent
@@ -1404,7 +1404,7 @@ windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts 
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
 windows/AppIcon.ico           the Windows app's icon (tools/make_icon.sh, tools/png_to_ico.py)
 tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python, VapourSynth and ffmpeg pinned
-tools/nas-helper/             the NAS Helper: the guardian (afp-catalog watch), the stream and the links for Jellyfin in one
+tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch), the stream and the links for Jellyfin in one
                               Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
 tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
 tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
