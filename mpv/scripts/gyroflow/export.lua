@@ -267,6 +267,28 @@ local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true
 --   nbcu, tonemap, dv, dvsdr  NBCU's conversion: Dolby Vision's own SDR, as macOS draws it, only exists on screen
 --                             (AVFoundation's decoders ignore the RPU), and the RPU's trims are fitted to NBCU's; mpv's
 --                             tone mapping isn't in gyroflow-export
+-- The clip's clean-up, as it plays, into args: the temporal denoise (Ctrl+p, the clip's transform; as much of it as
+-- this computer does, Performance & Quality's temporal_denoise: light or full, off none) with its Stronger, and the
+-- water's color fringes (Ctrl+a) taken out or left as recorded (whatever chromatic_skip leaves out on this screen).
+-- Every export carries them: the video, a moment, a batch's, a Live Photo's motion (gyroflow-export runs the player's
+-- own shaders for them). A clip whose saved view doesn't say: as the session has it, else the app's defaults
+local function cleanup_args(args, denoise, strong, chromatic)
+    local session = mp.get_property_native("user-data/gyroflow/session") or {}
+    local defaults = mp.get_property_native("user-data/gyroflow/defaults") or {}
+    local function pick(v, k)
+        if type(v) == "boolean" then return v end
+        if type(session[k]) == "boolean" then return session[k] end
+        return defaults[k] == true
+    end
+    local amount = mp.get_property_native("user-data/gyroflow/temporal_denoise") or "full"
+    if pick(denoise, "denoise") and (amount == "full" or amount == "light") then
+        table.insert(args, "--denoise"); table.insert(args, amount)
+        if pick(strong, "denoise_strong") then table.insert(args, "--denoise-strong") end
+    end
+    if type(chromatic) ~= "boolean" then chromatic = type(session.chromatic) == "boolean" and session.chromatic or defaults.chromatic ~= false end
+    table.insert(args, "--chromatic"); table.insert(args, chromatic and "yes" or "no")
+end
+
 local function as_it_plays(args, sdr, photo, live)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
@@ -319,6 +341,7 @@ local function as_it_plays(args, sdr, photo, live)
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
     if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
+    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"))
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
@@ -350,6 +373,7 @@ local function view_args(args, v)
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
+    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic)
 end
 
 local function installed(what)
@@ -668,6 +692,9 @@ local function gpu_frame()
     -- camera as the warp does (gpu_table's tests)
     local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
     if crop.active and crop.camera then return nil end
+    -- Nor with the color fringes skipped on this screen (Performance & Quality) where the clip has them taken out: the
+    -- photo has them out, gyroflow-export's
+    if mp.get_property_native("user-data/gyroflow/chromatic_skip") == true and mp.get_property_native("user-data/gyroflow/chromatic") == true then return nil end
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
     if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end

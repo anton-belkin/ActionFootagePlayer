@@ -267,7 +267,8 @@ switches and buttons, scrolled with the wheel:
 - **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame at full size, the temporal
   denoise (Full, Light, Off), what fills the edges and how often the trail is written, skipping the color aberration correction on
   this screen, whether it asks when the GPU can't keep up. They make playback lighter on this computer; what's
-  saved, exports and photos stay as they are.
+  saved, exports and photos stay as they are, but for the temporal denoise: exports have it as it plays here (Full,
+  Light, or none with Off).
 - **Telemetry**: whether it shows, the corner, the units, the fields.
 - **Dolby Vision** (Mac, the app): the trims, as sliders; back to the author's, or neutral ones.
 - **360° view**, for a 360° clip: looking around on or off, the projection, the field of view, the horizon, **Look
@@ -303,7 +304,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: Source → Save to the source keeps it, for all its moments and clips | `dlogm/curve` |
-| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's | `gyroflow/still` |
+| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's. Exports have it too (`Shift+E`, moments, the Library's batches, a Live Photo's video): each frame cleaned from the frames on both sides of it by the Mac GPU path's own shader (Full or Light as Performance & Quality has it, and Stronger), which gyroflow-export runs offline | `gyroflow/still` |
 | `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
 | `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
 | `Alt+s` | The frame on screen as a photo, in the project's `_Stills/` folder (beside `_Exports/`; with no project, `stabilized/` next to the clip): stabilized as it plays, cleaned up from the frames around it (as `Ctrl+p` does), with Save frame's frame and camera. The SDR look is the image, with a gain map to the HDR one (HLG), so an HDR screen shows it brighter: a HEIC on macOS, an Ultra HDR JPEG elsewhere (Android, Chrome and Apple read its ISO gain map). With 3 s of the video around it, as a phone's (the Save frame panel's Still / Live Photo / Motion Photo), exported as `Shift+E` would, at most 1920 wide or high: a Live Photo for Apple's devices (macOS: a `.mov` next to the HEIC; Photos and the iPhone take the two as one) or a Motion Photo for Android's (`<name>.MP.jpg`, an Ultra HDR JPEG with the video inside it, as Android's cameras write it) | `gyroflow/photo` |
@@ -515,8 +516,10 @@ channel is averaged over its spectrum, for a grey object in daylight through 3 m
 red's fringe at the edges of the frame, up to 3-7 px, goes to within about a pixel; blue's, up to 2-4 px, turns over
 to about 1-1.5 px the other way. Where the frame's own border shows (the wider view), it stays as recorded, against
 the edge fill or the background alike. Out of the water nothing moves. `Ctrl+a` leaves the fringes as recorded, and
-takes them out again; it switches nothing on above water (the lens stays as it is). Playback only,
-exports are as before. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
+takes them out again; it switches nothing on above water (the lens stays as it is). Exports and photos have it too,
+as the clip plays (`Shift+E`, moments, the Library's batches, `Alt+s`): gyroflow-export runs the same shader on each
+stabilized frame (`vs-gyroflow/src/user_shader.rs`; `--chromatic yes|no`), whatever Performance & Quality skips on
+this screen. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
 
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
@@ -617,6 +620,11 @@ What it renders:
   background color. A clip whose frame covers the output throughout has nothing to fill, and isn't.
 - `--underwater yes|no|auto|project`: the lens under water, above it, (the default) as the camera says over the
   clip, or as the project or preset says, as the menu's Lens has it (see Stabilization).
+- `--chromatic yes|no`: the water's color fringes taken out where the lens is under water (the default), as `Ctrl+a`
+  does it, or left as recorded. `--denoise light|full` (`--denoise-strong`, `--grain <0-1>`): the temporal denoise as
+  `Ctrl+p` plays it on the Mac's GPU path, each frame from the 3 or 5 frames on each side of it, the frames before
+  and after the part decoded for it; off by default. Both run the player's own shaders on the stabilized frame
+  (`chromatic.glsl`, `warp.glsl`'s denoise) on the GPU, as `Shift+E` passes them for the clip.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
 - **Log clips with nothing to stabilize them with** (D-Log M shot with EIS on, say), and any clip with
   `--no-stabilize` (what `Shift+E` passes after `Ctrl+g` turned the stabilization off): the color conversion only,

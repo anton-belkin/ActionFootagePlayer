@@ -1098,7 +1098,7 @@ local function transform_part(u, x, w, y)
     y = u:switch(x, w, y, "fringes", "Reduce color aberration", g.chromatic == true, "script-message-to gyroflow chromatic toggle",
                  nil, not g.chromatic_available or g.underwater == "no" or not filtering_note(g), saved_fringes)
     y = u:caption(x, w, y - 2 * s, g.chromatic_skip and "Skipped on this screen (Performance & Quality): exports and photos have it"
-        or "The water's color fringes, where the lens is under water")
+        or "The water's color fringes, where the lens is under water; exports and photos too")
 
     -- The temporal denoise: on or off (Ctrl+p, the clip's: kept with its transform, off where it harms, as on the
     -- water's surface); how much of it this computer does is Performance & Quality's, where Off leaves it out
@@ -1111,8 +1111,8 @@ local function transform_part(u, x, w, y)
     y = u:switch(x, w, y, "still", "Clean the noise", not none and denoise_on, "script-binding gyroflow/still", nil, none, saved_denoise)
     local gpu = type(g.gpu) == "table"
     y = u:caption(x, w, y - 2 * s, none and ("Off on this computer (Performance & Quality)" .. (denoise_on and "" or "; off for this clip too"))
-        or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows"
-        or "The paused frame from the frames around it, moved onto it")
+        or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows. Exports too"
+        or "The paused frame from the frames around it, moved onto it; exports each frame so")
     -- Stronger: the clip's (its transform), on the GPU path
     local saved_strong = nil
     if saved then saved_strong = saved.denoise_strong == true end
