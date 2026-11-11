@@ -65,9 +65,8 @@ Inside Albums:
 
 **Where a new moment or photo lands:** in the album its clip was opened from; otherwise in `Generated/`.
 
-**One item in two albums.** A link is cheap to copy, but a copy is a second item with its own tags and name. The rule
-proposed: an item has one album. "It's also about this" is a tag, and a smart album on that tag shows it. Copies are
-allowed but are separate items. *(Open.)*
+**One item in two albums** (decided): a link is cheap to copy, and a copy is a separate item with its own tags and
+name. An item has one album. "It's also about this" is a tag, and a smart album on that tag shows it.
 
 **Apple Photos sync** stays per folder, as designed in `docs/library-management.md` §5, so an album syncs as an
 album. Photos in it are rendered for the sync (below).
@@ -100,10 +99,11 @@ be changed later: open the photo, adjust, done.
    - for anything else: a plain JPEG, SDR.
    Clean still frame (`Ctrl+p`) and denoise become options of the render.
 
-**The photo's file:** a small JPEG (around 1280 px) with `afp:link` in its XMP (`kind: "photo"`, the frame's time).
+**The photo's file:** `<name>.afplink.jpg`, a small JPEG (around 1280 px) with `afp:link` in its XMP (`kind: "photo"`,
+the frame's time, the crop).
 Photos already carry this link today. Tags go into `dc:subject`. Finder and Quick Look show it as a picture.
-- **Risk:** someone shares the preview from Finder, thinking it's the photo. Keeping it visibly small is the guard.
-  *(Open: size, and whether to mark it.)*
+- **Risk:** someone shares the preview from Finder, thinking it's the photo. Two guards (decided): it's visibly
+  small, and the `.afplink.jpg` name says it's a link, as `.afplink.mp4` does for a moment.
 
 **Photos made before this** (a full HEIC or JPEG with `afp:link`, a Live Photo's HEIC + MOV): **no feature for it.**
 Anton is the only user so far, so a one-off migration script is run once, on his library, when he says so, and then
@@ -228,8 +228,9 @@ The real pixels of one **item** in one **profile**:
 | `JPEG` | anything else | SDR JPEG |
 
 - **Who picks the profile:** the destination, not the user. The user can override it.
-- **A possible `Light` profile:** for messengers' size limits, 1080p and a lower bitrate. *(Open: is it needed, or is
-  `SDR` small enough?)*
+- **The profiles are a configurable list** (decided). Each profile's values (size, codec, bitrate, look) can be
+  changed in the settings, and profiles can be added. It starts with the ones above plus a `Light` one for messengers'
+  size limits (1080p, a lower bitrate). A changed profile changes its renders' recipes, so they go stale.
 
 ### Found by recipe, not by path (decided: Anton, 2026-11-11)
 
@@ -367,26 +368,32 @@ Telling what changed goes by the recipe kept with the pair (item ↔ Photos asse
 - **NAS systems' tags; OS tags on Windows.**
 - **Visual search ("manta") and faces:** not discussed yet.
 
-## Open questions
+## Questions settled (Anton, 2026-11-11)
 
-1. **The photo preview:** its size, and how to keep it from being shared as the photo.
-2. **An item in two albums:** one place plus tags, or copies as separate items.
-3. **Share's order** (#214): list the services ourselves (choose, then render in the background), or render first
-   and open the system's picker.
-4. **Tag sync over SMB:**
-   - Does UGREEN keep the xattr as a stream, or write `._` files beside the clips?
-   - Does ctime move when a tag changes?
-5. **Where the telemetry summary is stored:** `<clip>.afp.json` proposed (#213).
-6. **The Timeline's place:** inside Albums for now (Anton); it could become the first screen later.
-7. ~~Renders by recipe hash~~: decided. Still open: with the library-folder option, `.afp/renders/` or `_Renders/`?
-8. ~~Where renders live~~: decided.
-   - Renders on this computer by default.
-   - Pinned renders in the library by default.
-   - Pins make the profiles set in the library's settings: `HDR` by default. The streamer makes `TV` from it on the
-     fly (to check on the N100 at 4K).
-   - Still open: the pinned folder's name (`_Renders/` or `.afp/renders/`).
-9. **A `Light` profile** for messengers, or `SDR` alone.
-10. **Photo originals:**
-    - lens profiles for the cameras' photo modes;
-    - the first viewer (Quick Look or the player);
-    - LibRaw or the system's RAW engine.
+1. **The photo preview:** small (around 1280 px), named `.afplink.jpg`.
+2. **An item in two albums:** copies are separate items. An item has one album; tags and smart albums do the rest.
+3. **Share's order** (#214): we list the services ourselves. You choose, it renders in the background, then it hands
+   over.
+4. **Tag sync over SMB:** as proposed.
+   - Last change wins.
+   - When both sides changed, compare ctime with the journal's time, else the library wins.
+   - No UGREEN-specific work. Checking for `._` files is a single look while building.
+5. **The telemetry summary** is stored in `<clip>.afp.json`, and the catalog carries it (#213).
+6. **The Timeline** lives inside Albums.
+7. **Renders:**
+   - found by recipe hash;
+   - the library's internals;
+   - kept on each computer by default;
+   - pinned ones (*Keep rendered*) in the library;
+   - pins make `HDR` by default (a setting), and the streamer makes `TV` from it on the fly.
+8. **Profiles:** a configurable list, with a `Light` profile for messengers among them.
+9. **Photo originals:** not now. The section above records the intention.
+
+## Still open
+
+- **The pinned renders' folder name:** `_Renders/` (visible, easy to exclude from a backup by hand; my
+  recommendation) or `.afp/renders/`.
+- **To check while building:**
+  - the N100 converting 4K HLG → the TV's PQ in real time;
+  - whether ctime moves over SMB;
+  - whether Telegram and WhatsApp appear in the share menus.
