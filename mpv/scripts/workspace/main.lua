@@ -170,6 +170,9 @@ fs.files = function(p)
 end
 fs.mounts = function()
     local out = {}
+    -- Shares reached otherwise than mounted from the network (a container on the NAS itself, where they're its own
+    -- folders, bound in): AFP_SHARES="//NAS/photo=/shares/photo;//NAS/DJI_Inbox=/shares/DJI_Inbox" (afp-stream)
+    for src, dir in (os.getenv("AFP_SHARES") or ""):gmatch("(//[^=;]+)=([^;]+)") do out[#out + 1] = { source = src, dir = dir } end
     if windows then return out end
     local text
     if macos then
