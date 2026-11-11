@@ -381,7 +381,7 @@ local function source_part(u, x, w, y)
         end
         local water = (not project and index_of(WATER, g.underwater)) and g.underwater or nil
         y = u:select_row(x, w, y + 6 * s, "water", "Under water", choices(WATER, "script-message-to gyroflow underwater"), water,
-                         { key = keys["script-binding gyroflow/lens"], disabled = project or not known, text = project and "Project's" or nil,
+                         { key = keys["script-binding gyroflow/above-water"], disabled = project or not known, text = project and "Project's" or nil,
                            saved = saved_input and (saved_input.underwater or "auto") or nil })
         y = u:caption(x, w, y, project and "As defined in the Gyroflow project" or not known and "Needs a known lens"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")

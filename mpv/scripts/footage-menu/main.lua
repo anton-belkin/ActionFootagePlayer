@@ -206,7 +206,7 @@ local function look_menu(d, key)
 end
 
 local function stabilization_menu(g, key)
-    local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/lens"], key["script-binding gyroflow/level"]
+    local toggle, lens, level = key["script-binding gyroflow/toggle"], key["script-binding gyroflow/above-water"], key["script-binding gyroflow/level"]
     -- The lens, apart from the stabilization: corrected or as recorded (with a lens profile)
     local lens_items = submenu("Lens", {
         item(g.kind == "project" and "As in the project" or "Corrected", "script-message-to gyroflow lens-mode corrected", { checked = g.lens_mode == "corrected" }),
