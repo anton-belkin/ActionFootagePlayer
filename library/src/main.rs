@@ -1237,7 +1237,7 @@ async fn lens_types(paths: Vec<String>) -> Result<Vec<Value>, String> {
 fn lens_types_of(text: &str) -> Vec<Value> {
     text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| v["path"].is_string() && v["types"].is_array())
-        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"], "type": v["type"], "recorded": v["recorded"], "mode": v["mode"] })).collect()
+        .map(|v| json!({ "path": v["path"], "camera": v["camera"], "types": v["types"], "type": v["type"], "recorded": v["recorded"], "default": v["default"], "mode": v["mode"] })).collect()
 }
 
 /// A clip's camera and the lens profile the player takes for it (gyroflow-probe --lens, as the player's Source → Lens
@@ -1257,12 +1257,19 @@ async fn lens_info(path: String) -> Result<Value, String> {
 
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
-async fn set_lens_type(shared: State<'_, Shared>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
+async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     if lens_type.as_deref().is_some_and(|t| t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
         return Err("no such lens type".into());
     }
-    tauri::async_runtime::spawn_blocking(move || tags::set_lens_type(&root, &clips, lens_type.as_deref())).await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_lens_type(&root, &clips, lens_type.as_deref());
+        // What the index knows about their lens was worked out with the type they had: read again
+        let paths: Vec<String> = clips.iter().filter_map(|t| tags::clip_own(&root, t).ok()).map(|(_, c)| c.display().to_string()).collect();
+        probes.lock().unwrap().forget(&paths);
+        problems
+    }).await.map_err(|e| e.to_string())
 }
 
 /// The Source settings of clips (the Source Settings tab, Batch set Source settings): [{ "clip": its path in the

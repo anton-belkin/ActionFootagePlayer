@@ -33,8 +33,10 @@
 // "<Type>, from the curated list: <name>": lens_pick.rs), or "" when it has none (Unknown: pick one in Gyroflow);
 // "types": the lens types the curated list has for the camera (resources/curated_lenses.json, empty for most);
 // "type": the one given to the clip by hand (source.lens_type in its .afp.json), "recorded": the one the camera wrote,
+// "default": the one the list gives the camera's clips that have neither (a drone's),
 // "mode": the camera's own number for it (DJI's fov_type; null for cameras without lens types), which the side panel
-// shows while the list doesn't name it: "Unknown (mode 6)".
+// shows while the list doesn't name it: "Unknown (mode 6)"; "curated_file": the user's own list laid over the built-in
+// one (lens_pick::user_file), when there is one, and "curated_error" when it couldn't be read (it's left out then).
 //
 // `gyroflow-probe --library <video>`: all of the above for Action Footage Library's index, in one line, plus "camera"
 // (as --lens), "movie" {duration, created (unix s), width, height, turn}, "marks" {camera, times}: the highlights
@@ -123,7 +125,8 @@ fn main() {
     // takes ~0.4 s cold (from a NAS more)
     let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
     // The lens type given to the clip by hand decides its lens profile: an answer kept for another isn't this one
-    let build = format!("{build}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default());
+    // and so does the user's own curated list (lens_pick::user_file), as it is now
+    let build = format!("{build}|{}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default(), vs_gyroflow::lens_pick::user_file_stamp());
     if library {
         let cache = vs_gyroflow::file_cache("library", &path, &build);
         if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {

@@ -1,20 +1,74 @@
 {
-  "about": "Lens profiles chosen by hand for cameras Gyroflow's database has none for, by lens type (lens_pick.rs). A camera's key is its brand and model as Gyroflow reads them (gyroflow-probe --lens: camera). recorded: the lens mode the camera writes (DJI: StreamMeta.fov_type; HERO4: udta SETT, probe::recorded_lens_mode) -> the type it is; a mode not here shows as 'Unknown (mode N)'. types: in the order the Library offers them; profile: a key of Gyroflow's database (its file path under camera_presets), or null when the camera's own lens in the file is what it takes. A clip's own choice is source.lens_type in its .afp.json",
+  "about": "Lens profiles chosen by hand for cameras Gyroflow's database has none for, by lens type (lens_pick.rs). A camera's key is its brand and model as Gyroflow reads them, or as the file names itself where Gyroflow doesn't know the model (geotag::dji_model, gopro_model; gyroflow-probe --lens: camera). recorded: the lens mode the camera writes (DJI: StreamMeta.fov_type; HERO4: udta SETT, probe::recorded_lens_mode), or Gyroflow's name for it ('Wide') -> the type it is; a mode not here shows as 'Unknown (mode N)'. default: the type of a clip that neither was given one nor recorded one named here (a drone, which records no mode). types: in the order the Library offers them; profile: a key of Gyroflow's database (its file path under camera_presets), a lens profile file, {'focal_35mm': mm} or {'hfov': degrees} for a focal length alone (no distortion), or null when the camera's own lens in the file is what it takes; sizes: another profile per resolution ('3840x2880') or aspect ratio ('4:3'). A clip's own choice is source.lens_type in its .afp.json. The same shape in the app's data folder (curated_lenses.json, or $AFP_CURATED_LENSES) is laid over this one: README, 'Your own lens list'",
   "cameras": {
     "DJI OsmoAction6": {
-      "recorded": { "1": "wide", "2": "normal" },
+      "recorded": {
+        "1": "wide",
+        "2": "normal"
+      },
       "types": [
-        { "id": "wide", "label": "Wide", "profile": null,
-          "note": "Recorded as fov_type 1. With EIS off the camera writes its own lens and motion data in the file; with EIS on nothing yet" },
-        { "id": "normal", "label": "Normal", "profile": "DJI/DJI_Osmo Action_standard_,_4k_16by9_3840x2160-59.94fps.json",
-          "note": "Recorded as fov_type 2. The original Osmo Action's standard lens (145°, f/2.8, by Silver): Anton's projects of the 2026-10-20 dive (0122-0135, EIS off, no motion data) use it and it works" }
+        {
+          "id": "wide",
+          "label": "Wide",
+          "profile": null,
+          "note": "Recorded as fov_type 1. With EIS off the camera writes its own lens and motion data in the file; with EIS on nothing yet"
+        },
+        {
+          "id": "normal",
+          "label": "Normal",
+          "profile": "DJI/DJI_Osmo Action_standard_,_4k_16by9_3840x2160-59.94fps.json",
+          "note": "Recorded as fov_type 2. The original Osmo Action's standard lens (145°, f/2.8, by Silver): Anton's projects of the 2026-10-20 dive (0122-0135, EIS off, no motion data) use it and it works"
+        }
       ]
     },
     "GoPro HERO4 Black": {
       "recorded": {},
       "types": [
-        { "id": "wide", "label": "Wide", "profile": "GoPro/GoPro_HERO4 Black___2.7k_16by9_2704x1520-59.94fps.json",
-          "note": "Gyroflow's HERO4 Black profiles don't say their mode; most were likely shot in Wide, the default. This one (2.7K 59.94, by Mike Petrichenko) is the best voted (18 good, 10 bad, 2026-11). Others to try: 2.7K 29.97 by Arseny Troyan (- 2: 17/11), by AsA (9/6). Modes 0, 2, 4 (likely Wide, Medium, Narrow) are left unnamed until Anton checks clips with them" }
+        {
+          "id": "wide",
+          "label": "Wide",
+          "profile": "GoPro/GoPro_HERO4 Black___2.7k_16by9_2704x1520-59.94fps.json",
+          "note": "Gyroflow's HERO4 Black profiles don't say their mode; most were likely shot in Wide, the default. This one (2.7K 59.94, by Mike Petrichenko) is the best voted (18 good, 10 bad, 2026-11). Others to try: 2.7K 29.97 by Arseny Troyan (- 2: 17/11), by AsA (9/6). Modes 0, 2, 4 (likely Wide, Medium, Narrow) are left unnamed until Anton checks clips with them"
+        }
+      ]
+    },
+    "DJI Mini4 Pro": {
+      "default": "main",
+      "types": [
+        {
+          "id": "main",
+          "label": "Main camera",
+          "profile": {
+            "focal_35mm": 24
+          },
+          "note": "The drone straightens its picture itself and the gimbal holds it, so a focal length is all the stabilization needs: 24 mm equivalent (82.1°, DJI's spec). Gyroflow's database has only a 720p screen profile of it. Gyroflow reads the camera as 'DJI' alone; geotag::dji_model names it from DJI's header"
+        }
+      ]
+    },
+    "DJI Mavic Pro": {
+      "default": "main",
+      "types": [
+        {
+          "id": "main",
+          "label": "Main camera",
+          "profile": {
+            "focal_35mm": 26
+          },
+          "note": "Camera FC220 (udta/©mdl, geotag::dji_model; Gyroflow doesn't read these files). 26 mm equivalent (78.8°, DJI's spec), straightened in the drone. Gyroflow's database has a Mavic Pro 1 4K 29.97 profile, but it's voted down (1 good, 37 bad, 2026-11)"
+        }
+      ]
+    },
+    "DJI Mavic Air 2": {
+      "default": "main",
+      "types": [
+        {
+          "id": "main",
+          "label": "Main camera",
+          "profile": {
+            "focal_35mm": 24
+          },
+          "note": "Camera FC3170. 24 mm equivalent (84°, DJI's spec), straightened in the drone. Anton's clips were saved again by DJI's muxer (Lavf56) and say nothing; geotag::dji_model names them from the drone's photos beside them. Gyroflow's Mavic Air 2 4K profiles are voted down (4/88, 1/64, 2026-11)"
+        }
       ]
     }
   }
