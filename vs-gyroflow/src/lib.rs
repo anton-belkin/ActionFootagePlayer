@@ -20,6 +20,7 @@ pub mod probe;
 pub mod lens_pick;
 pub mod project;
 pub mod gpu_lut;
+pub mod youtube;
 pub mod edges;
 pub mod sphere;
 pub mod smooth;
