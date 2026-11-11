@@ -14,7 +14,7 @@
 
 use std::sync::{ Arc, atomic::AtomicBool };
 use nalgebra::{ Quaternion, UnitQuaternion, Vector3 };
-use gyroflow_core::telemetry_parser::{ Input, InputOptions, tags_impl::*, rig::{ CameraRig, RigPicture, geometry as g } };
+use gyroflow_core::telemetry_parser::{ Input, InputOptions, tags_impl::*, rig::{ CameraRig, RigPicture, VendorFacts, geometry as g } };
 
 /// One lens of the rig, as the render needs it
 #[derive(Clone, Debug, PartialEq)]
@@ -244,6 +244,10 @@ impl Rig {
             return Err(format!("{} {}: not a rig of lenses ({:?})", rig.brand, rig.model, std::mem::discriminant(&rig.projection.kind)));
         };
         if cameras.is_empty() { return Err("a rig without lenses".into()); }
+        // An Insta360's lenses stitched as Studio does it (rig_masks.rs): since 1.7.0's telemetry-parser states only each
+        // lens's field, the stitch being the app's
+        let mut cameras = cameras.clone();
+        if let VendorFacts::Insta360(facts) = &rig.vendor { crate::rig_masks::stitch(&rig.model, &mut cameras, facts); }
         if rig.projection.imu_from_rig != g::Quat::IDENTITY {
             // Not on any body this is used with yet (the DJI Osmo 360 states one, gyroflow-core's motion then needs it)
             return Err(format!("{} {}: its IMU isn't in the rig's axes", rig.brand, rig.model));
@@ -334,7 +338,7 @@ pub fn camera_rig(path: &str) -> Option<CameraRig> {
     // all of it took 23-43 s for a DJI clip on a NAS, which a clip opened from Finder waited for (gyroflow-probe)
     let parse = |probe_only: bool| -> Option<Input> {
         let mut file = std::fs::File::open(path).ok()?;
-        let size = file.metadata().ok()?.len() as usize;
+        let size = file.metadata().ok()?.len();
         Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)),
                                         InputOptions { probe_only, dont_look_for_sidecar_files: true, ..Default::default() }).ok()
     };
@@ -355,7 +359,7 @@ pub fn camera_rig(path: &str) -> Option<CameraRig> {
 pub fn read(path: &str) -> Option<Result<Rig, String>> {
     let rig = camera_rig(path)?;
     let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len() as usize;
+    let size = file.metadata().ok()?.len();
     let video = gyroflow_core::util::get_video_metadata(&mut file, size, &gyroflow_core::filesystem::path_to_url(path)).ok()?;
     Some(Rig::new(&rig, (video.width, video.height)))
 }

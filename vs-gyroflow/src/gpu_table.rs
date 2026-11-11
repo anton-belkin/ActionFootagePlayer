@@ -412,7 +412,9 @@ pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
 /// Windows runners) writes it with \r\n, and the section markers below are found by their \n
 fn template() -> &'static str {
     static LF: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    LF.get_or_init(|| TEMPLATE.replace("\r\n", "\n"))
+    // AFP_WARP_TEMPLATE: another warp.glsl in place of the built-in one, for work on the shader without a rebuild
+    LF.get_or_init(|| std::env::var_os("AFP_WARP_TEMPLATE").and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_else(|| TEMPLATE.to_string()).replace("\r\n", "\n"))
 }
 
 /// warp.glsl's parts: the file's head (with @PASSES@), the common code, and each pass's body by name
@@ -545,21 +547,34 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
     };
     let warp = format!("{trans_head}{warp}");
     if !opts.denoise { return warp; }
+    format!("{warp}\n{}", denoise_passes(clip, opts, &defs, &[rb_bind, sphere_bind], DN_SLOT))
+}
+
+/// The denoise's ring slot in the player: the largest output it denoises (4K)
+const DN_SLOT: (usize, usize) = (3840, 2160);
+
+/// The temporal denoise's passes (after the warp, at MAIN), with the warp's defines and what its passes bind beside the
+/// table (the grid's textures); `slot`, the size of each frame's place in the ring: the largest output it denoises
+fn denoise_passes(clip: &Clip, opts: &Options, defs: &str, binds: &[&str], slot: (usize, usize)) -> String {
     // The temporal denoise after it, at MAIN (RGB in both layouts by then): the shared code binds what it reads
-    let common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }, rb_bind, sphere_bind];
-    let with = |mut v: Vec<&str>| { let at = 2.min(v.len()); for (k, c) in common.iter().enumerate() { v.insert(at + k, c); } d(&v) };
-    // The shown frame and DN_RADIUS frames on each side of it: a ring of 2 x DN_RADIUS + 1 slots, two across (a
-    // texture's height is at most 16384), each the size of the largest output it takes
+    let mut common: Vec<&str> = vec!["//!BIND GYROFLOW_TABLE", if opts.mode == Mode::Exact { "" } else { "//!BIND GYROFLOW_GRID" }];
+    common.extend_from_slice(binds);
+    let with = |v: Vec<&str>| -> Vec<String> {
+        let mut v: Vec<String> = v.into_iter().map(String::from).collect();
+        let at = 2.min(v.len());
+        for (k, c) in common.iter().enumerate() { v.insert(at + k, c.to_string()); }
+        v.into_iter().filter(|s| !s.is_empty()).collect()
+    };
+    // The shown frame and DN_RADIUS frames on each side of it: a ring of 2 x DN_RADIUS + 1 slots, two across for 4K
+    // (a texture's height is at most 16384), each the size of the largest output it takes
     const RADIUS: usize = 5;
     const RING: usize = 2 * RADIUS + 1;
-    const COLS: usize = 2;
-    const SLOT: (usize, usize) = (3840, 2160);
-    let rows = RING.div_ceil(COLS);
-    let dn_defs = format!("{defs}\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {COLS}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", SLOT.0, SLOT.1);
+    let (cols, rows) = dn_layout(slot, MAX_TEX).unwrap_or((2, RING.div_ceil(2)));
+    let dn_defs = format!("{defs}\n#define DN_RADIUS {RADIUS}\n#define DN_RING {RING}\n#define DN_COLS {cols}\n#define DN_SLOT_W {}\n#define DN_SLOT_H {}\n#define DN_PASS", slot.0, slot.1);
     let dn = |extra: &str, name: &str| format!("{extra}\n{}", pass_body("dn_common")) + pass_body(name);
     let state = format!("//!BUFFER GDN\n//!VAR uint gdn_hist[8192]\n//!VAR float gdn_sigma[32]\n//!VAR vec4 gdn_quat[{RING}]\n//!VAR vec4 gdn_cam[{RING}]\n//!VAR float gdn_zoom[{RING}]\n//!VAR float gdn_pts[{RING}]\n//!VAR vec2 gdn_size\n//!VAR int gdn_head\n//!VAR int gdn_epoch\n//!VAR uint gdn_magic\n//!STORAGE\n\n");
     let texture = |name: &str, w: usize, h: usize, fmt: &str| format!("//!TEXTURE {name}\n//!SIZE {w} {h}\n//!FORMAT {fmt}\n//!STORAGE\n\n");
-    let nb = (SLOT.0.div_ceil(32) + 1, SLOT.1.div_ceil(32) + 1);
+    let nb = (slot.0.div_ceil(32) + 1, slot.1.div_ceil(32) + 1);
     let ring = ["//!BIND GDN_FRAMES", "//!BIND GDN_QUART", "//!BIND GDN"];
     let pass = |head: &[&str], tail: &[&str]| with(head.iter().chain(ring.iter()).chain(tail.iter()).copied().collect());
     // After the frames' average: the guided filter's quarter-size statistics, its a and b, their means, and the filter
@@ -580,8 +595,8 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
         hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GDN_GF_MY", "//!BIND GDN_GF_MC"], &["//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise filter and specks"]),
             &dn_defs, "", &dn("#define DN_GF_APPLY", "dn_clean")),
     ].join("\n");
-    format!("{warp}\n{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{clean}",
-        texture("GDN_FRAMES", SLOT.0 * COLS, SLOT.1 * rows, FRAME_FORMAT), texture("GDN_QUART", SLOT.0 / 4 * COLS, SLOT.1 / 4 * rows, "rgba16f"),
+    format!("{state}{}{}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{clean}",
+        texture("GDN_FRAMES", slot.0 * cols, slot.1 * rows, FRAME_FORMAT), texture("GDN_QUART", slot.0 / 4 * cols, slot.1 / 4 * rows, "rgba16f"),
         texture("GDN_VEC", nb.0, nb.1 * RING, "rgba32f"),
         hook_pass(clip, &with(vec!["//!HOOK MAIN", "//!BIND HOOKED", "//!SAVE GDN_CUR4", "//!WIDTH HOOKED.w 4 /", "//!HEIGHT HOOKED.h 4 /",
             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow denoise luma"]), &dn_defs, "", pass_body("dn_luma")),
@@ -597,7 +612,28 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
             &dn_defs, "", &dn("#define DN_BLEND", "dn_blend")),
         hook_pass(clip, &pass(&["//!HOOK MAIN", "//!BIND HOOKED"], &["//!SAVE GDN_STATE_DONE", "//!WIDTH 16", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
             "//!COMPUTE 16 1", "//!DESC gyroflow denoise state"]), &dn_defs, "#define DN_COMPUTE", &dn("#define DN_STATE", "dn_state")))
+}
 
+/// The temporal denoise alone, as a shader file of its own for a frame the warp didn't render (gyroflow-export: the
+/// plugin's engine stabilizes it, user_shader.rs runs this on it): the file's head (the parameters, the table) and the
+/// denoise's passes at MAIN, its ring made for `size`. The table's data is left out (`@TABLE_HEX@` empty): the caller
+/// hands it over as it is (Table::data). The frame's size is the shader's RT, which the caller defines. None where the
+/// ring of that size doesn't fit a texture
+pub fn denoise_shader(clip: &Clip, opts: &Options, table: &Table, size: (usize, usize)) -> Option<String> {
+    let slot = (size.0.div_ceil(4) * 4, size.1.div_ceil(4) * 4);
+    dn_layout(slot, MAX_TEX)?;
+    let opts = Options { mode: Mode::Exact, denoise: true, ..*opts };
+    let (head, _, _) = sections();
+    let passes = denoise_passes(clip, &opts, &defines(clip, &opts, table), &[], slot);
+    Some(head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
+        .replace("@TABLE_HEX@", "").replace("@PASSES@", &passes))
+}
+
+/// How the ring's slots of `slot` pixels go into one texture of at most `max` a side: (across, down), the fewest
+/// across that fit (two for 4K, as the player has it); None: it doesn't fit
+pub fn dn_layout(slot: (usize, usize), max: usize) -> Option<(usize, usize)> {
+    const RING: usize = 11;
+    (2..=RING).chain(std::iter::once(1)).map(|c| (c, RING.div_ceil(c))).find(|&(c, r)| c * slot.0 <= max && r * slot.1 <= max)
 }
 
 impl Options {

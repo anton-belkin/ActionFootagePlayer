@@ -192,6 +192,14 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> Option<i64> {
 /// The first GPS fix in one GPMF sample (GPS5 with GPSF ≥ 2, or GPS9 whose fix field is ≥ 2), with its UTC, and the
 /// sample's UTC (GPSU) whatever the fix
 fn gopro_fix(sample: &[u8]) -> (Option<Fix>, Option<f64>) {
+    let (fixes, utc) = gopro_fixes(sample, true);
+    (fixes.first().map(|f| f.1), utc)
+}
+
+/// The GPS fixes in one GPMF sample, each with where in the sample it is (0 its start, 1 its end: GPS5 and GPS9 are
+/// rows spread evenly over the sample's time), and the sample's UTC; `first`: the first fix alone
+fn gopro_fixes(sample: &[u8], first: bool) -> (Vec<(f64, Fix)>, Option<f64>) {
+    let mut out = Vec::new();
     let mut items = Vec::new();
     klv(sample, &mut items);
     let (mut scal, mut fixq, mut utc): (Vec<f64>, Option<u32>, Option<f64>) = (Vec::new(), None, None);
@@ -208,12 +216,17 @@ fn gopro_fix(sample: &[u8]) -> (Option<Fix>, Option<f64>) {
             }
             b"GPSF" => fixq = be32(d, 0),
             b"GPSU" => utc = gpsu(d),
+            // GPS5: lat, lon, alt (WGS 84), 2D speed, 3D speed, as l l l l l (20 bytes), ~18 rows a second; the
+            // sample's GPSF its fix
             b"GPS5" if *size == 20 && *rep > 0 && fixq.unwrap_or(0) >= 2 => {
                 let s = |i: usize| scal.get(i).or(scal.first()).copied().filter(|v| *v != 0.0).unwrap_or(1.0);
-                let v = |i: usize| be32(d, i * 4).map(|x| x as i32 as f64 / s(i));
-                if let (Some(lat), Some(lon)) = (v(0), v(1)) {
-                    if lat.abs() <= 90.0 && lon.abs() <= 180.0 && !(lat == 0.0 && lon == 0.0) {
-                        return (Some(Fix { lat, lon, alt: v(2), t: utc }), utc);
+                for r in 0..*rep {
+                    let v = |i: usize| be32(d, r * 20 + i * 4).map(|x| x as i32 as f64 / s(i));
+                    if let (Some(lat), Some(lon)) = (v(0), v(1)) {
+                        if lat.abs() <= 90.0 && lon.abs() <= 180.0 && !(lat == 0.0 && lon == 0.0) {
+                            out.push((r as f64 / *rep as f64, Fix { lat, lon, alt: v(2), t: utc }));
+                            if first { return (out, utc); }
+                        }
                     }
                 }
             }
@@ -229,14 +242,15 @@ fn gopro_fix(sample: &[u8]) -> (Option<Fix>, Option<f64>) {
                     if let (Some(lat), Some(lon)) = (l(0), l(1)) {
                         if lat.abs() > 90.0 || (lat == 0.0 && lon == 0.0) { continue; }
                         let t = match (l(5), l(6)) { (Some(days), Some(secs)) => Some(946_684_800.0 + days * 86400.0 + secs), _ => utc };
-                        return (Some(Fix { lat, lon, alt: l(2), t }), utc.or(t));
+                        out.push((r as f64 / *rep as f64, Fix { lat, lon, alt: l(2), t }));
+                        if first { return (out, utc.or(t)); }
                     }
                 }
             }
             _ => {}
         }
     }
-    (None, utc)
+    (out, utc)
 }
 
 /// A GoPro's first fix in its first `until` s, and (sample's UTC, sample's time in the clip) for the clock
@@ -512,6 +526,208 @@ pub fn zone_text(min: i32) -> String {
     if m % 60 == 0 { format!("{sign}{}", m / 60) } else { format!("{sign}{}:{:02}", m / 60, m % 60) }
 }
 
+// ---------- Where a frame was taken (a photo's place, issue #50) ----------
+//
+// A photo saved from a clip carries its place in its Exif GPS (photo.rs, afp-photo), and a Live or Motion Photo's video
+// in its QuickTime location: the camera's own fix at the frame's time (`fix_at`), else the location the Library keeps
+// for the clip in its own file (`sidecar_place`, docs/geolocation.md), else none.
+
+/// How far from the frame's time a fix is still taken for it, s: a GPS that found its satellites a little after the
+/// recording started, or lost them for a while (under a bridge, in a dive), still places the frame near enough
+pub const FIX_NEAR_S: f64 = 30.0;
+
+/// Where the camera itself says it was `t` s into the clip: its fix nearest that time, at most FIX_NEAR_S away. GoPro's
+/// GPS (GPS5/GPS9 rows, each at its time in its sample), a DJI drone's per-frame GpsBasic (djmd) or its .SRT beside
+/// the clip (a block a frame), Insta360's (nav.rs), else QuickTime's location (one place a clip: the Mavic Pro, phones).
+/// `camera`: its maker as probe::camera has it ("GoPro", "DJI", "Insta360"), or ""
+pub fn fix_at(path: &Path, camera: &str, t: f64) -> Option<Fix> {
+    let brand = camera.split_whitespace().next().unwrap_or("").to_lowercase();
+    let dji_name = path.file_name().is_some_and(|n| n.to_string_lossy().to_uppercase().starts_with("DJI_"));
+    if brand == "gopro" || gopro_udta(path).is_some() {
+        return gopro_fix_at(path, t);
+    }
+    if brand == "insta360" {
+        let tel = crate::nav::Telemetry::read(&path.to_string_lossy())?;
+        return tel.gps.iter().filter(|g| g.fix >= 2).map(|g| ((g.t_ms / 1000.0 - t).abs(), g))
+            .filter(|(d, _)| *d <= FIX_NEAR_S).min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, g)| Fix { lat: g.lat, lon: g.lon, alt: None, t: None });
+    }
+    if brand == "dji" || dji_name {
+        if let Some(f) = dji_fix_at(path, t).or_else(|| srt_beside_at(path, t)) { return Some(f); }
+    }
+    quicktime_place(path)
+}
+
+/// A GoPro's fix nearest `t`: the GPMF samples around it read, each row at its time
+fn gopro_fix_at(path: &Path, t: f64) -> Option<Fix> {
+    let (mut file, _) = crate::prefetch::Prefetched::open_range(path, Some((t - FIX_NEAR_S - 2.0, t + FIX_NEAR_S))).ok()?;
+    let mut samples: Vec<crate::prefetch::Sample> = file.samples().to_vec();
+    samples.sort_by(|a, b| a.time.total_cmp(&b.time));
+    let mut best: Option<(f64, Fix)> = None;
+    for (i, s) in samples.iter().enumerate() {
+        // A sample's rows go up to the next one's start (GoPro's: a second each)
+        let span = samples.get(i + 1).map(|n| n.time - s.time).filter(|d| *d > 0.0 && *d < 5.0).unwrap_or(1.0);
+        if s.time + span < t - FIX_NEAR_S || s.time > t + FIX_NEAR_S { continue; }
+        if s.end <= s.start || s.end - s.start > 1 << 20 { continue; }
+        let mut buf = vec![0u8; (s.end - s.start) as usize];
+        if file.seek(SeekFrom::Start(s.start)).is_err() || file.read_exact(&mut buf).is_err() { continue; }
+        for (at, f) in gopro_fixes(&buf, false).0 {
+            let d = (s.time + at * span - t).abs();
+            if d <= FIX_NEAR_S && best.is_none_or(|b| d < b.0) { best = Some((d, f)); }
+        }
+    }
+    best.map(|(_, f)| Fix { t: None, ..f })
+}
+
+/// The track whose sample description is `codec`: each sample's offset, size and time in the clip (s), from its sample
+/// table (stsz, stsc, stco/co64, stts, mdhd's time scale)
+fn track_samples(f: &mut std::fs::File, codec: &[u8; 4]) -> Option<Vec<(u64, u64, f64)>> {
+    let size = f.metadata().ok()?.len();
+    let (ma, mb) = child(f, 0, size, b"moov")?;
+    let mut at = ma;
+    while let Some((ta, tb)) = child(f, at, mb, b"trak") {
+        at = tb;
+        let Some((da, db)) = child(f, ta, tb, b"mdia") else { continue };
+        let Some(mdhd) = child(f, da, db, b"mdhd").and_then(|(a, b)| read_range(f, a, b, 256)) else { continue };
+        let scale = if mdhd.first() == Some(&1) { be32(&mdhd, 20) } else { be32(&mdhd, 12) }.filter(|s| *s > 0)? as f64;
+        let stbl = (|| { let (ia, ib) = child(f, da, db, b"minf")?; child(f, ia, ib, b"stbl") })();
+        let Some((sa, sb)) = stbl else { continue };
+        let Some(stsd) = child(f, sa, sb, b"stsd").and_then(|(a, b)| read_range(f, a, b, 64 << 10)) else { continue };
+        if stsd.get(12..16) != Some(codec.as_slice()) { continue; }
+        let table = |f: &mut std::fs::File, name: &[u8; 4]| child(f, sa, sb, name).and_then(|(a, b)| read_range(f, a, b, 16 << 20));
+        let stsz = table(f, b"stsz")?;
+        let (fixed, count) = (be32(&stsz, 4)?, be32(&stsz, 8)? as usize);
+        let sizes: Vec<u64> = (0..count).map(|i| if fixed > 0 { Some(fixed as u64) } else { be32(&stsz, 12 + 4 * i).map(u64::from) }).collect::<Option<_>>()?;
+        let stsc = table(f, b"stsc")?;
+        let chunks: Vec<(u32, u32)> = (0..be32(&stsc, 4)? as usize).filter_map(|i| Some((be32(&stsc, 8 + 12 * i)?, be32(&stsc, 12 + 12 * i)?))).collect();
+        let (offs, wide) = match table(f, b"stco") { Some(x) => (x, false), None => (table(f, b"co64")?, true) };
+        let off = |c: usize| if wide { offs.get(8 + 8 * c..16 + 8 * c).map(|b| u64::from_be_bytes(b.try_into().unwrap())) } else { be32(&offs, 8 + 4 * c).map(u64::from) };
+        let stts = table(f, b"stts")?;
+        let mut times = Vec::with_capacity(count);
+        let mut now = 0u64;
+        for i in 0..be32(&stts, 4)? as usize {
+            let (n, delta) = (be32(&stts, 8 + 8 * i)?, be32(&stts, 12 + 8 * i)?);
+            for _ in 0..n { if times.len() < count { times.push(now as f64 / scale); } now += delta as u64; }
+        }
+        let mut out = Vec::with_capacity(count);
+        let (mut chunk, mut in_chunk, mut pos) = (0usize, 0u32, off(0)?);
+        let mut run = 0;
+        for (i, &sz) in sizes.iter().enumerate() {
+            // The samples a chunk has: the stsc entry whose first chunk (1-based) is at or before this one
+            while run + 1 < chunks.len() && chunks[run + 1].0 as usize <= chunk + 1 { run += 1; }
+            let per = chunks.get(run).map(|c| c.1).unwrap_or(1);
+            if in_chunk >= per { chunk += 1; in_chunk = 0; pos = off(chunk)?; while run + 1 < chunks.len() && chunks[run + 1].0 as usize <= chunk + 1 { run += 1; } }
+            out.push((pos, sz, times.get(i).copied().unwrap_or(f64::NAN)));
+            pos += sz; in_chunk += 1;
+        }
+        return Some(out);
+    }
+    None
+}
+
+/// A DJI clip's fix nearest `t` from its metadata track (djmd: a sample a frame, its GpsBasic): the frame at `t` read,
+/// then one a second further each way out to FIX_NEAR_S (the Osmo Action 6 writes a GpsBasic with no fix in every frame:
+/// ~60 small reads, not every frame's)
+fn dji_fix_at(path: &Path, t: f64) -> Option<Fix> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let samples = track_samples(&mut f, b"djmd")?;
+    let (first, ..) = *samples.first()?;
+    // DJI's own metadata only: its first sample names its dvtm_*.proto
+    let head = read_range(&mut f, first, first + samples[0].1.min(4096), 1 << 20)?;
+    if !head.windows(5).any(|w| w == b"dvtm_") { return None; }
+    let nearest = |at: f64| samples.iter().enumerate().filter(|(_, s)| s.2.is_finite()).min_by(|a, b| (a.1 .2 - at).abs().total_cmp(&(b.1 .2 - at).abs())).map(|(i, _)| i);
+    let mut tried = Vec::new();
+    for k in 0..=(2 * FIX_NEAR_S as i64) {
+        let at = t + if k % 2 == 1 { (k + 1) / 2 } else { -(k / 2) } as f64;
+        let Some(i) = nearest(at) else { break };
+        if tried.contains(&i) || (samples[i].2 - t).abs() > FIX_NEAR_S + 0.5 { continue; }
+        tried.push(i);
+        let (o, sz, _) = samples[i];
+        if let Some(fix) = read_range(&mut f, o, o + sz, 1 << 20).and_then(|b| dji_gps(&b, 0)) { return Some(fix); }
+    }
+    None
+}
+
+/// The time an SRT block starts and ends at, s ("00:01:02,345 --> 00:01:02,378")
+fn srt_times(line: &str) -> Option<(f64, f64)> {
+    let (a, b) = line.split_once("-->")?;
+    let t = |s: &str| -> Option<f64> {
+        let s = s.trim().replace(',', ".");
+        let mut p = s.split(':');
+        let (h, m, sec) = (p.next()?.parse::<f64>().ok()?, p.next()?.parse::<f64>().ok()?, p.next()?.parse::<f64>().ok()?);
+        Some(h * 3600.0 + m * 60.0 + sec)
+    };
+    Some((t(a)?, t(b)?))
+}
+
+/// A drone's .SRT: the place of the block at `t` s (a block a frame), else of the nearest one with a place, at most
+/// FIX_NEAR_S away
+pub fn srt_fix_at(text: &str, t: f64) -> Option<Fix> {
+    let mut best: Option<(f64, Fix)> = None;
+    let mut block: Option<(f64, f64)> = None;
+    let mut body = String::new();
+    let take = |block: Option<(f64, f64)>, body: &str, best: &mut Option<(f64, Fix)>| {
+        let Some((a, b)) = block else { return };
+        let d = if t < a { a - t } else if t > b { t - b } else { 0.0 };
+        if d > FIX_NEAR_S || best.is_some_and(|x| x.0 <= d) { return; }
+        if let Some(f) = srt_fix(body) { *best = Some((d, f)); }
+    };
+    for line in text.lines() {
+        if let Some(times) = line.contains("-->").then(|| srt_times(line)).flatten() {
+            take(block, &body, &mut best);
+            if best.is_some_and(|b| b.0 == 0.0) { break; }
+            block = Some(times);
+            body.clear();
+        } else {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    take(block, &body, &mut best);
+    best.map(|b| b.1)
+}
+
+fn srt_beside_at(path: &Path, t: f64) -> Option<Fix> {
+    ["SRT", "srt"].iter().find_map(|ext| std::fs::read(path.with_extension(ext)).ok()).and_then(|b| srt_fix_at(&String::from_utf8_lossy(&b), t))
+}
+
+/// The location the Library keeps for the clip (docs/geolocation.md): `location` { lat, lon, alt? } in its own file,
+/// the main one over its project's locations (workspace::own_file), else the other copies' files, else <clip>.afp.json
+pub fn sidecar_place(clip: &Path) -> Option<Fix> {
+    use crate::workspace as ws;
+    let mut files = Vec::new();
+    if let Some(root) = ws::project_root(clip) {
+        let (main, others) = ws::own_file(clip, &ws::locations(&root));
+        files.push(main);
+        files.extend(others);
+    }
+    files.push(ws::sidecar_file(clip));
+    files.iter().find_map(|f| {
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(f).ok()?).ok()?;
+        location_of(doc.get("location")?)
+    })
+}
+
+/// A sidecar's `location`, when it's a place
+pub fn location_of(l: &serde_json::Value) -> Option<Fix> {
+    let (lat, lon) = (l.get("lat")?.as_f64()?, l.get("lon")?.as_f64()?);
+    (lat.is_finite() && lon.is_finite() && lat.abs() <= 90.0 && lon.abs() <= 180.0 && !(lat == 0.0 && lon == 0.0))
+        .then(|| Fix { lat, lon, alt: l.get("alt").and_then(|a| a.as_f64()).filter(|a| a.is_finite()), t: None })
+}
+
+/// Where a photo of the clip's frame at `t` s was taken, and what says so: the camera's own GPS at that time, else the
+/// Library's location for the clip, else None
+pub fn photo_place(clip: &Path, camera: &str, t: f64) -> Option<(Fix, &'static str)> {
+    fix_at(clip, camera, t).map(|f| (f, "the camera's GPS")).or_else(|| sidecar_place(clip).map(|f| (f, "the clip's location in the Library")))
+}
+
+/// A place as ISO 6709 (QuickTime's ©xyz and com.apple.quicktime.location.ISO6709, as an iPhone writes it):
+/// "+46.10200+007.91928+1780.429/"
+pub fn to_iso6709(f: &Fix) -> String {
+    let alt = f.alt.map(|a| format!("{a:+.3}")).unwrap_or_default();
+    format!("{:+09.5}{:+010.5}{alt}/", f.lat, f.lon)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +756,69 @@ mod tests {
         assert!((f.lat - 27.2579).abs() < 1e-9 && (f.lon - 33.8116).abs() < 1e-9 && f.alt == Some(1.5));
         // 2025-10-19 09:07:26.5 UTC
         assert_eq!(utc, Some(1_760_864_846.5));
+    }
+
+    #[test]
+    fn gopro_rows_in_a_sample() {
+        // GPS5: three rows over the sample; each its place in it
+        let mut gps = Vec::new();
+        for r in 0..3i32 { for v in [27_257_900 + r * 100, 338_116_000, 1_500, 100, 100] { gps.extend(v.to_be_bytes()); } }
+        let mut scal = Vec::new();
+        for v in [1_000_000i32, 10_000_000, 1_000, 1_000, 100] { scal.extend(v.to_be_bytes()); }
+        let strm = [item(b"GPSF", b'L', 4, 1, &3u32.to_be_bytes()), item(b"SCAL", b'l', 4, 5, &scal), item(b"GPS5", b'l', 20, 3, &gps)].concat();
+        let stream = item(b"STRM", 0, 1, strm.len() as u16, &strm);
+        let devc = item(b"DEVC", 0, 1, stream.len() as u16, &stream);
+        let fix = |sample: &[u8]| gopro_fixes(sample, false).0;
+        let rows = fix(&devc);
+        assert_eq!(rows.len(), 3);
+        assert!((rows[2].0 - 2.0 / 3.0).abs() < 1e-9 && (rows[2].1.lat - 27.2581).abs() < 1e-9);
+        assert_eq!(gopro_fix(&devc).0.map(|f| f.lat), Some(27.2579));
+        // No lock (GPSF 0): none
+        let mut unlocked = devc.clone();
+        let at = unlocked.windows(4).position(|w| w == b"GPSF").unwrap() + 8;
+        unlocked[at + 3] = 0;
+        assert!(fix(&unlocked).is_empty());
+    }
+
+    #[test]
+    fn srt_at_a_time() {
+        let block = |n: usize, lat: f64| format!("{n}\n00:00:{:02},{:03} --> 00:00:{:02},{:03}\n<font size=\"28\">FrameCnt: {n}\n[latitude: {lat:.6}] [longitude: 7.919277] [rel_alt: 4.000 abs_alt: 1780.429] </font>\n\n",
+                                                 n / 10, (n % 10) * 100, (n + 1) / 10, ((n + 1) % 10) * 100);
+        let text: String = (0..50).map(|n| block(n, 46.0 + n as f64 * 0.001)).collect();
+        // 2.35 s is in block 23 (2.3 to 2.4)
+        let f = srt_fix_at(&text, 2.35).unwrap();
+        assert!((f.lat - 46.023).abs() < 1e-9 && f.alt == Some(1780.429), "{f:?}");
+        assert!((srt_fix_at(&text, 0.0).unwrap().lat - 46.0).abs() < 1e-9);
+        // After its end: the last block, while near enough
+        assert!((srt_fix_at(&text, 6.0).unwrap().lat - 46.049).abs() < 1e-9);
+        assert!(srt_fix_at(&text, 5.0 + FIX_NEAR_S + 1.0).is_none());
+        // Blocks with no place are passed over for the nearest with one
+        let text: String = (0..50).map(|n| if n < 30 { block(n, 0.0).replace("[latitude: 0.000000]", "") } else { block(n, 46.0 + n as f64 * 0.001) }).collect();
+        assert!((srt_fix_at(&text, 1.0).unwrap().lat - 46.030).abs() < 1e-9);
+    }
+
+    #[test]
+    fn places_written_and_read() {
+        let f = Fix { lat: 46.1020017, lon: 7.9192771, alt: Some(1780.429), t: None };
+        assert_eq!(to_iso6709(&f), "+46.10200+007.91928+1780.429/");
+        assert_eq!(to_iso6709(&Fix { lat: -8.65, lon: -115.2167, alt: None, t: None }), "-08.65000-115.21670/");
+        let back = iso6709(&to_iso6709(&f)).unwrap();
+        assert!((back.lat - 46.102).abs() < 1e-5 && (back.lon - 7.91928).abs() < 1e-5 && back.alt == Some(1780.429));
+        // A sidecar's location, as the Library writes it
+        let l = serde_json::json!({ "lat": 27.733312, "lon": 34.25, "alt": 2.0, "source": "photos", "place": { "country": "Egypt" } });
+        assert_eq!(location_of(&l), Some(Fix { lat: 27.733312, lon: 34.25, alt: Some(2.0), t: None }));
+        assert_eq!(location_of(&serde_json::json!({ "lat": 1.0, "lon": 2.0 })).unwrap().alt, None);
+        assert!(location_of(&serde_json::json!({ "lat": 91.0, "lon": 2.0 })).is_none() && location_of(&serde_json::json!({ "place": {} })).is_none());
+        // From the clip's own file beside it (no project)
+        let dir = std::env::temp_dir().join(format!("afp-geo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("A.MP4");
+        std::fs::write(&clip, b"not a video").unwrap();
+        assert!(photo_place(&clip, "", 1.0).is_none());
+        std::fs::write(dir.join("A.afp.json"), r#"{"format":"actionfootageplayer-clip","version":1,"location":{"lat":27.9158,"lon":34.3299,"source":"manual"}}"#).unwrap();
+        let (p, why) = photo_place(&clip, "", 1.0).unwrap();
+        assert!((p.lat - 27.9158).abs() < 1e-9 && why.contains("Library"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

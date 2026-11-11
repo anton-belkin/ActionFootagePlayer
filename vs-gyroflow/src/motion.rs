@@ -68,7 +68,7 @@ pub fn smooth_into(stab: &StabilizationManager, gyro: &mut GyroSource, geometry:
     let mut params = ComputeParams::from_manager(stab);
     params.calculate_camera_fovs();
     let horizon_lock = stab.smoothing.read().horizon_lock.clone();
-    let (mut quats, max_angles) = gyro.recompute_smoothness(&geometry.smoothing(level), horizon_lock, &params);
+    let (mut quats, max_angles) = gyro.recompute_smoothness(&geometry.smoothing(level), horizon_lock, &mut params);
     let end_us = (stab.params.read().get_scaled_duration_ms() * 1000.0) as i64;
     if let Some(from) = fade_in {
         for (t, q) in quats.range_mut(from..from + FADE_IN_US) {
@@ -76,7 +76,7 @@ pub fn smooth_into(stab: &StabilizationManager, gyro: &mut GyroSource, geometry:
         }
     }
     unstabilized_where_unknown(&mut quats, end_us);
-    gyro.smoothed_quaternions = quats;
+    gyro.smoothed_quaternions = Arc::new(quats);
     gyro.max_angles = max_angles;
 }
 
@@ -110,7 +110,7 @@ pub fn restabilize(stab: &StabilizationManager, geometry: &Geometry, level: Leve
 struct ClipFile {
     key: String,
     file: Mutex<Prefetched>,
-    len: usize,
+    len: u64,
     /// The latest frame any engine of the clip was asked for, µs into the clip, and when
     playhead: AtomicI64,
     asked: Mutex<Instant>,
@@ -156,14 +156,14 @@ pub struct Motion {
 impl Motion {
     /// The clip's file with the motion data of its first `lookahead` + START_S seconds read, for load_video_file; or as
     /// much as an engine before this one read of it. A `lookahead` of 0: all of it
-    pub fn open(path: &str, url: &str, lookahead: f64) -> std::io::Result<(Arc<Motion>, usize)> {
+    pub fn open(path: &str, url: &str, lookahead: f64) -> std::io::Result<(Arc<Motion>, u64)> {
         Self::open_range(path, url, lookahead, None)
     }
 
     /// The same with a `range` (s into the clip, with a `lookahead` of 0): that stretch's motion data alone, and as
     /// much as was read of it before (the GPU warp's first table, gpu_table.rs: a moment's part, or the seconds the clip
     /// starts playing at)
-    pub fn open_range(path: &str, url: &str, lookahead: f64, range: Option<(f64, f64)>) -> std::io::Result<(Arc<Motion>, usize)> {
+    pub fn open_range(path: &str, url: &str, lookahead: f64, range: Option<(f64, f64)>) -> std::io::Result<(Arc<Motion>, u64)> {
         let range = range.filter(|_| lookahead <= 0.0);
         let meta = std::fs::metadata(path)?;
         let key = format!("{path}|{}|{:?}", meta.len(), meta.modified().ok());

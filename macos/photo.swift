@@ -2,8 +2,8 @@
 //
 //   afp-photo --width W --height H [--sdr <file>] [--hdr <file>] [--out <file.heic>] [--sdr-out <file>]
 //             [--quality 0-1] [--taken "YYYY:MM:DD HH:MM:SS"] [--make <name>] [--model <name>] [--content-id <UUID>]
-//             [--link <json>]
-//   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds>
+//             [--link <json>] [--gps <lat,lon[,alt]>]
+//   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds> [--gps <lat,lon[,alt]>]
 //   afp-photo --set-meta <file.heic> [--link <json>] [--tags <json list>]
 //
 // The renditions are 16-bit RGB, little-endian, row by row (vs-gyroflow's photo::write_rgb16): --sdr the SDR look as
@@ -25,6 +25,10 @@
 // --link: the photo's link to its clip, as XMP (afp:link in the player's namespace, https://actionfootageplayer.ch/ns/1.0/,
 // as vs-gyroflow's photo.rs writes it in a JPEG): added once the HEIC is written, its image data copied as it is
 // (ImageIO's CGImageDestinationCopyImageSource), the gain map and the Live Photo's identifier kept.
+//
+// --gps: where the photo was taken (degrees, metres above sea level), from the clip's GPS or its location in the
+// Library (vs-gyroflow's geotag::photo_place): the HEIC's GPS dictionary (Exif GPS), and a Live Photo's MOV's
+// com.apple.quicktime.location.ISO6709, as an iPhone writes them; Photos puts the pair on its map by them.
 
 import Foundation
 import ImageIO
@@ -42,6 +46,13 @@ var it = CommandLine.arguments.dropFirst().makeIterator()
 while let a = it.next() {
     guard a.hasPrefix("--"), let v = it.next() else { fail("bad arguments") }
     args[String(a.dropFirst(2))] = v
+}
+
+// --gps "lat,lon[,alt]": where the photo was taken (degrees, metres)
+let gps: (lat: Double, lon: Double, alt: Double?)? = args["gps"].flatMap { s in
+    let v = s.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard v.count >= 2, abs(v[0]) <= 90, abs(v[1]) <= 180 else { return nil }
+    return (v[0], v[1], v.count > 2 ? v[2] : nil)
 }
 // --set-meta <file.heic> [--link <json>] [--tags <json list>]: a photo's link and tags (vs-gyroflow's afp-meta asks),
 // written into its XMP (afp:link, dc:subject), its image data copied as it is: the gain map and the Live Photo's
@@ -88,6 +99,15 @@ func liveVideo(from input: URL, to output: URL, id: String, still: Double) {
     identifier.value = id as NSString
     identifier.dataType = kCMMetadataBaseDataType_UTF8 as String
     writer.metadata = [identifier]
+    // Where it was taken, as an iPhone writes it (ISO 6709: "+46.10200+007.91928+1780.429/")
+    if let gps {
+        let location = AVMutableMetadataItem()
+        location.keySpace = .quickTimeMetadata
+        location.key = "com.apple.quicktime.location.ISO6709" as NSString
+        location.value = (String(format: "%+09.5f%+010.5f", gps.lat, gps.lon) + (gps.alt.map { String(format: "%+.3f", $0) } ?? "") + "/") as NSString
+        location.dataType = kCMMetadataBaseDataType_UTF8 as String
+        writer.metadata.append(location)
+    }
 
     var pairs: [(AVAssetReaderTrackOutput, AVAssetWriterInput)] = []
     for track in asset.tracks where track.mediaType == .video || track.mediaType == .audio {
@@ -231,6 +251,15 @@ if let make = args["make"] { tiff[kCGImagePropertyTIFFMake] = make }
 if let model = args["model"] { tiff[kCGImagePropertyTIFFModel] = model }
 if let taken = args["taken"] { tiff[kCGImagePropertyTIFFDateTime] = taken }
 if !tiff.isEmpty { props[kCGImagePropertyTIFFDictionary] = tiff }
+if let gps {
+    var g: [CFString: Any] = [
+        kCGImagePropertyGPSVersion: [2, 3, 0, 0],
+        kCGImagePropertyGPSLatitude: abs(gps.lat), kCGImagePropertyGPSLatitudeRef: gps.lat < 0 ? "S" : "N",
+        kCGImagePropertyGPSLongitude: abs(gps.lon), kCGImagePropertyGPSLongitudeRef: gps.lon < 0 ? "W" : "E",
+    ]
+    if let alt = gps.alt { g[kCGImagePropertyGPSAltitude] = abs(alt); g[kCGImagePropertyGPSAltitudeRef] = alt < 0 ? 1 : 0 }
+    props[kCGImagePropertyGPSDictionary] = g
+}
 // A Live Photo's half: the identifier its MOV has too
 if let id = args["content-id"] { props[kCGImagePropertyMakerAppleDictionary] = ["17": id] }
 sdr = sdr.settingProperties(props)

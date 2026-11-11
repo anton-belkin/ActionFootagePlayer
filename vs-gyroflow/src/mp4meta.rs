@@ -19,6 +19,9 @@ use std::path::{ Path, PathBuf };
 pub const LINK_KEY: &str = "ch.actionfootageplayer.link";
 /// The day the file was recorded, with its time zone ("2026-10-22T15:28:42+0200")
 pub const CREATION_DATE_KEY: &str = "com.apple.quicktime.creationdate";
+/// Where it was recorded, ISO 6709 ("+46.10200+007.91928+1780.429/"), as an iPhone writes it: a Live or Motion Photo's
+/// video made from a clip has its photo's place (geotag::photo_place)
+pub const LOCATION_KEY: &str = "com.apple.quicktime.location.ISO6709";
 
 fn be32(b: &[u8], at: usize) -> u32 { u32::from_be_bytes(b[at..at + 4].try_into().unwrap()) }
 fn be64(b: &[u8], at: usize) -> u64 { u64::from_be_bytes(b[at..at + 8].try_into().unwrap()) }

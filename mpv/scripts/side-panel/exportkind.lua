@@ -1,6 +1,6 @@
 -- The Output tab's one Export button (docs/360-reframe.md, "One Export button in the Output tab"): the kinds of file
 -- it makes, the rows of its list, the kind it makes now and its label. Each kind is what
--- `script-message-to gyroflow export <how>` gets: hdr (as it plays), sdr, 360, flat.
+-- `script-message-to gyroflow export <how>` gets: hdr (as it plays), sdr, youtube, 360, flat.
 -- Plain Lua, no mpv: tests/exportkind_test.lua
 
 local M = {}
@@ -28,6 +28,14 @@ function M.clip_kind(v)
     return M.is360(v) and "360" or "flat"
 end
 
+-- For YouTube (gyroflow-export --youtube): HDR10 with the SDR look's LUT inside, for a log or HDR clip. Its SDR: the
+-- look an SDR export takes (sdr_look), DJI's LUT for D-Log M's maker look
+function M.youtube_sdr(d)
+    if type(d) ~= "table" or not (d.log or d.hdr == "hlg" or d.hdr == "pq") then return nil end
+    if d.sdr_look == "maker" and d.curve == "dlogm" then return "maker", "DJI's LUT" end
+    return "nbcu", "NBCU"
+end
+
 local function recording(v)
     return type(v) == "table" and type(v.recording) == "table" and v.recording or {}
 end
@@ -41,6 +49,8 @@ function M.rows(d, v)
     if type(d) == "table" and (d.sdr_look or "") ~= "" and short ~= "SDR" then
         table.insert(rows, { kind = "sdr", label = "In SDR" })
     end
+    local _, sdr_name = M.youtube_sdr(d)
+    if sdr_name then table.insert(rows, { kind = "youtube", label = "For YouTube (HDR, its SDR by " .. sdr_name .. "; untested)" }) end
     if M.is360(v) then
         table.insert(rows, { kind = "360", label = "360° video" })
         local recorded = (recording(v).parts or 0) > 0
@@ -65,7 +75,7 @@ function M.busy(kind, v)
     return nil
 end
 
-local SUFFIX = { sdr = "SDR", ["360"] = "360°", flat = "flat" }
+local SUFFIX = { sdr = "SDR", youtube = "YouTube", ["360"] = "360°", flat = "flat" }
 
 -- The button's label: "Export the clip · HDR", "Export the part 0:12–0:47 · flat". a, b: the part marked (ab-loop-a,
 -- -b, nil when not set); clock: seconds as text

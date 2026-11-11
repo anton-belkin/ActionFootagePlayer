@@ -59,7 +59,7 @@ impl Level {
 pub fn still_fov(stab: &StabilizationManager) -> f64 {
     let mut gyro = stab.gyro.read().clone();
     // Gyroflow keeps the correction there, from the smoothed path to the camera's: none
-    gyro.smoothed_quaternions = gyro.quaternions.keys().map(|t| (*t, Quat64::identity())).collect();
+    gyro.smoothed_quaternions = Arc::new(gyro.quaternions.keys().map(|t| (*t, Quat64::identity())).collect());
     let last_ms = gyro.quaternions.keys().next_back().map_or(0.0, |t| *t as f64 / 1000.0);
     let mut params = ComputeParams::from_manager(stab);
     params.gyro = Arc::new(RwLock::new(gyro));
