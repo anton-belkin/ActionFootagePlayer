@@ -43,6 +43,9 @@ SETTINGS = [
      "'//HOST/share=/shares/share;...'. Empty: every folder in /shares, as a share of the NAS the projects' locations "
      "name (//DISKSTATIONDXP/photo for /shares/photo)."),
 
+    ("AFP_COMPUTER_NAME", "nas", "projects", "The guardian's name in the projects' journals, the first time it runs "
+     "(it's kept in /data/catalog after that, with an id of its own)."),
+
     # The stream
     ("AFP_PORT", "8099", "stream", "The stream's port (its page, the streams, /settings)."),
     ("AFP_HEIGHT", "1080", "stream", "The streams' height in pixels (never more than the clip's)."),

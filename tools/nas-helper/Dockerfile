@@ -88,7 +88,8 @@ COPY tools/stream/hlg_gain.glsl tools/stream/hlg_highlights.glsl /opt/afp/bin/
 COPY tools/stream/afp_stream.py tools/stream/jellyfin.py tools/nas-helper/helper.py tools/nas-helper/nas_settings.py /opt/afp/helper/
 ENV PATH=/opt/mpv/bin:$PATH LD_LIBRARY_PATH=/opt/pl/lib AFP_BIN=/opt/afp/bin AFP_PLAYER=/opt/afp/player PYTHONDONTWRITEBYTECODE=1
 # Everything links (a library missing at run time would show only when a part starts)
-RUN echo "$VERSION" > /opt/afp/helper/VERSION \
+# No machine id of its own: the guardian's name (kept in /data/catalog) stays the same from one image to the next
+RUN echo "$VERSION" > /opt/afp/helper/VERSION && : > /etc/machine-id \
  && ! (cd /opt/afp/player/gyroflow && ldd /opt/mpv/bin/mpv /opt/afp/bin/afp-render libvs_gyroflow.so gyroflow-probe gyroflow-project \
         gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical | grep "not found") \
  && mpv --version | head -1 && /opt/afp/bin/afp-catalog 2>&1 | head -1 && python3 /opt/afp/helper/helper.py --help > /dev/null

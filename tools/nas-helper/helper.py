@@ -189,7 +189,8 @@ def plan():
                     args += ["--share", f"{name}={d}"]
             # As root (UGOS refuses inotify on root's folders to other users), what it writes open to all; exit 3: the
             # project is newer than this helper
-            parts.append((f"guardian[{os.path.basename(p)}]", dict(args=args, env={"AFP_HOME": os.path.join(DATA, "catalog")}, umask=0, stop_codes=(3,))))
+            parts.append((f"guardian[{os.path.basename(p)}]", dict(args=args, env={"AFP_HOME": os.path.join(DATA, "catalog"), "COMPUTERNAME": S.get("AFP_COMPUTER_NAME")},
+                                                              umask=0, stop_codes=(3,))))
     if S.on("AFP_STREAM"):
         # The stream reads the projects read-only: /library/<name> for /projects/<name>
         lib = []

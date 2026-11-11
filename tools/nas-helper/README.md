@@ -71,6 +71,7 @@ container (`docker compose up -d`).
 |---|---|---|
 | `AFP_PROJECTS` | | The projects, ':'-separated paths inside the container. Empty: every folder in /projects that has a Project.afproject. |
 | `AFP_SHARES` | | Where the shares the projects' locations name are here: '//HOST/share=/shares/share;...'. Empty: every folder in /shares, as a share of the NAS the projects' locations name (//DISKSTATIONDXP/photo for /shares/photo). |
+| `AFP_COMPUTER_NAME` | `nas` | The guardian's name in the projects' journals, the first time it runs (it's kept in /data/catalog after that, with an id of its own). |
 
 ### The stream
 
