@@ -142,6 +142,9 @@ struct Watch {
     /// The project's catalog kept up to date (seen.rs): what's changed here is sent to it, and it counts the changes
     /// once it has them
     runner: seen::Runner,
+    /// Set when a location became reachable or stopped being (a share mounted after the Library opened, or taken
+    /// away): watched again, and the catalog started again with it, as on opening the project then
+    reach_changed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// What of the project's file says where its footage is: its locations (and the hosts they're on)
@@ -150,9 +153,36 @@ fn locations_key(root: &Path) -> String {
     json!([d.get("locations"), d.get("hosts")]).to_string()
 }
 
+/// Which of the project's locations are reachable here now, and where
+fn reach_key(root: &Path) -> String {
+    locations::locations(root, &locations::mounts()).iter()
+        .map(|l| format!("{}={}\n", l.path, l.dir.as_ref().filter(|d| d.is_dir()).map(|d| d.display().to_string()).unwrap_or_default()))
+        .collect()
+}
+
+/// Every few seconds, whether reach_key changed since `before`: `changed` set then, and the thread done. It ends too
+/// when the watch it's for is dropped (the project closed, or watched again)
+fn poll_reach(root: &Path, before: String, changed: &Arc<std::sync::atomic::AtomicBool>) {
+    let (root, changed) = (root.to_path_buf(), Arc::downgrade(changed));
+    std::thread::Builder::new().name("locations".into()).spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let Some(flag) = changed.upgrade() else { return };
+        drop(flag);
+        // Outside any lock: a share that hangs holds up only this thread
+        if reach_key(&root) != before {
+            if let Some(flag) = changed.upgrade() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
+            return;
+        }
+    }).ok();
+}
+
 /// `moved`: its own files just moved here (Move the project…), its catalog with them
 fn watch(root: &Path, moved: bool) -> Watch {
     use notify::Watcher;
+    // Before the catalog's thread reads them: a share mounted meanwhile is seen as a change
+    let reach = reach_key(root);
+    let reach_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    poll_reach(root, reach, &reach_changed);
     let changes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = Arc::new(Mutex::new(Instant::now()));
     let (c, l) = (changes.clone(), last.clone());
@@ -180,7 +210,7 @@ fn watch(root: &Path, moved: bool) -> Watch {
         any.then_some(w)
     });
     let stamp = std::fs::metadata(root.join(PROJECT_FILE)).and_then(|m| m.modified()).ok();
-    Watch { root: root.to_path_buf(), stamp, locs: locations_key(root), _watcher: watcher, changes, last, runner }
+    Watch { root: root.to_path_buf(), stamp, locs: locations_key(root), _watcher: watcher, changes, last, runner, reach_changed }
 }
 
 type Shared = Arc<Mutex<Inner>>;
@@ -604,7 +634,8 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
             if let Some(w) = inner.watch.as_mut().filter(|w| w.root == root && w.stamp != stamp) {
                 if locations_key(&root) == w.locs { w.stamp = stamp; }
             }
-            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp) {
+            // …or a location became reachable, or stopped being (a share mounted after the Library opened)
+            if inner.watch.as_ref().is_none_or(|w| w.root != root || w.stamp != stamp || w.reach_changed.load(std::sync::atomic::Ordering::Relaxed)) {
                 let before = inner.watch.as_ref().filter(|w| w.root == root).map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed) + 1);
                 let moved = inner.moved_to.take().is_some_and(|m| m == root);
                 let w = watch(&root, moved);
@@ -2180,6 +2211,34 @@ mod tests {
         assert_eq!(locations_key(&root), k);
         update_doc(&root, |d| { d.insert("locations".into(), json!([{ "path": "../B" }])); }).unwrap();
         assert_ne!(locations_key(&root), k);
+    }
+
+    // A location that wasn't reachable when the project was opened (the share mounted later) is noticed, and so is one
+    // that goes: the project is then watched again, as if opened now
+    #[test]
+    fn a_location_reached_later_is_noticed() {
+        let base = temp("reach");
+        let root = base.join("P");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(PROJECT_FILE), r#"{"locations":[{"name":"A","path":"../A"}]}"#).unwrap();
+        let before = reach_key(&root);
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        poll_reach(&root, before.clone(), &flag);
+        std::thread::sleep(Duration::from_millis(5500));
+        assert!(!flag.load(std::sync::atomic::Ordering::Relaxed), "nothing changed yet");
+        std::fs::create_dir_all(base.join("A")).unwrap();
+        assert_ne!(reach_key(&root), before);
+        let t = Instant::now();
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < Duration::from_secs(8) { std::thread::sleep(Duration::from_millis(100)); }
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed), "the location reached wasn't noticed");
+        // …and going away again
+        let back = reach_key(&root);
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        poll_reach(&root, back, &flag);
+        std::fs::remove_dir_all(base.join("A")).unwrap();
+        let t = Instant::now();
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < Duration::from_secs(8) { std::thread::sleep(Duration::from_millis(100)); }
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed), "the location gone wasn't noticed");
     }
 
     fn temp(name: &str) -> PathBuf {
