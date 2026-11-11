@@ -244,38 +244,38 @@ render's link for people reading the folder.
 - A changed transform gives a new hash. The old render becomes unreferenced, and cleaning removes it.
 - **Renders are the library's internals.** It manages them itself, and the user never needs to know how they lie on
   disk. An item's renders show in Info, and the room they take shows in the Library.
-- **Proposed:** since they're internals, the shared tier moves from a visible `_Renders/` to the project's hidden
-  `.afp/renders/`, next to the catalog. It moves with the project like the rest of `.afp/`. *(Open.)*
+- **Where they live:** see below. With the library-folder option they'd be hidden as `.afp/renders/`, since they're
+  internals.
 
-### Where they're stored
+### Where they're stored (decided: Anton, 2026-11-11)
 
-Three places are possible, each with a reason:
+**A setting of the library, local by default.**
 
-| Place | For | Against |
-|---|---|---|
-| **The project folder** (`_Renders/`, today) | every computer, afp-stream on the NAS and the Photos sync all reuse one render | NAS space; writing big files over SMB; slow from a laptop on Wi-Fi |
-| **This computer's cache** (`~/Library/Caches/…`, `%LOCALAPPDATA%`) | fast, uses no NAS space, works away from the NAS | each computer renders again; afp-stream can't see it |
-| **A place the user chooses** (an SSD, another share) | control over space | one more setting |
-
-**Proposal: two tiers, one rule.**
-1. **Shared renders** live in the project's `_Renders/`, wherever the project is. Anything that other computers or the
-   NAS need goes there: Photos sync, the TV, albums marked "keep rendered".
-2. **Local renders** live in this computer's cache: one-off Shares and messenger SDRs. They're evicted by size,
-   oldest first.
-3. **Lookup:** local first, then shared. A shared render found is used as is, never copied local. *(Open: copy it
-   local on a laptop, for playing away from the NAS?)*
-4. **Where `_Renders/` sits** can be moved like the project's other folders (*Move the project's own files to the SSD*,
-   §1), so a NAS-backed project can keep its renders on a faster disk.
-
-*(Open: is the shared tier worth it at all, or is local-only simpler, with afp-stream rendering its own?)*
+- **Default: this computer.**
+  - **Where:** each computer keeps its own renders in its own cache (`~/Library/Caches/…` on a Mac, `%LOCALAPPDATA%` on
+    Windows) and manages them itself.
+  - **The NAS's streamer counts as a computer of its own.** afp-stream keeps its `TV` renders on the NAS, in its own
+    place, and manages them. A Mac watching the footage doesn't need them, and the NAS doesn't need the Mac's.
+  - **Why not the library's folder:** the NAS folders with the originals are backed up. Renders there would go into
+    every backup and pile up there, endlessly. A Mac's `~/Library/Caches` is also left out of Time Machine.
+- **Option: the library's folder.** A user who wants renders shared between computers switches to it. They then live
+  in the project, as `.afp/renders/` (hidden) or `_Renders/` *(open)*. Keeping them out of backups is then the user's
+  job.
+- **Lookup:** this computer's renders only; with the library-folder option, the project's. Nothing is copied
+  between computers.
+- **What it costs:** two computers render the same moment twice. That's accepted: a render is minutes, a backup full
+  of renders is forever.
+- **Open: pinned renders in a purgeable cache.** macOS may purge `~/Library/Caches` when the disk is full, so a pinned
+  album's renders (Photos sync) could vanish and be re-rendered. Either accept that, or keep pinned ones in
+  `~/Library/Application Support/…`.
 
 ### Keeping and cleaning
 
 - **Pinned:** renders an album needs (Photos sync, the TV, "keep rendered") are never evicted.
 - **Everything else is evictable:**
-  - local renders, by a size budget per computer;
-  - shared ones, only by *Clean renders* (stale, unreferenced, or older than N months).
-- **The Library shows:** the room renders take, per tier and per album; how many are current, stale or unreferenced;
+  - on a computer, by a size budget, oldest first, plus stale and unreferenced ones;
+  - in the library's folder (the option), only by *Clean renders*.
+- **The Library shows:** the room renders take on this computer, per album; how many are current, stale or unreferenced;
   and a Clean button.
 - **After an update that changes the picture** (render version raised): renders go stale but aren't remade eagerly.
   They're remade the next time they're needed (Share, sync, playback), and a pinned album can be re-rendered on
@@ -338,7 +338,7 @@ Three places are possible, each with a reason:
 | `X` deletes a clip preview | `X` = Reject |
 | A photo = an exported file, rendered at once | a photo object; rendered when shared. Existing photos: a one-off migration script on Anton's library |
 | Export | Share → Save to a folder |
-| Renders of moments, at a path mirroring the moment's | renders of clips, moments and photos, found by recipe hash; shared and local tiers |
+| Renders of moments, at a path mirroring the moment's | renders of clips, moments and photos, found by recipe hash; kept on each computer by default, the library's folder as an option |
 
 ## Not in this concept
 
@@ -359,10 +359,9 @@ Three places are possible, each with a reason:
    - Does ctime move when a tag changes?
 5. **Where the telemetry summary is stored:** `<clip>.afp.json` proposed (#213).
 6. **The Timeline's place:** inside Albums for now (Anton); it could become the first screen later.
-7. ~~Renders by recipe hash~~: decided. Still open: the shared tier in `.afp/renders/` instead of `_Renders/`?
-8. **Where renders live:**
-   - Shared in the project plus local per computer, as proposed, or local only?
-   - Copy shared renders to a laptop's cache?
+7. ~~Renders by recipe hash~~: decided. Still open: with the library-folder option, `.afp/renders/` or `_Renders/`?
+8. ~~Where renders live~~: decided (local by default; the library's folder as an option). Still open: pinned renders
+   in Caches or Application Support?
 9. **A `Light` profile** for messengers, or `SDR` alone.
 10. **Photo originals:**
     - lens profiles for the cameras' photo modes;
