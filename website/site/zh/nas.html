@@ -120,7 +120,7 @@
           </a>
         </div>
         <div class="status">
-          <span>带 Intel 显卡的 NAS</span>
+          <span>性能足够的 NAS</span>
           <span>Docker</span>
           <span>Alpha 版</span>
         </div>
@@ -186,12 +186,12 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">所需条件</p>
-        <h2>一台能运行 Docker、带 Intel 显卡的 NAS。</h2>
+        <h2>一台性能足够、能运行 Docker 的 NAS。</h2>
       </div>
       <div class="gap-grid">
         <div class="gap-item">
           <h3>NAS</h3>
-          <p>x86-64 处理器加 Intel 显卡（VA-API）：Intel N100 渲染 1080p 视频流可达每秒 67–69 帧，超过 60 帧片段的需要。在 UGREEN DXP 上构建和使用。</p>
+          <p>一台有一定性能的 x86-64 NAS，显卡能硬件解码和编码 HEVC（VA-API）：Intel 或 AMD。在搭载 Intel N100 的 UGREEN DXP 上试过，它渲染 1080p 视频流可达每秒 67–69 帧，超过 60 帧片段的需要。</p>
         </div>
         <div class="gap-item">
           <h3>Docker</h3>
@@ -312,7 +312,7 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">大体积片段</p>
-        <h2>提前渲染，流畅播放，画质全开。</h2>
+        <h2>提前渲染，流畅播放。</h2>
         <p class="lede">有些片段超出了 NAS 边看边渲染的能力：8K、高帧率、长时间的潜水。提前把它们完整渲染出来，就能像普通视频文件一样从 NAS 播放。</p>
       </div>
       <div class="gap-grid">
@@ -323,10 +323,6 @@
         <div class="gap-item">
           <h3>再重也流畅</h3>
           <p>从提前渲染的内容播放，8K 或 120 帧的片段在任何屏幕上都和其他片段一样流畅。</p>
-        </div>
-        <div class="gap-item">
-          <h3>所有画质提升都在</h3>
-          <p>时间充裕时，渲染可以用上最精细的设置：更精确的变形、去除水下的彩色边缘，以及让昏暗潜水画面变干净的降噪。</p>
         </div>
         <div class="gap-item">
           <h3>改了设置也会重新渲染</h3>
@@ -344,12 +340,12 @@
         <h2>值得了解。</h2>
       </div>
       <ul class="st-limits">
-        <li><b>这是 Alpha 版。</b>目前只在一台 NAS 上运行过：搭载 Intel N100 的 UGREEN DXP。</li>
-        <li><b>Intel 显卡。</b>视频流通过 VA-API 渲染；AMD 和 NVIDIA 尚未试过。</li>
+        <li><b>这是 Alpha 版。</b>目前只在一台 NAS 上试过：搭载 Intel N100 的 UGREEN DXP。</li>
+        <li><b>需要带硬件视频的显卡。</b>视频流通过 VA-API 渲染，Intel 和 AMD 显卡都有；NVIDIA 显卡不提供用于编码的 VA-API。</li>
         <li><b>只用于家庭网络。</b>没有登录：不要让它暴露在互联网上，或在前面加一层 VPN。</li>
         <li><b>D-Log M 以 HDR 呈现。</b>其他 log 曲线目前按原样串流。</li>
         <li><b>8K 片段</b>在 N100 上渲染略慢于播放（每秒约 42 帧对 50 帧）：播放器会多缓冲一些。</li>
-        <li><b>两路视频流</b>可以同时渲染；更多的需要排队。</li>
+        <li><b>同时超过一路视频流可能吃不消。</b>N100 这类 NAS 渲染一段 4K60 片段只比播放略快，同时再开第二路可能会卡顿。提前渲染好的片段可以同时播放任意多路。</li>
         <li><b>Dolby Vision</b> 还不在视频流中：目前是 HLG，电视则为 HDR10。</li>
       </ul>
     </div>

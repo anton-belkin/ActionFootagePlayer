@@ -117,7 +117,7 @@
           </a>
         </div>
         <div class="status">
-          <span>A NAS with an Intel GPU</span>
+          <span>A capable NAS</span>
           <span>Docker</span>
           <span>Alpha</span>
         </div>
@@ -183,12 +183,12 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">What it needs</p>
-        <h2>A NAS that can run Docker, with Intel graphics.</h2>
+        <h2>A capable NAS that runs Docker.</h2>
       </div>
       <div class="gap-grid">
         <div class="gap-item">
           <h3>The NAS</h3>
-          <p>An x86-64 processor with Intel graphics (VA-API): an Intel N100 renders a 1080p stream at 67-69 frames a second, more than a 60 fps clip needs. Built and used on a UGREEN DXP.</p>
+          <p>An x86-64 NAS with some power and graphics that decode and encode HEVC in hardware (VA-API): Intel or AMD. Tried on a UGREEN DXP with an Intel N100, which renders a 1080p stream at 67-69 frames a second, more than a 60 fps clip needs.</p>
         </div>
         <div class="gap-item">
           <h3>Docker</h3>
@@ -309,7 +309,7 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">Heavy clips</p>
-        <h2>Rendered ahead, played smoothly, at full quality.</h2>
+        <h2>Rendered ahead, played smoothly.</h2>
         <p class="lede">Some clips ask more than a NAS can render while you watch: 8K, high frame rates, a long dive. Render them ahead, whole, and they play from the NAS like any video file.</p>
       </div>
       <div class="gap-grid">
@@ -320,10 +320,6 @@
         <div class="gap-item">
           <h3>Smooth, however heavy</h3>
           <p>Played from what was rendered ahead, an 8K or 120 fps clip plays as smoothly as any other, on any screen.</p>
-        </div>
-        <div class="gap-item">
-          <h3>Every improvement in it</h3>
-          <p>With time to spare, the render can take the sharpest settings: the finer warp, the water's color fringes taken out, and the denoise that cleans dim dives.</p>
         </div>
         <div class="gap-item">
           <h3>And again when you change it</h3>
@@ -341,12 +337,12 @@
         <h2>Good to know.</h2>
       </div>
       <ul class="st-limits">
-        <li><b>It's an alpha.</b> It runs on one NAS so far: a UGREEN DXP with an Intel N100.</li>
-        <li><b>Intel graphics.</b> The streams are rendered with VA-API; AMD and NVIDIA haven't been tried.</li>
+        <li><b>It's an alpha.</b> It's been tried on one NAS so far: a UGREEN DXP with an Intel N100.</li>
+        <li><b>Graphics with hardware video.</b> The streams are rendered with VA-API, which Intel and AMD graphics have; NVIDIA's cards don't offer it for encoding.</li>
         <li><b>For the home network.</b> There's no login: keep it out of reach from the internet, or put a VPN in front.</li>
         <li><b>D-Log M in HDR.</b> Other log curves stream as recorded for now.</li>
         <li><b>8K clips</b> render a little slower than they play on an N100 (about 42 frames a second for 50): players buffer a bit more.</li>
-        <li><b>Two streams at once</b> render side by side; more wait their turn.</li>
+        <li><b>More than one stream at once may be too much.</b> A NAS like the N100 renders one 4K60 clip only a little faster than it plays, so a second stream at the same time can stutter. Clips rendered ahead play any number at once.</li>
         <li><b>Dolby Vision</b> isn't in the streams yet: they're HLG, or HDR10 for TVs.</li>
       </ul>
     </div>

@@ -120,7 +120,7 @@
           </a>
         </div>
         <div class="status">
-          <span>Un NAS avec un GPU Intel</span>
+          <span>Un NAS assez puissant</span>
           <span>Docker</span>
           <span>Alpha</span>
         </div>
@@ -186,12 +186,12 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">Ce qu’il faut</p>
-        <h2>Un NAS qui fait tourner Docker, avec une puce graphique Intel.</h2>
+        <h2>Un NAS assez puissant qui fait tourner Docker.</h2>
       </div>
       <div class="gap-grid">
         <div class="gap-item">
           <h3>Le NAS</h3>
-          <p>Un processeur x86-64 avec une puce graphique Intel (VA-API) : un Intel N100 rend un flux 1080p à 67-69 images par seconde, plus qu’il n’en faut pour un clip à 60 i/s. Construit et utilisé sur un UGREEN DXP.</p>
+          <p>Un NAS x86-64 d’une certaine puissance, avec une puce graphique qui décode et encode le HEVC en matériel (VA-API) : Intel ou AMD. Essayé sur un UGREEN DXP avec un Intel N100, qui rend un flux 1080p à 67-69 images par seconde, plus qu’il n’en faut pour un clip à 60 i/s.</p>
         </div>
         <div class="gap-item">
           <h3>Docker</h3>
@@ -312,7 +312,7 @@
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">Clips lourds</p>
-        <h2>Rendus d’avance, lus sans à-coups, en pleine qualité.</h2>
+        <h2>Rendus d’avance, lus sans à-coups.</h2>
         <p class="lede">Certains clips demandent plus qu’un NAS ne peut rendre pendant qu’on regarde : la 8K, les hautes cadences, une longue plongée. Rendez-les d’avance, en entier, et ils se lisent depuis le NAS comme n’importe quel fichier vidéo.</p>
       </div>
       <div class="gap-grid">
@@ -323,10 +323,6 @@
         <div class="gap-item">
           <h3>Fluide, aussi lourd soit-il</h3>
           <p>Lu depuis ce qui a été rendu d’avance, un clip 8K ou à 120 i/s passe aussi fluide qu’un autre, sur n’importe quel écran.</p>
-        </div>
-        <div class="gap-item">
-          <h3>Toutes les améliorations</h3>
-          <p>Avec du temps devant lui, le rendu peut prendre les réglages les plus fins : la déformation plus précise, les franges colorées de l’eau retirées, et le débruitage qui nettoie les plongées sombres.</p>
         </div>
         <div class="gap-item">
           <h3>Et à nouveau quand vous changez</h3>
@@ -344,12 +340,12 @@
         <h2>Bon à savoir.</h2>
       </div>
       <ul class="st-limits">
-        <li><b>C’est une alpha.</b> Elle tourne sur un seul NAS pour l’instant : un UGREEN DXP avec un Intel N100.</li>
-        <li><b>Puce graphique Intel.</b> Les flux sont rendus avec VA-API ; AMD et NVIDIA n’ont pas été essayés.</li>
+        <li><b>C’est une alpha.</b> Elle a été essayée sur un seul NAS pour l’instant : un UGREEN DXP avec un Intel N100.</li>
+        <li><b>Une puce graphique avec vidéo matérielle.</b> Les flux sont rendus avec VA-API, qu’ont les puces Intel et AMD ; les cartes NVIDIA ne l’offrent pas pour l’encodage.</li>
         <li><b>Pour le réseau de la maison.</b> Il n’y a pas de connexion par mot de passe : gardez-le hors de portée d’internet, ou passez par un VPN.</li>
         <li><b>Le D-Log M en HDR.</b> Les autres courbes log sont diffusées telles qu’enregistrées pour l’instant.</li>
         <li><b>Les clips 8K</b> se rendent un peu moins vite qu’ils ne se lisent sur un N100 (environ 42 images par seconde pour 50) : les lecteurs mettent un peu plus en mémoire.</li>
-        <li><b>Deux flux à la fois</b> se rendent côte à côte ; les suivants attendent leur tour.</li>
+        <li><b>Plus d’un flux à la fois peut être trop.</b> Un NAS comme le N100 rend un clip 4K60 à peine plus vite qu’il ne se lit : un deuxième flux en même temps peut saccader. Les clips rendus d’avance se lisent en aussi grand nombre qu’on veut.</li>
         <li><b>Le Dolby Vision</b> n’est pas encore dans les flux : ils sont en HLG, ou en HDR10 pour les télévisions.</li>
       </ul>
     </div>
