@@ -454,9 +454,9 @@ Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its on
 Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
 
 The drones are in it as well, with a focal length alone, since a drone straightens its picture itself and the
-gimbal holds it: the Mini 4 Pro at 24 mm equivalent and the Mavic Pro (FC220) at 26 mm, from DJI's specs. Each has one
-type, Main camera, that its clips take by default (`"default"`). Gyroflow's database has nothing good for either
-(a 720p screen profile of the Mini 4 Pro; a Mavic Pro 4K profile voted down, 1 good of 38).
+gimbal holds it: the Mini 4 Pro and the Mavic Air 2 (FC3170) at 24 mm equivalent and the Mavic Pro (FC220) at 26 mm,
+from DJI's specs. Each has one type, Main camera, that its clips take by default (`"default"`). Gyroflow's database has
+nothing good for them (a 720p screen profile of the Mini 4 Pro; Mavic Pro and Mavic Air 2 4K profiles voted down).
 
 **Your own lens list.** The same list can be kept outside the app, so a profile can be tried without a new build:
 `curated_lenses.json` in the app's data folder (macOS: `~/Library/Application Support/ActionFootagePlayer/`;
@@ -481,9 +481,9 @@ If it can't be read, the built-in list is used and `gyroflow-probe --lens <clip>
 
 - A camera's key is its brand and model as `gyroflow-probe --lens <clip>` prints them (`"camera"`); case and spaces
   don't matter. Where Gyroflow doesn't know the model (a Mini 4 Pro reads as just "DJI") or the camera at all (a
-  Mavic Pro), it's the name the file gives itself: the encoder tag ("DJI Mini4 Pro"), or DJI's camera code in
-  `udta/©mdl` ("FC220" is "DJI Mavic Pro"; an unknown code reads as "DJI FC1234"). A clip saved again by another
-  program (encoder "Lavf…") names no camera and can't be listed.
+  Mavic Pro, a HERO3), it's the name the Library gives it too: DJI's own header ("DJI Mini 4 Pro"), DJI's camera
+  code in `udta/©mdl` ("FC220" is "DJI Mavic Pro"), for a clip DJI's muxer saved again ("Lavf56") the drone's photos
+  in the same folder ("DJI Mavic Air 2", else "DJI drone"), or an older GoPro's firmware ("GoPro HERO3 Black").
 - `recorded`: the camera's own number for its lens mode (DJI's fov_type and the HERO4's SETT, the number in
   "Unknown (mode 6)"), or Gyroflow's name for the mode ("Wide", "Linear" on GoPros with GPMF) → a type's id.
 - `default`: the type of a clip that wasn't given one in the Library and didn't record one the list names: for a

@@ -388,11 +388,14 @@ pub fn default_type(camera: &str) -> Option<String> {
 }
 
 /// A camera as the player names it: Gyroflow's brand and model, or, when Gyroflow doesn't know the model (a Mini 4
-/// Pro: "DJI") or the camera at all (a Mavic Pro), the one the file names itself (`probe::file_camera`)
+/// Pro: "DJI") or the camera at all (a Mavic Pro's MOV, a HERO3), the one the file names (`geotag::dji_model`: DJI's
+/// own header, the camera code in ©mdl, or for a clip saved again by DJI's muxer the drone's photos beside it;
+/// `geotag::gopro_model`: an older GoPro's firmware)
 pub fn camera_name(brand: &str, model: &str, path: &str) -> String {
     let gyroflow = format!("{brand} {model}").trim().to_string();
     if !model.trim().is_empty() { return gyroflow; }
-    match crate::probe::file_camera(path) {
+    let p = std::path::Path::new(path);
+    match crate::geotag::dji_model(p).or_else(|| crate::geotag::gopro_model(p)) {
         Some(c) if brand.trim().is_empty() || camera_key(&c).starts_with(&camera_key(brand)) => c,
         _ => gyroflow,
     }
@@ -562,7 +565,7 @@ mod tests {
         assert!(!base.contains_key(&camera_key("GoPro HERO7 Black")));
         assert_eq!(ids(&base[&camera_key("GoPro HERO4 Black")]), ["wide"]);
         // Drones record no mode: a default type, with a focal length alone
-        for drone in ["DJI Mini4 Pro", "DJI Mavic Pro"] {
+        for drone in ["DJI Mini 4 Pro", "DJI Mavic Pro", "DJI Mavic Air 2"] {
             let c = &base[&camera_key(drone)];
             assert_eq!(c.default.as_deref(), Some("main"), "{drone}");
             assert!(matches!(c.types[0].profile, Some(Profile::Focal { focal_35mm: Some(_), .. })), "{drone}");

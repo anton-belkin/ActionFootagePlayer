@@ -323,35 +323,6 @@ pub fn log_curve(path: &str) -> Option<&'static str> {
     }
 }
 
-/// The camera a file names itself, for one Gyroflow doesn't know the model of (or doesn't know at all): DJI's drones.
-/// A Mini 4 Pro writes "DJI Mini4 Pro" as its encoder (moov/udta/meta/ilst/©too, what ffprobe shows as "encoder"); a
-/// Mavic Pro its camera's code in moov/udta/©mdl ("FC220-Se..."), which is named here where it's known ("DJI Mavic
-/// Pro"), else "DJI FC220". None when it says neither (a clip saved again by another program: "Lavf56.15.102")
-pub fn file_camera(path: &str) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    file_camera_in_moov(&read_moov(&mut file, size)?)
-}
-
-// DJI's camera codes (the ©mdl a drone writes) that are named; the others are given as "DJI <code>"
-const DJI_CAMERA_CODES: &[(&str, &str)] = &[("FC220", "DJI Mavic Pro")];
-
-fn file_camera_in_moov(moov: &[u8]) -> Option<String> {
-    let udta = mp4_child(moov, b"udta")?;
-    let clean = |b: &[u8]| -> String {
-        String::from_utf8_lossy(b).split('\0').next().unwrap_or("").trim().to_string()
-    };
-    // ilst's ©too: its data box, after the type (4 bytes) and locale (4)
-    let encoder = mp4_child(udta, b"meta").and_then(|m| m.get(4..)).and_then(|m| mp4_child(m, b"ilst"))
-        .and_then(|i| mp4_child(i, b"\xa9too")).and_then(|t| mp4_child(t, b"data")).and_then(|d| d.get(8..)).map(clean);
-    if let Some(e) = encoder.filter(|e| e.starts_with("DJI ") && e.len() > 4) { return Some(e); }
-    if mp4_child(udta, b"\xa9dji").is_none() { return None; }
-    let code = clean(mp4_child(udta, b"\xa9mdl")?);
-    let code = code.split('-').next().unwrap_or("").trim();
-    if code.is_empty() || !code.bytes().all(|b| b.is_ascii_alphanumeric()) { return None; }
-    Some(DJI_CAMERA_CODES.iter().find(|(c, _)| *c == code).map(|(_, n)| n.to_string()).unwrap_or_else(|| format!("DJI {code}")))
-}
-
 /// The Protune color a GoPro recorded the video in (PTCL: "NATURAL", "FLAT", "LOG", "GPLOG2", ...), the camera (MINF)
 /// and its firmware (FIRM, H23.01.02.32.70 -> 2.32), from moov/udta. The same as mpv/scripts/dlogm/gopro_color.lua,
 /// which says where they are: keep the two in step
@@ -630,20 +601,6 @@ mod tests {
         // Truncated: no moov
         let mut cut = file[..20].to_vec();
         assert!(read_moov(&mut std::io::Cursor::new(&mut cut), 20).is_none());
-    }
-
-    // The camera a drone's file names: as a Mini 4 Pro and a Mavic Pro write it (checked on Anton's clips)
-    #[test]
-    fn file_cameras() {
-        let ilst = |enc: &[u8]| mp4_box(b"meta", &[&[0u8; 4][..], &mp4_box(b"ilst", &mp4_box(b"\xa9too", &mp4_box(b"data", &[&[0, 0, 0, 1, 0, 0, 0, 0][..], enc].concat())))].concat());
-        let moov = |udta: Vec<u8>| mp4_box(b"udta", &udta);
-        assert_eq!(file_camera_in_moov(&moov(ilst(b"DJI Mini4 Pro"))).as_deref(), Some("DJI Mini4 Pro"));
-        assert_eq!(file_camera_in_moov(&moov(ilst(b"Lavf56.15.102"))), None);
-        let mavic = |code: &[u8]| moov([mp4_box(b"\xa9dji", &[0; 16]), mp4_box(b"\xa9mdl", &[code, &[0u8; 16][..]].concat())].concat());
-        assert_eq!(file_camera_in_moov(&mavic(b"FC220-Se")).as_deref(), Some("DJI Mavic Pro"));
-        assert_eq!(file_camera_in_moov(&mavic(b"FC1234")).as_deref(), Some("DJI FC1234"));
-        // A ©mdl without DJI's own box isn't taken as a drone's
-        assert_eq!(file_camera_in_moov(&moov(mp4_box(b"\xa9mdl", b"FC220"))), None);
     }
 
     // A video track with these boxes after its sample entry's 78 bytes, and these next to its mdia
