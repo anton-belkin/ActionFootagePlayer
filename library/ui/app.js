@@ -1066,10 +1066,14 @@ function askLensTypes(paths) {
 // when its Info shows: the profile's name, "From the file", or "Unknown (<type>, mode N)" / "Unknown (mode N)" where
 // nothing fits, with the camera's own number for its mode
 const LENS_INFO = {};
-function lensInfoText(path) {
+function lensInfoText(path, project) {
+  // Asked again once a Gyroflow project is beside it (one saved in Gyroflow after the answer: it has no project's lens)
+  const r0 = LENS_INFO[path];
+  if (project && r0 && !r0.project && !r0.withProject) delete LENS_INFO[path];
   if (!(path in LENS_INFO)) {
     LENS_INFO[path] = null;
-    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = r || {}; }, () => { LENS_INFO[path] = {}; }).finally(() => { if (S.tab === "info") renderSide(); });
+    invoke("lens_info", { path }).then((r) => { LENS_INFO[path] = Object.assign(r || {}, { withProject: !!project }); }, () => { LENS_INFO[path] = { withProject: !!project }; })
+      .finally(() => { if (S.tab === "info") renderSide(); });
   }
   const r = LENS_INFO[path];
   if (r === null) return "Reading…";
@@ -1080,6 +1084,39 @@ function lensInfoText(path) {
   const mode = r.mode != null ? "mode " + r.mode : "";
   const inside = [lb, mode].filter(Boolean).join(", ");
   return r.camera || inside ? "Unknown" + (inside ? " (" + inside + ")" : "") : "";
+}
+// The lens of a clip's Gyroflow project (gyroflow-probe --lens's "project") and the button that keeps it in the user's
+// lens list as the default for the clip's camera, mode and size: every clip of them without a lens of its own takes it
+const LENS_SAVING = {};   // a clip's path -> true while its project's lens is being saved
+function lensKeyText(p, cam) {
+  return [cam || p.camera, p.type_label, String(p.size || "").replace("x", " × ")].filter(Boolean).join(" · ");
+}
+function projectLensHtml(it) {
+  if (!it.gyroflow) return "";
+  const r = LENS_INFO[it.path];
+  const p = r && r.project;
+  if (!p) return "";
+  if (!p.lens) return '<span class="sub wrap">' + esc(p.error || "") + '</span>';
+  let h = '<span class="blk">' + esc(String(p.lens).replace(/_/g, " ")) + '</span>';
+  if (p.error) return h + '<span class="sub wrap blk">Can’t be kept as a default: ' + esc(p.error) + '</span>';
+  if (p.saved) return h + '<span class="sub wrap blk">The default for ' + esc(lensKeyText(p, it.cam)) + '</span>';
+  const busy = LENS_SAVING[it.path];
+  return h + '<span class="btns lensave"><button type="button" class="btn sm" data-a="savelens" data-v="' + esc(it.path) + '" data-cam="' + esc(it.cam || "") + '"' + (busy ? " disabled" : "") +
+    ' title="Kept in your lens list: every clip of this camera, mode and size without a lens of its own (in the file, a lens type chosen, a Gyroflow project) takes it">' +
+    (busy ? '<span class="spin" aria-hidden="true"></span> Saving…' : "Save as the default for " + esc(lensKeyText(p, it.cam))) + '</button></span>';
+}
+async function saveProjectLens(path, cam) {
+  if (LENS_SAVING[path]) return;
+  LENS_SAVING[path] = true; renderSide();
+  try {
+    const r = await invoke("save_project_lens", { path });
+    // Every clip's lens may read otherwise now (the list changed): asked again as each shows
+    for (const k of Object.keys(LENS_INFO)) delete LENS_INFO[k];
+    for (const k of Object.keys(LENS_OF)) delete LENS_OF[k];
+    for (const k of Object.keys(LENS_TYPES)) delete LENS_TYPES[k];
+    toast(String(r.lens || "The lens").replace(/_/g, " ") + " is the default for " + lensKeyText(r, cam) + (r.again ? ": " + r.again + (r.again === 1 ? " clip" : " clips") + " of the camera read again" : ""));
+  } catch (e) { showError("The lens couldn’t be saved: " + e); }
+  finally { delete LENS_SAVING[path]; renderSide(); }
 }
 // What a clip's camera recorded, said as the player's panel says it: its type, its camera's default type where it
 // records none (a drone's main camera), or "unknown (mode 6)" where the curated list doesn't name the camera's mode
@@ -1684,7 +1721,7 @@ function itemInfo(it) {
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
-    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path)],
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path, it.gyroflow)], ["In its Gyroflow project", projectLensHtml(it), false, true],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
       ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
@@ -2434,6 +2471,7 @@ document.addEventListener("click", async (e) => {
   const a = el.dataset.a, v = el.dataset.v;
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
   if (a.startsWith("geo")) return geoAct(a, v, el);
+  if (a === "savelens") return saveProjectLens(v, el.dataset.cam);
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;

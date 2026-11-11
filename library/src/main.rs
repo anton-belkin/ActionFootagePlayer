@@ -1478,6 +1478,33 @@ async fn lens_info(path: String) -> Result<Value, String> {
     }).await.map_err(|e| e.to_string())?
 }
 
+/// The lens of the Gyroflow project beside this clip kept as the default for its camera, mode and size, in the user's
+/// lens list (gyroflow-probe --save-lens: vs-gyroflow's lens_pick::save_default). Every clip of that camera is read
+/// again: the ones of that mode and size, without a lens of their own, have it now. {"camera", "type", "type_label",
+/// "size", "lens", "profile", "file", "again" (how many clips are read again)}
+#[tauri::command]
+async fn save_project_lens(probes: State<'_, index::SharedProbes>, path: String) -> Result<Value, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there")?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&probe);
+        cmd.arg("--save-lens").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't save a lens: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        // Saved for any mode: the camera's clips of that size have it at once (their answers asked again behind)
+        let whole = (v["type"].as_str() == Some("any")).then(|| (v["size"].as_str().unwrap_or("").to_string(),
+            format!("{}, from your list: {}", v["type_label"].as_str().unwrap_or("Any mode"), v["lens"].as_str().unwrap_or("").replace('_', " "))));
+        let again = probes.lock().unwrap().lens_saved_for(v["camera"].as_str().unwrap_or(""), &before, whole.as_ref().map(|(s, l)| (s.as_str(), l.as_str())));
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
 async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
@@ -2257,7 +2284,7 @@ fn main() {
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
