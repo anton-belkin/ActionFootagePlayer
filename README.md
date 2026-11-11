@@ -498,6 +498,19 @@ If it can't be read, the built-in list is used and `gyroflow-probe --lens <clip>
   optically) needs to know to turn the picture right.
 - `sizes`: another profile for one resolution (`"3840x2880"`) or aspect ratio (`"4:3"`), either way round. An
   exact resolution wins over an aspect ratio, which wins over the type's own `profile`.
+- `file_first`: `true` makes the lens in the file (an Action 6 in Wide with EIS off, newer GoPros) come before the
+  type's profile, unless the clip was given the type by hand in the Library.
+
+**A lens from a Gyroflow project, kept for the rest.** In the Library, select a clip that has a Gyroflow project
+beside it: Info → Clip shows the lens the project uses ("In its Gyroflow project") and a button, *Save as the default
+for DJI Osmo Action 6 · Mode 6 · 3840 × 2160*. It writes that lens into this list as the one for the clip's camera,
+the lens mode the camera recorded it in, and its resolution (`types[...].sizes["3840x2160"]`, the type marked
+`file_first`). A mode the list doesn't name yet gets a type of its own (`"mode-6"`, or by Gyroflow's name for the
+mode, `"wide"`) and `recorded` names it; a camera that records no mode gets it as its `default`. The profile is the
+key of Gyroflow's database when the project's lens is one of its profiles (matched by its calibration), else the lens
+is written next to the list as `lenses/<name>-<checksum>.json`. The Library then reads that camera's clips again,
+and those of the mode and size without a lens of their own show it as known. Clips with their own Gyroflow project,
+another type chosen by hand, or the lens in the file keep theirs. Once saved, the button says *The default for …*.
 
 **The default preset is made for underwater footage.** In air, DJI's in-camera stabilization (EIS) works well,
 so there's little reason to turn it off. Under water it doesn't (as of today's firmware), likely because water
