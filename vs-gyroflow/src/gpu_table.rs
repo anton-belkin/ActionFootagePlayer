@@ -448,6 +448,13 @@ fn hook_pass(clip: &Clip, directives: &[String], defines: &str, extra: &str, bod
     format!("{}\n\n{defines}\n{extra}\n{}\n{body}\n", directives.join("\n"), common.replace("@LENS@", &lens_code(clip)))
 }
 
+/// The exact pass's GLSL without libplacebo's directives: the defines, the common code with the clip's lens and the
+/// pass's body (`vec4 hook()`). The iPhone app (ios/afp-motion) wraps it as a plain fragment shader and translates it
+/// to Metal
+pub fn exact_glsl(clip: &Clip, opts: &Options, table: &Table) -> String {
+    hook_pass(clip, &[], &defines(clip, opts, table), "", pass_body("exact"))
+}
+
 /// The denoise's ring of frames: 10 bits a channel (half of rgba16f's memory: 11 slots of 4K)
 const FRAME_FORMAT: &str = "rgb10a2";
 
