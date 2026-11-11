@@ -158,9 +158,31 @@ fn watch(root: &Path, moved: bool) -> Watch {
     let (c, l) = (changes.clone(), last.clone());
     let runner = seen::start(root, changes.clone(), last.clone(), moved);
     let (events, me) = (runner.events.clone(), root.to_path_buf());
+    // A file's attributes changed (a Finder tag set by hand, FSEvents' ItemXattrMod; this Mac's disks, and this Mac's
+    // own changes on a share): that original or moment synced with the library's tag stores, a second after it settles
+    // (docs/tags-and-culling.md, Sync). Our own writes, noticed again, find nothing to do
+    let (attrs, attrs_rx) = std::sync::mpsc::channel::<PathBuf>();
+    let sync_root = root.to_path_buf();
+    std::thread::spawn(move || {
+        while let Ok(first) = attrs_rx.recv() {
+            let mut paths = vec![first];
+            while let Ok(p) = attrs_rx.recv_timeout(Duration::from_millis(1000)) { paths.push(p); }
+            let stores = tags::Stores::of(&sync_root);
+            if stores.list.is_empty() { continue; }
+            let mut items: Vec<Value> = Vec::new();
+            for p in paths { if let Some(it) = tags::item_of_file(&sync_root, &p) { if !items.contains(&it) { items.push(it); } } }
+            if items.is_empty() { continue; }
+            let tool = link_tool();
+            let (came, problems) = tags::sync(&sync_root, &items, &|f, l| write_link(tool.as_ref(), f, l), &stores);
+            if came > 0 || !problems.is_empty() { eprintln!("tags: {came} item(s) changed in Finder taken in; {problems:?}"); }
+        }
+    });
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(e) = res else { return };
         if matches!(e.kind, notify::EventKind::Access(_)) { return; }
+        if matches!(e.kind, notify::EventKind::Modify(notify::event::ModifyKind::Metadata(_)) | notify::EventKind::Modify(notify::event::ModifyKind::Any)) {
+            for p in &e.paths { let _ = attrs.send(p.clone()); }
+        }
         // Temporary and hidden files (a write through a temporary file shows as its final name too), the NAS's recycle bin
         let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
                                           && !p.to_string_lossy().ends_with(".tmp"));
@@ -289,6 +311,8 @@ struct ProjectInfo {
     moments: u64,
     stills: u64,
     exports: u64,
+    // The library's tag stores (docs/tags-and-culling.md): "finder"
+    tag_stores: Vec<String>,
 }
 
 fn project_info(root: &Path) -> ProjectInfo {
@@ -313,6 +337,7 @@ fn project_info(root: &Path) -> ProjectInfo {
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
         stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
+        tag_stores: locations::tag_stores(root),
     }
 }
 
@@ -840,6 +865,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
                    "never_rename": locations::never_rename(&root),
+                   "tag_stores": locations::tag_stores(&root), "finder_here": cfg!(target_os = "macos"),
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
@@ -1208,10 +1234,81 @@ async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
     let meta = meta_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
-                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
+    tauri::async_runtime::spawn_blocking(move || {
+        tags::remember(&add);
+        tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t))
+    }).await.map_err(|e| e.to_string())
+}
+
+// 1–5 stars on the selection (None: none), kept where its tags are (stills: designed)
+#[tauri::command]
+async fn set_rating(shared: State<'_, Shared>, items: Vec<Value>, rating: Option<u8>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::apply(&root, &items, &tags::Op::Rating(rating), &|f, l| write_link(tool.as_ref(), f, l),
+                                                             &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root)))
         .await.map_err(|e| e.to_string())
 }
+
+// Accept or Reject on the selection (None: neither; docs/tags-and-culling.md)
+#[tauri::command]
+async fn set_pick(shared: State<'_, Shared>, items: Vec<Value>, pick: Option<String>) -> Result<Vec<String>, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || tags::apply(&root, &items, &tags::Op::Pick(pick.as_deref()), &|f, l| write_link(tool.as_ref(), f, l),
+                                                             &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root)))
+        .await.map_err(|e| e.to_string())
+}
+
+// The selection (none: every original and moment) synced with the library's tag stores: what changed in Finder comes in
+#[tauri::command]
+async fn sync_tags(shared: State<'_, Shared>, items: Option<Vec<Value>>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = items.filter(|i| !i.is_empty()).unwrap_or_else(|| tags::every_item(&root));
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        json!({ "looked": items.len(), "came": came, "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The library's tag stores (Project settings → Tags): written into Project.afproject (the library's choice, the same
+// from every computer), then everything synced once
+#[tauri::command]
+async fn save_tag_stores(shared: State<'_, Shared>, stores: Vec<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list: Vec<String> = stores.into_iter().filter(|s| s == "finder").collect();
+        update_doc(&root, |d| { if list.is_empty() { d.remove("tag_stores"); } else { d.insert("tag_stores".into(), json!(list)); } })?;
+        let items = tags::every_item(&root);
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        Ok(json!({ "looked": items.len(), "came": came, "problems": problems }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// A tag renamed everywhere in the project (every view's items that have it); to a name in use: merged into it
+#[tauri::command]
+async fn rename_tag(shared: State<'_, Shared>, from: String, to: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let (from, to) = (from.trim().to_string(), to.split_whitespace().collect::<Vec<_>>().join(" "));
+    if from.is_empty() || to.is_empty() { return Err("A tag and its new name".into()); }
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = tags::with_tag(&root, &from);
+        let problems = tags::apply(&root, &items, &tags::Op::Rename { from: &from, to: &to }, &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        tags::remember(std::slice::from_ref(&to));
+        json!({ "count": items.len(), "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tags used last on this computer (the player's K writes them too)
+#[tauri::command]
+fn recent_tags() -> Vec<String> { tags::recent() }
 
 // ---------- Stabilize optically: the lens ----------
 
@@ -2004,7 +2101,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
         .on_window_event(move |window, event| {
@@ -2560,7 +2657,7 @@ mod audit {
     }
 
     fn check(rows: &[(String, String, String)]) {
-        let want = ["[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
+        let want = ["[\"reef\"]", "[\"reef\"]", "[]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
                     "[\"_Moments/Reef/Shark.afplink.mp4\"]", "[\"_Moments/Sea/Shark.afplink.mp4\"]", "true", "true"];
         for ((w, _, a), x) in rows.iter().zip(want) { assert!(a.contains(x), "{w}: {a}, wanted {x}"); }
         let (_, _, del) = rows.last().unwrap();

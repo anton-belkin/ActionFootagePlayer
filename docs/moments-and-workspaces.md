@@ -502,21 +502,10 @@ right within the trip, on the wrong day.
 
 ### Rating and tags
 
-- **A moment that exists is liked; one that isn't, isn't.** Deleting the file (in Finder, or *Remove* in the
-  player, which moves it to the Trash) is the reject.
-- **Finder tags** on a moment are kept in the file's attributes and never change the file. The player reads
-  them (`xattr`), and the editors get them as keywords.
-- **The favorite is a Finder tag named *Favorite*, in green.** `K` sets it and takes it off. A tag is a name
-  plus a color, and Finder shows the color as the dot. The player counts as a favorite a tag with that name
-  (in any color, in any case) or Finder's own *Green* tag, so tagging green by hand in Finder works too.
-  *Favorite* is English because tags go to the editors as keywords, and the other names are the user's. The
-  name is a setting: `favorite_tag=Favorite` in `workspace.conf` (Right click → Project → Favorite tag, written
-  as the dlogm plugin writes its settings). It's read when deciding, so renaming it later doesn't need the files
-  retagged, provided the old tag is renamed in Finder too.
-- **Windows**: Explorer has no tags for an MP4, but its star rating (Properties → Details) is written *into*
-  the file, as an `Xtra` atom. For our own small files that's fine, unlike the originals. 4 or 5 stars is a
-  favorite (`favorite_stars=4`), and `K` sets 5. The player reads the atom with the same box reader. Writing it
-  goes through the Windows property system (`System.Rating`), so that Explorer reads it back as its own **(to try)**.
+Replaced by [tags-and-culling.md](tags-and-culling.md) (2026-11-11): Accept / Reject, 1–5 stars and custom tags on
+originals, moments and stills (never clip previews or exports), kept in the library and synced both ways with the
+stores the library turns on (Finder tags now). A moment that exists is still liked; deleting it is still the reject of
+the moment itself.
 
 ### Editing
 
@@ -634,8 +623,8 @@ All of them:
 | `l` | as now: the A-B part | — |
 | `k` | **save the A-B part as a moment** (asks for its name). On a moment being played: update it | free in mpv and the plugins |
 | `M` | **a mark here**; on a mark (within half a second): remove it. Final Cut's key for a marker | free (`m` is mute) |
-| `X` | **this clip isn't interesting**: its preview in `_Clips/` goes to the Trash; again: made again | free |
-| `K` | **favorite**: the *Favorite* tag on the moment playing, else on the clip's preview (5 stars on Windows); again: off | free |
+| `X` | **Reject** ([tags-and-culling.md](tags-and-culling.md)); `P` Accept, `U` neither, `1`–`5` stars. Was: the clip preview to the Trash (now the menu's *Remove this clip's preview*) | free |
+| `K` | **a tag of your own** on the original or moment playing ([tags-and-culling.md](tags-and-culling.md)) | free in mpv (no default binding) and the plugins; `Л` in a Cyrillic layout |
 | `Shift+E` | export, asking for a name | as now |
 
 ### The menu
@@ -794,7 +783,7 @@ first".
      - `X` trashes one, and *Make* leaves it deleted;
      - `X` again and *Make again for removed clips* bring it back;
      - a preview opened plays its 30.4 s clip in its look.
-8. **Tags**: Finder tags and Explorer's stars read; `K`.
+8. **Tags and culling**: [tags-and-culling.md](tags-and-culling.md).
 9. **Separate project folders**: `Sources.txt`, the list, the longest match, read-only folders, *Footage
    moved…*, *Keep this project separately*, the volume id.
 10. **Video previews** of moments, in place of stills.

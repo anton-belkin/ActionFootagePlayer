@@ -80,6 +80,16 @@ a{color:var(--accent)}
 .chip.sys{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
 .chip.tag{background:var(--tag-bg)}
 button.chip{cursor:pointer}
+.stars{display:flex;align-items:center;gap:2px}
+.star{font-size:18px;line-height:24px;min-width:26px;min-height:26px;border:0;background:none;color:var(--muted);cursor:pointer;border-radius:5px;padding:0}
+.star.on{color:var(--accent)}
+.star:hover{background:var(--tag-bg)}
+.stars .sub{margin-left:6px}
+.picks{display:flex;align-items:center;gap:6px}
+.pickb{flex:1;min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg2);cursor:pointer;font-weight:600}
+.pickb.acc.on{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+.pickb.rej.on{background:var(--wa-bg);border-color:var(--wa-line);color:var(--wa)}
+.pickb:hover{border-color:var(--accent-line)}
 .loc{font-size:12px;color:var(--fg2);display:flex;align-items:center;gap:5px}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 auto}
 .grid{padding:4px 14px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}

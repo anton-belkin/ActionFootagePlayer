@@ -6,7 +6,7 @@
 // - a moment, clip preview, export or render (a video in the project's own area, or a .afplink.mp4 anywhere): its link,
 //   the MP4 key ch.actionfootageplayer.link — { "link": … }
 // - a photo there: its link and tags, from its XMP — { "link": …, "tags": […] }
-// - a clip's sidecar (.afp.json, .marks.json), anywhere: its marks, view, source, tags and location — { "own": … }
+// - a clip's sidecar (.afp.json, .marks.json), anywhere: its marks, view, source, tags, rating and location — { "own": … }
 //
 // A file that couldn't be read is an error (the look leaves its folder to be listed again), not a file without a link.
 
@@ -145,7 +145,7 @@ pub fn read(path: &Path) -> io::Result<Option<Value>> {
         let text = std::fs::read(path)?;
         let Ok(own) = serde_json::from_slice::<Value>(&text) else { return Ok(None) };
         let pick = |k: &str| own.get(k).cloned().unwrap_or(Value::Null);
-        return Ok(Some(json!({ "own": { "marks": pick("marks"), "view": pick("view"), "source": pick("source"), "tags": pick("tags"), "location": pick("location") } })));
+        return Ok(Some(json!({ "own": { "marks": pick("marks"), "view": pick("view"), "source": pick("source"), "tags": pick("tags"), "rating": pick("rating"), "pick": pick("pick"), "location": pick("location") } })));
     }
     if is_video(&lower) {
         let keys = mp4_keys(path)?;

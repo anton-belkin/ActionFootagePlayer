@@ -161,6 +161,18 @@ pub fn never_rename(project: &Path) -> bool {
         .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
 }
 
+/// The tag stores the library syncs besides its own (docs/tags-and-culling.md): Project.afproject's `tag_stores`
+/// ("finder"), the library's choice, the same from every computer
+pub fn tag_stores(project: &Path) -> Vec<String> {
+    read_json(&project.join(PROJECT_FILE)).and_then(|d| d.get("tag_stores").cloned()).and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default().into_iter().filter(|s| s == "finder").collect()
+}
+
+/// The tags used last on this computer, the player's and the Library's (<data>/ActionFootage/tags-recent.json)
+pub fn recent_tags_file() -> Option<PathBuf> {
+    local_file("x").and_then(|f| f.parent().and_then(Path::parent).map(|d| d.join("tags-recent.json")))
+}
+
 fn from_json(list: Option<&Value>, project: &Path, hosts: Option<&Value>, mounts: &[(String, PathBuf)], local: bool) -> Vec<Location> {
     list.and_then(Value::as_array).into_iter().flatten().filter(|l| l.is_object()).map(|l| {
         let path = l.get("path").and_then(Value::as_str).unwrap_or("").to_string();
