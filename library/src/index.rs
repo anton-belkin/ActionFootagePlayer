@@ -447,8 +447,11 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         let files: Vec<String> = it["own_files"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
         if files.len() > 1 { it["own_conflict"] = json!(files); }
         if let Some(f) = files.first() {
-            // The sidecar's marks, view, source and tags as the catalog read them, else the file
-            let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned());
+            // The sidecar's marks, view, source, tags and location as the catalog read them, else the file. A record
+            // without the location key was made by an afp-catalog from before locations (the NAS's, 2026-11-11: it
+            // noted each sidecar the Library had just written, and the location went from the view): the file then
+            let seen = crate::seen::meta(Path::new(f)).flatten().and_then(|m| m.get("own").cloned())
+                .filter(|own| own.get("location").is_some());
             if let Some(own) = seen.or_else(|| read_json(Path::new(f))) {
                 it["own"] = json!({ "marks": own.get("marks").cloned().unwrap_or(Value::Null), "view": own.get("view").cloned().unwrap_or(Value::Null),
                                     "source": own.get("source").cloned().unwrap_or(Value::Null),
