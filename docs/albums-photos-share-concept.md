@@ -30,6 +30,8 @@
 | #112 | Crop mode | The crop key for photos (#216) |
 | #122 (closed) | Live Photos and Motion Photos | The `Live` and `Motion` render profiles |
 
+How the Library would compare with other products once this is built: `docs/albums-photos-share-comparison.md`.
+
 The comparative study it came from is a local report, `reports/library-comparison-2026-11-11.md` (not in the repo).
 
 It changes the Library's views and adds one kind of object, the photo. The rules of the files stay as they are.
