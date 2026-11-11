@@ -692,6 +692,9 @@ local function gpu_frame()
     -- camera as the warp does (gpu_table's tests)
     local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
     if crop.active and crop.camera then return nil end
+    -- Nor with the color fringes skipped on this screen (Performance & Quality) where the clip has them taken out: the
+    -- photo has them out, gyroflow-export's
+    if mp.get_property_native("user-data/gyroflow/chromatic_skip") == true and mp.get_property_native("user-data/gyroflow/chromatic") == true then return nil end
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     local hlg = (mp.get_property("video-params/gamma") or "") == "hlg"
     if not (HLG_LOOKS[look] and (curve and curve ~= "" or hlg)) then return nil end

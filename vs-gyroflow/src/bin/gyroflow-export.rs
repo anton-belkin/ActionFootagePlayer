@@ -1690,17 +1690,28 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let written = written.clone();
             let first = if all_frames { dec_first } else { first_frame };
             post_thread = Some(std::thread::spawn(move || -> Result<(), String> {
-                let mut enc_in = enc_in;
-                let mut emit = |index: u64, mut f: Vec<u8>| -> Result<(), String> {
+                // The LUT and the encoder on a thread of their own, beside the shaders
+                let (out_tx, out_rx) = mpsc::sync_channel::<Vec<u8>>(2);
+                let writer = std::thread::spawn(move || -> Result<(), String> {
+                    let mut enc_in = enc_in;
+                    for mut f in out_rx {
+                        let l1 = match lut.as_mut() { Some(l) => l.apply(&mut f)?, None => None };
+                        if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
+                        enc_in.write_all(&f).map_err(|e| format!("encoder stopped: {e}"))?;
+                        written.fetch_add(1, Relaxed);
+                    }
+                    Ok(())
+                });
+                let mut emit = |index: u64, f: Vec<u8>| -> Result<(), String> {
                     // Only the export's own frames (not those around them), every `step`th
                     if all_frames && (index < first_frame || index > last_frame || (index - first_frame) % step != 0) { return Ok(()); }
-                    let l1 = match lut.as_mut() { Some(l) => l.apply(&mut f)?, None => None };
-                    if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
-                    enc_in.write_all(&f).map_err(|e| format!("encoder stopped: {e}"))?;
-                    written.fetch_add(1, Relaxed);
-                    Ok(())
+                    out_tx.send(f).map_err(|_| "the writer stopped".to_string())
                 };
-                p.run(first, rx, &mut emit)
+                let done = p.run(first, rx, &mut emit);
+                drop(out_tx);
+                // The writer's own error says more
+                writer.join().map_err(|_| "the writer failed".to_string())??;
+                done
             }));
         }
     }
