@@ -186,7 +186,8 @@ function deriveSource(it, probe) {
   it.color = col ? col[1] : null;
   it.motion = probe ? probe.mode != null : null;
   // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
-  // "EIS: RockSteady", "FlowState"); null: off, or not said
+  // "EIS: RockSteady", "FlowState"); null: off, or not said. With motion data (a GoPro HERO8+ with HyperSmooth on), the
+  // player stabilizes on top of it
   it.camStab = probe && typeof probe.stabilized_in_camera === "string" ? probe.stabilized_in_camera : null;
   it.is360 = !!(probe && (probe.spherical || probe.rig360));
 }
@@ -1465,7 +1466,7 @@ function itemInfo(it) {
     const probe = PROBES[it.path];
     h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path)],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["Under water", probe && probe.water ? "Yes" : ""],
-      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
+      ["Motion data", it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") + (it.camStab ? ", stabilized on top of the camera's " + it.camStab : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
     h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));

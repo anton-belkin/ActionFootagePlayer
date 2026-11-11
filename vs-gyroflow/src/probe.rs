@@ -66,7 +66,11 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     }
     match in_camera.as_deref() {
         Some("") => (),
+        // HyperSmooth on a GoPro that recorded how it turned the picture (IORI: the HERO8 and later): its motion data
+        // is the picture's own, which is stabilized further (in_camera.rs). The HERO5-7 Black don't record it
+        Some(_) if camera == "GoPro" && picture_turn_recorded(samples) => (),
         Some(how) => return Err(match camera.as_str() {
+            "GoPro" => format!("{how} is on in the camera, which doesn't record how it turned the picture (HERO7 and older)"),
             "DJI" => format!("in-camera stabilization is on ({how})"),
             _ => format!("{how} is on in the camera"),
         }),
@@ -81,10 +85,19 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
 }
 
+// Whether a GoPro recorded how HyperSmooth turned the picture: IORI, the image's orientation, next to CORI, the
+// camera's (HERO8 and later, HyperSmooth on or off). telemetry-parser gives Gyroflow CORI × IORI then, the picture's
+// own turn. Checked on HERO12 Black clips (HS EIS, HS AutoBoost: IORI turning the picture by up to several degrees) and a
+// HERO7 Black's (HS EIS: no CORI, no IORI)
+fn picture_turn_recorded(samples: &[SampleInfo]) -> bool {
+    samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::ImageOrientation)).any(|m| m.contains_key(&TagId::Data))
+}
+
 // Whether the camera stabilized the picture itself: its name for how ("HyperSmooth (HS EIS)", "EIS: RockSteady",
 // "FlowState"), "" when it recorded that it didn't, None when it doesn't say. Footage the camera already stabilized
-// gets worse stabilized again, so only "" is stabilized here; on, or not said, plays as it is. The signs are the ones
-// Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
+// gets worse stabilized again, so only "" is stabilized here, and HyperSmooth on a GoPro that recorded how it turned
+// the picture (picture_turn_recorded); on otherwise, or not said, plays as it is. The signs are the ones Gyroflow
+// reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
 fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> {
     let default_tags = || samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Default));
     let metadata = || default_tags().filter_map(|m| match m.get(&TagId::Metadata).map(|t| &t.value) {

@@ -125,7 +125,8 @@ install -m 755 target/release/afp-cut ~/.config/mpv/scripts/gyroflow/
 ```
 
 `gyroflow-probe <video>` tells the gyroflow mpv plugin what a video without a `.gyroflow` next to it can be
-stabilized with: `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState),
+stabilized with: `default` (its own motion data, recorded with in-camera stabilization off: DJI EIS, GoPro HyperSmooth, Insta360 FlowState;
+or a GoPro HERO8+ with HyperSmooth on, which records how it turned the picture: stabilized on top of it, `src/in_camera.rs`),
 or nothing, with the reason.
 
 `afp-cut <video> --from <t> [--to <t>]` keeps a part of a camera's MP4 without re-encoding it: every sample as it is,

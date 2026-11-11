@@ -3,7 +3,9 @@
 --
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
---       with HyperSmooth off and Insta360 ones with FlowState off in the camera, when Gyroflow has their lens):
+--       with HyperSmooth off, or on from a HERO8 or later, which records how it turned the picture: stabilized on top
+--       of it with less crop, vs-gyroflow/src/in_camera.rs; and Insta360 ones with FlowState off in the camera, when
+--       Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
 --       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
@@ -354,8 +356,9 @@ local function find_source(path, done)
             end
         end
         -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
+        -- in_camera: how the camera stabilized it itself (GoPro HERO8+ HyperSmooth), stabilized further on top of it
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
-               rotation = tonumber(info.rotation) or 0 })
+               rotation = tonumber(info.rotation) or 0, in_camera = type(info.stabilized_in_camera) == "string" and info.stabilized_in_camera or nil })
     end)
 end
 
@@ -1450,6 +1453,7 @@ local function add_filter(source, done)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
                 .. ((has_project(source) or filter_lens(source) == "only") and "" or ", " .. level)
+                .. (source.in_camera and (", on top of the camera's " .. source.in_camera) or "")
                 .. (filter_lens(source) == "only" and ", the lens alone corrected" or filter_lens(source) == "recorded" and ", the lens as recorded" or "")
                 .. ((horizon ~= nil and filter_lens(source) ~= "only") and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
     done()
@@ -1701,6 +1705,7 @@ mp.register_event("file-loaded", function()
         if filtering() then label = "Gyroflow: no motion data, the lens corrected" end
     elseif current_source and filtering() then
         label = "Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+                .. ((current_source.in_camera and not stab_off) and (", on top of " .. current_source.in_camera) or "")
                 .. (view == "wide" and ", wider view" or "")
     end
     if label then first_frame_message(label) end

@@ -45,7 +45,8 @@ pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwate
         stab.recompute_blocking();
         crate::wide_fov(&ComputeParams::from_manager(&stab), stab.params.read().fps)
     } else {
-        level.fov(levels::still_fov(&stab))
+        let still = levels::still_fov(&stab);
+        crate::motion::Geometry::of(&stab, still).fov(level)
     };
     stab.set_fov(fov);
     // load_video_file leaves the project's video to the app
