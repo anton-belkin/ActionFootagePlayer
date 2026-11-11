@@ -2495,23 +2495,35 @@ end
 
 -- The command that opens the project (or a video) in Gyroflow and returns (status 0) once it's started, without
 -- waiting for it. nil on Windows for a video without gyroflow_app: the app videos open with is the player's
-local function gyroflow_command(file)
-    if platform.macos then return { "/usr/bin/open", "-b", GYROFLOW_APP, file } end
+-- `preset`: Gyroflow's preset as JSON (' for "), applied once the video is open (its --open and --preset): a video
+-- without a project opened with what the player knows of it (the lens under water)
+local function gyroflow_command(file, preset)
+    if platform.macos then
+        -- A new one: one already open wouldn't be given the preset
+        if preset then return { "/usr/bin/open", "-n", "-b", GYROFLOW_APP, "--args", "--open", file, "--preset", preset } end
+        return { "/usr/bin/open", "-b", GYROFLOW_APP, file }
+    end
     if platform.windows then
-        if o.gyroflow_app ~= "" then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, file } end
+        if o.gyroflow_app ~= "" then
+            if preset then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, "--open", file, "--preset", preset } end
+            return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, file }
+        end
         -- The app .gyroflow files are associated with (Gyroflow's installer sets it)
         if not file:lower():match("%.gyroflow$") then return nil end
         return { "cmd", "/d", "/c", "start", "", file }
     end
     -- Started in the background, and fails when there's no such program
     local app = o.gyroflow_app ~= "" and o.gyroflow_app or "gyroflow"
+    if preset then
+        return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" --open "$2" --preset "$3" >/dev/null 2>&1 &', "sh", app, file, preset }
+    end
     return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" "$2" >/dev/null 2>&1 &', "sh", app, file }
 end
 
 -- `project`: the project to watch for changes; nil for a video without one (`file`, the video itself), to watch
 -- for the project Gyroflow saves next to it
-local function open_in_gyroflow(file, project, opened_message)
-    local args = gyroflow_command(file)
+local function open_in_gyroflow(file, project, opened_message, preset)
+    local args = gyroflow_command(file, preset)
     if not args then
         mp.osd_message("Gyroflow: set gyroflow_app in gyroflow.conf to open videos in it", 4)
         return
@@ -2550,9 +2562,14 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     local project = find_project(path)
     if project then return edit_project(project) end
     if not current_source or current_source.kind == "lens" then
-        return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data:\n"
+        -- Gyroflow's "Lens is underwater" for it: the player's Lens under water (yes: water's refraction, no: none);
+        -- auto says nothing (Gyroflow's own default)
+        local r = underwater == "yes" and "1.33" or underwater == "no" and "1.0" or nil
+        local preset = r and ("{'version': 2, 'light_refraction_coefficient': " .. r .. "}") or nil
+        return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data"
+            .. (preset and (underwater == "yes" and " (its lens under water)" or " (its lens above water)") or "") .. ":\n"
             .. "let it find the motion from the picture (optical flow) and save the project next to the video,\n"
-            .. "then it plays here stabilized")
+            .. "then it plays here stabilized", preset)
     end
     if not file_exists(PROJECT_WRITER) then
         mp.osd_message("Gyroflow: gyroflow-project isn't installed", 2)
