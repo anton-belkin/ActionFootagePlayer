@@ -377,43 +377,83 @@ fn insert_app1(jpeg: Vec<u8>, exif: Vec<u8>) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// A minimal Exif segment's payload: when it was taken (local time, "YYYY:MM:DD HH:MM:SS"), and the camera
-pub fn exif(taken: Option<&str>, make: Option<&str>, model: Option<&str>) -> Vec<u8> {
-    // Big-endian TIFF: IFD0 with Make, Model and the Exif IFD's pointer, then the Exif IFD with DateTimeOriginal
-    let ascii = |s: &str| { let mut b = s.as_bytes().to_vec(); b.push(0); b };
-    let mut ifd0: Vec<(u16, Vec<u8>)> = Vec::new();
-    if let Some(m) = make { ifd0.push((0x010F, ascii(m))); }
-    if let Some(m) = model { ifd0.push((0x0110, ascii(m))); }
-    let exif_ifd: Vec<(u16, Vec<u8>)> = taken.map(|t| vec![(0x9003, ascii(t)), (0x9004, ascii(t))]).unwrap_or_default();
-    let ifd_size = |n: usize| 2 + n * 12 + 4;
-    let ifd0_entries = ifd0.len() + 1;
+/// A TIFF IFD entry: its tag, type (1 BYTE, 2 ASCII, 4 LONG, 5 RATIONAL), count and value's bytes (big-endian)
+struct Entry { tag: u16, kind: u16, count: u32, data: Vec<u8> }
+
+fn ascii(tag: u16, s: &str) -> Entry {
+    let mut data = s.as_bytes().to_vec();
+    data.push(0);
+    Entry { tag, kind: 2, count: data.len() as u32, data }
+}
+
+fn rationals(tag: u16, v: &[(u32, u32)]) -> Entry {
+    Entry { tag, kind: 5, count: v.len() as u32, data: v.iter().flat_map(|(n, d)| n.to_be_bytes().into_iter().chain(d.to_be_bytes())).collect() }
+}
+
+/// Degrees as Exif has them: degrees, minutes and seconds (to 1/10000″, ~3 mm), the sign apart
+fn dms(deg: f64) -> [(u32, u32); 3] {
+    let units = (deg.abs() * 3600.0 * 10_000.0).round() as u64;
+    let (d, rest) = (units / 36_000_000, units % 36_000_000);
+    [(d as u32, 1), ((rest / 600_000) as u32, 1), ((rest % 600_000) as u32, 10_000)]
+}
+
+/// The GPS IFD's entries for a place: latitude, longitude and, when known, altitude (metres, below sea level as Exif
+/// says it: its reference 1)
+fn gps_entries(p: &crate::geotag::Fix) -> Vec<Entry> {
+    let mut e = vec![
+        Entry { tag: 0x0000, kind: 1, count: 4, data: vec![2, 3, 0, 0] },
+        ascii(0x0001, if p.lat < 0.0 { "S" } else { "N" }),
+        rationals(0x0002, &dms(p.lat)),
+        ascii(0x0003, if p.lon < 0.0 { "W" } else { "E" }),
+        rationals(0x0004, &dms(p.lon)),
+    ];
+    if let Some(alt) = p.alt.filter(|a| a.is_finite() && a.abs() < 100_000.0) {
+        e.push(Entry { tag: 0x0005, kind: 1, count: 1, data: vec![(alt < 0.0) as u8] });
+        e.push(rationals(0x0006, &[((alt.abs() * 1000.0).round() as u32, 1000)]));
+    }
+    e
+}
+
+/// A minimal Exif segment's payload: when it was taken (local time, "YYYY:MM:DD HH:MM:SS"), the camera, and where (the
+/// GPS IFD)
+pub fn exif(taken: Option<&str>, make: Option<&str>, model: Option<&str>, place: Option<&crate::geotag::Fix>) -> Vec<u8> {
+    // Big-endian TIFF: IFD0 with Make, Model and the Exif and GPS IFDs' pointers, then the Exif IFD with
+    // DateTimeOriginal, then the GPS IFD
+    let mut ifd0: Vec<Entry> = Vec::new();
+    if let Some(m) = make { ifd0.push(ascii(0x010F, m)); }
+    if let Some(m) = model { ifd0.push(ascii(0x0110, m)); }
+    let exif_ifd: Vec<Entry> = taken.map(|t| vec![ascii(0x9003, t), ascii(0x9004, t)]).unwrap_or_default();
+    let gps_ifd: Vec<Entry> = place.map(gps_entries).unwrap_or_default();
+    // An IFD's length with the values that don't fit in its entries after it
+    let ifd_len = |e: &[Entry], pointers: usize| 2 + (e.len() + pointers) * 12 + 4 + e.iter().map(|x| if x.data.len() > 4 { x.data.len() + (x.data.len() & 1) } else { 0 }).sum::<usize>();
+    let pointers = 1 + !gps_ifd.is_empty() as usize;
     let ifd0_at = 8usize;
-    let mut data_at = ifd0_at + ifd_size(ifd0_entries);
-    let data_len = |e: &[(u16, Vec<u8>)]| e.iter().map(|(_, d)| if d.len() > 4 { d.len() + (d.len() & 1) } else { 0 }).sum::<usize>();
-    let exif_ifd_at = data_at + data_len(&ifd0);
+    let exif_at = ifd0_at + ifd_len(&ifd0, pointers);
+    let gps_at = exif_at + ifd_len(&exif_ifd, 0);
     let mut tiff = b"MM\0\x2a".to_vec();
     tiff.extend_from_slice(&(ifd0_at as u32).to_be_bytes());
-    let write_ifd = |tiff: &mut Vec<u8>, entries: &[(u16, Vec<u8>)], extra: Option<(u16, u32)>, data_at: &mut usize| {
-        let mut all: Vec<(u16, u16, u32, [u8; 4])> = Vec::new();
+    let write_ifd = |tiff: &mut Vec<u8>, entries: Vec<Entry>, pointers: &[(u16, u32)]| {
+        let mut all = entries;
+        for (tag, ptr) in pointers { all.push(Entry { tag: *tag, kind: 4, count: 1, data: ptr.to_be_bytes().to_vec() }); }
+        all.sort_by_key(|e| e.tag);
+        let mut data_at = tiff.len() + 2 + all.len() * 12 + 4;
         let mut blobs = Vec::new();
-        for (tag, d) in entries {
-            let value = if d.len() <= 4 { let mut b = [0u8; 4]; b[..d.len()].copy_from_slice(d); b }
-                        else { let b = (*data_at as u32).to_be_bytes(); *data_at += d.len() + (d.len() & 1); blobs.push(d.clone()); b };
-            all.push((*tag, 2, d.len() as u32, value));
-        }
-        if let Some((tag, ptr)) = extra { all.push((tag, 4, 1, ptr.to_be_bytes())); }
-        all.sort_by_key(|e| e.0);
         tiff.extend_from_slice(&(all.len() as u16).to_be_bytes());
-        for (tag, kind, count, value) in all {
-            tiff.extend_from_slice(&tag.to_be_bytes()); tiff.extend_from_slice(&kind.to_be_bytes());
-            tiff.extend_from_slice(&count.to_be_bytes()); tiff.extend_from_slice(&value);
+        for e in &all {
+            let value = if e.data.len() <= 4 { let mut b = [0u8; 4]; b[..e.data.len()].copy_from_slice(&e.data); b }
+                        else { let b = (data_at as u32).to_be_bytes(); data_at += e.data.len() + (e.data.len() & 1); blobs.push(&e.data); b };
+            tiff.extend_from_slice(&e.tag.to_be_bytes()); tiff.extend_from_slice(&e.kind.to_be_bytes());
+            tiff.extend_from_slice(&e.count.to_be_bytes()); tiff.extend_from_slice(&value);
         }
         tiff.extend_from_slice(&0u32.to_be_bytes());
-        for b in blobs { tiff.extend_from_slice(&b); if b.len() & 1 == 1 { tiff.push(0); } }
+        for b in blobs { tiff.extend_from_slice(b); if b.len() & 1 == 1 { tiff.push(0); } }
     };
-    write_ifd(&mut tiff, &ifd0, Some((0x8769, exif_ifd_at as u32)), &mut data_at);
-    let mut data_at = exif_ifd_at + ifd_size(exif_ifd.len());
-    write_ifd(&mut tiff, &exif_ifd, None, &mut data_at);
+    let mut ptrs = vec![(0x8769, exif_at as u32)];
+    if !gps_ifd.is_empty() { ptrs.push((0x8825, gps_at as u32)); }
+    write_ifd(&mut tiff, ifd0, &ptrs);
+    debug_assert_eq!(tiff.len(), exif_at);
+    write_ifd(&mut tiff, exif_ifd, &[]);
+    if !gps_ifd.is_empty() { debug_assert_eq!(tiff.len(), gps_at); write_ifd(&mut tiff, gps_ifd, &[]); }
     let mut out = b"Exif\0\0".to_vec();
     out.extend_from_slice(&tiff);
     out
@@ -483,7 +523,7 @@ mod tests {
             let (x, y) = ((i % w) as f32 / w as f32, (i / w) as f32 / h as f32);
             let v = if (0.4..0.6).contains(&y) { 0.75 + 0.25 * x } else { 0.75 * x };
             [v, v * 0.95, v * 0.8] }).collect() };
-        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None, None).unwrap()).unwrap();
+        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap()).unwrap();
     }
 
     #[test]
@@ -491,7 +531,7 @@ mod tests {
         let (w, h) = (64, 32);
         let sdr = Image { width: w, height: h, pixels: vec![[0.5, 0.4, 0.3]; w * h] };
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"))), None, None).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap();
         // The MPF's entries: the primary's size, and the gain map where it says
         let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
         let tiff = at + 4;
@@ -512,7 +552,7 @@ mod tests {
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
         let video = b"\0\0\0\x18ftypmp42 a video, not really".to_vec();
         let m = Motion { video: &video, presentation_us: 1_500_000 };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None)), Some(&m), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#)).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None, None)), Some(&m), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#)).unwrap();
         assert!(file.ends_with(&video));
         // The directory's lengths: the gain map and the video tightly after the primary
         let xmp = String::from_utf8_lossy(&file[file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap()..]).to_string();
@@ -535,5 +575,53 @@ mod tests {
         assert_eq!((be(at + 4 + 50 + 4), be(at + 4 + 50 + 20)), (primary, map_len));
         // Exif before XMP
         assert!(file.windows(6).position(|w| w == b"Exif\0\0").unwrap() < file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap());
+    }
+
+    /// An IFD's entries, read back: tag → (type, count, value's bytes)
+    fn read_ifd(tiff: &[u8], at: usize) -> std::collections::BTreeMap<u16, (u16, u32, Vec<u8>)> {
+        let be16 = |i: usize| u16::from_be_bytes([tiff[i], tiff[i + 1]]);
+        let be32 = |i: usize| u32::from_be_bytes(tiff[i..i + 4].try_into().unwrap());
+        (0..be16(at) as usize).map(|k| {
+            let e = at + 2 + k * 12;
+            let (kind, count) = (be16(e + 2), be32(e + 4));
+            let len = count as usize * match kind { 1 | 2 => 1, 3 => 2, 4 => 4, _ => 8 };
+            let from = if len <= 4 { e + 8 } else { be32(e + 8) as usize };
+            (be16(e), (kind, count, tiff[from..from + len].to_vec()))
+        }).collect()
+    }
+
+    #[test]
+    fn exif_gps() {
+        use crate::geotag::Fix;
+        let rational = |b: &[u8], i: usize| u32::from_be_bytes(b[i * 8..i * 8 + 4].try_into().unwrap()) as f64 / u32::from_be_bytes(b[i * 8 + 4..i * 8 + 8].try_into().unwrap()) as f64;
+        let degrees = |b: &[u8]| rational(b, 0) + rational(b, 1) / 60.0 + rational(b, 2) / 3600.0;
+        for (lat, lon, alt) in [(46.1020017, 7.9192771, Some(1780.429)), (-8.65, -115.2167, Some(-12.5)), (27.25, 33.8116, None), (0.99999999, 179.9999999, None)] {
+            let e = exif(Some("2026:11:05 10:00:00"), Some("DJI"), None, Some(&Fix { lat, lon, alt, t: None }));
+            assert_eq!(&e[..6], b"Exif\0\0");
+            let tiff = &e[6..];
+            let ifd0 = read_ifd(tiff, 8);
+            assert_eq!(ifd0[&0x010F].2, b"DJI\0");
+            let gps_at = u32::from_be_bytes(ifd0[&0x8825].2[..4].try_into().unwrap()) as usize;
+            let exif_at = u32::from_be_bytes(ifd0[&0x8769].2[..4].try_into().unwrap()) as usize;
+            assert_eq!(read_ifd(tiff, exif_at)[&0x9003].2, b"2026:11:05 10:00:00\0");
+            let gps = read_ifd(tiff, gps_at);
+            assert_eq!(gps[&0x0000].2, [2, 3, 0, 0]);
+            assert_eq!(gps[&0x0001].2, if lat < 0.0 { b"S\0" } else { b"N\0" });
+            assert_eq!(gps[&0x0003].2, if lon < 0.0 { b"W\0" } else { b"E\0" });
+            assert!((degrees(&gps[&0x0002].2) - lat.abs()).abs() < 1e-7, "{lat}: {}", degrees(&gps[&0x0002].2));
+            assert!((degrees(&gps[&0x0004].2) - lon.abs()).abs() < 1e-7, "{lon}: {}", degrees(&gps[&0x0004].2));
+            // Minutes and seconds in range: no 60″ from rounding
+            assert!(rational(&gps[&0x0002].2, 1) < 60.0 && rational(&gps[&0x0002].2, 2) < 60.0);
+            match alt {
+                Some(a) => {
+                    assert_eq!(gps[&0x0005].2, [(a < 0.0) as u8]);
+                    assert!((rational(&gps[&0x0006].2, 0) - a.abs()).abs() < 1e-3);
+                }
+                None => assert!(!gps.contains_key(&0x0005) && !gps.contains_key(&0x0006)),
+            }
+        }
+        // No place: no GPS IFD
+        let e = exif(Some("2026:11:05 10:00:00"), None, None, None);
+        assert!(!read_ifd(&e[6..], 8).contains_key(&0x8825));
     }
 }
