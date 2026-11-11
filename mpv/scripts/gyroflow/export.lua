@@ -15,9 +15,11 @@
 -- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
 -- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
 -- in color only by itself. Script messages, for the right-click menu:
---   export [hdr|sdr|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look it
---                        plays in, else the one the dlogm plugin would choose (its sdr_look); for a 360 camera's file
---                        the whole sphere (360) or the view recorded as you looked around (flat: docs/360-reframe.md)
+--   export [hdr|sdr|youtube|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look
+--                        it plays in, else the one the dlogm plugin would choose (its sdr_look); for YouTube: HDR10 in
+--                        an MKV with that SDR look's LUT inside for YouTube's SDR version (gyroflow-export --youtube,
+--                        a .mkv; issue #95); for a 360 camera's file the whole sphere (360) or the view recorded as you
+--                        looked around (flat: docs/360-reframe.md)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
@@ -352,6 +354,20 @@ local function view_args(args, v)
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
 end
 
+-- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
+-- choices (the export's own), and the SDR look of the LUT inside: the one an SDR export takes (the dlogm plugin's
+-- sdr_look; the maker's is DJI's, D-Log M only), else gyroflow-export's own choice
+local function youtube_args(args)
+    for i = #args, 1, -1 do
+        local a = args[i]
+        if a == "--sdr" or a == "--nbcu" or a == "--dv-live-l1" then table.remove(args, i)
+        elseif a == "--dv-rpu" then table.remove(args, i + 1); table.remove(args, i) end
+    end
+    local d = mp.get_property_native("user-data/dlogm") or {}
+    local look = (d.sdr_look == "maker" and d.curve == "dlogm") and "maker" or d.sdr_look == "nbcu" and "nbcu" or "auto"
+    table.insert(args, "--youtube"); table.insert(args, look)
+end
+
 local function installed(what)
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then
@@ -361,15 +377,17 @@ local function installed(what)
     return true
 end
 
--- `sdr`: in SDR whatever plays. `named`: the workspace plugin's answer, { output, link, from, to, alone }
-local function start(path, sdr, named)
+-- `how`: hdr (as it plays), sdr (in SDR whatever plays) or youtube. `named`: the workspace plugin's answer,
+-- { output, link, from, to, alone }
+local function start(path, how, named)
     if not installed("Export") then return end
     local progress = temp_name("progress")
     local control = platform.windows and temp_name("control") or nil
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    as_it_plays(args, sdr, false, false)
+    as_it_plays(args, how == "sdr", false, false)
+    if how == "youtube" then youtube_args(args) end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
     if named and named.from and named.to then a, b = named.from, named.to end
@@ -422,19 +440,21 @@ function run_export(path, args, range, progress, control)
 end
 
 -- With the workspace plugin: it asks the name, and answers export-start. The look and whether it's stabilized go
--- into the name and the link: " (SDR)", " (Dolby Vision)", nothing for HDR
-local function begin(path, sdr)
+-- into the name and the link: " (SDR)", " (Dolby Vision)", " (YouTube)" (an MKV), nothing for HDR
+local function begin(path, how)
     local ws = mp.get_property_native("user-data/workspace")
-    if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, sdr) end
+    if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, how) end
     local args = {}
-    as_it_plays(args, sdr, false, false)
+    as_it_plays(args, how == "sdr", false, false)
     local has = {}
     for i, v in ipairs(args) do has[v] = true; if v == "--curve" and args[i + 1] == "none" then has.none = true end end
     local label = has["--dv-rpu"] and " (Dolby Vision)" or (has["--sdr"] or has["--nbcu"]) and " (SDR)" or ""
     local look = has["--dv-rpu"] and "dv" or has["--sdr"] and "maker" or has["--nbcu"] and "nbcu" or has.none and "recorded" or "hdr"
+    if how == "youtube" then label, look = " (YouTube)", "youtube" end
     local g = mp.get_property_native("user-data/gyroflow") or {}
     mp.commandv("script-message-to", "workspace", "export-name", utils.format_json({
-        sdr = sdr, label = label, look = look, stabilized = g.available == true and g.view ~= "off", reply = mp.get_script_name(),
+        sdr = how == "sdr", youtube = how == "youtube", ext = how == "youtube" and ".mkv" or nil, label = label, look = look,
+        stabilized = g.available == true and g.view ~= "off", reply = mp.get_script_name(),
     }))
 end
 
@@ -443,14 +463,14 @@ mp.register_script_message("export-start", function(json)
     local path = local_path()
     -- Still the clip it was asked for
     if type(r) ~= "table" or not path or r.clip ~= mp.get_property_native("user-data/workspace/clip") or running[path] then return end
-    start(path, r.sdr == true, r)
+    start(path, r.youtube == true and "youtube" or r.sdr == true and "sdr" or "hdr", r)
 end)
 
 mp.add_key_binding("E", "export", function()
     local path = local_path()
     if not path then return end
     local job = running[path]
-    if not job then return begin(path, false) end
+    if not job then return begin(path, "hdr") end
     if job.cancelling then return end
     if confirm and confirm.path == path and mp.get_time() < confirm.time + CONFIRM_SECONDS then
         confirm = nil
@@ -521,7 +541,7 @@ mp.register_script_message("export", function(how)
         return
     end
     if how == "360" or how == "flat" then return start_360(path, how) end
-    begin(path, how == "sdr")
+    begin(path, (how == "sdr" or how == "youtube") and how or "hdr")
 end)
 
 mp.register_script_message("cancel-export", function()

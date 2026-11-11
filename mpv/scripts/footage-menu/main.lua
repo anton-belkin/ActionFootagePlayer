@@ -332,6 +332,10 @@ local function export_menu(d, g)
     return {
         item("Export in SDR (" .. (SDR_NAMES[d and d.sdr_look or ""] or "Rec.709") .. ")", "script-message-to gyroflow export sdr",
              { disabled = g.exporting or not (d and d.log and (d.sdr_look or "") ~= "") }),
+        -- HDR10 with the SDR look's LUT inside, for YouTube's SDR version (gyroflow-export --youtube): log or HDR clips
+        item("Export for YouTube (HDR, its SDR by " .. ((d and d.sdr_look == "maker" and d.curve == "dlogm") and "DJI's LUT" or "NBCU") .. ")",
+             "script-message-to gyroflow export youtube",
+             { disabled = g.exporting or not (d and (d.log or d.hdr == "hlg" or d.hdr == "pq")) }),
         SEPARATOR,
         item(reveal, "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" }),
     }

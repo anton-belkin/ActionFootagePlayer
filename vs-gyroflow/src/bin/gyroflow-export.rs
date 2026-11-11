@@ -25,6 +25,9 @@
 //   anything else:  HEVC Main10 in the source's own colors
 //   --prores:       ProRes 422 HQ instead of HEVC
 //   --dv-rpu:       HLG as Dolby Vision 8.4, PQ as 8.1, with the file's RPUs (src/dv_mux.rs; <name>_stab_dv.mov), macOS
+//   --youtube:      HDR10 for YouTube: PQ (log and HLG through BT.2100's 1000-nit OOTF), the mastering display and
+//                   MaxCLL/MaxFALL, in an MKV with a .cube inside for YouTube's SDR version in the player's SDR look
+//                   (src/youtube.rs; <name>_stab_youtube.mkv)
 //   --lens-only:    the lens corrected (and its projection), nothing smoothed: with the stabilization off, or for a
 //                   clip with a lens profile and no motion data
 //   --lens-recorded: the lens left as recorded (no correction) while it's stabilized
@@ -96,6 +99,13 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --dv-rpu <file>  HLG as Dolby Vision 8.4 (PQ as 8.1: an RPU made with afp-rpu --profile 8.1), with this file's RPUs (dovi_tool's or afp-rpu's .rpu: frame N of the
                    video gets RPU N, the last the frames after it) in place of VideoToolbox's, and the dvvC box Apple
                    needs to use them; the player's HDR + Dolby Vision look plays the same file (macOS, HLG only)
+  --youtube <look> for YouTube: HDR10 (PQ, BT.2020, with the mastering display and the MaxCLL/MaxFALL measured) in
+                   an MKV, a 3D LUT inside (application/x-cube, as YouTube's hdr_metadata tool attaches it) that YouTube
+                   makes its SDR version with, in this SDR look: maker (DJI's LUT; D-Log M), nbcu (NBCU's conversion),
+                   or auto (the maker's for D-Log M when its LUT is there, else NBCU's). A log or HDR (HLG, PQ) clip;
+                   log and HLG become PQ for a 1000-nit display (BT.2408). <name>_stab_youtube.mkv
+  --youtube-lut <full|data>  the LUT's levels: full (the default: 0 black, 1 white, as grading apps write them) or
+                   data (0..1 the 10-bit codes, the signal at 64..940, as NBCU's LUTs)
   --dv-live-l1     with --dv-rpu: each frame's own L1 in its RPU, measured on the GPU as the player's mpv measures
                    what it shows (--macos-dovi-live-l1): the lowest, average and highest max(R,G,B) of the frame
                    written, in PQ
@@ -240,6 +250,9 @@ struct Options {
     quality: u8,
     sdr_image: Option<String>,
     live: bool,
+    // --youtube: the SDR look of the LUT inside (None: auto), and its levels
+    youtube: Option<Option<vs_gyroflow::youtube::Look>>,
+    youtube_levels: vs_gyroflow::youtube::Levels,
     // A 360 camera's file: --360 or --reframe (export_360)
     sphere360: Option<Mode360>,
 }
@@ -290,7 +303,8 @@ fn main() {
                              interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
-                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false, sphere360: None };
+                             jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
+                             youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -327,6 +341,12 @@ fn main() {
             "--prores" => opts.prores = true,
             "--dv-rpu" => opts.dv_rpu = Some(PathBuf::from(value("--dv-rpu"))),
             "--dv-live-l1" => opts.dv_live_l1 = true,
+            "--youtube" => opts.youtube = Some(match value("--youtube").as_str() {
+                "auto" => None,
+                v => Some(vs_gyroflow::youtube::Look::parse(v).unwrap_or_else(|| fail(&format!("--youtube {v}: maker, nbcu or auto")))),
+            }),
+            "--youtube-lut" => { let v = value("--youtube-lut"); opts.youtube_levels = vs_gyroflow::youtube::Levels::parse(&v)
+                .unwrap_or_else(|| fail(&format!("--youtube-lut {v}: full or data"))); }
             "--from" => opts.from = Some(parse_time(&value("--from"))),
             "--to" => opts.to = Some(parse_time(&value("--to"))),
             "--out" => opts.out = Some(PathBuf::from(value("--out"))),
@@ -412,6 +432,10 @@ fn main() {
     if opts.preview.is_none() && (opts.at.is_some() || opts.dates.is_some() || opts.cover.is_some()) { fail("--at, --cover and --dates are for --preview"); }
     if opts.cover.is_some() && opts.preview != Some(Preview::Flipbook) { fail("--cover is for a flipbook: a still's cover is its frame"); }
     if opts.preview.is_some() && (opts.prores || opts.dv_rpu.is_some()) { fail("a preview is H.264: not with --prores or --dv-rpu"); }
+    if opts.youtube.is_some() && (opts.sdr || opts.nbcu || opts.dv_rpu.is_some() || opts.prores || opts.preview.is_some()
+                                  || opts.photo.is_some() || opts.translation || opts.sphere360.is_some()) {
+        fail("--youtube is an HDR video export of its own: not with --sdr, --nbcu, --dv-rpu, --prores, --preview, --photo, --translation, --360 or --reframe");
+    }
     if let Some(p) = opts.project.as_ref().filter(|p| !p.is_file()) { fail(&format!("no Gyroflow project {}", p.display())); }
     if let (Some(f), Some(t)) = (opts.from, opts.to) { if t <= f { fail("--to must be after --from"); } }
 
@@ -1205,6 +1229,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let (opt_from, opt_to) = part.map_or((opts.from, opts.to), |p| (Some(p.from), Some(p.to)));
     let dv_rpu = if part.is_some_and(|p| !p.dv) { None } else { opts.dv_rpu.as_ref() };
     let prores = opts.prores && part.is_none();
+    // For YouTube (src/youtube.rs): a video export's own kind
+    let youtube = opts.youtube.filter(|_| part.is_none() && opts.preview.is_none());
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
@@ -1219,7 +1245,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         // A photo's motion (Live or Motion Photo): the video around it, whatever there is to change
         (Err(_), None) if part.is_some() => None,
         // HDR that isn't log, in SDR (--nbcu) or with Dolby Vision (--dv-rpu): the color to change
-        (Err(_), None) if hdr_in(&path) && (opts.nbcu || dv_rpu.is_some()) => None,
+        (Err(_), None) if hdr_in(&path) && (opts.nbcu || dv_rpu.is_some() || youtube.is_some()) => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
     };
     let info = ffprobe(&path)?;
@@ -1242,9 +1268,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     };
     // A preview is a link to its original: .afplink.mp4, which still opens as an MP4
     let stem = if preview.is_some() { format!("{stem}.afplink") } else {
-        format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" }, if dv_rpu.is_some() { "_dv" } else { "" })
+        format!("{stem}_{}{range}{}", if source.is_some() { "stab" } else { "color" },
+                if dv_rpu.is_some() { "_dv" } else if youtube.is_some() { "_youtube" } else { "" })
     };
-    let ext = if preview.is_some() { "mp4" } else { "mov" };
+    let ext = if preview.is_some() { "mp4" } else if youtube.is_some() { "mkv" } else { "mov" };
     let out_path = match part {
         Some(p) => p.out.clone(),
         None => opts.output.clone().unwrap_or_else(|| out_dir.join(format!("{stem}.{ext}"))),
@@ -1256,8 +1283,11 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let tmp_path = match part {
         Some(p) => p.out.with_file_name(format!(".{}.partial", p.out.file_name().unwrap_or_default().to_string_lossy())),
+        // For YouTube: the encoder's MOV, then the MKV made from it (youtube_mux)
+        None if youtube.is_some() => out_dir.join(format!(".{stem}.partial.mov")),
         None => out_dir.join(format!(".{stem}.partial.{ext}")),
     };
+    let final_tmp = if youtube.is_some() { out_dir.join(format!(".{stem}.partial.{ext}")) } else { tmp_path.clone() };
 
     // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
     // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
@@ -1275,7 +1305,51 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let maker_sdr = curve == Some("dlogm") && !opts.nbcu && part_sdr != Some("nbcu") && (opts.sdr || in_sdr)
         && (!in_sdr || lut("dji-dlogm-rec709.cube").is_ok());
     let nbcu = opts.nbcu || (in_sdr && !maker_sdr);
-    let (graph, tags, color_label) = if let Some(curve) = curve {
+    // For YouTube: the SDR LUT that goes inside (made here), its name in the MKV, and the look it's in
+    let mut youtube_sdr: Option<(TempFile, String, &'static str)> = None;
+    let (graph, tags, color_label) = if let Some(want) = youtube {
+        use vs_gyroflow::youtube::{ self as yt, Look, SdrFrom };
+        let maker_lut = lut("dji-dlogm-rec709.cube");
+        let look = match (want, curve) {
+            (Some(Look::Maker), Some("dlogm")) => { maker_lut.as_ref().map_err(|e| format!("--youtube maker: DJI's LUT: {e}"))?; Look::Maker }
+            (Some(Look::Maker), _) => return Err("--youtube maker: only D-Log M has a maker's LUT (DJI's)".into()),
+            (Some(Look::Nbcu), _) => Look::Nbcu,
+            (None, Some("dlogm")) if maker_lut.is_ok() => Look::Maker,
+            (None, _) => Look::Nbcu,
+        };
+        let look_name = if look == Look::Maker { "DJI's LUT" } else { "NBCU" };
+        // The video: a log curve's HLG, or an HLG clip, made PQ by one LUT; a PQ clip as it is
+        let (log_hlg, name) = match (curve, info.transfer.as_deref()) {
+            (Some(c), _) => (Some(lut(&format!("{c}_hlg.cube"))?), CURVES.iter().find(|(id, _)| *id == c).map_or(c, |(_, name)| *name)),
+            (None, Some("arib-std-b67")) => (None, "HLG"),
+            (None, Some("smpte2084")) => (None, "PQ"),
+            _ => return Err("--youtube: an HDR video, for a log or HDR (HLG, PQ) clip".into()),
+        };
+        let (nbcu_hlg, nbcu_pq) = (lut(NBCU_HLG)?, lut(NBCU_PQ)?);
+        let from = match (look, name, &log_hlg, &maker_lut) {
+            (_, "PQ", _, _) => SdrFrom::PqNbcu { nbcu_pq: &nbcu_pq },
+            (Look::Maker, _, Some(log), Ok(maker)) => SdrFrom::HlgMaker { log_hlg: log, maker },
+            _ => SdrFrom::HlgNbcu { nbcu_hlg: &nbcu_hlg },
+        };
+        let sdr = TempFile(out_dir.join(format!(".{stem}.sdr.cube")));
+        let title = format!("{stem}: SDR by {look_name}");
+        std::fs::write(&sdr.0, yt::sdr_lut(&from, yt::GRID, opts.youtube_levels, &title)?).map_err(|e| format!("{}: {e}", sdr.0.display()))?;
+        youtube_sdr = Some((sdr, format!("{stem}_sdr_{}.cube", look.name()), look_name));
+        if name == "PQ" {
+            let tags = vec![info.primaries.clone().unwrap_or_else(|| "bt2020".into()), "smpte2084".to_string(),
+                            info.matrix.clone().unwrap_or_else(|| "bt2020nc".into()), in_range.to_string()];
+            (String::new(), tags, format!("PQ as it is, for YouTube (SDR by {look_name})"))
+        } else {
+            let cube = out_dir.join(format!(".{stem}.pq.cube"));
+            std::fs::write(&cube, yt::pq_lut(log_hlg.as_deref(), yt::GRID)?).map_err(|e| format!("{}: {e}", cube.display()))?;
+            _temp_lut = Some(TempFile(cube.clone()));
+            let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
+                                 scale=out_color_matrix=bt2020:out_range=tv", filter_path(&cube));
+            lut_job = Some((cube, "bt2020", graph));
+            let tags = vec!["bt2020".to_string(), "smpte2084".to_string(), "bt2020nc".to_string(), "tv".to_string()];
+            (String::new(), tags, format!("{name} -> PQ for YouTube (SDR by {look_name})"))
+        }
+    } else if let Some(curve) = curve {
         let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
         let (cube, matrix, primaries, transfer, label) = if nbcu {
             let composed = out_dir.join(format!(".{stem}.nbcu.cube"));
@@ -1413,7 +1487,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         Some((cube, matrix, cpu_graph)) => {
             let out_matrix = gpu_lut::matrix_coefficients(matrix).unwrap();
             // Each frame's L1: a Dolby Vision export's HLG, measured in the same pass
-            let measure = opts.dv_live_l1 && dv_rpus.is_some() && tags[1] == "arib-std-b67";
+            // For YouTube, its MaxCLL and MaxFALL
+            let measure = if youtube.is_some() { gpu_lut::Measure::PqNits }
+                else if opts.dv_live_l1 && dv_rpus.is_some() && tags[1] == "arib-std-b67" { gpu_lut::Measure::HlgL1 }
+                else { gpu_lut::Measure::None };
             match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix, measure) {
                 Ok(l) => Some(l),
                 Err(e) => {
@@ -1516,7 +1593,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // audio), as the Dolby Vision export reserves it
     let moov_size = 512 * 1024 + total_frames * 64;
     if preview.is_some() {
-    } else if dv_rpus.is_none() && opts.link.is_some() && part.is_none() {
+    } else if dv_rpus.is_none() && opts.link.is_some() && part.is_none() && youtube.is_none() {
         enc_cmd.args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(&tmp_path).stdout(Stdio::null());
     } else if dv_rpus.is_none() {
         enc_cmd.args(["-movflags", "+faststart", "-f", if part.is_some_and(|p| p.mp4) { "mp4" } else { "mov" }]).arg(&tmp_path).stdout(Stdio::null());
@@ -1634,6 +1711,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let mut background = None;
     let mut error = None;
     let mut last_control = Instant::now();
+    // For YouTube: the brightest pixel's max(R,G,B) and the brightest frame's average of it, in nits; frames measured
+    let (mut max_cll, mut max_fall, mut lit_frames) = (0.0f64, 0.0f64, 0u64);
     for (n, result) in done_rx {
         if let Some(control) = &opts.control {
             if last_control.elapsed().as_millis() >= 250 { read_control(control); last_control = Instant::now(); }
@@ -1654,6 +1733,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         while let Some((buf, l1)) = pending.remove(&next) {
             // The frame's L1 before the frame: the rewriter waits for it when the encoder hands the frame back
             if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
+            if let Some(v) = l1.filter(|_| youtube.is_some()) { max_cll = max_cll.max(v[2]); max_fall = max_fall.max(v[1]); lit_frames += 1; }
             if let Err(e) = enc_in.write_all(&buf) { error = Some(format!("encoder stopped: {e}")); break; }
             next += 1;
         }
@@ -1718,16 +1798,32 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         }
         Ok(read)
     })();
-    // A preview: its MP4 from the frame. An export: its link
-    let result = result.and_then(|read| match (&preview_files, &opts.link) {
-        (Some(files), _) => write_preview(files, 1, (to - from).max(1.0 / fps), &tags, &tmp_path, opts, opts.dates.map(|d| (d, true))).map(|_| read),
-        (None, Some(link)) => vs_gyroflow::mp4meta::write_keys(&tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, link)]).map(|_| read),
-        (None, None) => Ok(read),
+    // A preview: its MP4 from the frame. An export: its link. For YouTube: the MKV, with the HDR metadata and the LUT
+    // (no link: that's an MP4 key); MaxCLL/MaxFALL only when every frame was measured (the LUT on the GPU)
+    let light = (lit_frames > 0 && lit_frames == next).then(|| (max_cll.ceil() as u32, max_fall.ceil() as u32));
+    let result = result.and_then(|read| match (&youtube_sdr, &preview_files, &opts.link) {
+        (Some((cube, name, look)), _, _) => {
+            youtube_mux(&tmp_path, &final_tmp, &cube.0, name, light)?;
+            let _ = std::fs::remove_file(&tmp_path);
+            match light {
+                Some((cll, fall)) => eprintln!("  for YouTube: MaxCLL {cll}, MaxFALL {fall} nits; SDR by {look} in {name}"),
+                None => eprintln!("  for YouTube: MaxCLL/MaxFALL not measured (YouTube assumes its own); SDR by {look} in {name}"),
+            }
+            Ok(read)
+        }
+        (None, Some(files), _) => write_preview(files, 1, (to - from).max(1.0 / fps), &tags, &tmp_path, opts, opts.dates.map(|d| (d, true))).map(|_| read),
+        (None, None, Some(link)) => vs_gyroflow::mp4meta::write_keys(&tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, link)]).map(|_| read),
+        (None, None, None) => Ok(read),
     });
     let frames = match result {
         Ok(f) => f,
-        Err(e) => { let _ = std::fs::remove_file(&tmp_path); return Err(e); }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            let _ = std::fs::remove_file(&final_tmp);
+            return Err(e);
+        }
     };
+    let tmp_path = final_tmp;
 
     // The source's dates, so the clip sorts where it was shot, or --dates. On a Mac, a modification time before the
     // file's creation time moves that back too
@@ -1740,6 +1836,35 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
     Ok(Outcome::Done(out_path))
+}
+
+/// The export for YouTube as an MKV (src/youtube.rs): the encoder's MOV copied in, the mastering display and MaxCLL/
+/// MaxFALL (`light`, when measured) as the video's (Matroska's MasteringMetadata, MaxCLL, MaxFALL), and the SDR LUT
+/// attached as YouTube's hdr_metadata tool attaches it (application/x-cube, a .cube name). ffmpeg's -mastering_display
+/// and -content_light are recent input options; an ffmpeg without them makes the MKV without that metadata, and says so
+fn youtube_mux(mov: &Path, mkv: &Path, cube: &Path, cube_name: &str, light: Option<(u32, u32)>) -> Result<(), String> {
+    let run = |hdr: bool| -> Result<std::process::Output, String> {
+        let mut cmd = ffmpeg_command("ffmpeg");
+        cmd.args(["-nostdin", "-v", "error", "-y"]);
+        if hdr {
+            cmd.args(["-mastering_display:v:0", vs_gyroflow::youtube::MASTERING_DISPLAY]);
+            if let Some((cll, fall)) = light { cmd.args(["-content_light:v:0", &format!("{cll},{fall}")]); }
+        }
+        cmd.arg("-i").arg(mov).args(["-map", "0", "-c", "copy", "-attach"]).arg(cube)
+            .args(["-metadata:s:t:0", "mimetype=application/x-cube", "-metadata:s:t:0", &format!("filename={cube_name}"), "-f", "matroska"]).arg(mkv)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        cmd.output().map_err(|e| format!("ffmpeg: {e}"))
+    };
+    let out = run(true)?;
+    if out.status.success() { return Ok(()); }
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    if err.contains("mastering_display") || err.contains("content_light") {
+        eprintln!("  this ffmpeg can't write the mastering display (-mastering_display): the MKV without it");
+        let out = run(false)?;
+        if out.status.success() { return Ok(()); }
+        return Err(format!("the MKV: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Err(format!("the MKV: {}", err.trim()))
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -565,6 +565,10 @@ of `Ctrl+g`, the edges filled as `Ctrl+b` has them, the horizon locked or not an
 the menu has them, and the same log curve (`Ctrl+l`'s too, none after `L`) with the same LUT: HDR,
 or Rec.709 in an SDR look (`Ctrl+s`): DJI's LUT for D-Log M, or NBCU's conversion for any curve (the menu's
 Export in SDR does that whatever plays, in the SDR look last chosen). With an A-B loop set (`l` twice), only that part.
+**For YouTube** (the Export button's list, the menu's Export for YouTube) makes HDR10 for YouTube that carries the SDR
+look too: YouTube makes the SDR version people see on SDR screens itself, and a 3D LUT inside the file (as YouTube's
+own [hdr_metadata](https://github.com/YouTubeHDR/hdr_metadata) tool attaches it) makes that version DJI's LUT or
+NBCU's conversion, as the player shows it, instead of YouTube's own conversion: `Turtle (YouTube).mkv`.
 
 It asks the export's name first, as a moment does (Enter alone takes the suggestion), and the file goes to the
 trip's **_Exports** folder: `_Exports/Turtle.mov`, with the look in parentheses unless it's HDR (`Turtle (SDR).mov`,
@@ -610,6 +614,13 @@ What it renders:
   `luts/<curve>_hlg.cube`), tagged so macOS, iOS and YouTube show it as HDR. `--sdr` makes D-Log M Rec.709 with
   DJI's LUT instead, `--nbcu` any curve Rec.709 through NBCU's HLG → SDR conversion (the curve's LUT and NBCU's,
   made into one for the export).
+- `--youtube maker|nbcu|auto` (log, HLG or PQ clips): for YouTube, an MKV in HDR10: PQ in BT.2020 (log and HLG made PQ
+  for BT.2100's 1000-nit reference display, as BT.2408 does it), the mastering display (the BVM-X300's, as YouTube's
+  tool writes it) and the MaxCLL/MaxFALL measured, and a 65-point `.cube` attached (`application/x-cube`) that maps
+  that PQ to the SDR look: DJI's LUT (D-Log M; made on your computer from the LUT you downloaded) or NBCU's
+  conversion. YouTube honors such a LUT for PQ uploads, not HLG ones (users' reports), and doesn't document its
+  levels: `--youtube-lut full` (the default, 0 black and 1 white, as grading apps write LUTs) or `data` (0..1 the
+  10-bit codes).
 - **Other clips** (and `--curve none`): HEVC Main10 in the colors they were recorded in.
 - `--level weak|medium|strong`: a clip without a project at that level (`Ctrl+k`; default medium).
 - `--wide` renders the wider view of `Ctrl+g`, `--fov <x>` at a FOV of your own; `--edges sphere|smooth|off` fills the
