@@ -184,6 +184,11 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
                 out["width"] = w.into(); out["height"] = h.into(); out["fps"] = fps.into();
             }
         }
+        // A file telemetry-parser couldn't read, of a camera told from the file (a HERO3, an old DJI drone): it
+        // recorded no motion data, which says more than the parser's "Unsupported file format"
+        if out["reason"].as_str() == Some("Unsupported file format") && !camera.is_empty() {
+            out["reason"] = format!("{camera}: no motion data").into();
+        }
         out["camera"] = camera.into();
         out["lens"] = lens.into();
     }

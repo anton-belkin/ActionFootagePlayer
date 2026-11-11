@@ -424,6 +424,27 @@ const DJI_CAMERAS: &[(&str, &str)] = &[("FC220", "Mavic Pro"), ("FC2103", "Mavic
     ("FC3170", "Mavic Air 2"), ("FC3411", "Air 2S"), ("FC7203", "Mavic Mini"), ("FC7303", "Mini 2"), ("FC3582", "Mini 3 Pro"), ("FC3682", "Mini 3"),
     ("FC8482", "Mini 4 Pro"), ("L2D-20c", "Mavic 3"), ("FC4170", "Mavic 3 Pro"), ("FC6310", "Phantom 4 Pro"), ("FC330", "Phantom 4"), ("FC300X", "Phantom 3")];
 
+/// An older GoPro's model from its firmware (moov/udta FIRM, "HD3.01.03.00"): a HERO3 and its kin record no GPMF, so
+/// telemetry-parser can't read the file and names no camera. GoPro's firmware names the model by its first two parts;
+/// one not listed here is still a GoPro ("GoPro (HD3.20)")
+pub fn gopro_model(path: &Path) -> Option<String> {
+    gopro_from_firmware(&udta_text(path, b"FIRM")?)
+}
+
+fn gopro_from_firmware(firm: &str) -> Option<String> {
+    const MODELS: &[(&str, &str)] = &[
+        ("HD2", "HERO2"), ("HD3.01", "HERO3 White"), ("HD3.02", "HERO3 Silver"), ("HD3.03", "HERO3 Black"),
+        ("HD3.10", "HERO3+ Silver"), ("HD3.11", "HERO3+ Black"), ("HD4.01", "HERO4 Silver"), ("HD4.02", "HERO4 Black"),
+    ];
+    let firm = firm.trim();
+    let code: String = firm.split('.').take(2).collect::<Vec<_>>().join(".");
+    if !(code.starts_with("HD") || code.starts_with("HX")) { return None; }
+    Some(match MODELS.iter().find(|(c, _)| code == *c || (c.len() == 3 && code.starts_with(&format!("{c}.")))) {
+        Some((_, n)) => format!("GoPro {n}"),
+        None => format!("GoPro ({code})"),
+    })
+}
+
 /// A DJI drone's name, where telemetry-parser has none for it: the djmd header's product name ("DJI Mini4 Pro" →
 /// "DJI Mini 4 Pro"), else the camera code QuickTime's ©mdl has ("FC220" → "DJI Mavic Pro"), else, for DJI's muxer's
 /// files with nothing in them (DJI_0172.MOV, "Lavf56.15.102"), "DJI drone"
@@ -730,6 +751,15 @@ pub fn to_iso6709(f: &Fix) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn older_gopros_by_their_firmware() {
+        assert_eq!(gopro_from_firmware("HD3.01.03.00").as_deref(), Some("GoPro HERO3 White"));
+        assert_eq!(gopro_from_firmware("HD3.11.03.03").as_deref(), Some("GoPro HERO3+ Black"));
+        assert_eq!(gopro_from_firmware("HD2.08.12.198").as_deref(), Some("GoPro HERO2"));
+        assert_eq!(gopro_from_firmware("HD3.20.00.00").as_deref(), Some("GoPro (HD3.20)"));
+        assert_eq!(gopro_from_firmware("v01.02.00"), None);
+    }
+
     use super::*;
 
     fn item(key: &[u8; 4], typ: u8, size: u8, rep: u16, data: &[u8]) -> Vec<u8> {
