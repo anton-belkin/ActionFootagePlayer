@@ -1,0 +1,19 @@
+/* About page: the maker, a photo, the story beside a timeline. Builds on styles.css. */
+.ab-hero .wrap { align-items: center; }
+@media (min-width: 900px) { .ab-hero .wrap { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); } }
+.ab-photo-slot { aspect-ratio: 4 / 5; display: grid; place-items: center; border: 2px dashed var(--line); border-radius: var(--radius); color: var(--muted); font-family: var(--f-mono); font-size: var(--step--1); background: var(--surface); }
+
+.ab-story { display: grid; gap: 48px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 980px) { .ab-story { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); } }
+.ab-text { display: grid; gap: 16px; max-width: 68ch; }
+.ab-text h2 { margin-top: 28px; }
+.ab-text h2:first-child { margin-top: 0; }
+.ab-text p:not(.honest) { color: var(--muted); }
+.ab-support { margin-top: 6px; }
+.ab-support [aria-disabled] { opacity: 0.6; cursor: default; }
+
+.ab-time { position: sticky; top: calc(var(--top-h, 64px) + 24px); padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.ab-time ol { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 16px; }
+.ab-time li { padding-left: 14px; border-left: 2px solid var(--accent); color: var(--muted); font-size: 0.92rem; }
+.ab-time .when { display: block; margin-bottom: 4px; font-family: var(--f-mono); font-size: 0.78rem; color: var(--accent-ink); }
+@media (max-width: 979px) { .ab-time { position: static; } }

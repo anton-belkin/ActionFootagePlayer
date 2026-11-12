@@ -1,0 +1,67 @@
+# The website: website/site/ as is, published to the Cloudflare Pages project actionfootageplayer
+# (actionfootageplayer.pages.dev, actionfootageplayer.ch) on every push that changes it, to the website branch or main,
+# and by the release workflow once it has published a release (with ref: website), for the download page's latest.json.
+#
+# Needs two repository secrets: CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN, a token with Pages Write only.
+name: Website
+
+on:
+  push:
+    branches: [website, main]
+    paths: ['website/site/**', '.github/workflows/website.yml']
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The branch to deploy (the caller's ref otherwise)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push replaces a waiting one
+concurrency:
+  group: website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The latest release, for the download page: what download.js would otherwise ask GitHub's API for, which allows
+      # a visitor's address 60 requests an hour. Only the deployed copy has it
+      - name: The latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, size, digest, browser_download_url}]}' \
+            > website/site/latest.json
+          jq -r '"\(.tag_name): \(.assets | length) files"' website/site/latest.json
+
+      # The pages' links to the shared stylesheet and scripts get the file's content hash (styles.css?v=1a2b3c4d), so a
+      # browser never pairs a new page with a copy it cached earlier: Safari showed the new language switcher unstyled
+      # with the old styles.css. Only the deployed copy changes; the HTML in the repository stays as is.
+      - name: Version the shared stylesheet and scripts
+        working-directory: website/site
+        run: |
+          for f in styles.css top.js scene.js download.js moments.css features.css divers.css hub.css log.css stabilization.css organizing.css photos.css about.css v360.css; do
+            v=$(sha256sum "$f" | cut -c1-8)
+            find . -name '*.html' -exec perl -pi -e "s{((?:href|src)=\"(?:\.\./)?\Q$f\E)\"}{\$1?v=$v\"}g" {} +
+          done
+          grep -rhoE '(href|src)="[^"]*\.(css|js)[^"]*"' --include='*.html' . | sort | uniq -c
+
+      # Both branches publish to production: the project's production branch is main
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >
+          npx --yes wrangler@4 pages deploy website/site
+          --project-name actionfootageplayer --branch main
+          --commit-hash "$(git rev-parse HEAD)" --commit-message "$(git log -1 --format=%s)"
