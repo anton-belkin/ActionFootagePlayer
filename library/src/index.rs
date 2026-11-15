@@ -494,7 +494,10 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
                                                              "copies": l.copies, "local": l.local, "dirs": loc_dirs[i], "offline": offline[i],
                                                              "connect": offline[i] && cfg!(target_os = "macos") && crate::locations::network(&l.path).is_some(),
                                                              "names": if offline[i] { crate::locations::network(&l.path).map(|(h, _, _)| crate::host_names(&h, Some(&hosts))).unwrap_or_default() } else { Vec::new() } })).collect();
-    json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs })
+    // Every clip link, wherever it is (albums.rs): the Albums view shows each as an item of its folder
+    let (link_files, _) = own_files(root, &mut |rel, _, _| rel.to_lowercase().ends_with(LINK_EXT));
+    let links = crate::albums::clip_links(root, &link_files);
+    json!({ "dirs": dirs, "items": items, "locations": locs_json, "clips_dirs": clips_dirs, "links": links })
 }
 
 /// Where an offline location's clips would be: its folder when it names one (a disk not plugged in), else where the
@@ -889,11 +892,14 @@ fn data_url(bytes: &[u8]) -> String {
 
 /// A small picture of a file, as a data: URL: an MP4's cover (a moment's, a clip preview's), else one made by the
 /// system (sips for photos on macOS; videos: thumbs.rs), kept in `cache`. None: none to show
-pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
+pub fn thumb(path: &Path, cache: &Path) -> Option<String> { thumb_bytes(path, cache).map(|b| data_url(&b)) }
+
+/// The same picture, as its bytes (a JPEG, or a cover's PNG)
+pub fn thumb_bytes(path: &Path, cache: &Path) -> Option<Vec<u8>> {
     let (size, mtime) = stamp(&path.to_string_lossy())?;
     let key = fnv(&format!("{}|{size}|{mtime}", path.display()));
     let file = cache.join(format!("{key}.img"));
-    if let Ok(b) = std::fs::read(&file) { return (!b.is_empty()).then(|| data_url(&b)); }
+    if let Ok(b) = std::fs::read(&file) { return (!b.is_empty()).then_some(b); }
     let _ = std::fs::create_dir_all(cache);
     let lower = path.to_string_lossy().to_lowercase();
     // A camera's proxy (.LRF: an MP4) or thumbnail (.THM: a JPEG): a frame by the player's ffmpeg (0.7 s for a DJI
@@ -909,11 +915,13 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
         let bytes = if ok { std::fs::read(&out).ok() } else { None };
         let _ = std::fs::remove_file(&out);
         let _ = std::fs::write(&file, bytes.as_deref().unwrap_or(&[]));
-        return bytes.map(|b| data_url(&b));
+        return bytes;
     }
     let mut bytes: Option<Vec<u8>> = None;
     if lower.ends_with(".mp4") || lower.ends_with(".mov") {
         bytes = keys_and_cover(path).1;
+        // A light link (albums.rs): its one frame is its picture
+        if bytes.is_none() && lower.ends_with(LINK_EXT) { bytes = crate::albums::picture(path); }
     }
     if bytes.is_none() {
         let out = cache.join(format!("{key}.jpg"));
@@ -928,7 +936,7 @@ pub fn thumb(path: &Path, cache: &Path) -> Option<String> {
         let _ = std::fs::remove_file(&out);
     }
     let _ = std::fs::write(&file, bytes.as_deref().unwrap_or(&[]));
-    bytes.map(|b| data_url(&b))
+    bytes
 }
 
 #[cfg(test)]
