@@ -572,7 +572,7 @@ local function project_part(u, x, w, y)
         local st = ws.clips_stats
         local total = ws.moments_total or 0
         local parts = { total == 1 and "1 moment" or (total .. " moments") }
-        if st and st.total > 0 then parts[#parts + 1] = st.previews .. " of " .. st.total .. " clip previews" end
+        if st and st.total > 0 then parts[#parts + 1] = st.previews .. " of " .. st.total .. " clips in albums" end
         y = u:caption(ix, iw, y, table.concat(parts, " · "))
         if card_more then
             y = actions(u, ix, iw, y + 2 * s, "card", {
@@ -584,8 +584,7 @@ local function project_part(u, x, w, y)
         -- The trip's batches (clip previews, moments and photos of all marks, exports of all moments) are made in
         -- Action Footage Library, in the background, whatever plays here
         y = u:button(ix, iw, y + 2 * s, "library", "Open in Action Footage Library", "script-message-to workspace open-library", { primary = true })
-        y = u:caption(ix, iw, y - 2 * s, "Clip previews" .. (st and st.new > 0 and (" (" .. st.new .. " new clips)") or "")
-            .. ", moments and photos of all marks, exports of all moments: made there, in the background")
+        y = u:caption(ix, iw, y - 2 * s, "Albums are kept there (Add to an album…); moments and photos of all marks, exports of all moments are made there, in the background")
         if ws.clips then
             y = u:caption(ix, iw, y + 2 * s, "Making clip previews: " .. ws.clips.done .. " of " .. ws.clips.total, { color = C.text })
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
@@ -679,9 +678,9 @@ local function project_part(u, x, w, y)
         y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k"))
     end
 
-    if ws.project and not mo then
-        local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
-            or ws.clip_preview == "removed" and "Not interesting · undo" or "Make this clip's preview"
+    -- Only for a clip that is in an album (its link there: Action Footage Library makes them)
+    if ws.project and not mo and ws.clip_preview == "made" then
+        local label = "Take this clip out of its album"
         y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting",
                      { key = keys["script-binding workspace/not-interesting"], disabled = ws.clips ~= nil })
     end

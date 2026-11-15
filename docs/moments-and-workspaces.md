@@ -34,9 +34,11 @@ Those are marked **(to try)**.
   inside it a link to the part of the original. Finder and Explorer show the frame, Quick Look plays it, and a
   double click opens the player, which plays that part of the original in full quality, stabilized. Deleting
   the file deletes the moment. Subfolders are yours, to sort moments into, and the editors get them as bins.
-- **Clips** (the trip at a glance): `_Clips/<clip>.afplink.mp4` per clip, a flipbook of a dozen color frames from it,
-  linked to the whole clip. The grid of icons is in color, not log gray, and the space bar flips through a clip
-  in seconds. Deleting one says "not interesting".
+- **Clips in albums** (since 2026-11-15; `library/src/albums.rs`): `_Clips/<album>/<clip>.afplink.mp4`, a light link
+  the Library writes for a clip put in an album: one thumbnail (the file's one frame, a JPEG) and the link to the
+  whole clip. Deleting one takes the clip out of the album. Before that, a link was made for every clip by a batch
+  in the player, as a flipbook of a dozen color frames (`gyroflow-export --preview flipbook`): those stay and work,
+  new ones aren't asked for.
 - **Exports** go to `_Exports/` (now `stabilized/`), named in the same dialog as moments, with the same link
   inside. Old `stabilized/` folders stay where they are; new exports go to `_Exports/`. **Photos** (`Alt+s`: stills,
   Live Photos, Motion Photos) go to `_Stills/`, so that the pictures are apart from the videos.

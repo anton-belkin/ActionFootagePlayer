@@ -484,6 +484,8 @@ mod tests {
         // The link, as the Library reads every link's (and the catalog, and the player's link.lua: moov/meta, mdta)
         assert_eq!(crate::index::link(&f).unwrap()["clip"], "Day 1/A.MP4");
         assert_eq!(crate::index::keys_and_cover(&f).0.get(LINK_KEY).map(String::as_str), Some(link));
+        // …and as the project's catalog reads it (afp-catalog: what the views are listed from)
+        assert_eq!(afp_catalog::inspect::read(&f).unwrap().unwrap()["link"]["clip"], "Day 1/A.MP4");
         assert_eq!(picture(&f).as_deref(), Some(&pic[..]), "its frame is the JPEG, byte for byte");
         // A moment's or flip-book's MP4 (no JPEG frame): no picture this way
         let other = dir.join("B.afplink.mp4");

@@ -1,6 +1,8 @@
 # Albums, photos as objects, renders and Share: one concept
 
-**Status:** a concept, not built. It came out of Anton's discussion of the comparative study
+**Status:** a concept. Built so far (2026-11-15): the clip in an album as a light link and the Albums tab over
+`_Clips` (`library/src/albums.rs`, `library/ui/albums.js`; the handover for what follows is
+`docs/night-handover-albums.md`). It came out of Anton's discussion of the comparative study
 (`reports/library-comparison-2026-11-11.md`) on 2026-11-11.
 
 ## The issues

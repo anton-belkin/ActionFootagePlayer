@@ -787,7 +787,9 @@ read them in.
 
 ### The Library's views (Anton, 2026-11-10)
 
-Each view's top is its own folder: Footage `_Clips` (clips as their previews are arranged there), Moments `_Moments`,
+Each view's top is its own folder: Albums `_Clips` (the view that was Footage: the user's albums, folders of links, a
+clip once per album it's in; since 2026-11-15 a link is written by the Library on *Add to an album…*, `albums.rs`, and
+the batch of clip previews is gone from its UI), Moments `_Moments`,
 Photos `_Stills`, Exports `_Exports`; what's found anywhere else in the project's folder is under **Other folders**, at
 its path there (a new folder at a view's top is made in its own folder, in Other folders at the project's top). Sources
 is now **Originals**: the clips at their paths in the project's tree; the sources themselves are in Sources settings.

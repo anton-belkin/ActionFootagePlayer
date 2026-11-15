@@ -23,7 +23,7 @@
 -- the project's folder from there), a flipbook of the clip in color (its marks, else a dozen frames), made by Action
 -- Footage Library (the batch mode at the end of this file), one at a time in the background, for the clips without
 -- one. Nothing remembers a deleted one (docs/library-management.md §8): asked again, it's made again.
---   X                   this clip isn't interesting: its preview to the Trash; again: made again
+--   X                   this clip out of its album: its link to the Trash (the clip stays)
 -- A clip preview's file plays its original, all of it.
 --
 -- A clip spoiled in part (docs/lossless-cut.md): Ctrl+x cuts the A-B part out, the menu also all before or after
@@ -1852,26 +1852,23 @@ mp.register_script_message("project-folder", function()
     if state.project then reveal(state.project, true) end
 end)
 
--- X: this clip isn't interesting, its preview to the Trash; without one, it's made (again)
+-- X: this clip out of its album, its link to the Trash (the clip itself stays). Links are made in Action Footage
+-- Library (a selection in Originals, Add to an album…): X on a clip in no album only says so
 mp.add_key_binding("X", "not-interesting", function()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return end
-    if not need_project("Marking a clip not interesting") then return end
+    if not need_project("Taking a clip out of its album") then return end
     do
         local info = utils.file_info(state.clip)
         local preview = preview_for(state.relative, info and info.size)
         if preview then
             local where = trash_name(preview)
             return trash(preview, function(ok)
-                mp.osd_message(ok and ("Not interesting: its preview is in " .. where .. " (X again: made again)") or ("Couldn't move the preview to " .. where), 3)
+                mp.osd_message(ok and ("Out of its album: its link is in " .. where .. ". The clip itself is untouched") or ("Couldn't move its album link to " .. where), 3)
                 recount()
             end)
         end
     end
-    if clips_job then return mp.osd_message("Clip previews are being made", 2) end
-    local root = state.project
-    local info = utils.file_info(state.clip)
-    local c = { file = state.clip, relative = state.relative or tree_of(state.clip, root), size = info and info.size }
-    start_clips(root, { c }, "Making this clip's preview again")
+    mp.osd_message("This clip is in no album. Action Footage Library puts it in one: Originals, Add to an album…", 4)
 end)
 
 mp.register_event("shutdown", function()

@@ -410,7 +410,7 @@ local function project_menu(w, key)
             local quoted = '"' .. dir:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
             table.insert(choices, item(name .. "    " .. (dir:match("^(.*)[/\\][^/\\]+[/\\]?$") or ""), "script-message-to workspace init-project " .. quoted))
         end
-        return { info("No project yet: moments, exports and clip previews need one"), SEPARATOR,
+        return { info("No project yet: moments and exports need one"), SEPARATOR,
                  submenu("Initialize the project in", choices, { disabled = #choices == 0 }) }
     end
     local items = { info("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) }
