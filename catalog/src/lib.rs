@@ -11,6 +11,7 @@
 
 pub mod catalog;
 pub mod cli;
+pub mod finder;
 pub mod inspect;
 pub mod locations;
 pub mod project;

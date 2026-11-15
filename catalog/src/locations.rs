@@ -161,6 +161,26 @@ pub fn never_rename(project: &Path) -> bool {
         .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
 }
 
+/// The tag stores this computer syncs with the library's own (docs/tags-and-culling.md): `tag_stores` ("finder") in
+/// this computer's own file for the project, beside its other choices. Never in Project.afproject, which keeps only
+/// the locations (Anton, 2026-11-11): a Mac may show the tags in Finder while a Windows computer of the same library
+/// has no such store
+pub fn tag_stores(project: &Path) -> Vec<String> {
+    let doc = read_json(&project.join(PROJECT_FILE)).unwrap_or(Value::Null);
+    doc.get("id").and_then(Value::as_str).and_then(local_file).and_then(|f| read_json(&f)).map(|l| tag_stores_in(&l)).unwrap_or_default()
+}
+
+/// The stores named in this computer's file for a project (the ones known: "finder")
+pub fn tag_stores_in(local: &Value) -> Vec<String> {
+    local.get("tag_stores").cloned().and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default().into_iter().filter(|s| s == "finder").collect()
+}
+
+/// The tags used last on this computer, the player's and the Library's (<data>/ActionFootage/tags-recent.json)
+pub fn recent_tags_file() -> Option<PathBuf> {
+    local_file("x").and_then(|f| f.parent().and_then(Path::parent).map(|d| d.join("tags-recent.json")))
+}
+
 fn from_json(list: Option<&Value>, project: &Path, hosts: Option<&Value>, mounts: &[(String, PathBuf)], local: bool) -> Vec<Location> {
     list.and_then(Value::as_array).into_iter().flatten().filter(|l| l.is_object()).map(|l| {
         let path = l.get("path").and_then(Value::as_str).unwrap_or("").to_string();

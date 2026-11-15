@@ -89,6 +89,8 @@ const S = {
   locations: [], connecting: {}, via: null, sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
+  // Tags: the ones used last on this computer (the player's K too), a rename's two names, Finder's on this computer
+  recentTags: [], tagFrom: "", tagTo: "", tagStores: [],
   geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
   profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
@@ -386,7 +388,13 @@ function buildFacets() {
   }
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
-  if (tagList.length) sections.push({ id: "tg", title: "Tags", facets: [{ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) }] });
+  const tagFacets = [];
+  if (tagList.length) tagFacets.push({ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) });
+  // Keep it? and stars (originals, moments): "Hide rejected" is Rejected left out
+  if (S.view !== "stills" && S.view !== "exports") tagFacets.unshift({ id: "pick", title: "Keep it?", opts: [L("pick:a", "Accepted", (it) => it.pick === "accept"), L("pick:r", "Rejected", (it) => it.pick === "reject"), L("pick:n", "Not picked yet", (it) => !it.pick)] });
+  if (S.view !== "stills" && S.view !== "exports" && items.some((it) => it.rating)) tagFacets.push({ id: "stars", title: "Stars", opts: [5, 4, 3, 2, 1].map((n) => L("stars:" + n, n === 5 ? "★★★★★" : stars(n) + " or more", (it) => (it.rating || 0) >= n))
+    .concat([L("stars:0", "No stars", (it) => !it.rating)]) });
+  if (tagFacets.length) sections.push({ id: "tg", title: "Tags", facets: tagFacets });
   if (S.view === "moments") {
     const rf = (p, st) => (it) => (it.renders || {})[p] === st;
     sections.push({ id: "rn", title: "Renders", facets: ["HDR", "SDR"].map((p) => ({ id: "rn" + p, title: p, opts: [
@@ -586,6 +594,9 @@ function sizeText(n) {
 }
 function chips(it) {
   const c = [];
+  if (it.pick === "accept") c.push(["chip ok", "✓ Accepted"]);
+  if (it.pick === "reject") c.push(["chip warn", "✕ Rejected"]);
+  if (it.rating) c.push(["chip tag", stars(it.rating)]);
   for (const t of it.tags || []) c.push([t === "Deleted in Photos" ? "chip sys" : "chip tag", t]);
   if (it.kind === "folder") {
     const inner = under(it.path);
@@ -1158,12 +1169,52 @@ function tagsBody(c) {
     : '<p>Select items or folders to tag them.</p>';
   return body;
 }
+const tagItems = (c) => c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path }));
 async function setTags(add, remove) {
   const c = ctx();
   if (!c.any) return;
   try {
-    const problems = await invoke("set_tags", { items: c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), add, remove });
+    const problems = await invoke("set_tags", { items: tagItems(c), add, remove });
     if (problems.length) showError(problems.join(" · "));
+    if (add.length) S.recentTags = await invoke("recent_tags").catch(() => S.recentTags);
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function setRating(n) {
+  const c = ctx();
+  if (!c.any) return;
+  const rs = c.selItems.filter((it) => it.kind === "clip" || it.kind === "moment").map((it) => it.rating || 0);
+  // The stars all of it has already, clicked again: none
+  const rating = rs.length && rs.every((r) => r === n) ? null : n;
+  try {
+    const problems = await invoke("set_rating", { items: tagItems(c), rating });
+    if (problems.length) showError(problems.join(" · "));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function setPick(which) {
+  const c = ctx();
+  if (!c.any) return;
+  const ps = c.selItems.filter((it) => it.kind === "clip" || it.kind === "moment").map((it) => it.pick || "");
+  // All of it so already, clicked again: neither
+  const pick = ps.length && ps.every((p) => p === which) ? null : which;
+  try {
+    const problems = await invoke("set_pick", { items: tagItems(c), pick });
+    if (problems.length) showError(problems.join(" · "));
+    await refresh();
+  } catch (e) { showError(String(e)); }
+}
+async function renameTag() {
+  const from = S.tagFrom.trim(), to = S.tagTo.trim();
+  if (!from || !to) { toast("The tag, and its new name"); return; }
+  try {
+    const r = await invoke("rename_tag", { from, to });
+    if (r.problems.length) showError(r.problems.join(" · "));
+    toast(r.count ? "“" + from + "” → “" + to + "” on " + r.count + " item" + (r.count === 1 ? "" : "s") : "No item has “" + from + "”");
+    S.tagFrom = ""; S.tagTo = "";
+    S.recentTags = await invoke("recent_tags").catch(() => S.recentTags);
+    // The other views read already: read again (the catalog was told of every file written)
+    for (const v of ["stills", "exports"]) if (DATA[v] && v !== S.view) loadView(v).catch(() => {});
     await refresh();
   } catch (e) { showError(String(e)); }
 }
@@ -1280,6 +1331,7 @@ async function openSettings() {
   S.locEdit = st.locations.map((l) => ({ name: l.name, at: l.at, path: l.path, copies: l.copies,
     st: (l.reachable ? "Reachable" : "Not reachable here") + (l.pointer ? " · " + ptr + " in it" : l.reachable ? " · its " + ptr + " is written on Save" : "") }));
   S.neverRename = !!st.never_rename;
+  S.tagStores = (st.tag_stores || []).slice();
   S.localEdit = st.local.map((l) => ({ name: l.name, at: l.at, path: l.path, bytes: l.bytes, files: l.files, reachable: l.reachable }));
   S.hostsText = hostsToText(st.hosts);
   S.sheet = "settings";
@@ -1335,7 +1387,7 @@ function renderSheet() {
   if (S.sheet === "geodenied") { el.innerHTML = renderGeoDenied(); return; }
   if (!S.sheet || !S.settings) { el.innerHTML = ""; return; }
   const st = S.settings;
-  const tabs = [["loc", "Locations"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
+  const tabs = [["loc", "Locations"], ["tags", "Tags"], ["mac", S.macos ? "On this Mac" : "On this computer"], ["gen", "General"]];
   let h = '<div class="scrim" data-a="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">' +
     '<header><h2 id="sheetTitle">' + esc(st.name) + ': project settings</h2><span class="mono">' + esc(st.path) + '/Project.afproject</span></header>' +
     '<div class="tabs" role="tablist" style="margin-top:8px">' + tabs.map((t) => '<button type="button" role="tab" class="' + (S.stab === t[0] ? "on" : "") + '" data-a="stab" data-v="' + t[0] + '">' + t[1] + '</button>').join("") + '</div><div class="sb">';
@@ -1355,6 +1407,21 @@ function renderSheet() {
     h += '<div class="btns"><button type="button" class="btn sm" data-a="locadd">Add a location…</button>' + (st.next_to_footage ? '<button type="button" class="btn sm" data-a="locself">Add the project folder</button>' : "") + '</div>' +
       '<p class="sub wrap">Saving writes them into Project.afproject, and a ' + esc(st.name) + '.afplocation file at the top of each, so a clip opened from Finder finds this project. A location taken out loses its file; nothing else in it changes.</p></div>' +
       '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
+  } else if (S.stab === "tags") {
+    // The library's tag stores (docs/tags-and-culling.md): its own always, the others synced both ways when on
+    const on = (k) => S.tagStores.indexOf(k) >= 0;
+    const row = (k, name, what, can) => '<label class="switch"><input type="checkbox" data-a="tagstore" data-v="' + k + '"' + (k === "library" || on(k) ? " checked" : "") + (k === "library" || !can ? " disabled" : "") + '><span class="wrap"><b>' + esc(name) + '</b> · ' + what + '</span></label>';
+    h += '<p class="sub wrap">Accept or Reject, 1–5 stars and your own tags, on originals, moments and stills (never clip previews or exports). The library keeps them; the stores you turn on here get them too, and what’s changed there comes back (both ways, for the whole library, from every computer).</p>' +
+      '<div class="lab">Where tags are kept</div>' +
+      row("library", "The library", "the truth: an original’s own file, a moment’s link, a still’s XMP keywords", true) +
+      row("finder", "Finder tags", S.settings.finder_here ? "on the files themselves, as Finder and Spotlight show them: Accept (green), Reject (red), ★★★, and your tags. An attribute beside the video, never the video" : "macOS only: set on a Mac", !!S.settings.finder_here) +
+      row("xmp", "XMP sidecars", "clip.xmp beside each original, for Lightroom, Bridge, digiKam, darktable (not yet)", false) +
+      row("explorer", "Windows Explorer", "Explorer keeps an MP4’s tags inside the video: not for originals; moments later (not yet)", false) +
+      row("synology", "Synology Photos", "through its web API, with an account (not yet)", false) +
+      row("qnap", "QNAP QuMagie, UGREEN Photos", "to find out: their own databases, no API known (not yet)", false) +
+      '<div class="btns"><button type="button" class="btn sm" data-a="synctags"' + (on("finder") ? "" : " disabled") + '>Sync tags now</button></div>' +
+      '<p class="sub wrap">Sync runs on every change, when the player opens an item, and when this Mac sees a file’s Finder tags change. Changes made on another computer to files on the NAS come in when an item is opened or with Sync tags now. Conflicts: tags from both sides; Accept/Reject and stars from the side that changed (both: the later).</p></div>' +
+      '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savetagstores">Save</button></footer>';
   } else if (S.stab === "mac") {
     h += '<p class="sub wrap">Kept only on this computer, never part of the library: delete any of it and this computer simply reads the library again.</p>' +
       '<div class="lab">Local copies of clips</div>';
@@ -2278,6 +2345,7 @@ function mergeProbes(p) {
 async function loadProject() {
   S.info = await invoke("project").catch(() => null);
   S.name = S.info ? S.info.name : "";
+  S.tagStores = (S.info && S.info.tag_stores) || [];
   for (const k of Object.keys(DATA)) delete DATA[k];
   RAW_FOOTAGE = null; S.cachedViews = {}; S.scanning = {};
   S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
@@ -2548,6 +2616,12 @@ document.addEventListener("click", async (e) => {
     }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
     case "untag": return setTags([], [v]);
+    case "retag": return setTags([v], []);
+    case "rate": return setRating(+v);
+    case "renametag": return renameTag();
+    case "cull": return setPick(v);
+    case "synctags": try { const r = await invoke("sync_tags", { items: null }); toast(r.came ? r.came + " item" + (r.came === 1 ? "" : "s") + " changed in Finder, taken in" : "In step with Finder (" + r.looked + " looked at)"); if (r.problems.length) showError(r.problems.join(" · ")); await refresh(); } catch (er) { showError(String(er)); } return;
+    case "savetagstores": try { const r = await invoke("save_tag_stores", { stores: S.tagStores }); S.sheet = null; renderSheet(); toast("Tag stores saved" + (r.came ? ": " + r.came + " item" + (r.came === 1 ? "" : "s") + " taken in from Finder" : "")); if (r.problems.length) showError(r.problems.join(" · ")); await refresh(); } catch (er) { showError(String(er)); } return;
     case "findmoved": return findMoved();
     case "applymoved": return applyMoved();
     case "pickmoved": { const [i, j] = String(v).split(":").map(Number); const f = S.found && S.found[i]; if (f && f.candidates[j]) { f.found = f.candidates[j]; f.by = "chosen"; renderSide(); } return; }
@@ -2598,6 +2672,8 @@ document.addEventListener("input", (e) => {
   else if (t.id === "hosts") { S.hostsText = t.value; }
   else if (t.id === "takeplace") { S.takePlace = t.value; }
   else if (t.id === "tagdraft") { S.tagDraft = t.value; }
+  else if (t.id === "tagfrom") { S.tagFrom = t.value; }
+  else if (t.id === "tagto") { S.tagTo = t.value; }
   else if (t.id === "geohand") { S.geoHand = t.value; }
   else if (t.id === "geosite") { S.geoSite = t.value; }
   else if (t.id === "geomax") { S.geoMax = +t.value; geoSlid(); }
@@ -2607,6 +2683,7 @@ document.addEventListener("change", (e) => {
   if (!a) return;
   if (a === "loccopies") { S.locEdit[+v].copies = el.checked; return; }
   if (a === "neverrename") { S.neverRename = el.checked; return; }
+  if (a === "tagstore") { S.tagStores = S.tagStores.filter((k) => k !== v).concat(el.checked ? [v] : []); return; }
   // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
   if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
   if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
@@ -2626,6 +2703,7 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if ((e.target.id === "tagfrom" || e.target.id === "tagto") && e.key === "Enter") { e.preventDefault(); renameTag(); return; }
   if (e.target.id === "tagdraft" && e.key === "Enter") { e.preventDefault(); const t = S.tagDraft.trim(); if (t) { S.tagDraft = ""; setTags([t], []); } return; }
   if (e.target.id === "q") {
     const list = suggestions(), max = list.length;
@@ -2664,6 +2742,7 @@ try {
 
 (async () => {
   try { await invoke("engine"); } catch (e) { $("engine").textContent = String(e); $("engine").hidden = false; }
+  S.recentTags = await invoke("recent_tags").catch(() => []);
   S.recent = await invoke("recent").catch(() => []);
   await poll();
   if (!S.root) renderAll();
