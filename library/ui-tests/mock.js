@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A stand-in for the app behind the Library's page (window.__TAURI__), for the page's tests (jsdom: culling_test.js)
+// A stand-in for the app behind the Library's page (window.__TAURI__), for the page's tests (jsdom: culling_test.js; outside ui/, which the app bundles whole)
 // and its pictures (headless Chrome over library/ui): a small project of clips, moments and photos, kept in memory;
 // the commands the page calls answer from it and change it, so a view read again shows what was written. `MOCK.calls`
 // lists what was called. Set window.MOCK_OPTS before it is loaded: { project: null } starts with no project open.

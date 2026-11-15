@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The Library's culling and tags, on the page itself (culling.js with app.js) in jsdom, over tests/mock.js:
-//   npm install jsdom (anywhere), then NODE_PATH=<its node_modules> node library/ui/tests/culling_test.js
+// The Library's culling and tags, on the page itself (culling.js with app.js) in jsdom, over mock.js:
+//   npm install jsdom (anywhere), then NODE_PATH=<its node_modules> node library/ui-tests/culling_test.js
 // The Tags part's buttons for one, several and mixed selections, the tags in use, the new tag's suggestions, the keys,
 // Hide rejected across the tabs, Most stars first, photos.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const { JSDOM } = require("jsdom");
-const ui = path.join(__dirname, "..");
+const ui = path.join(__dirname, "..", "ui");
 let checks = 0, failures = 0;
 function expect(what, got, want) {
   checks++;
