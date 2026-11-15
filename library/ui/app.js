@@ -234,11 +234,12 @@ function derive(view) {
   if (view === "footage" || view === "sources") { arrange(); return; }
   deriveItems(view);
 }
-function deriveItems(view) {
+// (`only`: these items alone, of that view's kind: changes.js's pinpoint update)
+function deriveItems(view, only) {
   const d = DATA[view === "sources" ? "footage" : view];
   if (!d) return;
   const root = S.root;
-  for (const it of d.items) {
+  for (const it of only || d.items) {
     if (it.kind === "clip") {
       const probe = PROBES[it.path];
       deriveSource(it, probe);
@@ -2261,9 +2262,14 @@ function showView(view) {
   const r = Writes.over(view, CONFIRMED[view]);
   if (view === "footage") { RAW_FOOTAGE = { items: r.items || [], clips_dirs: r.clips_dirs || [], dirs: r.dirs || [] }; S.locations = r.locations || []; }
   else DATA[view] = rooted(view, { dirs: r.dirs || [], items: r.items || [] });
+  const had = MOMENTS_OF;
   if (view === "moments") countMoments();
   derive(view);
-  if (view === "moments") derive("footage");
+  // The clips' counts of moments: only the clips whose count changed are made again (changes.js), when they're few
+  if (view === "moments") {
+    const ids = Array.from(new Set(Object.keys(had).concat(Object.keys(MOMENTS_OF)))).filter((id) => had[id] !== MOMENTS_OF[id]);
+    if (!(ids.length <= 50 && CONFIRMED.footage && showItems("footage", ids.filter((id) => placeOf("footage", id) >= 0)))) derive("footage");
+  }
 }
 // A view: what was there last time (the app's cache) at once, then the disk looked at again
 async function loadView(view) {
@@ -2358,7 +2364,7 @@ async function poll() {
   // (what the project's catalog was told comes at once, as an event: refreshSoon below)
   const batchRuns = s.jobs.some((j) => j.state === "running");
   const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
-  if (S.root && s.changes !== S.changes && due) refreshSoon(s.changes);
+  if (S.root && s.changes !== S.changes && due) catalogChanged(s.changes);
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
   if (finished !== S.finished) {
@@ -2385,7 +2391,8 @@ function refreshSoon(n) {
     if (S.refreshAgain) { S.refreshAgain = false; refreshSoon(); }
   });
 }
-if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => refreshSoon(e.payload));
+// (the items that changed, not the views read again: changes.js)
+if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => catalogChanged(e.payload));
 
 // Move the project…: how far the copy is (a move on one disk is a rename, done at once)
 function renderMoving(m) {

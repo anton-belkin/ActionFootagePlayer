@@ -13,8 +13,9 @@
 //   one's failure.
 // - One write at a time, in the order the changes were made (two commands on one clip's own file, or on the
 //   project's file, would otherwise read it and write it over each other). The window never waits for the queue.
-// - A change that is written becomes part of what the disk has (the same patch, on the confirmed view: `land`), or,
-//   when the command says what its items are now (`Changed`, Path 2), those items are.
+// - A change that is written becomes part of what the disk has: the command says what its items are now (`Changed`,
+//   src/changed.rs: the pinpoint update) and those are taken as they are, whatever was shown, with no view read
+//   again; a command that doesn't say gets the same patch put on the confirmed view (`land`).
 // - A view read from the disk while a change was being written may have been read before it landed. A change stays
 //   put over every reading that started before it landed (`reading` / `read`), and is let go once those are in.
 // - A change the app wrote only in part without saying which (a list of problems): stays shown until the views are
@@ -49,18 +50,20 @@ const Writes = (() => {
     let index = null;
     const own = new Set();
     const d = {
-      view, data: Object.assign({}, data, { items: (data.items || []).slice() }),
+      // (`hit`: a patch found something of this view to change)
+      view, hit: false, data: Object.assign({}, data, { items: (data.items || []).slice() }),
       // The item with that id, to change; null: not in this view
       item(id) {
         if (!index) { index = new Map(); d.data.items.forEach((it, i) => index.set(it.id, i)); }
         const i = index.get(id);
         if (i === undefined) return null;
         if (!own.has(d.data.items[i])) { d.data.items[i] = clone(d.data.items[i]); own.add(d.data.items[i]); }
+        d.hit = true;
         return d.data.items[i];
       },
       // Every item `test` takes, to change
       where(test) { return d.data.items.filter(test).map((it) => d.item(it.id)); },
-      remove(test) { d.data.items = d.data.items.filter((it) => !test(it)); index = null; },
+      remove(test) { const n = d.data.items.length; d.data.items = d.data.items.filter((it) => !test(it)); index = null; if (d.data.items.length !== n) d.hit = true; },
       // An item whose id or folder changed: its id as it is now, and put where a reading of the disk would have it
       // among the others of its folder (by name)
       moved(it) {
@@ -71,7 +74,7 @@ const Writes = (() => {
         d.data.items = list; index = null;
       },
       // A list of folders of the view (`dirs`, Footage's `clips_dirs`) changed
-      list(name, f) { d.data[name] = f((d.data[name] || []).slice()); },
+      list(name, f) { const was = d.data[name] || [], now = f(was.slice()); if (now.join("\n") !== was.join("\n")) d.hit = true; d.data[name] = now; },
     };
     return d;
   }
@@ -83,14 +86,33 @@ const Writes = (() => {
     const d = draft(view, data);
     for (const o of list) {
       const k = kinds[o.kind];
+      d.hit = false;
       if (k.patch) k.patch(d, o.args, o);
       else for (const t of o.targets) { if (t.view !== view) continue; const it = d.item(t.id); if (it) k.item(it, o.args, o); }
+      // The views a change shows in (a delete may be of any view's items: only the ones it found are made again)
+      if (d.hit) o.shows.add(view);
     }
     return d.data;
   }
 
+  // Still to be put over what the disk has: not one whose items the disk's own state has replaced (`truth`)
+  const over = (o) => !(o.state === "landed" && o.truth);
   // What's shown of a view: what the disk has, with the changes not let go yet over it
-  W.over = (view, data) => patched(view, data, ops);
+  W.over = (view, data) => patched(view, data, ops.filter(over));
+  // One item of a view the same way (the pinpoint update: only it is made again); null: it can't be said for one
+  // item alone (a change waiting that moves or removes items: the view is made again whole)
+  W.overItem = (view, item) => {
+    // (the changes that show in this view: one that could touch it and found nothing of it doesn't count)
+    const list = ops.filter((o) => over(o) && o.shows.has(view));
+    if (list.some((o) => kinds[o.kind].patch)) return null;
+    let it = item;
+    for (const o of list) {
+      if (!o.targets.some((t) => t.view === view && t.id === item.id)) continue;
+      if (it === item) it = clone(item);
+      kinds[o.kind].item(it, o.args, o);
+    }
+    return it;
+  };
 
   // A command joins: { item(it, args) | patch(draft, args, op), send(args, op) -> [command, its arguments] |
   // run(op, invoke) -> its answer, what(args) -> "the tag “reef”" for the message, views (all it may touch, when not
@@ -104,12 +126,14 @@ const Writes = (() => {
     const targets = (items || []).filter((it) => VIEW_OF[it.kind]).map((it) => ({ view: VIEW_OF[it.kind], id: it.id, name: it.name || it.id }));
     const views = Array.from(new Set((k.views || []).concat(targets.map((t) => t.view))));
     if (!views.length) return Promise.resolve({ ok: true, args });
-    const op = Object.assign({ kind: name, args, targets, views, state: "queued", ok: false, until: new Set(), needs: new Set(), made: k.made ? k.made(args) : [] }, extra || {});
+    const op = Object.assign({ kind: name, args, targets, views, state: "queued", ok: false, shows: new Set(), until: new Set(), needs: new Set(), made: k.made ? k.made(args) : [] }, extra || {});
     // (a kind that learns more of its change while it's written shows it again: op.show)
-    op.show = () => { if (ops.includes(op)) W.host.show(op.views); };
+    op.show = () => { if (ops.includes(op)) W.host.show(Array.from(op.shows), op); };
     const done = new Promise((r) => { op.done = () => r(op); });
     ops.push(op);
-    W.host.show(views);
+    // Put over each view once to learn where it shows (`shows`), then those are made again and drawn
+    for (const v of views) { const data = W.host.get(v); if (data) patched(v, data, ops.filter(over)); }
+    W.host.show(Array.from(op.shows), op);
     tell();
     pump();
     return done;
@@ -145,12 +169,19 @@ const Writes = (() => {
       // Not written: what shows goes back to what the disk has (with the later changes), and the disk is read again
       // (a command that failed halfway)
       failed(op, error);
-      W.host.show(op.views);
+      W.host.show(Array.from(op.shows), op);
       W.host.reload(op.views);
     } else {
-      op.answer = answer;
-      const problems = (k.problems ? k.problems(answer, op) : []) || [];
-      if (problems.length) {
+      // The command's own account of what it changed (Path 2): its items are what the disk has now
+      const truth = W.host.changed ? W.host.changed(answer) : null;
+      op.answer = truth ? truth.answer : answer;
+      const problems = truth ? truth.problems || [] : (k.problems ? k.problems(answer, op) : []) || [];
+      if (truth) {
+        if (problems.length) W.host.failed({ what: k.what ? k.what(op.args, op) : op.kind, names: op.targets.map((t) => t.name), why: problems.join(" · "), partly: true });
+        landTruth(op, truth);
+        op.ok = !problems.length;
+        op.done();
+      } else if (problems.length) {
         // Written in part, which part not said: shown as changed until the views are read again, then as the disk has it
         op.state = "unsure";
         op.needs = new Set(op.views);
@@ -172,8 +203,27 @@ const Writes = (() => {
   function land(op) {
     op.state = "landed";
     for (const v of op.views) { const data = W.host.get(v); if (data) W.host.set(v, patched(v, data, [op])); }
-    op.until = new Set(Array.from(readings).filter((r) => op.views.includes(r.view)));
+    op.until = new Set(Array.from(readings).filter((r) => r.view === "*" || op.views.includes(r.view)));
     if (!op.until.size) ops = ops.filter((o) => o !== op);
+  }
+
+  // Written, and the command said what its items are now: those are what the disk has (whatever was shown: a part
+  // that failed shows as it is). Views it says must be read again (their folders changed) keep the change shown
+  // until they are
+  function landTruth(op, truth) {
+    const again = (truth.reload || []).filter((v) => op.views.includes(v) && W.host.get(v));
+    if (again.length) {
+      op.state = "unsure";
+      op.needs = new Set(again);
+      W.host.merge(truth, op);
+      W.host.reload(again);
+      return;
+    }
+    op.state = "landed";
+    op.truth = truth;
+    op.until = new Set(readings);
+    if (!op.until.size) ops = ops.filter((o) => o !== op);
+    W.host.merge(truth, op);
   }
 
   // A view being read from the disk (the host says so before it asks): what `read` is given back with the answer
@@ -183,7 +233,7 @@ const Writes = (() => {
     readings.delete(r);
     for (const op of ops.slice()) {
       if (op.state === "landed" && op.until.has(r)) {
-        if (data) data = patched(r.view, data, [op]);
+        if (data) data = op.truth ? W.host.mergedInto(r.view, data, op.truth) : patched(r.view, data, [op]);
         op.until.delete(r);
         if (!op.until.size) ops = ops.filter((o) => o !== op);
       } else if (op.state === "unsure" && data && r.at > op.ended && op.needs.has(r.view)) {
@@ -193,6 +243,21 @@ const Writes = (() => {
     }
     return data;
   };
+
+  // The answer of a reading of some items only (what the catalog says changed: `reading("*")`), once the host has put
+  // it into what the disk has: what was written since the reading started is put over it again
+  W.after = (r) => {
+    readings.delete(r);
+    for (const op of ops.slice()) {
+      if (op.state !== "landed" || !op.until.has(r)) continue;
+      if (op.truth) W.host.merge(op.truth, null);
+      else for (const v of op.views) { const data = W.host.get(v); if (data) W.host.set(v, patched(v, data, [op])); }
+      op.until.delete(r);
+      if (!op.until.size) ops = ops.filter((o) => o !== op);
+    }
+  };
+  // Whether a change still shown touches a view (the pinpoint update then makes the view again whole)
+  W.touches = (view) => ops.some((o) => over(o) && o.shows.has(view));
 
   // How many changes are still to be written
   W.pending = () => ops.filter(active).length;

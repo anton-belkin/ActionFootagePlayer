@@ -664,9 +664,10 @@ fn suggest(probes: &SharedProbes, places: &SharedPlaces, clips: &[Value], shifts
 
 /// Writes locations: [{ ids, lat, lon, alt?, source, place?, photo_gap_s?, site? }]; a missing place is looked up
 #[tauri::command]
-pub async fn set_locations(shared: State<'_, crate::Shared>, places: State<'_, SharedPlaces>, entries: Vec<Value>) -> Result<Vec<String>, String> {
+pub async fn set_locations(shared: State<'_, crate::Shared>, probes: State<'_, SharedProbes>, places: State<'_, SharedPlaces>, entries: Vec<Value>) -> Result<crate::changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let places = places.inner().clone();
+    let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut problems = Vec::new();
         let mut jobs: Vec<(String, Option<Value>)> = Vec::new();
@@ -681,7 +682,8 @@ pub async fn set_locations(shared: State<'_, crate::Shared>, places: State<'_, S
         let (written, more) = write_many(&root, &jobs);
         problems.extend(more);
         crate::seen::note_now(&written);
-        problems
+        // The clips as they are now (changed.rs): the page corrects those, and reads no view again
+        crate::changed::of_clips(&root, &jobs.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
     }).await.map_err(|e| e.to_string())
 }
 

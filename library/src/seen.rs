@@ -248,7 +248,9 @@ pub fn note_now(paths: &[PathBuf]) {
     entries.extend(up);
     if entries.is_empty() { return; }
     let _ = s.cat.note(entries);
-    if let Some((changes, last)) = &s.bump { changed(changes, last); }
+    // (what the journals said meanwhile is read by note: it's in this change too)
+    let more = paths_of(&s.roots, s.cat.take_seen());
+    if let Some((changes, last)) = &s.bump { changed_what(changes, last, more.map(|mut m| { m.extend(paths.iter().cloned()); m })); }
     let root = s.root.clone();
     drop(g);
     // The player windows open here told at once (their clip's moments, its own file): live.rs
@@ -327,6 +329,8 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
+    // (another project's counts, or this one's from before it was watched again: nothing can be said of them)
+    LOG.lock().unwrap().clear();
     std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, moved, stop, everything, missing, missing_list, rx, status, changes, last)).ok();
     r
 }
@@ -334,8 +338,42 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
 /// Told each time what the catalog knows changed, with the count (main.rs: the page hears it at once, an event)
 pub static ON_CHANGE: std::sync::OnceLock<Box<dyn Fn(u64) + Send + Sync>> = std::sync::OnceLock::new();
 
-fn changed(changes: &AtomicU64, last: &Mutex<Instant>) {
+/// What changed at each of the page's counts of changes, the last few hundred: the files (full paths), or None when
+/// that can't be said (the catalog read whole, a first look at a location). For the page to correct only those items
+/// (changed.rs) instead of reading its views again
+static LOG: Mutex<std::collections::VecDeque<(u64, Option<Vec<PathBuf>>)>> = Mutex::new(std::collections::VecDeque::new());
+
+/// The files that changed after the page's count `since`, up to `now`; None: can't be said (a count with nothing
+/// logged for it: the file system's own notice with no catalog, too long ago, too many): read the views again
+pub fn since(since: u64, now: u64) -> Option<Vec<PathBuf>> {
+    let log = LOG.lock().unwrap();
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut have = 0u64;
+    for (n, what) in log.iter().filter(|(n, _)| *n > since && *n <= now) {
+        let _ = n;
+        have += 1;
+        out.extend(what.as_ref()?.iter().cloned());
+    }
+    if have != now.saturating_sub(since) || out.len() > 400 { return None; }
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
+fn changed(changes: &AtomicU64, last: &Mutex<Instant>) { changed_what(changes, last, None) }
+
+/// The catalog's records that changed, as full paths
+fn paths_of(roots: &[Root], keys: Option<Vec<(String, String)>>) -> Option<Vec<PathBuf>> {
+    keys?.into_iter().map(|(root, rel)| roots.iter().find(|r| r.id == root).map(|r| rel.split('/').filter(|p| !p.is_empty()).fold(r.dir.clone(), |d, p| d.join(p)))).collect()
+}
+
+fn changed_what(changes: &AtomicU64, last: &Mutex<Instant>, what: Option<Vec<PathBuf>>) {
+    // Logged under the count it gets (the lock held over both: counts are logged in order)
+    let mut log = LOG.lock().unwrap();
     let n = changes.fetch_add(1, Ordering::Relaxed) + 1;
+    log.push_back((n, what));
+    while log.len() > 300 { log.pop_front(); }
+    drop(log);
     *last.lock().unwrap() = Instant::now() - Duration::from_secs(1);
     if let Some(f) = ON_CHANGE.get() { f(n); }
 }
@@ -347,7 +385,8 @@ pub fn read_now() {
     let Some(s) = g.as_mut() else { return };
     let before = s.cat.seen_changes;
     if s.cat.refresh().is_ok() && s.cat.seen_changes != before {
-        if let Some((changes, last)) = &s.bump { changed(changes, last); }
+        let what = paths_of(&s.roots, s.cat.take_seen());
+        if let Some((changes, last)) = &s.bump { changed_what(changes, last, what); }
     }
 }
 
@@ -439,7 +478,7 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
         // The views read again only when what there is changed (not a folder's listing noted again)
         let before = s.cat.seen_changes;
         match s.cat.refresh() {
-            Ok(_) if s.cat.seen_changes != before => changed(changes, last),
+            Ok(_) if s.cat.seen_changes != before => { let what = paths_of(&s.roots, s.cat.take_seen()); changed_what(changes, last, what) }
             Ok(_) | Err(Error::Io(_)) => {}
             Err(_) => { let mut c = project::open(&root); if load(&mut c, &Want::All).is_ok() { s.cat = c; changed(changes, last); } }
         }

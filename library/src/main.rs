@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod changed;
 mod checks;
 mod geo;
 mod index;
@@ -972,6 +973,32 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     }).await.map_err(|e| e.to_string())
 }
 
+/// What changed since the page's count `since` (seen.rs counts, and tells the page: `catalog-changed`), as the items
+/// it changed (changed.rs): { upto: the count now, changed: the items, or null when that can't be said and the views
+/// are to be read again }
+#[tauri::command]
+async fn changes_since(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, since: u64) -> Result<Value, String> {
+    let (root, now) = { let g = shared.lock().unwrap(); (g.project.clone().ok_or("Open a project first")?, g.watch.as_ref().map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0)) };
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let changed = seen::since(since, now).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
+        json!({ "upto": now, "changed": changed })
+    }).await.map_err(|e| e.to_string())
+}
+
+/// These items of a view as they are now (changed.rs): what the page asks for when it knows which items to look at
+/// again (a clip whose preview went)
+#[tauri::command]
+async fn view_items(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, ids: Vec<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut c = changed::Changed::default();
+        c.add(&root, changed::flat_previews(&root), &view, &ids);
+        c.with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
 /// An offline location's share connected (the Sources banner's Connect): its clips show as soon as it's there
 #[tauri::command]
 async fn connect_location(shared: State<'_, Shared>, path: String, host: Option<String>) -> Result<(), String> {
@@ -1423,26 +1450,32 @@ async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
 // ---------- renders ----------
 
 #[tauri::command]
-async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
-    Ok(json!({ "deleted": n, "problems": problems }))
+    // The moments as they are now (changed.rs): the page corrects those, and reads no view again
+    let mut c = changed::Changed { answer: json!({ "deleted": n, "problems": problems }), problems, ..Default::default() };
+    c.add(&root, changed::flat_previews(&root), "moments", &moments);
+    Ok(c)
 }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- tags ----------
 
 #[tauri::command]
-async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
+async fn set_tags(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
     let meta = meta_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
-                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
-        .await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t));
+        // The items as they are now (changed.rs): the page corrects those, and reads no view again
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Stabilize optically: the lens ----------
@@ -1505,11 +1538,16 @@ async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::Share
 /// The Source settings of clips (the Source Settings tab, Batch set Source settings): [{ "clip": its path in the
 /// tree, "source": { key: value, or null to take it out } }], each clip's own; only the keys given are written
 #[tauri::command]
-async fn set_source(shared: State<'_, Shared>, entries: Vec<Value>) -> Result<Vec<String>, String> {
+async fn set_source(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, entries: Vec<Value>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let list: Vec<(String, serde_json::Map<String, Value>)> = entries.iter().filter_map(|e| Some((e["clip"].as_str()?.to_string(), e["source"].as_object()?.clone())))
         .filter(|(_, s)| !s.is_empty()).collect();
-    tauri::async_runtime::spawn_blocking(move || tags::set_source(&root, &list)).await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_source(&root, &list);
+        // The clips as they are now (changed.rs)
+        changed::of_clips(&root, &list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------
@@ -1591,12 +1629,15 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        rename_in(&root, &view, &kind, &path, &name)
+        let to = rename_in(&root, &view, &kind, &path, &name)?;
+        // What it is now, and that the old name is gone (changed.rs); its new path is the answer
+        Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1724,12 +1765,15 @@ fn to_trash(file: &Path) -> Result<String, String> {
 // Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
 // footage is deleted in Finder), an export. What went where, and what couldn't
 #[tauri::command]
-async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        Ok(delete_in(&root, &items))
+        // What's gone, and the clips whose previews went, as they are now (changed.rs); what went where is the answer
+        let clips = changed::before_delete(&items);
+        let answer = delete_in(&root, &items);
+        Ok(changed::of_delete(&root, &items, &clips, answer))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -2277,7 +2321,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,

@@ -10,10 +10,35 @@
 
 const VIEW_OF = { clip: "footage", moment: "moments", still: "stills", export: "exports" };
 
-function fake(views) {
-  const app = { views, fail: {}, failItems: null, page: null, done: [] };
+// `o.changed`: the commands answer as the app does since the pinpoint update (src/changed.rs's Changed: the items as
+// they are now), and `changes_since` says which items the catalog's changes were; without it they answer as before
+// (lists of problems), and the page reads its views again
+function fake(views, o) {
+  const app = { views, fail: {}, failItems: null, page: null, done: [], log: [], changed: !!(o && o.changed) };
   const find = (kind, id) => (views[VIEW_OF[kind]] || { items: [] }).items.find((it) => it.id === id);
-  const told = () => { if (app.page) app.page.changed(); };
+  const copy = (v) => JSON.parse(JSON.stringify(v));
+  // What a change was, for changes_since: [[view, id]…] (null: can't be said), and the files that went
+  const told = (what, goneFiles) => {
+    if (!app.page) return;
+    app.log.push({ n: app.page.state.changes + 1, what: what === undefined ? null : what, gone: goneFiles || [] });
+    app.page.changed();
+  };
+  // A Changed: these items as the views have them now (the ones not there: gone)
+  const changedOf = (what, more) => {
+    const c = Object.assign({ items: {}, gone: {}, gone_files: [], reload: [], probes: { version: 1, items: {}, pending: 0 }, problems: [], answer: null }, more || {});
+    for (const [view, id] of what || []) {
+      const it = (views[view] || { items: [] }).items.find((x) => x.id === id);
+      const into = it ? c.items : c.gone;
+      if (!(into[view] || (into[view] = [])).some((x) => (it ? x.id : x) === id)) into[view].push(it ? copy(it) : id);
+    }
+    return c;
+  };
+  const ALL = ["footage", "moments", "stills", "exports"];
+  // As the command answers: the old way (`plain`), or what it changed
+  const answer = (plain, what, more) => (app.changed ? changedOf(what, Object.assign({ answer: plain, problems: Array.isArray(plain) ? plain : (plain && plain.problems) || [] }, more || {})) : plain);
+  // A change made elsewhere (the player, another computer), after the test changed `views` as the disk changed:
+  // the catalog tells the page; `what` as for `told`
+  app.elsewhere = (what, goneFiles) => told(what, goneFiles);
   const refuse = (cmd, args) => { const f = app.fail[cmd]; const why = f && f(args); if (why) throw why; };
   const bad = (cmd, id) => (app.failItems && app.failItems(cmd, id)) || null;
   const ownOf = (it) => { if (!it.own) it.own = { marks: null, view: null, source: null, location: null }; return it.own; };
@@ -43,8 +68,9 @@ function fake(views) {
         if (it.kind === "clip") ownOf(it);
       }
       app.done.push(["set_tags", a]);
-      told();
-      return problems;
+      const what = a.items.filter((x) => VIEW_OF[x.kind]).map((x) => [VIEW_OF[x.kind], x.id]);
+      told(what);
+      return answer(problems, what);
     },
     set_locations(a) {
       refuse("set_locations", a);
@@ -63,8 +89,9 @@ function fake(views) {
         ownOf(it).location = loc;
       }
       app.done.push(["set_locations", a]);
-      told();
-      return problems;
+      const what = a.entries.flatMap((e) => e.ids.map((id) => ["footage", id]));
+      told(what);
+      return answer(problems, what);
     },
     parse_location(a) {
       const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(a.text || "");
@@ -85,8 +112,9 @@ function fake(views) {
         own.source = Object.keys(src).length ? src : null;
       }
       app.done.push(["set_source", a]);
-      told();
-      return problems;
+      const what = a.entries.map((e) => ["footage", e.clip]);
+      told(what);
+      return answer(problems, what);
     },
     rename_item(a) {
       refuse("rename_item", a);
@@ -109,8 +137,8 @@ function fake(views) {
           v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
         }
         app.done.push(["rename_item", a]);
-        told();
-        return root + "/" + to;
+        told(null);
+        return answer(root + "/" + to, [], { reload: ALL });
       }
       const it = v.items.find((x) => x.path === a.path);
       if (!it) throw a.path + ": No such file or directory";
@@ -118,22 +146,26 @@ function fake(views) {
       const ext = /\.afplink\.mp4$/i.test(file) ? file.slice(-12) : /\.mp\.jpg$/i.test(file) ? file.slice(-7) : file.lastIndexOf(".") > 0 ? file.slice(file.lastIndexOf(".")) : "";
       const id = (it.dir ? it.dir + "/" : "") + a.name + ext;
       if (v.items.some((x) => x.id === id)) throw root + "/" + id + " exists already";
+      const was = it.id;
       it.id = id; it.path = root + "/" + id; it.name = a.kind === "moment" ? a.name : a.name + ext;
       v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
       app.done.push(["rename_item", a]);
-      told();
-      return it.path;
+      const what = [[a.view, was], [a.view, id]];
+      told(what);
+      return answer(it.path, what);
     },
     delete_items(a) {
       refuse("delete_items", a);
       const problems = [];
       let done = 0;
+      const what = [], files = [];
+      let folders = false;
       for (const x of a.items) {
         const why = bad("delete_items", x.path);
         if (why) { problems.push(why); continue; }
         if (x.kind === "preview") {
           const it = views.footage.items.find((c) => c.preview === x.path);
-          if (it) { it.preview = null; it.pdir = null; delete it.draft; done++; }
+          if (it) { it.preview = null; it.pdir = null; delete it.draft; done++; what.push(["footage", it.id]); files.push(x.path); }
           continue;
         }
         if (x.kind === "folder") {
@@ -146,19 +178,31 @@ function fake(views) {
             if (n !== v.items.length || v.dirs.includes(rel)) { redirs(v); }
           }
           done++;
+          folders = true;
           continue;
         }
         const v = views[VIEW_OF[x.kind]];
         const i = v ? v.items.findIndex((it) => it.path === x.path) : -1;
+        if (v && x.path.startsWith(v.root + "/")) what.push([VIEW_OF[x.kind], x.path.slice(v.root.length + 1)]);
         if (i < 0) continue;
         v.items.splice(i, 1);
+        files.push(x.path);
         done++;
       }
       app.done.push(["delete_items", a]);
-      told();
-      return { done, to: done ? ["the Trash"] : [], problems };
+      told(folders ? null : what, files);
+      return answer({ done, to: done ? ["the Trash"] : [], problems }, folders ? [] : what, folders ? { reload: ALL } : null);
     },
   };
+  // What changed since the page's count, as items; null when a change among them can't be said item by item
+  app.commands.changes_since = (a) => {
+    const upto = app.page ? app.page.state.changes : 0;
+    if (!app.changed) return null;
+    const list = app.log.filter((e) => e.n > a.since && e.n <= upto);
+    if (list.length !== upto - a.since || list.some((e) => !e.what)) return { upto, changed: null };
+    return { upto, changed: changedOf(list.flatMap((e) => e.what), { gone_files: list.flatMap((e) => e.gone) }) };
+  };
+  app.commands.view_items = (a) => changedOf(a.ids.map((id) => [a.view, id]));
   app.attach = (page) => { app.page = page; return app; };
   return app;
 }
