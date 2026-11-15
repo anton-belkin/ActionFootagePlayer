@@ -390,9 +390,9 @@ function buildFacets() {
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
   const tagFacets = [];
   if (tagList.length) tagFacets.push({ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) });
-  // Keep it? and stars (originals, moments): "Hide rejected" is Rejected left out
-  if (S.view !== "stills" && S.view !== "exports") tagFacets.unshift({ id: "pick", title: "Keep it?", opts: [L("pick:a", "Accepted", (it) => it.pick === "accept"), L("pick:r", "Rejected", (it) => it.pick === "reject"), L("pick:n", "Not picked yet", (it) => !it.pick)] });
-  if (S.view !== "stills" && S.view !== "exports" && items.some((it) => it.rating)) tagFacets.push({ id: "stars", title: "Stars", opts: [5, 4, 3, 2, 1].map((n) => L("stars:" + n, n === 5 ? "★★★★★" : stars(n) + " or more", (it) => (it.rating || 0) >= n))
+  // Keep it? and stars (originals, moments, photos); Hide rejected is culling.js's switch, kept across the tabs
+  if (S.view !== "exports") tagFacets.unshift({ id: "pick", title: "Keep it?", opts: [L("pick:a", "Accepted", (it) => it.pick === "accept"), L("pick:r", "Rejected", (it) => it.pick === "reject"), L("pick:n", "Undecided", (it) => !it.pick)] });
+  if (S.view !== "exports" && items.some((it) => it.rating)) tagFacets.push({ id: "stars", title: "Stars", opts: [5, 4, 3, 2, 1].map((n) => L("stars:" + n, n === 5 ? "★★★★★" : stars(n) + " or more", (it) => (it.rating || 0) >= n))
     .concat([L("stars:0", "No stars", (it) => !it.rating)]) });
   if (tagFacets.length) sections.push({ id: "tg", title: "Tags", facets: tagFacets });
   if (S.view === "moments") {
@@ -417,11 +417,11 @@ function textMatch(it) {
   if (!q) return true;
   return [it.name, it.cam, it.color, it.sub, it.dir, it.date].concat(it.tags || []).join(" ").toLowerCase().indexOf(q) >= 0;
 }
-function matches(it, except) { return textMatch(it) && allFacets().every((f) => f === except || facetMatch(f, it)); }
+function matches(it, except) { return cullShown(it) && textMatch(it) && allFacets().every((f) => f === except || facetMatch(f, it)); }
 function activeTokens() { const t = []; allFacets().forEach((f) => { const on = facetLeaves(f).filter((l) => S.filters[l.id]); if (on.length) t.push({ f, labels: on.map((l) => l.label) }); }); return t; }
 function nActive() { return Object.keys(S.filters).filter((k) => S.filters[k] && findOpt(k)).length; }
 function searching() { return S.q.trim() !== "" || S.flat; }
-function filtering() { return nActive() > 0; }
+function filtering() { return nActive() > 0 || cullHiding(); }
 function setOpt(id, on) { const o = findOpt(id); if (!o) return; (o.kids || [o]).forEach((k) => { if (on) S.filters[k.id] = true; else delete S.filters[k.id]; }); }
 
 // ---------- the tree ----------
@@ -482,6 +482,7 @@ function renderTop() {
       '<input id="q" type="search" value="' + esc(S.q) + '" placeholder="' + (nActive() ? "Add words or another filter" : "Search names, cameras, dates, or type a filter: dji, log, wider…") + '" aria-label="Search" autocomplete="off" spellcheck="false"></div><div id="sugg"></div></div>' +
       '<button type="button" class="btn' + (S.filtersOpen ? " on" : "") + '" data-a="filters" aria-pressed="' + S.filtersOpen + '">' + ICON.filter + 'Filters' + (nActive() ? " · " + nActive() : "") + '</button>' +
       '<div class="seg" aria-label="Layout"><button type="button" class="' + (S.layout === "list" ? "on" : "") + '" data-a="layout" data-v="list" aria-label="List">' + ICON.list + '</button><button type="button" class="' + (S.layout === "grid" ? "on" : "") + '" data-a="layout" data-v="grid" aria-label="Grid">' + ICON.grid + '</button></div>' : "");
+  cullTop();
 }
 
 function mosaic(path, filt) {
@@ -510,6 +511,7 @@ function renderMain() {
     if (!ok) hiddenFolders++;
     return ok;
   });
+  cullSort(list);
   let h = "";
   if (srch) {
     h += '<div class="scope"><span class="sub" style="display:inline">Search in</span>' +
@@ -1158,17 +1160,8 @@ function checksBody(c) {
   }
   return body;
 }
-// Tags on the selection (library/src/tags.rs): kept with each item, in the library
-function tagsBody(c) {
-  const on = [];
-  for (const it of c.selItems) for (const t of it.tags || []) if (on.indexOf(t) < 0) on.push(t);
-  const body = c.any
-    ? '<div class="chips">' + (on.length ? on.map((t) => '<button type="button" class="chip ' + (t === "Deleted in Photos" ? "sys" : "tag") + '" data-a="untag" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + ' from the selection">' + esc(t) + ' ×</button>').join("") : '<span class="sub">No tags yet</span>') + '</div>' +
-      '<div class="tagin"><input id="tagdraft" type="text" value="' + esc(S.tagDraft) + '" placeholder="Add a tag to ' + esc(c.label) + '" aria-label="New tag"><button type="button" class="btn sm" data-a="tag">Add</button></div>' +
-      '<span class="sub wrap">Kept with each: a clip’s in its own file, a moment’s or export’s in its link, a photo’s in its own metadata (XMP keywords).</span>'
-    : '<p>Select items or folders to tag them.</p>';
-  return body;
-}
+// Culling and tags on the selection: culling.js's panel (Accept / Reject, stars, the tags in use, a new one)
+function tagsBody(c) { return cullBody(c); }
 const tagItems = (c) => c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path }));
 async function setTags(add, remove) {
   const c = ctx();
@@ -1177,30 +1170,6 @@ async function setTags(add, remove) {
     const problems = await invoke("set_tags", { items: tagItems(c), add, remove });
     if (problems.length) showError(problems.join(" · "));
     if (add.length) S.recentTags = await invoke("recent_tags").catch(() => S.recentTags);
-    await refresh();
-  } catch (e) { showError(String(e)); }
-}
-async function setRating(n) {
-  const c = ctx();
-  if (!c.any) return;
-  const rs = c.selItems.filter((it) => it.kind === "clip" || it.kind === "moment").map((it) => it.rating || 0);
-  // The stars all of it has already, clicked again: none
-  const rating = rs.length && rs.every((r) => r === n) ? null : n;
-  try {
-    const problems = await invoke("set_rating", { items: tagItems(c), rating });
-    if (problems.length) showError(problems.join(" · "));
-    await refresh();
-  } catch (e) { showError(String(e)); }
-}
-async function setPick(which) {
-  const c = ctx();
-  if (!c.any) return;
-  const ps = c.selItems.filter((it) => it.kind === "clip" || it.kind === "moment").map((it) => it.pick || "");
-  // All of it so already, clicked again: neither
-  const pick = ps.length && ps.every((p) => p === which) ? null : which;
-  try {
-    const problems = await invoke("set_pick", { items: tagItems(c), pick });
-    if (problems.length) showError(problems.join(" · "));
     await refresh();
   } catch (e) { showError(String(e)); }
 }
@@ -1408,10 +1377,11 @@ function renderSheet() {
       '<p class="sub wrap">Saving writes them into Project.afproject, and a ' + esc(st.name) + '.afplocation file at the top of each, so a clip opened from Finder finds this project. A location taken out loses its file; nothing else in it changes.</p></div>' +
       '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
   } else if (S.stab === "tags") {
-    // The library's tag stores (docs/tags-and-culling.md): its own always, the others synced both ways when on
+    // The tag stores (docs/tags-and-culling.md): the library's own always; the others synced both ways when on, a
+    // choice of this computer's (kept in its own file for the project, never in Project.afproject)
     const on = (k) => S.tagStores.indexOf(k) >= 0;
     const row = (k, name, what, can) => '<label class="switch"><input type="checkbox" data-a="tagstore" data-v="' + k + '"' + (k === "library" || on(k) ? " checked" : "") + (k === "library" || !can ? " disabled" : "") + '><span class="wrap"><b>' + esc(name) + '</b> · ' + what + '</span></label>';
-    h += '<p class="sub wrap">Accept or Reject, 1–5 stars and your own tags, on originals, moments and stills (never clip previews or exports). The library keeps them; the stores you turn on here get them too, and what’s changed there comes back (both ways, for the whole library, from every computer).</p>' +
+    h += '<p class="sub wrap">Accept or Reject, 1–5 stars and your own tags, on originals, moments and stills (never clip previews or exports). The library keeps them, the same for every computer. The stores turned on here get them too, and what’s changed there comes back (both ways). Which stores are on is this computer’s choice: it’s kept on this computer, not in Project.afproject.</p>' +
       '<div class="lab">Where tags are kept</div>' +
       row("library", "The library", "the truth: an original’s own file, a moment’s link, a still’s XMP keywords", true) +
       row("finder", "Finder tags", S.settings.finder_here ? "on the files themselves, as Finder and Spotlight show them: Accept (green), Reject (red), ★★★, and your tags. An attribute beside the video, never the video" : "macOS only: set on a Mac", !!S.settings.finder_here) +
@@ -2616,10 +2586,7 @@ document.addEventListener("click", async (e) => {
     }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
     case "untag": return setTags([], [v]);
-    case "retag": return setTags([v], []);
-    case "rate": return setRating(+v);
     case "renametag": return renameTag();
-    case "cull": return setPick(v);
     case "synctags": try { const r = await invoke("sync_tags", { items: null }); toast(r.came ? r.came + " item" + (r.came === 1 ? "" : "s") + " changed in Finder, taken in" : "In step with Finder (" + r.looked + " looked at)"); if (r.problems.length) showError(r.problems.join(" · ")); await refresh(); } catch (er) { showError(String(er)); } return;
     case "savetagstores": try { const r = await invoke("save_tag_stores", { stores: S.tagStores }); S.sheet = null; renderSheet(); toast("Tag stores saved" + (r.came ? ": " + r.came + " item" + (r.came === 1 ? "" : "s") + " taken in from Finder" : "")); if (r.problems.length) showError(r.problems.join(" · ")); await refresh(); } catch (er) { showError(String(er)); } return;
     case "findmoved": return findMoved();
@@ -2704,6 +2671,7 @@ document.addEventListener("change", (e) => {
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
   if ((e.target.id === "tagfrom" || e.target.id === "tagto") && e.key === "Enter") { e.preventDefault(); renameTag(); return; }
+  if (e.target.id === "tagdraft" && cullDraftKeys(e)) return;
   if (e.target.id === "tagdraft" && e.key === "Enter") { e.preventDefault(); const t = S.tagDraft.trim(); if (t) { S.tagDraft = ""; setTags([t], []); } return; }
   if (e.target.id === "q") {
     const list = suggestions(), max = list.length;
@@ -2727,6 +2695,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !typing && Object.keys(S.sel).length) { S.sel = {}; S.anchor = null; renderMain(); renderSide(); return; }
   if (typing || S.sheet || !S.root) return;
+  if (cullKeys(e)) { e.preventDefault(); return; }
   if (listKeys(e)) e.preventDefault();
 });
 

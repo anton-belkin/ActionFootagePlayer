@@ -12,9 +12,10 @@ written first; the code follows it. Correct it here.
   stars, or none), and **custom tags** (any words).
 - **The library's own store is the truth**: the item's own file (an original's sidecar, a moment's link, a still's
   XMP). It's in the library, travels with it, and every computer reads the same.
-- **Other stores are mirrors the library chooses** (Project settings → Tags): macOS Finder tags now; XMP sidecars,
-  Windows and the NAS photo apps designed below. Each enabled store is **synced both ways**: a tag set in Finder comes
-  into the library, a tag set in the library goes to Finder.
+- **Other stores are mirrors each computer chooses** (Project settings → Tags, kept in this computer's own file for
+  the project, never in `Project.afproject`): macOS Finder tags now; XMP sidecars, Windows and the NAS photo apps
+  designed below. Each enabled store is **synced both ways**: a tag set in Finder comes into the library, a tag set
+  in the library goes to Finder.
 - **Culling is tagging.** `P` accept, `X` reject, `U` neither, `1`–`5` stars, `0` none, `K` a custom tag. The old
   "not interesting" (`X` trashing a clip preview) and the planned *Favorite* Finder tag are replaced by it.
 
@@ -43,14 +44,19 @@ nothing to tag. The Library tags its selection; in Exports there is no Tags part
 Accept and Reject are one choice: setting one clears the other. Rating and pick are independent (a rejected clip may
 keep its stars; filters decide what you see). *Deleted in Photos* stays the app's own custom tag.
 
-Stills keep custom tags in their XMP (`dc:subject`), as now. Their pick and rating go to `xmp:Rating` (−1 = rejected,
-1–5) and `xmpDM:pick` (1 = accepted), the Adobe/darktable convention **(designed: afp-meta to write them)**.
+Stills keep custom tags in their XMP (`dc:subject`), as now. Their pick and rating are in their link (`afp:link` in
+the same XMP, as a moment keeps them in its link; a photo older than the links gets a small one). Writing them also as
+`xmp:Rating` (−1 = rejected, 1–5) and `xmpDM:pick` (1 = accepted), the Adobe/darktable convention, so Photos and
+Lightroom show the stars: **designed (afp-meta to write them)**.
 
 ## Where tags live: stores
 
-A **store** is a place tags are kept. The library's own is always on; the others are chosen per library, in Project
-settings → Tags, and kept in `Project.afproject` as `"tag_stores": ["finder"]`: the library's config, the same from
-every computer (like its locations; a per-computer choice would make two computers sync differently).
+A **store** is a place tags are kept. The library's own is always on; the others are chosen in Project settings →
+Tags and kept as `"tag_stores": ["finder"]` in **this computer's own file for the project**
+(`<data>/ActionFootage/projects/<id>.json`, beside its local copies and "I never rename my footage").
+`Project.afproject` keeps only the locations (Anton, 2026-11-11). It is a computer's choice by nature too: a Mac can
+show the tags in Finder, a Windows computer of the same library has no such store. Two Macs that both turn Finder on
+sync the same files' attributes with the same library records, so they agree.
 
 | Store | Kind | Originals | Moments | Stills | Status |
 |---|---|---|---|---|---|
@@ -137,8 +143,30 @@ One model replaces the culling-like features there were:
 | Library tags + tag filter | Pick, Stars and Tags filters; the selection gets Accept / Reject / stars / tags |
 | Marks (`M`) | unchanged: points in a clip, not a verdict |
 
-Filters: **Pick** (Accepted, Rejected, Not picked), **Stars** (n or more, none), **Tags**. "Hide rejected" is the
-Pick filter with Rejected off.
+Filters: **Keep it?** (Accepted, Rejected, Undecided), **Stars** (n or more, none), **Tags**; on originals, moments
+and photos.
+
+## In the Library
+
+The side panel's **Tags** part, for the selection (clips, moments, photos; a folder stands for what's in it):
+
+- **Keep it?**: *Accept*, *Reject*, *Undecided*, always in the same place. A button is on when all of the selection
+  is so, dashed with a count when part of it is. *Accept* or *Reject* again takes it off, as in the player.
+- **Stars**: five and *None*. Filled up to what all of the selection has, half-toned up to the most any of it has.
+- **Tags**: a button for each tag used in the library (originals, moments, photos), the most used first. On all of
+  the selection: pressed, a click takes it off. On part of it: dashed, a click puts it on the rest.
+- **A new tag**: a field that suggests the tags in use while typing (the ones that start so, then the ones with it
+  inside). Down and Up move through them, Enter adds the one they're on, Tab completes to it. With none picked, Enter
+  adds what was typed: a new tag is never in the way. A tag typed in another case takes the library's spelling.
+- *Rename a tag…*: over the whole project; to a name in use, the two become one.
+
+**Keys**, with the list in front (not while typing): `P`, `X`, `U`, `1`–`5`, `0`, the player's. With one item
+selected the next one is selected after, as culling apps do; with several, all of them change and stay selected.
+
+**Hide rejected** (top bar): rejected ones aren't shown, counted in folders or taken by a command on a folder. It
+stays on across the tabs and is remembered on this computer. **★ first** beside it lists the most stars first.
+
+A change shows at once and is written behind it, one after another; the view is read again after the last one.
 
 ## Keys (player)
 
@@ -156,7 +184,8 @@ Accept / Reject, the stars, the custom tags as chips, the recent ones to add, *T
 
 ## Open questions
 
-1. `tag_stores` in `Project.afproject`: an exception to "the project keeps only its locations". Right?
+1. ~~`tag_stores` in `Project.afproject`~~ Answered (Anton, 2026-11-11): not in the project's file. It's in this
+   computer's own file for the project.
 2. Finder's names `Accept` / `Reject` / `★★★`: English, fixed. A setting?
 3. Digits for stars take mpv's video equalizer keys and `0` volume up. OK?
 4. Exports without tags: the old tags in export links are ignored now. OK?
