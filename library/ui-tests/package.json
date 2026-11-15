@@ -3,7 +3,7 @@
   "private": true,
   "description": "The Library's page (../ui) run in jsdom against a mock of the app: node --test",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-timeout=120000 *_test.js",
     "perf": "node page_perf.js"
   },
   "devDependencies": {

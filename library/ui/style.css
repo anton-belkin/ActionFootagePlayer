@@ -231,6 +231,8 @@ button.chip{cursor:pointer}
 .top .ttl{display:flex;flex-direction:column;min-width:0}
 .banner{padding:8px 14px;font-size:12px}
 .banner.bad{background:var(--wa-bg);color:var(--wa);border-bottom:1px solid var(--wa-line)}
+.banner.unsaved:not([hidden]){display:flex;gap:12px;align-items:flex-start}
+.banner.unsaved .lines{flex:1;min-width:0;overflow-wrap:anywhere}
 .empty{flex:1;display:flex;flex-direction:column;gap:10px;align-items:flex-start;padding:48px;max-width:640px}
 .empty h2{margin:0;font-size:20px}
 .empty p{margin:0;line-height:1.5;color:var(--fg2)}

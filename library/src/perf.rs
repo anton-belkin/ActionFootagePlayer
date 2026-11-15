@@ -9,7 +9,7 @@
 //
 // AFL_PERF_CLIPS: how many clips (10000); AFL_PERF_NAS: "stat,read,write" milliseconds (5,5,15); AFL_PERF_DIR: where
 // (kept there afterwards, with views/<view>.json and timings.json, which the page's own measurement reads:
-// library/tests/page_perf.js); none: the temporary folder, removed afterwards.
+// library/ui-tests/page_perf.js); none: the temporary folder, removed afterwards.
 
 use super::*;
 use crate::index::tests::tests_mp4_with_link as mp4;
@@ -161,16 +161,6 @@ pub fn timed<T>(rows: &mut Vec<Row>, what: &str, f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// What the page asks for after a command today (app.js's refresh): the project, Moments, and the view shown
-pub fn reads(r: &Rig, rows: &mut Vec<Row>, view: &str) {
-    timed(rows, "project", || project_info(&r.p));
-    for v in ["moments", view] {
-        let mut size = 0;
-        timed(rows, &format!("scan {v}"), || size = r.view(v).1);
-        rows.last_mut().unwrap().note = format!("{:.1} MB", size as f64 / 1e6);
-    }
-}
-
 /// Every changing command once (and for 20 and 200 items where it takes many)
 pub fn commands(r: &Rig, rows: &mut Vec<Row>) {
     let none = |v: Vec<String>, what: &str| assert!(v.is_empty(), "{what}: {v:?}");
@@ -225,7 +215,7 @@ pub fn nas_ms() -> (f64, f64, f64) {
 }
 
 /// The table, as the disk is and as a share would be; written into the rig's folder too (timings.json)
-pub fn report(r: &Rig, title: &str, local: &[Row], slow: &[Row]) -> Value {
+pub fn report(title: &str, local: &[Row], slow: &[Row]) -> Value {
     let (s, rd, w) = nas_ms();
     println!("\n### {title}\n\n| | This disk, ms | As a NAS ({s:.0}/{rd:.0}/{w:.0} ms a stat/read/write), ms | Stats · reads · writes | |\n|---|---:|---:|---|---|");
     let mut out = Vec::new();
@@ -233,7 +223,6 @@ pub fn report(r: &Rig, title: &str, local: &[Row], slow: &[Row]) -> Value {
         println!("| {} | {:.0} | {:.0} | {} · {} · {} | {} |", a.what, a.ms, b.ms, b.asked[0], b.asked[1], b.asked[2], a.note);
         out.push(json!({ "what": a.what, "local_ms": a.ms, "nas_ms": b.ms, "asked": b.asked, "note": a.note }));
     }
-    let _ = r;
     json!(out)
 }
 
@@ -262,7 +251,7 @@ fn where_the_time_goes() {
         rows
     };
     let (a, b) = (run(false), run(true));
-    tables.insert("reads".into(), report(&r, &format!("What the page reads again after a command ({n} clips)"), &a, &b));
+    tables.insert("reads".into(), report(&format!("What the page reads again after a command ({n} clips)"), &a, &b));
     // The views as the page gets them, for its own measurement
     nas::set(0.0, 0.0, 0.0);
     for v in ["footage", "moments", "stills", "exports"] {
@@ -280,7 +269,7 @@ fn where_the_time_goes() {
     let mut slow = Vec::new();
     commands(&r, &mut slow);
     nas::set(0.0, 0.0, 0.0);
-    tables.insert("commands".into(), report(&r, &format!("The commands themselves ({n} clips)"), &local, &slow));
+    tables.insert("commands".into(), report(&format!("The commands themselves ({n} clips)"), &local, &slow));
     tables.insert("clips".into(), json!(n));
     tables.insert("nas_ms".into(), json!([s, rd, w]));
     std::fs::write(base.join("timings.json"), serde_json::to_vec_pretty(&Value::Object(tables)).unwrap()).unwrap();

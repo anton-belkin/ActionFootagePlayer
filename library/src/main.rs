@@ -105,6 +105,9 @@ struct Inner {
     next_id: u64,
     // The window's close asked while batches are queued: the page asks whether to stop them
     close_asked: bool,
+    // …or while the page's changes are still being written (WRITES_PENDING): the window stays until they are, the
+    // page saying so
+    close_waits: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
     // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
@@ -726,6 +729,7 @@ struct Snapshot {
     project: Option<String>,
     jobs: Vec<Job>,
     close_asked: bool,
+    close_waits: bool,
     macos: bool,
     // Changes seen in the project's folder and locations, and how long since the last one (ms)
     changes: u64,
@@ -777,6 +781,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
+        close_waits: inner.close_waits,
         macos: cfg!(target_os = "macos"),
         changes,
         quiet_ms,
@@ -2153,11 +2158,27 @@ async fn reveal(shared: State<'_, Shared>, what: Option<String>) -> Result<(), S
 }).await.map_err(|e| e.to_string())
 }
 
+/// How many of the page's changes are still being written (ui/writes.js: a change shows at once and is written after):
+/// the window isn't closed under them
+static WRITES_PENDING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[tauri::command]
+fn writes_pending(n: u64) { WRITES_PENDING.store(n, std::sync::atomic::Ordering::Relaxed); }
+
+/// What a close of the window does: asked about (batches queued), waited with until the page's changes are written,
+/// or done. Asked a second time while waiting, it closes (a page that never answers mustn't keep the window)
+#[derive(Debug, PartialEq)]
+enum Close { Ask, Wait, Now }
+fn close_decision(batches: bool, writes: u64, waiting: bool) -> Close {
+    if batches { Close::Ask } else if writes > 0 && !waiting { Close::Wait } else { Close::Now }
+}
+
 // The window's close, answered: stop the batches and quit, or keep them going (the window stays)
 #[tauri::command]
 fn answer_close(app: tauri::AppHandle, shared: State<Shared>, quit: bool) {
     let mut inner = shared.lock().unwrap();
     inner.close_asked = false;
+    inner.close_waits = false;
     if quit {
         stop_all(&mut inner);
         drop(inner);
@@ -2256,7 +2277,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -2266,10 +2287,20 @@ fn main() {
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if busy(&for_window) {
-                    api.prevent_close();
-                    for_window.lock().unwrap().close_asked = true;
-                    let _ = window.set_focus();
+                let waiting = for_window.lock().unwrap().close_waits;
+                match close_decision(busy(&for_window), WRITES_PENDING.load(std::sync::atomic::Ordering::Relaxed), waiting) {
+                    Close::Ask => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_asked = true;
+                        let _ = window.set_focus();
+                    }
+                    // The page's changes still being written: it closes the window once they are (answer_close)
+                    Close::Wait => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_waits = true;
+                        let _ = window.emit("close-waits", ());
+                    }
+                    Close::Now => {}
                 }
             }
         })
@@ -2297,6 +2328,16 @@ mod perf;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_waits_for_changes_being_written() {
+        assert_eq!(close_decision(false, 0, false), Close::Now);
+        assert_eq!(close_decision(false, 2, false), Close::Wait);
+        // Asked again while it waits (the page not answering): closed
+        assert_eq!(close_decision(false, 2, true), Close::Now);
+        // Batches queued: asked about first (the page then waits for the changes before it quits)
+        assert_eq!(close_decision(true, 2, false), Close::Ask);
+    }
 
     #[test]
     fn changes_seen() {

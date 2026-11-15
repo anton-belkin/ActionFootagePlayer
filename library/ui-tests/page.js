@@ -43,7 +43,8 @@ function smallViews(root) {
 // The page opened on a project. `o.views`: what `scan` answers for each view (read each time: a test changes them as
 // the disk would change); `o.commands`: answers of other commands (a function of its arguments, which may throw or
 // return a promise), over the defaults; `o.delay`: milliseconds each command takes ({ scan: 50, set_tags: 200 }, or a
-// function (cmd, args) -> ms); `o.scripts`: the page's scripts, when not as index.html names them
+// function (cmd, args) -> ms); `o.atStart(cmd, args, rec)`: called as a command starts (its answer's function gets
+// `rec` too); `o.scripts`: the page's scripts, when not as index.html names them
 async function open(o) {
   o = o || {};
   const root = o.root || (o.views && o.views.footage && o.views.footage.root) || "/P";
@@ -81,6 +82,8 @@ async function open(o) {
     log.push(rec);
     inFlight++;
     try {
+      // (what a test wants done as a command starts, before it takes its time: a view as it was then)
+      if (o.atStart) o.atStart(cmd, args || {}, rec);
       const ms = delayOf(cmd, args);
       if (ms > 0) await sleep(ms); else await Promise.resolve();
       const f = commands[cmd];

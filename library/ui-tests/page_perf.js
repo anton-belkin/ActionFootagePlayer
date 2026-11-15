@@ -3,7 +3,7 @@
 // thousands of clips, the app's answers taking as long as src/perf.rs measured them (docs/library-responsiveness.md):
 //
 //   (cd library && AFL_PERF_DIR=/tmp/afl-perf cargo test --release -- --ignored where_the_time_goes --nocapture)
-//   AFL_PERF_DIR=/tmp/afl-perf node library/tests/page_perf.js [label]
+//   AFL_PERF_DIR=/tmp/afl-perf node library/ui-tests/page_perf.js [label]
 //
 // For each change: when the list shows it, when the page has stopped asking the app, and what it asked for. Three
 // times: the app answering at once (the page's own work), as this disk answers, as a NAS would.
