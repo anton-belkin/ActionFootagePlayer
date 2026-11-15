@@ -1,0 +1,12 @@
+{
+  "name": "action-footage-library-page-tests",
+  "private": true,
+  "description": "The Library's page (../ui) run in jsdom against a mock of the app: node --test",
+  "scripts": {
+    "test": "node --test",
+    "perf": "node page_perf.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

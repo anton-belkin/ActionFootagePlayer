@@ -390,6 +390,7 @@ fn project_of(path: &Path) -> Option<PathBuf> {
 }
 
 fn read_doc(root: &Path) -> Value {
+    afp_catalog::store::nas::read();
     std::fs::read_to_string(root.join(PROJECT_FILE)).ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .filter(|v| v.is_object() && v.get("format").is_none_or(|f| f == FORMAT))
@@ -419,6 +420,7 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
 }
 
 fn count_files(dir: &Path, suffixes: &[&str], depth: u32) -> u64 {
+    afp_catalog::store::nas::read();
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let mut n = 0;
     for e in entries.flatten() {
@@ -1610,7 +1612,9 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
     // comes late or never)
     let touched: std::cell::RefCell<Vec<PathBuf>> = std::cell::RefCell::new(Vec::new());
     let mv = |a: &Path, b: &Path| -> Result<(), String> {
+        afp_catalog::store::nas::stat();
         if b.exists() { return Err(format!("{} exists already", b.display())); }
+        afp_catalog::store::nas::write();
         std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))?;
         touched.borrow_mut().extend([a.to_path_buf(), b.to_path_buf()]);
         Ok(())
@@ -1671,6 +1675,7 @@ static TRASH_REMOVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
 // UGREEN or Synology share keeps what's deleted there; Finder can't put a network file in the Trash). Ok: where it went
 fn to_trash(file: &Path) -> Result<String, String> {
+    afp_catalog::store::nas::write();
     // Tests on a local disk: removed (Finder's Trash isn't theirs to fill)
     #[cfg(test)]
     if TRASH_REMOVES.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2284,6 +2289,10 @@ fn main() {
         }
     });
 }
+
+// Where the time goes on each changing command, measured on a project of thousands of clips (perf.rs)
+#[cfg(test)]
+mod perf;
 
 #[cfg(test)]
 mod tests {

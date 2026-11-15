@@ -138,6 +138,7 @@ pub fn path_for(dir: &Path, project: &Path, mounts: &[(String, PathBuf)]) -> Str
 }
 
 pub fn read_json(path: &Path) -> Option<Value> {
+    crate::store::nas::read();
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 

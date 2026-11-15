@@ -370,6 +370,7 @@ pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
+    afp_catalog::store::nas::read();
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
@@ -657,6 +658,7 @@ pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) ->
     let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
     let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
+    afp_catalog::store::nas::stat();
     let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
     trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
                      "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
