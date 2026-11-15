@@ -320,6 +320,36 @@ struct RecentEntry {
     /// while it's offline)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hosts: Vec<String>,
+    /// "Open at start": the one project of the list the app opens when it's started with no file (start_entry). This
+    /// computer's choice, kept here in the app's own data, never in the project
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    at_start: bool,
+}
+
+/// The project opened at start: the one of the list marked so (the first, should a list edited by hand mark several)
+fn start_entry(list: &[RecentEntry]) -> Option<&RecentEntry> { list.iter().find(|e| e.at_start) }
+
+/// "Open at start" put on the project at `path` (None: on none), taken off every other. false: it isn't in the list
+fn set_start(list: &mut [RecentEntry], path: Option<&str>) -> bool {
+    for e in list.iter_mut() { e.at_start = false; }
+    match path {
+        None => true,
+        Some(p) => list.iter_mut().find(|e| e.path == p).map(|e| e.at_start = true).is_some(),
+    }
+}
+
+/// The list with a project just opened put first: its own entry replaced (its "Open at start" kept), the list kept to
+/// ten, the project opened at start never dropped off its end
+fn remembered(mut list: Vec<RecentEntry>, mut new: RecentEntry) -> Vec<RecentEntry> {
+    new.at_start = list.iter().any(|x| x.path == new.path && x.at_start);
+    list.retain(|x| x.path != new.path);
+    list.insert(0, new);
+    if list.len() > 10 {
+        let start = list.iter().skip(10).find(|e| e.at_start).cloned();
+        list.truncate(10);
+        if let Some(s) = start { list[9] = s; }
+    }
+    list
 }
 
 /// The list as kept: entries, or (before 0.13) the paths alone
@@ -379,12 +409,9 @@ fn recent_names(e: &RecentEntry) -> Vec<String> {
 
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
-    let mut list = recent_list(app);
-    list.retain(|x| x.path != p);
     let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
     let hosts = other_names(root, share.as_deref());
-    list.insert(0, RecentEntry { path: p, share, rel, hosts });
-    list.truncate(10);
+    let list = remembered(recent_list(app), RecentEntry { path: p, share, rel, hosts, at_start: false });
     write_recent(app, &list);
 }
 
@@ -859,6 +886,8 @@ struct Recent {
     connect: bool,
     /// The names it can be connected by (the NAS's), for Connect's list
     names: Vec<String>,
+    /// The one the app opens when it's started with no file ("Open at start")
+    at_start: bool,
 }
 
 // The projects this computer has opened, the last first: every one, those not reachable now too (offline)
@@ -882,11 +911,48 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
         let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
                  here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
-                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
+                 names: if here.is_none() { recent_names(e) } else { Vec::new() }, at_start: e.at_start }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
 }).await.map_err(|e| e.to_string())
+}
+
+/// "Open at start" put on a project of the list (None: taken off): the one the app opens when it's started with no
+/// file. Kept with the list, in the app's own data on this computer
+#[tauri::command]
+async fn set_start_project(app: tauri::AppHandle, path: Option<String>) -> Result<(), String> {
+    let mut list = recent_list(&app);
+    if !set_start(&mut list, path.as_deref()) { return Err("That project isn't in the list of those opened here".into()); }
+    write_recent(&app, &list);
+    Ok(())
+}
+
+/// The app started with no file (the page asks once, when it's up and no project is open: a Project.afproject double
+/// clicked has opened by then): the project marked "Open at start" opened, when it's reachable. Its path; None: none
+/// marked, one opened already, or it's offline (the start screen then shows it so, with Connect)
+#[tauri::command]
+async fn open_at_start(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Option<String> {
+        if shared.lock().unwrap().project.is_some() { return None; }
+        let list = recent_list(&app);
+        let root = recent_here(start_entry(&list)?, &locations::mounts())?;
+        usable(&root).map_err(|e| eprintln!("{e}")).ok()?;
+        let mut inner = shared.lock().unwrap();
+        // One opened meanwhile (a double click) stays
+        if inner.project.is_some() { return None; }
+        inner.project = Some(root.clone());
+        Some(root.display().to_string())
+    }).await.map_err(|e| e.to_string())
+}
+
+/// The project closed: the start screen, with the projects opened before (tasks queued go on)
+#[tauri::command]
+fn close_project(shared: State<Shared>) {
+    let mut inner = shared.lock().unwrap();
+    inner.project = None;
+    inner.pending_open.clear();
 }
 
 /// A project taken off the list of those opened before (a test one, one moved away)
@@ -2365,7 +2431,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, set_start_project, open_at_start, close_project, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -2402,6 +2468,60 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Open at start": one project of the list, kept with it; opening projects keeps it, and never drops it off the list
+    #[test]
+    fn one_project_opens_at_start() {
+        let e = |p: &str| RecentEntry { path: p.into(), ..Default::default() };
+        let mut list = vec![e("/a"), e("/b"), e("/c")];
+        assert!(start_entry(&list).is_none());
+        assert!(set_start(&mut list, Some("/b")));
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Another one: only one at a time
+        assert!(set_start(&mut list, Some("/c")));
+        assert_eq!(list.iter().filter(|x| x.at_start).count(), 1);
+        assert_eq!(start_entry(&list).unwrap().path, "/c");
+        // One that isn't in the list: said, none marked
+        assert!(!set_start(&mut list, Some("/nowhere")));
+        assert!(start_entry(&list).is_none());
+        // As kept in the file: the mark only on the one, older lists (no mark, paths alone) read as before
+        assert!(set_start(&mut list, Some("/b")));
+        let text = serde_json::to_string(&list).unwrap();
+        assert_eq!(text.matches("at_start").count(), 1);
+        assert_eq!(parse_recent(&text), list);
+        assert!(start_entry(&parse_recent(r#"["/a",{"path":"/b","share":"//u@nas/Trips","rel":"b"}]"#)).is_none());
+        // Opened again: first in the list, still the one at start, its share kept as now
+        let list = remembered(list, RecentEntry { path: "/b".into(), share: Some("//u@nas/Trips".into()), rel: "b".into(), ..Default::default() });
+        assert_eq!(list.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/b", "/a", "/c"]);
+        assert!(list[0].at_start && list[0].share.is_some());
+        // Ten others opened after it: it stays in the list (the last place), still marked
+        let mut list = list;
+        for i in 0..12 { list = remembered(list, e(&format!("/p{i}"))); }
+        assert_eq!(list.len(), 10);
+        assert_eq!(list[0].path, "/p11");
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Taken off
+        assert!(set_start(&mut list, None));
+        assert!(start_entry(&list).is_none());
+    }
+
+    /// The project at start, where it is now: reachable at its path; else by its share, mounted now; else offline
+    #[test]
+    fn the_start_project_reachable_or_offline() {
+        let top = std::env::temp_dir().join(format!("afl-atstart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let p = top.join("vol/Trips/Egypt");
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(p.join(PROJECT_FILE), "{}").unwrap();
+        let here = RecentEntry { path: p.display().to_string(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&here, &[]), Some(p.clone()));
+        // Kept at a path that isn't there now, its share mounted elsewhere: found under the mount
+        let moved = RecentEntry { path: "/Volumes/Trips/Egypt".into(), share: Some("//me@nas.local/Trips".into()), rel: "Egypt".into(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&moved, &[("//me@nas.local/Trips".into(), top.join("vol/Trips"))]), Some(p.clone()));
+        // Its share not mounted: offline (the start screen shows it, with Connect)
+        assert_eq!(recent_here(&moved, &[]), None);
+        let _ = std::fs::remove_dir_all(&top);
+    }
 
     /// The tag stores chosen on a computer are in its own file for the project, beside its other choices, which stay
     #[test]
@@ -2592,7 +2712,7 @@ mod tests {
         // The same share mounted elsewhere now (another name for the NAS too): the project found there
         std::fs::create_dir_all(b.join("Trips/P")).unwrap();
         std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
-        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new() };
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new(), at_start: false };
         assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
         // Not mounted: offline
         assert_eq!(recent_here(&e, &[]), None);

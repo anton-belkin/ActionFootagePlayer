@@ -19,6 +19,7 @@
   <section class="empty" id="empty" hidden>
     <h2>Open a project</h2>
     <p>A project is a folder with <b>Project.afproject</b> in it. Double-click that file, drop it here, or choose it with the project menu.</p>
+    <p class="dim" id="startHint" hidden></p>
     <p class="dim">No project yet? Open one of its clips in ActionFootagePlayer and initialize the project in its side panel's Project tab.</p>
     <div class="btns"><button type="button" class="btn pri" data-a="choose">Open a project…</button></div>
     <div id="recentEmpty"></div>
@@ -41,6 +42,7 @@
 </div>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" data-a="toastok">OK</button></div>
 <script src="culling.js"></script>
+<script src="atstart.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

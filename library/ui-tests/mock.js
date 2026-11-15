@@ -3,7 +3,8 @@
 // A stand-in for the app behind the Library's page (window.__TAURI__), for the page's tests (jsdom: culling_test.js; outside ui/, which the app bundles whole)
 // and its pictures (headless Chrome over library/ui): a small project of clips, moments and photos, kept in memory;
 // the commands the page calls answer from it and change it, so a view read again shows what was written. `MOCK.calls`
-// lists what was called. Set window.MOCK_OPTS before it is loaded: { project: null } starts with no project open.
+// lists what was called. Set window.MOCK_OPTS before it is loaded: { project: null } starts with no project open, { atStart: path } marks the
+// project opened at start.
 (function () {
   const ROOT = "/Volumes/Trips/Egypt 2026";
   const opts = window.MOCK_OPTS || {};
@@ -70,7 +71,7 @@
     },
     open_project: (a) => { M.root = a.path; return a.path; },
     close_project: () => { M.root = null; return null; },
-    start_project: () => M.atStart,
+    open_at_start: () => { const r = M.recent.find((x) => x.path === M.atStart); if (M.root || !r || !r.here) return null; M.root = r.path; return r.path; },
     set_start_project: (a) => { M.atStart = a.path || null; return M.atStart; },
     forget_recent: (a) => { M.recent = M.recent.filter((r) => r.path !== a.path); if (M.atStart === a.path) M.atStart = null; return null; },
   };

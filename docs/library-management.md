@@ -174,6 +174,17 @@ the library:
 - Delete it, and the computer simply reads the library. Another computer never sees it. *Find moved files* and *Take
   in* never write it.
 
+### The project opened at start
+
+One project of the list of those opened on a computer can be marked **Open at start** (a tick in the project's menu
+for the one open, and on each row of the start screen's list). The app started with no file then opens it at once,
+skipping the start screen. Ticking another moves the mark; the tick again takes it off.
+
+- The choice is the computer's: it's kept with that list, in the app's own data (`recent.json`), never in the project.
+- A `Project.afproject` double-clicked opens that project, whatever is marked.
+- Its share not mounted: the start screen shows, with the project marked Offline and its Connect, as any offline one.
+- The start screen stays a menu item away (*Start screen*), where the tick can be taken off.
+
 ### Finding a clip
 
 The same in the player (Lua, `workspace.lua`), gyroflow-export and the Library (Rust, `workspace.rs`), with one set of

@@ -471,6 +471,7 @@ function renderTop() {
       (S.root ? '<button type="button" role="menuitem" class="cur" data-a="closemenu"><span class="ck">' + ICON.check + '</span><span style="min-width:0"><span style="display:block">' + esc(S.name) + '</span><span class="sub">' + esc(S.root) + '</span></span></button>' : '') +
       recent.map((r) => recentRow(r, true)).join("") +
       '<hr><button type="button" role="menuitem" data-a="choose"><span class="ck"></span>Open a project…</button>' +
+      startMenu() +
       (S.root ? '<hr><button type="button" role="menuitem" data-a="sheet" data-v="settings"><span class="ck"></span>Project settings…</button>' +
         '<button type="button" role="menuitem" data-a="takein"><span class="ck"></span>Take in another project…</button>' +
         '<button type="button" role="menuitem" data-a="moveproject"><span class="ck"></span>Move the project to…</button>' +
@@ -1218,6 +1219,7 @@ async function applyMoved() {
 function renderEmpty() {
   $("empty").hidden = !!S.root;
   $("bodyrow").hidden = !S.root;
+  startHint();
   if (!S.root) $("recentEmpty").innerHTML = S.recent.length ? '<div class="lab" style="margin-top:12px">Opened before</div><div class="rlist">' + S.recent.map((r) => recentRow(r, false)).join("") + '</div>' : "";
 }
 // A project opened before: opened with a click; offline (its share not mounted, its disk not plugged in) marked so, with
@@ -1227,7 +1229,7 @@ function recentRow(r, menu) {
   const where = r.here ? r.path : r.path + (r.share ? " · on " + r.share : "");
   return '<div class="rrow' + (r.here ? "" : " off") + '"><button type="button"' + (menu ? ' role="menuitem"' : "") + ' class="rmain" data-a="openrecent" data-v="' + esc(r.path) + '">' + (menu ? '<span class="ck"></span>' : "") +
     '<span style="min-width:0"><span class="nm" style="display:block">' + esc(r.name) + (r.here ? "" : ' <span class="chip warn">Offline</span>') + '</span><span class="sub">' + esc(where) + '</span></span></button>' +
-    (!r.here && r.connect ? connectButton("connectrecent", r.path, busy, r.names) : "") +
+    (!r.here && r.connect ? connectButton("connectrecent", r.path, busy, r.names) : "") + startRow(r, menu) +
     '<button type="button" class="rx" data-a="forgetrecent" data-v="' + esc(r.path) + '" title="Remove from the list" aria-label="Remove ' + esc(r.name) + ' from the list">' + ICON.x + '</button></div>';
 }
 // An offline project's share connected (connect_project), then the project opened from where it is now
@@ -2714,6 +2716,8 @@ try {
   S.recentTags = await invoke("recent_tags").catch(() => []);
   S.recent = await invoke("recent").catch(() => []);
   await poll();
+  // Started with no file: the project marked Open at start (atstart.js)
+  if (!S.root) await startOpen();
   if (!S.root) renderAll();
   setInterval(poll, 600);
   setInterval(pollProbes, 900);
