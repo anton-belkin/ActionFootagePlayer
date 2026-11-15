@@ -26,6 +26,7 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   const ev = (code) => vm.runInContext(code, ctx);
   run(path.join(__dirname, "mock.js"));
   run(path.join(ui, "culling.js"));
+  run(path.join(ui, "atstart.js"));
   run(path.join(ui, "app.js"));
   const doc = w.document, M = w.MOCK;
   const settle = async () => { for (let i = 0; i < 6; i++) { await tick(5); await ev("CULL.chain"); } };

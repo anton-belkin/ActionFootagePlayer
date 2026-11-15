@@ -92,3 +92,13 @@ only when called. Its own state is the `CULL` object; its buttons carry `data-c`
 - Footage renamed to Albums: `culling.js` counts tags over `RAW_FOOTAGE.items`, `DATA.moments`, `DATA.stills`, treats kinds `clip` / `moment` / `still` as cullable and switches off only for `S.view === "exports"`.
 - Commands returning changed items: in `cullApply` replace the final `refresh()` with applying what came back; the page is already updated first.
 - `renderTop` rewritten: keep `cullTop();` as its last statement (it appends to `#top`).
+
+## Piece 2: Open at start (PR #234, branch `claude/night-default-library`, stacked on #233)
+Done in the same session; not handed to a fresh one.
+
+- `library/ui/atstart.js` (new, loaded before `app.js`): `startMenu()`, `startRow(r, menu)`, `startHint()`, `startOpen()`, `startSet(path)`; buttons carry `data-s` (`start`, `screen`) with their own click listener.
+- `app.js`, four lines: `startMenu() +` in `renderTop`'s menu, `startRow(r, menu)` in `recentRow`, `startHint();` in `renderEmpty`, `if (!S.root) await startOpen();` at start-up. `index.html`: the script tag and `<p id="startHint">`. `style.css`: `.rstart` at the end.
+- `main.rs`: `RecentEntry.at_start` (in `recent.json`, written only when true), `start_entry`, `set_start`, `remembered` (used by `remember`: keeps the mark, never drops the marked one off the ten), `Recent.at_start`, commands `set_start_project(path: Option<String>)`, `open_at_start() -> Option<String>`, `close_project()`.
+- The page asks `open_at_start` once, when it comes up with no project open, so a project given by a double click wins.
+- Tests: `cargo test` (44; `one_project_opens_at_start`, `the_start_project_reachable_or_offline`), `library/ui-tests/atstart_test.js` (24 checks).
+- Not verified: the real window; the order of the file-open event and the page's question on a cold start by double click on macOS.

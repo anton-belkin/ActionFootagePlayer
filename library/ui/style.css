@@ -337,3 +337,10 @@ body.waiting,body.waiting *{cursor:progress}
 .minimap{margin:2px 0 8px}
 .minimap img{display:block;width:100%;max-width:300px;aspect-ratio:300/170;border-radius:8px;border:1px solid var(--line2)}
 .kv dd .blk{display:block}
+/* Open at start (atstart.js): the tick on a row of the projects opened before, the word on the one marked in the menu */
+.rstart{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--fg2);font-size:12px;white-space:nowrap;padding:4px 8px;border-radius:6px;min-height:28px;cursor:pointer;flex:0 0 auto}
+button.rstart:hover{background:var(--hover)}
+.rstart .box{width:15px;height:15px;border:1px solid var(--muted);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface)}
+.rstart.on{color:var(--fg)}
+.rstart.on .box{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
