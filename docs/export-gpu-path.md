@@ -139,6 +139,27 @@ Times are whole runs, engine load included: for 2 s of 4K30 the load dominates. 
 `--from/--to` ask for (61 against 60, 121 against 120). That is the pipes' own off-by-one, left as it is. The test
 compares the frames both have.
 
+**Share's headless test** (`share_e2e::a_share_with_the_player`): a moment (0.5-2.5 s), a photo link (1 s) and the whole
+clip, rendered by the player's batch and copied out. It used a scratch copy of the player with this branch's binaries,
+scripts and ffmpeg (0001 + 0002), and a scratch HOME (Anton's render-defaults.json untouched). Both pass:
+
+| Trip | Time | What came out |
+|---|---|---|
+| D-Log M 4K60, 15.5 s | 50.9 s | clip HDR 181 MB, moment 25 MB, photo HEIC 3840×2160 4.7 MB |
+| Egypt HERO12, 0 %, 2.7 s | 21.4 s | clip 29 MB and moment 22 MB, both as "this clip is SDR: its SDR render", full range kept; photo 721 KB |
+
+The same exporter by hand, with the launcher's environment (`GYROFLOW_TOOLS`, MoltenVK's ICD), says "on the GPU" for
+all of these:
+
+- the whole D-Log M clip: 12.8 s (78 fps);
+- the Egypt clip: 3.4 s;
+- the Egypt clip wide, under water, sphere edges, light denoise: 5.5 s. Its shader has `CHROMATIC 1`, `LENS_BLEND 1`
+  and `SPHERE_FILL 1`.
+
+A run by hand without that environment finds Homebrew's ffmpeg (no libplacebo) and goes through the pipes, as it
+says. The scratch HOME also needed DJI's Rec.709 LUT in `ActionFootagePlayer/dlogm/luts`, or a D-Log M photo fails
+("dji-dlogm-rec709.cube is missing").
+
 **Clips with nothing to warp.** A clip with no motion data and no project but a look (log → HLG, HLG → SDR) already
 went through the GPU path. A turn or a cut (`--rotation`, `--aspect`, the file's display matrix) now does too, instead
 of the pipes:
