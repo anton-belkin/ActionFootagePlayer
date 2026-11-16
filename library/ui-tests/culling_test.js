@@ -179,7 +179,7 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   key("p", "KeyP", null, { metaKey: true }); await settle();
   expect("⌘P: not culling", M.calls.slice(n0).some((c) => c[0] === "set_pick"), false);
   // A folder selected: what's in it
-  ev('S.path = []; S.sel = { "f:Day 2": true }; renderAll()');
+  ev('S.path = [AV_MARK + "My albums"]; S.sel = { "f:Day 2": true }; renderAll()');
   key("4", "Digit4"); await settle();
   expect("a folder: its clips rated", [M.clips[5].rating, M.clips[6].rating, M.clips[7].rating], [4, 4, 4]);
 
@@ -199,11 +199,12 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   const kindOf = (k) => ({ a: "clip", m: "moment", p: "still", e: "export" }[k.slice(2, 3)] || "folder");
   const visibleOf = (kind) => ev("VISIBLE").filter((k) => kindOf(k) === kind);
   click(tab("footage")); await tick(60);
+  ev('S.path = [AV_MARK + "My albums"]; renderAll()'); // (what's at the albums' top is in My albums)
   expect("in Albums: still on, the rejected moment hidden", [hide().getAttribute("aria-pressed"), ev('VISIBLE.some((k) => k.includes("Dolphins far"))'), visibleOf("moment").length], ["true", false, 2]);
   expect("…and the rejected photo", [ev('VISIBLE.some((k) => k.includes("Blurry"))'), visibleOf("still").length], [false, 2]);
   ev('S.path = ["Day 1"]; renderAll()');
   expect("…and the rejected clips' links in their album", [ev("VISIBLE.indexOf(" + JSON.stringify(linkKey(1)) + ")"), ev("VISIBLE.indexOf(" + JSON.stringify(linkKey(2)) + ")"), ev("VISIBLE.length")], [-1, -1, 3]);
-  ev('S.path = []; renderAll()');
+  ev('S.path = [AV_MARK + "My albums"]; renderAll()');
   expect("remembered on this computer", w.localStorage.getItem("afl.hideRejected"), "1");
 
   // Photos are culled and tagged like moments
@@ -247,7 +248,7 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   const sort = () => q('#top [data-c="starsort"]');
   click(sort());
   expect("Most stars first: by stars, the rest as they were", visibleOf("still").map((k) => k.replace("i:p:_Stills/", "")), ["Turtle 1.heic", "Reef 2.heic", "Blurry 3.heic"]);
-  expect("…folders stay on top (Other folders, then the albums)", ev("VISIBLE.slice(0, 3)"), ["f:Other folders", "f:Day 1", "f:Day 2"]);
+  expect("…folders stay on top", ev("VISIBLE.slice(0, 2)"), ["f:Day 1", "f:Day 2"]);
   click(sort());
 
   // A clip selected in its album (its link): the clip itself is what's culled; it shows at once on the link and on

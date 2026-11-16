@@ -35,13 +35,18 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
   // Albums: the user's albums at the top, the rest of the project's folder under Other folders
   click(tab("footage")); await tick(120);
   ok(tabs.length === 2, "two tabs: Moments, Photos and Exports are gone");
-  ok(names().join("|") === "Timeline|Map|Videos|Moments|Photos|Live Photos|Generated|Other folders|Best of the year|Egypt", "Albums' top is one list: Timeline, Map, the media types, Generated, Other folders, your albums: " + names().join("|"));
+  ok(names().join("|") === "My albums|Timeline|Map|Videos|Moments|Photos|Live Photos|Generated|Other folders", "Albums' top is one list: My albums, Timeline, Map, the media types, Generated, Other folders: " + names().join("|"));
+  click(by("aview", "mine")); await tick();
+  ok(names().join("|") === "Best of the year|Egypt", "My albums: the user's albums: " + names().join("|"));
   ok(!$("main").textContent.includes("Without a clip preview"), "no folder of clips without a preview");
   dbl(by("pick", "f:Egypt")); await tick();
+  const crumbs = Array.from(w.document.querySelectorAll(".crumbs button:not(.icon)")).map((b) => b.textContent).join(" › ");
+  ok(crumbs === "Albums › My albums › Egypt" && w.__T.S.path.join("/") === "Egypt", "an album's path: " + crumbs + " (its own path: " + w.__T.S.path.join("/") + ")");
   ok(names().join("|") === "Dives|DJI_20261020083012_0001_D.MP4|GX010123.MP4", "an album: its albums, then its links as their clips: " + names().join("|"));
   dbl(by("pick", "f:Egypt/Dives")); await tick();
   ok(names().join("|") === "GX010124.MP4", "an album inside an album");
-  click(by("crumb", "0")); await tick();
+  click(by("up")); await tick(); click(by("up")); await tick();
+  ok(w.__T.S.path.length === 1 && w.__T.S.path[0].slice(1) === "My albums" && w.__T.S.sel["f:Egypt"], "Up from an album: My albums, the album selected");
   dbl(by("pick", "f:Best of the year")); await tick();
   ok(names().includes("GX010123.MP4"), "a clip in two albums is an item of each");
   click(by("crumb", "0")); await tick();
@@ -81,8 +86,8 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
   ok($("toastMsg").textContent.includes("1 was there already"), "a clip already in the album: " + $("toastMsg").textContent);
 
   // Albums: the new album, its items moved and removed
-  click(tab("footage")); await tick(150);
-  ok(names().includes("Red Sea"), "the new album is in Albums");
+  click(tab("footage")); await tick(150); click(by("aview", "mine")); await tick();
+  ok(names().includes("Red Sea"), "the new album is in My albums");
   dbl(by("pick", "f:Red Sea")); await tick();
   ok(names().length === 2, "with its two links");
   const item = w.document.querySelector('#main [data-a="pick"]');
@@ -111,6 +116,7 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
   ok(by("newdir").getAttribute("aria-label") === "New album", "New album in Albums");
   click(by("newdir")); await tick(200);
   ok(last("new_folder")[1].view === "footage" && last("new_folder")[1].parent === "_Clips", "made in _Clips");
+  ok(w.__T.S.path[0].slice(1) === "My albums" && !!w.__T.S.renaming, "…shown in My albums, its name being typed: " + w.__T.S.renaming);
   click(by("tab", "moments")); await tick();
   const side = $("side").textContent;
   ok(!side.includes("Make clip previews") && !$("clips_layout") && side.includes("Moments of the marks") && side.includes("Photos of the marks"), "the side panel: no clip previews batch, moments and photos kept");
@@ -118,7 +124,7 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
 
   // ---------- moments and photos are items of albums ----------
   const T = w.__T;
-  const go = async (...path) => { click(tab("footage")); await tick(80); click(by("crumb", "0") || tab("footage")); await tick(); for (let i = 0; i < path.length; i++) { dbl(by("pick", "f:" + path.slice(0, i + 1).join("/"))); await tick(); } };
+  const go = async (...path) => { click(tab("footage")); await tick(80); click(by("crumb", "0") || tab("footage")); await tick(); if (!path.length || (path[0] !== "Generated" && path[0] !== "Other folders")) { click(by("aview", "mine")); await tick(); } for (let i = 0; i < path.length; i++) { dbl(by("pick", "f:" + path.slice(0, i + 1).join("/"))); await tick(); } };
   const rowOf = (name) => Array.from(w.document.querySelectorAll('#main [data-a="pick"]')).find((e) => e.querySelector(".nm").textContent === name);
   const pick = async (name, o) => { click(rowOf(name), o); await tick(); return name; };
   const menuOf = async (name) => { const el = rowOf(name); el.dispatchEvent(new w.MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); await tick(); return w.document.querySelector(".cmenu"); };

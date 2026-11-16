@@ -2,8 +2,9 @@
 // share. Loaded after albums.js and before app.js, whose state and helpers it uses when called; app.js calls in at
 // the lines marked "albumviews.js" (items(), buildFacets(), renderMain(), goUp()).
 //
-// A view is [id, label, draw(main), items(), meta]. With no draw (null) it is drawn by app.js's renderMain as an album
-// of its items: the media types (Videos, Moments, Photos…), meta { media: true }, pushed below. While one is open the page's view is still Albums (S.view "footage")
+// A view is [id, label, draw(main), items(), meta]. With no draw (null) it is drawn by app.js's renderMain: the media
+// types (Videos, Moments, Photos…, meta { media: true }) as an album of their items, My albums (meta { folders: true })
+// as the user's albums' folders. Both pushed below. While one is open the page's view is still Albums (S.view "footage")
 // and S.path[0] is the view's label behind AV_MARK, a character no folder's name starts with: so the breadcrumbs,
 // Back and Forward and the keys work as for a folder, and an album of the user's called "Timeline" stays an album.
 // The view's items are what items() gives then, so the selection, ctx(), the menu, the side panel and opening in the
@@ -27,50 +28,49 @@ function albumViewDraw(main) {
   v[2](main);
   return true;
 }
-// Albums' top is one list (renderMain): the views of the whole library (Timeline, Map), the media types, then the
-// folders (Generated, Other folders), then the user's albums; rows of the one look, each opened by a click.
-const AV_GROUPS = { views: "The whole library", media: "Media types", folders: "Folders", albums: "Your albums" };
+// Albums' top is one list (renderMain): My albums (one row: the user's own albums are inside it), the views of the
+// whole library (Timeline, Map), the media types, then the folders (Generated, Other folders); rows of the one look,
+// each opened by a click. My albums is a place in the page only: the albums stay where they are (_Clips/…), the path
+// shows Albums › My albums › Egypt, and S.path inside an album is the album's as before.
+const AV_GROUPS = { views: "The whole library", media: "Media types", folders: "Folders" };
 function avGroupHead(g) { return '<div class="lgroup" role="presentation">' + esc(AV_GROUPS[g]) + '</div>'; }
-// The views' rows, with their group's heading before each group; null: none (no project yet)
+const avMeta = (v) => v[4] || {};
+// The rows above the folders; null: none (no project yet)
 function albumTopRows(layout, filt) {
   if (!ALBUM_VIEWS.length) return null;
-  const shown = ALBUM_VIEWS.filter((v) => !(v[4] && v[4].optional) || v[3]().length);
-  const views = shown.filter((v) => !(v[4] && v[4].media)), media = shown.filter((v) => v[4] && v[4].media);
+  const shown = ALBUM_VIEWS.filter((v) => !avMeta(v).optional || v[3]().length);
+  const mine = shown.filter((v) => avMeta(v).folders), views = shown.filter((v) => !avMeta(v).media && !avMeta(v).folders), media = shown.filter((v) => avMeta(v).media);
   const row = (v) => {
-    const m = v[4] && v[4].media ? v[4] : null;
-    const all = m ? v[3]() : null, its = m && filt ? avShown(all) : all;
-    const sub = m ? (filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many)) : (AV_SUB[v[0]] || "");
-    const th = m ? avMosaic(its) : '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>';
+    const m = avMeta(v);
+    let th, sub;
+    if (m.folders) {
+      const albums = childDirs("").filter(userAlbum), its = (v[3]() || []).filter((it) => userAlbum(it.dir) || it.dir === "");
+      th = avMosaic(filt ? avShown(its) : its, true);
+      sub = albums.length ? avCount(albums.length, "album", "albums") + " · " + avCount(its.length, "item", "items") : "None yet: made from a selection in Originals";
+    } else if (m.media) {
+      const all = v[3](), its = filt ? avShown(all) : all;
+      th = avMosaic(its);
+      sub = filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many);
+    } else { th = '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>'; sub = AV_SUB[v[0]] || ""; }
     const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Open ' + esc(v[1]) + '"';
     if (layout === "list") return '<button ' + a + ' class="row avrow">' + th + '<span style="min-width:0"><span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span></span>' +
       '<span class="cell hide-s"></span><span class="cell hide-s"></span><span class="cell hide-s"></span><span class="chips hide-s"></span><span class="cell"></span></button>';
     return '<button ' + a + ' class="card avrow">' + th + '<span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span><span class="chips"></span></button>';
   };
-  return (views.length ? avGroupHead("views") + views.map(row).join("") : "") + (media.length ? avGroupHead("media") + media.map(row).join("") : "");
+  return mine.map(row).join("") + (views.length ? avGroupHead("views") + views.map(row).join("") : "") + (media.length ? avGroupHead("media") + media.map(row).join("") : "");
 }
-// Four pictures of a media type's items, as a folder's row has its own
-function avMosaic(list) {
+// Four pictures of a list's items, as a folder's row has its own (with the folder's mark: My albums)
+function avMosaic(list, folder) {
   const its = [];
   for (const it of list) { if (it.thumbPath) its.push(it); if (its.length === 4) break; }
   let h = '<span class="mosaic">';
   for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
-  return h + '</span>';
+  return h + (folder ? '<span class="fb">' + ICON.fsm + '</span>' : "") + '</span>';
 }
-function avTopGroup(it) {
-  if (it.kind !== "folder") return "albums";
-  return it.path === GENERATED || it.path === OTHER ? "folders" : "albums";
-}
-// The heading before the i-th row of the folders' part, when its group starts there
-function albumTopHead(list, i) {
-  const g = avTopGroup(list[i]);
-  return i && avTopGroup(list[i - 1]) === g ? "" : avGroupHead(g);
-}
-// The folders at the top: Generated and Other folders first, then the user's albums (each part as it was sorted)
-function albumTopOrder(rows) {
-  const rank = (it) => it.path === GENERATED ? 0 : it.path === OTHER ? 1 : 2;
-  const keyed = rows.map((r, i) => [rank(r), i, r]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  keyed.forEach((k, i) => { rows[i] = k[2]; });
-}
+// The heading before the folders' part of the top (Generated, Other folders)
+function albumTopHead(list, i) { return i ? "" : avGroupHead("folders"); }
+// My albums: open (S.path is its label behind AV_MARK)
+function albumMineOpen() { const v = albumViewOpen(); return !!v && !!avMeta(v).folders; }
 // What a media-type album says of itself on its breadcrumbs' line
 function albumViewWhere(v) { return (v[4] && v[4].where) || AV_SUB[v[0]] || ""; }
 const AV_ICON = {
@@ -94,6 +94,10 @@ function avMedia(id, fn) {
   if (!AV.media || AV.media.all !== all) AV.media = { all, lists: {} };
   return AV.media.lists[id] || (AV.media.lists[id] = all.filter(fn));
 }
+// My albums: the user's albums (folders of _Clips, _Moments, _Stills, as albumItems() shows them), drawn by renderMain
+// as the top of Albums was: its folders are the albums, the album's path stays its own
+ALBUM_VIEWS.push(["mine", "My albums", null, () => (DATA.footage && DATA.footage.items) || [],
+  { folders: true, where: "Your albums: folders of links to the originals. New ones are made from a selection in Originals" }]);
 for (const m of AV_MEDIA) ALBUM_VIEWS.push([m[0], m[1], null, () => avMedia(m[0], m[2]), Object.assign({ media: true }, m[3])]);
 function albumViewGo(id) {
   const v = ALBUM_VIEWS.find((x) => x[0] === id);

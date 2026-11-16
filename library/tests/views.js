@@ -60,9 +60,9 @@ async function bigRun() {
   await tick(500);
   ok(scripts.filter((x) => ["albums.js", "albumviews.js", "timeline.js", "map.js", "app.js"].includes(x)).join() === "albums.js,albumviews.js,timeline.js,map.js,app.js" && scripts[scripts.length - 1] === "app.js", "the page's scripts: " + scripts.join(", "));
   click(by("view", "footage")); await tick(120);
-  ok(T.ALBUM_VIEWS.filter((v) => !(v[4] && v[4].media)).map((v) => v[1]).join() === "Timeline,Map", "ALBUM_VIEWS: Timeline, Map, and the media types");
+  ok(T.ALBUM_VIEWS.filter((v) => !(v[4] && (v[4].media || v[4].folders))).map((v) => v[1]).join() === "Timeline,Map", "ALBUM_VIEWS: Timeline, Map, and My albums and the media types");
   ok(!!by("aview", "timeline") && !!by("aview", "map"), "Albums' top has the two views above the albums");
-  ok(names().includes("Egypt") && names().includes("Other folders"), "…and the albums as before");
+  ok(names().includes("My albums") && names().includes("Other folders"), "…and My albums, Other folders");
 
   // ----- Timeline -----
   click(by("aview", "timeline")); await tick(300);

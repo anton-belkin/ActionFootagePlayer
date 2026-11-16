@@ -91,6 +91,15 @@ const ok = (c, what) => { if (c) console.log("ok: " + what); else { fails++; con
   await shot("albums-top-list");
   await click('[data-a="layout"][data-v="grid"]');
   await shot("albums-top-grid");
+  // My albums, an album in it (the path: Albums › My albums › Egypt)
+  if (await click('[data-a="aview"][data-v="mine"]')) {
+    await shot("my-albums");
+    await dbl('[data-a="pick"][data-v="f:Egypt"]');
+    const crumbs = await page.evaluate(() => Array.from(document.querySelectorAll(".crumbs button:not(.icon)")).map((b) => b.textContent).join(" › "));
+    ok(crumbs === "Albums › My albums › Egypt", "an album's path: " + crumbs);
+    await shot("album-in-my-albums");
+    await click('[data-a="crumb"][data-v="0"]');
+  }
   if (await click('[data-a="aview"][data-v="videos"]')) {
     await scrollMain(3000);
     b = await barSeen();

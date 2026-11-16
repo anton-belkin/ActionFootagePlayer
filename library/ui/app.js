@@ -440,9 +440,9 @@ function setOpt(id, on) { const o = findOpt(id); if (!o) return; (o.kids || [o])
 
 // ---------- the tree ----------
 
-function dirKey() { return S.path.join("/"); }
+function dirKey() { return albumMineOpen() ? "" : S.path.join("/"); } // albumviews.js: My albums is the albums' top
 function items() { return albumViewItems() || (DATA[S.view] && DATA[S.view].items) || []; } // albumviews.js: a view inside Albums has its own
-function under(path) { return albumViewOpen() ? items() : path ? items().filter((it) => it.dir === path || it.dir.startsWith(path + "/")) : items(); }
+function under(path) { const v = albumViewOpen(); return v && !(v[4] && v[4].folders) ? items() : path ? items().filter((it) => it.dir === path || it.dir.startsWith(path + "/")) : items(); }
 function childDirs(dir) {
   const ds = (DATA[S.view] && DATA[S.view].dirs) || [];
   return ds.filter((d) => (d.lastIndexOf("/") < 0 ? "" : d.slice(0, d.lastIndexOf("/"))) === dir);
@@ -542,16 +542,17 @@ function renderMain() {
   if (!S.root) { main.innerHTML = ""; return; }
   noteHistory();
   if (albumViewDraw(main)) { pinBar(main); return; } // albumviews.js: Timeline, Map
-  // A media-type album (Videos, Moments, Photos: albumviews.js) is drawn as an album, of every item of its kind
-  const media = albumViewOpen();
+  // A media-type album (Videos, Moments, Photos: albumviews.js) is drawn as an album, of every item of its kind; My
+  // albums as the folders of the user's albums (dirKey() is "" there)
+  const av = albumViewOpen(), mine = albumMineOpen(), media = av && !mine ? av : null;
   const c = ctx(), srch = searching(), filt = filtering();
   const dir = dirKey();
-  // Albums' top: Timeline, Map and the media types as rows of the list, then the folders (albumviews.js)
+  // Albums' top: My albums, Timeline, Map and the media types as rows of the list, then Generated and Other folders
+  // (albumviews.js); the user's albums are in My albums
   const atTop = S.view === "footage" && !S.path.length && !srch;
   let hiddenFolders = 0;
-  const folderRows = media ? [] : childDirs(dir).map((d) => ({ kind: "folder", path: d, name: d.split("/").pop(), dir }));
-  if (atTop) albumTopOrder(folderRows);
-  const here = media ? items().slice() : folderRows.concat(items().filter((it) => it.dir === dir));
+  const folderRows = media ? [] : childDirs(dir).filter((d) => !(atTop || mine) || (mine ? userAlbum(d) : !userAlbum(d))).map((d) => ({ kind: "folder", path: d, name: d.split("/").pop(), dir }));
+  const here = media ? items().slice() : folderRows.concat(atTop ? [] : items().filter((it) => it.dir === dir));
   const list = srch ? scopeItems().filter((it) => matches(it)) : !filt ? here : here.filter((it) => {
     if (it.kind !== "folder") return matches(it);
     const ok = under(it.path).some((x) => matches(x));
@@ -575,8 +576,10 @@ function renderMain() {
       '<span class="where">Its marks, moments and photos, in the order they are in the clip</span></div>';
   } else {
     bar += '<div class="crumbs">' + navButtons() + '<button type="button" class="' + (S.path.length ? "" : "here") + '" data-a="crumb" data-v="0">' + c.viewName + '</button>';
+    // An album of the user's: in My albums (a place in the page: the album's path is its own)
+    if (S.view === "footage" && !av && S.path.length && userAlbum(S.path[0])) bar += '<span aria-hidden="true">›</span><button type="button" data-a="aview" data-v="mine">My albums</button>';
     S.path.forEach((p, i) => { bar += '<span aria-hidden="true">›</span><button type="button" class="' + (i === S.path.length - 1 ? "here" : "") + '" data-a="crumb" data-v="' + (i + 1) + '">' + esc(p) + '</button>'; });
-    bar += '<span class="where">' + esc(media ? albumViewWhere(media) : S.view === "footage" ? (S.path.length ? "Links to the originals: opening one plays its original" : "Your albums: folders of links to the originals. New ones are made from a selection in Originals") : S.view === "sources" ? (S.path.length ? "The originals at " + S.path.join("/") : "The originals in the project’s tree (where each is: Sources settings)") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
+    bar += '<span class="where">' + esc(av ? albumViewWhere(av) : atTop ? "Your albums, the whole library by day and by place, each kind of item, and the folders new items land in" : S.view === "footage" ? (S.path.length ? "Links to the originals: opening one plays its original" : "Your albums: folders of links to the originals. New ones are made from a selection in Originals") : S.view === "sources" ? (S.path.length ? "The originals at " + S.path.join("/") : "The originals in the project’s tree (where each is: Sources settings)") : S.root + "/" + BASE[S.view].replace(/\/$/, "")) + '</span></div>';
     if (S.view === "sources" && !S.path.length) bar += '<div class="selbar"><button type="button" class="btn sm" data-a="addsource">Add a source…</button><button type="button" class="btn sm" data-a="sheet" data-v="settings">Sources settings…</button></div>';
     if (filt) {
       const all = under(dir).filter((x) => matches(x)).length;
@@ -612,7 +615,7 @@ function renderMain() {
   } else if (S.layout === "list") {
     const clipsV = S.view === "footage" || S.view === "sources";
     const cnt = clipsV ? "Marks · mom." : "";
-    bar += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (clipsV ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div>';
+    if (!top) bar += '<div class="head" aria-hidden="true"><span></span><span>Name</span><span class="hide-s">' + (clipsV ? "Recorded" : "Date") + '</span><span class="hide-s">Length</span><span class="hide-s">' + cnt + '</span><span class="hide-s">Status</span><span>' + (S.locations.length > 1 && S.view === "footage" ? "Plays from" : "Size") + '</span></div>';
     h += '<div class="list">' + (top || "");
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
@@ -634,7 +637,7 @@ function renderMain() {
     });
     h += '</div>';
   }
-  if (top && !list.length) h += '<div class="empty">' + (filt ? "No album matches. Remove a filter." : "No albums of your own yet. Select clips in Originals and choose Add to an album…") + '</div>';
+  if (top && !list.length) h += '<div class="empty">' + (filt ? "No album matches. Remove a filter." : "Generated and Other folders are empty.") + '</div>';
   const scrollTop = main.scrollTop;
   main.innerHTML = '<div class="mbar">' + bar + '</div>' + h;
   main.scrollTop = scrollTop;
@@ -782,7 +785,9 @@ function renderFilters() {
       // A long list: by its counts, the largest first, as it was when laid out; its first rows, then "N more"
       const long = rowsOf.length > FMORE_AT;
       if (long && (fresh || !fz.order[f.id])) {
-        const byCount = rowsOf.slice().sort((x, y) => y.c - x.c);
+        // ("No location", "Unknown": last, whatever their counts)
+        const odd = (x) => /:(none|\?)$/.test(x.o.id) ? 1 : 0;
+        const byCount = rowsOf.slice().sort((x, y) => odd(x) - odd(y) || y.c - x.c);
         fz.order[f.id] = byCount.map((x) => x.o.id);
         fz.top[f.id] = new Set(byCount.filter((x, i) => i < FTOP || S.filters[x.o.id] || (x.onKids && x.onKids.length)).map((x) => x.o.id));
       }
@@ -1567,7 +1572,9 @@ function navButtons() {
 }
 async function newFolder() {
   if (!FOLDER_VIEWS[S.view]) return;
-  const parent = S.path.join("/");
+  // A new album is made in My albums: from the top of Albums, it's opened first
+  if (S.view === "footage" && (!S.path.length || albumMineOpen())) S.path = [AV_MARK + "My albums"];
+  const parent = dirKey();
   try {
     // An album's new album is in _Clips (the user's own); under Other folders, where that folder is
     const made = await invoke("new_folder", { view: S.view, parent: S.view === "footage" && parent === NOPREV ? VIEW_ROOT.footage : diskRel(parent) });
@@ -2333,6 +2340,8 @@ function goUp() {
   if (S.view === "clip" && !searching()) { goFootage(S.clip); return; }
   if (!S.path.length || searching()) return;
   if (albumViewOpen()) { S.path = S.path.slice(0, -1); S.sel = {}; S.anchor = null; renderAll(); return; } // albumviews.js: no folder to select
+  // An album of the user's: up is My albums, the album selected there
+  if (S.view === "footage" && S.path.length === 1 && userAlbum(S.path[0])) { const k = "f:" + S.path[0]; S.path = [AV_MARK + "My albums"]; S.sel = {}; S.sel[k] = true; S.anchor = k; renderAll(); return; }
   const left = S.path[S.path.length - 1];
   S.path = S.path.slice(0, -1);
   const k = "f:" + (S.path.length ? S.path.join("/") + "/" : "") + left;

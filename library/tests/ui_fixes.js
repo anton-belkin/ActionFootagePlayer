@@ -59,13 +59,29 @@ const pinned = (where) => {
   // ----- 4. Albums' top: one list -----
   click(by("layout", "list")); await tick(60);
   const top = names();
-  ok(top.join("|") === "Timeline|Map|Videos|Moments|Photos|Live Photos|Generated|Other folders|Alps|Best of the year|Egypt", "Albums' top, one list: " + top.join("|"));
+  ok(top.join("|") === "My albums|Timeline|Map|Videos|Moments|Photos|Live Photos|Generated|Other folders", "Albums' top, one list, My albums first: " + top.join("|"));
   const heads = Array.from(d.querySelectorAll("#main .list > .lgroup")).map((e) => e.textContent);
-  ok(heads.join("|") === "The whole library|Media types|Folders|Your albums", "its groups: " + heads.join("|"));
-  ok(d.querySelectorAll("#main .list > .row.avrow").length === 6 && !d.querySelector(".avtiles"), "Timeline, Map and the media types are rows of the list's own look, no tiles");
+  ok(heads.join("|") === "The whole library|Media types|Folders", "its groups: " + heads.join("|"));
+  ok(d.querySelectorAll("#main .list > .row.avrow").length === 7 && !d.querySelector(".avtiles"), "My albums, Timeline, Map and the media types are rows of the list's own look, no tiles");
+  ok(!d.querySelector("#main .mbar .head"), "no column head over rows that have no columns");
+  ok(d.querySelector('[data-a="aview"][data-v="mine"] .sub').textContent.startsWith("3 albums"), "My albums says how many: " + d.querySelector('[data-a="aview"][data-v="mine"] .sub').textContent);
+  // My albums: one level, the albums inside as they were; an album's path; Up; Back
+  click(by("aview", "mine")); await tick(80);
+  ok(names().join("|") === "Alps|Best of the year|Egypt", "My albums: the user's albums: " + names().join("|"));
+  pinned("My albums");
+  d.querySelector('#main [data-a="pick"][data-v="f:Egypt"]').dispatchEvent(new w.MouseEvent("dblclick", { bubbles: true })); await tick(80);
+  const crumbs = Array.from(d.querySelectorAll(".crumbs button:not(.icon)")).map((b) => b.textContent).join(" › ");
+  ok(crumbs === "Albums › My albums › Egypt" && T.S.path.join("/") === "Egypt", "an album: " + crumbs + ", its own path " + T.S.path.join("/"));
+  click(by("up")); await tick(60);
+  ok(T.S.path[0].slice(1) === "My albums" && T.S.sel["f:Egypt"], "Up: My albums, Egypt selected");
+  click(by("back")); await tick(60);
+  ok(T.S.path.join("/") === "Egypt", "Back: the album again");
+  click(by("aview", "mine")); await tick(60);
+  ok(T.S.path[0].slice(1) === "My albums", "the path's My albums opens it");
+  click(by("crumb", "0")); await tick(60);
   ok(!names().includes("360° videos"), "360° videos: not offered when the library has none");
   click(by("layout", "grid")); await tick(60);
-  ok(d.querySelectorAll("#main .grid > .card.avrow").length === 6 && d.querySelectorAll("#main .grid > .lgroup").length === 4, "…and cards of the grid's own look in the grid");
+  ok(d.querySelectorAll("#main .grid > .card.avrow").length === 7 && d.querySelectorAll("#main .grid > .lgroup").length === 3, "…and cards of the grid's own look in the grid");
   const allClips = T.DATA.sources.items.length;
   ok(d.querySelector('[data-a="aview"][data-v="videos"] .sub').textContent === allClips + " clips", "Videos says how many: " + d.querySelector('[data-a="aview"][data-v="videos"] .sub').textContent);
 
@@ -82,6 +98,7 @@ const pinned = (where) => {
   const c = T.ctx();
   ok(c.selItems.length === 1 && c.selItems[0].kind === "clip", "an item is selected as in any album");
   ok(!!d.querySelector('.mbar .selbar [data-a="albumadd"]') && !!d.querySelector('.mbar .selbar [data-a="share"]'), "its bar has Add to an album… and Share…");
+  ok(!d.querySelector('[data-a="albumout"]'), "…and no Take out of the album (it's no album of files)");
   d.querySelector('#main [data-a="pick"].sel').dispatchEvent(new w.MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); await tick(60);
   const menu = Array.from(d.querySelectorAll(".cmenu button, [role=menu] button")).map((b) => b.textContent);
   ok(menu.some((t) => /album/i.test(t)) && menu.some((t) => /Share/.test(t)), "the menu: " + menu.join(" | "));
