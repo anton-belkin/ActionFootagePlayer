@@ -13,6 +13,10 @@
 // images and buffers; then naga's GLSL front end compiles it. That has no atomics: an atomicAdd on a buffer's uint
 // array goes in as a call to a stub, made the atomic add in naga's IR (patch_atomics).
 //
+// A still can go through them in RGB instead (render_rgb): FSR 1's passes (mpv/scripts/gyroflow/fsr.glsl) for a photo
+// (upscale.rs), MAIN's size changing on the way to OUTPUT's (Config::output), as libplacebo hooks them for a target
+// bigger than the picture.
+//
 // Frames come and go as gyroflow-export has them, 10-bit YUV 4:2:0 (yuv420p10le). MAIN is the frame in RGB as
 // libplacebo makes it (the source's matrix and range, not clamped; the chroma between its samples, which sit with
 // the even columns and between the rows: MPEG-2's), in rgba16f as mpv's passes are; LUMA its luma as coded (code /
@@ -449,6 +453,8 @@ pub struct Config {
     pub full_range: bool,
     /// The parameters' values in place of their defaults
     pub params: Vec<(String, f64)>,
+    /// OUTPUT's size, where it isn't the frame's (render_rgb: a still scaled up)
+    pub output: Option<(usize, usize)>,
 }
 
 struct Tex {
@@ -480,6 +486,7 @@ pub struct Shaders {
     parsed: Parsed,
     prelude: String,
     size: (u32, u32),
+    output: (u32, u32),
     params: Vec<Param>,
     uniforms: wgpu::Buffer,
     textures: HashMap<String, Tex>,
@@ -585,7 +592,7 @@ impl Shaders {
         // The stages' textures: written by the frame's conversion, read by the passes
         for name in ["LUMA", "MAIN"] {
             let format = wgpu::TextureFormat::Rgba16Float;
-            let texture = make(name, (w, h), format, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING);
+            let texture = make(name, (w, h), format, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC);
             let view = texture.create_view(&Default::default());
             textures.insert(format!("afp_{name}"), Tex { _texture: texture, view, size: (w, h), format, glsl: "rgba16f", storage: false, filterable: true, linear: true });
         }
@@ -627,7 +634,8 @@ impl Shaders {
         let pack_group = group(&pack, &[convert.as_entire_binding(), samples.as_entire_binding(), frame_out.as_entire_binding()]);
 
         let mut s = Shaders {
-            device, queue, parsed, prelude: cfg.prelude, size: (w, h), params, uniforms, textures, buffers, linear, nearest,
+            device, queue, parsed, prelude: cfg.prelude, size: (w, h), output: cfg.output.map(|(a, b)| (a as u32, b as u32)).unwrap_or((w, h)),
+            params, uniforms, textures, buffers, linear, nearest,
             plan: None, compiled: HashMap::new(), convert, frame_in, samples, frame_out, staging,
             unpack: (unpack, unpack_group), to_yuv, pack: (pack, pack_group), frame_bytes, millis: 0.0,
         };
@@ -647,17 +655,18 @@ impl Shaders {
 
     /// Which passes run (their WHEN) with the parameters as they are
     fn conditions(&self) -> Result<Vec<bool>, String> {
-        let none = |_: &str| None;
+        // The stages' sizes as they come in, and OUTPUT's
+        let sizes = |n: &str| match n { "OUTPUT" => Some(self.output), "MAIN" | "LUMA" | "HOOKED" => Some(self.size), _ => None };
         self.parsed.passes.iter().map(|p| match &p.when {
             None => Ok(true),
-            Some(e) => rpn(e, &none, &|n| self.param(n)).map(|v| v != 0.0),
+            Some(e) => rpn(e, &sizes, &|n| self.param(n)).map(|v| v != 0.0),
         }).collect()
     }
 
     /// The steps for the passes that run, their textures and bindings (pipelines compiled once)
     fn replan(&mut self) -> Result<(), String> {
         let on = self.conditions()?;
-        let (w, h) = self.size;
+        let output = self.output;
         let mut steps = Vec::new();
         // Where each stage's texture is now, and the size of every texture by name
         let mut stage: HashMap<&str, String> = HashMap::from([("LUMA", "afp_LUMA".to_string()), ("MAIN", "afp_MAIN".to_string())]);
@@ -680,7 +689,7 @@ impl Shaders {
                     _ => saved.get(n).cloned().or_else(|| self.textures.contains_key(n).then(|| n.to_string())),
                 }
             };
-            let size_of = |n: &str| -> Option<(u32, u32)> { if n == "OUTPUT" { return Some((w, h)); } resolve(n).and_then(|t| self.textures.get(&t)).map(|t| t.size) };
+            let size_of = |n: &str| -> Option<(u32, u32)> { if n == "OUTPUT" { return Some(output); } resolve(n).and_then(|t| self.textures.get(&t)).map(|t| t.size) };
             let hsize = self.textures[&hooked].size;
             let ow = match &p.width { Some(e) => rpn(e, &size_of, &|n| self.param(n))?, None => hsize.0 as f64 };
             let oh = match &p.height { Some(e) => rpn(e, &size_of, &|n| self.param(n))?, None => hsize.1 as f64 };
@@ -702,7 +711,7 @@ impl Shaders {
             // Its target: a texture of its own (saved, or the stage's from now on)
             let target = format!("afp_pass{i}");
             if !self.textures.contains_key(&target) {
-                let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT;
+                let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
                 let size = if p.compute.is_some() { (1, 1) } else { out };
                 let format = wgpu::TextureFormat::Rgba16Float;
                 let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -927,6 +936,99 @@ impl Shaders {
     }
 }
 
+impl Shaders {
+    /// A still in RGB (the signal, 0..1, row by row; the size set up) through the passes as MAIN, and MAIN after them:
+    /// its size (OUTPUT's, or what the passes made of it) and pixels. LUMA isn't filled: for passes that hook MAIN
+    pub fn render_rgb(&mut self, pixels: &[[f32; 3]]) -> Result<((usize, usize), Vec<[f32; 3]>), String> {
+        let t = std::time::Instant::now();
+        let (w, h) = self.size;
+        if pixels.len() != (w * h) as usize { return Err(format!("{} pixels, set up for {w}x{h}", pixels.len())); }
+        if self.plan.as_ref().map(|p| &p.0) != Some(&self.conditions()?) { self.replan()?; }
+        let values: Vec<[f32; 4]> = if self.params.is_empty() { vec![[0.0; 4]] } else { self.params.iter().map(|p| [p.value as f32, 0.0, 0.0, 0.0]).collect() };
+        self.queue.write_buffer(&self.uniforms, 0, bytemuck::cast_slice(&values));
+        let texels: Vec<u16> = pixels.iter().flat_map(|p| [f16_bits(p[0]), f16_bits(p[1]), f16_bits(p[2]), f16_bits(1.0)]).collect();
+        let main_in = &self.textures["afp_MAIN"];
+        self.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &main_in._texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(&texels), wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 8), rows_per_image: Some(h) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
+        let d = &self.device;
+        let (_, steps, main) = self.plan.as_ref().unwrap();
+        let out = &self.textures[main];
+        let (ow, oh) = out.size;
+        let row = (ow * 8).div_ceil(256) * 256;
+        let staging = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * oh) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let mut enc = d.create_command_encoder(&Default::default());
+        for s in steps {
+            match &s.pipeline {
+                Pipeline::Compute(c, groups) => {
+                    let mut pass = enc.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(c);
+                    pass.set_bind_group(0, &s.group, &[]);
+                    pass.dispatch_workgroups(groups.0, groups.1, 1);
+                }
+                Pipeline::Render(r) => {
+                    let view = &self.textures[s.target.as_ref().unwrap()].view;
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(r);
+                    pass.set_bind_group(0, &s.group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+            }
+        }
+        enc.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo { texture: &out._texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &staging, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(oh) } },
+            wgpu::Extent3d { width: ow, height: oh, depth_or_array_layers: 1 });
+        self.queue.submit([enc.finish()]);
+        let slice = staging.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        let _ = d.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        rx.recv().map_err(|_| "GPU readback lost".to_string())?.map_err(|e| format!("GPU readback: {e}"))?;
+        let bytes = slice.get_mapped_range().map_err(|e| format!("GPU readback: {e:?}"))?.to_vec();
+        staging.unmap();
+        let mut px = Vec::with_capacity((ow * oh) as usize);
+        for y in 0..oh as usize {
+            let line: &[u16] = bytemuck::cast_slice(&bytes[y * row as usize..y * row as usize + ow as usize * 8]);
+            px.extend(line.chunks_exact(4).map(|c| [f16_value(c[0]), f16_value(c[1]), f16_value(c[2])]));
+        }
+        self.millis = t.elapsed().as_secs_f64() * 1000.0;
+        Ok(((ow as usize, oh as usize), px))
+    }
+}
+
+/// A float as half-precision bits (rounded to nearest; enough for 0..1 signals), and back
+fn f16_bits(v: f32) -> u16 {
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let e = ((b >> 23) & 0xff) as i32 - 127 + 15;
+    let m = b & 0x7f_ffff;
+    if v.is_nan() { return 0x7e00; }
+    if e >= 31 { return sign | 0x7c00; }
+    if e <= 0 {
+        if e < -10 { return sign; }
+        let m = (m | 0x80_0000) >> (1 - e);
+        return sign | ((m + 0x1000) >> 13) as u16;
+    }
+    // Rounding may carry into the exponent, which is right
+    sign | (((e as u32) << 10) + ((m + 0x1000) >> 13)) as u16
+}
+
+fn f16_value(h: u16) -> f32 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let e = ((h >> 10) & 0x1f) as i32;
+    let m = (h & 0x3ff) as f32;
+    sign * match e {
+        0 => m * 2f32.powi(-24),
+        31 => if m == 0.0 { f32::INFINITY } else { f32::NAN },
+        _ => (1.0 + m / 1024.0) * 2f32.powi(e - 15),
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Bound { Buffer, Image(String), Sampled(String) }
 
@@ -998,6 +1100,30 @@ mod tests {
     fn samples(b: &[u8]) -> Vec<u16> { b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect() }
 
     #[test]
+    fn half_floats() {
+        for v in [0.0f32, 1.0, 0.5, 0.25, 0.1, 0.75, 1e-5, 0.999, 65504.0] {
+            let back = f16_value(f16_bits(v));
+            assert!((back - v).abs() <= v.abs() * 1e-3 + 1e-7, "{v} -> {back}");
+        }
+    }
+
+    #[test]
+    fn fsr_on_a_still() {
+        // FSR's two passes take a 64x48 still to 128x96 (twice, its limit), a flat one staying flat; to an OUTPUT the
+        // size of the still they don't run
+        let src = include_str!("../../mpv/scripts/gyroflow/fsr.glsl");
+        let cfg = |out| Config { sources: vec![src.into()], size: (64, 48), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: true,
+                                 params: vec![("afp_fsr_sharpness".into(), 0.2)], output: Some(out) };
+        let flat = vec![[0.25f32, 0.5, 0.75]; 64 * 48];
+        let Ok(mut s) = Shaders::new(cfg((200, 150))) else { return }; // no GPU here
+        let ((w, h), px) = s.render_rgb(&flat).unwrap();
+        assert_eq!((w, h), (128, 96));
+        assert!(px.iter().all(|p| (p[0] - 0.25).abs() < 2e-3 && (p[1] - 0.5).abs() < 2e-3 && (p[2] - 0.75).abs() < 2e-3), "{:?}", &px[..4]);
+        let mut same = Shaders::new(cfg((64, 48))).unwrap();
+        assert_eq!(same.render_rgb(&flat).unwrap().0, (64, 48));
+    }
+
+    #[test]
     fn rpn_sizes() {
         let size = |n: &str| (n == "HOOKED").then_some((3840, 2160));
         let param = |n: &str| (n == "scale").then_some(0.5);
@@ -1024,7 +1150,7 @@ mod tests {
     fn round_trip() {
         let (w, h) = (64, 32);
         let input = frame(w, h, |p, x, y| if p == 0 { 64 + ((x * 13 + y * 7) % 876) as u16 } else { 512 + if p == 1 { 40 } else { -30i32 as u16 } });
-        let mut s = Shaders::new(Config { sources: vec![], size: (w, h), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: false, params: vec![] }).unwrap();
+        let mut s = Shaders::new(Config { sources: vec![], size: (w, h), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: false, params: vec![], output: None }).unwrap();
         let out = s.render(&input).unwrap();
         let (a, b) = (samples(&input), samples(&out));
         let worst = a.iter().zip(&b).map(|(x, y)| (*x as i32 - *y as i32).abs()).max().unwrap();
@@ -1086,7 +1212,7 @@ vec4 hook() {
         let (w, h) = (32, 16);
         // Grey: Y 502 (mid, limited range), no chroma
         let input = frame(w, h, |p, _, _| if p == 0 { 502 } else { 512 });
-        let mut s = Shaders::new(Config { sources: vec![src.into()], size: (w, h), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: false, params: vec![] }).unwrap();
+        let mut s = Shaders::new(Config { sources: vec![src.into()], size: (w, h), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: false, params: vec![], output: None }).unwrap();
         let out = samples(&s.render(&input).unwrap());
         // 0.5 * 0.5 + 0.25 * (count / pixels: 1 on the first frame)
         let want = 64.0 + 876.0 * (0.5 * 0.5 + 0.25);

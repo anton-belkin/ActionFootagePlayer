@@ -34,6 +34,8 @@
 --                        <name>.MP.jpg, the video in it)
 --   live-photo no|live|motion|next  photos alone, as Live Photos (macOS) or as Motion Photos, kept in gyroflow.conf
 --                        at once; next: the next of them
+--   photo-upscaler auto|none|fsr|realesrgan|swinir  what makes a photo's pixels where its crop is stretched past the
+--                        camera's (gyroflow-export --upscale; the neural ones macOS only), kept in gyroflow.conf at once
 --
 -- The clip is the one playing, or the original when the file playing is a moment (user-data/workspace/clip), whose
 -- time is the moment's plus its offset.
@@ -765,6 +767,26 @@ local function photo_dir()
     return dir
 end
 
+-- The photos' upscaler (the Save frame panel's choice, gyroflow.conf's photo_upscaler), into args
+local function upscale_args(args)
+    local up = mp.get_property_native("user-data/gyroflow/photo_upscaler") or "auto"
+    table.insert(args, "--upscale"); table.insert(args, up)
+end
+
+-- What a photo's gyroflow-export says it's doing (its --progress file), on the OSD while it saves: a neural upscaler
+-- takes a minute or two, the model's download before it the first time. Returns the timer
+local STAGES = { upscale = "drawing detail", download = "downloading the upscaler's model" }
+local function watch_photo(file, saving)
+    return mp.add_periodic_timer(0.5, function()
+        local f = io.open(file, "r")
+        local p = f and utils.parse_json(f:read("*a") or "")
+        if f then f:close() end
+        if type(p) == "table" and STAGES[p.stage] and p.done then
+            mp.osd_message(string.format("%s %s, %d %%", saving, STAGES[p.stage], p.done), 60)
+        end
+    end)
+end
+
 local function photo()
     local path = local_path()
     if not path or not installed("Photo") then return end
@@ -808,6 +830,10 @@ local function photo()
     end
     local dir = photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
+    upscale_args(args)
+    -- Its progress, while a neural upscaler draws (a minute or two)
+    local progress = temp_name("json")
+    table.insert(args, "--progress"); table.insert(args, progress)
     -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
     local frame_args, frame_file = gpu_frame()
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
@@ -815,10 +841,14 @@ local function photo()
     photos = photos + 1
     local name = platform.file_name(path)
     local kind = mode == "live" and "Live Photo" or mode == "motion" and "Motion Photo" or "photo"
-    mp.osd_message("Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…", 60)
+    local saving = "Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…"
+    mp.osd_message(saving, 60)
+    local watch = watch_photo(progress, saving)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         photos = photos - 1
+        watch:kill()
+        os.remove(progress)
         if frame_file then os.remove(frame_file) end
         local err = r and r.stderr or ""
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
@@ -827,7 +857,10 @@ local function photo()
             tell_catalog(out)
             publish()
             local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
-            mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
+            -- Saved as the warp drew it when its upscaler couldn't run (no model yet, say): why
+            local plain = err:match("\n  not upscaled %(.-%): ([^\r\n]+)")
+            if plain then saved = saved .. ", not upscaled (" .. plain .. ")" end
+            mp.osd_message(saved .. ": " .. platform.file_name(out), plain and 8 or 4)
             notify(saved, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
@@ -879,6 +912,7 @@ mp.register_script_message("photo-at", function(json)
     -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
     local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
+    upscale_args(args)
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
@@ -888,6 +922,16 @@ mp.register_script_message("photo-at", function(json)
         mp.msg.warn("photo: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
+end)
+
+-- The upscalers there are: the neural ones need macOS (afp-upscale, Core ML)
+local UPSCALERS = { auto = "Auto: by how much the frame is enlarged", none = "None: as the warp draws it", fsr = "FSR: sharper edges, nothing added",
+                    realesrgan = "Real-ESRGAN: draws detail that wasn't in the frame", swinir = "SwinIR-L: draws detail that wasn't in the frame" }
+mp.register_script_message("photo-upscaler", function(how)
+    if not UPSCALERS[how] or ((how == "realesrgan" or how == "swinir") and not platform.macos) then return end
+    mp.set_property_native("user-data/gyroflow/photo_upscaler", how)
+    platform.save_options("gyroflow", { { "photo_upscaler", how } })
+    mp.osd_message("Photos upscaled: " .. UPSCALERS[how], 2)
 end)
 
 -- Live Photos need afp-photo (macOS)

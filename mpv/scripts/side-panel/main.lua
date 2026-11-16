@@ -1346,6 +1346,24 @@ local function crop_part(u, x, w, y)
     local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
     if platform ~= "darwin" then table.remove(modes, 2) end
     y = u:select_row(x, w, y + 10 * s, "crop-live", "Photo", choices(modes, "script-message-to gyroflow live-photo"), mode)
+    -- What makes its pixels where the frame is enlarged past the camera's (gyroflow.conf's photo_upscaler,
+    -- docs/photo-upscaling.md): the neural ones draw detail, and need macOS
+    local ups = { { "auto", "Auto", "by the zoom" }, { "none", "None", "the warp's" }, { "fsr", "FSR", "sharp edges" } }
+    if platform == "darwin" then
+        ups[#ups + 1] = { "realesrgan", "Real-ESRGAN", "draws detail" }
+        ups[#ups + 1] = { "swinir", "SwinIR-L", "draws detail" }
+    end
+    local up = g.photo_upscaler or "auto"
+    y = u:select_row(x, w, y, "crop-upscale", "Upscale", choices(ups, "script-message-to gyroflow photo-upscaler"), up)
+    local UP_NOTES = {
+        auto = platform == "darwin" and "Enlarged a little: FSR. More than 2.4×: SwinIR-L, which draws detail that wasn't in the frame"
+               or "Enlarged more than 1.1×: FSR",
+        none = "As the stabilization's warp draws it, as it plays",
+        fsr = "AMD's FSR 1: sharper edges, nothing added",
+        realesrgan = "Draws detail that wasn't in the frame: plausible texture, sometimes things that were never there. A minute or so",
+        swinir = "Draws detail that wasn't in the frame: plausible texture, sometimes things that were never there. A minute or two",
+    }
+    if UP_NOTES[up] then y = u:caption(x, w, y, UP_NOTES[up], { color = C.label }) end
     y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
     local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
               or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"

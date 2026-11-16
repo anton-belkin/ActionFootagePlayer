@@ -120,6 +120,8 @@ install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
 # gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
 swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
+# Its neural upscalers (--upscale realesrgan|swinir): Core ML, the models fetched into Application Support on first use
+swiftc -O -target arm64-apple-macos12 macos/upscale.swift -o "$gyroflow/afp-upscale"
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -137,7 +139,7 @@ fi
 # existing signature"
 sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signature" >&2 || true; }; return "${PIPESTATUS[0]}"; }
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-gpu-table" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" "$gyroflow/afp-meta" "$gyroflow/afp-catalog" "$gyroflow/gyroflow-optical" \
-          "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
+          "$gyroflow/afp-photo" "$gyroflow/afp-upscale" "$sdrcheck/sdr-check"; do
     sign "$f"
 done
 sign "$app"

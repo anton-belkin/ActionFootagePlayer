@@ -200,7 +200,11 @@ QuickTime location): the camera's GPS at that time, else the clip's location in 
                    say how; at most 1920 wide or high): a HEIC becomes a Live Photo (a .mov next to it, paired by
                    afp-photo), a JPEG a Motion Photo (<name>.MP.jpg, the MP4 inside it, as Android's cameras write it;
                    its video in the image's SDR look, which the apps showing it all play alike)
-  --quality <0-100>  the image's quality (default 92)";
+  --quality <0-100>  the image's quality (default 92)
+  --upscale <auto|none|fsr|realesrgan|swinir>  what makes the pixels a crop stretched past the camera's has
+                   (docs/photo-upscaling.md): none, the warp's interpolation (the default); FSR 1; Real-ESRGAN x4plus
+                   or SwinIR-L, neural networks that draw detail that wasn't in the frame (macOS: afp-upscale, models
+                   in the app's data folder); auto: none up to a stretch of 1.1, FSR to 2.4, SwinIR-L past it";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
 const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
@@ -262,6 +266,8 @@ struct Options {
     quality: u8,
     sdr_image: Option<String>,
     live: bool,
+    /// --upscale (upscale.rs)
+    upscale: vs_gyroflow::upscale::Choice,
     // --youtube: the SDR look of the LUT inside (None: auto), and its levels
     youtube: Option<Option<vs_gyroflow::youtube::Look>>,
     youtube_levels: vs_gyroflow::youtube::Levels,
@@ -316,6 +322,7 @@ fn main() {
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
+                             upscale: vs_gyroflow::upscale::Choice::Fixed(vs_gyroflow::upscale::Upscaler::None),
                              youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -417,6 +424,8 @@ fn main() {
                 .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
                 .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
             "--image" => opts.image = Some(PathBuf::from(value("--image"))),
+            "--upscale" => { let v = value("--upscale"); opts.upscale = vs_gyroflow::upscale::Choice::parse(&v)
+                .unwrap_or_else(|| fail(&format!("unknown upscaler {v} (auto, none, fsr, realesrgan, swinir)"))); }
             "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
                 v @ ("maker" | "nbcu" | "macos") => v.to_string(),
                 v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
@@ -2049,7 +2058,7 @@ impl Post {
         if sources.is_empty() { return None; }
         let matrix = gpu_lut::matrix_coefficients(yuv_matrix(info.matrix.as_deref())).unwrap_or((0.2126, 0.0722));
         let config = |sources: Vec<String>, data, params| vs_gyroflow::user_shader::Config { sources, size, prelude: format!("#define RT vec2({}.0, {}.0)", size.0, size.1),
-                                                                                        data, matrix, full_range: info.full_range, params };
+                                                                                        data, matrix, full_range: info.full_range, params, output: None };
         match vs_gyroflow::user_shader::Shaders::new(config(sources.clone(), data, params)) {
             Ok(shaders) => Some(Post { shaders, chromatic, radius, fps, label: labels.join(", ") }),
             Err(e) => {
@@ -2253,6 +2262,64 @@ fn photo_link(clip: &Path, opts: &Options, t: f64) -> String {
     ws::with_fingerprint(&serde_json::Value::Object(o).to_string(), clip)
 }
 
+/// --upscale: the photo's renditions upscaled as it says (upscale.rs), and what was done, for the summary line. A
+/// failure leaves them as the warp drew them, said on stderr
+fn upscale_photo(opts: &Options, sdr: vs_gyroflow::photo::Image, hdr: Option<vs_gyroflow::photo::Image>, stretch: Option<f64>)
+    -> (vs_gyroflow::photo::Image, Option<vs_gyroflow::photo::Image>, String) {
+    use vs_gyroflow::upscale::{ self as up, Upscaler };
+    let Some(s) = stretch else { return (sdr, hdr, String::new()) };
+    let which = opts.upscale.resolve(s);
+    let said = |u: Upscaler| format!(" · stretched {s:.2}x, {}", u.label());
+    let progress = |stage: &str, share: f64| opts.progress.write(serde_json::json!({ "pid": std::process::id(), "stage": stage, "done": (share * 100.0).round() }));
+    let tried = match which {
+        Upscaler::None => return (sdr, hdr, said(which)),
+        Upscaler::Fsr => fsr_photo(&sdr, hdr.as_ref(), s),
+        u => (|| {
+            let helper = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("afp-upscale"))).filter(|p| p.is_file())
+                .unwrap_or_else(|| tool("afp-upscale"));
+            if !cfg!(target_os = "macos") || !helper.is_file() { return Err(format!("{} needs afp-upscale (macOS)", u.label())); }
+            let model = up::ensure_model(u.model().ok_or("no model")?, &|f| progress("download", f))?;
+            let (sw, sh) = up::source_size((sdr.width, sdr.height), s);
+            eprintln!("  upscaling by {}: {sw}x{sh} (the source's pixels) x4, then to {}x{}", u.label(), sdr.width, sdr.height);
+            up::neural(&model, &helper, &std::env::temp_dir(), &sdr, hdr.as_ref(), s, &|f| progress("upscale", f))
+        })(),
+    };
+    match tried {
+        Ok((sdr, hdr)) => (sdr, hdr, said(which)),
+        Err(e) => { eprintln!("  not upscaled ({}): {e}", which.label()); (sdr, hdr, format!(" · stretched {s:.2}x, not upscaled")) }
+    }
+}
+
+/// The player's FSR 1 (fsr.glsl, docs/gpu-render.md), for photos as for the GPU path's upscale to the screen
+const FSR_GLSL: &str = include_str!("../../../mpv/scripts/gyroflow/fsr.glsl");
+/// Its sharpening, stops (gyroflow.conf's fsr_sharpness default)
+const FSR_SHARPNESS: f64 = 0.2;
+
+/// FSR 1 for a still: the crop shrunk to the source's density, then fsr.glsl's EASU and RCAS on the GPU (at most twice
+/// each way, as in the player), Lanczos for the rest. Each rendition on its own: FSR adds no detail, it sharpens edges
+fn fsr_photo(sdr: &vs_gyroflow::photo::Image, hdr: Option<&vs_gyroflow::photo::Image>, stretch: f64)
+    -> Result<(vs_gyroflow::photo::Image, Option<vs_gyroflow::photo::Image>), String> {
+    use vs_gyroflow::upscale::{ self as up, Filter };
+    use vs_gyroflow::photo::Image;
+    let (w, h) = (sdr.width, sdr.height);
+    let (sw, sh) = up::source_size((w, h), stretch);
+    let (sw, sh) = (sw & !1, sh & !1);
+    if sw >= w || sh >= h { return Ok((sdr.clone(), hdr.cloned())); }
+    let mut shaders = vs_gyroflow::user_shader::Shaders::new(vs_gyroflow::user_shader::Config {
+        sources: vec![std::env::var("AFP_FSR_GLSL").ok().and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_else(|| FSR_GLSL.to_string())],
+        size: (sw, sh), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: true,
+        params: vec![("afp_fsr".into(), 1.0), ("afp_fsr_sharpness".into(), FSR_SHARPNESS)], output: Some((w, h)) })?;
+    let mut one = |img: &Image| -> Result<Image, String> {
+        let small = up::resize(img, sw, sh, Filter::Lanczos3);
+        let ((fw, fh), pixels) = shaders.render_rgb(&small.pixels)?;
+        let done = Image { width: fw, height: fh, pixels: pixels.into_iter().map(|p| p.map(|v| v.clamp(0.0, 1.0))).collect() };
+        Ok(up::resize(&done, w, h, Filter::Lanczos3))
+    };
+    let s = one(sdr)?;
+    let h = match hdr { Some(i) => Some(one(i)?), None => None };
+    Ok((s, h))
+}
+
 /// A place for afp-photo's --gps: "lat,lon[,alt]"
 fn gps_arg(p: &vs_gyroflow::geotag::Fix) -> String {
     format!("{:.8},{:.8}{}", p.lat, p.lon, p.alt.map(|a| format!(",{a:.3}")).unwrap_or_default())
@@ -2307,9 +2374,24 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     // shows it as the player does
     let motion_sdr = jpeg.then(|| if sdr_look == "maker" && curve == Some("dlogm") { "maker" } else { "nbcu" });
 
+    // The crop's stretch, for --upscale (upscale.rs): output pixels per source pixel across --crop's part of a frame
+    // rendered at `render`, through the view's parameters `index` of `views`
+    let video_size = (w, h);
+    let want_stretch = opts.upscale != vs_gyroflow::upscale::Choice::Fixed(vs_gyroflow::upscale::Upscaler::None);
+    let crop_px = |(rw, rh): (usize, usize)| {
+        let [cx, cy, cw, ch] = opts.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+        let even = |v: f64| (v.round() as usize) & !1;
+        let (x0, y0) = (even(cx * rw as f64).min(rw - 2), even(cy * rh as f64).min(rh - 2));
+        (x0, y0, even(cw * rw as f64).clamp(2, rw - x0), even(ch * rh as f64).clamp(2, rh - y0))
+    };
+    let stretch_of = |views: &vs_gyroflow::Views, index: usize, render: (usize, usize)| -> Option<f64> {
+        let p = camera.apply(views.params.get(index)?);
+        vs_gyroflow::upscale::stretch(&p, n as usize, fps, render, crop_px(render), video_size)
+    };
+
     // The image: the frame at `t`, cleaned up from its neighbours, in the HDR look and the SDR one the image is
-    // (--sdr-image)
-    let image = || -> Result<(ph::Image, Option<ph::Image>, String, usize), String> {
+    // (--sdr-image); and the crop's stretch when --upscale needs it
+    let image = || -> Result<(ph::Image, Option<ph::Image>, String, usize, Option<f64>), String> {
         // The player's own render (--image): the HDR look as it is, cut to the frame; the SDR image from it
         if let Some(img) = &opts.image {
             let (iw, ih, raw) = read_png16(img)?;
@@ -2330,13 +2412,22 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let hdr = ph::Image { width: w, height: h, pixels };
             eprintln!("{}: photo at {t:.2} s (frame {n}), {w}x{h} as the player rendered it", file_name(file));
             lap("the player's frame read");
+            // Its stretch: the clip's parameters as the player has them (no GPU workers, no frames)
+            let stretch = match &source {
+                Some(s) if want_stretch => vs_gyroflow::prepare(&s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, video_size, None,
+                                                                opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project, opts.frame, s.lens, None)
+                    .ok().and_then(|prep| stretch_of(&prep.views, prep.view_index, (iw, ih))).or(Some(1.0)),
+                _ if want_stretch => Some(iw as f64 / video_size.0 as f64),
+                _ => None,
+            };
+            if want_stretch { lap("stretch measured"); }
             let (sdr, how) = if sdr_look == "macos" && cfg!(target_os = "macos") && helper.is_file() {
                 (macos_sdr(&helper, &hdr, &out_dir)?, "as macOS shows the HLG")
             } else {
                 (Cube::load(&lut(NBCU_HLG)?)?.apply_type3(&hdr), "NBCU")
             };
             lap("colors");
-            return Ok((sdr, Some(hdr), format!("HLG as the player rendered it: SDR {how}, HDR HLG"), 0));
+            return Ok((sdr, Some(hdr), format!("HLG as the player rendered it: SDR {how}, HDR HLG"), 0, stretch));
         }
         let engine = match &source {
             Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
@@ -2454,6 +2545,11 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         let edge_label = if edges == EdgeMode::Off { String::new() } else { format!(", edges {}", format!("{edges:?}").to_lowercase()) };
         eprintln!("{}: photo at {t:.2} s (frame {n}), {}x{} from frames {near}-{last}{edge_label}", file_name(file), rw, rh);
         let (window, rendered) = render(first, (fps / 15.0).round().max(1.0) as u64)?;
+        // The stretch, from the engine's own parameters; without stabilization the frame as decoded
+        let stretch = want_stretch.then(|| match &engine {
+            Some(e) => stretch_of(&e.views, e.views.index(view, e.level.unwrap_or(opts.level)), (rw, rh)).unwrap_or(1.0),
+            None => rw as f64 / dw as f64,
+        });
         drop(engine);
         lap(&format!("frames rendered ({rendered})"));
         let target = window.iter().position(|(i, _)| *i == n).ok_or("the frame isn't in the video")?;
@@ -2530,7 +2626,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         };
         let label = if hdr.is_some() { format!("{recorded}: SDR {how}, HDR HLG") } else { format!("SDR {how}") };
         lap("colors");
-        Ok((sdr, hdr, label, cleaned))
+        Ok((sdr, hdr, label, cleaned, stretch))
     };
 
     // The camera, and where the frame was taken (the camera's GPS at its time, else the Library's location for the
@@ -2566,7 +2662,10 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         // No image: the motion is of no use either
         // (said here: the stop makes the caller say only "cancelled")
         if let Err(e) = &made { eprintln!("  no photo: {e}"); STOP.store(libc::SIGTERM, Relaxed); }
-        let (sdr, hdr, label, cleaned) = made?;
+        let (sdr, hdr, label, cleaned, stretch) = made?;
+        // Upscaled (--upscale): a neural one takes a minute or more, the motion is done by then
+        let (sdr, hdr, upscaled) = upscale_photo(opts, sdr, hdr, stretch);
+        lap("upscaled");
         let live = match motion.map(|m| m.join()) {
             None => None,
             Some(Ok(Ok(v))) => Some(v),
@@ -2606,7 +2705,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
         }
         lap("written");
-        eprintln!("  {label} · {}x{}{} · {}", sdr.width, sdr.height,
+        eprintln!("  {label} · {}x{}{upscaled}{} · {}", sdr.width, sdr.height,
                   if cleaned > 0 { format!(" · cleaned up from {cleaned} frames") } else { String::new() },
                   if hdr.is_some() { if jpeg { "Ultra HDR JPEG" } else { "HEIC with a gain map" } } else if jpeg { "JPEG" } else { "HEIC" });
         if live.is_some() { eprintln!("  {}", if jpeg { "Motion Photo: the video in the JPEG" } else { "Live Photo: the .mov next to it" }); }

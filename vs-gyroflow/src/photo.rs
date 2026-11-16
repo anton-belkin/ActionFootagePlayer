@@ -91,14 +91,14 @@ pub fn yuv420p10_to_rgb(planes: [&[u16]; 3], width: usize, height: usize, rect: 
 }
 
 /// HLG's signal to scene light (BT.2100's inverse OETF)
-fn hlg_inverse_oetf(e: f32) -> f32 {
+pub(crate) fn hlg_inverse_oetf(e: f32) -> f32 {
     const A: f32 = 0.178_832_77;
     const B: f32 = 0.284_668_92;
     const C: f32 = 0.559_910_7;
     if e <= 0.5 { e * e / 3.0 } else { (((e - C) / A).exp() + B) / 12.0 }
 }
 
-fn srgb_to_linear(v: f32) -> f32 {
+pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
 }
 

@@ -174,6 +174,10 @@
 --                (a .mov next to the HEIC, for Apple's devices; macOS only), motion, a Motion Photo (an Ultra HDR JPEG
 --                with the video in it, for Android's), no, the still alone; yes: Live Photos on macOS, Motion Photos
 --                elsewhere. The Save frame panel's choice sets it, kept here at once (export.lua)
+--   photo_upscaler=auto  what makes a photo's pixels where its crop is stretched past the camera's (gyroflow-export
+--                --upscale, docs/photo-upscaling.md): none, the warp's own; fsr, FSR 1; realesrgan or swinir, neural
+--                networks that draw detail that wasn't in the frame (macOS); auto, by the stretch: none, FSR, then
+--                SwinIR-L (FSR off macOS). The Save frame panel's choice sets it, kept here at once (export.lua)
 --   gyroflow_app=   Gyroflow for Ctrl+e on Linux and Windows: its executable (default: gyroflow in PATH on Linux,
 --                   the app .gyroflow files open with on Windows). macOS opens the app by its bundle id
 --   sphere_width=0  a 360 camera's own file (below): the sphere's width (its height half of it), 0 for the plugin's
@@ -213,7 +217,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", upscaler = "fsr", fsr_sharpness = 0.2, paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", upscaler = "fsr", fsr_sharpness = 0.2, paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", photo_upscaler = "auto", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -2645,6 +2649,10 @@ do
     local v = tostring(o.live_photo)
     if v ~= "no" and v ~= "motion" and not (v == "live" and platform.macos) then v = platform.macos and "live" or "motion" end
     mp.set_property_native("user-data/gyroflow/live_photo", v)
+    -- And their upscaler (auto, none, fsr, realesrgan, swinir; the neural ones need macOS)
+    local up = tostring(o.photo_upscaler)
+    local known = { auto = true, none = true, fsr = true, realesrgan = platform.macos, swinir = platform.macos }
+    mp.set_property_native("user-data/gyroflow/photo_upscaler", known[up] and up or "auto")
 end
 require 'export'
 

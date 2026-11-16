@@ -369,6 +369,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `upscaler=fsr`, `fsr_sharpness=0.2` | on the GPU path, when the stabilized frame renders smaller than it shows (`resolution` above, or `auto` with the temporal denoise on), what takes it up to the screen: `fsr`, AMD's FSR 1 after the look (an edge-adaptive upscale, then a sharpening; `fsr_sharpness` in stops below its strongest, 0 to 2), or `mpv`, mpv's own scaler (lighter, softer); `off`: no FSR, and the render at the size it had before FSR (`auto`: the display's, at most 1080p with the denoise), to compare. The panel's Quality › Sharpen (FSR) switches between `fsr` and `off` at once. When frames drop, the offer of lighter settings includes `mpv` |
 | `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
+| `gyroflow.conf`: `photo_upscaler=auto` | what makes a photo's pixels where its frame is stretched past the camera's (docs/photo-upscaling.md): `none` (the stabilization's warp, as it plays), `fsr` (AMD's FSR 1: sharper edges, nothing added), `realesrgan` or `swinir` (neural networks that **draw detail that wasn't in the frame**: plausible texture, sometimes things that were never there; macOS, a minute or two, the model downloaded the first time); `auto`: none up to a stretch of 1.1, FSR up to 2.4, SwinIR-L past it (FSR off macOS). The Save frame panel's Upscale sets it |
 | `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
 | `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
@@ -1457,6 +1458,7 @@ tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch),
                               Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
 tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
 tools/fsrbench/               the GPU chain (warp, look, FSR) offscreen through libplacebo, timed per pass, frames saved
+tools/upscalers/convert.py    the photo upscalers' models from their PyTorch weights to Core ML, for macos/upscale.swift
 tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
@@ -1478,6 +1480,12 @@ builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and ot
 at build). The sources are also available from this project on request.
 
 ## Credits
+
+The photo upscalers' models (`photo_upscaler=realesrgan|swinir`, docs/photo-upscaling.md) are Core ML conversions
+(`tools/upscalers/convert.py`) of [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)'s `RealESRGAN_x4plus`
+(Copyright (c) 2021, Xintao Wang, BSD 3-Clause License) and [SwinIR](https://github.com/JingyunLiang/SwinIR)'s
+SwinIR-L real-world x4 GAN model (Copyright 2021 SwinIR Authors, Apache License 2.0). They aren't in the app: it
+downloads them on first use, each zip with its license (`<model>.mlpackage.LICENSE`).
 
 The GPU path's upscale to the screen (`mpv/scripts/gyroflow/fsr.glsl`) is a port of AMD's
 [FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) (EASU and RCAS, Copyright (c)

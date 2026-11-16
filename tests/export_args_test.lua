@@ -2,6 +2,7 @@
 -- the clip's clean-up as it plays (the temporal denoise, its Stronger, the water's color fringes), the clip playing
 -- (Shift+E) from the plugin's state, another clip (the Library's batch, a photo of a mark) from its saved view, else
 -- the session's, else the app's defaults; Performance & Quality's temporal denoise says how much (light, full, off).
+-- And a photo's upscaler (docs/photo-upscaling.md).
 -- From the repository's folder: luajit tests/export_args_test.lua
 
 local failures, checks = 0, 0
@@ -120,6 +121,12 @@ a = last()
 expect("photo-at: --photo", has(a, "--photo 4.5000"), true)
 expect("photo-at: the view's fringes", has(a, "--chromatic no"), true)
 expect("photo-at: the session's denoise for its motion", has(a, "--denoise full"), true)
+
+-- Its upscaler: Auto unless Save frame's Upscale says otherwise (gyroflow.conf's photo_upscaler)
+expect("photo-at: Auto by default", has(a, "--upscale auto"), true)
+props["user-data/gyroflow/photo_upscaler"] = "swinir"
+messages["photo-at"]("photo")
+expect("photo-at: the upscaler chosen", has(last(), "--upscale swinir"), true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
