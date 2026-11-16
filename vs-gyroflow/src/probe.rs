@@ -175,6 +175,10 @@ pub struct LensInfo {
     pub curated_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curated_error: Option<String>,
+    /// The Gyroflow project beside the clip, when there is one: the lens it uses and where the list would keep it as the
+    /// default for the clip's camera, mode and size (`project_lens_answer`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<serde_json::Value>,
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
@@ -184,7 +188,8 @@ pub fn lens_info(path: &str) -> Option<LensInfo> {
     lens_read(path).or_else(|| crate::geotag::dji_model(p).or_else(|| crate::geotag::gopro_model(p)).map(|camera| LensInfo { camera, ..Default::default() }))
 }
 
-fn lens_read(path: &str) -> Option<LensInfo> {
+/// The clip as its lens is decided (`lens_pick::Clip`), and whether the file has its own lens
+fn lens_clip(path: &str) -> Option<(lens_pick::Clip, bool)> {
     let url = filesystem::path_to_url(path);
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
@@ -199,6 +204,41 @@ fn lens_read(path: &str) -> Option<LensInfo> {
         Some(input) => lens_pick::Clip::from_input(path, input, video.width, video.height, video.fps),
         None => lens_pick::Clip::from_file(path, video.width, video.height),
     };
+    Some((clip, in_file))
+}
+
+/// The lens of the Gyroflow project beside the clip and where the user's list would keep it: {"lens" (its name),
+/// "key" (of Gyroflow's database, null for a calibration of one's own), "camera", "type", "type_label", "size",
+/// "new_type", "saved" (the list gives it already)}, or {"lens"?, "error"} when it can't be kept; None without a project
+fn project_lens_answer(path: &str, clip: &lens_pick::Clip) -> Option<serde_json::Value> {
+    let project = lens_pick::project_beside(path)?;
+    let lens = match lens_pick::project_lens(&project) {
+        Ok(l) => l,
+        Err(e) => return Some(serde_json::json!({ "error": e })),
+    };
+    Some(match lens_pick::list_key(path, clip) {
+        Ok(key) => {
+            let mut v = serde_json::to_value(&key).unwrap_or_default();
+            v["lens"] = lens.name.clone().into();
+            v["key"] = lens.key.clone().into();
+            v["saved"] = lens_pick::is_default(&key, &lens).into();
+            v
+        }
+        Err(e) => serde_json::json!({ "lens": lens.name, "error": e }),
+    })
+}
+
+/// Keeps the lens of the Gyroflow project beside the clip as the default for its camera, mode and size, in the
+/// user's list (`lens_pick::save_default`): what was kept, as `lens_pick::Saved`
+pub fn save_project_lens(path: &str) -> Result<serde_json::Value, String> {
+    let project = lens_pick::project_beside(path).ok_or("there's no Gyroflow project beside the clip")?;
+    let lens = lens_pick::project_lens(&project)?;
+    let (clip, _) = lens_clip(path).ok_or("the clip can't be read")?;
+    lens_pick::save_default(path, &clip, &lens).and_then(|s| serde_json::to_value(s).map_err(|e| e.to_string()))
+}
+
+fn lens_read(path: &str) -> Option<LensInfo> {
+    let (clip, in_file) = lens_clip(path)?;
     let pick = chosen_lens(path, &clip, in_file);
     let focal_only = pick.as_ref().is_some_and(|p| p.focal_only);
     let lens = match pick {
@@ -213,7 +253,8 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let mode = if types.is_empty() { None } else { recorded_lens_mode(path) };
     let lists = lens_pick::lists();
     let curated_file = lists.user_file.as_ref().map(|f| f.to_string_lossy().to_string());
-    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone() })
+    let project = project_lens_answer(path, &clip);
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone(), project })
 }
 
 /// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player corrects the video with
