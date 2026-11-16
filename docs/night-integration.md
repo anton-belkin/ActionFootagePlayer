@@ -1,7 +1,7 @@
 # The night's Library work in one branch (2026-11-16)
 
 Branch `claude/night-integration-fd9085`: the night's branches merged, for one thing to try in the morning. **It is not
-for merging**: the PRs are the seven below; fixes found here are listed so they can go to the PR they belong to.
+for merging**: the PRs are the ones in the table below; fixes found here are listed so they can go to the PR they belong to.
 
 ## What is in it
 
@@ -222,5 +222,5 @@ Unfinished, known:
   adapted, not run. The numbers in `docs/library-responsiveness.md` are #237's own, not this branch's.
 - The star chip and "In an album" use the tags' chip style (`chip tag`).
 
-For the PRs: the cross-feature fixes above belong after the seven are merged in the order of the table; the
+For the PRs: the cross-feature fixes above belong after the PRs are merged in the order of the table; the
 conflicts will come back in that order and this branch's merge commits show each resolution.
