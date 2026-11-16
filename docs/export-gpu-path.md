@@ -8,7 +8,7 @@ build, is **not done**: the reason is in the verdict.
 
 **Update, the zero-copy spike** (see "The zero-copy spike" below): libplacebo called directly, with VideoToolbox
 IOSurfaces imported into Vulkan, renders the player's shader with its real `PTS` at the encoder's speed. The
-D-Log M clip takes **19.5 s, against 18.1 s for the encoder alone, 24.6 s for the filter and 53.8 s today**. It is the
+D-Log M clip takes **18.9-19.1 s, against 18.1 s for the encoder alone, 24.6 s for the filter and 53.8 s today**. It is the
 same picture as the filter path. That is the route to "render what you see, no longer than encoding takes". The
 filter findings below stand as the comparison.
 
@@ -342,7 +342,8 @@ M1 Pro):
 |---|---|---|---|
 | LUT shader only (≈ the encoder's floor) | **18.1 s** | 51 | the encoder: waits 18.4 ms a frame on it, 0.1 ms on the GPU |
 | Player's warp + fringes + LUT, warm | **19.3-19.6 s** | 47-48 | the GPU: about 19.7 ms a frame; the encoder waits 0.05 ms |
-| The same, first run after a build | 27.0-27.4 s | 34 | cold start: pipeline compile and clocks, and another session's `rustc` was loading the machine (load 13-50) |
+| The same, on a quiet machine (load < 5), 3 runs in a row, first one included | **18.9-19.05 s** | 48.6-49 | the GPU: 17.2 ms a frame |
+| The same, while another session's `rustc` loaded the machine (load 13-50) | 27.0-27.4 s | 34 | the load, not a cold start: on a quiet machine the first run is as fast |
 | The same, without the overlap (`pl_gpu_finish` each frame) | 20.1 s | 46 | |
 
 **Against the earlier paths** for the same clip and settings:
@@ -351,10 +352,10 @@ M1 Pro):
 |---|---|
 | Today's exporter | 53.8 s |
 | ffmpeg libplacebo filter | 24.6 s |
-| **Spike, warm** | **19.5 s** |
+| **Spike** | **18.9-19.1 s** |
 | Real time | 15.5 s |
 
-So with fringes it is **within 8 % of the encoder alone**, 2.8× faster than today. Without fringes (29.1 s today)
+So with fringes it is **within 5 % of the encoder alone**, 2.8× faster than today. Without fringes (29.1 s today)
 it should land at the same encoder-bound ~18-19 s; not run.
 
 **Pictures.**
