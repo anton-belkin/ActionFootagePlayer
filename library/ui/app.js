@@ -93,12 +93,11 @@ const S = {
   tab: remembered("afl.tab", "info"), sideOpen: remembered("afl.side", "1") === "1", menu: false, recent: [],
   // Source settings changed in the Source Settings tab, not written yet (key -> value), and for which clips
   srcDraft: {}, srcFor: null,
-  photoKind: "live", exportSdr: false, jobs: [], finished: 0,
+  photoKind: "live", jobs: [], finished: 0,
   locations: [], connecting: {}, via: null, sheet: null, stab: "loc", settings: null, locEdit: [], localEdit: [], hostsText: "",
   checking: false, checked: null, finding: false, found: null,
   take: null, takePlace: "", taking: false, tagDraft: "",
   geoHand: "", geoSite: "", geo: null, geoBusy: false, geoClips: [], geoStatus: "", geoMax: 3, geoPick: null, geoKeep: true, geoHad: [],
-  profiles: { HDR: true, SDR: false },
   scanning: {}, cachedViews: {}, renaming: null,
   hist: [], histAt: -1,
   // Stabilize optically: the lens chosen for the selected clips ("keep": each as it is, "recorded": as the camera
@@ -397,10 +396,12 @@ function buildFacets() {
   const tagList = [];
   for (const it of items) for (const t of it.tags || []) if (tagList.indexOf(t) < 0) tagList.push(t);
   if (tagList.length) sections.push({ id: "tg", title: "Tags", facets: [{ id: "tag", title: "Tag", opts: tagList.sort().map((t) => L("tag:" + t, t, (it) => (it.tags || []).indexOf(t) >= 0)) }] });
-  if (has("moment")) {
+  // What's rendered (the render cache: renders.rs): moments in HDR and SDR, photo links as photos
+  const photoLinks = items.some((i) => i.kind === "still" && i.linked);
+  if (has("moment") || photoLinks) {
     const rf = (p, st) => (it) => (it.renders || {})[p] === st;
-    sections.push({ id: "rn", title: "Renders", facets: ["HDR", "SDR"].map((p) => ({ id: "rn" + p, title: p, opts: [
-      L("rn:" + p + ":c", "Current", rf(p, "current")), L("rn:" + p + ":s", "Stale", rf(p, "stale")), L("rn:" + p + ":n", "None", (it) => !(it.renders || {})[p])] })) });
+    sections.push({ id: "rn", title: "Renders", facets: (has("moment") ? ["HDR", "SDR"] : []).concat(photoLinks ? ["Photo"] : []).map((p) => ({ id: "rn" + p, title: p, opts: [
+      L("rn:" + p + ":c", "Current", rf(p, "current")), L("rn:" + p + ":s", "Stale", rf(p, "stale")), L("rn:" + p + ":n", "None", (it) => (p === "Photo" ? it.kind === "still" && it.linked : it.kind === "moment") && !(it.renders || {})[p])] })) });
   }
   if (has("still")) {
     sections.push({ id: "frm2", title: "Photos", facets: [{ id: "form", title: "Photo", opts: distinct(items.filter((i) => i.kind === "still"), (i) => i.form).map((f) => L("form:" + f, f, (it) => it.form === f)) }] });
@@ -560,7 +561,7 @@ function renderMain() {
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
-  if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + '</div>';
+  if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + shareBar(c) + '</div>'; // albums.js, share.js
   const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
   const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
@@ -771,19 +772,19 @@ function queueHtml() {
     const other = j.project !== S.root ? " · " + j.project_name : "";
     h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div>' +
       (j.state === "waiting" ? "" : '<div class="bar2"><i style="width:' + pct.toFixed(1) + '%"></i></div>') +
-      '<div class="t"><span class="sub" style="flex:1">' + esc([what, j.current].filter(Boolean).join(" · ")) + '</span><button type="button" class="btn sm" data-a="cancel" data-v="' + j.id + '">' + (j.state === "waiting" ? "Remove" : "Stop") + '</button></div></div>';
+      '<div class="t"><span class="sub" style="flex:1">' + esc([what, j.current].filter(Boolean).join(" · ")) + '</span><button type="button" class="btn sm" data-a="cancel" data-v="' + j.id + '">' + (j.state === "waiting" ? "Remove" : "Stop") + '</button></div>' + shareJobDetails(j) + '</div>'; // share.js
   }
   if (done.length) {
     h += '<div class="qh" style="display:flex;align-items:center">Done<button type="button" class="btn sm" data-a="clearjobs" style="margin-left:auto">Clear</button></div>';
     for (const j of done) {
       const parts = [];
-      if (j.made != null) parts.push(j.made + " made");
+      if (j.made != null) parts.push(j.made + (j.share ? " saved" : " made"));
       if (j.failed > 0) parts.push(j.failed + " failed");
       if (j.message) parts.push(j.message);
       const other = j.project !== S.root ? " · " + j.project_name : "";
       h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div><span class="sub wrap' + (j.state === "failed" ? " err" : "") + '">' + esc(parts.join(" · ")) + '</span>' +
-        ((j.failures || []).length ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
-        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + '</div>';
+        ((j.failures || []).length && !j.share ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
+        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + shareJobDetails(j) + '</div>';
     }
   }
   h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
@@ -820,18 +821,18 @@ const ICON_TAB = {
   geo: '<path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0 1 13 0c0 4.8-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
   moments: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M7.5 4.5v15M16.5 4.5v15M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/>',
   stabilize: '<circle cx="12" cy="12" r="6"/><path d="M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.2"/>',
-  export: '<path d="M12 15V3.5M7.5 8L12 3.5 16.5 8M5 12.5V20h14v-7.5"/>',
+  share: '<path d="M12 15V3.5M7.5 8L12 3.5 16.5 8M5 12.5V20h14v-7.5"/>',
   queue: '<path d="M9 6.5h11M9 12h11M9 17.5h11M4 5l2.5 1.5L4 8M4 10.5l2.5 1.5L4 13.5M4 16l2.5 1.5L4 19"/>',
   checks: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
 };
-const TABS_TOP = [["info", "Info"], ["source", "Source Settings"], ["tags", "Tags"], ["geo", "Location"], ["moments", "Moments & Photos"], ["stabilize", "Stabilize"], ["export", "Export"]];
+const TABS_TOP = [["info", "Info"], ["source", "Source Settings"], ["tags", "Tags"], ["geo", "Location"], ["moments", "Moments & Photos"], ["stabilize", "Stabilize"], ["share", "Share"]];
 const TABS_LOW = [["queue", "Tasks"], ["checks", "Checks"]];
 const TAB_IDS = TABS_TOP.concat(TABS_LOW).map((t) => t[0]);
 // Whether a part has anything for the view (its icon dimmed where it hasn't: the part then says where that is)
 function tabFits(id) {
   const clips = S.view === "footage" || S.view === "sources";
   if (id === "source" || id === "geo" || id === "moments" || id === "stabilize") return clips;
-  if (id === "export") return S.view === "footage" || S.view === "clip";
+  if (id === "share") return S.view === "footage" || S.view === "sources" || S.view === "clip";
   if (id === "checks") return clips;
   return true;
 }
@@ -860,11 +861,8 @@ function sideBody(c) {
       if (!clipsView) return partHead(title, c, true) + note(S.view === "clip" ? "Moments and photos of this clip’s marks are made on the clip in Originals." : "Moments and photos are made from the clips: select them in Albums or Originals.");
       return partHead(title, c, true) + part(momentsBody(c));
     case "stabilize": return partHead(title, c, true) + (clipsView ? part(opticalBody(c)) : note("Stabilize optically is for clips without motion data: select them in Albums or Originals."));
-    case "export":
-      // Of the moments in the selection (an album holds clips and photos beside them)
-      if (c.moments.length) return partHead(title, c, true) + exportBody(Object.assign({}, c, { selItems: c.moments, label: countText(c.moments) }));
-      return partHead(title, c, true) + note(S.view === "sources" ? "Renders and exports are made of moments: select them in Albums (Moments & Photos makes them of the marks)."
-        : "Renders and exports are made of moments: select moments here (the filter Kind shows only them; Moments & Photos makes them of the clips’ marks).");
+    // Of anything selected: clips, moments, photos, mixed (share.js)
+    case "share": return partHead(title, c, true) + shareBody(c);
     case "checks":
       return partHead(title, c, true) + (clipsView ? part(checksBody(c)) : note("Checks look at clips and moments: in Albums or Originals."));
   }
@@ -901,22 +899,6 @@ function momentsBody(c) {
 }
 // What the Library exports: moments, rendered and exported as the player's Shift+E does (the clips' photos are made in
 // Moments & Previews)
-function exportBody(c) {
-  const on = ["HDR", "SDR"].filter((p) => S.profiles[p]);
-  const stats = on.map((p) => { let cu = 0, st = 0, mi = 0; c.selItems.forEach((it) => { const v = (it.renders || {})[p]; if (v === "current") cu++; else if (v === "stale") st++; else mi++; }); return [p, cu, st, mi]; });
-  const toMake = stats.reduce((n, x) => n + x[2] + x[3], 0);
-  return part('<div class="lab">Render · ' + esc(on.join(", ") || "no profile") + '</div><div class="checks">' +
-      [["HDR", "HLG, as Shift+E exports HDR"], ["SDR", "as Shift+E exports SDR"]].map((p) => '<label title="' + esc(p[1]) + '"><input type="checkbox" id="prof-' + p[0] + '" data-a="prof" data-v="' + p[0] + '"' + (S.profiles[p[0]] ? " checked" : "") + '>' + p[0] + '</label>').join("") + '</div>' +
-      (c.any && stats.length ? '<div class="result">' + stats.map((x) => '<div class="it"><b style="width:36px">' + x[0] + '</b><span>' + x[1] + ' current · ' + x[2] + ' stale · ' + x[3] + ' missing</span></div>').join("") + '</div>' : "") +
-      '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="render"' + (c.any && on.length && !toMake ? " disabled" : "") + '>' + (c.any ? (toMake ? "Render " + toMake + " (missing and stale)" : "All current") : "Render") + '</button>' +
-      '<button type="button" class="btn sm" data-a="delrenders" data-v="stale">Delete stale</button><button type="button" class="btn sm" data-a="delrenders" data-v="all">Delete renders</button></div>' +
-      '<span class="sub wrap">Kept in _Renders/ of the project. An export with the same look copies a current render instead of rendering again. Deleting renders breaks nothing.</span>') +
-    part('<div class="lab">Export · to _Exports/Generated (Other folders)</div>' +
-      '<div class="field"><label class="sub" for="look">Look</label><select id="look" data-a="look"><option value="hdr"' + (S.exportSdr ? "" : " selected") + '>HDR, as the player shows it</option><option value="sdr"' + (S.exportSdr ? " selected" : "") + '>SDR</option></select></div>' +
-      '<span class="sub wrap">Each with its own transform. One already exported in that look is skipped.</span>' +
-      '<div class="btns"><button type="button" class="btn sm pri" data-a="job" data-v="export">Export ' + esc(c.any ? c.label : "") + '</button></div>');
-}
-
 // ---------- Source settings (Batch set Source settings) ----------
 // How each original is read, kept in its own file's `source` beside it (the player's Source tab: the workspace
 // plugin's input, docs/moments-and-workspaces.md "Source and transform"): the log curve, the turn it was recorded with,
@@ -1346,6 +1328,7 @@ function renderSheet() {
   const el = $("sheet");
   if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
   if (S.sheet === "album") { el.innerHTML = renderAlbumSheet(); return; } // albums.js
+  if (S.sheet === "share") { el.innerHTML = renderShareSheet(); return; } // share.js
   if (S.sheet === "geo") { el.innerHTML = renderGeo(); return; }
   if (S.sheet === "geoask") { el.innerHTML = renderGeoAsk(); return; }
   if (S.sheet === "geodenied") { el.innerHTML = renderGeoDenied(); return; }
@@ -1622,6 +1605,7 @@ function openMenu(x, y) {
     if (e.length) parts.push(e.join(""));
     const clips = (S.view === "footage" || S.view === "sources") ? c.selItems.filter((x) => x.kind === "clip").length : 0;
     { const am = albumMenu(c, b); if (am) parts.push(am); } // albums.js
+    { const sm = shareMenu(c, b); if (sm) parts.push(sm); } // share.js
     if (clips) parts.push(b("srcsettings", clips > 1 ? "Batch set Source settings…" : "Source settings…"));
     parts.push(b("info", "Info") + b("selall", "Select all", k("⌘A", "Ctrl+A")) + b("desel", "Select none", k("Esc", "Esc")));
   } else {
@@ -2375,6 +2359,7 @@ async function poll() {
     if (more) refresh();
   }
   renderQueueOnly();
+  shareTick(); // share.js
   $("ask").hidden = !s.close_asked;
   renderMoving(s.moving);
 }
@@ -2412,7 +2397,7 @@ function renderMoving(m) {
 async function addJob(kind) {
   const c = ctx();
   if (!c.any) return;
-  const options = kind === "photos" ? { photo: S.photoKind } : kind === "export" ? { sdr: S.exportSdr } : kind === "render" ? { profiles: ["HDR", "SDR"].filter((p) => S.profiles[p]) }
+  const options = kind === "photos" ? { photo: S.photoKind }
     : kind === "clips" || kind === "clips-again" ? { layout: S.clipsLayout } : kind === "moments" ? { alone: S.alone } : {};
   let label = c.label;
   if (kind === "optical") {
@@ -2434,11 +2419,7 @@ async function addJob(kind) {
     label = op.go.length + (op.go.length === 1 ? " clip" : " clips") + (S.opticalLens !== "keep" ? ", lens " + (S.opticalLens === "recorded" ? "as recorded" : S.opticalLens) : "");
   }
   try {
-    // Renders and exports are of moments: the selected ones, by their paths in the project's folder
-    const ofMoments = kind === "render" || kind === "export";
-    if (ofMoments && !c.moments.length) return showError("Select moments: renders and exports are made of them");
-    if (ofMoments) label = countText(c.moments);
-    await invoke("add_job", { kind, options, only: ofMoments ? c.moments.map((it) => it.id) : c.only, label });
+    await invoke("add_job", { kind, options, only: c.only, label });
     toast("In the queue: " + label);
     showTab("queue");
     renderSide();
@@ -2568,6 +2549,8 @@ document.addEventListener("click", async (e) => {
     case "ql": return quickLook();
     case "renameit": { const c = ctx(); if (canRename(c)) startRename(); else toast(S.view === "sources" ? "Sources’ folders and clips are renamed in Finder" : "A clip is renamed in Finder: Find moved files then follows"); return; }
     case "trash": return deleteSelection();
+    case "share": return askShare(); // share.js
+    case "sharego": return shareGo(v);
     case "albumadd": return askAlbum("add");
     case "albummove": return askAlbum("move");
     case "albumout": return albumOut();
@@ -2580,7 +2563,7 @@ document.addEventListener("click", async (e) => {
     case "removesource": return removeSources(ctx().selFolders);
     case "delrenders": {
       const c = ctx(); if (!c.any) return;
-      try { const r = await invoke("delete_renders", { moments: c.moments.map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
+      try { const r = await invoke("delete_renders", { moments: c.selItems.filter((it) => it.kind === "moment" || (it.kind === "still" && it.linked)).map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
       return;
     }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
@@ -2648,10 +2631,9 @@ document.addEventListener("change", (e) => {
   // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
   if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
   if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
-  if (a === "prof") { S.profiles[v] = el.checked; renderSide(); return; }
+  if (a === "sharelook") { if (S.share) { S.share.look = el.value === "SDR" ? "SDR" : "HDR"; S.share.sel = shareSel(S.share.list, S.share.look); remember("afl.share.look", S.share.look); renderSheet(); renderSide(); } return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
-  else if (a === "look") S.exportSdr = el.value === "sdr";
   // Chosen for each run, remembered on this computer (docs/library-management.md §8), not in the project
   else if (a === "layout_set") { S.clipsLayout = el.value; remember("afl.layout", S.clipsLayout); return; }
   else if (a === "alone_set") { S.alone = el.checked; remember("afl.alone", S.alone ? "1" : ""); return; }
