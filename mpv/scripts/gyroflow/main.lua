@@ -140,6 +140,10 @@
 --                display. A number, 1080 or 720: no bigger than the display and its short side no longer than that,
 --                for a GPU that doesn't keep up at the display's size. On the GPU path the warp, the edge fill, the
 --                denoise and the looks render at that size and mpv scales it to the screen (gyroflow_render_scale)
+--   upscaler=fsr  on the GPU path, what takes the picture from the size it renders at to the size it shows at, when
+--                that's bigger: fsr, AMD's FSR 1 (fsr.glsl: an edge-adaptive upscale, then a sharpening, after the look),
+--                or mpv, mpv's own scaler (scale=, Lanczos by default). fsr_sharpness=0.2: FSR's sharpening, in stops
+--                below its strongest (0 the strongest, 2 the weakest). docs/gpu-render.md, "The upscale to the screen"
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
 --   still=yes    the temporal denoise by default (Ctrl+p, the panel's Transform; a clip's transform keeps its own, Use
@@ -206,7 +210,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", upscaler = "fsr", fsr_sharpness = 0.2, paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -217,6 +221,8 @@ end
 local DENOISE_FRAMES = { full = 5, light = 3 }
 if o.temporal_denoise ~= "light" and o.temporal_denoise ~= "off" then o.temporal_denoise = "full" end
 if not ({ auto = true, display = true, video = true })[o.resolution] and not tonumber(o.resolution) then o.resolution = "auto" end
+if o.upscaler ~= "mpv" then o.upscaler = "fsr" end
+o.fsr_sharpness = math.max(0, math.min(2, tonumber(o.fsr_sharpness) or 0.2))
 o.still_radius = DENOISE_FRAMES[o.temporal_denoise] or 5
 o.still_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25))
 
@@ -868,7 +874,7 @@ function publish()
         ask_when_slow = o.ask_when_slow, spherical = spherical, rig360 = rig360, aspect = frame.aspect, orientation = frame.orientation, frame_aspect = shown_aspect(),
         rotation = frame.rotation, projection = frame.projection,
         file_rotation = current_source and current_source.rotation or 0,
-        chromatic_skip = o.chromatic_skip,
+        chromatic_skip = o.chromatic_skip, upscaler = o.upscaler,
         temporal_denoise = o.temporal_denoise, denoise = still.switched(), denoise_strong = denoise_strong,
         -- The hand's sideways jerks: unavailable (off in gyroflow.conf, or not on the GPU path), measuring, none
         -- (not computed for the clip yet), on, off
@@ -1059,6 +1065,19 @@ mp.register_event("shutdown", function()
     for path in pairs(gpu_kept) do os.remove(path) end
 end)
 
+-- FSR 1 for the GPU path's upscale (upscaler=fsr), its shader parameters (glsl-shader-opts are mpv's, for every shader
+-- that has them): afp_fsr on or off, afp_fsr_sharpness. upscaling: the GPU path renders smaller than it shows
+local fsr = { shader = utils.join_path(DIR, "fsr.glsl"), upscaling = false }
+fsr.available = file_exists(fsr.shader)
+function fsr.params()
+    local opts = mp.get_property_native("glsl-shader-opts") or {}
+    local on, sharp = o.upscaler == "fsr" and "1" or "0", string.format("%.3f", o.fsr_sharpness)
+    if opts.afp_fsr == on and opts.afp_fsr_sharpness == sharp then return end
+    opts.afp_fsr, opts.afp_fsr_sharpness = on, sharp
+    mp.set_property_native("glsl-shader-opts", opts)
+end
+fsr.params()
+
 -- The shader in mpv's list (file-local), in place of the one before; the dlogm plugin keeps it in its own list.
 -- extra_mb: what it holds on the GPU besides its text (gpu_resident_add)
 local function gpu_set_shader(old, new, extra_mb)
@@ -1079,8 +1098,14 @@ local function gpu_set_shader(old, new, extra_mb)
         end
         table.insert(list, at, new)
     end
+    -- The upscale to the screen (fsr.glsl) last, after the look, while there's a warp: it runs only when the warp
+    -- renders smaller than the picture shows (its own WHEN), and does nothing with upscaler=mpv (afp_fsr 0)
+    for i = #list, 1, -1 do if list[i] == fsr.shader then table.remove(list, i) end end
+    local upscale = new and fsr.available and fsr.shader or ""
+    if upscale ~= "" then table.insert(list, upscale) end
     mp.set_property_native("file-local-options/glsl-shaders", list)
     mp.commandv("script-message-to", "dlogm", "gyroflow-shader", old or "", new or "")
+    mp.commandv("script-message-to", "dlogm", "gyroflow-upscale", upscale)
     if old and old ~= new and old ~= GPU_HOLD_SHADER and not gpu_kept[old] then os.remove(old) end
     gpu_resident_add(new, extra_mb)
 end
@@ -1211,10 +1236,9 @@ end
 -- as on screen; 1080, 720: its short side at most that; auto: as on screen, at most 1080 while the denoise is in the
 -- shader (paused too: a new size starts its ring of frames again, and the paused frame would have none around it);
 -- video: the video's own, at most 4K's (the denoise's frames and the warp's grid are made for that much)
-local render_scale = 1
--- The short side it renders at, for quality.lua (nil: not the GPU path)
-local gpu_render_short = nil
-local render_logged = nil
+-- scale: gyroflow_render_scale as set; short: the short side it renders at, for quality.lua (nil: not the GPU path);
+-- logged: the size last said in the log
+local render_at = { scale = 1, short = nil, logged = nil }
 local function gpu_render_scale()
     if not gpu or not gpu.shader or gpu.sphere then return end
     local d = mp.get_property_native("osd-dimensions") or {}
@@ -1231,11 +1255,13 @@ local function gpu_render_scale()
         s = math.min(1, short / math.min(dw, dh))
     end
     s = math.max(0.1, math.min(4, s))
-    gpu_render_short = math.floor(math.min(dw, dh) * s + 0.5)
+    render_at.short = math.floor(math.min(dw, dh) * s + 0.5)
+    -- Smaller than it shows: FSR (or mpv's scaler) takes it up
+    fsr.upscaling = s < 1 - 1e-4
     local line = string.format("GPU path: rendering at %dx%d (%s), shown at %dx%d", math.floor(dw * s + 0.5), math.floor(dh * s + 0.5), o.resolution, dw, dh)
-    if line ~= render_logged then render_logged = line; mp.msg.info(line) end
-    if math.abs(s - render_scale) < 1e-4 and (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_render_scale then return end
-    render_scale = s
+    if line ~= render_at.logged then render_at.logged = line; mp.msg.info(line) end
+    if math.abs(s - render_at.scale) < 1e-4 and (mp.get_property_native("glsl-shader-opts") or {}).gyroflow_render_scale then return end
+    render_at.scale = s
     local opts = mp.get_property_native("glsl-shader-opts") or {}
     opts.gyroflow_render_scale = string.format("%.4f", s)
     mp.set_property_native("glsl-shader-opts", opts)
@@ -2278,6 +2304,7 @@ end)
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
     resolution = { auto = "auto: fits the display, at most 1080p while the temporal denoise is on", display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
+    upscaler = { fsr = "upscale to the screen: FSR 1, sharp", mpv = "upscale to the screen: mpv's scaler, lighter" },
     edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
     chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },
@@ -2296,6 +2323,9 @@ local function set_quality(key, value)
     elseif key == "resolution" then
         o.resolution = value
         gpu_render_scale()
+    elseif key == "upscaler" then
+        o.upscaler = value
+        fsr.params()
     elseif key == "edge_fill_rate" then
         o.edge_fill_rate = value
         write_edge_control()
@@ -2333,13 +2363,15 @@ quality.init(o, {
     short_side = function()
         if not current_source then return nil end
         -- The GPU path's: what the shader renders, mpv scaling it to the screen
-        if gpu and gpu.shader and not gpu.sphere and gpu_render_short then return gpu_render_short end
+        if gpu and gpu.shader and not gpu.sphere and render_at.short then return render_at.short end
         local out = render_sizes(current_source).output
         local w, h = current_source.out_width or current_source.width, current_source.out_height or current_source.height
         if out then w, h = out[1], out[2] end
         return w and h and math.min(w, h) or nil
     end,
     edges = function() return edge_mode end,
+    -- FSR taking the GPU path's picture up to the screen's size (upscaler=fsr, rendered smaller than it shows)
+    fsr = function() return gpu ~= nil and gpu.shader ~= nil and not gpu.sphere and fsr.available and o.upscaler == "fsr" and fsr.upscaling end,
     -- The color fringes being taken out where it can: the shader there, the lens not set above water
     chromatic = function() return chromatic and chromatic_shader and underwater ~= "no" and not o.chromatic_skip end,
     -- The temporal denoise as it runs while it plays (the GPU path's): full, light, or nil for none

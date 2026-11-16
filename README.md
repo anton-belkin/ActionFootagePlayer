@@ -366,6 +366,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=auto` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. On the Mac's GPU path, at most 1080p while the temporal denoise (`Ctrl+p`) is on: at a Retina screen's size it drops frames full screen. `display`: the display's size, denoise or not. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that. Right click > Quality, or the panel's Performance & Quality › Size, sets it |
+| `gyroflow.conf`: `upscaler=fsr`, `fsr_sharpness=0.2` | on the GPU path, when the stabilized frame renders smaller than it shows (`resolution` above, or `auto` with the temporal denoise on), what takes it up to the screen: `fsr`, AMD's FSR 1 after the look (an edge-adaptive upscale, then a sharpening; `fsr_sharpness` in stops below its strongest, 0 to 2), or `mpv`, mpv's own scaler (lighter, softer). When frames drop, the offer of lighter settings includes `mpv` |
 | `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
 | `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
@@ -1402,6 +1403,7 @@ mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses an
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
+mpv/scripts/gyroflow/fsr.glsl  AMD's FSR 1 (EASU + RCAS) on the picture's RGB: the GPU path's upscale to the screen
 mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
 mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
                               rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
@@ -1454,6 +1456,7 @@ tools/make_windows_app.sh     builds the Windows app and its installer, with mpv
 tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch), the stream and the links for Jellyfin in one
                               Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
 tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
+tools/fsrbench/               the GPU chain (warp, look, FSR) offscreen through libplacebo, timed per pass, frames saved
 tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
 tools/make_workflow.py        writes the Finder Quick Actions
 tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
@@ -1475,6 +1478,11 @@ builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and ot
 at build). The sources are also available from this project on request.
 
 ## Credits
+
+The GPU path's upscale to the screen (`mpv/scripts/gyroflow/fsr.glsl`) is a port of AMD's
+[FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) (EASU and RCAS, Copyright (c)
+2021 Advanced Micro Devices, Inc., MIT License), laid out after agyild's mpv port of it (MIT); the notice is in the
+file.
 
 Camera metadata (motion data, lens, in-camera stabilization) is read by Adrian Eddy's
 [telemetry-parser](https://github.com/AdrianEddy/telemetry-parser), through Gyroflow.

@@ -565,7 +565,8 @@ What a pass costs scales with one of three things, and that decides which knob h
 |---|---|---|---|
 | Interpolation | EWA (Robidoux) · Lanczos4 · bicubic · bilinear | output px × taps: EWA up to hundreds, Lanczos 64, bicubic 16 (or 4 fetches as a B-spline, softer), bilinear 1 | The biggest single knob at a given size |
 | Shrinking a large source | EWA · a prefiltered half-size source (one pass over the source) · widened taps · none (aliasing) | the prefilter: source px; widened taps: output px × 4 | Whenever the window is much smaller than the video (4K in a 1080p window, 8K 360). mpv's default downscaler cost the N100 half its frames (35 vs 75 fps) |
-| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`, `gyroflow_render_scale` on the GPU path); on a 4K or 5K screen a factor of 4 or more. `auto`: the display's, at most 1080p while the temporal denoise is on (measured below) |
+| Render size | the video's · display · 1080p · 720p, then FSR 1 (or mpv's scaler) scales up | output px | Exists (`resolution`, `gyroflow_render_scale` on the GPU path); on a 4K or 5K screen a factor of 4 or more. `auto`: the display's, at most 1080p while the temporal denoise is on (measured below) |
+| The upscale to the screen | FSR 1 · mpv's scaler (Lanczos) | screen px | `upscaler`; only when the render is smaller than it shows. FSR costs more (below, "The upscale to the screen: FSR 1") |
 | Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | Exists (`fps_limit`); the most visible (judder), so last |
 | Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
 | Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
@@ -609,6 +610,92 @@ So `resolution=auto` (the default) renders at the screen's size, and at most 108
 paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
 When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
 denoise.
+
+### The upscale to the screen: FSR 1
+
+When the GPU path renders smaller than the picture shows (`resolution=1080` or `720`, or `auto` with the denoise on:
+1080p on the M1 Pro's XDR, shown at 3024x1701), something takes it up to the screen. Until now mpv's scaler did
+(`scale`, Lanczos in sigmoid light by default). Now it's AMD's FSR 1 (`mpv/scripts/gyroflow/fsr.glsl`), the choice
+after the upscaling probe of 2026-11-16: on a stabilized coral frame Anton preferred the frame shrunk to 0.8 and
+scaled back by MetalFX over the full-size warp, and FSR 1 looked nearly the same as MetalFX; FSR is open, runs on
+every platform and needs no mpv patch.
+
+- **Where.** Two passes at `MAIN`, last in `glsl-shaders`: after the warp, the edge fill, the denoise and the look.
+  main.lua puts the file at the end of the list with the warp (`gpu_set_shader`) and tells the dlogm plugin
+  (`gyroflow-upscale`), which keeps it after whatever look it sets. EASU (`FSR 1 EASU (upscale)`) writes
+  `AFP_FSR_EASU` at the video's rectangle on screen (`OUTPUT`), at most twice the picture's width and height (AMD's
+  range: from 720p to the XDR mpv's scaler does the last 1.18x); RCAS (`FSR 1 RCAS (sharpen)`) sharpens it back into
+  `MAIN`. Both run only when `OUTPUT` is bigger than `MAIN` (their `WHEN`), so at the screen's size, with
+  `resolution=video` on a small window, or in the 360 view they cost nothing.
+- **RGB, not luma.** agyild's mpv port works on `LUMA`, before the conversion; here the picture is RGB after the
+  look. As AMD's own `FsrEasuF`/`FsrRcasF`: the direction and the edge's length from a luma made of RGB
+  (G + (R + B) / 2), the taps and the sharpening on each channel, the deringing and RCAS's limits per channel.
+- **Coded values, as they are.** The look leaves HLG (hdr, Dolby Vision), PQ (an HDR file as it is) or SDR gamma.
+  FSR wants a perceptual signal: HLG's lower half is gamma 2 and its upper half a logarithm; PQ is perceptual too.
+  AMD's optional PQ step (x⁴ into gamma 2, the fourth root after) was tried on the coral frame made PQ: the result's
+  edge contrast (mean |Laplacian| of luma) 7.8 with it, 8.7 without, against 4.9 for the full-size frame and 4.5 for
+  Lanczos; on the HLG frame 12.6 against 15.1 (8.7 full size). So it acts as a slightly weaker sharpening, mostly in
+  the darks, which `fsr_sharpness` sets anyway; it costs two `pow` per channel per tap; and the frames Anton looked at
+  were FSR on HLG's coded values. None of it then.
+- **Settings.** `gyroflow.conf`: `upscaler=fsr` (or `mpv`), `fsr_sharpness=0.2` (RCAS in stops below its strongest,
+  0 to 2; 0.2 as in the probe). They set the shader's parameters `afp_fsr` and `afp_fsr_sharpness`; nothing is
+  written again. No panel control yet.
+- **For a still.** The same file through libplacebo with the target at the size wanted (the photo export's
+  upscaler choice uses it): the passes run when the target is bigger than the image.
+
+Measured offscreen (tools/fsrbench: libplacebo 7.360 with MoltenVK, the player's own warp for clip 0021, D-Log M,
+4K 59.94, under water, the sphere edge fill, bicubic, color fringes out, the hdr look, into 3024x1701 as the XDR full
+screen; 240 renders after 20, frame by frame from 2.5 s). Another session's ffmpeg was busy on the CPU during the
+runs, so read the differences, not the absolute times. The passes' GPU time per render, mean / p95 / max, ms:
+
+| Rendered at (short side) | mpv's scaler, no denoise | FSR, no denoise | FSR's two passes (mean) |
+|---|---|---|---|
+| the screen's (1701) | 7.6 / 10.0 / 18.3 | (not needed) | — |
+| 0.8 of it (1361) | 7.4 / 9.3 / 10.8 | 9.0 / 12.2 / 14.7 | 2.6 + 0.9 |
+| 1080 | 6.2 / 8.1 / 9.6 | 7.9 / 10.4 / 12.2 | 2.6 + 0.9 |
+| 720 | 4.9 / 6.6 / 7.6 | 7.7 / 9.8 / 11.6 | 1.7 + 0.6, then mpv's from 1440p |
+
+With the denoise (Light, 3 + 3) MoltenVK reports some of the ~60 passes' times as 0, so this is the time from a
+render's start to the GPU done with it (it takes the CPU's dispatch too): the screen's size 20.8 / 24.9 / 45.3; 0.8:
+18.2 / 24.8 / 39.2 with mpv's scaler, 17.1 / 17.7 / 37.2 with FSR; 1080: 15.1 / 20.8 / 38.4 and 15.9 / 20.4 / 28.3;
+720: 11.1 / 13.8 / 15.8 and 11.4 / 12.3 / 17.8. FSR's ~1.7 ms is inside these runs' spread.
+
+Alone (no warp; a 4K coral frame already stabilized, shrunk, through libplacebo with and without fsr.glsl), FSR
+in place of mpv's scaler into 3024x1701 cost 0.4 ms more from 1440p and 0.8 of it, 0.7 from 1080p, 2.3 from 720p
+(where mpv's scaler still runs after it). EASU took ~1.2 ms there against ~2.6 inside the chain: the same pass, so
+part of what the chain shows is the GPU shared with the rest (another process's load, the clocks).
+
+**Not measured yet: the player itself** (vo-passes with the window full screen; it takes the screen, so it waits for
+a time Anton gives). Until then the chain's +1.7 ms (0.8 and 1080p), +2.8 ms (720p) is the figure.
+
+**The quality ladder.** FSR's +1.7 ms is about what the lighter denoise saves (14.2 → 11.8 ms above), and it only runs
+where the render is already lowered because frames were short. So quality.lua offers "Plain upscale to the screen"
+(`upscaler=mpv`) when FSR is running, after the lighter denoise and before the frame rate: a little softer, and every
+frame stays.
+
+**Open: 0.8 of the size with FSR, or the full size?** What Anton liked in the probe was the frame rendered at 0.8 and
+taken up by MetalFX, against the full-size warp. The same here, from the real chain at the real settings (each image:
+the screen's size | 0.8 + FSR | 0.8 + mpv's scaler, 640x400 at 1:1 of the 3024x1701 picture, HLG's coded values as
+they are, flatter than on an HDR screen):
+
+![clip 0021 at 3 s: the screen's size, 0.8 with FSR, 0.8 with mpv's scaler](img/fsr-0021-08.png)
+![clip 0068 at 10 s: the same](img/fsr-0068-08.png)
+
+And with the denoise as Anton plays (Light; `auto` renders 1080p): the screen's size | 1080p + FSR | 1080p + mpv's
+scaler:
+
+![clip 0021 with the denoise: the screen's size, 1080p with FSR, 1080p with mpv's scaler](img/fsr-0021-1080-denoise.png)
+![clip 0068 with the denoise: the same](img/fsr-0068-1080-denoise.png)
+
+- The look: FSR's frames have about 1.8x the full-size frame's edge contrast (0021: 26 at 0.8, 28 at 1080p, against
+  15 full size and 14 with mpv's scaler; 0068: 14, 14, 8 and 7.5). That's RCAS's sharpening, and it's what made the
+  probe's MetalFX frame look better than the full-size one; without the denoise it sharpens the noise too.
+- The cost: without the denoise 0.8 + FSR costs more than the full size (9.0 against 7.6 ms): the warp, the fill and
+  the look at 0.8 save less than FSR adds. With the denoise, whose composite grows with the pixels, it costs less
+  (17.1 against 20.8 to the GPU done).
+- So 0.8 + FSR isn't a way to save time without the denoise; it's a look. If the sharper picture is what's wanted at
+  the full size too, RCAS alone on the full-size frame is the cheap way (one pass, ~0.9 ms) **(to try, if wanted)**.
+  `resolution`'s default stays as it is until Anton decides.
 
 ### Choosing them
 

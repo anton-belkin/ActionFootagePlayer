@@ -1,7 +1,7 @@
 -- When the stabilization doesn't keep up: playback pauses and offers lighter settings, and the one picked sticks (in
 -- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges), the
 -- color aberration correction skipped on this screen (chromatic_skip: the clip's transform keeps it, exports have it),
--- a lighter temporal denoise or none (temporal_denoise).
+-- a lighter temporal denoise or none (temporal_denoise), mpv's plain scaler in place of FSR (upscaler).
 --
 -- A laptop's GPU keeps up for its first half-minute or so, at its boost power, then slows to half at its sustained
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
@@ -69,6 +69,10 @@ local function choices()
         add("Auto size: at most 1080p while the temporal denoise is on", { { "resolution", "auto" } })
     end
     if dn == "full" then add("Lighter temporal denoise: 3 frames on each side", { { "temporal_denoise", "light" } }) end
+    -- FSR's upscale to the screen (fsr.glsl) costs more than mpv's scaler it replaces: 1.7 ms more per render taking
+    -- 1080p or 0.8 of the screen up to the M1 Pro's XDR, 2.8 ms from 720p (docs/gpu-render.md, "The upscale to the
+    -- screen"), about what the lighter denoise saves; softer, but every frame stays, so before the frame rate goes
+    if hooks.fsr() then add("Plain upscale to the screen: a little softer, lighter than FSR", { { "upscaler", "mpv" } }) end
     local fps = mp.get_property_number("container-fps") or 0
     local limit = o.fps_limit > 0 and o.fps_limit or fps
     local can30, can15 = fps > 31 and limit > 30, fps > 16 and limit > 15
@@ -138,7 +142,7 @@ local function check()
 end
 
 -- options: main.lua's (fps_limit, resolution, ask_when_slow); hooks: stabilizing() the stabilization is on,
--- short_side() the short side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
+-- short_side() the short side it renders at, fsr() FSR upscales the picture to the screen, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
 -- the temporal denoise while it plays (full, light, nil), set(key, value) applies and keeps a setting
 function M.init(options, h)
     o, hooks = options, h

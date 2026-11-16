@@ -504,6 +504,8 @@ local function shader_list(look)
         end
     end
     for _, s in ipairs(look or {}) do table.insert(shaders, s) end
+    -- The gyroflow plugin's upscale to the screen (fsr.glsl), after the look
+    if base.after then table.insert(shaders, base.after) end
     return shaders
 end
 
@@ -687,6 +689,14 @@ mp.register_script_message("gyroflow-shader", function(old, new)
     end
     if new ~= "" and not done then table.insert(list, 1, new) end
     base.shaders = list
+end)
+
+-- The gyroflow plugin's upscale from the size its GPU warp renders at to the screen's (fsr.glsl): last in the list,
+-- after the look, which it takes as it is (an empty name: none)
+mp.register_script_message("gyroflow-upscale", function(path)
+    if not base then return end
+    for i = #base.shaders, 1, -1 do if base.shaders[i] == path then table.remove(base.shaders, i) end end
+    base.after = path ~= "" and path or nil
 end)
 
 -- After the file is opened (its metadata is known), before the video output is set up for it
