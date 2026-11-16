@@ -36,6 +36,13 @@ INSTALL_NAME_TOOL=$(xcrun -f install_name_tool 2>/dev/null || echo /usr/bin/inst
 command -v brew >/dev/null || { echo "Missing Homebrew (https://brew.sh): the app carries its mpv and ffmpeg" >&2; exit 1; }
 prefix=$(brew --prefix)
 [ -x "$prefix/bin/ffmpeg" ] || { echo "Missing ffmpeg: brew install ffmpeg" >&2; exit 1; }
+# ffmpeg with libplacebo for gyroflow-export's GPU path (tools/export-gpu/build_ffmpeg_libplacebo.sh) when it's built,
+# else Homebrew's (the export then takes the pipes, saying why)
+FFPL_DIR="${FFPL_DIR:-$HOME/Library/Caches/afp-ffmpeg-build}"
+if [ -z "${FFMPEG_BIN:-}" ] && [ -x "$FFPL_DIR/prefix/bin/ffmpeg" ]; then
+    FFMPEG_BIN="$FFPL_DIR/prefix/bin/ffmpeg"
+fi
+[ -z "${FFMPEG_BIN:-}" ] || export FFMPEG_BIN
 # The release's mpv (tools/build_mpv.sh) when it's built, else Homebrew's
 if [ -z "${MPV_BIN:-}" ] && [ -x build/mpv-afp/out/mpv ]; then
     MPV_BIN=build/mpv-afp/out/mpv

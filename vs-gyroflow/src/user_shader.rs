@@ -1023,7 +1023,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let (w, h) = (64, 32);
-        let input = frame(w, h, |p, x, y| if p == 0 { 64 + ((x * 13 + y * 7) % 876) as u16 } else { 512 + if p == 1 { 40 } else { -30i32 as u16 } });
+        let input = frame(w, h, |p, x, y| if p == 0 { 64 + ((x * 13 + y * 7) % 876) as u16 } else { (512 + if p == 1 { 40 } else { -30 }) as u16 });
         let mut s = Shaders::new(Config { sources: vec![], size: (w, h), prelude: String::new(), data: vec![], matrix: (0.2126, 0.0722), full_range: false, params: vec![] }).unwrap();
         let out = s.render(&input).unwrap();
         let (a, b) = (samples(&input), samples(&out));

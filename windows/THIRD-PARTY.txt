@@ -8,9 +8,8 @@ mpv (mpv\mpv.exe)
     releases)
 
 ffmpeg (plugins\gyroflow\ffmpeg.exe, ffprobe.exe)
-    GPL 3 (licenses\ffmpeg.txt). Source: https://ffmpeg.org. The build: https://www.gyan.dev/ffmpeg/builds/
-    (https://github.com/GyanD/codexffmpeg), which lists its libraries and their sources; for arm64,
-    https://github.com/BtbN/FFmpeg-Builds
+    GPL 3 (licenses\ffmpeg.txt). Source: https://ffmpeg.org. The build: https://github.com/BtbN/FFmpeg-Builds
+    (its gpl variant, with libplacebo and Vulkan), which lists its libraries and their sources
 
 Python (python\)
     PSF License (licenses\Python.txt). https://www.python.org

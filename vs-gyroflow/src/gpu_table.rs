@@ -648,6 +648,36 @@ impl Options {
     }
 }
 
+/// A .cube LUT as the player's look shader (tools/cube_to_glsl.py with shaders/log_hlg.glsl.in: an `rgba16` 3-D
+/// texture sampled trilinearly at MAIN), for gyroflow-export's GPU path: the look the export picks (its .cube, the
+/// NBCU one composed as gpu_lut::compose_nbcu makes it) drawn as playback draws its looks
+pub fn look_shader(cube: &std::path::Path) -> Result<String, String> {
+    const TEMPLATE: &str = include_str!("../../shaders/log_hlg.glsl.in");
+    let (n, data) = crate::gpu_lut::read_cube(cube)?;
+    let mut hex = String::with_capacity(data.len() / 3 * 16);
+    let unorm = |v: f32| ((v * 65535.0).round().clamp(0.0, 65535.0)) as u16;
+    for rgb in data.chunks(3) {
+        for v in [unorm(rgb[0]), unorm(rgb[1]), unorm(rgb[2]), 65535] {
+            let b = v.to_le_bytes();
+            hex.push_str(&format!("{:02x}{:02x}", b[0], b[1]));
+        }
+    }
+    Ok(TEMPLATE.replace("\r\n", "\n").replace("@LUT_SIZE@", &n.to_string()).replace("@LUT_DATA@", &hex))
+}
+
+/// A `//!PARAM`'s default value set to `value` (what mpv's glsl-shader-opts would set: the filter has no way to)
+pub fn set_param_default(shader: &str, name: &str, value: f64) -> Result<String, String> {
+    let head = format!("//!PARAM {name}\n");
+    let at = shader.find(&head).ok_or_else(|| format!("no parameter {name}"))?;
+    let mut lines: Vec<&str> = shader[at..].splitn(16, '\n').collect();
+    // The directives after the name, then the value line
+    let i = lines.iter().skip(1).position(|l| !l.starts_with("//!")).map(|i| i + 1).ok_or("no value")?;
+    let kind_int = lines[1..i].iter().any(|l| l.contains(" int"));
+    let v = if kind_int { format!("{}", value.round() as i64) } else { format!("{value:.6}") };
+    lines[i] = &v;
+    Ok(format!("{}{}", &shader[..at], lines.join("\n")))
+}
+
 /// The hook passes a frame runs through, in a shader made by shader_with (each `//!HOOK` once; CHROMA's once for each
 /// chroma plane libplacebo hooks: 1 for NV12/P010, 2 for planar 4:2:0). Every pass has `//!WHEN gyroflow_gpu_on`, on
 /// by default
@@ -1016,6 +1046,29 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let (head2, common2, passes2) = split_sections(&normalized);
         assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
         assert!(!pass_body(passes[0].0).is_empty());
+    }
+
+    #[test]
+    fn parameter_defaults_and_look_shaders() {
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let text = fill_head(&t, "", "PASSES", 1.5);
+        let text = set_param_default(&text, "gyroflow_dn_radius", 3.0).unwrap();
+        let text = set_param_default(&text, "gyroflow_cam_zoom", 1.25).unwrap();
+        let params = crate::user_shader::param_values(&text).expect("parses");
+        assert!(params.contains(&("gyroflow_dn_radius".to_string(), 3.0)) && params.contains(&("gyroflow_cam_zoom".to_string(), 1.25)), "{params:?}");
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 1.5)));
+        assert!(set_param_default(&text, "nope", 1.0).is_err());
+        let dir = std::env::temp_dir().join(format!("afp-look-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cube = dir.join("t.cube");
+        let mut c = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 { for g in 0..2 { for r in 0..2 { c += &format!("{r} {g} {b}\n"); } } }
+        std::fs::write(&cube, c).unwrap();
+        let sh = look_shader(&cube).unwrap();
+        assert!(sh.contains("//!SIZE 2 2 2") && sh.contains("const float N = 2.0;"));
+        // texels 0 and 1 (black, then r = 1), little-endian, alpha 0xffff
+        assert!(sh.contains("000000000000ffffffff00000000ffff"), "{}", &sh[..200.min(sh.len())]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

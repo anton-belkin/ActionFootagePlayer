@@ -4,6 +4,89 @@ Question (2026-11-16): can `gyroflow-export` run the player's GPU path, the same
 `libplacebo` filter, with the frame staying on the GPU up to the encoder? This is stage 1, the test. Stage 2, the
 build, is **not done**: the reason is in the verdict.
 
+## Built: the GPU export path (`gyroflow-export --gpu`, default `auto`)
+
+`gyroflow-export` renders on the GPU wherever the clip and the ffmpeg allow it. It uses **one ffmpeg**: hardware
+decode → the libplacebo filter running **the player's own shaders** → hardware encode, with **no copy of a frame**
+on a Mac. The pipes (decoder → Gyroflow's engine → encoder) remain the fallback, and the export says why it fell back,
+e.g. `through the pipes, not the GPU path: …`. `--gpu on` takes only the GPU path; `--gpu off` never.
+
+**The shaders.** They are `gpu_table`'s, as the player loads them, plus the look:
+
+- the warp at the view, level, FOV, camera and frame turn (`Options::player`, the same code as
+  `gyroflow-gpu-table --player`);
+- the fringes under water, the edge fill (smooth or sphere) and the temporal denoise (`--denoise`);
+- the translation compensation (`--with-translation`, Ctrl+j's cache);
+- then the look: the export's own `.cube` (log → HLG, DJI's Rec.709, NBCU composed), baked as the player's look
+  shaders are (`gpu_table::look_shader`, the `log_hlg.glsl.in` template).
+- **Interpolation:** the player's for the clip's frame rate: Lanczos up to 31 fps, bicubic (9 fetches) above
+  (`--gpu-interpolation` overrides).
+- **Frame time:** the filter feeds no `PTS`, so each pass counts its frame with libplacebo's pass counter
+  (`gpu_table::for_libplacebo`). The parameters the player sets at run time are written as their defaults
+  (`set_param_default`): the denoise's radius, strength and grain.
+- **Resolution:** the export's, which the warp renders at directly: it is its own scaler.
+- **fps:** the clip's.
+
+**Mac, no copies:** `tools/export-gpu/ffmpeg-patches/0001` (our ffmpeg build,
+`tools/export-gpu/build_ffmpeg_libplacebo.sh`).
+
+- The libplacebo filter takes VideoToolbox frames and gives them out. Each IOSurface plane becomes an MTLTexture and
+  is imported into Vulkan (MoltenVK, `VK_EXT_metal_objects`), kept per surface.
+- The output comes from a VideoToolbox frames pool, its colour attachments set for the encoder. Without them
+  `hevc_videotoolbox` rejects the buffer (-12902).
+- The encoder runs in VideoToolbox's real-time mode: 82 fps for 4K Main10, the same PSNR at the same bit rate.
+
+**Windows and Linux** (not run here):
+
+- Vulkan Video's decoder where the driver has it (`-hwaccel vulkan -hwaccel_output_format vulkan`), else decoded and
+  uploaded.
+- The filter on a Vulkan device.
+- `hevc_vulkan` where the driver encodes HEVC, with no copies; else a download to NVENC / AMF / QSV / x265 (one copy).
+- The Windows app now carries BtbN's GPL build of ffmpeg 9.0.2 for x64 too, not Gyan's essentials, which has no
+  libplacebo and no Vulkan (`tools/make_windows_app.sh`; its check requires `hevc_vulkan` and the libplacebo filter).
+
+**Measured** (D-Log M 4K60 under water, 15.5 s, 926 frames, M1 Pro, quiet machine):
+
+| Export | Pipes (before) | GPU path |
+|---|---|---|
+| Whole clip, HDR (HLG), fringes, default | 53.8 s | **15.6 s** in all, engine load included (13 s of frames, 74 fps) |
+| Moment 3-5 s, fringes off | 4 s (28 fps) | 3 s (45 fps); each frame is its own index (MSE 7 against 200-400 for its neighbours) |
+| Moment 3-5 s, temporal denoise full | 13 s (9 fps) | 8 s (15 fps), frames aligned |
+| Whole clip as Share has it (wide, horizon lock, edges sphere, fringes, denoise light) | 68 s (14 fps) | **35 s** (26 fps) |
+| **Share's headless test** (#242's `share_e2e`: clip + moment + photo, the player batch-rendering) | 80 s | **46.8 s**, passes |
+| SDR (DJI's LUT) | | 42 fps |
+| Wide view + edges smooth / sphere | | 34 / 33 fps; edges filled (dark border share 33 % → 0 %) |
+| ProRes 422 HQ | | 57 fps |
+| Dolby Vision 8.4 (`--dv-rpu`) | | 52 fps, 120 RPUs, dvvC written |
+
+**The denoise up to the clip's end:** the last decoded frame is repeated as the frames after it (`loop`), where the
+player shows its last frames with fewer after them: only the clip's last `radius` frames differ.
+
+**Pictures.** Against the pipes, Y is 38-39 dB. That is the player's warp (8-px grid, its interpolation) against
+Gyroflow's per-pixel engine: what the player shows, not what the pipes rendered.
+
+**Still on the pipes** (with the reason printed):
+
+- the preview, photos and their Live Photo / Motion Photo motion;
+- `--youtube`, `--crop`, `--dv-live-l1` (each frame's L1 is measured by the pipes' LUT);
+- clips the GPU warp can't render: lens correction below 100 % (both GoPro test projects), Sony / mesh lenses,
+  IBIS/OIS, equirect;
+- a turned clip without stabilization;
+- 360 and reframe exports;
+- an ffmpeg without the libplacebo filter, or a Mac ffmpeg without the patch (Homebrew's).
+
+**The test.** `vs-gyroflow/tests/export_gpu.rs` (`AFP_GPU_CLIP`, `AFP_GPU_FFMPEG`) renders 2 s of a real clip both ways:
+the same frame count, each frame closest to its own index, PSNR above 33 dB. It passes on the D-Log M clip.
+
+**Shipping.**
+
+- **macOS:** `tools/dev_app.sh` bundles the patched ffmpeg (`FFMPEG_BIN`, from `build_ffmpeg_libplacebo.sh`'s default
+  folder `~/Library/Caches/afp-ffmpeg-build`). `bundle_runtime.py` lists its sources. **The release workflow doesn't
+  build it yet:** it needs a step running `build_ffmpeg_libplacebo.sh` (about 10 min on the runner) before
+  `bundle_runtime.py` with `FFMPEG_BIN`.
+- **Windows:** the BtbN build above.
+- **Share's recipe:** version 4 (`renders::VERSION`), since the GPU path's pixels differ from the pipes'.
+
 ## Verdict
 
 **Update, the zero-copy spike** (see "The zero-copy spike" below): libplacebo called directly, with VideoToolbox
