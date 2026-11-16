@@ -114,7 +114,7 @@ const sheet = () => $("sheet").textContent;
   // Project settings, General: the render cache's room and its Clear (never by itself)
   await T.openSettings(); await tick(60);
   click(by("stab", "gen")); await tick();
-  ok(sheet().includes("_Renders") && sheet().includes("3 files · 52 MB") && sheet().includes("1 other files there are kept"), "settings: the render cache's room, what Clear leaves");
+  ok(sheet().includes("_Renders") && sheet().includes("3 files · 52 MB") && sheet().includes("1 other file there is kept"), "settings: the render cache's room, what Clear leaves");
   ok(!!by("clearrenders") && !by("clearrenders").disabled, "…and Clear the render cache");
   click(by("clearrenders")); await tick(120);
   ok(!!last("clear_renders") && /Render cache cleared: 52 MB freed \(3 files\)/.test($("toast").textContent), "cleared: how much it freed (" + $("toast").textContent + ")");
