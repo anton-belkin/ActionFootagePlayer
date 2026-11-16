@@ -368,8 +368,8 @@ it should land at the same encoder-bound ~18-19 s; not run.
 
 **Open in the spike:**
 
-- **Cold start.** A `pl_cache` saved to disk, as mpv keeps its shader cache, should cut the first run's extra seconds.
-  Not tried.
+- **Cold start.** On a quiet machine, a first run costs only 0.25 s more setup (0.51 s against 0.26 s); no slow first run.
+  A `pl_cache` saved to disk, as mpv keeps its shader cache, would save that much. Not tried.
 - **The GPU's ~19.7 ms a frame:** the shader's own ~10 ms plus libplacebo's conversion to and from YUV and the output's
   chroma downsampling. The LUT-only render shows that part is about 10 ms with `pl_gpu_finish`. The player pays the
   same per frame.
