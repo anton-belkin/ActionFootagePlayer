@@ -95,12 +95,15 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
             continue;
         }
         let item = match renders::item(root, kind, path) { Ok(i) => i, Err(e) => { out.push(failed(&shown, kind, e)); continue } };
-        let profile = renders::profile(if item.kind == Kind::Photo { "Photo" } else if look == "SDR" { "SDR" } else { "HDR" }).unwrap();
+        let wanted = renders::profile(if item.kind == Kind::Photo { "Photo" } else if look == "SDR" { "SDR" } else { "HDR" }).unwrap();
+        // An SDR clip's HDR is its SDR render: one file (the sheet says so)
+        let profile = renders::resolve(ctx, &item, wanted);
+        let note = (profile.name != wanted.name).then(|| "this clip is SDR: its SDR render".to_string());
         let found = renders::find(ctx, &item, profile);
         let ext_of = |f: &Path| f.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| profile.exts[0].to_string());
         if let Some(file) = found.file.clone() {
             let save_as = renders::readable(&item, profile, &ext_of(&file));
-            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: None, saved: None, file: Some(file), save_as, expect: Vec::new(), along: Vec::new(), render: None });
+            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: note, saved: None, file: Some(file), save_as, expect: Vec::new(), along: Vec::new(), render: None });
             continue;
         }
         // To be rendered: from its original, which has to be here
@@ -120,7 +123,7 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
         }
         let part = (item.kind == Kind::Moment).then(|| (item.link["in"].as_f64(), item.link["out"].as_f64())).and_then(|(a, b)| Some((a?, b?)));
         let render = Asked { recipe: found.recipe.clone(), out: made, original, part, cut: renders::cache_path(root, &found.hash, profile, "mp4") };
-        out.push(Item { name: shown, kind: kind.into(), state: "waiting".into(), message: None, saved: None, file: None, save_as: String::new(), expect, along: Vec::new(),
+        out.push(Item { name: shown, kind: kind.into(), state: "waiting".into(), message: note, saved: None, file: None, save_as: String::new(), expect, along: Vec::new(),
                         render: Some(render) });
     }
     (out, asked)
