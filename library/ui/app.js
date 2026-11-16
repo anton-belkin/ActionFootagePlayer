@@ -1747,6 +1747,7 @@ function manyInfo(c) {
 }
 function infoHtml(c) {
   if (!c.any) {
+    if (albumViewOpen()) return albumViewInfo(); // albumviews.js: no folder behind it
     const all = items();
     const here = hereOnDisk();
     return '<div class="ihead"><b>' + esc(c.folderName) + '</b><span class="sub">' + esc(plural(scopeItems().length) + " here, " + plural(all.length) + " in " + c.viewName) + '</span></div>' +

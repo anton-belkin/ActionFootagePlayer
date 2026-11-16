@@ -7,7 +7,7 @@
 // rows of tiles) has a height known from the tiles' fixed size, so only the blocks near the window are in the page.
 
 const TL = { tileW: 168, tileH: 146, gap: 8, pad: 14, dayH: 38, tripH: 34, monthH: 48, over: 700,
-  level: ["years", "months", "days"].includes(remembered("afl.timeline", "days")) ? remembered("afl.timeline", "days") : "days",
+  level: ["years", "months", "days"].includes(avRemembered("afl.timeline", "days")) ? avRemembered("afl.timeline", "days") : "days",
   model: null, jump: null, range: "", bound: false };
 const TL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 

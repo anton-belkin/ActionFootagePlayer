@@ -8,7 +8,7 @@
 // or read for this view. The grouping into pins is the page's own (Web Mercator cells at the zoom), so a pin is a
 // place in S.path ("c:<zoom>:<x>:<y>") that Back, Forward and a reload find again.
 
-const MAPV = { mode: remembered("afl.map", "map") === "list" ? "list" : "map", cell: 84, el: null, map: null, pins: null, tiles: null,
+const MAPV = { mode: avRemembered("afl.map", "map") === "list" ? "list" : "map", cell: 84, el: null, map: null, pins: null, tiles: null,
   loading: false, offline: false, ok: 0, bad: 0, placed: [], fitted: null, dragged: 0 };
 const MAP_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 

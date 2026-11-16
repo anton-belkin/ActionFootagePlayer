@@ -316,7 +316,7 @@ body.waiting,body.waiting *{cursor:progress}
 .avtile:hover{background:var(--hover)}
 .avtile svg{color:var(--accent);flex:none}
 /* Timeline (timeline.js): Days is blocks at known places, the tiles of a fixed size (TL in timeline.js has the same numbers) */
-.tlbody{position:relative}
+.tlbody{position:relative;flex:none}
 .tlb{position:absolute;left:0;right:0;padding:0 14px;overflow:hidden}
 .tlmonth{display:flex;align-items:flex-end;gap:10px;padding-bottom:6px}
 .tlmonth h3,.tlyear h3{margin:0;font-size:18px;font-weight:650}

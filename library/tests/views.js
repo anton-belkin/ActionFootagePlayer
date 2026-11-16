@@ -72,7 +72,7 @@ async function bigRun() {
   ok(all.filter((x) => x.kind === "clip").length === 8 && all.filter((x) => x.kind === "moment").length === 2 && all.filter((x) => x.kind === "still").length === 2, "everything: 8 originals, 2 moments, 2 photos");
   const heads = () => Array.from(w.document.querySelectorAll(".tlday header b")).map((e) => e.textContent);
   ok(heads()[0].startsWith("20 Oct 2026 · Dahab"), "a day's header has its date and place: " + heads()[0]);
-  ok(heads().some((h) => /^14 Feb 2026 · Chamonix-Mont-Blanc, 46\.1° N, 7\.2° E$/.test(h)), "a point with no name looked up shows as coordinates: " + heads().find((h) => h.startsWith("14 Feb")));
+  ok(heads().some((h) => h === "14 Feb 2026 · Chamonix-Mont-Blanc"), "a point with no name isn't in a header that has a named place: " + heads().find((h) => h.startsWith("14 Feb")));
   ok(heads().some((h) => /Ras Muhammad|Sharm El Sheikh/.test(h)), "the other day's place: " + heads().join(" | "));
   const months = Array.from(w.document.querySelectorAll(".tlmonth h3")).map((e) => e.textContent);
   ok(months[0] === "October 2026" && months.includes("February 2026"), "months, the newest first: " + months.join(", "));
@@ -142,7 +142,7 @@ async function bigRun() {
   // Offline: the places as a list
   T.MAPV.offline = true; T.renderMain(); await tick();
   const rows = Array.from(w.document.querySelectorAll(".placerow"));
-  ok(rows.length === 4 && rows[0].textContent.includes("Dahab") && text().includes("can’t be reached"), "offline: a list of places with counts: " + rows.map((r) => r.querySelector(".nm").textContent + " " + r.querySelector(".cnt").textContent).join(" | "));
+  ok(rows.length === 4 && rows[0].textContent.includes("Dahab") && rows.some((r) => r.textContent.includes("46.1° N, 7.2° E")) && text().includes("can’t be reached"), "offline: a list of places with counts: " + rows.map((r) => r.querySelector(".nm").textContent + " " + r.querySelector(".cnt").textContent).join(" | "));
   click(rows[0]); await tick();
   ok(w.document.querySelectorAll("#main .grid .card").length === 4 && names().some((n) => n.includes("0m05s")), "a place lists its items (a moment is where its clip is)");
   click(by("crumb", "1")); await tick();

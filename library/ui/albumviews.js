@@ -10,6 +10,8 @@
 
 const AV_MARK = "​";
 const AV = { cache: null, more: 400 };
+// What was chosen last time on this computer; here, not app.js's remembered(): these files load before it
+function avRemembered(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } }
 
 function albumViewOpen() {
   if (S.view !== "footage" || !S.path.length || S.path[0].charAt(0) !== AV_MARK) return null;
@@ -45,6 +47,14 @@ function albumViewGo(id) {
   const want = ["footage", "moments", "stills"].filter((x) => x === "footage" || (typeof VIEW_ROOT === "object" && VIEW_ROOT[x]));
   const before = want.map((x) => DATA[x]);
   needViews(want).then(() => { if (want.some((x, i) => DATA[x] !== before[i]) && albumViewOpen()) renderAll(); }, () => {});
+}
+
+// The Info part with nothing selected: what the view is of (it has no folder of its own)
+function albumViewInfo() {
+  const v = albumViewOpen(), all = avEverything();
+  return '<div class="ihead"><b>' + esc(v[1]) + '</b><span class="sub">' + esc(avKinds(all) || "Nothing yet") + '</span></div>' +
+    infoSec("Files", kv([["Project", pathsHtml([S.root]), false, true]])) +
+    '<p class="sub wrap" style="padding:0 16px">' + esc(AV_SUB[v[0]] || "") + ': the whole library, not a folder. Select a clip, moment or photo to see what it is.</p>';
 }
 
 // Everything in the library, for these views: every original once (as Originals has them), and the moments and photos
@@ -105,7 +115,10 @@ function avPlaces(items, nameOf) {
   for (const it of items) { const g = avGeo(it); if (!g) continue; const k = (nameOf || avPlaceName)(g); n.set(k, (n.get(k) || 0) + 1); }
   return Array.from(n).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
+// …as a line's text: the first few. Points without a name (shown as coordinates) only when no place has one, and then one
 function avNames(places, max) {
+  const named = places.filter((p) => !/^\d+\.\d° [NS], /.test(p[0]));
+  places = named.length ? named : places.slice(0, 1);
   const names = places.slice(0, max).map((p) => p[0]);
   return names.join(", ") + (places.length > max ? " +" + (places.length - max) : "");
 }
