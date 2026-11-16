@@ -53,6 +53,10 @@ package.loaded['mp'] = mp
 package.loaded['mp.utils'] = utils
 package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path
 assert(loadfile("mpv/scripts/gyroflow/export.lua"))()
+-- The gyroflow plugin's main.lua compiles: Lua allows a chunk 200 locals (a photo option once pushed it over)
+local _, err = loadfile("mpv/scripts/gyroflow/main.lua")
+checks = checks + 1
+if err then failures = failures + 1; print("FAIL main.lua: " .. err) end
 
 -- The arguments of the last gyroflow-export run, as a string, and whether it has a run of them
 local function last() return " " .. table.concat(ran[#ran] or {}, " ") .. " " end

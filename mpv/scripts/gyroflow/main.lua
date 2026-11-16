@@ -2644,8 +2644,8 @@ end)
 mp.register_event("end-file", stop_watching)
 
 -- export.lua's photos read it from here, and its live-photo message sets it
--- (no, live or motion; a Live Photo needs macOS's afp-photo)
-do
+-- (no, live or motion; a Live Photo needs macOS's afp-photo). In a function: the main chunk is at Lua's 200 locals
+;(function()
     local v = tostring(o.live_photo)
     if v ~= "no" and v ~= "motion" and not (v == "live" and platform.macos) then v = platform.macos and "live" or "motion" end
     mp.set_property_native("user-data/gyroflow/live_photo", v)
@@ -2653,7 +2653,7 @@ do
     local up = tostring(o.photo_upscaler)
     local known = { auto = true, none = true, fsr = true, realesrgan = platform.macos, swinir = platform.macos }
     mp.set_property_native("user-data/gyroflow/photo_upscaler", known[up] and up or "auto")
-end
+end)()
 require 'export'
 
 -- The session's bundle and the app's defaults, for the workspace plugin before the first file loads
