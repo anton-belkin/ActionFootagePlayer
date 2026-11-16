@@ -345,7 +345,7 @@ let FACETS = [];
 // The files whose link's original isn't where it says (the Library counts them on its own)
 let MISSING = new Set();
 function buildFacets() {
-  const items = (DATA[S.view] && DATA[S.view].items) || [];
+  const items = albumViewItems() || (DATA[S.view] && DATA[S.view].items) || []; // albumviews.js
   const sections = [];
   const has = (k) => S.view === "footage" && items.some((it) => it.kind === k);
   if (S.view === "footage" && MISSING.size && items.some((it) => it.kind !== "clip"))
@@ -429,7 +429,7 @@ function setOpt(id, on) { const o = findOpt(id); if (!o) return; (o.kids || [o])
 // ---------- the tree ----------
 
 function dirKey() { return S.path.join("/"); }
-function items() { return (DATA[S.view] && DATA[S.view].items) || []; }
+function items() { return albumViewItems() || (DATA[S.view] && DATA[S.view].items) || []; } // albumviews.js: a view inside Albums has its own
 function under(path) { return path ? items().filter((it) => it.dir === path || it.dir.startsWith(path + "/")) : items(); }
 function childDirs(dir) {
   const ds = (DATA[S.view] && DATA[S.view].dirs) || [];
@@ -509,6 +509,7 @@ function renderMain() {
   const main = $("main");
   if (!S.root) { main.innerHTML = ""; return; }
   noteHistory();
+  if (albumViewDraw(main)) return; // albumviews.js: Timeline, Map
   const c = ctx(), srch = searching(), filt = filtering();
   const dir = dirKey();
   let hiddenFolders = 0;
@@ -558,6 +559,7 @@ function renderMain() {
   }
   if (probesPending && (S.view === "footage" || S.view === "sources")) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. Filters fill in as they come.</div>';
   if (!DATA[S.view]) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; VISIBLE = []; return; }
+  if (S.view === "footage" && !S.path.length && !srch) h += albumViewTiles(); // albumviews.js
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   if (list.length) h += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + '</div>';
@@ -1769,6 +1771,7 @@ function manyInfo(c) {
 }
 function infoHtml(c) {
   if (!c.any) {
+    if (albumViewOpen()) return albumViewInfo(); // albumviews.js: no folder behind it
     const all = items();
     const here = hereOnDisk();
     return '<div class="ihead"><b>' + esc(c.folderName) + '</b><span class="sub">' + esc(plural(scopeItems().length) + " here, " + plural(all.length) + " in " + c.viewName) + '</span></div>' +
@@ -2204,6 +2207,7 @@ function openSelection() {
 function goUp() {
   if (S.view === "clip" && !searching()) { goFootage(S.clip); return; }
   if (!S.path.length || searching()) return;
+  if (albumViewOpen()) { S.path = S.path.slice(0, -1); S.sel = {}; S.anchor = null; renderAll(); return; } // albumviews.js: no folder to select
   const left = S.path[S.path.length - 1];
   S.path = S.path.slice(0, -1);
   const k = "f:" + (S.path.length ? S.path.join("/") + "/" : "") + left;
