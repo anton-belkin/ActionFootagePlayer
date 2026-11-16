@@ -32,7 +32,7 @@ function smallViews(root) {
     probes: { version: 1, pending: 0, items: {} },
   };
   for (const it of footage.items) footage.probes.items[it.path] = { camera: "DJI OsmoAction6", color: "dlogm", mode: "default", movie: { duration: 30, created: 1735700000 }, marks: { times: [] } };
-  const moments = { root, view: "moments", dirs: ["_Moments", "_Moments/Reef"], items: [moment("Reef", "Turtle", "Day 1/A.MP4"), moment("Reef", "Shark", "Day 1/B.MP4"), moment("Reef", "Ray", "Day 2/D.MP4")],
+  const moments = { root, view: "moments", dirs: ["_Moments", "_Moments/Reef"], items: [moment("Reef", "Ray", "Day 2/D.MP4"), moment("Reef", "Shark", "Day 1/B.MP4"), moment("Reef", "Turtle", "Day 1/A.MP4")],
     probes: { version: 1, pending: 0, items: {} } };
   const stills = { root, view: "stills", dirs: ["_Stills"], items: [still("A_1.5s.jpg", "Day 1/A.MP4"), still("B_1.5s.jpg", "Day 1/B.MP4")], probes: { version: 1, pending: 0, items: {} } };
   const exports = { root, view: "exports", dirs: ["_Exports"], items: [{ id: "_Exports/E.mov", dir: "_Exports", name: "E.mov", path: root + "/_Exports/E.mov", size: 900, mtime: 1700000300, kind: "export", tags: [],

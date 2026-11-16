@@ -9,8 +9,7 @@ about 5 ms, thousands of clips) that is seconds to tens of seconds for one tag. 
 2. **Pinpoint update.** A command says which items it changed, and the window corrects only those: no tab is read
    again.
 
-This file says where the time went, how it's measured, and the rules of the first. The second has its own part at
-the end once it's in.
+This file says where the time went, how it's measured, the rules of the first, and how the second works.
 
 ## Where the time went
 
@@ -120,9 +119,9 @@ export, a folder), deleting, and deleting renders.
 What a patch must be: the command's own rule (what it does to the item on disk), and doing it twice must be as doing
 it once, since it's put over fresh readings again and again.
 
-Not through it (they read the views again as before): a new folder (its name is the app's), Take in, Project
-settings (locations), Find moved files and Mend, the lens chosen for Stabilize optically (the task needs it on the
-disk before it starts), and what tasks make.
+Not through it (they wait for the app and read the views again as before): a new folder (its name is the app's),
+Take in, Project settings (locations), Find moved files and Mend, the lens chosen for Stabilize optically (the task
+needs it on the disk before it starts), and the end of a task.
 
 ## A command joins with a few lines
 
@@ -146,3 +145,67 @@ Writes.run("rating", items, { items: items.map((it) => ({ kind: it.kind, id: it.
 `items` are the items as shown (`kind`, `id`, `name`); `Writes.run` gives a promise of the change once it's settled
 (`ok`, `answer`). A change that isn't one item's field (a rename, a delete) gives `patch(draft, args)` instead of
 `item`: see `rename` and `delete` in `changes.js`.
+
+## The pinpoint update
+
+A changing command answers with what it changed (`library/src/changed.rs`, `Changed`): the items as the views have
+them now, each exactly as a reading of the whole view would give it (`index::scan_only`, the same code with only
+those items looked up), the ids that are gone, and in words what couldn't be done. The page takes those items as
+what the disk has, whatever it had shown, and makes only them again in what's shown. It reads no view.
+
+- **The app's own commands**: `set_tags`, `set_locations`, `set_source`, `rename_item`, `delete_items`,
+  `delete_renders`.
+- **What the catalog says changed elsewhere** (the player, another computer, a task's files as they land): the
+  catalog's thread keeps which files changed at each of the page's counts of changes (`seen.rs`, `since`), and
+  `changes_since` turns them into items the same way (`changed::of_files`: a clip's own file is its clip's, a render
+  its moment's, a Live Photo's video its photo's, a clip preview its clip's). The page asks for that instead of
+  reading its views when it's told `catalog-changed`.
+- **When the app can't say which items** it says so and the page reads the views again, as before: the project's
+  file changed (its locations), a folder was made, renamed or removed, a clip came or went, more than a few hundred
+  items at once, a first look at a location, or no catalog. A folder renamed or deleted from the window reads the
+  views once too (what's in it shows at once all the same).
+- **Written in part**: every item shows as it is (the command gives all of them, written or not), the strip says
+  what couldn't be done, and nothing is read.
+- **Filters and the search**: an item they no longer take leaves the list at once, as in Lightroom and Capture One,
+  and when everything selected left, the item that took its place is selected, so the next one is under the hand.
+  (A filter on a value nothing has any more stops filtering, as before.) A renamed item goes where its name puts it
+  among its folder's, as a reading would have it.
+- **What's on screen** (the list, the side panel, the filters' counts, the folders' pictures) is drawn again from
+  memory, as on every click; only the data is corrected item by item.
+
+The window, 10,000 clips, from the click (the page in jsdom, the mock app answering as slowly as measured, each
+command now also taking the time to say what it changed):
+
+| Change | Shown after | | | Page done after | | |
+|---|---:|---:|---:|---:|---:|---:|
+| | before | screen first | pinpoint | before | screen first | pinpoint |
+| A tag on 1 clip, as a NAS | 21.6 s | 0.11 s | 0.03 s | 21.8 s | 21.8 s | 0.45 s |
+| A tag on 200 clips, as a NAS | 35.7 s | 0.19 s | 0.04 s | 35.9 s | 35.8 s | 16.3 s |
+| A location for 20 clips, as a NAS | 22.0 s | 0.12 s | 0.03 s | 22.2 s | 22.1 s | 0.71 s |
+| Source settings for 20 clips, as a NAS | 22.6 s | 0.13 s | 0.04 s | 22.8 s | 22.7 s | 1.45 s |
+| A moment renamed, as a NAS | 18.0 s | 0.11 s | 0.02 s | 21.7 s | 21.8 s | 0.44 s |
+| A moment deleted, as a NAS | 17.8 s | 0.31 s | 0.02 s | 21.6 s | 21.8 s | 0.39 s |
+| A tag on 1 clip, this disk | 2.2 s | 0.11 s | 0.03 s | 2.4 s | 2.2 s | 0.12 s |
+| A tag on 1 clip, the page's own work | 0.60 s | 0.11 s | 0.04 s | 0.61 s | 0.40 s | 0.07 s |
+
+"Page done" is now the write itself (the 16.3 s are 200 clips' own files written one after another on a NAS, in the
+background) and one small question, `changes_since`. Asked of the app for a tag: `set_tags`, `changes_since`; no
+`project`, no `scan`.
+
+Saying what changed costs the command 40 ms on this disk (90 ms as a NAS: six small reads) for clips at 10,000
+clips, 11 ms at 1,000: it still looks through the project's clip previews for the clip's own (in memory, from the
+catalog), which grows with the archive; for moments, photos and exports it's 9 ms at either size. It's after the
+write, in the background.
+
+That it ends where a reading ends is tested both ways:
+- `changed.rs`'s test: on the measured project (smaller), after every command the items it says are, field for
+  field, the items of the whole view read again; the ones it says gone aren't there.
+- `library/ui-tests/pinpoint_test.js`: a sequence of changes (tags on and off clips, moments, a photo, an export;
+  a location set and taken off; Source settings; a moment and a photo renamed; a moment and a clip's preview deleted;
+  a moment the player made, another computer's tag and marks) on two pages, one corrected item by item, the other
+  reading every view again after each step: after every step the views as shown, what the disk has, the clips' counts
+  of moments, and the list, side panel and filters drawn at nine places are the same.
+
+A command joins in Rust with its last line: `changed::of_items(&root, &items, problems).with_probes(&probes)` (or
+`of_clips`). One that doesn't yet (it answers with its list of problems) still works through `writes.js`: the page
+then reads the views again only when it lists problems.

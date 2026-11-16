@@ -21,20 +21,28 @@ const ms = {};
 for (const t of ["reads", "commands"]) for (const r of timings[t]) ms[r.what] = { local: r.local_ms, nas: r.nas_ms };
 const readViews = () => { const v = {}; for (const n of ["footage", "moments", "stills", "exports"]) v[n] = JSON.parse(fs.readFileSync(path.join(dir, "views", n + ".json"), "utf8")); return v; };
 
+// Whether the page is the one that takes a command's own account of what it changed (the pinpoint update): the mock
+// then answers as the app does since, each command taking the time to say it too
+const pinpoint = fs.readFileSync(path.join(__dirname, "..", "ui", "changes.js"), "utf8").includes("changes_since");
+
 // How long a command takes in a mode ("own": at once), by how many items it's for
 function delayFor(mode) {
   if (mode === "own") return () => 0;
   const of = (what) => (ms[what] ? ms[what][mode] : 0);
+  // Saying what changed, after the write (src/changed.rs): by how many items
+  const saying = (n, moments) => (!pinpoint ? 0 : moments ? of("saying what changed: 20 moments") * Math.max(1, n) / 20 : n <= 1 ? of("saying what changed: 1 clip(s)") : of("saying what changed: 200 clip(s)") * n / 200);
   const sized = (stem, n, unit) => { const k = n <= 1 ? 1 : n <= 20 ? 20 : 200; const base = of(stem + k + unit); return k === 200 || k === 1 ? base * (k === 200 ? n / 200 : 1) : base * n / 20; };
   return (cmd, a) => {
     switch (cmd) {
       case "project": return of("project");
       case "scan": return of("scan " + a.view);
-      case "set_tags": return sized("set_tags: add to ", a.items.length, a.items[0] && a.items[0].kind === "moment" ? " moment(s)" : " clip(s)");
-      case "set_locations": return sized("set_locations: ", a.entries.reduce((n, e) => n + e.ids.length, 0), " clip(s)");
-      case "set_source": return sized("set_source: ", a.entries.length, " clip(s)");
-      case "rename_item": return of(a.kind === "folder" ? "rename_item: a folder of 10 moments" : "rename_item: a moment");
-      case "delete_items": return sized("delete_items: ", a.items.length, " moment(s)");
+      case "set_tags": { const m = a.items[0] && a.items[0].kind === "moment"; return sized("set_tags: add to ", a.items.length, m ? " moment(s)" : " clip(s)") + saying(a.items.length, m); }
+      case "set_locations": { const n = a.entries.reduce((k, e) => k + e.ids.length, 0); return sized("set_locations: ", n, " clip(s)") + saying(n); }
+      case "set_source": return sized("set_source: ", a.entries.length, " clip(s)") + saying(a.entries.length);
+      case "rename_item": return of(a.kind === "folder" ? "rename_item: a folder of 10 moments" : "rename_item: a moment") + saying(2, true);
+      case "delete_items": return sized("delete_items: ", a.items.length, " moment(s)") + saying(a.items.length, true);
+      // What the catalog says changed, as items (the command's own change, told back)
+      case "changes_since": return of("what the catalog says changed, as items: 1 clip's own file");
       default: return 0;
     }
   };
@@ -105,7 +113,7 @@ const SCENARIOS = [
     if (only && !sc.name.toLowerCase().includes(only.toLowerCase())) continue;
     for (const mode of modes) {
       const views = readViews();
-      const app = fake(views);
+      const app = fake(views, { changed: pinpoint });
       // Opening isn't what's measured: the project opens with the app answering at once
       let live = false;
       const d = delayFor(mode);

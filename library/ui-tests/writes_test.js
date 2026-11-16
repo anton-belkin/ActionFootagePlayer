@@ -201,7 +201,7 @@ const names = (page) => page.$$("#main .nm").map((e) => e.textContent);
 test("a moment renamed shows at once, where its name puts it; one that can't be goes back", async () => {
   const { page, app, views } = await start({ delay: { rename_item: 120 } });
   await inMoments(page);
-  assert.deepEqual(names(page), ["Turtle", "Shark", "Ray"]);
+  assert.deepEqual(names(page), ["Ray", "Shark", "Turtle"]);
   rename(page, TURTLE, "Angel");
   assert.ok(names(page).includes("Angel") && !names(page).includes("Turtle"));
   assert.equal(page.calls("rename_item")[0].took, null);

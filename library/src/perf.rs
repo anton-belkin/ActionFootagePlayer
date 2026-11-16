@@ -199,6 +199,15 @@ pub fn commands(r: &Rig, rows: &mut Vec<Row>) {
     timed(rows, "new_folder", || new_folder_in(&r.p, "moments", "_Moments").unwrap());
     let rendered: Vec<String> = r.moments.iter().skip(8).step_by(8).take(20).cloned().collect();
     timed(rows, "delete_renders: 20 moments", || index::delete_renders(&r.p, &rendered, false));
+    // Saying what changed (changed.rs: what each command now does after its write, instead of the page reading views)
+    for n in [1, 200] {
+        let ids = trees(n);
+        timed(rows, &format!("saying what changed: {n} clip(s)"), || crate::changed::of_clips(&r.p, &ids, Vec::new()).with_probes(&r.probes));
+    }
+    let items: Vec<Value> = r.moments.iter().skip(3).take(20).map(|m| r.own("moment", m)).collect();
+    timed(rows, "saying what changed: 20 moments", || crate::changed::of_items(&r.p, &items, Vec::new()).with_probes(&r.probes));
+    let own = vec![r.f.join(&r.clips[pick(0)]).with_extension("afp.json")];
+    timed(rows, "what the catalog says changed, as items: 1 clip's own file", || crate::changed::of_files(&r.p, &own).map(|c| c.with_probes(&r.probes)));
     TRASH_REMOVES.store(true, std::sync::atomic::Ordering::Relaxed);
     for (n, skip) in [(1, r.moments.len() / 2), (20, r.moments.len() * 6 / 10)] {
         let items: Vec<Value> = r.moments.iter().skip(skip).take(n).map(|m| r.own("moment", m)).collect();

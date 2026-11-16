@@ -18,6 +18,9 @@ const STATES = {
   unsaved: { set_tags: { fail: "//nas/footage isn’t connected (No route to host)" }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/A.MP4', 'Day 1/B.MP4']); tag('turtle');" },
   saving: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('queue'); renderAll(); sel(['Day 1/B.MP4', 'Day 1/C.MP4']); S.tagDraft = 'turtle'; setTags(['turtle'], []);" },
   closing: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/B.MP4']); tag('turtle'); setTimeout(() => { window.closeWaits = true; closing(true); }, 700);" },
+  // A list filtered to a tag, the tag taken off the clip selected: it leaves the list
+  leaves: { set_tags: { apply: true }, first: "VIEWS.footage.items[1].tags = ['reef']; VIEWS.footage.items[2].tags = ['reef'];",
+    does: "S.path = ['Day 1']; showTab('tags'); renderAll(); buildFacets(); S.filters = { 'tag:reef': true }; S.filtersOpen = true; renderAll(); sel(['Day 1/A.MP4']); setTimeout(() => document.querySelector('[data-a=\"untag\"][data-v=\"reef\"]').click(), 200);" },
   tagged: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/A.MP4', 'Day 1/B.MP4']); tag('turtle');" },
 };
 
@@ -28,12 +31,19 @@ function html(ui, state) {
     window.onerror = (m, f, l) => { if (!document.title.startsWith("ERR")) document.title = "ERR " + m + " " + f + ":" + l; };
     window.addEventListener("unhandledrejection", (e) => { document.title = "REJ " + e.reason; });
     const VIEWS = ${JSON.stringify(smallViews())}, ROOT = "/P", ST = ${JSON.stringify(st)};
+    ${st.first || ""}
     const answers = {
       snapshot: () => ({ project: ROOT, jobs: [], close_asked: false, close_waits: !!window.closeWaits, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),
       project: () => ({ path: ROOT, name: "Red Sea 2025", legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
       engine: () => "", recent: () => [], cached_view: () => null, probes_since: () => ({ version: 1, items: {}, pending: 0 }), thumb: () => null, missing_links: () => [],
       scan: (a) => JSON.parse(JSON.stringify(VIEWS[a.view] || { root: ROOT, view: a.view, dirs: [], items: [] })),
-      set_tags: () => { if (ST.set_tags.never) return new Promise(() => {}); if (ST.set_tags.fail) throw ST.set_tags.fail; return []; },
+      set_tags: (a) => {
+        if (ST.set_tags.never) return new Promise(() => {});
+        if (ST.set_tags.fail) throw ST.set_tags.fail;
+        // (written: a view read afterwards shows it)
+        if (ST.set_tags.apply) for (const x of a.items) { const it = VIEWS.footage.items.find((c) => c.id === x.id); if (it) it.tags = (it.tags || []).filter((t) => !a.remove.includes(t)).concat(a.add); }
+        return [];
+      },
     };
     window.__TAURI__ = { core: { invoke: (cmd, a) => new Promise((ok, no) => setTimeout(() => { try { const f = answers[cmd]; Promise.resolve(f ? f(a || {}) : null).then(ok, no); } catch (e) { no(e); } }, cmd === "set_tags" ? 60 : 0)) },
       event: { listen: () => Promise.resolve(() => {}) }, webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) } };`;

@@ -3,6 +3,10 @@
 // is what ties writes.js to the page (app.js): where the views are kept, how they're drawn again, what's said when a
 // change couldn't be saved, the sign that changes are still being written, the window's close; and the changes
 // themselves, each a few lines (Writes.define). Loaded before app.js, whose names it uses only when called.
+//
+// And the pinpoint update: a command says what its items are now (src/changed.rs), and so does the app for what the
+// catalog says changed elsewhere (`changes_since`); those items are put into what the disk has and only they are
+// made again in what's shown. No view is read again, unless the app says one must be (its folders changed).
 
 // A view as the app last read it from the disk is kept as it came (CONFIRMED); what's shown (RAW_FOOTAGE, DATA) is that
 // with the changes still being written put over it. A change is made with Writes.run: shown at once, written when
@@ -11,16 +15,214 @@ Writes.host = {
   invoke: (cmd, args) => invoke(cmd, args),
   get: (view) => CONFIRMED[view],
   set: (view, data) => { CONFIRMED[view] = data; },
-  // These views made again from what the disk has and what's being written, and drawn
-  show(views) {
-    for (const v of views) if (CONFIRMED[v]) showView(v);
+  // These views made again from what the disk has and what's being written, and drawn: only the change's own items
+  // when it's one of their fields (a tag, a location), else the views whole (from memory, nothing read)
+  show(views, op) {
+    for (const v of views) {
+      if (!CONFIRMED[v]) continue;
+      const ids = op ? op.targets.filter((t) => t.view === v).map((t) => t.id) : [];
+      if (!(ids.length && showItems(v, ids))) showView(v);
+    }
     if (S.view === "clip") buildClip();
-    renderAll();
+    drawChanged();
   },
+  // A command's answer, when it says what it changed (src/changed.rs)
+  changed: (r) => (r && typeof r === "object" && r.items && r.gone && Array.isArray(r.reload) ? r : null),
+  // …put into what the disk has, and shown
+  // (`op`: the change it's the answer to: its items are made again whatever the disk says of them, since what they
+  // showed was the change put over them)
+  merge(ch, op) {
+    const r = mergeChanged(ch);
+    if (op) {
+      r.changed = true;
+      for (const v of op.shows) {
+        if (!CONFIRMED[v] || r.whole.has(v)) continue;
+        const ids = op.targets.filter((t) => t.view === v).map((t) => t.id);
+        if (!(ids.length && showItems(v, ids))) showView(v);
+      }
+    }
+    if (S.view === "clip" && r.changed) buildClip();
+    if (r.changed) drawChanged();
+    if (r.reload.size) Writes.host.reload(Array.from(r.reload));
+    previewsGone(ch);
+  },
+  mergedInto: (view, data, ch) => mergedInto(view, data, ch),
   // …read from the disk again (a change that failed, or was written only in part)
   reload(views) { for (const v of views) if (CONFIRMED[v]) loadView(v).then(renderAll, () => {}); },
   failed(f) { UNSAVED.push((f.partly ? "Not all saved: " : "Not saved: ") + f.what + ". " + f.why); renderUnsaved(); },
 };
+// ---------- the pinpoint update ----------
+
+const VIEW_NAMES = ["footage", "moments", "stills", "exports"];
+// Where each item is in the app's answer for its view, by its id. What's shown of the view is in the same order
+// (unless a change that moves items is waiting: then the view is made again whole)
+const ITEM_AT = new WeakMap();
+function placeOf(view, id) {
+  const items = CONFIRMED[view] && CONFIRMED[view].items;
+  if (!items) return -1;
+  let m = ITEM_AT.get(items);
+  if (!m) { m = new Map(); items.forEach((it, i) => m.set(it.id, i)); ITEM_AT.set(items, m); }
+  const i = m.get(id);
+  return i === undefined ? -1 : i;
+}
+const parentDir = (p) => (p.lastIndexOf("/") < 0 ? "" : p.slice(0, p.lastIndexOf("/")));
+// A view's data with a Changed's items of it put in (a copy: for a reading that came in after them, and for changes
+// that add, remove or move items): each replaces the one of its id; a new one goes where a reading would have it
+// among its folder's (by name), its folder listed; the gone ones go
+function mergedInto(view, data, ch) {
+  const items = (ch.items || {})[view] || [], gone = new Set((ch.gone || {})[view] || []);
+  if (!items.length && !gone.size) return data;
+  const by = new Map(items.map((it) => [it.id, it]));
+  const list = [];
+  for (const it of data.items || []) {
+    if (gone.has(it.id)) continue;
+    const now = by.get(it.id);
+    if (now) by.delete(it.id);
+    list.push(now || it);
+  }
+  const out = Object.assign({}, data, { items: list });
+  const folders = (name, dir) => {
+    const dirs = (out[name] || []).slice();
+    for (let d = dir; d && !dirs.includes(d); d = parentDir(d)) dirs.push(d);
+    if (dirs.length !== (out[name] || []).length) out[name] = dirs.sort();
+  };
+  for (const it of by.values()) {
+    // (a clip that's new to Footage isn't placed here: the view is read again, mergeChanged)
+    if (view === "footage") continue;
+    let at = -1, last = -1;
+    list.forEach((x, i) => { if (x.dir === it.dir) { last = i; if (at < 0 && x.id > it.id) at = i; } });
+    list.splice(at >= 0 ? at : last + 1 || list.length, 0, it);
+    folders("dirs", it.dir);
+  }
+  // A clip whose preview is in a folder not listed yet (a run's new folder)
+  if (view === "footage") for (const it of items) if (it.pdir) folders("clips_dirs", it.pdir);
+  return out;
+}
+// A Changed put into what the disk has, and what's shown made again for it: its items alone when they're where
+// they were, the view whole (from memory) when items came, went or moved. What's said back: whether anything shown
+// changed, and the views that must be read again after all
+function mergeChanged(ch) {
+  if (ch.probes) mergeProbes(ch.probes);
+  const out = { changed: false, reload: new Set(), whole: new Set() };
+  for (const view of VIEW_NAMES) {
+    const data = CONFIRMED[view];
+    if (!data) continue;
+    let items = (ch.items || {})[view] || [];
+    const gone = ((ch.gone || {})[view] || []).filter((id) => placeOf(view, id) >= 0);
+    // A clip the page has never seen: where it goes in the tree isn't known here
+    if (view === "footage" && items.some((it) => placeOf(view, it.id) < 0)) { out.reload.add(view); items = items.filter((it) => placeOf(view, it.id) >= 0); }
+    if (!items.length && !gone.length) continue;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const inPlace = !gone.length && items.every((it) => { const i = placeOf(view, it.id); return i >= 0 && data.items[i].dir === it.dir && (view !== "footage" || data.items[i].pdir === it.pdir); });
+    if (inPlace) {
+      const ids = [];
+      for (const it of items) { const i = placeOf(view, it.id); if (!same(data.items[i], it)) { data.items[i] = it; ids.push(it.id); } }
+      if (!ids.length) continue;
+      if (!showItems(view, ids)) { showView(view); out.whole.add(view); }
+    } else {
+      CONFIRMED[view] = mergedInto(view, data, { items: { [view]: items }, gone: { [view]: gone } });
+      showView(view);
+      out.whole.add(view);
+    }
+    out.changed = true;
+  }
+  return out;
+}
+// These items of a view made again in what's shown (the item as the disk has it, the changes waiting for it over it,
+// what the page works out of it), where they are. false: it can't be done item by item (a change waiting that moves
+// items, an item that changes folders): the view is to be made again whole
+function showItems(view, ids) {
+  const conf = CONFIRMED[view];
+  if (view === "footage") {
+    if (!RAW_FOOTAGE || !DATA.footage || !DATA.sources || RAW_FOOTAGE.items.length !== conf.items.length) return false;
+    const made = [];
+    for (const id of ids) {
+      const i = placeOf(view, id);
+      const raw = i < 0 ? null : Writes.overItem(view, conf.items[i]);
+      const f = DATA.footage.items[i], s = DATA.sources.items[i];
+      if (!raw || !f || f.id !== id || !s || s.id !== id) return false;
+      const dir = raw.pdir == null ? NOPREV : shownDir("footage", raw.pdir);
+      if (dir !== f.dir || raw.dir !== s.dir) return false;
+      made.push([i, raw, Object.assign({}, raw, { key: raw.id, tdir: raw.dir, dir }), Object.assign({}, raw, { key: "s:" + raw.id, tdir: raw.dir, dir: raw.dir })]);
+    }
+    // (what's shown shares the disk's list until a change waits for one of its items)
+    if (RAW_FOOTAGE.items === conf.items && made.some((m) => m[1] !== conf.items[m[0]])) RAW_FOOTAGE.items = RAW_FOOTAGE.items.slice();
+    for (const [i, raw, f, s] of made) {
+      RAW_FOOTAGE.items[i] = raw;
+      deriveItems("footage", [f, s]);
+      DATA.footage.items[i] = f; DATA.sources.items[i] = s;
+    }
+    return true;
+  }
+  const d = DATA[view];
+  if (!d || d.items.length !== conf.items.length) return false;
+  const made = [];
+  for (const id of ids) {
+    const i = placeOf(view, id);
+    const raw = i < 0 ? null : Writes.overItem(view, conf.items[i]);
+    const old = d.items[i];
+    if (!raw || !old || old.id !== id) return false;
+    const x = Object.assign({}, raw, { rdir: raw.dir, dir: shownDir(view, raw.dir || "") });
+    // (a moment of another clip now: the clips' counts of moments change with it)
+    if (x.dir !== old.dir || (view === "moments" && (raw.link || {}).clip !== (old.link || {}).clip)) return false;
+    made.push([i, x]);
+  }
+  for (const [i, x] of made) { deriveItems(view, [x]); d.items[i] = x; }
+  return true;
+}
+// Drawn after a change. An item selected that the filters or the search no longer take leaves the list at once, as
+// in the culling programs (Lightroom, Capture One); when everything selected left, the item that took its place is
+// selected, so the next one is under the hand
+function drawChanged() {
+  const was = VISIBLE.slice(), sel = Object.keys(S.sel).filter((k) => k.startsWith("i:") && was.includes(k));
+  renderAll();
+  if (!sel.length || !(filtering() || S.q.trim())) return;
+  const left = sel.filter((k) => !VISIBLE.includes(k));
+  if (!left.length) return;
+  for (const k of left) delete S.sel[k];
+  if (!Object.keys(S.sel).length && VISIBLE.length) {
+    const k = VISIBLE[Math.min(was.indexOf(left[0]), VISIBLE.length - 1)];
+    if (k.startsWith("i:")) { S.sel[k] = true; S.anchor = k; S.cursor = k; }
+  }
+  renderMain(); renderSide();
+}
+// Files gone that were clips' previews: those clips asked for as they are now
+function previewsGone(ch) {
+  const gone = new Set(ch.gone_files || []);
+  if (!gone.size || !CONFIRMED.footage) return;
+  const ids = CONFIRMED.footage.items.filter((it) => it.preview && gone.has(it.preview)).map((it) => it.id);
+  if (ids.length) invoke("view_items", { view: "footage", ids }).then((c) => { if (Writes.host.changed(c)) Writes.host.merge(c); }, () => {});
+}
+// What the catalog says changed (the app's own commands, the player, another computer, a task's files as they land):
+// the items it changed asked for and put in; the views read again only when the app can't say which items (too many,
+// folders, the project's file). One at a time; a later one asked meanwhile follows
+let changesBusy = false, changesNext = null;
+async function catalogChanged(n) {
+  if (!S.root || n === undefined || n === S.changes) return;
+  if (changesBusy) { changesNext = n; return; }
+  changesBusy = true;
+  const root = S.root, since = S.changes;
+  const reading = Writes.reading("*");
+  let r = null;
+  try { r = await invoke("changes_since", { since: since || 0 }); } catch (e) { /* an app that can't say */ }
+  changesBusy = false;
+  if (root !== S.root) { Writes.read(reading, null); return; }
+  if (!r || !Writes.host.changed(r.changed)) {
+    Writes.read(reading, null);
+    refreshSoon(r ? r.upto : n);
+  } else {
+    S.changes = r.upto;
+    const m = mergeChanged(r.changed);
+    Writes.after(reading);
+    for (const v of r.changed.reload || []) m.reload.add(v);
+    if (S.view === "clip" && m.changed) buildClip();
+    if (m.changed) drawChanged();
+    if (m.reload.size) Writes.host.reload(Array.from(m.reload));
+    previewsGone(r.changed);
+  }
+  if (changesNext !== null) { const next = changesNext; changesNext = null; catalogChanged(next); }
+}
+
 // What couldn't be saved, said until it's read (not a toast that goes by itself): which change, of what, and why
 const UNSAVED = [];
 function renderUnsaved() {
