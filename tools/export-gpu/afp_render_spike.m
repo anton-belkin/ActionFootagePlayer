@@ -101,10 +101,12 @@ int main(int argc, const char **argv) {
     @autoreleasepool {
         if (argc < 4) die("usage: afp_render_spike <in.mp4> <shader.glsl> <out.mov> [--frames n] [--bitrate bps]");
         long max_frames = LONG_MAX;
+        bool realtime = false; // --realtime 1: VideoToolbox's real-time mode (speed over its slower search)
         double bitrate = 89874482;
         for (int i = 4; i + 1 < argc; i += 2) {
             if (!strcmp(argv[i], "--frames")) max_frames = atol(argv[i + 1]);
             else if (!strcmp(argv[i], "--bitrate")) bitrate = atof(argv[i + 1]);
+            else if (!strcmp(argv[i], "--realtime")) realtime = atoi(argv[i + 1]) != 0;
         }
         double t0 = now();
 
@@ -159,7 +161,9 @@ int main(int argc, const char **argv) {
         NSDictionary *vs = @{ AVVideoCodecKey: AVVideoCodecTypeHEVC, AVVideoWidthKey: @(w), AVVideoHeightKey: @(h),
                               AVVideoCompressionPropertiesKey: @{ AVVideoAverageBitRateKey: @(bitrate),
                                                                   AVVideoProfileLevelKey: (__bridge NSString *) kVTProfileLevel_HEVC_Main10_AutoLevel,
-                                                                  AVVideoExpectedSourceFrameRateKey: @(track.nominalFrameRate) },
+                                                                  AVVideoExpectedSourceFrameRateKey: @(track.nominalFrameRate),
+                                                                  (__bridge NSString *) kVTCompressionPropertyKey_RealTime: @(realtime),
+                                                                  (__bridge NSString *) kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality: @(realtime) },
                               AVVideoColorPropertiesKey: @{ AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
                                                             AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
                                                             AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020 } };

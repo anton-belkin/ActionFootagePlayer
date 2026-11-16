@@ -358,6 +358,28 @@ M1 Pro):
 So with fringes it is **within 5 % of the encoder alone**, 2.8× faster than today. Without fringes (29.1 s today)
 it should land at the same encoder-bound ~18-19 s; not run.
 
+**Faster than real time: the encoder's real-time mode and the player's interpolation** (quiet machine, same clip):
+
+- **The encoder's mode.** VideoToolbox's HEVC encoder runs at about 50 fps only in its default mode. Its real-time mode
+  (`kVTCompressionPropertyKey_RealTime` + `PrioritizeEncodingSpeedOverQuality`, ffmpeg's `-realtime 1` /
+  `-prio_speed 1`) runs the same 4K60 Main10 at about 82 fps. Decode → encode of this clip takes 11.3 s, against
+  18.7 s.
+- **What it costs.** At the same bit rate, PSNR against the source moves by 0.01-0.1 dB (Y 42.44 / 42.36 against
+  42.45, first 300 frames), and the size is the same.
+- **Not the decoder.** Decoding is a separate block on the chip: 4.8 s for the clip, about 190 fps.
+
+| Spike, `--realtime 1` | Time | fps | Limited by |
+|---|---|---|---|
+| LUT only | 10.8 s | 86 | the encoder |
+| Warp + fringes + LUT, Lanczos4 (the exporter's default interpolation) | 19.1 s | 48.5 | the GPU: 18 ms a frame (64 taps, the fringes read red and blue at their own coordinates) |
+| Warp + fringes + LUT, **bicubic** (16 taps) | **11.1 s** | **83** | the encoder; the GPU waits 0.4 ms |
+| Warp + fringes + LUT, bilinear | 11.0 s | 84 | the encoder |
+
+**So the whole export runs 1.4× faster than real time:** decode, the player's warp with the fringes, the LUT and the
+encode, with the frame on the GPU throughout, as long as the warp interpolates bicubic. The player's own default is
+bicubic from 9 bilinear fetches. Lanczos4 at full 4K takes about 18 ms a frame on an M1 Pro. While playing, the player
+renders at the window's size (`gyroflow_render_scale`), not 4K.
+
 **Pictures.**
 
 - **Against the filter path:** 120 frames, the spike encoded at 600 Mbps against the filter path's lossless FFV1.
